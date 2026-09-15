@@ -35,11 +35,11 @@
     - node_action == "node_grant_access"
     - bare_metal_lease_generation | default('') | trim == ''
 
-- name: Refuse unprotected encrypted lease storage preparation
+- name: Refuse incomplete encrypted lease storage preparation
   fail:
     msg: >-
-      node_prepare_lease_storage is disabled until its swap, core-dump, and
-      supervised-helper protections are enforced
+      node_prepare_lease_storage remains disabled until persistent-path,
+      mapping, mount, and reboot-recovery readiness are integrated
   when: node_action == 'node_prepare_lease_storage'
 
 # The lease account exists only inside the generated runtime view, so the host

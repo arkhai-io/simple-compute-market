@@ -29,6 +29,16 @@ bare_metal_lease_counter_headroom: 0
 bare_metal_lease_parent_handle: ""
 bare_metal_lease_parent_name: ""
 
+# These values describe the controlled supervision artifact. The ordinary
+# prepare action remains refused until the role can establish every storage,
+# recovery and persistent-path prerequisite before installing or starting it.
+bare_metal_lease_storage_request_root: /var/lib/arkhai/lease-storage-requests
+bare_metal_lease_storage_supervisor_path: /usr/lib/arkhai/arkhai-supervise-lease-storage
+bare_metal_lease_storage_supervision_profile_path: /etc/arkhai/lease-storage-supervision.json
+bare_metal_lease_tpm_device: ""
+bare_metal_lease_cryptsetup_path: /usr/sbin/cryptsetup
+bare_metal_lease_cryptsetup_version: 2.4.3
+
 # The buyer-facing port the lease socket listens on. The host registry is the
 # authority for it; this default only applies when the inventory states none.
 bare_metal_lease_buyer_port: "{{ hostvars[target_host].public_port | default(2222) }}"

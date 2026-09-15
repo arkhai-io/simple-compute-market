@@ -116,6 +116,24 @@ Socket activation allocates the listening socket in the host network namespace. 
 
 **TPM safety.** Operations never clear the TPM, flush broadly, or touch an index or object the lease does not own. Other owners may depend on the same TPM.
 
+**Supervised execution.** A provider-owned, content-addressed request file is
+the only input to the storage oneshot. The request and its execution record are
+private regular files beneath a private provider directory; the unit receives
+only the request digest and a fixed root-owned profile path. It has no secret
+argument, environment or output channel. The unit fixes the process in
+`system.slice`, enforces zero swap and hard and soft core-size limits of zero,
+kills its whole control group on stop, never restarts automatically and admits
+only the explicitly configured direct TPM device. Before opening ESAPI or
+mutating lease state, the executor verifies request identity and ownership,
+the fixed cryptsetup path and version, the exact live unit cgroup, zero swap and
+core limits, and no-new-privileges. It also reads the effective kernel
+`core_pattern` from procfs and refuses a missing, unreadable, malformed or piped
+handler: the inherited hard-zero limit constrains ordinary file dumps but does
+not constrain a piped handler. Accepted, running,
+completed, refused and quarantined transitions are durable. A changed request
+or a prior running lifetime quarantines without dispatching the helper; an
+uncertain systemd response is not permission to submit the request again.
+
 **Custody lifetime.** Creation, policy evaluation, load, public verification,
 unseal and cleanup run through one ESAPI connection. The production adapter
 selects only an explicit provider-qualified TPM device TCTI; an injected
@@ -162,7 +180,7 @@ Only the provisioning recovery action may reopen a lease volume. All of these mu
 - the counter equals `C_G`;
 - the parent Name matches the recorded Name.
 
-The lock is held from the start of the policy session through unseal and volume open. Recovery may continue a policy session only within the same live ESAPI ownership boundary while its dependent policy operations run. It never saves a session context or deliberately carries a session across a completed executor lifetime, and it requires an explicit checked flush plus durable confirmed-closed evidence before that lifetime succeeds. Recovery runs as a transient unit with swap and core dumps disabled and never writes the lease window.
+The lock is held from the start of the policy session through unseal and volume open. Recovery may continue a policy session only within the same live ESAPI ownership boundary while its dependent policy operations run. It never saves a session context or deliberately carries a session across a completed executor lifetime, and it requires an explicit checked flush plus durable confirmed-closed evidence before that lifetime succeeds. Recovery runs as a transient unit with zero swap, inherited hard and soft core-size limits of zero, and refusal of a piped effective core handler, and it never writes the lease window.
 
 **Session-creation evidence.** Before any helper creates a policy session or loads the sealed object, it durably records a pending session intent in the host manifest (generation, attempt and helper unit) and fsyncs it. Only then does it create the session, and it records the returned handle before using it. Pending intents, partial records, and each helper's unit and exit evidence are retained, including for interrupted helpers, and cleanup never removes them.
 
@@ -325,10 +343,11 @@ None. Each unresolved physical fact above is an explicit qualification gate, not
 | Account operations report only read-back-verified outcomes, bounded to the current database | `openspec/specs/physical-provisioning/spec.md` — "Bare-metal account operations report only verified outcomes", limit stated in `architecture.md` — "Pinned access to the selected host" (promoted) |
 | Registry write credentials are sanitized and publication failures are truthful | `openspec/specs/storefront-publication/spec.md` — "Registry write credentials are sanitized and publication failures are truthful" (promoted) |
 | Roadmap disposition | `docs/development/ROADMAP.md` — no goal or gap row names this change; nothing owed (recorded) |
-| Campaign index currency | `openspec/changes/README.md` — this change's row states section 1 accepted with later sections outstanding (recorded) |
+| Campaign index currency | `openspec/changes/README.md` — this change's row records the accepted section 1 and 2.1 checkpoints and the verified 2.2 custody and synthetic supervision checkpoints, with overall integration and later sections outstanding (recorded) |
 | Managed tenant boundary and runtime view | `openspec/specs/physical-provisioning/spec.md` (pending) |
 | Persistent-path containment | `openspec/specs/physical-provisioning/spec.md` (pending) |
 | Serialized lease-storage preparation and same-process checked TPM custody | `openspec/specs/physical-provisioning/spec.md` — "Encrypted lease-storage preparation is isolated and fail-closed", rationale in `architecture.md` — "Lease-storage custody has one live owner" (promoted; activation remains pending) |
+| Provider-owned supervised storage request seam | `openspec/specs/physical-provisioning/spec.md` — "Encrypted lease-storage preparation is isolated and fail-closed", rationale in `architecture.md` — "Lease-storage custody has one live owner" (promoted; role installation and activation remain pending) |
 | Active-lease storage recovery and release-time counter revocation | `openspec/specs/physical-provisioning/spec.md` and `architecture.md` (pending) |
 | Release sequence, completion and fencing | `openspec/specs/physical-provisioning/spec.md` and `docs/development/ARCHITECTURE.md#release` (pending) |
 | Egress containment | `openspec/specs/physical-provisioning/spec.md` (pending) |

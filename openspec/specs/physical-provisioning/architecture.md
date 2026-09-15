@@ -233,13 +233,38 @@ a handle that has been reused. It quarantines without attempting stale cleanup
 or repeating the counter mutation. This deliberately prefers an unavailable
 host to deleting a resource another TPM user may now own.
 
-The implementation is currently an isolated preparation and qualification
-seam. The ordinary helper entrypoint and host role refuse before state or key
-creation because the provider unit's swap, core-dump and supervision boundary
-is not present, and access grant remains refused. Disposable software-TPM and
-regular-file LUKS-header evidence does not establish mapping or mount behavior,
-active-lease reboot recovery, release, preservation on a provider device, or
-physical-host qualification.
+The provider supervision seam accepts a canonical, content-addressed request
+without secret material and dispatches the helper from a non-restarting
+systemd oneshot. Its fixed profile selects the request root, state root,
+qualified cryptsetup path and version, and qualified direct TPM device. The
+unit is explicitly placed in `system.slice`, matching the exact cgroup the
+executor admits. Both the unit directives and the executor's live
+cgroup/resource-limit checks participate in the boundary: rendering a directive
+does not prove that the running process received it. A zero hard core-size
+limit is inherited across fork and exec and cannot be raised by descendants,
+but it does not constrain a piped kernel core handler. The executor therefore
+reads the effective policy from the fixed procfs location and refuses before
+backend loading when the policy is missing, unreadable, malformed or piped.
+It does not alter the host policy or rely on no-new-privileges or filesystem
+restrictions to contain a handler. A durable `running` record
+is deliberately one-way on abnormal exit; the next invocation quarantines
+instead of treating a new process or a reused TPM handle as continuation.
+Systemd owns the whole process cgroup, so stopping the unit covers descendants
+rather than only the main process.
+
+The implementation remains a controlled preparation and qualification seam.
+The host role does not install or activate these artifacts, and its ordinary
+prepare action still refuses before state or key creation while persistent-path,
+mapping, mount and reboot-recovery prerequisites are absent. Access grant also
+remains refused. Deterministic execution tests and disposable software-TPM and
+regular-file LUKS-header evidence do not establish systemd-manager behavior. A
+separate disposable systemd 249 run of the synthetic storage unit established
+that its child inherited zero hard and soft core limits and that systemd
+removed the sleeping child after the main process exited, before fixture
+cleanup stopped the unit. That run exercised neither the real supervisor nor
+storage dispatch. It does not establish production-host systemd enforcement,
+mapping or mount behavior, active-lease reboot recovery, release, preservation
+on a provider device, or physical-host qualification.
 
 ## Related contracts
 

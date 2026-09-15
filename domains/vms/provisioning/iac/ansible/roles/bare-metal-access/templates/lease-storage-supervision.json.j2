@@ -1,0 +1,8 @@
+{
+  "schema": "arkhai.lease-storage-supervision.v1",
+  "request_root": {{ bare_metal_lease_storage_request_root | to_json }},
+  "state_root": {{ bare_metal_lease_storage_state_root | to_json }},
+  "tpm_device": {{ bare_metal_lease_tpm_device | to_json }},
+  "cryptsetup_path": {{ bare_metal_lease_cryptsetup_path | to_json }},
+  "cryptsetup_version": {{ bare_metal_lease_cryptsetup_version | string | to_json }}
+}

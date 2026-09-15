@@ -21,6 +21,8 @@ Nothing here activates a unit.
 
 from __future__ import annotations
 
+import importlib.util
+import json
 import os
 import re
 import shutil
@@ -49,6 +51,10 @@ UNIT_TEMPLATES = {
     "lease.socket.j2": f"arkhai-lease-{GENERATION}.socket",
     "lease-sshd@.service.j2": f"arkhai-lease-{GENERATION}@.service",
     "lease.slice.j2": f"arkhai-lease-{GENERATION}.slice",
+    "lease-storage-prepare@.service.j2": (
+        "arkhai-lease-storage-prepare@"
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.service"
+    ),
 }
 
 in_compatibility_lane = pytest.mark.skipif(
@@ -74,6 +80,19 @@ def _render(name: str) -> str:
         "bare_metal_lease_privsep_user": "sshd",
         "bare_metal_lease_tenant_uid": 61001,
         "bare_metal_lease_tenant_gid": 61001,
+        "bare_metal_lease_storage_supervisor_path": (
+            "/usr/lib/arkhai/arkhai-supervise-lease-storage"
+        ),
+        "bare_metal_lease_storage_supervision_profile_path": (
+            "/etc/arkhai/lease-storage-supervision.json"
+        ),
+        "bare_metal_lease_storage_request_root": (
+            "/var/lib/arkhai/lease-storage-requests"
+        ),
+        "bare_metal_lease_storage_state_root": "/var/lib/arkhai/lease-storage",
+        "bare_metal_lease_tpm_device": "/dev/tpm0",
+        "bare_metal_lease_cryptsetup_path": "/usr/sbin/cryptsetup",
+        "bare_metal_lease_cryptsetup_version": "2.4.3",
     })
     return templar.template(trust_as_template((TEMPLATES / name).read_text(encoding="utf-8")))
 
@@ -85,6 +104,58 @@ def _rendered_units(tmp_path: Path) -> list[Path]:
         path.write_text(_render(template), encoding="utf-8")
         written.append(path)
     return written
+
+
+def test_storage_supervision_profile_renders_only_public_fixed_configuration():
+    profile = json.loads(_render("lease-storage-supervision.json.j2"))
+
+    assert profile == {
+        "schema": "arkhai.lease-storage-supervision.v1",
+        "request_root": "/var/lib/arkhai/lease-storage-requests",
+        "state_root": "/var/lib/arkhai/lease-storage",
+        "tpm_device": "/dev/tpm0",
+        "cryptsetup_path": "/usr/sbin/cryptsetup",
+        "cryptsetup_version": "2.4.3",
+    }
+    assert not {"secret", "key", "password", "auth"} & set(profile)
+
+
+def test_rendered_storage_unit_and_runtime_admission_compose(tmp_path):
+    rendered = _render("lease-storage-prepare@.service.j2")
+    request_id = "a" * 64
+    unit_name = f"arkhai-lease-storage-prepare@{request_id}.service"
+    slice_lines = [line for line in rendered.splitlines() if line.startswith("Slice=")]
+    assert slice_lines == ["Slice=system.slice"]
+    slice_name = slice_lines[0].partition("=")[2]
+
+    supervisor_path = (
+        TEMPLATES.parent / "files" / "arkhai-supervise-lease-storage.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "composed_storage_supervisor", supervisor_path
+    )
+    assert spec and spec.loader
+    supervisor = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(supervisor)
+
+    proc = tmp_path / "proc"
+    cgroups = tmp_path / "cgroup"
+    (proc / "self").mkdir(parents=True)
+    (proc / "sys" / "kernel").mkdir(parents=True)
+    relative = Path(slice_name) / unit_name
+    (cgroups / relative).mkdir(parents=True)
+    (proc / "self" / "status").write_text("NoNewPrivs:\t1\n")
+    (proc / "self" / "cgroup").write_text(f"0::/{relative}\n")
+    (proc / "sys" / "kernel" / "core_pattern").write_text("core\n")
+    (cgroups / relative / "memory.swap.max").write_text("0\n")
+
+    supervisor.assert_runtime_controls(
+        request_id,
+        proc_root=proc,
+        cgroup_root=cgroups,
+        effective_uid=0,
+        core_limit=(0, 0),
+    )
 
 
 def _local_systemd_version() -> int:

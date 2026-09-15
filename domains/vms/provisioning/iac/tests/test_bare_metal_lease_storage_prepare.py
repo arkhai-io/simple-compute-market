@@ -7,6 +7,7 @@ import json
 import os
 import re
 import stat
+import subprocess
 import threading
 from pathlib import Path
 from types import SimpleNamespace
@@ -235,6 +236,35 @@ def test_prepare_formats_one_keyslot_and_records_exact_identity(tmp_path):
     assert b"53535353" not in persisted
     for argv, _ in runner.calls:
         assert "53" * 32 not in " ".join(argv)
+
+
+def test_supervised_dispatch_records_the_verified_request_boundary(tmp_path):
+    module = _load_helper()
+    config = _config(module, tmp_path)
+    request_id = "a" * 64
+
+    module.prepare(
+        config,
+        runner=RecordingRunner(),
+        random_bytes=lambda length: b"S" * length,
+        execution_evidence={
+            "boundary": "systemd-oneshot",
+            "request_id": request_id,
+        },
+    )
+
+    manifest = json.loads(
+        (config.state_root / "leases" / config.generation / "manifest.json").read_text()
+    )
+    assert manifest["helper_attempts"] == [
+        {
+            "attempt": 1,
+            "helper": "supervised-preparation-helper",
+            "state": "completed",
+            "boundary": "systemd-oneshot",
+            "request_id": request_id,
+        }
+    ]
 
 
 def test_new_policy_and_sealed_blobs_are_private_files(tmp_path):
@@ -758,6 +788,68 @@ def test_subprocess_failure_does_not_echo_stdin_or_child_output(tmp_path, monkey
         runner.run(("cryptsetup",), stdin=secret)
     assert secret.decode() not in str(error.value)
     assert str(error.value) == "cryptsetup failed with exit status 9"
+
+
+def test_supervised_runner_verifies_exact_qualified_cryptsetup(tmp_path, monkeypatch):
+    module = _load_helper()
+    binary = tmp_path / "cryptsetup"
+    binary.write_bytes(b"fixture")
+    binary.chmod(0o700)
+    actual_lstat = module.Path.lstat
+    calls = []
+
+    def root_owned_lstat(path):
+        info = actual_lstat(path)
+        if path == binary:
+            return SimpleNamespace(
+                st_mode=info.st_mode,
+                st_uid=0,
+            )
+        return info
+
+    def version(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return subprocess.CompletedProcess(argv, 0, stdout=b"cryptsetup 2.4.3\n")
+
+    monkeypatch.setattr(module.Path, "lstat", root_owned_lstat)
+    monkeypatch.setattr(module.subprocess, "run", version)
+
+    runner = module.SubprocessRunner(
+        cryptsetup_path=binary,
+        expected_version="2.4.3",
+    )
+
+    assert runner._tools == {"cryptsetup": str(binary)}
+    assert calls[0][0] == [str(binary), "--version"]
+    assert calls[0][1]["stdin"] is subprocess.DEVNULL
+    assert calls[0][1]["stderr"] is subprocess.DEVNULL
+    assert calls[0][1]["timeout"] == 10
+
+
+def test_supervised_runner_rejects_unqualified_cryptsetup_version(tmp_path, monkeypatch):
+    module = _load_helper()
+    binary = tmp_path / "cryptsetup"
+    binary.write_bytes(b"fixture")
+    binary.chmod(0o700)
+    info = binary.lstat()
+    monkeypatch.setattr(
+        module.Path,
+        "lstat",
+        lambda _path: SimpleNamespace(st_mode=info.st_mode, st_uid=0),
+    )
+    monkeypatch.setattr(
+        module.subprocess,
+        "run",
+        lambda argv, **_kwargs: subprocess.CompletedProcess(
+            argv, 0, stdout=b"cryptsetup 2.4.4\n"
+        ),
+    )
+
+    with pytest.raises(module.PreparationRefused, match="version is not qualified"):
+        module.SubprocessRunner(
+            cryptsetup_path=binary,
+            expected_version="2.4.3",
+        )
 
 
 def test_production_prepare_refuses_without_enabled_esapi_custody(tmp_path, monkeypatch):

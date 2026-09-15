@@ -1,0 +1,51 @@
+[Unit]
+Description=Arkhai supervised lease-storage preparation %i
+Documentation=https://github.com/arkhai-io/simple-compute-market
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+Slice=system.slice
+ExecStart={{ bare_metal_lease_storage_supervisor_path }} execute %i --profile {{ bare_metal_lease_storage_supervision_profile_path }}
+Restart=no
+TimeoutStartSec=300
+TimeoutStopSec=30
+KillMode=control-group
+SendSIGKILL=yes
+
+# Key material must not enter the journal or a process environment.
+StandardInput=null
+StandardOutput=null
+StandardError=null
+NoNewPrivileges=yes
+MemorySwapMax=0
+LimitCORE=0
+
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateNetwork=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX
+SystemCallArchitectures=native
+SystemCallFilter=~@keyring @module @mount @reboot @swap @obsolete
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+ReadOnlyPaths={{ bare_metal_lease_storage_supervision_profile_path }}
+ReadOnlyPaths={{ bare_metal_lease_cryptsetup_path }}
+ReadWritePaths={{ bare_metal_lease_storage_request_root }}
+ReadWritePaths={{ bare_metal_lease_storage_state_root }}
+BindPaths={{ bare_metal_lease_tpm_device }}
+DevicePolicy=closed
+DeviceAllow={{ bare_metal_lease_tpm_device }} rw

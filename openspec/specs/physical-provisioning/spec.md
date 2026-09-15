@@ -661,11 +661,29 @@ again or clearing the uncertainty automatically. If quarantine cannot be made
 durable, the seam MUST report unresolved ownership rather than quarantine or
 success.
 
+A provider-owned preparation request MUST be canonical, content-addressed and
+stored with its execution record as a root-owned, mode-0600, single-link
+regular file beneath a root-owned mode-0700 request directory. The supervised
+unit MUST receive only that request identity and a fixed root-owned profile
+path. It MUST have no secret argument, environment or output channel; MUST run
+in `system.slice`; MUST enforce zero swap and hard and soft core-size limits of
+zero; MUST stop its whole control group; and MUST NOT restart automatically.
+Before opening the explicitly configured direct TPM device or mutating lease
+state, the executor MUST revalidate the request, the fixed cryptsetup path and
+version, the exact live unit cgroup, zero swap and core limits, and
+no-new-privileges. It MUST read the effective kernel core pattern from trusted
+procfs and refuse when that policy is missing, unreadable, malformed or piped.
+Accepted, running,
+completed, refused and quarantined outcomes MUST be durable. A changed request
+or an incomplete earlier execution MUST quarantine without helper dispatch or
+automatic retry, and an uncertain service-manager response MUST NOT authorize
+resubmission.
+
 The ordinary helper entrypoint and the `node_prepare_lease_storage` role action
-MUST refuse before creating lease state or key material until supervised
-execution and the required swap, core-dump and persistent-path controls are
-integrated. Access grant MUST remain refused while those controls and recovery
-readiness are absent.
+MUST continue to refuse before creating lease state or key material until the
+supervised artifacts are safely installed and the persistent-path, mapping,
+mount and reboot-recovery prerequisites are integrated. Access grant MUST
+remain refused while those controls and recovery readiness are absent.
 
 #### Scenario: Another generation owns the host counter
 
@@ -684,8 +702,13 @@ readiness are absent.
 
 #### Scenario: Ordinary host preparation is requested
 
-- **WHEN** the production role requests encrypted lease-storage preparation before its supervision and persistent-path prerequisites exist
+- **WHEN** the production role requests encrypted lease-storage preparation before its supervised artifacts are safely installed and its remaining storage prerequisites exist
 - **THEN** it refuses before invoking the helper, creating state or generating a key
+
+#### Scenario: A supervised request cannot be trusted
+
+- **WHEN** the supervised executor finds changed request content, unsafe ownership, missing live unit controls or an incomplete prior execution
+- **THEN** it refuses before TPM access or lease-state mutation and durably records refusal or quarantine without automatic restart
 
 ### Requirement: Relays are administered resources
 

@@ -17,8 +17,8 @@ PLAYBOOK = IAC / "ansible" / "playbooks" / "bare-metal" / "node-access.yaml"
 ANSIBLE_CFG = IAC / "ansible" / "ansible.cfg"
 ROLE = IAC / "ansible" / "roles" / "bare-metal-access"
 REFUSAL = (
-    "node_prepare_lease_storage is disabled until its swap, core-dump, "
-    "and supervised-helper protections are enforced"
+    "node_prepare_lease_storage remains disabled until persistent-path, "
+    "mapping, mount, and reboot-recovery readiness are integrated"
 )
 
 
@@ -87,7 +87,7 @@ def test_prepare_refusal_has_no_caller_bypass():
     refusal = next(
         item
         for item in _tasks()
-        if item["name"] == "Refuse unprotected encrypted lease storage preparation"
+        if item["name"] == "Refuse incomplete encrypted lease storage preparation"
     )
 
     assert refusal["when"] == "node_action == 'node_prepare_lease_storage'"

@@ -131,13 +131,54 @@ class SubprocessRunner:
         for command in ("cryptsetup",)
     }
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        cryptsetup_path: Path | None = None,
+        expected_version: str | None = None,
+    ) -> None:
         self._tools: dict[str, str] = {}
-        for command in self._REQUIRED:
-            resolved = shutil.which(command)
+        if cryptsetup_path is None:
+            resolved = shutil.which("cryptsetup")
             if resolved is None:
-                raise PreparationRefused(f"required tool unavailable: {command}")
-            self._tools[command] = resolved
+                raise PreparationRefused("required tool unavailable: cryptsetup")
+        else:
+            path = Path(cryptsetup_path)
+            if not path.is_absolute() or path.name != "cryptsetup":
+                raise PreparationRefused("cryptsetup path is not an absolute binary path")
+            try:
+                info = path.lstat()
+            except OSError as exc:
+                raise PreparationRefused("required tool unavailable: cryptsetup") from exc
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or stat.S_ISLNK(info.st_mode)
+                or info.st_uid != 0
+                or info.st_mode & 0o022
+            ):
+                raise PreparationRefused("cryptsetup binary is not safely owned")
+            resolved = str(path)
+        self._tools["cryptsetup"] = resolved
+        if expected_version is not None:
+            try:
+                completed = subprocess.run(
+                    [resolved, "--version"],
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                    close_fds=True,
+                    timeout=10,
+                )
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                raise PreparationRefused("cryptsetup version cannot be verified") from exc
+            match = re.search(rb"\bcryptsetup ([0-9]+(?:\.[0-9]+)+)\b", completed.stdout)
+            if (
+                completed.returncode != 0
+                or match is None
+                or match.group(1).decode("ascii") != expected_version
+            ):
+                raise PreparationRefused("cryptsetup version is not qualified")
 
     def _argv(self, argv: Sequence[str]) -> list[str]:
         command = Path(argv[0]).name
@@ -544,6 +585,7 @@ def _prepare(
     custody=None,
     random_bytes: Callable[[int], bytes] = os.urandom,
     fail_after: str | None = None,
+    execution_evidence: dict[str, str] | None = None,
 ) -> dict[str, object]:
     """Prepare or safely resume one lease generation under its host lock."""
     if fail_after is not None and fail_after not in FAILPOINTS:
@@ -571,6 +613,13 @@ def _prepare(
             "helper": "standalone-preparation-helper",
             "state": "running",
         }
+        if execution_evidence is not None:
+            if set(execution_evidence) != {"boundary", "request_id"} or any(
+                not isinstance(value, str) for value in execution_evidence.values()
+            ):
+                raise PreparationRefused("invalid supervised execution evidence")
+            helper_attempt.update(execution_evidence)
+            helper_attempt["helper"] = "supervised-preparation-helper"
         attempts.append(helper_attempt)
         _persist(manifest_path, manifest, config, "helper_started")
         _fail("helper_intent", fail_after)
@@ -841,6 +890,7 @@ def prepare(
     custody=None,
     random_bytes: Callable[[int], bytes] = os.urandom,
     fail_after: str | None = None,
+    execution_evidence: dict[str, str] | None = None,
 ) -> dict[str, object]:
     """Run preparation with a root-private creation mask, restoring the caller's."""
     previous_umask = os.umask(0o077)
@@ -851,6 +901,7 @@ def prepare(
             custody=custody,
             random_bytes=random_bytes,
             fail_after=fail_after,
+            execution_evidence=execution_evidence,
         )
     finally:
         os.umask(previous_umask)

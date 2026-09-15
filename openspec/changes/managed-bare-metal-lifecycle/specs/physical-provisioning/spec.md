@@ -34,6 +34,8 @@ A managed bare-metal lease volume MUST survive an unexpected host reboot during 
 
 Preparation MUST hold the host/index lock while reading or creating the authoritative generation fence and manifest. Another unreleased generation MUST refuse before a counter increment. Object creation, policy evaluation, load, public verification, unseal and cleanup MUST share one ESAPI lifetime, and cleanup MUST be checked and limited to handles returned in that lifetime. Durable sealed public/private blobs, not runtime object or session handles, are the recovery material. An incomplete record from an earlier process lifetime MUST quarantine ordinary retry without flushing a stale handle or advancing the counter again. A prepared retry MUST revalidate the LUKS2 header, its single keyslot and the sealed secret's ability to unlock it before reporting success.
 
+Preparation MUST enter through a content-addressed root-private request and a non-restarting provider oneshot with durable execution state. The unit MUST expose no secret argument, environment or output channel, MUST run in `system.slice`, MUST enforce zero swap and hard and soft core-size limits of zero, and MUST stop its whole control group. Before TPM access or lease-state mutation, the executor MUST verify request identity and ownership, the configured direct TPM device, the fixed cryptsetup path and version, the exact live unit cgroup, zero swap and core limits, and no-new-privileges. It MUST read the effective kernel core pattern from trusted procfs and refuse when that policy is missing, unreadable, malformed or piped. A changed request, incomplete prior execution or uncertain completion MUST refuse or quarantine without automatic redispatch.
+
 #### Scenario: Host reboots during an active lease
 
 - **WHEN** the host restarts before the lease's original end, and no release intent exists
@@ -58,6 +60,11 @@ Preparation MUST hold the host/index lock while reading or creating the authorit
 
 - **WHEN** a retry finds that the recorded backing file is no longer a matching single-keyslot LUKS2 volume unlockable by the sealed secret
 - **THEN** preparation quarantines without formatting or overwriting the existing file
+
+#### Scenario: Supervised execution evidence is incomplete
+
+- **WHEN** the provider oneshot finds changed request content, missing live controls or an earlier running execution without a durable completion
+- **THEN** it refuses before TPM access or lease-state mutation and does not automatically restart the request
 
 ### Requirement: Bare-metal release revokes, resets and verifies before capacity returns
 
