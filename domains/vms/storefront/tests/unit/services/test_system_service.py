@@ -250,6 +250,53 @@ class TestGetHealthSiteProjections:
         assert "site_projections" not in result["checks"]
 
 
+class TestGetHealthProvisioningContractPin:
+    """The pin has to survive the response model, not just the service dict.
+
+    The status route returns `HealthResponse(**body)`, so a key the service
+    puts in its dict and the model does not declare never reaches a caller.
+    That is how this pin first shipped invisible -- on this service and,
+    separately, on the provisioning service, both times passing a check that
+    only looked at the service method.
+    """
+
+    async def test_reports_the_major_this_storefront_speaks(self, db):
+        from compute_provisioning import COMPUTE_PROVISIONING_CONTRACT_VERSION
+
+        svc = _make_service(db)
+        result = await svc.get_health(include_registry=True)
+
+        assert (
+            result["provisioning_contract_version"]
+            == COMPUTE_PROVISIONING_CONTRACT_VERSION
+        )
+
+    async def test_survives_the_response_model(self, db):
+        """Constructing the model is the assertion the route performs."""
+        from compute_provisioning import COMPUTE_PROVISIONING_CONTRACT_VERSION
+        from core_storefront.models.system_models import HealthResponse
+
+        svc = _make_service(db)
+        body = await svc.get_health(include_registry=True)
+
+        model = HealthResponse(**body)
+
+        assert (
+            model.provisioning_contract_version
+            == COMPUTE_PROVISIONING_CONTRACT_VERSION
+        ), (
+            "the status route returns HealthResponse(**body); a pin the "
+            "service reports but the model drops is invisible to every caller"
+        )
+
+    async def test_omitted_from_fast_health_probe(self, db):
+        """The liveness probe does not owe a cutover diagnostic."""
+        svc = _make_service(db)
+        result = await svc.get_health()
+
+        assert "provisioning_contract_version" not in result
+
+
 class TestGetHealthListingModeExplanations:
     async def test_reports_per_site_per_pool_explanation(self, db):
         """get_health copies the injected provider's explanations through

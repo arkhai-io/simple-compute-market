@@ -44,6 +44,22 @@ class HealthResponse(BaseModel):
     # absence means nothing is owed, not that data is missing.
     listing_cardinality_mode_explanations: dict[str, dict[str, str]] | None = None
     storefront_domains: tuple[dict[str, str], ...] | None = None
+    #: The storefront-to-provisioning contract major this storefront speaks,
+    #: read from its own installed `compute_provisioning` wheel. A cutover
+    #: requires every participant to report its pin before mutations resume,
+    #: and two deployments can disagree only if their wheels differ.
+    #:
+    #: Declared here because this model is what the route returns: the status
+    #: handler builds `HealthResponse(**body)`, so a key the service puts in
+    #: its dict and this model does not name never reaches a caller. That is
+    #: how the pin first shipped invisible on this service and, separately,
+    #: on the provisioning service.
+    #:
+    #: Distinct from `storefront_domains[].contract_version`, which is a
+    #: domain contribution's own version and a different axis. Optional so
+    #: `GET /health`, which shares this model and reports neither, stays
+    #: valid.
+    provisioning_contract_version: str | None = None
 
 
 class AdminPauseResponse(BaseModel):
