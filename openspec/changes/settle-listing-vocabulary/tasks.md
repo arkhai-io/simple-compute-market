@@ -565,8 +565,44 @@ effects; an assertion that changes for any other reason is the defect.
         rename it to 'listing_cardinality_mode'`, and a pool carrying both
         spellings resolves to the settled one with no notice. Needs one e2e
         run to confirm the projection surfaces it over HTTP.
-- [ ] 9.13 **System.** The cutover gate rejects an incompatible peer before mutations
+- [x] 9.13 **System.** The cutover gate rejects an incompatible peer before mutations
       resume, per the identity-contract pattern.
+      - **Status (2026-09-14).** Recast, and the recast found a real gap.
+        The task's own framing -- refuse an incompatible peer -- is already
+        proven where it belongs, against the route, by
+        `test_retired_contract_major_is_refused` and
+        `test_unsupported_future_contract_major_is_refused` in the
+        provisioning service's contract suite. Re-proving a rejection over
+        the network would have needed a hand-built signed envelope carrying
+        a version the typed client refuses to construct, and in a
+        single-version stack the "peer" would still be a crafted request.
+
+        So this asserts the other half of `cutover.md`'s step 5, which is
+        the half nothing covered: every participant reports its pin before
+        mutations resume. That turned out to be unverifiable --
+        `COMPUTE_PROVISIONING_CONTRACT_VERSION` existed only in the contract
+        module, with no way to ask a running service which major it speaks.
+        A documented cutover step was therefore not executable against a
+        live deployment at all.
+
+        Both ends now report it: the provisioning service's system status
+        carries `provisioning_contract_version` and
+        `provisioning_contract_supported_majors`, and the storefront's
+        carries the major it speaks from its own installed wheel. Deliberately
+        distinct from `storefront_domains[].contract_version`, which is a
+        domain contribution's version and a different axis.
+        `HealthResponse` gained the field rather than letting it fall into
+        `extra`.
+
+        Asserted by stage `00c2` in
+        `e2e-tests/tests/e2e/roles/scenarios/vms/test_full_deal.py`, a
+        preflight: both sides report a pin, the majors agree, and the
+        service admits its own declared major. Gating it before any mutating
+        stage is the point -- the stages that follow are then known to have
+        run across a wire whose ends agree, so a later failure cannot be
+        explained away as skew. Verified locally that the pin reaches both
+        status shapes as a first-class field; needs one e2e run to confirm
+        it over HTTP.
 - [x] 9.14 **Integration.** A buyer client declaring the new schema identity queries a
       bumped registry successfully; one declaring the retired identity does not.
       - **Closed by 11.7b (verified 2026-09-14).** Re-run rather than taken

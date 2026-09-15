@@ -34,6 +34,10 @@ from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from sqlalchemy import text
 
+from compute_provisioning import (
+    COMPUTE_PROVISIONING_CONTRACT_VERSION,
+    SUPPORTED_COMPUTE_PROVISIONING_MAJOR_VERSIONS,
+)
 from vm_provisioning_operator.models import (
     AnsibleReadinessResponse,
     FileInfo,
@@ -232,7 +236,21 @@ class SystemService:
             checks["job_processor"] = "degraded"
 
         all_ok = all(v == "ok" for v in checks.values())
-        return {"status": "ok" if all_ok else "degraded", "checks": checks}, all_ok
+        # The contract major this service speaks, so a fleet can be checked
+        # for skew before mutations resume. Without it there is no way to ask
+        # a running service which version of the storefront-to-provisioning
+        # wire it accepts: the constant existed only in the contract module,
+        # which makes a documented cutover step unexecutable against a live
+        # deployment. Reported rather than negotiated -- the service still
+        # rejects an unsupported major on the route itself.
+        return {
+            "status": "ok" if all_ok else "degraded",
+            "checks": checks,
+            "provisioning_contract_version": COMPUTE_PROVISIONING_CONTRACT_VERSION,
+            "provisioning_contract_supported_majors": sorted(
+                SUPPORTED_COMPUTE_PROVISIONING_MAJOR_VERSIONS
+            ),
+        }, all_ok
 
     def ansible_readiness(self) -> AnsibleReadinessResponse:
         """Collect full Ansible readiness information synchronously.
@@ -307,7 +325,9 @@ class SystemService:
                     "storefront":      "ok" | "unreachable" | "timeout" | "unconfigured" | "http_N",
                     "storefront_auth": "ok" | "unauthorized" | "configuration_error" | "unconfigured" | "http_N",
                     "lease_watchdog":  "running" | "paused" | "disabled",
-                }
+                },
+                "provisioning_contract_version": "2.0",
+                "provisioning_contract_supported_majors": [2],
             }
 
         ``storefront_auth`` uses the provisioning service signer with explicit

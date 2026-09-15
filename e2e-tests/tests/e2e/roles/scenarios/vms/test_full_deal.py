@@ -300,6 +300,75 @@ class TestStage00c_ProvisioningHealth:
                  playbook_exists, resp.get("ansible_version"))
 
 
+class TestStage00c2_ProvisioningContractPins:
+    def test_00c2_both_participants_report_an_agreeing_contract_pin(
+        self, storefront_admin_client, provisioning_client, deal_state: DealState
+    ):
+        """Both sides of the provisioning wire report the same contract major.
+
+        The cutover for this wire requires every participant to report its
+        pinned version *before mutations resume*, so a half-deployed fleet
+        cannot quietly write rows in two spellings of the same field. This is
+        that check, run against the live deployment rather than inferred from
+        the source both services happen to be built from.
+
+        A preflight on purpose. Asserting it here means the stages that
+        follow -- which publish, negotiate, settle and provision -- are known
+        to have been driven across a wire whose two ends agree, so a later
+        failure cannot be quietly explained by version skew.
+
+        The rejection of an unsupported major is a separate property and is
+        covered where it belongs, against the route itself, in the
+        provisioning service's own contract suite. This asserts agreement,
+        not refusal: in a single-version stack the two cannot disagree, so
+        what earns its keep here is that both sides *report* a pin at all
+        and that the reported value is one the service admits.
+        """
+        require_state(
+            deal_state,
+            "_storefront_healthy",
+            "_registry_reachable",
+            "_provisioning_healthy",
+        )
+        provisioning_status = provisioning_client.get_system_status()
+        seller_status = storefront_admin_client.get_system_status()
+
+        service_pin = provisioning_status.get("provisioning_contract_version")
+        supported = provisioning_status.get(
+            "provisioning_contract_supported_majors"
+        )
+        caller_pin = seller_status.provisioning_contract_version
+
+        assert service_pin, (
+            "the provisioning service reports no contract pin, so a fleet "
+            f"cannot be checked for skew: {provisioning_status!r}"
+        )
+        assert caller_pin, (
+            "the storefront reports no provisioning contract pin, so the "
+            "caller's half of the wire is unverifiable"
+        )
+
+        service_major = int(str(service_pin).split(".")[0])
+        caller_major = int(str(caller_pin).split(".")[0])
+        assert caller_major == service_major, (
+            f"provisioning wire skew: the storefront speaks major "
+            f"{caller_major} ({caller_pin!r}) and the service speaks "
+            f"{service_major} ({service_pin!r}). Mutations must not resume "
+            "until both sides agree."
+        )
+        assert supported and service_major in supported, (
+            f"the service reports pin {service_pin!r} but admits majors "
+            f"{supported!r}, so it does not accept its own declared version"
+        )
+
+        deal_state._contract_pins_agree = True
+        log.info(
+            "[00c2] provisioning contract pin agreed: storefront=%s "
+            "service=%s supported=%s",
+            caller_pin, service_pin, supported,
+        )
+
+
 class TestStage00d_NegotiationStrategy:
     def test_00d_negotiation_strategy_is_viable(
         self, storefront_admin_client, deal_state: DealState

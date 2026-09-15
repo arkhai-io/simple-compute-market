@@ -13,6 +13,7 @@ from collections.abc import Callable
 from typing import Any
 
 import httpx
+from compute_provisioning import COMPUTE_PROVISIONING_CONTRACT_VERSION
 from market_identity import Signer
 
 import market_storefront.container as _container
@@ -165,6 +166,20 @@ class SystemService:
                     "contract_version": item.contract_version,
                 }
                 for item in self._db.domain_registry.projection()
+            )
+            # The provisioning contract major this storefront *speaks*, taken
+            # from its own installed `compute_provisioning` wheel rather than
+            # from anything the peer reports. Two deployments can disagree
+            # only if their wheels differ, which is exactly the skew a
+            # cutover has to rule out before mutations resume -- and until
+            # both sides reported this there was no way to check it against a
+            # live fleet.
+            #
+            # Distinct from `storefront_domains[].contract_version` above,
+            # which is a domain contribution's own version and a different
+            # axis entirely.
+            result["provisioning_contract_version"] = (
+                COMPUTE_PROVISIONING_CONTRACT_VERSION
             )
             wallet = get_evm_wallet_address().lower() if CHAINS else ""
             result["evm_mechanisms"] = {

@@ -58,6 +58,10 @@ class DealState(DomainDealState):
     _storefront_healthy: bool = False
     _registry_reachable: bool = False
     _provisioning_healthy: bool = False
+    #: Both ends of the storefront-to-provisioning wire reported an
+    #: agreeing contract major. Gated before any mutating stage so a
+    #: later failure cannot be explained away as version skew.
+    _contract_pins_agree: bool = False
     _provisioning_mock_mode: bool = False
     _negotiation_strategy_viable: bool = False
     _resources_seeded: bool = False
