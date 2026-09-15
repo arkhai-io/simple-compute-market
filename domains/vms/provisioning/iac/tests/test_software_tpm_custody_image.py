@@ -18,16 +18,25 @@ def test_image_pins_the_supported_binding_source_and_runtime_closure():
     assert "sha256sum --check --strict" in content
     assert "--no-build-isolation --no-deps" in content
     for package in (
+        "dbus",
         "libtss2-esys-3.0.2-0",
+        "libtss2-tcti-cmd0",
         "libtss2-fapi1",
         "libtss2-tcti-device0",
         "libtss2-tcti-swtpm0",
         "libtss2-tctildr0",
+        "netcat-openbsd",
+        "systemd",
     ):
-        assert package in content
+        assert f"        {package} \\" in content
     assert 'version("tpm2-pytss") == "2.2.1"' in content
     assert "ldd \"$binding\"" in content
     assert "! grep -F 'not found'" in content
+    assert "ldconfig -p | grep -F 'libtss2-tcti-cmd.so.0'" in content
+    assert "command -v dbus-daemon" in content
+    assert "test -f /lib/systemd/system/dbus.service" in content
+    assert "test -f /lib/systemd/system/dbus.socket" in content
+    assert "systemd-analyze --version | grep -E '^systemd 249\\b'" in content
 
 
 def test_image_does_not_retain_the_disproved_tools_57_build():

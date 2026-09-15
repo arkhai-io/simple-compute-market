@@ -718,6 +718,7 @@ def test_unit_enforces_plaintext_controls_and_cgroup_owned_shutdown():
         "StandardOutput=null",
         "StandardError=null",
         "DevicePolicy=closed",
+        "SystemCallFilter=~@keyring @module @mount @reboot @swap @obsolete",
     }
     assert required <= set(unit.splitlines())
     assert "Environment=" not in unit

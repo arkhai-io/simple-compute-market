@@ -12,7 +12,6 @@ import importlib.util
 import json
 import os
 import re
-import shutil
 import socket
 import stat
 import struct
@@ -227,7 +226,18 @@ def _verify_foreign_sentinels(tmp_path: Path, sentinels) -> None:
     _run(["tpm2_readpublic", "-c", sentinels["persistent_handle"], "-n", str(name)])
     assert name.read_bytes() == sentinels["persistent_name"]
     value = tmp_path / f"foreign-nv-{time.monotonic_ns()}"
-    _run(["tpm2_nvread", "-s", "8", "-o", str(value), sentinels["nv_index"]])
+    _run(
+        [
+            "tpm2_nvread",
+            "-C",
+            "o",
+            "-s",
+            "8",
+            "-o",
+            str(value),
+            sentinels["nv_index"],
+        ]
+    )
     assert value.read_bytes() == sentinels["nv_value"]
 
 
@@ -236,7 +246,18 @@ def _verify_durable_foreign_sentinels(tmp_path: Path, sentinels) -> None:
     _run(["tpm2_readpublic", "-c", sentinels["persistent_handle"], "-n", str(name)])
     assert name.read_bytes() == sentinels["persistent_name"]
     value = tmp_path / f"foreign-restart-nv-{time.monotonic_ns()}"
-    _run(["tpm2_nvread", "-s", "8", "-o", str(value), sentinels["nv_index"]])
+    _run(
+        [
+            "tpm2_nvread",
+            "-C",
+            "o",
+            "-s",
+            "8",
+            "-o",
+            str(value),
+            sentinels["nv_index"],
+        ]
+    )
     assert value.read_bytes() == sentinels["nv_value"]
 
 
@@ -287,6 +308,8 @@ def test_foreign_sentinel_verification_uses_supported_tools_52_argv(
         ),
         (
             "tpm2_nvread",
+            "-C",
+            "o",
             "-s",
             "8",
             "-o",
@@ -794,7 +817,7 @@ def _run_kill_child(specification) -> None:
 
 def _read_counter_for_probe(tmp_path: Path, nv_index: str) -> int:
     output = tmp_path / f"counter-{time.monotonic_ns()}"
-    _run(["tpm2_nvread", "-s", "8", "-o", str(output), nv_index])
+    _run(["tpm2_nvread", "-C", "o", "-s", "8", "-o", str(output), nv_index])
     raw = output.read_bytes()
     assert len(raw) == 8
     return int.from_bytes(raw, "big")

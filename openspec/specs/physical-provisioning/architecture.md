@@ -256,15 +256,17 @@ The implementation remains a controlled preparation and qualification seam.
 The host role does not install or activate these artifacts, and its ordinary
 prepare action still refuses before state or key creation while persistent-path,
 mapping, mount and reboot-recovery prerequisites are absent. Access grant also
-remains refused. Deterministic execution tests and disposable software-TPM and
-regular-file LUKS-header evidence do not establish systemd-manager behavior. A
-separate disposable systemd 249 run of the synthetic storage unit established
-that its child inherited zero hard and soft core limits and that systemd
-removed the sleeping child after the main process exited, before fixture
-cleanup stopped the unit. That run exercised neither the real supervisor nor
-storage dispatch. It does not establish production-host systemd enforcement,
-mapping or mount behavior, active-lease reboot recovery, release, preservation
-on a provider device, or physical-host qualification.
+remains refused. A disposable systemd 249 run of the synthetic storage unit
+established inherited zero hard and soft core limits and manager-owned removal
+of a sleeping child after its main process exited. A separate disposable-guest
+run composed the real request submission, systemd unit, live runtime admission,
+storage helper and same-process ESAPI custody against a private software TPM and
+a regular-file LUKS target. It completed preparation and prepared retry,
+preserved durable foreign TPM sentinels, refused mismatched runtime controls
+before custody, and quarantined abrupt execution. The qualification transport
+and storage target were test-only: this does not establish production-device
+transport, block-device mapping or mount behavior, active-lease reboot recovery,
+release, preservation on a provider device, or physical-host qualification.
 
 ## Related contracts
 

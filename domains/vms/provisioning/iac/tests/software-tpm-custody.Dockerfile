@@ -36,15 +36,18 @@ FROM ubuntu@sha256:281c5745f657873d78e5531fc5ba8575f46ab7769b94550ac99543f122679
 
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        dbus \
         cryptsetup-bin \
         libtss2-esys-3.0.2-0 \
         libtss2-fapi1 \
         libtss2-mu0 \
         libtss2-rc0 \
         libtss2-sys1 \
+        libtss2-tcti-cmd0 \
         libtss2-tcti-device0 \
         libtss2-tcti-swtpm0 \
         libtss2-tctildr0 \
+        netcat-openbsd \
         python3 \
         python3-asn1crypto \
         python3-cffi \
@@ -52,6 +55,7 @@ RUN apt-get update \
         python3-packaging \
         python3-yaml \
         swtpm \
+        systemd \
         tpm2-tools \
     && rm -rf /var/lib/apt/lists/*
 
@@ -63,6 +67,12 @@ RUN /opt/custody-venv/bin/python -c \
     && test -n "$binding" \
     && ldd "$binding" > /tmp/pytss.ldd \
     && ! grep -F 'not found' /tmp/pytss.ldd \
+    && ldconfig -p | grep -F 'libtss2-tcti-cmd.so.0' \
+    && command -v dbus-daemon \
+    && command -v nc \
+    && test -f /lib/systemd/system/dbus.service \
+    && test -f /lib/systemd/system/dbus.socket \
+    && systemd-analyze --version | grep -E '^systemd 249\b' \
     && rm /tmp/pytss.ldd
 
 WORKDIR /workspace/domains/vms/provisioning/iac

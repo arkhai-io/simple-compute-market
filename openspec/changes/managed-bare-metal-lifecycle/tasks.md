@@ -34,7 +34,8 @@
   - **Evidence:** The deterministic custody set reports `76 passed, 2 skipped`, and final bounded review accepts the simulator custody seam. A reviewing operator's disposable-software-TPM run completed preparation and prepared-state revalidation, preserved foreign transient, session, persistent and NV sentinels, recovered from durable blobs after an emulator restart without another counter advance, and observed revoked blobs refuse recovery. Five abrupt `os._exit(97)` checkpoints restarted with neither stale cleanup nor a repeated counter advance; `after-flush-session` covers the first trial-policy flush, not a separate post-unseal flush.
   - **Limits:** Deterministic fault tests establish the modeled failure propagation, not comprehensive real response-loss or physical-TPM fault injection. The revocation run establishes refusal and owned-resource closure, not an independently read counter value or an assertion of one exact TPM error code. No mapping, mount, qualified-host device, physical TPM, provider-preservation, reboot, Windows, GPU, egress, complete recovery or release path is established. Tasks 2.3–2.6 and sections 3–6 remain open, so overall 2.2 stays unchecked.
   - **Supervised execution seam:** A content-addressed root-private request and durable execution record now lead through a non-restarting provider oneshot to the existing helper and same-process ESAPI executor. Before backend loading, TPM access or lease-state mutation, the executor revalidates request ownership and identity, its exact `system.slice` unit cgroup, zero swap, inherited hard and soft core limits of zero, a non-piped effective kernel core pattern, and no-new-privileges. Missing, unreadable, malformed or piped core policy refuses with no helper dispatch; this is a conditional no-file-dump boundary, not containment of a piped handler. The unit has no secret argument, environment or output channel, selects one configured direct TPM device and fixed cryptsetup path/version, and stops its whole control group. Changed requests, incomplete prior executions, uncertain helper completion and cleanup failure persist refusal or quarantine without automatic redispatch. Controlled flow and helper-orchestration tests exercise request acceptance through durable completion with systemd, OS, cryptsetup and TPM boundaries controlled.
-  - **Supervision evidence:** A reviewing operator ran the current full offline IaC suite and observed `285 passed, 5 skipped`; the opt-in target-systemd syntax and manager lanes are not part of that result. The operator separately ran the synthetic storage unit under a disposable systemd 249 manager and observed one passing case: the main process exited with status 23 while its sleeping child remained, the child inherited zero hard and soft core limits, systemd removed that child before the fixture issued its cleanup stop, and the unit reported `Result=exit-code`. This is evidence for the synthetic unit's manager-owned control-group cleanup and inherited limit only. It did not execute the real supervisor, storage helper, cryptsetup or TPM path. Final bounded harness review accepts this synthetic supervision checkpoint within those limits.
+  - **Supervision evidence:** A reviewing operator ran the current full offline IaC suite and observed `378 passed, 7 skipped`; the opt-in guest lane is not part of that result. The operator separately ran the synthetic storage unit under a disposable systemd 249 manager and observed one passing case: the main process exited with status 23 while its sleeping child remained, the child inherited zero hard and soft core limits, systemd removed that child before fixture cleanup stopped the unit, and the unit reported `Result=exit-code`. Final bounded harness review accepts this synthetic supervision checkpoint within those limits.
+  - **Real-composition checkpoint:** The opt-in harness composes production request submission, the rendered systemd unit and live runtime admission with the real helper, regular-file cryptsetup and same-process ESAPI custody. It admits only a genuine non-piped guest kernel core policy, refuses existing unit artifacts, and uses test-only software-TPM transport without changing the production direct-device contract. One source-bound disposable-guest run completed preparation and prepared retry, revalidated the receipt and sealed artifacts, preserved the foreign durable TPM state, refused mismatched runtime controls before custody, and quarantined abrupt execution. Its LUKS target was a disposable regular file and `production_device_transport_used` was false. This is one successful simulated composition run, not block-device, mapping, mount, reboot, provider-preservation or physical-TPM qualification; its final bounded checkpoint review accepts this simulated checkpoint within those limits.
   - **Activation limits:** The role does not install or start the new unit, profile or request executable, and `node_prepare_lease_storage` now refuses on the remaining persistent-path, mapping, mount and reboot-recovery prerequisites. Grant remains unconditional refusal. No production-host supervisor dispatch, qualified device, mapping/mount, reboot recovery or physical-host behavior is claimed, so overall 2.2 stays unchecked.
 - [ ] 2.3 Implement recovery after restart or reboot under the per-host lock (D5), with the lease window never written.
 - [ ] 2.4 Implement persistent-path preflight and controls (D3) as prepare preconditions that fail closed.
@@ -143,17 +144,18 @@ prepared for its pending acceptance review; the rest of sections 2–6 remains o
 
 ### M2.2 documentation closeout preparation
 
-The task narrative now records only the current same-process custody mechanism,
-the accepted simulator-seam evidence, and its limits. The implemented interface
-is promoted to the physical-provisioning specification and architecture; no
-activation, recovery, release or physical-qualification behavior is promoted.
-The roadmap needs no change. The campaign index records section 1 and the 2.1
-rendering checkpoint as accepted, the 2.2 simulator seam as verified with
-overall integration pending, and every later stage as open. Exact-version
-strict validation, citation checks, comment hygiene and whitespace validation
-pass for these documentation edits. Overall 2.2 remains unchecked until its
-supervision, persistent-path, production activation and recovery integration
-gates are completed.
+The task narrative records the same-process custody mechanism, supervised
+execution boundary, one successful simulated preparation/retry composition and
+their limits. The implemented interface and qualification boundary are promoted
+to the physical-provisioning specification and architecture; no activation,
+recovery, release or physical-qualification behavior is promoted. The roadmap
+needs no change. The campaign index records section 1 and the 2.1 rendering
+checkpoint as accepted, the 2.2 custody and supervision seams as verified, and
+the simulated composition checkpoint with overall integration pending. Strict
+validation, citation checks, comment hygiene and whitespace validation apply to
+these documentation edits. Overall 2.2 remains unchecked until its
+persistent-path, mapping, mount, production activation and reboot-recovery gates
+are completed.
 
 ## Section 1 acceptance
 

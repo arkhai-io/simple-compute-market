@@ -148,6 +148,18 @@ class RecordingRunner:
                 raise RuntimeError("not a LUKS volume")
             return self.luks_json.encode()
         if command == "cryptsetup" and "--test-passphrase" in argv:
+            assert argv[:-1] == (
+                "cryptsetup",
+                "--type",
+                "luks2",
+                "--test-passphrase",
+                "--disable-keyring",
+                "--key-file",
+                "-",
+                "--keyfile-size",
+                "32",
+                "open",
+            )
             if not self._is_luks(argv[-1]) or self.keys.get(argv[-1]) != stdin:
                 raise RuntimeError("LUKS key does not unlock this header")
             return b""
@@ -215,6 +227,19 @@ def test_prepare_formats_one_keyslot_and_records_exact_identity(tmp_path):
     )
     assert luks[luks.index("--keyfile-size") + 1] == "32"
     assert luks[-2] == "luksFormat"
+    test_passphrase = next(argv for argv in commands if "--test-passphrase" in argv)
+    assert test_passphrase[:-1] == (
+        "cryptsetup",
+        "--type",
+        "luks2",
+        "--test-passphrase",
+        "--disable-keyring",
+        "--key-file",
+        "-",
+        "--keyfile-size",
+        "32",
+        "open",
+    )
     secret_inputs = [stdin for _, stdin in runner.calls if stdin == b"S" * 32]
     assert len(secret_inputs) == 3
 

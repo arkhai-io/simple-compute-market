@@ -839,6 +839,7 @@ def _prepare(
             runner.run(
                 (
                     "cryptsetup", "--type", "luks2", "--test-passphrase",
+                    "--disable-keyring",
                     "--key-file", "-", "--keyfile-size", "32", "open", str(backing),
                 ),
                 stdin=secret,
