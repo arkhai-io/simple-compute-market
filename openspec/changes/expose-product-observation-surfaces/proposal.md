@@ -25,6 +25,13 @@ it expected is gone and the shape it found is plausible.
   an incidental field for a contract.
 - Establishes that an observation surface is a public contract: changing one is a
   spec change, not an implementation detail.
+- Scopes the first set to the VM deal flow: the listing, negotiation, settlement,
+  fulfillment, and delivered-resource states the end-to-end suite already asserts,
+  each restated as a surface rather than as the internal identifier the suite
+  currently reads. Other domains follow the same rule when they need it.
+- Adds a read-only observation credential class, distinct from buyer, seller, and
+  operator credentials, so an observer can read deal state without holding a key
+  that could act on it.
 
 ## Permanent documentation impact
 

@@ -203,11 +203,12 @@ publish-documentation-closure (independent)
 | 2 | [`expose-product-observation-surfaces`](expose-product-observation-surfaces/) | blocked on the lifecycle contract | Deal state observable through documented, versioned surfaces with stable identifiers, distinct from operator endpoints, each recording what it does not promise. An observation surface is a public contract |
 | 3 | [`instrument-service-timing-spans`](instrument-service-timing-spans/) | blocked on the observation surfaces | Spans naming the intervals a service can distinguish internally and a caller cannot — queue wait against service time, transaction construction against receipt wait. Context propagates through this repository's own clients and CLI and no further. Emits spans; deploys no collector |
 | — | [`publish-documentation-closure`](publish-documentation-closure/) | active | The transitive closure of internal links from each entry document, published as a content-addressed manifest per revision. A missing closure member fails the build rather than surprising a reader |
-| — | [`retire-issue-discovery-tooling`](retire-issue-discovery-tooling/) | retained, not started until a replacement exists | `tools/issue-discovery` and its Make targets removed, and `TESTING.md` stops describing a subsystem that has never existed on `dev`. The four test levels and their jurisdiction statement are untouched |
+| — | [`correct-testing-documentation`](correct-testing-documentation/) | active | `TESTING.md` stops describing a subsystem that has never existed on `dev`. The four test levels and their jurisdiction statement are untouched |
+| — | [`retire-issue-discovery-tooling`](retire-issue-discovery-tooling/) | retained, not started until a replacement exists | `tools/issue-discovery` and its Make targets removed, after `correct-testing-documentation` has landed |
 
 Six changes previously grouped here are archived under [`archive/`](archive/), each carrying an archive header recording what superseded it and what carried forward. Their design rationale is cited by the successors rather than restated.
 
-Two dependencies point outside this group and are unchanged. Nothing an external suite exercises can complete a buyer deal until [`compose-domain-wheels-and-policies`](compose-domain-wheels-and-policies/) closes, and nothing can assert that the GPU reserved is the GPU received until [`fix-vm-fulfillment-capacity-boundary`](fix-vm-fulfillment-capacity-boundary/) does.
+Two dependencies point outside this group and are unchanged. Nothing an external suite exercises can complete a buyer deal until `compose-domain-wheels-and-policies` closes — a change that exists on `ci-discovered-bug-fixes` and not on this branch, so it is named and not linked — and nothing can assert that the GPU reserved is the GPU received until [`fix-vm-fulfillment-capacity-boundary`](fix-vm-fulfillment-capacity-boundary/) does.
 
 ## Independent active changes
 

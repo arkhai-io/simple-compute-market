@@ -22,7 +22,11 @@ to conform to rather than a file to imitate.
   of market activity — discovery, negotiation, settlement, provisioning,
   delivery, teardown. The existing per-entity lifecycles become its constituents.
 - Declares `DealStage` identities as a published, importable artifact rather than
-  a convention.
+  a convention. The artifact is importable without `pytest` or any test-only
+  dependency — today the enumeration lives in an end-to-end helper module that
+  imports `pytest`, which no non-test consumer can import — and it has one stable
+  serialization, so a consumer can pin it by the digest of its declared content
+  rather than by a package version that moves when nothing in it does.
 - Restructures `e2e-tests/` to reference stages. The existing numbered
   choreography step is retained as a `TestPhase` **within** a stage: several
   phases carry no deal content at all — arming a gate, dry-running a publication,

@@ -27,4 +27,4 @@ happening, and the correction should not wait on it.
 - Rescoped from `restore-issue-discovery-thin-runner`; the runner repair, phase
   configuration, and Make targets are dropped
 - `tools/issue-discovery` remains in the tree. Removing it is deferred until a
-  working replacement exists and is carried as a task there, not here
+  working replacement exists and is `retire-issue-discovery-tooling`'s, not here

@@ -19,11 +19,16 @@ does not work is already asking a question this repository cannot answer.
 
 - Defines the entry documents whose closures are published.
 - Computes the transitive closure of internal links from each entry document, and
-  publishes it as a content-addressed manifest per revision.
+  publishes it as a content-addressed manifest per revision: one digest per
+  member over its bytes, and a manifest digest over the member list, so a consumer
+  can state which bytes it received and detect a member that changed with no
+  visible edit to the entry document.
 - Fails when a closure member is missing, so a broken internal link is a build
   failure rather than a reader's discovery.
 - Distinguishes internal links, which are closure members, from external links,
-  which are recorded but not pinned.
+  which are recorded but not pinned. A consumer that cannot follow external links
+  therefore knows exactly what it is missing, and a reader who could follow one
+  is reading something the closure does not vouch for.
 
 ## Permanent documentation impact
 

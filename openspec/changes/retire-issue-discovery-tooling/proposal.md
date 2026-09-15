@@ -1,4 +1,4 @@
-# Retire the issue-discovery tooling and correct the testing documentation
+# Retire the issue-discovery tooling
 
 ## Why
 
@@ -13,17 +13,13 @@ executes. Repairing it would produce something with no consumer.
 
 Leaving it is not neutral. Code in the tree reads as code that works, and the
 next person to find it will either try to use it or spend an afternoon
-establishing that they should not. The same is true of the documentation: this
-repository currently describes a subsystem that has never existed on `dev`, so a
-reader looking for it cannot tell whether it was removed, was never built, or
-lives on a branch they should go find.
+establishing that they should not. The documentation half of the same problem is
+`correct-testing-documentation`, which is not blocked and lands first.
 
 ## What Changes
 
 - Removes `tools/issue-discovery` and its configuration, fixtures, and schemas.
 - Removes the Make targets and packaging entries that reference it.
-- Removes the section of `docs/development/TESTING.md` describing a subsystem
-  absent from this branch.
 - Leaves the four test levels and their jurisdiction statement intact — a
   separate suite still sits outside them, and that boundary is unchanged by this
   removal.
@@ -42,12 +38,12 @@ on there being something to point at instead.
 
 ## Permanent documentation impact
 
-- [x] `docs/development/TESTING.md`
+- [ ] `docs/development/TESTING.md` — already corrected by `correct-testing-documentation`
 - [ ] No specification change
 
 ## Impact
 
-- Affected code: `tools/issue-discovery/`, `Makefile`, `docs/development/TESTING.md`
-- Supersedes the scope of `correct-testing-documentation`, which held only the
-  documentation half
+- Affected code: `tools/issue-discovery/`, `Makefile`
+- Sequenced after `correct-testing-documentation`, which holds the documentation
+  half and is not blocked
 - Rescoped from the archived `restore-issue-discovery-thin-runner`
