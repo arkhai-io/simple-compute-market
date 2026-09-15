@@ -137,11 +137,15 @@ class TestRetiredSpellingsAreRejected:
         )
         body = response.json()
         assert response.status_code == 200
-        # The retired key is not the settled one, so it is carried as opaque
-        # extra content and contributes no offering mode: the listing is
-        # therefore invisible to an offering-mode filter rather than matching.
-        assert body["valid"] is True
-        assert "listing_resource_type" not in body
+        # Refused, not carried. This boundary's skew is the invisible kind --
+        # the offering-mode field is optional, so a listing under the retired
+        # spelling would publish, store, and then match nothing a buyer
+        # filters on, with no signal to the seller. The permanent requirement
+        # is that a registry MUST NOT accept a second spelling, and the
+        # cutover plan names this boundary as the one needing the closest
+        # verification for exactly that reason.
+        assert body["valid"] is False
+        assert any("virtualization_type" in str(err) for err in body["errors"]), body
 
     async def test_no_derived_resource_type_tag_is_reported(self, registry_client):
         response = await self._post(

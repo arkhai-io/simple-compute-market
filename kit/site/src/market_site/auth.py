@@ -95,6 +95,22 @@ class SiteRouteContract:
     path_resource: str | None = None
     body_resource: str | None = None
     optional_body_resource: bool = False
+    #: Whether an exact retry of this route may be re-executed.
+    #:
+    #: This middleware's replay store reserves `(principal, request_id)` but
+    #: keeps no outcomes, so it cannot return a recorded one. Conformance with
+    #: the exact-retry requirement is therefore delegated to the handler, and
+    #: most routes satisfy it: a consume deduplicates on an idempotency key
+    #: carried inside the signed body, a revoke is idempotent by
+    #: construction, an issuance is unique per fulfillment id.
+    #:
+    #: A route that would apply a *relative* change cannot. Declaring that
+    #: here turns an assumption the middleware used to make about every route
+    #: into a property each route states, so a new non-idempotent mutation
+    #: behind this middleware is refused rather than silently double-applied.
+    #: Returning the recorded outcome instead of refusing needs a store that
+    #: retains outcomes; see `retain-authenticated-request-outcomes`.
+    exact_retry_safe: bool = True
 
     def match(self, method: str, path: str, body: Any) -> str | None:
         if method.upper() != self.method:
@@ -425,6 +441,40 @@ class SiteAuthMiddleware(BaseHTTPMiddleware):
                 resource=resource,
                 body={"detail": _verification_detail(verification.code)},
                 status_code=_verification_status(verification.code),
+                request_id=authenticated.request_id,
+            )
+
+        if (
+            verification.code == VerificationCode.EXACT_RETRY
+            and not contract.exact_retry_safe
+        ):
+            # An exact retry is already `verified`, so it bypasses the
+            # reservation branch below and would otherwise reach the handler
+            # a second time. For a route that applies a relative change that
+            # is a double-apply, and this store has no recorded outcome to
+            # return instead. Refusing is the safe half of the requirement:
+            # no conflicting mutation runs.
+            logger.warning(
+                "Refusing exact retry of a non-replay-safe route: "
+                "operation=%r resource=%r principal=%s:%s",
+                operation,
+                resource,
+                authenticated.principal.scheme.value,
+                authenticated.principal.identifier,
+            )
+            return self._signed_rejection(
+                signer,
+                request=request,
+                operation=operation,
+                resource=resource,
+                body={
+                    "detail": (
+                        "This operation cannot be safely retried under the "
+                        "same request ID. Reissue it with a new request ID "
+                        "once the outcome of the first attempt is known."
+                    )
+                },
+                status_code=status.HTTP_409_CONFLICT,
                 request_id=authenticated.request_id,
             )
 

@@ -20,6 +20,7 @@ directly instead.
 
 from __future__ import annotations
 
+from dataclasses import replace
 import time
 import uuid
 from typing import Any
@@ -531,3 +532,97 @@ async def test_the_real_client_can_list_reservations_with_no_filter(query_app):
     client = _real_client(query_app)
     rows = await client.list_reservations()
     assert rows == [{"state": None, "escrow_uid": None}]
+
+
+# ---------------------------------------------------------------------------
+# Exact retry, per route
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_an_exact_retry_of_a_replay_safe_route_reaches_the_handler(client):
+    """The default, and why it is the default.
+
+    This store reserves `(principal, request_id)` but keeps no outcomes, so
+    it cannot return a recorded one. A route whose handler resolves an exact
+    retry itself -- deduplicating on a key inside the signed body, or being
+    idempotent by construction -- is better served by being let through than
+    by a refusal it does not need.
+    """
+    headers = _signed_headers(
+        signer=SELLER_SIGNER,
+        role="seller",
+        method="GET",
+        operation="capacity_snapshot",
+        resource="",
+    )
+    first = await client.get("/api/v1/capacity/snapshot", headers=headers)
+    second = await client.get("/api/v1/capacity/snapshot", headers=headers)
+
+    assert first.status_code == 200
+    assert second.status_code == 200, second.text
+
+
+@pytest.mark.asyncio
+async def test_an_exact_retry_of_a_non_replay_safe_route_is_refused(app):
+    """A relative mutation must not be applied twice.
+
+    Declared per route rather than assumed of all of them. The middleware
+    used to let every exact retry through on the reasoning that capacity
+    operations are idempotent, which stopped being true of the whole surface
+    once the same middleware began protecting credit mutations.
+
+    Refusing is the safe half of the exact-retry requirement -- no conflicting
+    mutation runs. Returning the recorded outcome is the other half and needs
+    a store that retains outcomes; `retain-authenticated-request-outcomes`
+    owns that.
+    """
+    calls: list[int] = []
+
+    application = FastAPI()
+
+    @application.post("/api/v1/capacity/reservations")
+    def reserve() -> dict[str, Any]:
+        calls.append(1)
+        return {"reserved": len(calls)}
+
+    application.add_middleware(
+        SiteAuthMiddleware,
+        signer_provider=lambda: AUTHORITY_SIGNER,
+        expected_principals=_expected_principals,
+        contracts=tuple(
+            replace(contract, exact_retry_safe=False)
+            if contract.operation == "capacity_reserve"
+            else contract
+            for contract in CAPACITY_ROUTE_CONTRACTS
+        ),
+    )
+
+    headers = _signed_headers(
+        signer=SELLER_SIGNER,
+        role="seller",
+        method="POST",
+        operation="capacity_reserve",
+        resource="",
+        body={"claim": {"units": 1}},
+    )
+    transport = httpx.ASGITransport(app=application)
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://authority"
+    ) as http:
+        first = await http.post(
+            "/api/v1/capacity/reservations",
+            json={"claim": {"units": 1}},
+            headers=headers,
+        )
+        second = await http.post(
+            "/api/v1/capacity/reservations",
+            json={"claim": {"units": 1}},
+            headers=headers,
+        )
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 409, second.text
+    assert "cannot be safely retried" in second.json()["detail"]
+    # The refusal's whole purpose: the handler ran once.
+    assert len(calls) == 1

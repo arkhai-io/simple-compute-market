@@ -17,7 +17,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError
 
@@ -47,6 +47,74 @@ def _validator() -> Draft202012Validator:
 def _reset_cache() -> None:
     """Drop the cached validator — for tests that hot-swap the spec."""
     _validator.cache_clear()
+
+
+def reject_retired_listing_shape(body: Any) -> None:
+    """Refuse a listing whose shape uses a retired spelling.
+
+    The same `listing_shape` schema the dry-run route validates against and
+    `GET /filter-spec` serves, applied at the mutation boundary. Before this,
+    only the dry run checked anything: `POST /listings` stored whatever it was
+    given, so a publisher could be told `valid=false` by the dry run and still
+    publish successfully.
+
+    Scoped to the retired spellings rather than enforcing the whole schema
+    here. Full enforcement at publish would reject listings this registry has
+    accepted for as long as it has existed -- a different and larger decision
+    than closing the cutover. `additionalProperties` stays open, so a seller
+    may carry any attribute the schema does not name; what is refused is
+    exactly `offer`, `offer_resource`, and `listing_resource.virtualization_type`.
+
+    Refused rather than ignored because this boundary's skew is invisible: the
+    offering-mode field is optional, so a listing carrying the retired
+    spelling publishes, stores, and then matches nothing a buyer filters on,
+    with no signal to the seller. Naming the field and its replacement is safe
+    disclosure -- the prohibition is already public in the served spec.
+    """
+
+    shape = get_loaded_spec().listing_shape
+    retired: list[str] = []
+    for key in ("offer", "offer_resource"):
+        if _forbids_property(shape, key) and isinstance(body, dict) and key in body:
+            retired.append(key)
+    resource = body.get("listing_resource") if isinstance(body, dict) else None
+    nested = shape.get("properties", {}).get("listing_resource", {})
+    for key in _forbidden_properties(nested):
+        if isinstance(resource, dict) and key in resource:
+            retired.append(f"listing_resource.{key}")
+    if retired:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "retired_listing_shape",
+                "retired_fields": sorted(retired),
+                "message": (
+                    "The published listing shape is named `listing_resource` "
+                    "and its offering-mode field `offering_mode`. See "
+                    "GET /filter-spec."
+                ),
+            },
+        )
+
+
+def _forbidden_properties(schema: dict[str, Any]) -> list[str]:
+    """Property names a schema's ``not`` clause forbids by requiring them."""
+
+    prohibition = schema.get("not")
+    if not isinstance(prohibition, dict):
+        return []
+    clauses = prohibition.get("anyOf")
+    if not isinstance(clauses, list):
+        clauses = [prohibition]
+    names: list[str] = []
+    for clause in clauses:
+        if isinstance(clause, dict):
+            names.extend(clause.get("required", []) or [])
+    return names
+
+
+def _forbids_property(schema: dict[str, Any], key: str) -> bool:
+    return key in _forbidden_properties(schema)
 
 
 def _format_path(err: ValidationError) -> str:

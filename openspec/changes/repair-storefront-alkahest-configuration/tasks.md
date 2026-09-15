@@ -39,7 +39,7 @@ confirms settlement becomes ready has not happened yet.
       Compare failure *causes*, not counts — the escrow phases have never run,
       so new failures downstream of a now-publishing listing are the expected
       result and are findings for classification, not regressions.
-- [ ] 3.4 `make test` stays green. No production Python changed, so nothing is
+- [ ] 3.4 `make test` stays green. Sections 1 and 2 change no production Python, so nothing is
       expected here; run it rather than assume.
 
 ## 3b. Drift the settling stack exposed
@@ -2442,6 +2442,80 @@ failures.
       principals configured for role 'service'", which no table comparison
       would have seen.
 
+- [x] 3ax.11 **Four production defects the flip then exposed, none of them
+      configuration.** Enabling signed authentication let the credits scenario
+      past discovery for the first time, and every stage it reached was a
+      first execution. Recorded per fix, because the proposal's
+      `Scope as implemented` names the cluster and the clusters are not the
+      unit a future reader will be looking for.
+
+      **A superset dict handed to a strict model, twice.** `ApiCreditsMessage`
+      extends `ProvisionTerms` with `settlement_selection`, `buyer_principal`
+      and `seller_principal`; `_decode_terms` dumped the whole message into
+      the wire form the runtime echoes back as `accepted_provision_terms`,
+      which is typed `ProvisionTerms` with `extra="forbid"`. Every accepted
+      round zero was a 500. Separately, `prepare` passed the storefront's own
+      `load_listing` row -- bookkeeping columns included -- to the domain's
+      `normalize_listing`, and `ApiCreditsListing` also forbids extras, so
+      issuance failed with eleven errors before its first call to the credits
+      service.
+
+      Both fixed by narrowing at the caller, with the field names read off the
+      model, rather than by relaxing the model. Each of those models describes
+      a payload arriving from somewhere untrusted -- a registry listing, a
+      buyer's terms -- and `extra="forbid"` is what makes it a contract. The
+      defect in both cases was a local structure passed where a wire payload
+      belongs.
+
+      **A 500 with no traceback.** `negotiate_controller` built its response
+      outside every `except`, so a `ValidationError` there escaped to FastAPI
+      and was reported through `uvicorn.error`, which this storefront does not
+      route to stdout. Response construction now has its own handler,
+      deliberately not the one above it: that one maps `ValidationError` to a
+      400 `incompatible_provision_terms`, and reusing it would blame the
+      caller for a defect on the seller's side.
+
+      **A settlement failure recorded only for the buyer.**
+      `persist_api_credit_settlement_outcome` wrote the reason to the escrow
+      row and returned it in the settle-status body, and logged nothing. A
+      settlement that failed before its first call to the credits service left
+      no trace in this storefront's own output, so an operator holding the
+      container log saw a `202` and then silence. Now logged at warning before
+      it is persisted.
+
+      Each carries a regression test asserting the thing that was wrong rather
+      than the thing that was easy: the raw row must still be refused, the
+      narrowed one must validate and keep `accepted_escrows`, and the
+      controller's response must load into `NegotiateNewResponse`. Every test
+      around the last of those asserted the runtime's raw dict, which is why
+      none of them noticed the dict could not load into the model the
+      controller has to return.
+
+- [x] 3ax.12 **Two configuration gaps behind the flip, both silent.** The
+      credits storefront had no `[settlement]` section, so
+      `mechanism_config("alkahest")` was `None`, `_build_alkahest_clients()`
+      was never called, and `POST /settle` refused with
+      `available chains: []`. Then, with the section added, the builder ran
+      and reported `wallet.private_key` missing: the wallet env file carries
+      `AGENT_PRIV_KEY`, which this service does not read, and the
+      `APICREDITS_STOREFRONT_WALLET__PRIVATE_KEY` line the VM storefronts
+      already have was absent.
+
+      Both were silent in the same way and for the same reason. The
+      diagnostics that would have named them -- "no chains configured",
+      "required EVM settings are missing" -- live *inside* the builder, and
+      the first gap was that the builder never ran. `listing_service` computes
+      settlement readiness and gates on it, but only when there are no escrows
+      *and* no settlement options; the seed listing supplies its own, so
+      publication proceeded with alkahest unready and the failure deferred to
+      the last step of the scenario.
+
+      Two runs went to these two gaps. The durable lesson is not the
+      configuration but the gating: a storefront that publishes an
+      `alkahest.v1` settlement option while the mechanism reports blockers is
+      advertising something it cannot do, and tightening that would have
+      caught both at startup. Recorded as deferred rather than fixed here.
+
 - [ ] 3ax.9 Carried from 3ar.6 and now larger: this adds *two* dev identities
       to the committed-file-plus-hardcoded-pin-plus-compose-mount pattern
       rather than one. Confirmed as acceptable for now against a dedicated
@@ -2487,7 +2561,9 @@ failures.
 ## 4. Closeout
 
 - [ ] 4.1 **Comment hygiene.** `make check-comment-hygiene`.
-- [ ] 4.2 **Import placement.** No Python changed; record that disposition.
+- [ ] 4.2 **Import placement.** Substantial production Python changed after this
+      plan was written -- see the proposal's `Scope as implemented`. Check each
+      import this change actually added or touched, not the tree.
 - [ ] 4.3 **Documentation compliance.** Confirm the no-permanent-change
       disposition still holds once the stack result is known.
 - [ ] 4.4 **Narrative compression.** Reduce these notes to final state.
@@ -2520,6 +2596,17 @@ failures.
 | *(none expected — configuration only; the conventions relied on are already demonstrated elsewhere in the repository)* | — |
 
 ## Deferred, carried out of this change
+
+- **A storefront may publish a settlement option its mechanism cannot
+  honour.** `listing_service` computes mechanism readiness and refuses to
+  publish only when a listing carries no escrows and no settlement options at
+  all. A listing supplying its own -- which the credits seed listing does --
+  publishes while the mechanism reports blockers, so the failure surfaces at
+  settle rather than at startup. Both configuration gaps in 3ax.12 were
+  invisible for exactly this reason. Gating publication on the readiness of
+  the mechanisms a listing actually names would have caught them at startup,
+  and is a behavioural change to publication rather than a fix to either gap.
+
 
 - [ ] 5.1 Converge compose configuration onto a single source shared with the
       tests, and reconcile it with the Helm charts, which express the same

@@ -34,6 +34,7 @@ from market_identity import (
     EMPTY_BODY,
     Ed25519Signer,
     Identity,
+    TrustedIdentitySet,
     RequestEnvelope,
     canonical_body_hash,
     sign_request,
@@ -382,3 +383,181 @@ def test_a_deployment_without_an_identity_keeps_the_shared_secret_gate(
     finally:
         for name in _MODULES:
             sys.modules.pop(name, None)
+
+
+# ---------------------------------------------------------------------------
+# The canonical clients against this service
+#
+# The tests above sign by hand, which is right for exercising the middleware's
+# own branches -- a hand-built envelope can express inputs no client will
+# construct. It is also why a client/authority disagreement is invisible to
+# them: both sides of the assertion are this suite's view of the envelope.
+#
+# These drive the real `CreditsServiceClient` (seller) and real `TokensClient`
+# (service role) over `ASGITransport` against `signed_app` -- the real
+# composition, the real route tables, a real database. Nothing about the
+# envelope, the canonical body, or the response verification is reconstructed
+# locally, so a client that signs what this service does not verify fails
+# here rather than in a deployed stack.
+# ---------------------------------------------------------------------------
+
+
+def _seller_client(signed_app):
+    from domains.apicredits.settlement import CreditsServiceClient
+
+    return CreditsServiceClient(
+        "http://credits-service",
+        transport=httpx.ASGITransport(app=signed_app),
+        signer=STOREFRONT_SIGNER,
+        expected_authorities=TrustedIdentitySet(
+            identities=(Ed25519Signer(AUTHORITY_SEED).identity,),
+        ),
+    )
+
+
+def _gated_client(signed_app):
+    # `arkhai-apicredits-middleware[signed]` is a declared dev dependency of
+    # this service precisely so its boundary can be tested against the real
+    # client rather than a hand-built envelope.
+    from apicredits_middleware.client import TokensClient
+    from apicredits_middleware.signing import (
+        AuthoritySigning,
+        build_trusted_authorities,
+    )
+
+    return TokensClient(
+        service_url="http://credits-service",
+        http=httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=signed_app),
+            base_url="http://credits-service",
+        ),
+        signing=AuthoritySigning(
+            signer=GATED_SIGNER,
+            expected_authorities=build_trusted_authorities(
+                [
+                    {
+                        "scheme": Ed25519Signer(AUTHORITY_SEED).identity.scheme.value,
+                        "identifier": Ed25519Signer(AUTHORITY_SEED).identity.identifier,
+                    }
+                ]
+            ),
+        ),
+    )
+
+
+async def _seed_quota(signed_app, resource_id: str = "weather-quota", units: int = 100):
+    """Register the quota an issuance draws on, through the capacity client.
+
+    Issuance refuses when no quota resource can cover the request, which is
+    the service behaving correctly -- credits are backed by declared capacity
+    rather than minted on demand. The seller declares that capacity through
+    `SiteCapacityClient`, so seeding it here brings the third canonical client
+    onto the same real application and makes the flow the deployed one.
+    """
+    from market_site_client import SiteCapacityAdminClient
+
+    client = SiteCapacityAdminClient(
+        "http://credits-service",
+        signer=STOREFRONT_SIGNER,
+        expected_authorities=TrustedIdentitySet(
+            identities=(Ed25519Signer(AUTHORITY_SEED).identity,),
+        ),
+        transport=httpx.ASGITransport(app=signed_app),
+    )
+    return await client.register_resource(
+        resource_id,
+        total_units=units,
+        resource_type="api.credits",
+        attributes={"service": "weather-api"},
+    )
+
+
+def _issuance_request(obligation_ref: str, quantity: int = 5):
+    """One issuance request, with its grant key derived rather than invented.
+
+    `fulfillment_id` is a digest of the obligation reference, and the contract
+    refuses a pair that does not agree -- which is what makes an issuance
+    idempotent per obligation rather than per caller-chosen string.
+    """
+    from domains.apicredits.settlement.credits_client import (
+        CreditIssuanceRequest,
+        CreditKeyTarget,
+        credit_issuance_request_digest,
+        derive_credit_fulfillment_id,
+    )
+
+    fields: dict[str, Any] = {
+        "fulfillment_id": derive_credit_fulfillment_id(obligation_ref),
+        "obligation_ref": obligation_ref,
+        "mechanism": "alkahest.v1",
+        "owner": STOREFRONT_SIGNER.identity,
+        "service": "weather-api",
+        "resource_id": "weather-quota",
+        "quantity": quantity,
+        "key": CreditKeyTarget(mode="new"),
+    }
+    # The digest binds every field above, so it is computed rather than
+    # supplied: a literal would be a second source of truth for what the
+    # request says, and the contract refuses the two disagreeing.
+    return CreditIssuanceRequest(
+        **fields, request_digest=credit_issuance_request_digest(**fields)
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_canonical_clients_transact_against_this_service(signed_app):
+    """Seller issues, gated app verifies and spends. Both canonical clients.
+
+    The one shape the review found missing: real client, real transport, real
+    application, real database. It is deliberately one flow rather than a
+    matrix -- issuance is the only way a key exists, so a gated client cannot
+    be exercised against this service without the seller client first, and
+    running them together is what proves the two roles' envelopes are both
+    accepted by the same composed authority.
+    """
+    await _seed_quota(signed_app)
+    seller = _seller_client(signed_app)
+    issued = await seller.submit_credit_issuance(_issuance_request("obl-1"))
+
+    assert issued.quantity == 5
+    assert issued.balance == 5
+
+    # Spend, not verify: `CreditIssuanceResult` deliberately excludes the
+    # bearer secret from serialization, and `verify` needs it. `consume` is
+    # keyed by the grant alone, so it exercises the gated app's signed
+    # envelope against this authority without the test holding material the
+    # contract declines to hand back.
+    gated = _gated_client(signed_app)
+    spent = await gated.consume(
+        key_id=issued.key_id, amount=2, idempotency_key="i-1"
+    )
+    assert spent.ok is True, spent
+    assert spent.balance == 3
+
+    # The same signed request again resolves to the recorded consumption
+    # rather than spending twice -- the handler-side half of the exact-retry
+    # contract, which is why `credits_key_consume` stays replay-safe.
+    again = await gated.consume(
+        key_id=issued.key_id, amount=2, idempotency_key="i-1"
+    )
+    assert again.balance == 3, again
+
+
+@pytest.mark.asyncio
+async def test_the_seller_client_reads_back_what_it_issued(signed_app):
+    """`get_key` and `get_credit_issuance` over the same signed boundary."""
+    await _seed_quota(signed_app)
+    seller = _seller_client(signed_app)
+    issued = await seller.submit_credit_issuance(_issuance_request("obl-2", 7))
+
+    key = await seller.get_key(issued.key_id)
+    assert key["balance"] == 7
+
+    from domains.apicredits.settlement.credits_client import (
+        derive_credit_fulfillment_id,
+    )
+
+    grant = await seller.get_credit_issuance(
+        derive_credit_fulfillment_id("obl-2")
+    )
+    assert grant is not None

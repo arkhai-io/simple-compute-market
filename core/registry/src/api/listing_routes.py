@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from src.api.api_key_auth import require_read_access, require_write_access
 from src.api.filter_eval import FilterParamError, build_criteria, evaluate_all
 from src.api.filter_spec import compute_etag, get_loaded_spec
+from src.api.validate_routes import reject_retired_listing_shape
 from src.api.publisher_auth import (
     authenticate_publisher_request,
     cached_response,
@@ -54,6 +55,7 @@ async def publish_listing(
         body=body,
     )
     require_write_access(request, db)
+    reject_retired_listing_shape(body)
     signer = registry_authority_signer(request)
     replay = cached_response(authenticated, signer=signer)
     if replay is not None:

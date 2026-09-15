@@ -60,6 +60,29 @@ current path and does not for the mounted one.
 Both wallet credentials derive to the `Wallet.address` their storefront already
 declares, which is the check that would have caught a swapped pair.
 
+## What this design does not cover
+
+The sections above design the three configuration gaps. The change as
+implemented is much larger -- signed authority boundaries, uint256-safe wire
+values, lifecycle control seams, and a long sequence of negotiation and
+settlement fixes -- because settling the stack let the e2e suite reach stages
+that had never run, and each one surfaced latent production defects.
+
+That work is designed in place, in the task file's sequential record
+(`3b` through `3ax`): each section states the fault, the evidence, the
+decision taken and why, in the order the campaign encountered them. It is not
+restated here. A reader wanting the rationale for a particular production
+change should read that section rather than expect this document to
+anticipate it, and the proposal's `Scope as implemented` is the index.
+
+This is a deliberate accommodation, not the shape to imitate. A campaign that
+discovers production work should normally open a narrow change per cluster
+before implementing it, so each behavior gets its own acceptance boundary and
+permanent-spec impact. That was not done here; the growth was accepted in
+flight to keep a settling stack in view, and the cost is that the design
+rationale lives in a 2,500-line chronology rather than in per-change
+documents.
+
 ## Deferred
 
 Compose configuration is assembled by hand across a root file, domain compose

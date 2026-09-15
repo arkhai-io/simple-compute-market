@@ -12,7 +12,7 @@
 # registries whose declared id matches; registries without the header match
 # any domain for compatibility with pre-identity deployments.
 
-version: 5
+version: 6
 
 schema:
   id: compute.market
@@ -26,7 +26,24 @@ listing_shape:
   # matching the GET /publishers entity. gpu_model is gated to a vetted
   # NVIDIA vocabulary; region stays open because city/datacenter naming
   # has no canonical list.
+  #
+  # v6: the retired spellings of the published shape are refused outright.
+  # `additionalProperties` stays true, so a seller may carry any attribute
+  # this schema does not name -- the prohibition is exactly the two retired
+  # names, not a closed shape.
+  #
+  # Refused rather than ignored because this is the boundary whose skew is
+  # invisible: the offering-mode field is optional, so a listing carrying the
+  # retired spelling publishes successfully, stores, and then matches nothing
+  # a buyer filters on. The seller gets no signal. The sibling boundary
+  # (seller tooling to storefront) already rejects the retired key, and a
+  # registry that quietly accepts what the storefront refuses is the
+  # inconsistency, not the strictness.
   required: [listing_id, listing_resource, storefront_url]
+  not:
+    anyOf:
+      - required: [offer_resource]
+      - required: [offer]
   anyOf:
     - properties:
         accepted_escrows: {type: array, minItems: 1}
@@ -41,6 +58,9 @@ listing_shape:
       type: object
       required: [gpu_model, region]
       additionalProperties: true
+      # v6: `virtualization_type` is the retired spelling of `offering_mode`.
+      not:
+        required: [virtualization_type]
       properties:
         gpu_model:
           type: string

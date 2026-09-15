@@ -1012,7 +1012,7 @@ why they are recorded as their own tasks rather than folded into 11.4 or 11.12.
 
 - [x] 11.12 **Comment hygiene, import placement, documentation compliance,
       narrative compression, roadmap currency, campaign index currency, and
-      promotion** — the full seven-part closeout from
+      promotion** — the closeout parts defined at the time from
       `openspec/README.md#plan-closeout-requirements`, re-run after this
       section rather than inherited from section 10. Section 10's pass is what
       let 8.9, 9.16, 10.5, and 10.6 be marked complete while false, so its
@@ -1036,9 +1036,12 @@ why they are recorded as their own tasks rather than folded into 11.4 or 11.12.
         settled and left open.
 ## Implementation status
 
-84 of 105 tasks complete. `make test` is green on every suite this change
-touches, and the validation baseline has been rebuilt in an isolated
-environment, so the numbers below are measurable rather than asserted.
+All tasks complete except the two closeout parts added to this plan after it
+was written (documentation citations and end-to-end pipeline evidence).
+`make test` is green on every suite this change touches, the validation
+baseline was rebuilt in an isolated environment, and the end-to-end pipeline
+now reaches its test phase and reports a full green run -- which is what
+closed the blocker recorded under 11.13 and unblocked 9.12 and 9.13.
 
 **Remaining:** 11.7b-d (one typed-client-over-ASGI integration test per changed
 boundary, closing 9.4-9.7, 9.14, 9.17; reclassify the client-contract test;
@@ -1102,13 +1105,16 @@ payloads, and the cutover gates.
 
 ### Unrun checks
 
-- **`make -C e2e-tests test-e2e` cannot reach its test phase in CI**, for a
-  reason unrelated to this change: the root `docker-compose.yml` requires
-  `APICREDITS_REGISTRY_IDENTITY_CREDENTIAL_FILE` and nothing sets it. See 11.13.
-  9.12 and 9.13 are blocked behind it.
-- **Live-service integration (5.5, 9.4, 9.5, 9.6, 9.7, 9.13, 9.14, 9.17).** Per
-  `TESTING.md` most of these are in-process and do not need the e2e stack; 11.7b
-  plans them.
+- **Resolved: the end-to-end pipeline now runs.** The
+  `APICREDITS_REGISTRY_IDENTITY_CREDENTIAL_FILE` gap recorded under 11.13 was
+  closed by `provide-e2e-development-identities`, and the suite reports a full
+  green run. 9.12 and 9.13 are no longer blocked and are complete: 9.12 asserts
+  the deprecated cardinality ingestion alias across deployed services, and 9.13
+  asserts both ends of the provisioning wire report an agreeing contract pin
+  before any mutating stage.
+- **Resolved: live-service integration (5.5, 9.4, 9.5, 9.6, 9.7, 9.14, 9.17)**
+  was delivered by 11.7b as in-process typed-client suites, which is the level
+  `TESTING.md` assigns them.
 - **Migration-plus-integration (9.9, 9.10, 9.11)** are covered against real
   databases but not end to end through a running service.
 - **A clean-baseline suite comparison (11.6).** The packaging half is discharged

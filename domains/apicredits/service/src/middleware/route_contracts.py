@@ -108,6 +108,14 @@ CREDITS_ROUTE_CONTRACTS: tuple[SiteRouteContract, ...] = (
         "credits_key_adjust",
         _SELLER,
         path_resource="key_id",
+        # The one credit mutation an exact retry cannot be allowed through to.
+        # It applies a *relative* delta and records no idempotency key, so
+        # re-executing the same signed request applies the adjustment twice.
+        # Consume deduplicates on a key inside its signed body, revoke is
+        # idempotent, and an issuance is unique per fulfillment id -- each of
+        # those resolves an exact retry to the recorded outcome in the handler,
+        # which is why they stay safe.
+        exact_retry_safe=False,
     ),
     _contract(
         "GET",
