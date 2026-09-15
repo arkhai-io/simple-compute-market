@@ -52,6 +52,7 @@
       "items": {"$ref": "#/definitions/publicIdentity"}
     },
     "siteBindingsSecret": {"$ref": "#/definitions/secretReference"},
+    "registryApiKeySecret": {"$ref": "#/definitions/optionalSecretReference"},
     "sitePlacement": {"enum": ["fill_first", "round_robin"]},
     "publicUrl": {"type": "string", "format": "uri", "pattern": "^https?://"},
     "sellerEvmAddress": {
@@ -103,6 +104,15 @@
       "required": ["name", "key"],
       "properties": {
         "name": {"type": "string", "minLength": 1},
+        "key": {"type": "string", "minLength": 1}
+      }
+    },
+    "optionalSecretReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "key"],
+      "properties": {
+        "name": {"type": "string"},
         "key": {"type": "string", "minLength": 1}
       }
     },

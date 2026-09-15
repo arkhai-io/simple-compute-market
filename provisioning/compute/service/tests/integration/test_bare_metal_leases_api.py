@@ -14,7 +14,11 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
-from arkhai_bare_metal import NODE_GRANT_ACCESS_ACTION, NODE_RECLAIM_ACCESS_ACTION
+from arkhai_bare_metal import (
+    NODE_GRANT_ACCESS_ACTION,
+    NODE_RECLAIM_ACCESS_ACTION,
+    canonical_lease_account,
+)
 from market_site.ledger import ALLOCATION_MODE_EXCLUSIVE
 from compute_provisioning_service.db.models import AnsibleJob
 from vm_provisioning_adapter.services.ansible_service import AnsibleResult
@@ -80,7 +84,7 @@ def _ensure_bare_metal_host(name: str = "bm-node-1", *, enabled: bool = True) ->
         host_service.disable_host(name)
 
 
-def _reserve_bare_metal(escrow_uid: str) -> dict:
+def _reserve_bare_metal(escrow_uid: str, *, deal_ref: dict | None = None) -> dict:
     ledger = _container_module.resolved_capacity_ledger_service
     if "bare-metal-node-1" not in {
         r["resource_id"] for r in ledger.list_resources()
@@ -100,7 +104,7 @@ def _reserve_bare_metal(escrow_uid: str) -> dict:
             "physical_host_id": "host-physical-1",
             "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
         },
-        deal_ref={"escrow_uid": escrow_uid},
+        deal_ref=deal_ref if deal_ref is not None else {"escrow_uid": escrow_uid},
     )
     assert reserved is not None
     return reserved
@@ -178,13 +182,14 @@ async def test_register_bare_metal_lease_uses_bare_metal_endpoint_and_view(
 ):
     _ensure_bare_metal_host()
     reserved = _reserve_bare_metal("escrow-bm-api-1")
+    account = canonical_lease_account("escrow-bm-api-1")
 
     lease = await bare_metal_client.register_lease(
         capacity_reservation_id=reserved["capacity_reservation_id"],
         escrow_uid="escrow-bm-api-1",
         machine_id="bm-node-1",
         physical_host_id="host-physical-1",
-        access_ref={"ssh_user": "tenant-a"},
+        access_ref={"ssh_user": account},
         lease_end_utc=_future_dt(),
     )
 
@@ -193,7 +198,7 @@ async def test_register_bare_metal_lease_uses_bare_metal_endpoint_and_view(
     assert lease["machine_id"] == "bm-node-1"
     assert lease["physical_host_id"] == "host-physical-1"
     assert lease["state"] == "leased"
-    assert lease["access_ref"] == {"ssh_user": "tenant-a"}
+    assert lease["access_ref"] == {"ssh_user": account}
 
     ledger = _container_module.resolved_capacity_ledger_service
     reservation = ledger.get_reservation(lease["capacity_reservation_id"])
@@ -201,7 +206,7 @@ async def test_register_bare_metal_lease_uses_bare_metal_endpoint_and_view(
     assert reservation["executor_target"] == "bm-node-1"
     assert reservation["executor_ref"] == {
         "physical_host_id": "host-physical-1",
-        "ssh_user": "tenant-a",
+        "ssh_user": account,
     }
     assert reservation["create_job_id"]
     assert reservation["vm_target"] is None
@@ -228,6 +233,7 @@ async def test_list_and_get_bare_metal_leases_exclude_vm_leases(
         escrow_uid="escrow-bm-api-2",
         machine_id="bm-node-1",
         physical_host_id="host-physical-1",
+        access_ref={"ssh_user": canonical_lease_account("escrow-bm-api-2")},
         lease_end_utc=_future_dt(),
     )
 
@@ -256,7 +262,7 @@ async def test_generic_market_lease_terminate_dispatches_bare_metal_reclaim(
         escrow_uid="escrow-bm-api-reclaim",
         machine_id="bm-node-1",
         physical_host_id="host-physical-1",
-        access_ref={"ssh_user": "tenant-a"},
+        access_ref={"ssh_user": canonical_lease_account("escrow-bm-api-reclaim")},
         lease_end_utc=_future_dt(),
     )
 
@@ -286,6 +292,44 @@ async def test_generic_market_lease_terminate_dispatches_bare_metal_reclaim(
         assert job.params["bare_metal_reclaim_policy"] == "remove_lease_key"
 
 
+async def test_obligation_backed_terminate_reclaims_the_leases_own_account(
+    bare_metal_client: BareMetalLeaseTestClient,
+):
+    """A hosted reservation carries its obligation in the site deal reference."""
+    _ensure_bare_metal_host()
+    reserved = _reserve_bare_metal(
+        "unused",
+        deal_ref={
+            "negotiation_id": "negotiation-bm-api-hosted",
+            "hosted_obligation_ref": "obligation-bm-api-hosted",
+        },
+    )
+    account = canonical_lease_account("obligation-bm-api-hosted")
+    lease = await bare_metal_client.register_lease(
+        capacity_reservation_id=reserved["capacity_reservation_id"],
+        settlement_obligation_ref="obligation-bm-api-hosted",
+        machine_id="bm-node-1",
+        physical_host_id="host-physical-1",
+        access_ref={"ssh_user": account},
+        lease_end_utc=_future_dt(),
+    )
+
+    terminated = await bare_metal_client.terminate_market_lease(
+        lease["capacity_reservation_id"],
+    )
+
+    assert terminated["status"] == "releasing"
+    reservation = _container_module.resolved_capacity_ledger_service.get_reservation(
+        lease["capacity_reservation_id"]
+    )
+    session_factory = _container_module.resolved_session_factory
+    with session_factory() as db:
+        job = db.get(AnsibleJob, reservation["release_job_id"])
+        assert job is not None
+        assert job.params["vm_action"] == NODE_RECLAIM_ACCESS_ACTION
+        assert job.params["ssh_user"] == account
+
+
 async def test_bare_metal_grant_and_reclaim_jobs_succeed_with_executor_playbook(
     client_and_queue,
     fake_ansible,
@@ -306,7 +350,7 @@ async def test_bare_metal_grant_and_reclaim_jobs_succeed_with_executor_playbook(
             machine_id="bm-node-1",
             physical_host_id="host-physical-1",
             access_ref={
-                "ssh_user": "tenant-a",
+                "ssh_user": canonical_lease_account("escrow-bm-api-smoke"),
                 "ssh_public_key": "ssh-ed25519 AAAA tenant-a",
             },
             lease_end_utc=_future_dt(),
@@ -376,3 +420,37 @@ async def test_register_bare_metal_lease_for_unknown_machine_does_not_queue_job(
     assert exc_info.value.status_code == 404
     with session_factory() as db:
         assert db.query(AnsibleJob).count() == job_count_before
+
+
+@pytest.mark.parametrize(
+    "ssh_user",
+    ["root", canonical_lease_account("escrow-bm-api-other-settlement")],
+)
+async def test_register_bare_metal_lease_refuses_an_unadmitted_account(
+    bare_metal_client: BareMetalLeaseTestClient,
+    ssh_user: str,
+):
+    """A client error, raised before any privileged job is queued."""
+    _ensure_bare_metal_host()
+    reserved = _reserve_bare_metal("escrow-bm-api-refused")
+    session_factory = _container_module.resolved_session_factory
+    with session_factory() as db:
+        job_count_before = db.query(AnsibleJob).count()
+
+    with pytest.raises(BareMetalApiError) as exc_info:
+        await bare_metal_client.register_lease(
+            capacity_reservation_id=reserved["capacity_reservation_id"],
+            escrow_uid="escrow-bm-api-refused",
+            machine_id="bm-node-1",
+            physical_host_id="host-physical-1",
+            access_ref={"ssh_user": ssh_user},
+            lease_end_utc=_future_dt(),
+        )
+
+    assert exc_info.value.status_code == 422
+    with session_factory() as db:
+        assert db.query(AnsibleJob).count() == job_count_before
+    reservation = _container_module.resolved_capacity_ledger_service.get_reservation(
+        reserved["capacity_reservation_id"]
+    )
+    assert reservation.get("create_job_id") is None

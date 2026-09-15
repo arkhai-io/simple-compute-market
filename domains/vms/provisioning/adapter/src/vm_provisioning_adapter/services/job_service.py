@@ -50,6 +50,8 @@ from vm_provisioning_operator.models import (
 from vm_provisioning_adapter.services.ansible_service import (
     AnsibleError,
     AnsibleService,
+    HostTrustError,
+    SshHostTrust,
     redact_ansible_output,
 )
 
@@ -488,6 +490,7 @@ class AnsibleJobService:
             # initialised before the try block so the outer finally block can
             # always clean it up, including early returns.
             host_public_host = None
+            host = None
             if self._host_service is not None:
                 host = self._host_service.get_host(params.vm_host)
                 if host is not None:
@@ -505,12 +508,26 @@ class AnsibleJobService:
                 else self._settings.resolved_inventory_path
             )
 
-            run = self._ansible.start_playbook(
-                playbook_path=self._playbook_path_for_params(params),
-                inventory_path=inventory_path,
-                extra_vars_path=vars_path,
-                limit=params.vm_host,
-            )
+            try:
+                run = self._ansible.start_playbook(
+                    playbook_path=self._playbook_path_for_params(params),
+                    inventory_path=inventory_path,
+                    extra_vars_path=vars_path,
+                    limit=params.vm_host,
+                    host_trust=self._ssh_host_trust(params, host),
+                )
+            except HostTrustError as exc:
+                # No playbook started, so nothing else will remove the vars
+                # file, which can carry credentials resolved above.
+                vars_path.unlink(missing_ok=True)
+                self._update_job(
+                    db,
+                    job,
+                    status=JobStatus.failed.value,
+                    error=f"Job failed (host trust): {exc}",
+                )
+                logger.error("Job %s refused before start: %s", job_id, exc)
+                return
             # Inject params onto the run handle so ProgrammableMockAnsibleService
             # can match rules in wait_for_playbook. Real AnsibleRun ignores it.
             run._params = params  # type: ignore[attr-defined]
@@ -748,6 +765,26 @@ class AnsibleJobService:
             max_retries=params.get("max_retries"),
             playbook_path=params.get("playbook_path"),
             provider_extra_vars=params.get("provider_extra_vars") or {},
+        )
+
+    def _ssh_host_trust(self, params: AnsibleJobParams, host) -> SshHostTrust | None:
+        """The pinned SSH trust a bare-metal access playbook must verify, or None.
+
+        Bare-metal access is the managed profile: its playbook always runs with
+        strict checking against the configured pins, for the management
+        endpoint the inventory connects to. An unregistered host yields no
+        endpoint, which the spawner refuses. VM playbooks keep their existing
+        behaviour.
+        """
+        if not (
+            params.offering_mode == "bare_metal"
+            or params.executor_action in _BARE_METAL_ACTIONS
+        ):
+            return None
+        return SshHostTrust(
+            known_hosts_path=self._settings.bare_metal_ssh_known_hosts_path,
+            host=getattr(host, "kvm_host", None),
+            port=getattr(host, "ssh_port", None),
         )
 
     def _playbook_path_for_params(self, params: AnsibleJobParams):

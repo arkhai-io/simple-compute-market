@@ -179,6 +179,40 @@ one. A malformed port fails its entry rather than degrading to a default: an
 unreachable host is not a degraded host, and a substituted value turns an
 operator's typo into a failure that resembles a network fault.
 
+A bare-metal host's tenant-facing endpoint is recorded separately from the
+management endpoint because the two answer different questions: the management
+endpoint is how the provisioner reaches the host, and the tenant endpoint is what
+a buyer is told. A host serving both from one endpoint falls back to the
+management values rather than publishing a second, invented endpoint.
+
+## Pinned access to the selected host
+
+A bare-metal access action is privileged execution on a machine the provider does
+not otherwise touch, so it is pinned twice: the host key must match the
+operator-supplied pin file for the selected management endpoint, and the
+connection must reach that endpoint rather than another host the same file
+happens to pin. Reaching *a* pinned host is not the same as reaching *the*
+selected one, and only the second makes the action safe to perform.
+
+Expressing this as a preference would not hold. The automation layer resolves
+connection settings from several sources of differing precedence, and OpenSSH
+honours the first value given for an option, so the enforced settings are
+supplied from the highest-precedence source and placed ahead of anything an
+inventory or an inherited environment can add. The connection plugin, its
+client executables and the destination are fixed for the same reason: trust
+expressed as OpenSSH options constrains nothing if another transport is chosen,
+a different binary is executed, or the connection is aimed elsewhere. A
+legitimate operator proxy route to the selected endpoint still applies, because
+it describes how that endpoint is reached rather than which endpoint it is.
+
+Deletion of a lease account is confirmed by reading the host's own account
+database rather than by a name-service lookup, whose unsuccessful result cannot
+distinguish an absent account from an unavailable backend. That read certifies
+the current database only. A snapshot ending after a complete record is
+indistinguishable from one that legitimately ends there, so it establishes that
+the account is absent now, not that the host's other accounts were preserved;
+preservation rests on the action mutating only the named account.
+
 ## Related contracts
 
 - [Fulfillment](../fulfillment/spec.md)

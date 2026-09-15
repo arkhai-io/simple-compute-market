@@ -44,6 +44,22 @@ class HostNotFoundError(Exception):
     """Raised when a requested host name does not exist in the DB."""
 
 
+def tenant_endpoint_segments(host) -> str:
+    """Inventory segments for a host's tenant-facing address and port.
+
+    Both renderings of a host row emit these, so they cannot disagree about the
+    endpoint a buyer is handed. Each is omitted when unset, so a host whose
+    tenants and provisioner share one endpoint renders without them and the
+    playbook falls back to the provisioner's values.
+    """
+    segments = ""
+    if getattr(host, "public_host", None):
+        segments += f"  public_host={host.public_host}"
+    if getattr(host, "public_port", None):
+        segments += f"  public_port={host.public_port}"
+    return segments
+
+
 class HostService:
     """CRUD operations and inventory helpers for the ``hosts`` table."""
 
@@ -123,6 +139,7 @@ class HostService:
             name=data.name,
             kvm_host=data.kvm_host,
             public_host=data.public_host,
+            public_port=data.public_port,
             ssh_user=data.ssh_user,
             ssh_port=data.ssh_port,
             ssh_key_type=data.ssh_key_type,
@@ -153,8 +170,13 @@ class HostService:
 
             if data.kvm_host is not None:
                 host.kvm_host = data.kvm_host
-            if data.public_host is not None:
+            # The tenant endpoint falls back to the management endpoint when
+            # unset, so an explicit null clears it; an omitted field leaves it
+            # unchanged.
+            if "public_host" in data.model_fields_set:
                 host.public_host = data.public_host
+            if "public_port" in data.model_fields_set:
+                host.public_port = data.public_port
             if data.ssh_user is not None:
                 host.ssh_user = data.ssh_user
             if data.ssh_port is not None:
@@ -262,6 +284,7 @@ class HostService:
                     self._require_pool_exists(db, entry["pool_id"])
                     existing.kvm_host = entry["kvm_host"]
                     existing.public_host = entry["public_host"]
+                    existing.public_port = entry["public_port"]
                     existing.ssh_user = entry["ssh_user"]
                     existing.ssh_port = entry["ssh_port"]
                     existing.ssh_key_type = ssh_key_type
@@ -275,6 +298,7 @@ class HostService:
                         name=entry["name"],
                         kvm_host=entry["kvm_host"],
                         public_host=entry["public_host"],
+                        public_port=entry["public_port"],
                         ssh_user=entry["ssh_user"],
                         ssh_port=entry["ssh_port"],
                         ssh_key_type=ssh_key_type,
@@ -340,6 +364,7 @@ class HostService:
             lines.append(
                 f"{host.name}"
                 f"  ansible_host={host.kvm_host}"
+                f"{tenant_endpoint_segments(host)}"
                 f"  ansible_port={host.ssh_port}"
                 f"  ansible_user={host.ssh_user}"
                 f"  ansible_ssh_private_key_file={key_ref}"
@@ -369,16 +394,19 @@ def _parse_ini(ini_text: str) -> list[dict]:
     skipped — they describe infrastructure that manages the provisioning
     service itself, not machines the provisioning service sells.
 
-    Returns a list of ``{"name", "kvm_host", "ssh_user", "ssh_port",
-    "gpu_count", "gpu_model", "pool_id", "ansible_ssh_private_key_file"}``
-    dicts. Entries missing ``ansible_host`` or ``ansible_user`` are skipped
-    with a warning.
+    Returns a list of ``{"name", "kvm_host", "public_host", "public_port",
+    "ssh_user", "ssh_port", "gpu_count", "gpu_model", "pool_id",
+    "ansible_ssh_private_key_file"}`` dicts. Entries missing ``ansible_host``
+    or ``ansible_user``, or carrying a malformed port, are skipped with a
+    warning.
 
     Variable mapping:
         ``ansible_port=``                 → ``ssh_port`` (int, default 22)
         ``gpus=``                         → ``gpu_count`` (int, default 0)
         ``gpu_model=``                    → ``gpu_model`` (str, default None)
         ``public_host=``                  → ``public_host`` (tenant-facing addr)
+        ``public_port=``                  → ``public_port`` (tenant-facing port,
+                                             default None)
         ``ansible_ssh_private_key_file=`` → preserved verbatim
         ``pool_id=``                      → Resource Pool id (default "default")
         All other variables              → ignored
@@ -445,10 +473,29 @@ def _parse_ini(ini_text: str) -> list[dict]:
                 )
                 continue
 
+        # A malformed public_port= skips the entry for the same reason as
+        # ansible_port=, and additionally because substituting a default would
+        # hand a buyer an endpoint nobody configured.
+        public_port = None
+        if "public_port" in host_vars:
+            try:
+                public_port = int(host_vars["public_port"])
+            except ValueError:
+                public_port = -1
+            if not 1 <= public_port <= 65535:
+                logger.warning(
+                    "seed_from_ini: skipping '%s' — public_port '%s' is not a "
+                    "port number between 1 and 65535",
+                    name,
+                    host_vars["public_port"],
+                )
+                continue
+
         results.append({
             "name": name,
             "kvm_host": kvm_host,
             "public_host": host_vars.get("public_host"),
+            "public_port": public_port,
             "ssh_user": ssh_user,
             "ssh_port": ssh_port,
             "gpu_count": gpu_count,

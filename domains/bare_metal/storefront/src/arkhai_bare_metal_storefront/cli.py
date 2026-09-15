@@ -54,7 +54,14 @@ def publish_cmd() -> None:
 
     from .publication_cli import run_publication_once
 
-    typer.echo(json.dumps(run_publication_once(), sort_keys=True))
+    result = run_publication_once()
+    typer.echo(json.dumps(result, sort_keys=True))
+    # The round is printed before the exit status so a caller keeps the
+    # per-candidate evidence, but any failed candidate leaves a nonzero
+    # status: a caller checking only the exit code must not read a round that
+    # published nothing as a success.
+    if result.get("failed"):
+        raise typer.Exit(code=1)
 
 
 @app.command("redeliver-introduction")

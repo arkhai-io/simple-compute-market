@@ -16,11 +16,11 @@ dependencies = []
 package = false
 
 [dependency-groups]
-# pyyaml: the task-file structure tests parse the role's YAML directly. Ansible
-# is not a dependency of this project's tests -- they deliberately validate
-# structure without it, so that coverage does not depend on Ansible being
-# installed -- which means the YAML parser has to be declared here.
-dev = ["pytest>=8.0", "pyyaml>=6.0"]
+# pyyaml: the task-file structure tests parse the role's YAML directly and do
+# not import Ansible. ansible-core: the rendering tests evaluate role
+# expressions with Ansible's own inventory and templating, so they need the
+# range the provisioning image installs. Test-only; this project ships nothing.
+dev = ["pytest>=8.0", "pyyaml>=6.0", "ansible-core>=2.17,<2.20"]
 
 [tool.pytest.ini_options]
 pythonpath = ["tests"]

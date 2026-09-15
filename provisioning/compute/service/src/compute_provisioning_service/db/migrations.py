@@ -352,6 +352,10 @@ def _migrate_hosts_public_host(engine: Engine) -> None:
     _add_column_if_missing(engine, "hosts", "public_host", "VARCHAR")
 
 
+def _migrate_hosts_public_port(engine: Engine) -> None:
+    _add_column_if_missing(engine, "hosts", "public_port", "INTEGER")
+
+
 def _migrate_relay_reachable_hosts(engine: Engine) -> None:
     """Everything needed to reach a host, and a VM on it, without an inbound route.
 
@@ -1893,5 +1897,9 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260911_001_reservation_offering_mode_name",
         _migrate_reservation_offering_mode_name,
+    ),
+    Migration(
+        "20260914_001_hosts_public_port",
+        _migrate_hosts_public_port,
     ),
 )

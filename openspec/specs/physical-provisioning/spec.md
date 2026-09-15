@@ -540,6 +540,91 @@ An `ansible_port` supplied through the INI input format MUST be preserved rather
 - **WHEN** an INI inventory entry carries an `ansible_port` that is not a port number between 1 and 65535
 - **THEN** that entry is rejected with a warning naming the host, other entries in the same file are still imported, and no host is registered with a substituted port
 
+### Requirement: A bare-metal host's tenant endpoint is distinct from its management endpoint
+
+The host registry MUST record a bare-metal host's tenant-facing SSH port separately from the management port the provisioner connects to, and MUST carry it through inventory ingestion, the typed host API and every rendered inventory. A host update that omits the tenant port MUST leave the recorded value unchanged; one that sets it explicitly to null MUST clear it. An access result MUST report the tenant endpoint when one is recorded, and MUST fall back to the management endpoint when none is, rather than reporting an endpoint the registry does not hold.
+
+#### Scenario: A host serves tenants on a separate port
+
+- **WHEN** a bare-metal host records a tenant port different from its management port
+- **THEN** the returned access credentials name the tenant endpoint, while the provisioner continues to connect on the management port
+
+#### Scenario: A host update omits the tenant port
+
+- **WHEN** a host update carries no tenant port field
+- **THEN** the recorded tenant port is unchanged, and an update that sets the field explicitly to null clears it
+
+#### Scenario: A host serves both from one endpoint
+
+- **WHEN** a bare-metal host records no tenant port
+- **THEN** the access result falls back to the host's management endpoint
+
+### Requirement: Bare-metal lease accounts are derived, not supplied
+
+A bare-metal lease's host account name MUST be derived by the provider from the lease's settlement identity. A caller-supplied or operator-supplied account name MUST NOT reach privileged host execution: a request whose account name is absent, malformed, or not the derivation for its settlement identity MUST be rejected at admission, before any host is contacted. The derived account MUST be the same value in the lease's durable record, the rendered inventory and the returned result, so a reclaim acts on the account its grant created.
+
+#### Scenario: A request supplies its own account name
+
+- **WHEN** a bare-metal access request carries an account name that is not the derivation for its settlement identity
+- **THEN** the request is rejected at admission and no privileged host execution begins
+
+#### Scenario: Reclaim acts on the granted account
+
+- **WHEN** a lease is reclaimed
+- **THEN** the account named in the reclaim and its result is the derived account recorded for that lease
+
+### Requirement: Managed bare-metal access reaches only the selected pinned endpoint
+
+Every privileged bare-metal access action MUST run over an SSH connection whose host key is verified against an operator-supplied pin file, and MUST reach the exact management endpoint that pin was verified for. Enforcement MUST apply at the effective connection boundary the automation uses, not only as a preference: the connection plugin, every alias of its host-key-checking option, its client executables, and the connection host and port MUST be fixed from the highest-precedence source, and the verification options MUST take effect ahead of any later-supplied option for the same setting. Consequently no inventory variable, inherited environment value or configuration file may select another transport, substitute a client binary, relax or disable verification, introduce an additional host-key source, reuse a shared connection opened without these options, or redirect the action to a different host that is merely pinned in the same file. An operator-supplied proxy route to the selected endpoint MUST continue to apply.
+
+#### Scenario: Inventory names another pinned host
+
+- **WHEN** the inventory for a pinned action supplies the address, port or host-key alias of a different host that is also pinned in the same file
+- **THEN** the action is carried out against the selected endpoint, or refused, and the other host is not contacted
+
+#### Scenario: Inventory selects another transport or client
+
+- **WHEN** the inventory or the inherited environment selects a different connection plugin, disables that plugin's host-key checking, or names a substitute ssh, scp or sftp executable
+- **THEN** the action still runs over the pinned OpenSSH connection with verification in force, and the substituted client is not executed
+
+#### Scenario: Inventory supplies its own host-key sources
+
+- **WHEN** the inventory supplies additional known-hosts files, a host-key command, or a pre-existing shared connection path
+- **THEN** the operator-supplied pin file remains the only source that can satisfy the connection
+
+### Requirement: Absent or changed bare-metal host trust refuses before contact
+
+A managed bare-metal access action MUST refuse before any connection is attempted when the pin file is unconfigured, missing, empty or unreadable, when the target host has no registered management endpoint, or when the file holds no pin for that endpoint. The job MUST fail without contacting the host. When the selected endpoint presents a host key other than the pinned one, the connection MUST be refused and the action MUST NOT run.
+
+#### Scenario: No pin for the selected endpoint
+
+- **WHEN** a bare-metal access action is requested and the pin file holds no entry for the selected management endpoint
+- **THEN** the job fails before the automation starts, and the host is not contacted
+
+#### Scenario: Host key changed at the selected endpoint
+
+- **WHEN** the selected endpoint presents a host key that differs from its pinned key
+- **THEN** the connection is refused and no access action is performed on that host
+
+### Requirement: Bare-metal account operations report only verified outcomes
+
+A bare-metal reclaim MUST NOT report an account operation as successful unless the operation itself succeeded and a read-back of the host's own account database confirms the intended state. A failed or unverifiable lock or delete MUST fail the action. Deletion MUST be confirmed by reading the local account database the account tooling writes, rather than by a name-service lookup whose unsuccessful result cannot distinguish an absent account from an unavailable backend. Absence MUST be certified only from a snapshot that parses as a valid, unambiguous current database; an unreadable, malformed, duplicated or otherwise ambiguous snapshot MUST fail the action instead of certifying absence. Reported per-step outcomes MUST be taken from the verified read-back rather than from a tool's change flag.
+
+#### Scenario: Lock reported changed but not verifiable
+
+- **WHEN** an account lock reports a change and the read-back shows a usable password or an interactive login shell
+- **THEN** the reclaim fails and reports no successful lock
+
+#### Scenario: Account database cannot be read or parsed after delete
+
+- **WHEN** the account database is unreadable after a delete, or its content does not parse as a valid unambiguous database
+- **THEN** the reclaim fails rather than certifying the account absent
+
+#### Scenario: Account still present after delete
+
+- **WHEN** the read-back shows the tenant account still present
+- **THEN** the reclaim fails and capacity is not reported reclaimed
+
 ### Requirement: Relays are administered resources
 
 A relay is a durable resource, not pool configuration. The provisioning service MUST record each relay's rendezvous address, rendezvous port, VM port allocation window, and admission token as one row, and resource pools MUST reference a relay rather than restating its address, window, or token.

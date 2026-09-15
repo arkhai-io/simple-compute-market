@@ -328,10 +328,14 @@ class BareMetalFulfillmentProvider(FulfillmentProvider):
                 idempotency_key=f"{operation.capacity_reservation_id}:reclaim-access",
                 parameters=lease.model_dump(mode="json", exclude_none=True),
             )
+            # The lease's identity fields are passed by name so admission binds
+            # the reclaimed account to this lease; the contract's deal_ref
+            # keeps its mechanism-keyed form.
             response = await self._operations.reclaim_access(
                 {
                     "capacity_reservation_id": operation.capacity_reservation_id,
-                    lease.settlement_identity_kind: lease.settlement_identity,
+                    "escrow_uid": lease.escrow_uid,
+                    "settlement_obligation_ref": lease.settlement_obligation_ref,
                     "executor_target": lease.machine_id,
                     "access_ref": lease.access_ref,
                     "executor_ref": bare_metal_executor_ref(

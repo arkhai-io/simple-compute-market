@@ -488,3 +488,166 @@ class TestGpuModel:
         ))
         updated = svc.update_host("kvm1", HostUpdate(kvm_host="10.0.0.2"))
         assert updated.gpu_model == "H100"
+
+
+# ---------------------------------------------------------------------------
+# Tenant-facing endpoint
+#
+# A buyer is handed public_host/public_port when a host separates the endpoint
+# its tenants use from the one the provisioner arrives through.
+# ---------------------------------------------------------------------------
+
+
+_SPLIT_ENDPOINT_INI = (
+    "[bare_metal_nodes]\n"
+    "bm1 ansible_host=10.0.0.5 ansible_port=6001 public_host=192.168.1.50"
+    "  public_port=22 ansible_user=svc ansible_ssh_private_key_file=/k\n"
+)
+
+
+class TestTenantEndpoint:
+    def test_inventory_public_port_is_parsed(self):
+        entries = _parse_ini(_SPLIT_ENDPOINT_INI)
+
+        assert len(entries) == 1
+        assert entries[0]["public_host"] == "192.168.1.50"
+        assert entries[0]["public_port"] == 22
+        assert entries[0]["ssh_port"] == 6001
+
+    def test_inventory_without_a_public_port_stays_unset(self):
+        entries = _parse_ini("[kvm_hosts]\nbm1 ansible_host=10.0.0.5 ansible_user=svc\n")
+
+        assert entries[0]["public_port"] is None
+
+    @pytest.mark.parametrize("bad", ["0", "65536", "ssh", "-1"])
+    def test_an_invalid_public_port_skips_the_entry(self, bad):
+        """Substituting a default would hand a buyer a port nobody configured."""
+        entries = _parse_ini(
+            "[bare_metal_nodes]\n"
+            f"bm1 ansible_host=10.0.0.5 ansible_user=svc public_port={bad}\n"
+        )
+
+        assert entries == []
+
+    def test_seeded_tenant_endpoint_survives_a_read_back(self, svc, session_factory):
+        svc.seed_from_ini(_SPLIT_ENDPOINT_INI)
+
+        with session_factory() as db:
+            row = db.query(Host).filter(Host.name == "bm1").one()
+            assert row.kvm_host == "10.0.0.5"
+            assert row.ssh_port == 6001
+            assert row.public_host == "192.168.1.50"
+            assert row.public_port == 22
+
+    def test_reseeding_updates_the_stored_tenant_endpoint(self, svc, session_factory):
+        base = (
+            "[bare_metal_nodes]\nbm1 ansible_host=10.0.0.5 ansible_port=6001 "
+            "ansible_user=svc ansible_ssh_private_key_file=/k"
+        )
+        svc.seed_from_ini(base + " public_host=192.168.1.50  public_port=22\n")
+        svc.seed_from_ini(base + " public_host=192.168.1.99  public_port=2222\n")
+
+        with session_factory() as db:
+            row = db.query(Host).filter(Host.name == "bm1").one()
+            assert row.public_host == "192.168.1.99"
+            assert row.public_port == 2222
+
+    def test_reseeding_without_a_public_port_clears_it(self, svc, session_factory):
+        """The inventory is the source of the endpoint; a removed port is removed."""
+        base = (
+            "[bare_metal_nodes]\nbm1 ansible_host=10.0.0.5 ansible_port=6001 "
+            "ansible_user=svc ansible_ssh_private_key_file=/k"
+        )
+        svc.seed_from_ini(base + " public_port=2222\n")
+        svc.seed_from_ini(base + "\n")
+
+        with session_factory() as db:
+            assert db.query(Host).filter(Host.name == "bm1").one().public_port is None
+
+    def test_registered_tenant_port_is_stored_and_updatable(self, svc):
+        host = svc.register_host(HostCreate(
+            name="bm1", kvm_host="10.0.0.5", ssh_port=6001,
+            public_host="192.168.1.50", public_port=22,
+            ssh_user="svc", ssh_key_type="path", ssh_key_value="/k",
+        ))
+        assert host.public_port == 22
+
+        updated = svc.update_host("bm1", HostUpdate(public_port=2222))
+        assert updated.public_port == 2222
+        assert updated.ssh_port == 6001
+
+    def test_explicit_null_resets_the_tenant_endpoint_to_fallback(self, svc):
+        svc.register_host(HostCreate(
+            name="bm1", kvm_host="10.0.0.5", ssh_port=6001,
+            public_host="192.168.1.50", public_port=2222,
+            ssh_user="svc", ssh_key_type="path", ssh_key_value="/k",
+        ))
+
+        cleared_port = svc.update_host("bm1", HostUpdate(public_port=None))
+        assert cleared_port.public_port is None
+        assert cleared_port.public_host == "192.168.1.50"
+
+        cleared_host = svc.update_host("bm1", HostUpdate(public_host=None))
+        assert cleared_host.public_host is None
+        ini = svc.render_inventory_ini([cleared_host])
+        assert "public_host=" not in ini
+        assert "public_port=" not in ini
+        assert "ansible_host=10.0.0.5" in ini
+        assert "ansible_port=6001" in ini
+
+    def test_omitted_tenant_endpoint_fields_are_unchanged(self, svc):
+        svc.register_host(HostCreate(
+            name="bm1", kvm_host="10.0.0.5", ssh_port=6001,
+            public_host="192.168.1.50", public_port=2222,
+            ssh_user="svc", ssh_key_type="path", ssh_key_value="/k",
+        ))
+
+        updated = svc.update_host("bm1", HostUpdate(ssh_port=6005))
+
+        assert updated.public_host == "192.168.1.50"
+        assert updated.public_port == 2222
+        assert updated.ssh_port == 6005
+
+    def test_api_models_bound_the_tenant_port(self):
+        with pytest.raises(ValueError):
+            HostCreate(
+                name="bm1", kvm_host="10.0.0.5", ssh_user="svc",
+                ssh_key_value="/k", public_port=0,
+            )
+        with pytest.raises(ValueError):
+            HostUpdate(public_port=65536)
+
+    def test_both_inventory_renderings_emit_the_stored_tenant_endpoint(
+        self, svc, session_factory, settings,
+    ):
+        """The two renderings of one row must agree about the buyer endpoint."""
+        from vm_provisioning_adapter.services.ansible_service import AnsibleService
+
+        svc.seed_from_ini(_SPLIT_ENDPOINT_INI)
+        with session_factory() as db:
+            hosts = db.query(Host).all()
+            ini_text = svc.render_inventory_ini(hosts)
+            inventory_path = AnsibleService(settings).write_inventory(hosts)
+            try:
+                written = inventory_path.read_text(encoding="utf-8")
+            finally:
+                inventory_path.unlink(missing_ok=True)
+
+        for rendering, label in (
+            (ini_text, "render_inventory_ini"),
+            (written, "write_inventory"),
+        ):
+            assert "public_host=192.168.1.50" in rendering, label
+            assert "public_port=22" in rendering, label
+            assert "ansible_port=6001" in rendering, label
+
+    def test_single_endpoint_host_renders_no_tenant_segments(self, svc):
+        hosts = [
+            Host(name="kvm1", kvm_host="10.0.0.1", ssh_user="ubuntu", ssh_port=22,
+                 ssh_key_type="path", ssh_key_value="/key", gpu_count=0, enabled=True),
+        ]
+
+        ini = svc.render_inventory_ini(hosts)
+
+        assert "public_host=" not in ini
+        assert "public_port=" not in ini

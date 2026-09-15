@@ -65,6 +65,20 @@ config-provisioning-secrets.yml.
 {{- end }}
 
 {{/*
+Resolve the required pre-existing Secret holding the pinned known_hosts.
+*/}}
+{{- define "provisioning.hostKeyPinsSecretName" -}}
+{{- required "provisioning.hostKeyPins.secretName must reference a pre-existing Secret when hostKeyPins.enabled" .Values.hostKeyPins.secretName -}}
+{{- end }}
+
+{{/*
+Absolute path of the mounted pinned known_hosts file inside the container.
+*/}}
+{{- define "provisioning.hostKeyPinsPath" -}}
+{{- printf "%s/%s" (trimSuffix "/" .Values.hostKeyPins.mountPath) .Values.hostKeyPins.key -}}
+{{- end }}
+
+{{/*
 Resolve the ConfigMap name for the production config profile.
 */}}
 {{- define "provisioning.configMapName" -}}

@@ -88,6 +88,7 @@
     manage_dir: no
   become: yes
   delegate_to: "{{ target_host }}"
+  register: bare_metal_revoke_key_result
   when:
     - node_action == "node_reclaim_access"
     - (bare_metal_reclaim_policy | default('remove_lease_key')) in ["remove_lease_key", "lock_user"]
@@ -99,11 +100,17 @@
     state: absent
   become: yes
   delegate_to: "{{ target_host }}"
+  register: bare_metal_remove_keys_result
   when:
     - node_action == "node_reclaim_access"
     - (bare_metal_reclaim_policy | default('remove_lease_key')) == "remove_lease_key"
     - bare_metal_ssh_public_key | default('') | trim == ''
 
+# Lock and delete failures fail the play, and each is followed by a read-back:
+# a reclaim reports an account locked or deleted only when the host's own user
+# database shows it, never from a module's `changed` flag. A failed or
+# unverifiable step therefore leaves the job failed rather than reporting a
+# reclaimed lease.
 - name: Lock bare-metal tenant account after reclaim
   user:
     name: "{{ bare_metal_ssh_user }}"
@@ -113,7 +120,46 @@
   become: yes
   delegate_to: "{{ target_host }}"
   register: bare_metal_lock_result
-  failed_when: false
+  when:
+    - node_action == "node_reclaim_access"
+    - (bare_metal_reclaim_policy | default('remove_lease_key')) == "lock_user"
+
+- name: Read back the locked bare-metal tenant password entry
+  getent:
+    database: shadow
+    key: "{{ bare_metal_ssh_user }}"
+  become: yes
+  delegate_to: "{{ target_host }}"
+  register: bare_metal_lock_shadow
+  when:
+    - node_action == "node_reclaim_access"
+    - (bare_metal_reclaim_policy | default('remove_lease_key')) == "lock_user"
+
+- name: Read back the locked bare-metal tenant login shell
+  getent:
+    database: passwd
+    key: "{{ bare_metal_ssh_user }}"
+  become: yes
+  delegate_to: "{{ target_host }}"
+  register: bare_metal_lock_passwd
+  when:
+    - node_action == "node_reclaim_access"
+    - (bare_metal_reclaim_policy | default('remove_lease_key')) == "lock_user"
+
+- name: Verify the bare-metal tenant account is locked
+  assert:
+    that:
+      - (bare_metal_lock_shadow.ansible_facts.getent_shadow[bare_metal_ssh_user] | first) is match('!')
+      - (bare_metal_lock_passwd.ansible_facts.getent_passwd[bare_metal_ssh_user] | last) == '/usr/sbin/nologin'
+    fail_msg: "bare-metal tenant account {{ bare_metal_ssh_user }} is not verifiably locked"
+    quiet: yes
+  when:
+    - node_action == "node_reclaim_access"
+    - (bare_metal_reclaim_policy | default('remove_lease_key')) == "lock_user"
+
+- name: Record the verified bare-metal tenant account lock
+  set_fact:
+    bare_metal_account_locked: true
   when:
     - node_action == "node_reclaim_access"
     - (bare_metal_reclaim_policy | default('remove_lease_key')) == "lock_user"
@@ -126,15 +172,50 @@
   become: yes
   delegate_to: "{{ target_host }}"
   register: bare_metal_delete_result
-  failed_when: false
   when:
     - node_action == "node_reclaim_access"
     - (bare_metal_reclaim_policy | default('remove_lease_key')) == "delete_user"
 
+# Absence is read from /etc/passwd, the local database the `user` module above
+# writes to, not from getent: a getent lookup maps an unavailable NSS backend
+# to the same unsuccessful result as a genuinely absent account, so it cannot
+# prove deletion. The file counts only as a complete, well-formed and
+# unambiguous database (filter_plugins/passwd_database.py): an unreadable,
+# truncated, malformed or ambiguous file fails the task rather than certifying
+# a deletion that did not happen.
+- name: Read back the local account database after delete
+  slurp:
+    src: /etc/passwd
+  become: yes
+  delegate_to: "{{ target_host }}"
+  register: bare_metal_passwd_file
+  when:
+    - node_action == "node_reclaim_access"
+    - (bare_metal_reclaim_policy | default('remove_lease_key')) == "delete_user"
+
+- name: Verify the bare-metal tenant account is absent from /etc/passwd
+  assert:
+    that:
+      - bare_metal_passwd_file.content | bare_metal_account_absent_from_passwd(bare_metal_ssh_user)
+    fail_msg: "bare-metal tenant account {{ bare_metal_ssh_user }} is still present in /etc/passwd"
+    quiet: yes
+  when:
+    - node_action == "node_reclaim_access"
+    - (bare_metal_reclaim_policy | default('remove_lease_key')) == "delete_user"
+
+- name: Record the verified bare-metal tenant account deletion
+  set_fact:
+    bare_metal_account_deleted: true
+  when:
+    - node_action == "node_reclaim_access"
+    - (bare_metal_reclaim_policy | default('remove_lease_key')) == "delete_user"
+
+# Taken on the controller without a connection. The provisioning service forces
+# this play's connection to the pinned OpenSSH client, and that applies to a
+# task delegated to localhost as well, so the role never delegates there.
 - name: Get current timestamp for bare-metal node access action
-  shell: date -u +"%Y-%m-%dT%H:%M:%SZ"
-  register: node_access_timestamp
-  delegate_to: localhost
+  set_fact:
+    node_access_timestamp: "{{ now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ') }}"
   when: node_action in ["node_grant_access", "node_reclaim_access"]
 
 - name: Create JSON data structure for node_grant_access action
@@ -145,9 +226,13 @@
       physical_host_id: "{{ physical_host_id | default('') }}"
       ssh_user: "{{ bare_metal_ssh_user }}"
       escrow_uid: "{{ escrow_uid | default('') }}"
-      timestamp: "{{ node_access_timestamp.stdout }}"
-      host: "{{ hostvars[target_host].ansible_host | default(target_host) }}"
-      port: "{{ hostvars[target_host].ansible_port | default(22) }}"
+      timestamp: "{{ node_access_timestamp }}"
+      # The buyer is told the tenant-facing endpoint, which need not be the one
+      # the provisioner arrived through: a management tunnel endpoint handed to
+      # a buyer points it at that tunnel. A host serving both from one endpoint
+      # falls back to the provisioner's values.
+      host: "{{ hostvars[target_host].public_host | default(hostvars[target_host].ansible_host | default(target_host)) }}"
+      port: "{{ hostvars[target_host].public_port | default(hostvars[target_host].ansible_port | default(22)) }}"
       status: "success"
   when:
     - node_action == "node_grant_access"
@@ -177,11 +262,18 @@
       ssh_user: "{{ bare_metal_ssh_user }}"
       escrow_uid: "{{ escrow_uid | default('') }}"
       reclaim_policy: "{{ bare_metal_reclaim_policy | default('remove_lease_key') }}"
-      timestamp: "{{ node_access_timestamp.stdout }}"
+      timestamp: "{{ node_access_timestamp }}"
       host: "{{ target_host }}"
+      # Reached only after every step above succeeded; the account fields are
+      # the read-back results, not the modules' change flags.
       status: "success"
-      account_locked: "{{ bare_metal_lock_result.changed | default(false) }}"
-      account_deleted: "{{ bare_metal_delete_result.changed | default(false) }}"
+      account_locked: "{{ bare_metal_account_locked | default(false) }}"
+      account_deleted: "{{ bare_metal_account_deleted | default(false) }}"
+      steps:
+        revoke_lease_key: "{{ 'not_run' if (bare_metal_revoke_key_result is not defined or bare_metal_revoke_key_result is skipped) else ('changed' if bare_metal_revoke_key_result is changed else 'unchanged') }}"
+        remove_authorized_keys: "{{ 'not_run' if (bare_metal_remove_keys_result is not defined or bare_metal_remove_keys_result is skipped) else ('changed' if bare_metal_remove_keys_result is changed else 'unchanged') }}"
+        lock_account: "{{ 'verified' if (bare_metal_account_locked | default(false)) else 'not_run' }}"
+        delete_account: "{{ 'verified' if (bare_metal_account_deleted | default(false)) else 'not_run' }}"
   when:
     - node_action == "node_reclaim_access"
     - node_access_timestamp is defined

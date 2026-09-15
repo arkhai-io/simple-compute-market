@@ -10,6 +10,7 @@ from arkhai_bare_metal import (
     NODE_GRANT_ACCESS_ACTION,
     NODE_RECLAIM_ACCESS_ACTION,
     bare_metal_executor_ref,
+    canonical_lease_account,
 )
 from vm_provisioning_operator.models import JobSubmitResponse
 
@@ -17,6 +18,9 @@ from bare_metal_provisioning_adapter.services.bare_metal_operations_service impo
     BareMetalHostValidationError,
     BareMetalOperationsService,
 )
+
+# The executor admits only the account derived for the lease's settlement.
+LEASE_ACCOUNT = canonical_lease_account("0xbm")
 
 
 @pytest.mark.asyncio
@@ -41,7 +45,7 @@ async def test_grant_access_submits_node_grant_job():
             physical_host_id="host-physical-1",
             lease_end_utc=datetime(2099, 1, 1, tzinfo=timezone.utc),
             access_ref={
-                "ssh_user": "tenant-a",
+                "ssh_user": LEASE_ACCOUNT,
                 "ssh_public_key": "ssh-ed25519 AAAA tenant-a",
             },
         ),
@@ -58,12 +62,12 @@ async def test_grant_access_submits_node_grant_job():
     assert params.executor_target == "bm-node-1"
     assert params.executor_ref == {
         "physical_host_id": "host-physical-1",
-        "ssh_user": "tenant-a",
+        "ssh_user": LEASE_ACCOUNT,
         "ssh_public_key": "ssh-ed25519 AAAA tenant-a",
     }
     assert params.escrow_uid == "0xbm"
     assert params.physical_host_id == "host-physical-1"
-    assert params.ssh_user == "tenant-a"
+    assert params.ssh_user == LEASE_ACCOUNT
     assert params.ssh_public_key == "ssh-ed25519 AAAA tenant-a"
 
 
@@ -89,7 +93,7 @@ async def test_reclaim_access_submits_node_reclaim_job_from_reservation():
         "executor_ref": bare_metal_executor_ref(
             "host-physical-1",
             access_ref={
-                "ssh_user": "tenant-a",
+                "ssh_user": LEASE_ACCOUNT,
                 "ssh_public_key": "ssh-ed25519 AAAA tenant-a",
             },
         ),
@@ -106,12 +110,12 @@ async def test_reclaim_access_submits_node_reclaim_job_from_reservation():
     assert params.executor_target == "bm-node-1"
     assert params.executor_ref == {
         "physical_host_id": "host-physical-1",
-        "ssh_user": "tenant-a",
+        "ssh_user": LEASE_ACCOUNT,
         "ssh_public_key": "ssh-ed25519 AAAA tenant-a",
     }
     assert params.escrow_uid == "0xbm"
     assert params.physical_host_id == "host-physical-1"
-    assert params.ssh_user == "tenant-a"
+    assert params.ssh_user == LEASE_ACCOUNT
     assert params.ssh_public_key == "ssh-ed25519 AAAA tenant-a"
     assert params.bare_metal_reclaim_policy == "lock_user"
 

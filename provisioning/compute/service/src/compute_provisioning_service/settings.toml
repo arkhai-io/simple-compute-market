@@ -46,6 +46,13 @@ management_vars_path = "/opt/domains/vms/provisioning/iac/ansible/inventory/mana
 #   delete_user      — delete the tenant account and home directory.
 bare_metal_reclaim_policy = "remove_lease_key"
 
+# Pinned known_hosts for managed bare-metal hosts, one line per management
+# endpoint in the form the host registry names it (`[address]:port` for a
+# non-default port). Bare-metal access playbooks run with strict host-key
+# checking against this file alone and refuse to start while it is unset or
+# lacks the host's endpoint. VM playbooks are unaffected.
+bare_metal_ssh_known_hosts_path = ""
+
 # Golden image credentials.
 # Used when image_setup_type=golden. Set via config-production.yml or env vars.
 # Never commit real values here.

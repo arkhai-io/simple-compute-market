@@ -128,8 +128,12 @@ class MockAnsibleService:
         extra_vars_path: Path,
         limit: str,
         extra_cli_vars: dict | None = None,
+        host_trust=None,
     ) -> AnsibleRun:
-        """Return a fake AnsibleRun handle with a mock process."""
+        """Return a fake AnsibleRun handle with a mock process.
+
+        ``host_trust`` is accepted and ignored: no SSH connection is made.
+        """
         mock_proc = MagicMock()
         mock_proc.pid = 0
         mock_proc.poll.return_value = 0
@@ -417,12 +421,23 @@ class ProgrammableMockAnsibleService(MockAnsibleService):
     # ------------------------------------------------------------------
 
     def start_playbook(
-        self, playbook_path, inventory_path, extra_vars_path, limit, extra_cli_vars=None
+        self,
+        playbook_path,
+        inventory_path,
+        extra_vars_path,
+        limit,
+        extra_cli_vars=None,
+        host_trust=None,
     ) -> "AnsibleRun":
         # Store the job_id from extra_vars_path stem for event notification.
         # The vars file is named after the job_id by build_vars_file.
         return super().start_playbook(
-            playbook_path, inventory_path, extra_vars_path, limit, extra_cli_vars
+            playbook_path,
+            inventory_path,
+            extra_vars_path,
+            limit,
+            extra_cli_vars,
+            host_trust=host_trust,
         )
 
     async def wait_for_playbook(

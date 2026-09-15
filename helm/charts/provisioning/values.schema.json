@@ -24,6 +24,17 @@
       }
     },
     "sshDecryptionKey": {"$ref": "#/definitions/secretReference"},
+    "hostKeyPins": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "secretName", "key", "mountPath"],
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "secretName": {"type": "string"},
+        "key": {"type": "string", "minLength": 1, "pattern": "^[A-Za-z0-9._-]+$"},
+        "mountPath": {"type": "string", "minLength": 1, "pattern": "^/"}
+      }
+    },
     "inventory": false,
     "storefront": {
       "type": "object",

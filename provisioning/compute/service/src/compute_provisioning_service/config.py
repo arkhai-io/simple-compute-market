@@ -127,6 +127,11 @@ class Settings:
         return policy
 
     @property
+    def bare_metal_ssh_known_hosts_path(self) -> Path | None:
+        raw = str(getattr(self._source, "bare_metal_ssh_known_hosts_path", "") or "")
+        return Path(raw) if raw.strip() else None
+
+    @property
     def resolved_inventory_path(self) -> Path:
         return Path(str(self._source.inventory_path)).resolve()
 

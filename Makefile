@@ -418,6 +418,7 @@ test-release-tooling: dist-identity ## Run release verifier and portable wheelho
 
 test-deployment-packaging: test-release-tooling ## Run release tooling plus Helm schema/render contracts.
 	$(MAKE) -C helm test-render
+	$(MAKE) -C helm test-chart-contracts
 
 dist-clean: ## Remove .dist/ directory
 	rm -rf $(DIST_DIR)

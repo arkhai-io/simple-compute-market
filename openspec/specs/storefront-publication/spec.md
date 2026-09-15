@@ -88,6 +88,25 @@ A storefront MUST publish, update, close, and reconcile its listings against one
 - **WHEN** authoritative capacity no longer supports a derived listing
 - **THEN** reconciliation closes that listing in configured registries without treating stale local state as authority
 
+### Requirement: Registry write credentials are sanitized and publication failures are truthful
+
+A registry client MUST refuse a configured write credential it cannot transmit verbatim as a request header, MUST NOT trim, re-encode or otherwise alter the configured value to make it sendable, and MUST NOT include it in any error, log or diagnostic. When no write credential is configured, the request MUST carry no credential header. Publication and close failures MUST be reported by failure type and HTTP status only, and a publication command MUST exit non-zero when any candidate listing failed.
+
+#### Scenario: Configured credential cannot be sent verbatim
+
+- **WHEN** the configured registry write credential contains characters that cannot be transmitted in a request header
+- **THEN** the client refuses before making the request, and the configured value does not appear in the reported failure
+
+#### Scenario: A publication candidate fails
+
+- **WHEN** one or more candidate listings fail to publish or close
+- **THEN** the command reports each failure by type and HTTP status and exits non-zero
+
+#### Scenario: No write credential is configured
+
+- **WHEN** publication runs with no registry write credential configured
+- **THEN** the request carries no credential header and publication proceeds under the registry's unauthenticated contract
+
 ### Requirement: Canonical storefront market identities
 
 A storefront MUST represent listing ownership, negotiation parties and message senders, accepted terms and settlement plans, heartbeat parties, claim actors, settlement parties, administrator subjects, service-peer bindings, replay reservations, and identity-audit actors as complete canonical principals. Listing, negotiation, obligation, fulfillment, service-peer, and operation identifiers MUST remain stable subjects distinct from the principals authorized to act for them. An explicitly named EVM address inside a tagged chain-mechanism payload MAY identify a chain effect, but it MUST NOT authorize a marketplace action or replace a canonical principal.

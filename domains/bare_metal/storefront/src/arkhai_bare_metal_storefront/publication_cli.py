@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+import httpx
 from arkhai_bare_metal import (
     BareMetalListing,
     BareMetalResourceProjection,
@@ -23,7 +24,12 @@ from core_storefront.publication_command import (
 from market_identity import Identity, TrustedIdentitySet
 from market_settlement_runtime import SettlementPublicationClause
 from pydantic_core import to_jsonable_python
-from registry_client import ListingRequest, SyncRegistryClient, UpdateListingRequest
+from registry_client import (
+    ListingRequest,
+    RegistryClientError,
+    SyncRegistryClient,
+    UpdateListingRequest,
+)
 
 from .publication import (
     build_bare_metal_publication_selection,
@@ -31,6 +37,27 @@ from .publication import (
 )
 from .runtime import BareMetalStorefrontRuntime, build_runtime_from_environment
 from .server import build_bare_metal_storefront_registry
+
+
+class RegistryPublicationError(RuntimeError):
+    """A registry call failure described without any request material."""
+
+
+def _registry_failure(operation: str, exc: Exception) -> RegistryPublicationError:
+    """Reduce a registry call failure to what is safe to record.
+
+    A publication round records ``str(exception)`` against each failed
+    candidate, and that record reaches an operator's run log. Everything the
+    underlying exception carries is request or response material: the
+    transport quotes a rejected header, and ``RegistryClientError`` carries the
+    URL and response body, either of which may repeat the bearer credential.
+    The exception type and HTTP status say what went wrong without repeating
+    what was sent.
+    """
+    detail = type(exc).__name__
+    if isinstance(exc, RegistryClientError):
+        detail = f"{detail} HTTP {exc.status_code}"
+    return RegistryPublicationError(f"registry {operation} failed: {detail}")
 
 
 def _json_env(name: str) -> Any:
@@ -51,19 +78,31 @@ def _instant(name: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
-def _registry(runtime: BareMetalStorefrontRuntime) -> SyncRegistryClient:
+def _registry(
+    runtime: BareMetalStorefrontRuntime,
+    *,
+    transport: httpx.BaseTransport | None = None,
+) -> SyncRegistryClient:
     raw_principals = _json_env("BARE_METAL_STOREFRONT_REGISTRY_PRINCIPALS")
     if not isinstance(raw_principals, list):
         raise RuntimeError("registry principals must be a JSON list")
     trust = TrustedIdentitySet(
         identities=tuple(Identity.model_validate(item) for item in raw_principals)
     )
+    # A registry that gates writes additionally requires a write-scoped API
+    # key, carried as the client's bearer credential alongside the seller's
+    # per-request signature. Registries with open publishing supply none, and
+    # an empty value then sends no header rather than an empty bearer. The
+    # client refuses a value it cannot send verbatim; it is never trimmed.
+    api_key = os.environ.get("BARE_METAL_STOREFRONT_REGISTRY_API_KEY") or None
     return SyncRegistryClient(
         os.environ["BARE_METAL_STOREFRONT_REGISTRY_URL"],
         signer=runtime.marketplace_signer,
         caller_role="seller",
         expected_registries=trust,
         registry_authority=os.environ["BARE_METAL_STOREFRONT_REGISTRY_AUTHORITY"],
+        transport=transport,
+        api_key=api_key,
     )
 
 
@@ -150,20 +189,33 @@ def _publish_registry_listing(
     max_duration_seconds: int | None,
     storefront_url: str,
 ) -> dict[str, Any]:
-    response = client.publish_listing(
-        ListingRequest(
-            listing_id=listing_id,
-            listing_resource=listing_resource,
-            accepted_escrows=accepted_escrows,
-            settlement_options=settlement_options,
-            demands=demands,
-            max_duration_seconds=max_duration_seconds,
-            storefront_url=storefront_url,
+    try:
+        response = client.publish_listing(
+            ListingRequest(
+                listing_id=listing_id,
+                listing_resource=listing_resource,
+                accepted_escrows=accepted_escrows,
+                settlement_options=settlement_options,
+                demands=demands,
+                max_duration_seconds=max_duration_seconds,
+                storefront_url=storefront_url,
+            )
         )
-    )
+    # Chaining is suppressed deliberately: the original message is the leak,
+    # and an uncaught traceback would print it alongside the safe one.
+    except Exception as exc:
+        raise _registry_failure("listing.publish", exc) from None
     if str(response.get("listing_id") or "") != listing_id:
         raise RuntimeError("registry returned a conflicting listing identity")
     return {"status": "published", "listing_id": listing_id}
+
+
+def _close_registry_listing(client: SyncRegistryClient, listing_id: str) -> dict[str, Any]:
+    try:
+        client.update_listing(listing_id, UpdateListingRequest(updates={"status": "closed"}))
+    except Exception as exc:
+        raise _registry_failure("listing.update", exc) from None
+    return {"status": "closed", "listing_id": listing_id}
 
 
 def run_publication_once() -> dict[str, Any]:
@@ -197,10 +249,7 @@ def run_publication_once() -> dict[str, Any]:
     def close_listing(
         _base_url: str, listing_id: str, _reason: str | None = None
     ) -> dict[str, Any]:
-        client.update_listing(
-            listing_id, UpdateListingRequest(updates={"status": "closed"})
-        )
-        return {"status": "closed", "listing_id": listing_id}
+        return _close_registry_listing(client, listing_id)
 
     def publish_existing_listing(*, listing_id: str, **values: Any) -> dict[str, Any]:
         return _publish_registry_listing(

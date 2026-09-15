@@ -35,6 +35,16 @@ class HostCreate(BaseModel):
             "network than the provisioner does."
         ),
     )
+    public_port: Optional[int] = Field(
+        default=None,
+        ge=1,
+        le=65535,
+        description=(
+            "Port tenants reach this host on. Defaults to ssh_port when "
+            "omitted — set it when the provisioner arrives through a tunnel, "
+            "NAT forward, or bastion port that tenants do not use."
+        ),
+    )
     ssh_user: str = Field(default="root", description="SSH user on the KVM host.")
     ssh_port: int = Field(
         default=22,
@@ -75,6 +85,9 @@ class HostUpdate(BaseModel):
 
     kvm_host: Optional[str] = Field(default=None, description="Updated IP/hostname.")
     public_host: Optional[str] = Field(default=None, description="Updated public address.")
+    public_port: Optional[int] = Field(
+        default=None, ge=1, le=65535, description="Updated tenant-facing port.",
+    )
     ssh_user: Optional[str] = Field(default=None, description="Updated SSH user.")
     ssh_port: Optional[int] = Field(
         default=None, ge=1, le=65535, description="Updated SSH port.",
@@ -97,6 +110,7 @@ class HostResponse(BaseModel):
     name: str
     kvm_host: str
     public_host: Optional[str] = None
+    public_port: Optional[int] = None
     ssh_user: str
     ssh_port: int
     ssh_key_type: str

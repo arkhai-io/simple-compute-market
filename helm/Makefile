@@ -5,7 +5,7 @@ RELEASE      := arkhai-node-operator
 NAMESPACE    := default
 VALUES       := values.yaml
 
-.PHONY: init template deploy test test-render
+.PHONY: init template deploy test test-render test-chart-contracts
 
 ## Update Helm dependencies declared in Chart.yaml
 init:
@@ -37,6 +37,14 @@ template:
 ## cosmetic chart edits (no byte-level snapshots).
 test-render:
 	@./scripts/test-render.sh
+
+## Run each subchart's render contract tests (charts/*/tests). Every test
+## renders its chart with `helm template` and asserts the parsed manifest, so
+## it needs the same Helm as test-render and fails, rather than skips, without
+## it. pytest and pyyaml are test-only.
+test-chart-contracts:
+	uv run --no-project --with pytest --with 'pyyaml>=6.0' \
+		pytest -q $(wildcard charts/*/tests)
 
 ## Render a single subchart in isolation.
 ## Requires MODULE=<subchart-name>, e.g. make template-module MODULE=dev-env

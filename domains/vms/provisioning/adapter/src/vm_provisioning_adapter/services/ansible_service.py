@@ -22,8 +22,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import select
+import shlex
+import signal
 import subprocess
 import sys
 import time
@@ -44,9 +47,43 @@ from vm_provisioning_adapter.models.ansible import (
     InventoryResponse,
 )
 from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams, AnsibleRunResult
+from vm_provisioning_adapter.services.host_service import tenant_endpoint_segments
 from market_config import decrypt_secret
 
 logger = logging.getLogger(__name__)
+
+
+def _end_playbook_run(run: "AnsibleRun") -> None:
+    """End a playbook run and the workers and SSH children it started.
+
+    ``start_playbook`` gives every run its own session, so the run is exactly
+    one process group this service created. Killing only the ansible-playbook
+    process would leave its workers, and their ssh clients, holding connections
+    to managed hosts — and by the time cleanup runs the leader may already have
+    been reaped, which is why the group comes from the receipt taken at spawn
+    rather than from a lookup on a pid that may no longer exist.
+
+    Without a receipt, or for a group this process shares, nothing is signalled
+    by group: only the direct child is ended.
+    """
+    group = run.process_group
+    owned = group is not None and group > 0 and group != os.getpgrp()
+    if owned:
+        try:
+            os.killpg(group, signal.SIGKILL)
+        except ProcessLookupError:
+            pass  # Every member already exited.
+        except (PermissionError, OSError):
+            owned = False
+    if not owned:
+        try:
+            run.process.kill()
+        except Exception:
+            pass
+    try:
+        run.process.wait(timeout=10)
+    except Exception:
+        pass
 
 
 def redact_ansible_output(text: str) -> str:
@@ -113,6 +150,12 @@ class AnsibleRun:
     process: subprocess.Popen
     process_id: int
     vars_path: Path
+    # The process group this service created for the run, recorded when the
+    # session was made. It is a receipt, not a lookup: once the leader has been
+    # reaped its group can no longer be found from its pid, and the workers and
+    # ssh clients still in that group would then be unreachable. ``None`` means
+    # no group was established, and nothing may be signalled by group.
+    process_group: int | None = None
 
 
 @dataclass
@@ -138,6 +181,157 @@ class AnsibleError(RuntimeError):
 # ---------------------------------------------------------------------------
 
 
+class HostTrustError(RuntimeError):
+    """A playbook's SSH host trust is absent or does not cover its endpoint.
+
+    Raised before ``ansible-playbook`` starts, so no connection is attempted.
+    """
+
+
+@dataclass(frozen=True)
+class SshHostTrust:
+    """The pinned known_hosts a playbook's SSH connections must verify against.
+
+    ``host`` and ``port`` are the management endpoint the inventory connects
+    to, never a tenant-facing endpoint. A missing value means no endpoint could
+    be pinned, which refuses the spawn rather than connecting unverified.
+    """
+
+    known_hosts_path: Path | None
+    host: str | None
+    port: int | None
+
+
+def _known_hosts_name(host: str, port: int) -> str:
+    # OpenSSH records a non-default port as ``[host]:port``.
+    return host if port == 22 else f"[{host}]:{port}"
+
+
+@dataclass(frozen=True)
+class PinnedSshInvocation:
+    """How a bare-metal playbook is spawned with enforced host trust."""
+
+    env: dict[str, str]
+    extra_vars: dict[str, object]
+
+
+def _strict_ssh_args(known_hosts_path: Path, host: str) -> str:
+    # These come first because OpenSSH honours the first value given for an
+    # ``-o`` option, and Ansible emits ``ssh_args`` ahead of every inventory/task
+    # ``ssh_common_args``/``ssh_extra_args`` and ahead of the insecure ``-o`` a
+    # disabled host_key_checking would add. Putting them here, rather than in
+    # the last-place common args, is what makes them win.
+    return " ".join(
+        (
+            # The pinned file alone decides: no image-wide known_hosts, no
+            # command output and no DNS record can add a trusted key. OpenSSH
+            # documents no value that disables KnownHostsCommand, so /bin/true
+            # takes its place and contributes nothing.
+            "-o StrictHostKeyChecking=yes",
+            f"-o UserKnownHostsFile={shlex.quote(str(known_hosts_path))}",
+            "-o GlobalKnownHostsFile=/dev/null",
+            "-o KnownHostsCommand=/bin/true",
+            "-o VerifyHostKeyDNS=no",
+            # Reach the selected management host and no other. ``HostName`` fixes
+            # the TCP destination to the endpoint the pin was verified against;
+            # first here, it wins the first-value race against any inventory or
+            # inherited ``ssh_common_args`` HostName. The known_hosts lookup uses
+            # the connection's host alias and port, which the ``ansible_host`` /
+            # ``ansible_port`` extra-vars fix to this same endpoint, so the pin
+            # consulted is the selected endpoint's. A hostile ``HostKeyAlias``
+            # cannot make a different pinned host pass: the connection still
+            # reaches the selected host, whose key cannot match another entry.
+            f"-o HostName={shlex.quote(host)}",
+            # No connection sharing: a master socket opened without these
+            # options — by a VM playbook to the same endpoint, or at a path an
+            # inventory names — would carry this connection with its host key
+            # never checked. Compression is kept from Ansible's defaults.
+            "-o ControlMaster=no",
+            "-o ControlPath=none",
+            "-C",
+        )
+    )
+
+
+def _pinned_ssh_invocation(trust: SshHostTrust) -> PinnedSshInvocation:
+    """Return the spawn env and extra-vars enforcing *trust*, or refuse.
+
+    Enforcement is carried as extra-vars because they are Ansible's
+    highest-precedence source: no inventory variable, inherited environment
+    setting or ansible.cfg value can override them. They fix:
+
+    * the connection plugin, to the builtin OpenSSH plugin by its fully
+      qualified name. Pins are OpenSSH options: paramiko consults its own
+      known_hosts files and ``local`` connects to nothing, so under any other
+      plugin the playbook would run with the pin ignored;
+    * both aliases of that plugin's host-key-checking option, and the
+      ssh/scp/sftp executables, so neither an alias nor a substitute binary
+      can step around the options below;
+    * the connection host and port, to the selected management endpoint the
+      pin was verified against. Both the ``ansible_host``/``ansible_ssh_host``
+      and ``ansible_port``/``ansible_ssh_port`` variants are set because the
+      connection plugin resolves the later-listed alias when several carry a
+      value; fixing all of them, together with the ``HostName`` in the strict
+      args, stops an inventory address or port from aiming the action at, and
+      satisfying it against, a different host that merely happens to be pinned
+      in the same file;
+    * ``ansible_ssh_args``, carrying the strict options first so they win
+      OpenSSH's first-value race.
+
+    The endpoint identity is taken from the immutable ``SshHostTrust`` and used
+    verbatim; it is never rewritten. Legitimate ``ssh_common_args``/
+    ``ssh_extra_args`` (for example a management ProxyCommand routing to that
+    endpoint) still apply, but can no longer relax the host key check or
+    redirect the connection. The endpoint must already have a pin, so an absent
+    entry refuses here instead of reaching SSH as an unknown host. Every task of
+    a pinned play uses this client, including one delegated to ``localhost``, so
+    a pinned playbook must not delegate to the controller.
+    """
+    if trust.known_hosts_path is None:
+        raise HostTrustError("bare-metal SSH host trust is not configured")
+    path = Path(trust.known_hosts_path)
+    try:
+        if not path.is_file() or path.stat().st_size == 0:
+            raise HostTrustError("bare-metal SSH host trust file is missing or empty")
+    except OSError as exc:
+        raise HostTrustError("bare-metal SSH host trust file cannot be read") from exc
+    if not trust.host or not trust.port:
+        raise HostTrustError(
+            "bare-metal host has no registered management endpoint to pin"
+        )
+    try:
+        lookup = subprocess.run(
+            ["ssh-keygen", "-F", _known_hosts_name(trust.host, trust.port), "-f", str(path)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError as exc:
+        raise HostTrustError("bare-metal SSH host trust cannot be checked") from exc
+    if lookup.returncode != 0 or not lookup.stdout.strip():
+        raise HostTrustError("no pinned host key for the bare-metal management endpoint")
+    ssh_args = _strict_ssh_args(path, trust.host)
+    env = {
+        **os.environ,
+        "ANSIBLE_HOST_KEY_CHECKING": "True",
+        "ANSIBLE_SSH_ARGS": ssh_args,
+    }
+    extra_vars: dict[str, object] = {
+        "ansible_connection": "ansible.builtin.ssh",
+        "ansible_ssh_executable": "ssh",
+        "ansible_scp_executable": "scp",
+        "ansible_sftp_executable": "sftp",
+        "ansible_host": trust.host,
+        "ansible_ssh_host": trust.host,
+        "ansible_port": trust.port,
+        "ansible_ssh_port": trust.port,
+        "ansible_ssh_args": ssh_args,
+        "ansible_host_key_checking": True,
+        "ansible_ssh_host_key_checking": True,
+    }
+    return PinnedSshInvocation(env=env, extra_vars=extra_vars)
+
+
 class AnsibleService:
     """Single subprocess boundary + Ansible support layer.
 
@@ -158,13 +352,21 @@ class AnsibleService:
         extra_vars_path: Path,
         limit: str,
         extra_cli_vars: dict[str, str] | None = None,
+        host_trust: SshHostTrust | None = None,
     ) -> AnsibleRun:
         """Spawn ansible-playbook and return immediately with a process handle.
 
         The caller must pass the returned handle to ``await wait_for_playbook``
         to collect the result.  ``extra_vars_path`` is cleaned up inside
         ``wait_for_playbook``.
+
+        With ``host_trust`` the playbook runs with strict SSH host-key checking
+        against those pins alone, and ``HostTrustError`` is raised before
+        spawning when they are absent or lack the endpoint. Without it the
+        process inherits this service's environment unchanged.
         """
+        invocation = None if host_trust is None else _pinned_ssh_invocation(host_trust)
+        env = None if invocation is None else invocation.env
         cmd = [
             "ansible-playbook",
             "-i", str(inventory_path),
@@ -174,12 +376,24 @@ class AnsibleService:
         ]
         for k, v in (extra_cli_vars or {}).items():
             cmd += ["-e", f"{k}={v}"]
+        # The trust extra-vars are appended last so they win over any @file or
+        # earlier -e that set the same key, and, being extra-vars, over any
+        # inventory connection variable.
+        if invocation is not None:
+            cmd += ["-e", json.dumps(invocation.extra_vars)]
 
         process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            env=env,
+            # Own the whole run: ansible-playbook forks workers which fork ssh.
+            # In this service's own process group, killing the playbook on
+            # timeout or cancellation leaves those descendants holding
+            # connections. A new session makes the run one group this service
+            # can end as a unit, and cannot signal anything it did not start.
+            start_new_session=True,
         )
 
         logger.info(
@@ -190,6 +404,11 @@ class AnsibleService:
             process=process,
             process_id=process.pid,
             vars_path=extra_vars_path,
+            # The receipt for the session just created: a new session makes the
+            # child both session and group leader, so the run's group id is this
+            # pid. Recorded here because after the leader is reaped the group can
+            # no longer be derived from it, while its descendants still can be.
+            process_group=process.pid,
         )
 
     async def wait_for_playbook(
@@ -292,25 +511,30 @@ class AnsibleService:
                 raise AnsibleError("Playbook failed", stdout, stderr)
 
         except asyncio.TimeoutError:
-            run.process.kill()
-            run.process.wait()
+            _end_playbook_run(run)
             stdout = "".join(stdout_lines)
             stderr = "".join(stderr_lines)
             raise AnsibleError("Playbook timed out", stdout, stderr)
+        except asyncio.CancelledError:
+            # The caller gave up on this job: end the run rather than leaving
+            # ansible workers and their ssh children holding connections.
+            _end_playbook_run(run)
+            raise
         except AnsibleError:
             raise
         except Exception as exc:
-            try:
-                run.process.kill()
-                run.process.wait()
-            except Exception:
-                pass
+            _end_playbook_run(run)
             stdout = "".join(stdout_lines)
             stderr = "".join(stderr_lines)
             raise AnsibleError(
                 f"Playbook error: {exc}", stdout, stderr or str(exc)
             ) from exc
         finally:
+            # Unconditional, so a leader that exited on its own — successfully
+            # or not — does not leave workers and their ssh clients behind. By
+            # this point the run is over, so anything still in its group is a
+            # stray holding a connection to a managed host.
+            _end_playbook_run(run)
             try:
                 run.vars_path.unlink(missing_ok=True)
             except Exception:
@@ -366,13 +590,10 @@ class AnsibleService:
                 companion_key_paths.append(key_file)
                 key_ref = str(key_file)
 
-            # public_host is the tenant-facing address; emit it as a host var
-            # so the playbook can use it for the connection strings it returns.
-            public_seg = (
-                f"  public_host={host.public_host}"
-                if getattr(host, "public_host", None)
-                else ""
-            )
+            # The tenant-facing address and port are host vars so the playbook
+            # can return connection details a buyer can reach, which need not
+            # be the endpoint the provisioner arrives through.
+            public_seg = tenant_endpoint_segments(host)
             # ansible_port is emitted for every host, matching
             # HostService.render_inventory_ini. These are two renderings of
             # the same registry row and must not drift: a host that connects

@@ -8,6 +8,7 @@ from typing import Any
 
 from arkhai_bare_metal import (
     PHYSICAL_HOST_ID_REF_KEY,
+    BareMetalLeaseAccountError,
     BareMetalLeaseCreate,
     BareMetalLeaseView,
 )
@@ -93,6 +94,8 @@ def _http_error(exc: Exception) -> HTTPException:
         return HTTPException(status_code=404, detail=str(exc))
     if isinstance(exc, BareMetalHostValidationError):
         return HTTPException(status_code=exc.status_code, detail=str(exc))
+    if isinstance(exc, BareMetalLeaseAccountError):
+        return HTTPException(status_code=422, detail=str(exc))
     return HTTPException(status_code=500, detail=str(exc))
 
 
@@ -141,7 +144,11 @@ class BareMetalLeasesController:
                 )
                 body = body.model_copy(update={"create_job_id": grant.job_id})
             attached = self._leases.register_lease(body)
-        except (LeaseNotFoundError, BareMetalHostValidationError) as exc:
+        except (
+            LeaseNotFoundError,
+            BareMetalHostValidationError,
+            BareMetalLeaseAccountError,
+        ) as exc:
             raise _http_error(exc) from exc
         logger.info(
             "[BARE_METAL_LEASES] Attached lease to reservation %s (machine=%s escrow=%s)",

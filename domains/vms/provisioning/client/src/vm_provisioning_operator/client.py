@@ -65,6 +65,19 @@ from vm_provisioning_operator.models import (
 
 logger = logging.getLogger(__name__)
 
+# Host-update fields whose explicit null is meaningful: clearing a tenant-facing
+# endpoint returns the host to its management endpoint. Every other request
+# body keeps omitting null fields.
+_HOST_UPDATE_CLEARABLE_FIELDS = ("public_host", "public_port")
+
+
+def _host_update_body(body: HostUpdate) -> dict[str, Any]:
+    payload = body.model_dump(mode="json", exclude_none=True)
+    for field in _HOST_UPDATE_CLEARABLE_FIELDS:
+        if field in body.model_fields_set and getattr(body, field) is None:
+            payload[field] = None
+    return payload
+
 
 # ---------------------------------------------------------------------------
 # Exceptions
@@ -374,7 +387,9 @@ class ProvisioningClient(_ProvisioningClientBase):
 
     async def update_host(self, name: str, body: HostUpdate) -> HostResponse:
         """PUT /api/v1/hosts/{name}"""
-        return HostResponse(**(await self._put(f"/api/v1/hosts/{name}", body)))
+        return HostResponse(
+            **(await self._put(f"/api/v1/hosts/{name}", _host_update_body(body)))
+        )
 
     async def enable_host(self, name: str) -> HostResponse:
         """POST /api/v1/hosts/{name}/enable"""
@@ -892,7 +907,7 @@ class SyncProvisioningClient(_ProvisioningClientBase):
         return HostResponse(**(self._post("/api/v1/hosts/", body)))
 
     def update_host(self, name: str, body: HostUpdate) -> HostResponse:
-        return HostResponse(**(self._put(f"/api/v1/hosts/{name}", body)))
+        return HostResponse(**(self._put(f"/api/v1/hosts/{name}", _host_update_body(body))))
 
     def enable_host(self, name: str) -> HostResponse:
         return HostResponse(**(self._post(f"/api/v1/hosts/{name}/enable", {})))
