@@ -264,9 +264,17 @@ storage helper and same-process ESAPI custody against a private software TPM and
 a regular-file LUKS target. It completed preparation and prepared retry,
 preserved durable foreign TPM sentinels, refused mismatched runtime controls
 before custody, and quarantined abrupt execution. The qualification transport
-and storage target were test-only: this does not establish production-device
-transport, block-device mapping or mount behavior, active-lease reboot recovery,
-release, preservation on a provider device, or physical-host qualification.
+and storage target were test-only. The bounded native-guest qualification
+establishes the narrower downstream prerequisite for an owned synthetic
+fixture: explicit loop attachment, device-mapper open, fixed ext4 formatting,
+native PID 1 mount, identity readback and checked reverse cleanup. It also
+establishes its selected denial paths, while controlled tests separately cover
+mapper-timeout and cleanup-mismatch quarantine. The profile retains
+`CAP_SYS_ADMIN` and device-mapper class access. Those controls are broader than
+mapping-specific authority; no ioctl allowlist or tracing was established. The
+result therefore does not establish a production activation producer,
+consumption of the prepared TPM-sealed secret, provider-device preservation,
+active-lease reboot recovery, release, or physical-host qualification.
 
 ## Related contracts
 

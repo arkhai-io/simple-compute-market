@@ -36,6 +36,8 @@ Preparation MUST hold the host/index lock while reading or creating the authorit
 
 Preparation MUST enter through a content-addressed root-private request and a non-restarting provider oneshot with durable execution state. The unit MUST expose no secret argument, environment or output channel, MUST run in `system.slice`, MUST enforce zero swap and hard and soft core-size limits of zero, and MUST stop its whole control group. Before TPM access or lease-state mutation, the executor MUST verify request identity and ownership, the configured direct TPM device, the fixed cryptsetup path and version, the exact live unit cgroup, zero swap and core limits, and no-new-privileges. It MUST read the effective kernel core pattern from trusted procfs and refuse when that policy is missing, unreadable, malformed or piped. A changed request, incomplete prior execution or uncertain completion MUST refuse or quarantine without automatic redispatch.
 
+A synthetic mapper, filesystem and mount qualification MUST NOT authorize production activation or tenant access. Production activation MUST consume the prepared secret while holding the authoritative host/index lock, durably bind mapping, formatting and mount ownership to the lease generation, and quarantine an interruption whose live-resource state cannot be proved.
+
 #### Scenario: Host reboots during an active lease
 
 - **WHEN** the host restarts before the lease's original end, and no release intent exists
@@ -65,6 +67,11 @@ Preparation MUST enter through a content-addressed root-private request and a no
 
 - **WHEN** the provider oneshot finds changed request content, missing live controls or an earlier running execution without a durable completion
 - **THEN** it refuses before TPM access or lease-state mutation and does not automatically restart the request
+
+#### Scenario: Synthetic mapper and mount qualification passes
+
+- **WHEN** a disposable guest completes mapping, formatting, a native mount and checked cleanup for its owned fixture
+- **THEN** production activation and tenant access remain refused until the generation-bound activation and recovery owners are integrated
 
 ### Requirement: Bare-metal release revokes, resets and verifies before capacity returns
 

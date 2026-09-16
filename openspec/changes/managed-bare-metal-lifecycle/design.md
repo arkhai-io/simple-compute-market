@@ -306,6 +306,7 @@ Behavior from earlier bare-metal development work is carried selectively through
 | Unit | Decision tables and rendering |
 | Integration | The real application, database and typed clients, with a controlled executor boundary |
 | Disposable software TPM and VM | Custody, recovery, revocation, containment and egress |
+| Disposable native storage guest | Synthetic loop, mapper, filesystem, PID 1 mount and checked cleanup under the candidate authority profile |
 | Physical qualification | Execution on a real host |
 
 Controlled-boundary results are never reported as physical proof, and evidence from different rentals is never combined into one lifecycle claim.
@@ -343,11 +344,12 @@ None. Each unresolved physical fact above is an explicit qualification gate, not
 | Account operations report only read-back-verified outcomes, bounded to the current database | `openspec/specs/physical-provisioning/spec.md` — "Bare-metal account operations report only verified outcomes", limit stated in `architecture.md` — "Pinned access to the selected host" (promoted) |
 | Registry write credentials are sanitized and publication failures are truthful | `openspec/specs/storefront-publication/spec.md` — "Registry write credentials are sanitized and publication failures are truthful" (promoted) |
 | Roadmap disposition | `docs/development/ROADMAP.md` — no goal or gap row names this change; nothing owed (recorded) |
-| Campaign index currency | `openspec/changes/README.md` — this change's row records the accepted section 1 and 2.1 checkpoints, verified 2.2 custody and supervision seams, and one successful simulated preparation/retry composition, with overall integration and later sections outstanding (recorded) |
+| Campaign index currency | `openspec/changes/README.md` — this change's row records the accepted section 1 and 2.1 checkpoints, verified 2.2 custody and supervision seams, one simulated preparation/retry composition, and the bounded native synthetic mapping/mount prerequisite, with overall integration and later sections outstanding (recorded) |
 | Managed tenant boundary and runtime view | `openspec/specs/physical-provisioning/spec.md` (pending) |
 | Persistent-path containment | `openspec/specs/physical-provisioning/spec.md` (pending) |
 | Serialized lease-storage preparation and same-process checked TPM custody | `openspec/specs/physical-provisioning/spec.md` — "Encrypted lease-storage preparation is isolated and fail-closed", rationale in `architecture.md` — "Lease-storage custody has one live owner" (promoted; activation remains pending) |
 | Provider-owned supervised storage request seam | `openspec/specs/physical-provisioning/spec.md` — "Encrypted lease-storage preparation is isolated and fail-closed", rationale in `architecture.md` — "Lease-storage custody has one live owner" (promoted; role installation and activation remain pending) |
+| Synthetic mapping, filesystem, native mount and checked-cleanup prerequisite | `openspec/specs/physical-provisioning/spec.md` — "Encrypted lease-storage preparation is isolated and fail-closed", rationale and authority limitation in `architecture.md` — "Lease-storage custody has one live owner" (promoted; production activation and recovery remain pending) |
 | Active-lease storage recovery and release-time counter revocation | `openspec/specs/physical-provisioning/spec.md` and `architecture.md` (pending) |
 | Release sequence, completion and fencing | `openspec/specs/physical-provisioning/spec.md` and `docs/development/ARCHITECTURE.md#release` (pending) |
 | Egress containment | `openspec/specs/physical-provisioning/spec.md` (pending) |

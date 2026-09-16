@@ -685,6 +685,14 @@ supervised artifacts are safely installed and the persistent-path, mapping,
 mount and reboot-recovery prerequisites are integrated. Access grant MUST
 remain refused while those controls and recovery readiness are absent.
 
+A synthetic mapping-and-mount qualification MUST NOT authorize the ordinary
+role action or access grant. The implemented seam has no generation-bound owner
+that consumes the prepared secret under the authoritative host/index lock or
+durably owns mapping, formatting and mount outcomes, so those production paths
+remain refused. Qualification authority that includes `CAP_SYS_ADMIN` and
+device-mapper class access MUST be described as that broader authority, not as
+mapping-specific confinement.
+
 #### Scenario: Another generation owns the host counter
 
 - **WHEN** preparation finds an unreleased generation holding the host/index fence
@@ -709,6 +717,11 @@ remain refused while those controls and recovery readiness are absent.
 
 - **WHEN** the supervised executor finds changed request content, unsafe ownership, missing live unit controls or an incomplete prior execution
 - **THEN** it refuses before TPM access or lease-state mutation and durably records refusal or quarantine without automatic restart
+
+#### Scenario: Synthetic mapping and mount qualification succeeds
+
+- **WHEN** a disposable qualification guest maps, formats, mounts, reads back and cleans up its owned synthetic fixture
+- **THEN** the production preparation action and access grant remain refused until the generation-bound activation and reboot-recovery owners are integrated
 
 ### Requirement: Relays are administered resources
 
