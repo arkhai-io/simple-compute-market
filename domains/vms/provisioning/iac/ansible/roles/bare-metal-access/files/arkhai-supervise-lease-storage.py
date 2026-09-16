@@ -578,15 +578,19 @@ def execute_request(
         _required_transition(outcome_path, outcome, profile, "running")
 
         factory = backend_factory or custody_api.PytssBackend.open_device
-        backend = None
-        custody = None
-        try:
+        def open_custody():
             backend = factory(profile.tpm_device)
-            backend.bind(
-                parent_handle=int(request["parent_handle"], 16),
-                nv_index=int(request["nv_index"], 16),
-            )
-            custody = _CloseOnceCustody(custody_api.EsapiCustodyExecutor(backend))
+            try:
+                backend.bind(
+                    parent_handle=int(request["parent_handle"], 16),
+                    nv_index=int(request["nv_index"], 16),
+                )
+                return _CloseOnceCustody(custody_api.EsapiCustodyExecutor(backend))
+            except BaseException:
+                backend.close()
+                raise
+
+        try:
             config = helper.PrepareConfig(
                 state_root=profile.state_root,
                 host_id=request["host_id"],
@@ -603,26 +607,14 @@ def execute_request(
             receipt = helper.prepare(
                 config,
                 runner=runner,
-                custody=custody,
+                custody_factory=open_custody,
                 execution_evidence={
                     "boundary": "systemd-oneshot",
                     "request_id": request_id,
                 },
             )
-            custody.close()
             receipt = _verified_receipt(receipt, request)
         except BaseException as exc:
-            cleanup_failure = None
-            if custody is not None and not custody.closed:
-                try:
-                    custody.close()
-                except BaseException as close_exc:
-                    cleanup_failure = close_exc
-            elif backend is not None:
-                try:
-                    backend.close()
-                except BaseException as close_exc:
-                    cleanup_failure = close_exc
             _required_transition(
                 outcome_path,
                 outcome,
@@ -632,7 +624,7 @@ def execute_request(
             )
             raise SupervisionQuarantined(
                 "helper completion is uncertain; request quarantined"
-            ) from (cleanup_failure or exc)
+            ) from exc
         _required_transition(
             outcome_path, outcome, profile, "completed", receipt=receipt
         )

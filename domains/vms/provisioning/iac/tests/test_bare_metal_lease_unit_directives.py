@@ -55,6 +55,11 @@ UNIT_TEMPLATES = {
         "arkhai-lease-storage-prepare@"
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.service"
     ),
+    "lease-storage-open@.service.j2": (
+        "arkhai-lease-storage-open@"
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.service"
+    ),
+    "lease-volume.mount.j2": "run-arkhai-volumes-generation-1.mount",
 }
 
 in_compatibility_lane = pytest.mark.skipif(
@@ -93,6 +98,21 @@ def _render(name: str) -> str:
         "bare_metal_lease_tpm_device": "/dev/tpm0",
         "bare_metal_lease_cryptsetup_path": "/usr/sbin/cryptsetup",
         "bare_metal_lease_cryptsetup_version": "2.4.3",
+        "bare_metal_lease_storage_activation_supervisor_path": (
+            "/usr/lib/arkhai/arkhai-supervise-lease-storage-activation"
+        ),
+        "bare_metal_lease_storage_activation_profile_path": (
+            "/etc/arkhai/lease-storage-activation.json"
+        ),
+        "bare_metal_lease_storage_loop_device": "/dev/loop7",
+        "bare_metal_lease_storage_mapper_path": "/dev/mapper/arkhai-test",
+        "bare_metal_lease_storage_mount_point": "/run/arkhai/volumes/generation-1",
+        "bare_metal_lease_storage_activation_request_root": (
+            "/var/lib/arkhai/lease-storage-activation-requests"
+        ),
+        "bare_metal_lease_storage_activation_state_root": "/var/lib/arkhai/lease-storage",
+        "bare_metal_lease_storage_activation_mount_root": "/run/arkhai/volumes",
+        "bare_metal_lease_storage_activation_unit_root": "/run/systemd/system",
     })
     return templar.template(trust_as_template((TEMPLATES / name).read_text(encoding="utf-8")))
 
@@ -156,6 +176,23 @@ def test_rendered_storage_unit_and_runtime_admission_compose(tmp_path):
         effective_uid=0,
         core_limit=(0, 0),
     )
+
+
+def test_activation_unit_retains_confinement_and_exact_required_authority():
+    rendered = _render("lease-storage-open@.service.j2")
+    assert "ProtectSystem=strict" in rendered
+    assert "SystemCallFilter=~@mount" in rendered
+    assert "MemorySwapMax=0" in rendered
+    assert "LimitCORE=0" in rendered
+    assert "DevicePolicy=closed" in rendered
+    assert "DeviceAllow=/dev/tpm0 rw" in rendered
+    assert "DeviceAllow=/dev/loop7 rw" in rendered
+    assert "DeviceAllow=/dev/mapper/control rw" in rendered
+    assert "DeviceAllow=block-device-mapper rw" in rendered
+    assert "ReadWritePaths=/var/lib/arkhai/lease-storage-activation-requests" in rendered
+    assert "ReadWritePaths=/var/lib/arkhai/lease-storage" in rendered
+    assert "ReadWritePaths=/run/arkhai/volumes" in rendered
+    assert "ReadWritePaths=/run/systemd/system" in rendered
 
 
 def _local_systemd_version() -> int:

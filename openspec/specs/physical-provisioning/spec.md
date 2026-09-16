@@ -679,19 +679,37 @@ or an incomplete earlier execution MUST quarantine without helper dispatch or
 automatic retry, and an uncertain service-manager response MUST NOT authorize
 resubmission.
 
-The ordinary helper entrypoint and the `node_prepare_lease_storage` role action
-MUST continue to refuse before creating lease state or key material until the
-supervised artifacts are safely installed and the persistent-path, mapping,
-mount and reboot-recovery prerequisites are integrated. Access grant MUST
-remain refused while those controls and recovery readiness are absent.
+The generation-bound activation owner MUST admit the immutable preparation
+identity and backing-file/LUKS provenance under the authoritative host/index
+lock before opening TPM custody. It MUST compare the expected sealed-object
+Name before creating a policy session or unsealing, keep the recovered secret
+inside the lock-held mapper callback, require checked object/session cleanup
+before receiving that secret, and require checked final ESAPI-context closure
+before formatting or success. It MUST durably fence loop attachment, mapper
+open, one-time format and native PID 1 mount intent and outcome. Missing,
+unreadable or changed provenance, a changed preparation identity, or an
+ambiguous mutation MUST quarantine the generation under the same lock without
+automatic rollback, detach or retry.
 
-A synthetic mapping-and-mount qualification MUST NOT authorize the ordinary
-role action or access grant. The implemented seam has no generation-bound owner
-that consumes the prepared secret under the authoritative host/index lock or
-durably owns mapping, formatting and mount outcomes, so those production paths
-remain refused. Qualification authority that includes `CAP_SYS_ADMIN` and
-device-mapper class access MUST be described as that broader authority, not as
-mapping-specific confinement.
+Before any custody or storage mutation, the activation owner MUST admit the
+exact live unit, cgroup, boot, zero-swap/core state, non-piped core policy and
+manager-resolved syscall, device and writable-path profile. Before format or
+mount it MUST bind the mapper UUID, published block node and kernel dependency
+to the prepared LUKS UUID and owned loop. Before PID 1 starts the mount it MUST
+admit the collision-free manager-resolved mount fragment and drop-ins. After
+mount start and before success it MUST verify PID 1's mounted device, filesystem
+identity and `nodev,nosuid,noexec` options. Qualification authority
+that includes `CAP_SYS_ADMIN` and device-mapper class access MUST be described
+as that broader authority, not as mapping-specific confinement.
+
+The activation owner and its supervised artifacts are not installed by the
+ordinary role. The ordinary helper entrypoint and
+`node_prepare_lease_storage` role action MUST continue to refuse before
+creating lease state or key material until installation, persistent-path and
+reboot-recovery prerequisites are integrated. Access grant MUST remain refused
+while those controls and recovery readiness are absent. A synthetic prepared-
+storage activation qualification MUST NOT authorize either path or establish
+physical-device behavior.
 
 #### Scenario: Another generation owns the host counter
 
@@ -718,10 +736,10 @@ mapping-specific confinement.
 - **WHEN** the supervised executor finds changed request content, unsafe ownership, missing live unit controls or an incomplete prior execution
 - **THEN** it refuses before TPM access or lease-state mutation and durably records refusal or quarantine without automatic restart
 
-#### Scenario: Synthetic mapping and mount qualification succeeds
+#### Scenario: Prepared storage is activated by the isolated qualification path
 
-- **WHEN** a disposable qualification guest maps, formats, mounts, reads back and cleans up its owned synthetic fixture
-- **THEN** the production preparation action and access grant remain refused until the generation-bound activation and reboot-recovery owners are integrated
+- **WHEN** a disposable qualification guest prepares synthetic encrypted storage through the helper and activates it through the supervised generation-bound owner using a software TPM exposed as a guest device
+- **THEN** the live mapper and native mount may remain until whole-guest disposal, and the production preparation action and access grant remain refused pending installation, persistent-path, reboot-recovery and physical-device qualification
 
 ### Requirement: Relays are administered resources
 

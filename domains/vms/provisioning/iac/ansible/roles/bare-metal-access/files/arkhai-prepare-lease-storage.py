@@ -19,12 +19,14 @@ import stat
 import subprocess
 import sys
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable, Sequence
 
 
 MAX_COUNTER = (1 << 64) - 1
 SCHEMA = "arkhai.lease-storage-preparation.v1"
+ACTIVATION_SCHEMA = "arkhai.lease-storage-activation.v1"
 FAILPOINTS = (
     "lease_state",
     "host_lock",
@@ -45,6 +47,7 @@ FAILPOINTS = (
     "luks_format_intent",
     "luks_format",
     "luks_verified",
+    "backing_evidence",
     "prepared_receipt",
     "helper_completed",
 )
@@ -52,6 +55,10 @@ _IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z")
 _HANDLE = re.compile(r"0x[0-9a-fA-F]{8}\Z")
 _NV_INDEX = re.compile(r"0x[0-9a-fA-F]{7,8}\Z")
 _HEX_NAME = re.compile(r"(?:[0-9a-fA-F]{2}){3,}\Z")
+_REQUEST_ID = re.compile(r"[0-9a-f]{64}\Z")
+_LUKS_UUID = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\Z"
+)
 
 
 class PreparationRefused(RuntimeError):
@@ -341,6 +348,73 @@ def _sync_owned_output(path: Path, *, uid: int) -> None:
     _fsync_dir(path.parent)
 
 
+def _luks_uuid(runner, backing: Path) -> str:
+    try:
+        raw = runner.run(("cryptsetup", "luksUUID", str(backing)))
+        value = raw.decode("ascii").strip()
+    except (PreparationRefused, UnicodeError) as exc:
+        raise PreparationQuarantined("cannot verify LUKS2 backing provenance") from exc
+    if not _LUKS_UUID.fullmatch(value):
+        raise PreparationQuarantined("cannot verify LUKS2 backing provenance")
+    return value
+
+
+def _backing_evidence(
+    backing: Path, *, config: PrepareConfig, request_id: str, runner
+) -> dict[str, object]:
+    fd = os.open(backing, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        info = os.fstat(fd)
+    finally:
+        os.close(fd)
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or info.st_uid != config.required_uid
+        or stat.S_IMODE(info.st_mode) != 0o600
+        or info.st_nlink != 1
+        or info.st_size != config.backing_size
+    ):
+        raise PreparationQuarantined("backing provenance is not safely owned")
+    return {
+        "schema": "arkhai.lease-storage-backing.v1",
+        "preparation_request_id": request_id,
+        "path": backing.name,
+        "st_dev": info.st_dev,
+        "st_ino": info.st_ino,
+        "st_size": info.st_size,
+        "st_uid": info.st_uid,
+        "st_gid": info.st_gid,
+        "st_mode": stat.S_IMODE(info.st_mode),
+        "st_nlink": info.st_nlink,
+        "luks_type": "luks2",
+        "luks_uuid": _luks_uuid(runner, backing),
+        "keyslots": [0],
+    }
+
+
+def _verify_backing_evidence(
+    backing: Path, evidence, *, config: PrepareConfig, runner,
+    expected_request_id: str | None = None,
+) -> None:
+    if not isinstance(evidence, dict):
+        raise PreparationQuarantined("backing provenance is malformed")
+    request_id = evidence.get("preparation_request_id")
+    if not isinstance(request_id, str) or not _REQUEST_ID.fullmatch(request_id):
+        raise PreparationQuarantined("backing provenance is malformed")
+    if expected_request_id is not None and request_id != expected_request_id:
+        raise PreparationQuarantined("backing provenance request identity changed")
+    try:
+        observed = _backing_evidence(
+            backing, config=config, request_id=request_id, runner=runner
+        )
+    except OSError as exc:
+        raise PreparationQuarantined(
+            "backing provenance no longer matches"
+        ) from exc
+    if observed != evidence:
+        raise PreparationQuarantined("backing provenance no longer matches")
+
+
 def _lease_state(config: PrepareConfig) -> tuple[Path, Path, dict[str, object]]:
     leases = config.state_root / "leases"
     lease_dir = leases / config.generation
@@ -367,6 +441,31 @@ def _lease_state(config: PrepareConfig) -> tuple[Path, Path, dict[str, object]]:
         manifest = {**expected, "state": "new", "events": [], "sessions": [], "objects": []}
         _write_new_json(manifest_path, manifest)
     return lease_dir, manifest_path, manifest
+
+
+def _admit_activation_state(config: PrepareConfig, lease_dir: Path) -> None:
+    path = lease_dir / "activation.json"
+    if not path.exists() and not path.is_symlink():
+        return
+    try:
+        value = _read_private_json(path, uid=config.required_uid)
+    except PreparationRefused as exc:
+        raise PreparationQuarantined("activation ownership evidence is unsafe") from exc
+    expected = {
+        "schema": ACTIVATION_SCHEMA,
+        "host_id": config.host_id,
+        "machine_id": config.machine_id,
+        "generation": config.generation,
+        "nv_index": config.nv_index,
+    }
+    if any(value.get(key) != expected_value for key, expected_value in expected.items()):
+        raise PreparationQuarantined("activation ownership identity is ambiguous")
+    state = value.get("state")
+    if state in {"pending", "quarantined"}:
+        raise PreparationQuarantined("activation ownership is incomplete")
+    if state == "completed":
+        raise PreparationRefused("lease storage is already activated")
+    raise PreparationQuarantined("activation ownership state is invalid")
 
 
 def _state_prerequisites(config: PrepareConfig) -> None:
@@ -534,6 +633,126 @@ class _ManifestOwnershipRecorder:
             raise
 
 
+class LockedLease:
+    """A prepared generation admitted while its host/index lock is held."""
+
+    def __init__(self, config, runner, lease_dir, manifest_path, manifest) -> None:
+        self.config = config
+        self.runner = runner
+        self.lease_dir = lease_dir
+        self.manifest_path = manifest_path
+        self.manifest = manifest
+        self._valid = True
+
+    def invalidate(self) -> None:
+        self._valid = False
+
+    def quarantine(self, reason: str, event: str) -> None:
+        if not self._valid:
+            raise PreparationUnresolved("prepared lease lock is no longer held")
+        self.manifest["state"] = "quarantined"
+        self.manifest["quarantine_reason"] = reason
+        _persist(self.manifest_path, self.manifest, self.config, event)
+
+    def require_prepared(self, preparation_request_id: str) -> None:
+        if not self._valid:
+            raise PreparationRefused("prepared lease lock is no longer held")
+        evidence = self.manifest.get("backing_evidence")
+        receipt = self.manifest.get("receipt")
+        if self.manifest.get("state") != "prepared" or not isinstance(receipt, dict):
+            raise PreparationRefused("lease storage is not durably prepared")
+        expected_receipt = {
+            "schema": SCHEMA,
+            "host_id": self.config.host_id,
+            "machine_id": self.config.machine_id,
+            "generation": self.config.generation,
+            "counter": self.manifest.get("counter"),
+            "nv_index": self.config.nv_index,
+            "parent_name": self.config.parent_name,
+            "sealed_object_name": self.manifest.get("sealed_object_name"),
+            "state": "prepared",
+        }
+        if receipt != expected_receipt:
+            raise PreparationQuarantined("prepared receipt identity no longer matches")
+        if not isinstance(evidence, dict):
+            raise PreparationRefused("legacy preparation has no activation provenance")
+        if evidence.get("preparation_request_id") != preparation_request_id:
+            raise PreparationRefused("preparation identity does not match activation")
+        _verify_backing_evidence(
+            self.lease_dir / "volume.luks",
+            evidence,
+            config=self.config,
+            runner=self.runner,
+        )
+        _luks_metadata(self.runner, self.lease_dir / "volume.luks")
+
+    def consume_secret(self, custody_factory, mapper_callback):
+        """Recover only into a callback, then check final ESAPI-context closure."""
+        if not self._valid:
+            raise PreparationRefused("prepared lease lock is no longer held")
+        custody = None
+        recorder = _ManifestOwnershipRecorder(
+            self.config, self.manifest_path, self.manifest
+        )
+        try:
+            custody = custody_factory()
+            custody.verify_resources(
+                parent_handle=int(self.config.parent_handle, 16),
+                parent_name=bytes.fromhex(self.config.parent_name),
+                nv_index=int(self.config.nv_index, 16),
+            )
+            _reconcile_handles(self.config, self.manifest_path, self.manifest)
+            counter = custody.read_counter()
+            if counter != self.manifest.get("counter"):
+                raise PreparationQuarantined("prepared counter no longer matches")
+            name = self.manifest.get("sealed_object_name")
+            if not isinstance(name, str) or not _HEX_NAME.fullmatch(name):
+                raise PreparationQuarantined("prepared sealed-object Name is invalid")
+            evidence, secret = custody.recover_and_verify(
+                private_blob=(self.lease_dir / "sealed.priv").read_bytes(),
+                public_blob=(self.lease_dir / "sealed.pub").read_bytes(),
+                expected_policy=(self.lease_dir / "policy.nv").read_bytes(),
+                expected_name=bytes.fromhex(name),
+                counter=counter,
+                recorder=recorder,
+            )
+            if evidence.name.hex() != name:
+                raise PreparationQuarantined("prepared sealed-object Name changed")
+            result = mapper_callback(secret)
+            del secret
+            custody.close()
+            custody = None
+            return result
+        except BaseException as exc:
+            if custody is not None:
+                try:
+                    custody.close()
+                except BaseException as close_exc:
+                    raise PreparationQuarantined(
+                        "ESAPI ownership boundary did not finalize"
+                    ) from close_exc
+            raise exc
+
+
+@contextmanager
+def locked_prepared_lease(config: PrepareConfig, *, runner):
+    """Yield one non-reentrant prepared consumer under the host/index lock."""
+    _state_prerequisites(config)
+    lock_fd = _lock_host(config)
+    lease = None
+    try:
+        _claim_generation(config)
+        lease_dir, manifest_path, manifest = _lease_state(config)
+        if manifest.get("state") == "quarantined":
+            raise PreparationQuarantined("lease preparation is already quarantined")
+        lease = LockedLease(config, runner, lease_dir, manifest_path, manifest)
+        yield lease
+    finally:
+        if lease is not None:
+            lease.invalidate()
+        os.close(lock_fd)
+
+
 def _create_backing(path: Path, config: PrepareConfig) -> None:
     if path.exists() or path.is_symlink():
         _owned_regular(path, uid=config.required_uid)
@@ -583,6 +802,7 @@ def _prepare(
     *,
     runner=None,
     custody=None,
+    custody_factory=None,
     random_bytes: Callable[[int], bytes] = os.urandom,
     fail_after: str | None = None,
     execution_evidence: dict[str, str] | None = None,
@@ -591,11 +811,16 @@ def _prepare(
     if fail_after is not None and fail_after not in FAILPOINTS:
         raise ValueError(f"unknown failpoint: {fail_after}")
     runner = runner or SubprocessRunner()
-    custody = custody or getattr(runner, "custody", None)
-    if custody is None:
+    if custody is None and custody_factory is None:
+        custody = getattr(runner, "custody", None)
+    if custody is not None and custody_factory is not None:
+        raise PreparationRefused("custody and custody factory are mutually exclusive")
+    if custody is None and custody_factory is None:
         raise PreparationRefused(
             "same-process ESAPI custody is not enabled for production preparation"
         )
+    factory_owned = False
+    custody_finalized = False
     _state_prerequisites(config)
     lock_fd = _lock_host(config)
     try:
@@ -603,8 +828,41 @@ def _prepare(
         _claim_generation(config)
         lease_dir, manifest_path, manifest = _lease_state(config)
         _fail("lease_state", fail_after)
+        _admit_activation_state(config, lease_dir)
         if manifest.get("state") == "quarantined":
             raise PreparationQuarantined("lease preparation is already quarantined")
+        preparation_request_id = None
+        if execution_evidence is not None:
+            if set(execution_evidence) != {"boundary", "request_id"} or any(
+                not isinstance(value, str) for value in execution_evidence.values()
+            ) or not _REQUEST_ID.fullmatch(execution_evidence["request_id"]):
+                raise PreparationRefused("invalid supervised execution evidence")
+            preparation_request_id = execution_evidence["request_id"]
+        completed_before_attempt = isinstance(manifest.get("receipt"), dict)
+        if "preparation_request_id" not in manifest:
+            if completed_before_attempt:
+                recorded_preparation_request_id = None
+            else:
+                manifest["preparation_request_id"] = preparation_request_id
+                _persist(
+                    manifest_path, manifest, config,
+                    "preparation_request_identity_recorded",
+                )
+                recorded_preparation_request_id = preparation_request_id
+        else:
+            recorded_preparation_request_id = manifest["preparation_request_id"]
+        if recorded_preparation_request_id != preparation_request_id:
+            raise PreparationQuarantined(
+                "preparation request identity changed across retry"
+            )
+        if custody is None:
+            try:
+                custody = custody_factory()
+                factory_owned = True
+            except BaseException as exc:
+                raise PreparationQuarantined(
+                    "ESAPI ownership boundary could not be opened"
+                ) from exc
         attempts = manifest.setdefault("helper_attempts", [])
         if not isinstance(attempts, list):
             raise PreparationRefused("invalid helper-attempt evidence")
@@ -614,10 +872,6 @@ def _prepare(
             "state": "running",
         }
         if execution_evidence is not None:
-            if set(execution_evidence) != {"boundary", "request_id"} or any(
-                not isinstance(value, str) for value in execution_evidence.values()
-            ):
-                raise PreparationRefused("invalid supervised execution evidence")
             helper_attempt.update(execution_evidence)
             helper_attempt["helper"] = "supervised-preparation-helper"
         attempts.append(helper_attempt)
@@ -641,6 +895,14 @@ def _prepare(
                 "size": config.backing_size,
             }:
                 raise PreparationRefused("backing file has no matching ownership intent")
+            if manifest.get("backing_evidence") is not None:
+                _verify_backing_evidence(
+                    backing,
+                    manifest["backing_evidence"],
+                    config=config,
+                    runner=runner,
+                    expected_request_id=preparation_request_id,
+                )
         elif shutil.disk_usage(backing.parent).free - config.backing_size < config.free_space_floor:
             raise PreparationRefused("free-space floor would be violated")
 
@@ -757,10 +1019,19 @@ def _prepare(
             _owned_regular(path, uid=config.required_uid)
         policy = policy_path.read_bytes()
         try:
+            recorded_name = manifest.get("sealed_object_name")
+            if recorded_name is not None and (
+                not isinstance(recorded_name, str)
+                or not _HEX_NAME.fullmatch(recorded_name)
+            ):
+                raise PreparationQuarantined("recorded sealed-object Name is malformed")
             evidence, recovered_secret = custody.recover_and_verify(
                 private_blob=object_private.read_bytes(),
                 public_blob=object_public.read_bytes(),
                 expected_policy=policy,
+                expected_name=(
+                    bytes.fromhex(recorded_name) if recorded_name is not None else None
+                ),
                 counter=current,
                 recorder=recorder,
             )
@@ -773,7 +1044,8 @@ def _prepare(
         secret = recovered_secret
         object_name = evidence.name.hex()
         _fail("object_closed", fail_after)
-        manifest["sealed_object_name"] = object_name
+        if recorded_name is None:
+            manifest["sealed_object_name"] = object_name
         manifest["state"] = "sealed_object_verified"
         _persist(manifest_path, manifest, config, "sealed_object_verified")
         _fail("sealed_object_verified", fail_after)
@@ -783,6 +1055,7 @@ def _prepare(
             raise PreparationQuarantined(
                 "ESAPI ownership boundary did not finalize"
             ) from exc
+        custody_finalized = True
 
         existed = backing.exists() or backing.is_symlink()
         if not existed:
@@ -856,6 +1129,24 @@ def _prepare(
             _persist(manifest_path, manifest, config, "luks_single_keyslot_verified")
             _fail("luks_verified", fail_after)
 
+        if manifest.get("backing_evidence") is not None:
+            _verify_backing_evidence(
+                backing,
+                manifest["backing_evidence"],
+                config=config,
+                runner=runner,
+                expected_request_id=preparation_request_id,
+            )
+        elif preparation_request_id is not None and not completed_before_attempt:
+            manifest["backing_evidence"] = _backing_evidence(
+                backing,
+                config=config,
+                request_id=preparation_request_id,
+                runner=runner,
+            )
+            _persist(manifest_path, manifest, config, "backing_evidence_recorded")
+            _fail("backing_evidence", fail_after)
+
         manifest["state"] = "prepared"
         receipt = _receipt(config, manifest)
         manifest["receipt"] = receipt
@@ -865,21 +1156,37 @@ def _prepare(
         _persist(manifest_path, manifest, config, "helper_completed")
         _fail("helper_completed", fail_after)
         return receipt
-    except PreparationQuarantined as exc:
-        if "manifest" not in locals() or "manifest_path" not in locals():
-            raise PreparationUnresolved(
-                "cannot identify authoritative manifest to persist quarantine"
-            ) from exc
-        if manifest.get("state") != "quarantined":
-            manifest["state"] = "quarantined"
-            manifest["quarantine_reason"] = str(exc)
+    except BaseException as original:
+        failure = original
+        if (
+            factory_owned
+            and custody is not None
+            and not custody_finalized
+            and not isinstance(original, InjectedInterruption)
+        ):
             try:
-                _persist(manifest_path, manifest, config, "quarantined")
-            except (OSError, PreparationRefused) as persist_error:
+                custody.close()
+                custody_finalized = True
+            except BaseException as close_error:
+                failure = PreparationQuarantined(
+                    "ESAPI ownership boundary did not finalize"
+                )
+                failure.__cause__ = close_error
+        if isinstance(failure, PreparationQuarantined):
+            if "manifest" not in locals() or "manifest_path" not in locals():
                 raise PreparationUnresolved(
-                    "failed to persist quarantine under the host/index lock"
-                ) from persist_error
-        raise
+                    "cannot identify authoritative manifest to persist quarantine"
+                ) from failure
+            if manifest.get("state") != "quarantined":
+                manifest["state"] = "quarantined"
+                manifest["quarantine_reason"] = str(failure)
+                try:
+                    _persist(manifest_path, manifest, config, "quarantined")
+                except (OSError, PreparationRefused) as persist_error:
+                    raise PreparationUnresolved(
+                        "failed to persist quarantine under the host/index lock"
+                    ) from persist_error
+        raise failure
     finally:
         os.close(lock_fd)
 
@@ -889,6 +1196,7 @@ def prepare(
     *,
     runner=None,
     custody=None,
+    custody_factory=None,
     random_bytes: Callable[[int], bytes] = os.urandom,
     fail_after: str | None = None,
     execution_evidence: dict[str, str] | None = None,
@@ -900,6 +1208,7 @@ def prepare(
             config,
             runner=runner,
             custody=custody,
+            custody_factory=custody_factory,
             random_bytes=random_bytes,
             fail_after=fail_after,
             execution_evidence=execution_evidence,

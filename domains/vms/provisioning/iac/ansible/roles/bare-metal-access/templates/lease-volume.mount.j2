@@ -1,0 +1,13 @@
+[Unit]
+Description=Managed lease plaintext volume
+DefaultDependencies=no
+
+[Mount]
+What={{ bare_metal_lease_storage_mapper_path }}
+Where={{ bare_metal_lease_storage_mount_point }}
+Type=ext4
+Options=rw,nosuid,nodev,noexec
+Slice=system.slice
+
+[Install]
+WantedBy=

@@ -136,11 +136,13 @@ class EsapiCustodyExecutor:
         private_blob: bytes,
         public_blob: bytes,
         expected_policy: bytes,
+        expected_name: bytes | None = None,
         counter: int,
         recorder,
     ) -> tuple[SealedEvidence, bytes]:
         if (
             len(expected_policy) != 32
+            or (expected_name is not None and len(expected_name) != 34)
             or not 0 < len(private_blob) <= _MAX_SEALED_BLOB
             or not 0 < len(public_blob) <= _MAX_SEALED_BLOB
         ):
@@ -176,6 +178,8 @@ class EsapiCustodyExecutor:
                 or evidence.name[:2] != b"\x00\x0b"
             ):
                 raise CustodyRefused("sealed object public area does not match custody policy")
+            if expected_name is not None and evidence.name != expected_name:
+                raise CustodyRefused("sealed object Name does not match prepared evidence")
             session_record = recorder.pending("session", "unseal-policy-nv")
             session_handle = self._backend.start_policy(False)
             self._checkpoint("after-unseal-session-create")

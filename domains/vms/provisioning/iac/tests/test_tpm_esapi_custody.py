@@ -291,6 +291,34 @@ def test_recovery_uses_one_live_object_and_policy_session_then_closes_both():
     assert [event[0] for event in recorder.events].count("closed") == 2
 
 
+def test_prepared_name_mismatch_closes_object_before_session_or_unseal():
+    module = _load_module()
+    recorder = Recorder()
+    backend = Backend()
+
+    with pytest.raises(module.CustodyUncertain):
+        module.EsapiCustodyExecutor(backend).recover_and_verify(
+            private_blob=b"private",
+            public_blob=b"public",
+            expected_policy=b"P" * 32,
+            expected_name=b"\x00\x0b" + b"X" * 32,
+            counter=10,
+            recorder=recorder,
+        )
+
+    assert backend.calls == [
+        ("load_sealed", b"private", b"public"),
+        ("sealed_public", 0x03000001),
+        ("flush:0x3000001", 0x03000001),
+    ]
+    assert recorder.events == [
+        ("pending", "object", "load-sealed-object"),
+        ("live", "object", 0x03000001),
+        ("close_pending", "object"),
+        ("closed", "object"),
+    ]
+
+
 def test_production_transport_is_explicit_direct_device_only(monkeypatch):
     module = _load_module()
     calls = []

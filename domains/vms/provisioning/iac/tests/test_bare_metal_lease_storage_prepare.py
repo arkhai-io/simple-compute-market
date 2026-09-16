@@ -70,7 +70,9 @@ class RecordingRunner:
         self.formatted: set[str] = set()
         self.keys: dict[str, bytes] = {}
         self.luks_json = LUKS_JSON
+        self.luks_uuid = "12345678-1234-4abc-8def-1234567890ab"
         self.sealed_secret = b"S" * 32
+        self.sealed_name = b"\x00\x0b" + b"N" * 32
 
     @property
     def custody(self):
@@ -116,18 +118,27 @@ class RecordingRunner:
         return b"private", b"public"
 
     def recover_and_verify(
-        self, *, private_blob, public_blob, expected_policy, counter, recorder
+        self,
+        *,
+        private_blob,
+        public_blob,
+        expected_policy,
+        expected_name=None,
+        counter,
+        recorder,
     ):
         self.calls.append((("esapi_recover_and_verify",), None))
         assert private_blob == b"private"
         assert public_blob == b"public"
         assert len(expected_policy) == 32
+        if expected_name is not None:
+            assert expected_name == self.sealed_name
         assert counter == self.counter
         obj = self._owned(recorder, "object", "load-sealed-object", 0x80000001)
         session = self._owned(recorder, "session", "unseal-policy-nv", 0x03000001)
         self._close_owned(recorder, session)
         self._close_owned(recorder, obj)
-        return SimpleNamespace(name=bytes.fromhex("000baabbccdd")), self.sealed_secret
+        return SimpleNamespace(name=self.sealed_name), self.sealed_secret
 
     def close(self):
         self.calls.append((("esapi_finalize",), None))
@@ -147,6 +158,10 @@ class RecordingRunner:
             if not self._is_luks(argv[-1]):
                 raise RuntimeError("not a LUKS volume")
             return self.luks_json.encode()
+        if command == "cryptsetup" and "luksUUID" in argv:
+            if not self._is_luks(argv[-1]):
+                raise RuntimeError("not a LUKS volume")
+            return (self.luks_uuid + "\n").encode()
         if command == "cryptsetup" and "--test-passphrase" in argv:
             assert argv[:-1] == (
                 "cryptsetup",
@@ -215,7 +230,7 @@ def test_prepare_formats_one_keyslot_and_records_exact_identity(tmp_path):
         "counter": 10,
         "nv_index": "0x1500020",
         "parent_name": "000b11223344",
-        "sealed_object_name": "000baabbccdd",
+        "sealed_object_name": (b"\x00\x0b" + b"N" * 32).hex(),
         "state": "prepared",
     }
     commands = [call[0] for call in runner.calls]
@@ -290,6 +305,47 @@ def test_supervised_dispatch_records_the_verified_request_boundary(tmp_path):
             "request_id": request_id,
         }
     ]
+    backing = config.state_root / "leases" / config.generation / "volume.luks"
+    info = backing.stat()
+    assert manifest["backing_evidence"] == {
+        "schema": "arkhai.lease-storage-backing.v1",
+        "preparation_request_id": request_id,
+        "path": "volume.luks",
+        "st_dev": info.st_dev,
+        "st_ino": info.st_ino,
+        "st_size": config.backing_size,
+        "st_uid": os.geteuid(),
+        "st_gid": info.st_gid,
+        "st_mode": stat.S_IMODE(info.st_mode),
+        "st_nlink": 1,
+        "luks_type": "luks2",
+        "luks_uuid": "12345678-1234-4abc-8def-1234567890ab",
+        "keyslots": [0],
+    }
+
+
+def test_supervised_retry_never_refreshes_backing_provenance(tmp_path):
+    module = _load_helper()
+    config = _config(module, tmp_path)
+    runner = RecordingRunner()
+    evidence = {"boundary": "systemd-oneshot", "request_id": "a" * 64}
+
+    module.prepare(
+        config,
+        runner=runner,
+        random_bytes=lambda length: b"S" * length,
+        execution_evidence=evidence,
+    )
+    manifest_path = config.state_root / "leases" / config.generation / "manifest.json"
+    original = json.loads(manifest_path.read_text())["backing_evidence"]
+    runner.luks_uuid = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+
+    with pytest.raises(module.PreparationQuarantined, match="provenance"):
+        module.prepare(config, runner=runner, execution_evidence=evidence)
+
+    current = json.loads(manifest_path.read_text())
+    assert current["backing_evidence"] == original
+    assert current["state"] == "quarantined"
 
 
 def test_new_policy_and_sealed_blobs_are_private_files(tmp_path):
@@ -721,9 +777,20 @@ def test_retry_resumes_attributable_partial_prepare_without_reincrement(tmp_path
             runner=runner,
             random_bytes=lambda length: b"S" * length,
             fail_after=boundary,
+            execution_evidence={
+                "boundary": "controlled-test",
+                "request_id": "a" * 64,
+            },
         )
 
-    receipt = module.prepare(config, runner=runner)
+    receipt = module.prepare(
+        config,
+        runner=runner,
+        execution_evidence={
+            "boundary": "controlled-test",
+            "request_id": "a" * 64,
+        },
+    )
     assert receipt["state"] == "prepared"
     assert sum(call[0][0] == "esapi_increment_counter" for call in runner.calls) == 1
     assert sum("luksFormat" in call[0] for call in runner.calls) == 1
@@ -975,16 +1042,75 @@ def test_all_declared_side_effect_boundaries_leave_a_durable_manifest(tmp_path):
         case = tmp_path / boundary
         case.mkdir(mode=0o700)
         runner = RecordingRunner()
-        with pytest.raises(module.InjectedInterruption):
+        try:
             module.prepare(
                 _config(module, case),
                 runner=runner,
                 random_bytes=lambda length: b"S" * length,
                 fail_after=boundary,
+                execution_evidence={
+                    "boundary": "controlled-test",
+                    "request_id": "a" * 64,
+                },
             )
+        except module.InjectedInterruption:
+            pass
+        else:
+            pytest.fail(f"failpoint was not reached: {boundary}")
         manifests = list((case / "state" / "leases").glob("*/manifest.json"))
         if boundary == "host_lock":
             assert manifests == []
             continue
         assert len(manifests) == 1, boundary
         json.loads(manifests[0].read_text(encoding="utf-8"))
+
+
+def test_lazy_factory_failure_is_closed_and_quarantined_under_host_lock(tmp_path):
+    module = _load_helper()
+    config = _config(module, tmp_path)
+    runner = RecordingRunner()
+    closed = []
+
+    class FailingCustody(RecordingRunner):
+        def verify_resources(self, **_expected):
+            raise RuntimeError("controlled resource failure")
+
+        def close(self):
+            closed.append(True)
+
+    with pytest.raises(module.PreparationQuarantined, match="resource verification"):
+        module.prepare(
+            config, runner=runner, custody_factory=FailingCustody,
+            execution_evidence={"boundary": "systemd-oneshot", "request_id": "d" * 64},
+        )
+    assert closed == [True]
+    manifest = json.loads(
+        (config.state_root / "leases" / config.generation / "manifest.json").read_text()
+    )
+    assert manifest["state"] == "quarantined"
+
+
+def test_interrupted_original_request_cannot_be_relabelled_by_retry(tmp_path):
+    module = _load_helper()
+    config = _config(module, tmp_path)
+    first = RecordingRunner()
+    with pytest.raises(module.InjectedInterruption):
+        module.prepare(
+            config, runner=first, fail_after="counter_intent",
+            execution_evidence={"boundary": "systemd-oneshot", "request_id": "a" * 64},
+        )
+    opened = []
+    calls = list(first.calls)
+    with pytest.raises(module.PreparationQuarantined, match="identity changed"):
+        module.prepare(
+            config, runner=first,
+            custody_factory=lambda: opened.append(True) or first,
+            execution_evidence={"boundary": "systemd-oneshot", "request_id": "b" * 64},
+        )
+    assert opened == []
+    assert first.calls == calls
+    manifest = json.loads(
+        (config.state_root / "leases" / config.generation / "manifest.json").read_text()
+    )
+    assert manifest["preparation_request_id"] == "a" * 64
+    assert manifest["state"] == "quarantined"

@@ -252,13 +252,13 @@ instead of treating a new process or a reused TPM handle as continuation.
 Systemd owns the whole process cgroup, so stopping the unit covers descendants
 rather than only the main process.
 
-The implementation remains a controlled preparation and qualification seam.
-The host role does not install or activate these artifacts, and its ordinary
-prepare action still refuses before state or key creation while persistent-path,
-mapping, mount and reboot-recovery prerequisites are absent. Access grant also
-remains refused. A disposable systemd 249 run of the synthetic storage unit
-established inherited zero hard and soft core limits and manager-owned removal
-of a sleeping child after its main process exited. A separate disposable-guest
+The implementation contains a generation-bound activation owner but remains an
+uninstalled controlled seam. The host role does not install or activate these
+artifacts, and its ordinary prepare action still refuses before state or key
+creation while persistent-path and reboot-recovery prerequisites are absent.
+Access grant also remains refused. A disposable systemd 249 run of the
+synthetic storage unit established inherited zero hard and soft core limits and
+manager-owned removal of a sleeping child after its main process exited. A separate disposable-guest
 run composed the real request submission, systemd unit, live runtime admission,
 storage helper and same-process ESAPI custody against a private software TPM and
 a regular-file LUKS target. It completed preparation and prepared retry,
@@ -272,9 +272,20 @@ establishes its selected denial paths, while controlled tests separately cover
 mapper-timeout and cleanup-mismatch quarantine. The profile retains
 `CAP_SYS_ADMIN` and device-mapper class access. Those controls are broader than
 mapping-specific authority; no ioctl allowlist or tracing was established. The
-result therefore does not establish a production activation producer,
-consumption of the prepared TPM-sealed secret, provider-device preservation,
-active-lease reboot recovery, release, or physical-host qualification.
+checked reverse cleanup in that prerequisite belongs only to that run.
+
+An isolated prepared-storage activation used the source-bound helper directly
+for preparation, then traversed the production activation supervisor and
+generation-bound owner. The software TPM reached the production direct-device
+transport through a guest device; that is not physical-TPM qualification. The
+owner recovered the prepared sealed secret, activated the owned loop and
+device-mapper mapping, formatted ext4 and completed a native PID 1 mount under
+the admitted runtime profile. Its live mapper and mount were retained until
+whole-guest disposal, so it is not evidence of native reverse cleanup. This
+establishes the bounded prepared-secret activation seam, not ordinary role
+preparation, installed operation, provider-device preservation, active-lease
+reboot or interruption recovery, release, tenant authorization or physical-
+host qualification.
 
 ## Related contracts
 

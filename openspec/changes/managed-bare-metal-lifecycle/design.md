@@ -168,6 +168,25 @@ Alternatives rejected:
 
 If a host's TPM lacks the required capability or authorization, that host is unqualified for this mechanism. That does not establish that no other custody design exists; any other design needs its own review.
 
+Preparation and activation share a generation-owned activation journal admitted
+only under the host/index lock. Preparation opens its TPM backend lazily after
+that journal and the generation fence are admitted. Activation retains the
+same lock while it revalidates immutable backing provenance, supplies the
+recovered secret only to mapper open, checks final ESAPI-context closure, and
+records the loop, mapper, one-time format and native-mount outcome. Before that
+flow begins, the activation owner admits the exact live unit, cgroup, boot,
+swap, core and effective confinement profile, including the manager-resolved
+syscall filter, device allowlist and writable paths. Before format or mount it
+binds the published mapper node and kernel device identity to the prepared LUKS
+UUID and owned loop, and it admits the manager-resolved native mount fragment,
+drop-ins and effective properties before PID 1 starts it. Pending or
+quarantined intent is never an instruction to retry or clean up automatically.
+The implementation remains uninstalled. One isolated synthetic run exercised
+the helper-prepared secret through the production activation supervisor and
+owner, with live mapper and mount state retained until whole-guest disposal.
+That qualifies this bounded seam, not ordinary role preparation, physical
+devices, reverse cleanup, reboot recovery or operational activation.
+
 ### D5. Recovery after restart or reboot
 
 Only the provisioning recovery action may reopen a lease volume. All of these must hold:
@@ -344,12 +363,13 @@ None. Each unresolved physical fact above is an explicit qualification gate, not
 | Account operations report only read-back-verified outcomes, bounded to the current database | `openspec/specs/physical-provisioning/spec.md` — "Bare-metal account operations report only verified outcomes", limit stated in `architecture.md` — "Pinned access to the selected host" (promoted) |
 | Registry write credentials are sanitized and publication failures are truthful | `openspec/specs/storefront-publication/spec.md` — "Registry write credentials are sanitized and publication failures are truthful" (promoted) |
 | Roadmap disposition | `docs/development/ROADMAP.md` — no goal or gap row names this change; nothing owed (recorded) |
-| Campaign index currency | `openspec/changes/README.md` — this change's row records the accepted section 1 and 2.1 checkpoints, verified 2.2 custody and supervision seams, one simulated preparation/retry composition, and the bounded native synthetic mapping/mount prerequisite, with overall integration and later sections outstanding (recorded) |
+| Campaign index currency | `openspec/changes/README.md` — this change's row records the accepted section 1 and 2.1 checkpoints, verified 2.2 custody and supervision seams, one simulated preparation/retry composition, the bounded native synthetic mapping/mount prerequisite and the prepared-secret activation checkpoint, with overall integration and later sections outstanding (recorded) |
 | Managed tenant boundary and runtime view | `openspec/specs/physical-provisioning/spec.md` (pending) |
 | Persistent-path containment | `openspec/specs/physical-provisioning/spec.md` (pending) |
-| Serialized lease-storage preparation and same-process checked TPM custody | `openspec/specs/physical-provisioning/spec.md` — "Encrypted lease-storage preparation is isolated and fail-closed", rationale in `architecture.md` — "Lease-storage custody has one live owner" (promoted; activation remains pending) |
-| Provider-owned supervised storage request seam | `openspec/specs/physical-provisioning/spec.md` — "Encrypted lease-storage preparation is isolated and fail-closed", rationale in `architecture.md` — "Lease-storage custody has one live owner" (promoted; role installation and activation remain pending) |
+| Serialized lease-storage preparation and same-process checked TPM custody | `openspec/specs/physical-provisioning/spec.md` — "Encrypted lease-storage preparation is isolated and fail-closed", rationale in `architecture.md` — "Lease-storage custody has one live owner" (promoted; operational integration remains pending) |
+| Provider-owned supervised storage request seam | `openspec/specs/physical-provisioning/spec.md` — "Encrypted lease-storage preparation is isolated and fail-closed", rationale in `architecture.md` — "Lease-storage custody has one live owner" (promoted; role installation and ordinary invocation remain pending) |
 | Synthetic mapping, filesystem, native mount and checked-cleanup prerequisite | `openspec/specs/physical-provisioning/spec.md` — "Encrypted lease-storage preparation is isolated and fail-closed", rationale and authority limitation in `architecture.md` — "Lease-storage custody has one live owner" (promoted; production activation and recovery remain pending) |
+| Generation-bound prepared-secret activation owner and bounded runtime checkpoint | `openspec/specs/physical-provisioning/spec.md` — "Encrypted lease-storage preparation is isolated and fail-closed", rationale and qualification limits in `architecture.md` — "Lease-storage custody has one live owner" (promoted; installation, physical devices and recovery remain pending) |
 | Active-lease storage recovery and release-time counter revocation | `openspec/specs/physical-provisioning/spec.md` and `architecture.md` (pending) |
 | Release sequence, completion and fencing | `openspec/specs/physical-provisioning/spec.md` and `docs/development/ARCHITECTURE.md#release` (pending) |
 | Egress containment | `openspec/specs/physical-provisioning/spec.md` (pending) |

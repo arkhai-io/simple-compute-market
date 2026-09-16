@@ -125,11 +125,11 @@ def test_request_to_unit_to_actual_helper_dispatch(tmp_path):
         def close(self):
             backend.close()
 
-    helper = SimpleNamespace(
-        PrepareConfig=lambda **values: SimpleNamespace(**values),
-        prepare=lambda config, **values: observed.update(
-            config=config, prepare=values
-        ) or {
+    def prepare(config, **values):
+        custody = values["custody_factory"]()
+        custody.close()
+        observed.update(config=config, prepare=values, custody=custody)
+        return {
             "schema": "arkhai.lease-storage-preparation.v1",
             "host_id": config.host_id,
             "machine_id": config.machine_id,
@@ -139,7 +139,11 @@ def test_request_to_unit_to_actual_helper_dispatch(tmp_path):
             "parent_name": config.parent_name,
             "sealed_object_name": "000baabbccdd",
             "state": "prepared",
-        },
+        }
+
+    helper = SimpleNamespace(
+        PrepareConfig=lambda **values: SimpleNamespace(**values),
+        prepare=prepare,
     )
     custody_module = SimpleNamespace(EsapiCustodyExecutor=Custody)
 
@@ -163,7 +167,7 @@ def test_request_to_unit_to_actual_helper_dispatch(tmp_path):
     assert observed["device"] == "/dev/tpm0"
     assert observed["runtime"] == request_id
     assert observed["config"].state_root == profile.state_root
-    assert observed["prepare"]["custody"].closed
+    assert observed["custody"].closed
     assert observed["prepare"]["execution_evidence"] == {
         "boundary": "systemd-oneshot",
         "request_id": request_id,
@@ -230,6 +234,55 @@ def test_supervised_flow_runs_helper_orchestration_with_controlled_boundaries(tm
     )
     assert manifest["helper_attempts"][0]["request_id"] == request_id
     assert manifest["helper_attempts"][0]["state"] == "completed"
+
+
+def test_activation_generation_fence_precedes_lazy_tpm_backend(tmp_path):
+    module = _load_supervisor()
+    profile = _profile(module, tmp_path)
+    helper = module._load_sibling(
+        "activation_fenced_storage_helper", "arkhai-prepare-lease-storage.py"
+    )
+    fixture_path = Path(__file__).with_name("test_bare_metal_lease_storage_prepare.py")
+    spec = importlib.util.spec_from_file_location("activation_fence_fixtures", fixture_path)
+    assert spec and spec.loader
+    fixtures = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fixtures)
+    controlled = fixtures.RecordingRunner()
+    request = _request()
+    config = helper.PrepareConfig(
+        state_root=profile.state_root,
+        required_uid=profile.required_uid,
+        **{key: value for key, value in request.items() if key != "schema"},
+    )
+    helper.prepare(
+        config, runner=controlled, random_bytes=lambda size: b"S" * size,
+        execution_evidence={"boundary": "controlled-test", "request_id": "a" * 64},
+    )
+    journal = {
+        "schema": helper.ACTIVATION_SCHEMA,
+        "host_id": config.host_id, "machine_id": config.machine_id,
+        "generation": config.generation, "nv_index": config.nv_index,
+        "request_id": "b" * 64, "boot_id": "other-boot", "state": "pending",
+    }
+    activation_path = profile.state_root / "leases" / config.generation / "activation.json"
+    activation_path.write_text(json.dumps(journal), encoding="utf-8")
+    activation_path.chmod(0o600)
+    alternate = dict(request, free_space_floor=2048)
+    request_id = module.accept_request(profile, alternate)
+    opened = []
+    calls = list(controlled.calls)
+
+    with pytest.raises(module.SupervisionQuarantined):
+        module.execute_request(
+            profile, request_id, runtime_check=lambda _request_id: None,
+            backend_factory=lambda _device: opened.append(True),
+            helper_module=helper,
+            custody_module=SimpleNamespace(EsapiCustodyExecutor=object),
+            runner=controlled,
+        )
+
+    assert opened == []
+    assert controlled.calls == calls
 
 
 @pytest.mark.parametrize("failure", ["unsafe runtime", "missing swap controller"])
@@ -528,9 +581,14 @@ def test_helper_failure_is_quarantined_and_cleanup_is_checked(tmp_path):
     profile = _profile(module, tmp_path)
     request_id = module.accept_request(profile, _request())
     backend = Backend()
+    def fail_after_lazy_open(*_args, **values):
+        custody = values["custody_factory"]()
+        custody.close()
+        raise RuntimeError("child failed")
+
     helper = SimpleNamespace(
         PrepareConfig=lambda **values: SimpleNamespace(**values),
-        prepare=lambda *_args, **_values: (_ for _ in ()).throw(RuntimeError("child failed")),
+        prepare=fail_after_lazy_open,
     )
     custody_module = SimpleNamespace(
         EsapiCustodyExecutor=lambda selected: SimpleNamespace(
