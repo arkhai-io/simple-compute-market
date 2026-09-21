@@ -17,9 +17,11 @@ registry's `host_id` key from `unify-host-identity`, archived before this change
 resumed. Names in notes written before it follow its mapping: `name` → `host_id`,
 the `vm_host` attribute → the declaration's `host_id`, `kvm_host` → `ssh_host`.
 
-**Status (2026-09-21).** Every section through 7b is implemented and tested, and
-`make test` and the end-to-end pipeline passed on the owner's run. A second review
-reopened the change with Section 7c; archival waits on it. Each task's note records its final behaviour and evidence; the
+**Status (2026-09-21).** Every section is implemented and tested, including both
+reviews' corrections (7b, 7c); `make test` and the end-to-end pipeline passed on the
+owner's run on the final code, after 7c. The chart wiring is render-tested but not
+deployed (6.5). Each task's note records its final behaviour and evidence;
+the decisions behind them are in `design.md`. Each task's note records its final behaviour and evidence; the
 decisions behind them are in `design.md`.
 
 ## 1. Capacity declaration carrier and administration surface
@@ -739,6 +741,11 @@ depends on.
       `helm/charts/*/tests/test_render.py`, so the bare-metal storefront chart's
       existing test, previously reachable only through its own Makefile, runs
       there too; it passes.
+      **Deployment status (2026-09-21):** the chart changes are validated by
+      render tests only. The owner's deployment to the development cluster is
+      blocked by pre-existing issues in that environment, unrelated to this
+      change, and was not made a condition of archival; a deployed mount of
+      either document is unexercised.
 
 ## 7. Validation
 
@@ -884,13 +891,13 @@ so none moves.
       failure, VM storefront 1170 plus its two known `test_alkahest` failures
       (in its existing environment).
 
-## 7c. Second review corrections (planned 2026-09-21)
+## 7c. Second review corrections (planned and done 2026-09-21)
 
 From the review after closeout; `design.md`'s "Review corrections" records the
 corrected serialization rule. `kit-site` 0.4.0 and `kit-fulfillment` 0.3.0 are
 unpublished minor bumps on this branch and cover these changes.
 
-- [ ] 7c.1 **Settlement assignment serializes with pool moves.**
+- [x] 7c.1 **Settlement assignment serializes with pool moves.**
       `kit/site/src/market_site/ledger.py`: `assign_settlement_resource_in_session`
       requires `serialized()`. `kit/fulfillment/src/market_fulfillment/scheduling_persistence.py`:
       `SqlAlchemySchedulingUnitOfWork.transaction` takes `capacity_ledger.serialized()`
@@ -902,16 +909,34 @@ unpublished minor bumps on this branch and cover these changes.
       the resource, and no committed state has a held reservation debited to or
       assigned to the moved resource. Break `serialized()` to confirm the race test
       fails, as for 7b.1.
-- [ ] 7c.2 **Stale docstring.** `provisioning/compute/service/tests/integration/test_capacity_definitions_api.py`'s
+      **Done 2026-09-21:** `kit/site/tests/unit/test_ledger.py`'s
+      `test_a_settlement_assignment_outside_the_serialized_region_is_refused`;
+      the race test is in `kit/fulfillment/tests/unit/test_scheduler.py`
+      (`test_a_settlement_assignment_racing_a_pool_move_never_survives_on_the_moved_resource`),
+      so it drives the real scheduling unit of work. It asserts the commit
+      order, because an assignment committed after the move, onto the resource
+      in its new pool, is not what the rule forbids. With neither the writer's
+      requirement nor the unit of work's lock (the pre-fix state), it fails on
+      each of three runs; with only the unit of work's lock removed, six
+      scheduler tests fail at once on the writer's refusal. The existing
+      cross-thread scheduling test still passes.
+- [x] 7c.2 **Stale docstring.** `provisioning/compute/service/tests/integration/test_capacity_definitions_api.py`'s
       `test_a_refused_import_reports_every_problem_and_applies_nothing` describes the
       two requests it makes.
-- [ ] 7c.3 **`kit/site` → `kit/resource-pools` layering.** `ARCHITECTURE.md` allows
+      **Done 2026-09-21:** The docstring now describes the two imports the test
+      makes.
+- [x] 7c.3 **`kit/site` → `kit/resource-pools` layering.** `ARCHITECTURE.md` allows
       authority capabilities to depend on foundation capabilities only; `kit/site`
       declares `kit-resource-pools` and reads `ResourcePool` for pool existence
       (added here) and deliverable modes (pre-existing). Disposition per the owner's
       decision; `design.md`'s "The ledger refuses an unknown pool" is corrected either
       way, since "the dependency already exists" does not answer the layering rule.
-- [ ] 7c.4 **Image publication tag.** `Makefile`'s `push-images` retags the local
+      **Disposition 2026-09-21:** not resolved here; the owner declined to add
+      scope this late. Recorded as an open question in
+      `openspec/changes/pool-declared-advertisement-and-backing/design.md`,
+      whose pool declarations are what the site authority reads. `design.md`'s
+      "The ledger refuses an unknown pool" no longer justifies the dependency.
+- [x] 7c.4 **Image publication tag.** `Makefile`'s `push-images` retags the local
       `arkhai:compute-provisioning-<sha>` the service build produces as the remote
       `arkhai:provisioning-<sha>`; it named a local `arkhai:provisioning-<sha>` that no
       build makes. `scripts/tests/test_image_publication_contract.py` asserts exactly
@@ -920,8 +945,13 @@ unpublished minor bumps on this branch and cover these changes.
       the contract test asserts. The test itself needs `git rev-parse`, unavailable in
       the implementation snapshot, so its first run is the owner's. Pre-existing and
       unrelated to capacity; fixed here at the owner's request.
-- [ ] 7c.5 **Validation.** Rebuild `kit-site` and `kit-fulfillment`; rerun `kit/site`,
+- [x] 7c.5 **Validation.** Rebuild `kit-site` and `kit-fulfillment`; rerun `kit/site`,
       `kit/fulfillment`, the provisioning service, and every suite 7b.6 ran.
+      **Done 2026-09-21:** `kit/site` 246, `kit/fulfillment` 166, provisioning
+      service 936, `kit/site-client` 36, `core/storefront` 158, API-credits
+      service 63 and storefront 79, bare-metal storefront 126 and adapter 2, the
+      VM adapter's target 38, e2e unit 237 plus its known failure, VM storefront
+      1170 plus its two known `test_alkahest` failures.
 
 ## 8. Closeout
 
@@ -1023,6 +1053,9 @@ Per `openspec/README.md#plan-closeout-requirements`.
       and the registration contract; the capacity-definitions document and INI
       derivation are not exercised end to end, since Compose wires no document
       and the scenarios declare through the API by design.
+      **Amended 2026-09-21:** after 7c changed the scheduling unit of work, the
+      owner reran `make test` and the end-to-end pipeline on the final fileset;
+      both passed. That run is the evidence for the final code.
 ## Design promotion record
 
 | Accepted decision | Permanent location |
@@ -1054,5 +1087,6 @@ Per `openspec/README.md#plan-closeout-requirements`.
 | Legacy single-quantity claims translate to the composition's mirror dimension; a bucket's host link is its `host_id` | `openspec/specs/site-capacity/spec.md` — "Multidimensional capacity accounting" and "Site identity ownership boundary" (modified) |
 | The upgrade migration's derivation is frozen SQL, held equal to the runtime derivation by a parity test until it ships | Temporary; change history only (the migration's docstring states what it does) |
 | Test levels are stated as `TESTING.md` defines them | Temporary; change history only |
+| `kit/site`'s dependency on `kit/resource-pools` contradicts the kit layers | Open question in `openspec/changes/pool-declared-advertisement-and-backing/design.md` — not resolved by this change |
 | Stored reserved attribute keys are removed by migration, not promoted | Temporary; change history only (the migration's docstring states the rule it enforces) |
 | Capacity-definitions wire models live in `kit/site`, re-exported by `compute_provisioning` | Code: `kit/site/src/market_site/capacity_definitions.py` module docstring; `ARCHITECTURE.md`'s layers name no model ownership |

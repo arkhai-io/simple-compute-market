@@ -83,7 +83,7 @@ def test_assign_settlement_resource_in_session_shares_caller_transaction(tmp_pat
     reserved = ledger.reserve(claim={"offering_mode": "vm", **{"units": 4}}, deal_ref={})
 
     session_factory = sessionmaker(bind=engine)
-    with session_factory() as db:
+    with ledger.serialized(), session_factory() as db:
         result = ledger.assign_settlement_resource_in_session(
             db,
             capacity_reservation_id=reserved["capacity_reservation_id"],
@@ -107,7 +107,7 @@ def test_assign_settlement_resource_in_session_rolls_back_with_caller(tmp_path):
     reserved = ledger.reserve(claim={"offering_mode": "vm", **{"units": 4}}, deal_ref={})
 
     session_factory = sessionmaker(bind=engine)
-    with session_factory() as db:
+    with ledger.serialized(), session_factory() as db:
         ledger.assign_settlement_resource_in_session(
             db,
             capacity_reservation_id=reserved["capacity_reservation_id"],

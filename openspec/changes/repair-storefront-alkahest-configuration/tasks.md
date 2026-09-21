@@ -2558,6 +2558,26 @@ failures.
       was signing. So the scenario per implementation is owed before the
       signing, not after.
 
+## 3ay. A release-tooling test forbids the chain field 2.3 added
+
+Found 2026-09-21 on `capacity-resource-administration`'s branch, the first run of
+`make test-release-tooling` there; it fails identically on the upload that
+branch started from.
+
+- [ ] 3ay.1 **Decide which is right, then make the other agree.**
+      `scripts/tests/test_settlement_deployment_surfaces.py`'s
+      `test_alkahest_profiles_keep_policy_outside_chains` asserts that no field
+      under `Chains` in `domains/vms/storefront/storefront.bob.toml` or
+      `storefront.alice.toml` names alkahest. Task 2.3 deliberately added
+      `Chains.anvil.alkahest_address_config_path` to both, because client
+      construction reads the per-chain path separately from the readiness
+      preflight (`kit/alkahest/src/market_alkahest/escrow_verification.py` takes
+      `alkahest_address_config_path` per chain). The test has no docstring
+      stating the rule it protects. Either the rule is intended, and the address
+      path moves out of `Chains` with the readers that take it; or the chain entry
+      legitimately carries a mechanism's per-chain connection data, and the test
+      narrows to settlement policy (priority, enablement) and says so.
+
 ## 4. Closeout
 
 - [ ] 4.1 **Comment hygiene.** `make check-comment-hygiene`.

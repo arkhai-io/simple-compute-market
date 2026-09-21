@@ -1777,3 +1777,21 @@ def test_a_declaration_naming_an_unknown_pool_is_refused():
         ledger.register_resource(resource_id="r1", pool_id="no-such-pool", total_units=1)
 
     assert ledger.snapshot() == []
+
+
+def test_a_settlement_assignment_outside_the_serialized_region_is_refused():
+    """Assignment creates the live obligation a pool move checks for, so it
+    writes only under the lock that serializes it with that check."""
+    ledger = _make_ledger()
+    ledger.register_resource(resource_id="r1", pool_id="default", total_units=4)
+    reserved = ledger.reserve(claim={"offering_mode": "vm", "gpu_count": 1}, deal_ref={})
+
+    with ledger._session_factory() as db:
+        with pytest.raises(RuntimeError, match="serialized"):
+            ledger.assign_settlement_resource_in_session(
+                db,
+                capacity_reservation_id=reserved["capacity_reservation_id"],
+                settlement_resource_id="r1",
+            )
+
+    assert ledger.get_reservation(reserved["capacity_reservation_id"])["settlement_resource_id"] is None

@@ -1133,7 +1133,9 @@ class CapacityLedgerService:
 
         Does not commit or expire stale holds: the caller owns the
         transaction boundary and decides when those happen relative to its
-        own writes in the same session. Availability accounting is
+        own writes in the same session, and holds :meth:`serialized` around
+        it through the commit, because an assignment creates the live
+        obligation a concurrent pool move checks for. Availability accounting is
         unchanged by this method: it still keys off ``resource_id``, which
         this method still moves on an actual reassignment, exactly as
         before ``settlement_resource_id`` existed. ``settlement_resource_id``
@@ -1141,6 +1143,7 @@ class CapacityLedgerService:
         assignment it identifies the concrete resource selected for
         fulfillment. Repeating the same assignment is idempotent.
         """
+        self._require_serialized("assign_settlement_resource_in_session")
         reservation = self._find_reservation(
             db, capacity_reservation_id=capacity_reservation_id
         )

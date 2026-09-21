@@ -89,9 +89,10 @@ async def test_an_explicit_import_leaves_the_startup_digest_alone(client_and_que
 async def test_a_refused_import_reports_every_problem_and_applies_nothing(
     client_and_queue, capacity: CapacityApi
 ):
-    """A structural problem, an unknown pool, and a pool move under a live
-    obligation are all reported, and the acceptable first entry is not
-    applied either."""
+    """Two refused imports. The first is structurally valid, so stored state
+    is consulted: an unknown pool and a pool move under a live obligation are
+    both reported, and the acceptable first entry is not applied either. The
+    second carries a structural problem and is refused for it alone."""
     client, _ = client_and_queue
     await client.create_pool(PoolCreate(
         id="pool-b", label="Pool B", provider="ansible",

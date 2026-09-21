@@ -989,11 +989,16 @@ obligation and is left as it is; the other in-session methods only read.
 
 **The ledger refuses an unknown pool.** Registration stored a declaration naming a
 pool that does not exist, while a capacity document refused the same entry, because
-only the document's reconciler checked. The reviewer proposed an injected pool port
-so `kit/site` need not depend on resource pools; that dependency already exists
-(`kit/site` declares `kit-resource-pools` and admission reads `ResourcePool`), so the
-check goes in the ledger's one registration path, raising `UnknownPoolError`: 422 on
-`PUT`, `unknown_pool` in a document. The reconciler's `pool_exists` parameter goes.
+only the document's reconciler checked. The check goes in the ledger's one
+registration path, raising `UnknownPoolError`: 422 on `PUT`, `unknown_pool` in a
+document, and the reconciler's `pool_exists` parameter goes. It reads `ResourcePool`
+through `kit/site`'s existing dependency on `kit/resource-pools`, as admission
+already does for a pool's deliverable modes. That dependency contradicts
+`ARCHITECTURE.md`'s kit layers, which allow an authority capability foundation
+dependencies only; the reviewer's alternative is an injected pool-authority port.
+This change does not resolve it: the owner declined to add scope this late, and the
+conflict is recorded as an open question in `pool-declared-advertisement-and-backing`,
+whose pool declarations are what the site reads.
 
 **Structural validation completes before stored state is consulted.** A document
 with any structural problem reports all of its structural problems and nothing
