@@ -85,6 +85,55 @@ listing if *any* catalogue entry matched, so a price bound on one model would
 surface a listing because a different model was cheap. Per-model listings make
 every filter mean what it says.
 
+### Model identity is domain-canonical
+
+`model_id` identifies the **logical model** — one weights lineage at one version
+— and nothing else. It is a domain-defined canonical string: lowercase,
+`<org>/<name>` with the version inside the name
+(`meta-llama/llama-3.1-8b-instruct`), validated by a pattern the domain owns and
+the filter specification enforces at publication. It is not a Hugging Face
+repository name, because a repository branch is mutable and a model need not be
+hosted there; and it is not minted by a registry, for the reason below.
+
+The exact source rides beside it. `artifact_ref` names the weights the seller
+actually serves (`hf://meta-llama/Llama-3.1-8B-Instruct@<revision>`, or any
+other scheme), and `artifact_digest` optionally carries an immutable hash. Both
+are seller assertions, like every published field; nothing in the marketplace
+verifies them. `display_name` is a mutable label with no identity role. This is
+the identity-versus-provenance split the repository already draws between a
+listing's origin site and its admission authority, and between a host's
+connection identity and its capacity declaration.
+
+Quantization, runtime, and context limits are **not** in the identifier. They
+are properties of a deployment and are already explicit, filterable fields;
+encoding one of them in `model_id` as well would give one fact two names, which
+the one-name rule forbids, and would let an identifier say `fp8` while the field
+says `awq`. A fine-tune is different weights and therefore a different
+`model_id`. OpenRouter's request-facing `id` follows the same line — it names the
+model and leaves quantization to provider metadata — which is what a per-seller
+listing is here.
+
+Aliases such as `latest` are not in the protocol in version 1. A listing carries
+exactly one canonical `model_id`; `model_family` is the coarse grouping filter;
+resolving an alias to a version is a buyer-side or webapp convenience.
+
+**Why the registry does not own this.** `registry-discovery` requires the
+registry to treat domain payloads as opaque except for the declarative
+validation and filter rules its filter specification supplies. A registry that
+minted or curated model identifiers would become an authority on a domain fact,
+and because registries are federated the same string could then mean different
+things on two of them, which defeats a canonical identifier. Curation still has
+a home: a registry *operator* may narrow the accepted vocabulary to an `enum` in
+its filter specification — the domain-authoring guide explicitly permits local
+vocabulary constraints — which is the posture Goal 7 records for rate honesty:
+curation sits outside the registry service boundary, as operator policy rather
+than service behaviour.
+
+Rejected: `deployment_id` as a further identifier. A seller's deployment is
+already identified by `storefront_url` plus the publisher-chosen, normatively
+stable `listing_id`, and `served_model_name` is what a request names; a fourth
+identifier would be one concept with two names.
+
 ### Two pricing layers, and a credit is the joint
 
 Purchase is priced per **credit**, exactly as API credits prices it:
@@ -302,28 +351,26 @@ usage fields under a version bump, not a reinterpretation.
 - **Cross-asset comparison is client-side.** Accepted for the reasons
   `publish-indicative-listing-rates` records; that change owns the primitives
   for anything better.
-- **Model identity.** `model_id` needs a naming authority (see open questions).
-  A wrong choice is an additive filter alias, not a migration.
+- **Model identity format.** The domain-defined format rejects identifiers
+  sellers may already use informally (mixed case, revision suffixes). Mitigated
+  by `artifact_ref` carrying the exact source and `display_name` the label; a
+  format change is a filter-specification version bump, not a migration.
 
 ## Open questions
 
 Each carries its revisit trigger. None is prescribed by a task in this change;
 where a task touches one it is an explicit decision gate.
 
-1. **Model identity naming authority.** Is `model_id` a Hugging Face repository
-   identifier, a registry-curated canonical name, or seller-asserted with a
-   family alias? Affects the `model_id` filter's usefulness across sellers.
-   Gate: task 7.1 in `tasks.md`.
-2. **`asking_rate` per million tokens.** Trigger:
+1. **`asking_rate` per million tokens.** Trigger:
    `publish-indicative-listing-rates` promotes the exact-decimal value type and
    filter co-requirements.
-3. **Unbacked inference listings.** Trigger: `unbacked-listing-publication`
+2. **Unbacked inference listings.** Trigger: `unbacked-listing-publication`
    promotes the backing discriminator and its scope is widened beyond the
    compute family.
-4. **Whether the inference authority is the same kit-composed service binary as
+3. **Whether the inference authority is the same kit-composed service binary as
    API credits deployed twice, or a distinct distribution.** Owned by
    `extract-access-issuance-kit`; irrelevant to this change's vocabulary.
-5. **Pre-flight token estimation source** (vLLM `/tokenize` versus a local
+4. **Pre-flight token estimation source** (vLLM `/tokenize` versus a local
    tokenizer). Owned by `meter-inference-usage`.
 
 ## Migration Plan

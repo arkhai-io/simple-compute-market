@@ -26,12 +26,22 @@ quantity, and select either a new key or an existing key identified by `key_id`.
 ### Requirement: One listing is one served model
 
 An inference listing MUST describe exactly one served model at one seller. Its
-`listing_resource` MUST carry a canonical `model_id`, the seller's
-`served_model_name`, `context_length`, `quantization`, an architecture block
-naming modality, `supported_parameters`, an endpoint block whose `api_style`
-is `openai.v1`, a complete rate card, and `offering_mode` equal to `inference`.
-A listing omitting any field a buyer filters on MUST be rejected at publication
-rather than published with the field absent.
+`listing_resource` MUST carry a canonical `model_id`, an `artifact_ref` naming
+the exact weights it serves, the seller's `served_model_name`, `context_length`,
+`quantization`, an architecture block naming modality, `supported_parameters`,
+an endpoint block whose `api_style` is `openai.v1`, a complete rate card, and
+`offering_mode` equal to `inference`; it MAY carry an `artifact_digest` and a
+mutable `display_name`. A listing omitting any field a buyer filters on MUST be
+rejected at publication rather than published with the field absent.
+
+`model_id` MUST identify the logical model — one weights lineage at one version
+— under the domain-defined canonical format: lowercase, `<org>/<name>`, with the
+version inside the name and no alias segment such as `latest`. Quantization,
+runtime, and context limits MUST NOT be encoded in `model_id`; they are explicit
+fields. A fine-tune is a different logical model and MUST carry its own
+`model_id`. The domain MUST own the format. A registry MUST validate the format
+from its filter specification and MAY restrict the accepted vocabulary by
+operator policy, but MUST NOT mint, resolve, or alias identifiers.
 
 #### Scenario: Seller serves several models
 
@@ -44,6 +54,26 @@ rather than published with the field absent.
 - **WHEN** a listing candidate lacks `context_length`, `quantization`, or a rate
   card entry
 - **THEN** publication is rejected before the registry stores it
+
+#### Scenario: Two sellers serve the same logical model
+
+- **WHEN** two sellers publish listings carrying the same `model_id` with
+  different `artifact_ref`, `quantization`, and rate cards
+- **THEN** both are stored under their own `listing_id`, a filter on that
+  `model_id` returns both, and a filter on rate distinguishes them
+
+#### Scenario: Identifier violates the canonical format
+
+- **WHEN** a listing's `model_id` carries uppercase, an alias segment such as
+  `latest`, or an encoded quantization
+- **THEN** publication is rejected before the registry stores it
+
+#### Scenario: Registry operator narrows the vocabulary
+
+- **WHEN** a registry's filter specification enumerates the `model_id` values it
+  accepts and a listing names another
+- **THEN** the registry rejects the listing at validation, and no component of
+  the domain or registry resolves or aliases the identifier
 
 ### Requirement: Purchase is priced per credit
 
