@@ -102,6 +102,23 @@ applied. A configured document that cannot be read or applied MUST fail startup
 rather than be skipped silently, and the startup import MUST run after resource-pool
 definitions and host inventory seeding.
 
+A document entry MUST state a declaration with the registration contract's own fields
+and MUST replace the whole declaration it names, exactly as a registration request
+does. The document MUST NOT accept the legacy scalar unit total, MUST require each
+entry's resource type rather than defaulting it, and MUST reject unknown fields.
+Document validation MUST report every problem it finds, each with its location,
+rather than stopping at the first.
+
+An import MUST compare each entry with the stored declaration before writing, and an
+entry equal to the stored declaration MUST write nothing and emit no capacity event,
+so reconciling an unchanged or reformatted document does not advance the capacity
+version. A refusal only stored state can decide (an unknown pool, a host already
+named by an unnamed declaration, a pool move under a live obligation) MUST come from
+the same rules registration enforces. Every such refusal MUST be reported, and any
+refusal MUST leave the whole import unapplied with no digest recorded. The import API
+MUST offer a validate-only mode that reports the problems and the planned changes
+without applying either.
+
 #### Scenario: Capacity definitions change between restarts
 
 - **WHEN** an operator edits the configured capacity-definitions document and
@@ -133,6 +150,39 @@ definitions and host inventory seeding.
 - **WHEN** a capacity-definitions document names a resource pool that does not exist
 - **THEN** the import fails naming the pool, no declaration from the document is
   applied, and no digest is recorded
+
+#### Scenario: A document is reapplied unchanged
+
+- **WHEN** an import names declarations identical to the stored ones
+- **THEN** no declaration is written and no capacity event is emitted
+- **AND** the import reports them as unchanged
+
+#### Scenario: An entry omits an optional field
+
+- **WHEN** a document entry names an existing declaration but omits its host or
+  attributes
+- **THEN** the declaration is replaced as a registration request would replace it,
+  and the omitted fields are cleared rather than retained
+
+#### Scenario: A document has several problems
+
+- **WHEN** a document carries an unknown field, a missing resource type, and two
+  entries naming the same host
+- **THEN** the import reports all three with their locations and applies nothing
+
+#### Scenario: A later entry is refused by stored state
+
+- **WHEN** an import's earlier entries are acceptable and a later entry would move a
+  resource that holds a live obligation to another pool
+- **THEN** the refusal is reported, no entry from the document is applied, and no
+  digest is recorded
+
+#### Scenario: An operator validates a document
+
+- **WHEN** an operator submits a document to the import API in validate-only mode
+- **THEN** the response reports the problems and the planned creations, updates, and
+  unchanged entries
+- **AND** nothing is applied
 
 #### Scenario: Configured document is missing
 

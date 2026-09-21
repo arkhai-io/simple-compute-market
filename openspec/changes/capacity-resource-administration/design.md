@@ -497,11 +497,12 @@ without it.
   table-level constraints, so it would silently drop the unnamed `UNIQUE`
   constraints the model declares.
 
-### The capacity-definitions document (proposed 2026-09-21)
+### The capacity-definitions document (decided 2026-09-21)
 
-Task 1.2 fixed the posture — mirror the pool document, report every problem together
-— but not the shape. This section proposes it. Decisions marked **(confirm)** await
-the owner.
+Task 1.2 fixed the posture (mirror the pool document, and report every problem
+together) but not the shape. This section was proposed on 2026-09-21. The owner
+accepted it, including every item then awaiting confirmation, by moving the change
+to planning.
 
 **Shape.** One root field, `resources`, holding a list of declarations. Each entry
 is the registration contract, field for field, minus the legacy scalar:
@@ -538,15 +539,15 @@ document's `id`: each document follows its own API.
 
 Unknown-field rejection is what catches a stray `total_units` or a misspelt `pool`.
 
-- **`total_units` is not accepted (confirm).** The scalar exists for legacy
+- **`total_units` is not accepted.** The scalar exists for legacy
   single-quantity callers. A new document format has none, and accepting it would
   mean carrying the consistency rule between it and `capacity` into a surface that
   has no reason to need it.
-- **`resource_type` is required, not defaulted (confirm).** The `PUT` body defaults
+- **`resource_type` is required, not defaulted.** The `PUT` body defaults
   it to `compute.gpu` for its existing callers. A domain-neutral document that did
   the same would repeat the defect this change removes from the mirror dimension:
   a GPU name supplied where the author wrote nothing.
-- **Attribute keys may not name a declaration field (confirm).** An attribute
+- **Attribute keys may not name a declaration field.** An attribute
   named `resource_id`, `pool_id`, `host_id`, `resource_type` or `resource_subtype`
   is refused. This matters beyond readability: the feasibility view spreads
   attributes after the authoritative facts and re-asserts only `pool_id`. So
@@ -570,7 +571,7 @@ enablement. A field-level merge was rejected:
 a document whose entries are partial could no longer be read as the declarations
 it produces.
 
-**Applying is planned, and unchanged entries write nothing (confirm).** Every
+**Applying is planned, and unchanged entries write nothing.** Every
 registration appends a capacity event, even one that changes nothing; an identical
 re-registration was observed to append `released`. The REST import always
 reconciles, and the startup import reconciles whenever the raw text's digest
@@ -601,7 +602,7 @@ conflict with each other part-way through. Exchanging hosts takes two imports, o
 an API edit between them. It is rare enough to document rather than to engineer a
 two-phase apply for.
 
-**A validate-only import (confirm).** Because an import already plans inside a
+**A validate-only import.** Because an import already plans inside a
 transaction it may roll back, a dry run costs only a flag. The REST endpoint would
 accept `validate_only` and return the problems and the diff without committing, as
 `POST /api/v1/pools/import` does. It is proposed rather than assumed because it
@@ -618,8 +619,41 @@ reproduced with a view whose column `host_id` is `kvm1` and whose attributes nam
 `kvm9`. Since host identity became a column, nothing legitimate writes these keys
 into attributes. So the proposed fix is to build the facts after the attributes, so
 the columns win, and to refuse the reserved keys at registration. Scoping this here
-is **(confirm)**: it is the same function 4b.1 changes, and the document's
+was accepted with the document design: it is the same function 4b.1 changes, and the document's
 attribute rule depends on it.
+
+**Stored declarations are brought under the rule by migration (decided 2026-09-21).**
+Refusing reserved keys at registration protects new writes, and making facts win
+makes a stored reserved key inert for matching. A stored key would still turn the
+next write of that declaration into a refusal: an operator who `GET`s a declaration
+and `PUT`s it back would receive a 422 for a key they never wrote. The only stored
+source found is historical, the storefront's retired push of `pool_id` inside
+attributes. So a migration removes top-level reserved keys from stored declaration
+attributes. It rewrites by path, never recursively. It logs each removed key with
+its resource at INFO, and it is its own ordered entry rather than an amendment to
+`20260921_002`, because a database that already ran that entry would never run
+the amendment. An attribute `host_id` is removed rather than promoted into the
+column: the column has been authoritative for correlation since host identity
+became a column, and promoting a value that was never authoritative would change
+which host a declaration is published through.
+
+**Where the wire models live (decided 2026-09-21).** The import request, response,
+diff, and problem models live in `kit/site` beside the document parser, which owns
+the shape. `compute_provisioning` re-exports them, and the operator client
+(`vm_provisioning_operator.ProvisioningClient`, async and sync) imports them from
+there, exactly as the pool import's models travel from `kit/resource-pools`. The
+client gains `import_capacity_definitions(yaml_text, *, validate_only=False)`.
+
+**Versions (decided 2026-09-21).** Every package this change alters is published,
+and all of its unpublished versions ride this branch with `unify-host-identity`.
+`kit-site` 0.4.0, `vms-provisioning-operator-client` 0.4.0, and
+`compute-provisioning-service` 0.3.0 already carry minor bumps for this merge, and
+the additions here fall inside them. `compute-provisioning` carries only a patch
+bump (0.6.1), so the new route contract and re-exported models take it to 0.7.0.
+Its bound moves only in the operator client and the provisioning service, the two
+that sign and verify the new route. Every consumer's lock is regenerated with that
+one package upgraded. This supersedes 4b.14's earlier disposition only for
+`compute-provisioning`.
 
 ### The import contract changed underneath this change (added 2026-09-09)
 

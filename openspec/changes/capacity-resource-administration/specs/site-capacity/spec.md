@@ -118,6 +118,36 @@ for example a credit balance with no compute dimension — MUST be stored as dec
 - **THEN** that dimension is used for the mirror in that composition
 - **AND** no other composition's dimension name appears in it
 
+#### Scenario: A claim names another domain's dimension as an attribute
+
+- **GIVEN** a composition whose mirror dimension and unit claim keys do not include
+  `gpu_count`
+- **WHEN** a claim requires `gpu_count` equal to a resource's unit total
+- **THEN** the resource does not match, because the unit total is a matchable fact
+  only under the composition's own mirror dimension
+
+### Requirement: A declaration's attributes cannot restate its identity
+
+A capacity authority MUST refuse a declaration whose attributes use a key naming one
+of the declaration's own fields: the resource id, pool, host, resource type, or
+resource subtype. Those are declaration fields, and an attribute of the same name
+would be a second, disagreeing statement of the same fact. Wherever claims are
+matched against a resource, its declaration fields MUST take precedence over any
+attribute of the same name, so a stored declaration written before this rule
+cannot change its own identity for matching.
+
+#### Scenario: A registration puts the host in attributes
+
+- **WHEN** a registration request's attributes include `host_id`
+- **THEN** it is refused as invalid and no declaration is written or changed
+
+#### Scenario: A stored declaration carries a conflicting attribute
+
+- **GIVEN** a stored declaration whose host is `kvm1` and whose attributes name
+  `host_id` as `kvm9`
+- **WHEN** a claim requires `host_id` `kvm1`
+- **THEN** the declaration matches, and a claim requiring `kvm9` does not
+
 ### Requirement: A capacity resource does not move pools under live obligations
 
 A capacity resource MUST NOT be reassigned from one Resource Pool to another while

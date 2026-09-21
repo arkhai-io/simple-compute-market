@@ -43,6 +43,13 @@ field (was the `vm_host` attribute), and `ssh_host` is the host's address (was
 `kvm_host`). Where an earlier task note uses an old name, read it through that
 mapping; notes are amended rather than rewritten, per `AGENTS.md`.
 
+**Planning pass (2026-09-21, after design of the document).** It adds tasks 1.6–1.8,
+5.11–5.12 and amends 1.2, 1.4, 1.5, 4b.6, 4c.4, 5.2, 5.9, 5.10, 6.3 and 7.1 for
+`design.md`'s "The capacity-definitions document", "Declared attributes shadow
+authoritative facts", and the three decisions recorded after them. It also records
+4b.14's disposition. Migration order becomes: 4b.12's schema entry, 1.8's attribute
+entry, then Section 3's derivation entry.
+
 ## 1. Capacity declaration carrier and administration surface
 
 - [x] 1.1 Confirm by inspection, before writing anything, that the findings in
@@ -60,6 +67,32 @@ mapping; notes are amended rather than rewritten, per `AGENTS.md`.
       together, not first-failure exceptions. New module
       `kit/site/src/market_site/capacity_definitions.py`, parallel to
       `kit/resource-pools/src/market_resource_pools/service.py`'s document handling.
+      **Amended 2026-09-21 (design decided):**
+      - *Shape:* the root field `resources`, holding entries with the registration
+        contract's field names. `resource_id`, `pool_id`, `resource_type` and a
+        non-empty `capacity` are required. `resource_subtype`, `host_id`,
+        `attributes` and `enabled` (default true) are optional. `total_units` is not
+        accepted, and unknown root or entry fields are problems.
+      - *Validation:* duplicate `resource_id` or `host_id` among entries, and
+        attribute keys in the reserved set from 1.6, are problems. Problems are
+        `path`/`code`/`message`, all reported together.
+      - *Contents of the module:* the parsed `CapacityDefinition`, the validation
+        result, the plan (`created`/`updated`/`unchanged`), and
+        `reconcile_capacity_definitions_in_session(db, ledger, document, *,
+        pool_exists, apply)`.
+      - *Reconciliation:*
+        - compare each entry with the stored declaration through the ledger's
+          payload;
+        - register only created and updated entries, through
+          `register_resource_in_session`;
+        - collect every `CapacityConflictError`, `ValueError`, and unknown-pool
+          refusal as a problem;
+        - raise with all problems if any exist, so the caller's transaction rolls
+          back.
+        With `apply=False`, the function plans and reports without registering.
+      - *Wire models:* the import request, response, diff and problem models live in
+        the same module. Export them all from
+        `kit/site/src/market_site/__init__.py`.
 - [x] 1.3 Promote `PUT /api/v1/capacity/resources/{resource_id}` from a compatibility
       endpoint to a documented operator administration surface: correct the route
       docstring in `kit/site/src/market_site/router.py`, which currently describes it
@@ -72,8 +105,58 @@ mapping; notes are amended rather than rewritten, per `AGENTS.md`.
       `TESTING.md` requires. **Amended 2026-09-21:** the two field changes this change
       does make (`pool_id` required, `total_units` optional) are Section 4b's.
       `SiteCapacityAdminClient` has no sync variant, so parity does not apply to it.
+      **Amended 2026-09-21:** the reserved-key refusal (1.6) adds no field and
+      lives in the ledger, so the `PUT` body, the document, and in-process callers
+      share one rule. `ResourceRegisterRequest` is unchanged.
 - [ ] 1.5 Focused tests: declaration accepted with several dimensions, declaration
       accepted with a single dimension, omitted dimensions treated as undeclared.
+      **Amended 2026-09-21:** in `kit/site/tests/unit/test_capacity_definitions.py`,
+      also:
+      - every validation rule in 1.2, with one document carrying several problems
+        reported together;
+      - an unchanged entry planned as unchanged, writing nothing and emitting no
+        event (assert on `events_after`);
+      - an entry omitting `host_id` clearing the stored one;
+      - a stored-state refusal on a later entry leaving earlier entries unapplied
+        (session rolled back by the caller);
+      - `apply=False` registering nothing.
+- [ ] 1.6 Refuse reserved attribute keys at registration. A module constant in
+      `kit/site/src/market_site/ledger.py` names the declaration fields
+      (`resource_id`, `pool_id`, `host_id`, `resource_type`, `resource_subtype`).
+      `register_resource_in_session` raises `ValueError` naming the key, which the
+      `PUT` route already maps to 422. 1.2's validation reuses the constant.
+      Existing tests that write such keys change:
+      - `kit/site/tests/unit/test_ledger.py`'s
+        `test_attribute_view_prefers_real_pool_id_over_attributes_json` stores its
+        stale attribute directly, as its neighbour stores a `NULL` pool;
+      - `domains/vms/storefront/tests/integration/test_capacity_reservation_boundary.py`
+        registers without its `vm_host`/`pool_id` attributes.
+      Tests:
+      - **Unit** (`test_ledger.py`): each reserved key refused, with nothing
+        written.
+      - **Integration** (`provisioning/compute/service/tests/integration/test_capacity_api.py`):
+        a `PUT` through `SiteCapacityAdminClient` with `host_id` in attributes
+        raises `SiteCapacityAdminClientError` with status 422. The client
+        constructs this body, so it is not a raw-HTTP exception.
+- [ ] 1.7 Make declaration fields win over attributes in `resource_feasibility_view`
+      (`kit/site/src/market_site/ledger.py`): spread attributes first, then write
+      the facts, then `pool_id` as now. **Unit**
+      (`kit/site/tests/unit/test_resource_satisfies_requirement.py`): a view whose
+      column host is `kvm1` and whose attributes name `kvm9` matches `kvm1` and not
+      `kvm9`; the same for `resource_id` and `resource_type`.
+- [ ] 1.8 Add migration `20260921_003_capacity_declaration_attributes` to
+      `provisioning/compute/service/src/compute_provisioning_service/db/migrations.py`,
+      ordered after `20260921_002` and before Section 3's entry. It removes the
+      reserved top-level keys from stored `capacity_buckets.attributes`, rewriting by
+      path and never recursively, planned in full before the first write, and logs
+      each removed key with its resource at INFO. An attribute `host_id` is removed,
+      not promoted (`design.md`). **Unit**, starting from
+      `tests/unit/fixtures/schema_through_20260911_001.sql` with the chain applied
+      through `20260921_002`:
+      - reserved keys removed;
+      - other keys, including nested ones with a reserved name, untouched;
+      - idempotent rerun;
+      - a clean database unchanged.
 
 ## 2. Derivation from legacy host capacity
 
@@ -231,6 +314,13 @@ depends on.
       still read correctly, and record how a row written before this change is
       interpreted after it. **Amended 2026-09-21:** scoped to the compute domain,
       whose mirror name does not change; API-credit rows are out of scope per 4b.5.
+      **Amended 2026-09-21 (method):** a unit test in
+      `provisioning/compute/service/tests/unit/` seeds a declaration row as the
+      previous code stored it (from the previous-schema fixture: `total_units` set,
+      `capacity` naming `gpu_count`, and a row with `capacity` empty). After the chain
+      runs, it asserts the payload's `capacity`, `total_units`, and
+      `available_gpu_count` equal what the previous code reported. Record the
+      interpretation here.
 - [x] 4b.7 **Unit.** An explicit multidimensional declaration with no compute
       dimension is stored as declared, with no manufactured GPU dimension, and its
       scalar unit total is absent rather than zero.
@@ -255,12 +345,17 @@ depends on.
 - [x] 4b.13 **Rejection-path integration.** A `PUT` without `pool_id` returns 422;
       status-code-only assertion, commented as a rejection-path test per
       `TESTING.md`.
-- [ ] 4b.14 Bump distribution versions and lower bounds: `arkhai-kit-site`,
+- [x] 4b.14 Bump distribution versions and lower bounds: `arkhai-kit-site`,
       `arkhai-kit-site-client`, the compute provisioning service, the API-credits
       service and storefront, and every `pyproject.toml` that depends on the first
       two. No versioned envelope is affected (`design.md`, "Wire and distribution
       versioning"); if implementation finds one, raise its version and record it
       there.
+      **Disposition 2026-09-21:** covered by the minor bumps this branch already
+      carries for `unify-host-identity` (`kit-site` 0.4.0, `kit-site-client` 0.3.0,
+      the provisioning service 0.3.0, API-credits service and storefront 0.3.0), all
+      unpublished and merged together. The one package this change needs further
+      is `compute-provisioning`, in 5.12.
 
 ## 4c. Pool reassignment drain rule
 
@@ -284,6 +379,13 @@ depends on.
       specialization belongs to the Goal 7 change that introduces it.
 - [ ] 4c.4 Confirm no existing fixture, bulk import, or e2e setup reassigns a resource
       under a live obligation. If one does, drain it rather than exempting it.
+      **Amended 2026-09-21 (method):**
+      - Enumerate every `register_resource` and `register_resource_in_session` call
+        site in tests, e2e scenarios (`e2e-tests/tests/e2e/roles/scenarios/`), and
+        the API-credits startup, and read each for a re-registration under a
+        different `pool_id` after a reserve.
+      - Run the VM e2e scenarios' pool setup (`host_registry.py`) against the rule.
+      - Record the call sites examined.
 
 ## 5. Startup import
 
@@ -301,6 +403,10 @@ depends on.
       submission and that reapplying an unchanged document reverts administration
       performed since; capacity resources have an API administration surface, so this
       change would have introduced exactly that regression.
+      **Amended 2026-09-21:** the applier calls kit/site's
+      `reconcile_capacity_definitions_in_session` (1.2) inside the importer's
+      transaction, with `pool_exists` answered from the resource-pool tables in the
+      same session. It owns no reconciliation logic of its own.
 - [ ] 5.3 Register the step in `startup_steps()` **after** `import-pool-definitions`,
       since a declaration may reference a pool. **Amended 2026-09-21:** also after
       `seed-inventory`, giving relays → pools → hosts → capacity → job queue.
@@ -330,10 +436,46 @@ depends on.
       It always reconciles and records no digest. Register it in the provisioning
       route contract (`provisioning/compute/src/compute_provisioning/client.py`) and
       add a typed client method so integration tests obey the "no raw calls" rule.
+      **Amended 2026-09-21:** the request carries `yaml_text` and `validate_only`
+      (default false). The response carries `applied`, the plan's diff, and the
+      problems. A document with problems is 422 carrying them; validate-only
+      returns 200 with them. Files:
+      - `provisioning/compute/src/compute_provisioning/__init__.py`: re-export 1.2's
+        wire models.
+      - `provisioning/compute/src/compute_provisioning/client.py`: the route
+        contract, with the same role as `provisioning_hosts_import`.
+      - `domains/vms/provisioning/client/src/vm_provisioning_operator/client.py`:
+        `import_capacity_definitions(yaml_text, *, validate_only=False)` on both
+        `ProvisioningClient` and its sync variant.
+      - `provisioning/compute/service/tests/unit/test_provisioning_client_contract.py`
+        (parity) and
+        `provisioning/compute/service/tests/integration/test_provisioning_client_endpoint_coverage.py`
+        cover the new method and route.
 - [ ] 5.10 **Integration.** A document omitting a previously imported, derived, or
       API-registered declaration leaves it unchanged; a document naming an unknown
       pool fails naming it, applies nothing, and records no digest; an explicit
       import leaves the recorded startup digest unchanged.
+      **Amended 2026-09-21:** all through `ProvisioningClient.import_capacity_definitions`,
+      in a new `provisioning/compute/service/tests/integration/test_capacity_definitions_api.py`.
+- [ ] 5.11 **Integration**, same file:
+      - reimporting an unchanged document writes nothing and leaves the capacity
+        event feed unchanged (read through `SiteCapacityClient.events_after`);
+      - a document whose later entry moves a held resource to another pool reports
+        the 409-class refusal and leaves earlier entries unapplied;
+      - a document with several validation problems returns them all;
+      - `validate_only` returns the diff and applies nothing;
+      - a startup import whose document is refused records no digest (the
+        `DefinitionDocumentImporter` failure pattern).
+- [ ] 5.12 Bump `compute-provisioning` to 0.7.0 (`design.md`, "Versions"):
+      - `provisioning/compute/pyproject.toml`;
+      - its bound to `>=0.7.0` in `domains/vms/provisioning/client/pyproject.toml`
+        and `provisioning/compute/service/pyproject.toml` only;
+      - regenerate every consumer's `uv.lock` with only that package upgraded;
+      - update any `==` image pin.
+      `test_every_image_pins_the_version_its_package_declares` guards the pins.
+      The VM storefront's lock needs the `torch` index; if the implementation
+      environment cannot reach it, the owner's `make test` regenerates it, as
+      before.
 
 ## 6. Operator surface and deployment wiring
 
@@ -361,7 +503,12 @@ depends on.
       2026-09-21:** cover the document format, the startup digest rule, the REST
       import, retention of unnamed declarations, the `pool_id` requirement, the Helm
       values (`definitions.capacity` and `definitions.pools`), and that everything in
-      a declaration's attributes is published to storefronts. Add a "Capacity definitions" subsection to
+      a declaration's attributes is published to storefronts. **Amended 2026-09-21:**
+      also the document fields and their reserved attribute keys; that an entry
+      replaces the whole declaration (restate `host_id` when adopting a derived
+      declaration; an omitted `enabled` re-enables); that unchanged entries write
+      nothing; `validate_only`; and that exchanging hosts between declarations
+      takes two imports. Add a "Capacity definitions" subsection to
       `docs/development/DEPLOYMENT_AND_CONFIG.md`'s "Definition documents", stating
       how its retention rule differs from pools and matches relays.
 - [ ] 6.4 State the INI's `gpus=`/`gpu_model=` disposition in operator documentation:
@@ -378,6 +525,10 @@ depends on.
 
 - [ ] 7.1 Run the provisioning unit and integration suites, `kit/site`'s suites, and
       the affected VM e2e scenarios. Disclose any suite not run.
+      **Amended 2026-09-21:** also `kit/site-client`, `kit/fulfillment`,
+      `core/storefront`, `provisioning/compute`, the VM provisioning operator
+      client, the VM storefront, the API-credits service and storefront, and
+      e2e unit, since 1.6, 1.7 and 5.12 reach each.
 - [ ] 7.2 Run `openspec validate --all --strict` and confirm no regression against the
       baseline current at implementation time.
 - [ ] 7.3 Verify package and import boundaries are unchanged: `kit/site` must not
@@ -459,3 +610,8 @@ Per `openspec/README.md#plan-closeout-requirements`.
 | Legacy host capacity is derived into declarations rather than retained as a fallback tier | `openspec/specs/physical-provisioning/spec.md` — "Legacy host capacity is derived into declarations" |
 | Capacity definitions import is digest-gated, after pool definitions and host seeding | `openspec/specs/physical-provisioning/spec.md` — "Capacity definitions are imported from a mounted document" |
 | Why capacity declaration is separate from host inventory, and why splitting dimensions across both was rejected | `openspec/specs/site-capacity/architecture.md` |
+| A capacity-definitions entry uses the registration fields, replaces the whole declaration, and is refused with every problem reported; unchanged entries write nothing; refusals come from registration's own rules and leave the import unapplied; the import API has a validate-only mode | `openspec/specs/physical-provisioning/spec.md` — "Capacity definitions are imported from a mounted document"; `docs/development/DEPLOYMENT_AND_CONFIG.md` — "Definition documents" |
+| A declaration's attributes cannot restate its identity, and declaration fields win over attributes in matching | `openspec/specs/site-capacity/spec.md` — "A declaration's attributes cannot restate its identity" |
+| The unit total is a match fact only under the composition's mirror dimension | `openspec/specs/site-capacity/spec.md` — "A capacity declaration names no mandatory dimension" |
+| Stored reserved attribute keys are removed by migration, not promoted | Temporary; change history only (the migration's docstring states the rule it enforces) |
+| Capacity-definitions wire models live in `kit/site`, re-exported by `compute_provisioning` | `docs/development/ARCHITECTURE.md` — "Package and dependency layers" if the kit-layer description names model ownership; otherwise the code's module docstrings |
