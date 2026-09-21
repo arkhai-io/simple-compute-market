@@ -473,6 +473,154 @@ had no implementation task while task 1.4 said to add nothing to
 while coding. The domain-neutral declaration contract this change states cannot hold
 without it.
 
+**As implemented (recorded 2026-09-21).**
+
+- *The ledger's own default is `units`.* `CapacityLedgerService(mirror_dimension=...)`
+  defaults to `units`, the name that belongs to no domain, so a composition that
+  supplies nothing gets neutral behaviour rather than inheriting VM's. The provisioning
+  container and the VM storefront's claim matcher (`VM_MIRROR_DIMENSION` in
+  `capacity_client.py`) supply `gpu_count`; API credits supplies `units`.
+- *Payload aliases follow the mirror.* Reservation and resource payloads carry
+  `allocated_<mirror>` and `available_<mirror>` beside the generic fields, so a VM
+  payload is byte-identical to before and no domain sees another's name.
+- *The unit total is a match fact only under the mirror name.* The feasibility view
+  exposes the scalar total as a claim-matchable fact under `units` and under the
+  composition's mirror. It previously used a hard-coded `gpu_count`, so where
+  `gpu_count` is not a unit claim key, a claim naming it matched the unit total as
+  an attribute. This was found after 4b.1 was checked and is fixed there.
+- *The nullable-column migration rebuilds from the model.*
+  `20260921_002_capacity_declaration_contract` makes `total_units` nullable, which
+  SQLite cannot do in place. The table is rebuilt from `CapacityBucket`'s current
+  definition inside `_schema_transaction`, with foreign keys off and a
+  `foreign_key_check` before commit. The repository's existing rebuild helper was
+  rejected: it reconstructs the table from `PRAGMA table_info`, which carries no
+  table-level constraints, so it would silently drop the unnamed `UNIQUE`
+  constraints the model declares.
+
+### The capacity-definitions document (proposed 2026-09-21)
+
+Task 1.2 fixed the posture — mirror the pool document, report every problem together
+— but not the shape. This section proposes it. Decisions marked **(confirm)** await
+the owner.
+
+**Shape.** One root field, `resources`, holding a list of declarations. Each entry
+is the registration contract, field for field, minus the legacy scalar:
+
+```yaml
+resources:
+  - resource_id: compute-kvm1-001
+    pool_id: default
+    resource_type: compute.gpu
+    resource_subtype: h200        # optional
+    host_id: kvm1                 # optional
+    capacity:                     # required, at least one dimension
+      gpu_count: 8
+      vcpu_count: 192
+      ram_gb: 2048
+    attributes:                   # optional
+      gpu_model: H200
+      region: us-west
+    enabled: true                 # optional, default true
+```
+
+Using the API's field names means a declaration reads the same in a document, a
+`PUT` body, and a `GET` response. That is why the key is `resource_id`, not the pool
+document's `id`: each document follows its own API.
+
+**Validation.** Validation is structural, and every problem is reported together as
+`path`/`code`/`message`, like `PoolValidationProblem`:
+
+- an unknown root or entry field;
+- a missing `resource_id`, `pool_id`, `resource_type` or `capacity`;
+- a `capacity` that is not a non-empty mapping of non-negative numbers;
+- a non-boolean `enabled`;
+- a duplicate `resource_id`, or a duplicate `host_id` among entries.
+
+Unknown-field rejection is what catches a stray `total_units` or a misspelt `pool`.
+
+- **`total_units` is not accepted (confirm).** The scalar exists for legacy
+  single-quantity callers. A new document format has none, and accepting it would
+  mean carrying the consistency rule between it and `capacity` into a surface that
+  has no reason to need it.
+- **`resource_type` is required, not defaulted (confirm).** The `PUT` body defaults
+  it to `compute.gpu` for its existing callers. A domain-neutral document that did
+  the same would repeat the defect this change removes from the mirror dimension:
+  a GPU name supplied where the author wrote nothing.
+- **Attribute keys may not name a declaration field (confirm).** An attribute
+  named `resource_id`, `pool_id`, `host_id`, `resource_type` or `resource_subtype`
+  is refused. This matters beyond readability: the feasibility view spreads
+  attributes after the authoritative facts and re-asserts only `pool_id`. So
+  today, a declaration whose attributes say `host_id: kvm9` matches claims as
+  `kvm9` while its column says `kvm1`. The companion fix is to make the view's
+  facts win, and to refuse such keys at `PUT` as well, so the document is not
+  stricter than the API it mirrors. See "Declared attributes shadow authoritative
+  facts" below.
+
+**An entry replaces the whole declaration.** Applying an entry has exactly the
+effect of the same `PUT`: an optional field the entry omits is cleared, not kept.
+A document entry is then a complete statement of a declaration, and the document
+and the API never disagree about what an entry means. The consequence is
+deliberate and needs stating in the operator documentation. Adopting a derived
+declaration into a document by naming its `resource_id` means restating its
+`host_id`. Otherwise the link is cleared and, under "A host with no declaration is
+not projected", the host stops being published. Likewise `enabled` defaults to
+true, so an entry that omits it re-enables a declaration someone disabled
+through the API: once a document names a declaration, the document owns its
+enablement. A field-level merge was rejected:
+a document whose entries are partial could no longer be read as the declarations
+it produces.
+
+**Applying is planned, and unchanged entries write nothing (confirm).** Every
+registration appends a capacity event, even one that changes nothing; an identical
+re-registration was observed to append `released`. The REST import always
+reconciles, and the startup import reconciles whenever the raw text's digest
+changes, including a comment or whitespace edit. Without a plan, every such
+import would emit one event per entry and advance the capacity version that
+storefronts republish on. So reconciliation compares each entry with the stored
+declaration first, classifies it as created, updated, or unchanged (the pool
+reconciliation's `ReconciliationPlan` shape, without `disabled`, since documents
+retain), and registers only the first two. The REST response reports that diff.
+
+**Refusals are collected from the registration authority itself.** Some problems
+only exist against stored state:
+
+- an unknown pool;
+- a `host_id` already carried by a declaration the document does not name;
+- a pool move under a live obligation.
+
+These are not re-implemented as validation rules. The reconciliation applies each
+changed entry through `register_resource_in_session` inside the import's
+transaction and records each refusal (`CapacityConflictError`, `ValueError`, or the
+missing-pool check) as a problem instead of stopping at the first. If any problem
+was recorded, the transaction rolls back: nothing is applied and no digest is
+recorded. One import is atomic, and the ledger stays the only place those rules
+live.
+
+One limitation follows from applying in order: two entries that exchange host ids
+conflict with each other part-way through. Exchanging hosts takes two imports, or
+an API edit between them. It is rare enough to document rather than to engineer a
+two-phase apply for.
+
+**A validate-only import (confirm).** Because an import already plans inside a
+transaction it may roll back, a dry run costs only a flag. The REST endpoint would
+accept `validate_only` and return the problems and the diff without committing, as
+`POST /api/v1/pools/import` does. It is proposed rather than assumed because it
+widens the endpoint this change adds; without it, an operator's only preview is a
+real import.
+
+### Declared attributes shadow authoritative facts (found 2026-09-21)
+
+`resource_feasibility_view` builds the claim-matchable facts as `resource_id`,
+`host_id`, `resource_type`, `resource_subtype`, `value`, `units`, and the mirror,
+then spreads the declaration's attributes over them. It then re-asserts only
+`pool_id`. A declaration can therefore override its own identity for matching, as
+reproduced with a view whose column `host_id` is `kvm1` and whose attributes name
+`kvm9`. Since host identity became a column, nothing legitimate writes these keys
+into attributes. So the proposed fix is to build the facts after the attributes, so
+the columns win, and to refuse the reserved keys at registration. Scoping this here
+is **(confirm)**: it is the same function 4b.1 changes, and the document's
+attribute rule depends on it.
+
 ### The import contract changed underneath this change (added 2026-09-09)
 
 This change was written when the pool-definitions import applied its document on every

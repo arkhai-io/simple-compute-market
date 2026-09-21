@@ -33,6 +33,7 @@ Sections 1.2, 1.5, 2, 3, 4, 5, 6, 7, 8. Notes for resuming:
 - Known leftover, deliberately not fixed: the feasibility view still adds a
   `"gpu_count": units` match fact for every domain. It writes nothing into
   declarations; decide in the resumed session whether it belongs here.
+  **Resolved 2026-09-21:** unfinished 4b.1 work; fixed there.
 - 4b.6 (legacy compute rows read correctly) and 4c.4 (no fixture or e2e setup
   reassigns under a live obligation) remain to verify.
 
@@ -161,13 +162,13 @@ authority.
       hosts that previously projected no `available` will project one, and the VM
       reconciler distinguishes an absent projection from a loaded empty one under its
       "ignorance is not zero" rule. Add storefront-side coverage, not only
-      provisioning-side — \1
+      provisioning-side — this is the highest-risk item in the change.
       **Amended 2026-09-21:** files —
       `domains/vms/storefront/tests/unit/test_reconciler.py` for
       `_projected_resource_usage` with `available` present on every derived row, and
       `provisioning/compute/service/tests/integration/test_capacity_api.py` for the
       resource-pool projection read through the typed client.
-\2 Run the VM e2e scenarios that depend on projected capacity shape, and the
+- [ ] 4.5 Run the VM e2e scenarios that depend on projected capacity shape, and the
       `kit/site` ledger and router suites.
 - [ ] 4.6 **Unit.** A host with no correlated declaration yields no projected entry;
       update `tests/unit/services/test_capacity_inventory.py`'s host-only cases, which
@@ -190,6 +191,20 @@ depends on.
       `dict_resource_satisfies_claim`, `resource_feasibility_view`), which take it as
       a parameter. Update their callers in `kit/fulfillment/src/market_fulfillment/`
       and any storefront caller found by search.
+      **Reopened and finished 2026-09-21.** It was checked with
+      `resource_feasibility_view` still writing the unit total into every
+      domain's match facts under `gpu_count`. Where a composition's unit claim
+      keys exclude `gpu_count` (the kit defaults, API credits), a claim naming
+      it was an attribute requirement matched against that total, so a neutral
+      ledger admitted `{"gpu_count": 3}` against a 3-unit quota. The view now
+      takes `mirror_dimension` (default the module default) and keys the total
+      under it; `dict_resource_satisfies_claim` and the ledger's own builder pass
+      theirs. Nothing in `kit/fulfillment` or the storefronts reads the fact.
+      Tests: `test_dict_resource_satisfies_claim.py` and `test_ledger.py`, each
+      failing against the previous ledger. Suites: `kit/site` 202,
+      `kit/site-client` 36, `kit/fulfillment` 165, `core/storefront` 158 + 2
+      skipped, provisioning service 888, API-credits service 63 and storefront
+      79, VM storefront 1169 + the 2 pre-existing `test_alkahest` failures.
 - [x] 4b.2 Stop writing a mirror dimension into a caller's explicit capacity map.
       `register_resource` currently injects it when absent and then reads it back for
       `mirrored_units`; both sites need the supplied name and the explicit-declaration
