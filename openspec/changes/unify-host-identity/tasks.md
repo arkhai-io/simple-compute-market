@@ -336,6 +336,23 @@ rather than renumbering it, so the closeout keeps its references.
       Not this change's work: give the bare-metal lease endpoints a canonical client,
       or decide they are not an inter-service API, and move
       `test_bare_metal_leases_api.py` onto it. Tracked outside this change.
+- [x] 9.9 **`make test` finding, 2026-09-21.** The API-credits domain suite's
+      `test_role_wheels_require_shared_domain_and_versioned_core` asserted literal
+      `Requires-Dist` specifiers, so 7.2's correct move of the storefront's
+      `arkhai-core-storefront` bound to `>=0.5.0` failed it. The test, and its two
+      runtime-requirement siblings, now assert the dependency edges and, for the
+      role/core edges, that a version specifier is present — not its value. Mutation
+      checks: removing the edge and unbounding it each fail the test. A scan of all
+      171 internal requirement specifiers in the repository found each satisfied by
+      the version the repository builds. The suites `make test` runs that the 7.1
+      baseline omitted were run and pass: API-credits domain 42, buyer 17,
+      sample-app 1, Python middleware 8, TypeScript middleware; `core` 98,
+      `core/buyer` 125, registry 114; kits alkahest 179, capacity-publication 20,
+      config 134, contact-exchange 37, delivery 42, identity 165, policy 39,
+      resource-pools 101, settlement-runtime 90, negotiation-runtime 7, storefront 8,
+      hosted-settlement 187; VM buyer 196 (`--frozen`; its `reinit` relocks and
+      needs the `torch` index); provisioning IaC 65. The Rust middleware suite was
+      not run (no `cargo` in the implementation environment).
 
 ## Design promotion record
 

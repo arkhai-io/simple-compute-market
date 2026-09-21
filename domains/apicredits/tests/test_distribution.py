@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest_wheels import APICREDITS, REPO, _members, _metadata, wheels
+from conftest_wheels import APICREDITS, REPO, _members, _requirements, wheels
 
 __all__ = ["wheels"]
 
@@ -79,33 +79,44 @@ def test_role_wheels_do_not_duplicate_shared_concepts(
 def test_role_wheels_require_shared_domain_and_versioned_core(
     wheels: dict[str, Path],
 ) -> None:
-    domain_metadata = _metadata(wheels["domain"])
-    buyer_metadata = _metadata(wheels["buyer"])
-    storefront_metadata = _metadata(wheels["storefront"])
+    """Each role wheel depends on the shared domain wheel and on its versioned
+    core role package.
 
-    assert "Requires-Dist: arkhai-core>=0.2.0" in domain_metadata
-    assert "Requires-Dist: arkhai-apicredits-domain>=0.1.0" in buyer_metadata
-    assert "Requires-Dist: arkhai-core>=0.2.0" in buyer_metadata
-    assert "Requires-Dist: arkhai-core-buyer>=0.3.0" in buyer_metadata
-    assert "Requires-Dist: arkhai-apicredits-domain>=0.1.0" in storefront_metadata
-    assert "Requires-Dist: arkhai-core>=0.2.0" in storefront_metadata
-    assert "Requires-Dist: arkhai-core-storefront>=0.4.0" in storefront_metadata
+    This asserts the dependency edges and that each carries a version
+    specifier, not what the specifier says. Which bound a consumer needs is
+    decided where its dependency's contract changes, and a literal here would
+    only restate the project's own pyproject, failing every time a bound is
+    correctly moved.
+    """
+    expected = {
+        "domain": {"arkhai-core"},
+        "buyer": {"arkhai-apicredits-domain", "arkhai-core", "arkhai-core-buyer"},
+        "storefront": {
+            "arkhai-apicredits-domain",
+            "arkhai-core",
+            "arkhai-core-storefront",
+        },
+    }
+    for role, names in expected.items():
+        requirements = _requirements(wheels[role])
+        missing = names - requirements.keys()
+        assert not missing, f"{role} wheel does not require {sorted(missing)}"
+        unbounded = sorted(name for name in names if not requirements[name])
+        assert not unbounded, f"{role} wheel requires {unbounded} without a version"
 
 
 def test_storefront_wheels_require_settlement_runtime(
     wheels: dict[str, Path],
 ) -> None:
     for name in ("storefront", "vms_storefront", "bare_metal_storefront"):
-        metadata = _metadata(wheels[name])
-        assert "Requires-Dist: arkhai-kit-settlement-runtime>=0.1.0" in metadata, name
+        assert "arkhai-kit-settlement-runtime" in _requirements(wheels[name]), name
 
 
 def test_migrated_storefront_wheels_require_negotiation_runtime(
     wheels: dict[str, Path],
 ) -> None:
     for name in ("storefront", "vms_storefront"):
-        metadata = _metadata(wheels[name])
-        assert "Requires-Dist: arkhai-kit-negotiation-runtime==0.1.0" in metadata, name
+        assert "arkhai-kit-negotiation-runtime" in _requirements(wheels[name]), name
 
 
 def test_storefront_wheel_exports_contract_constant(

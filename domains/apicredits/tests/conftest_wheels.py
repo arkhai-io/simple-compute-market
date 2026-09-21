@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 import zipfile
@@ -110,3 +111,23 @@ def _metadata(wheel: Path) -> str:
         return archive.read(metadata_name).decode()
 
 
+
+
+_REQUIRES_DIST = re.compile(r"^Requires-Dist: ([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]*\])?([^;]*)$")
+
+
+def _requirements(wheel: Path) -> dict[str, str]:
+    """A wheel's unconditional requirements, as normalized name -> specifier.
+
+    Requirements guarded by an environment or extra marker are excluded: the
+    edges these tests care about are the ones every installation receives.
+    An unbounded requirement maps to the empty string.
+    """
+    requirements: dict[str, str] = {}
+    for line in _metadata(wheel).splitlines():
+        match = _REQUIRES_DIST.match(line)
+        if match is None:
+            continue
+        name = re.sub(r"[-_.]+", "-", match.group(1)).lower()
+        requirements[name] = match.group(2).strip()
+    return requirements
