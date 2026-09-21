@@ -15,6 +15,8 @@ from market_site.ledger import ALLOCATION_MODE_EXCLUSIVE, ALLOCATION_MODE_SHAREA
 from compute_provisioning_service.main import app
 from market_site_client import (
     SiteCapacityAdminClient,
+    SiteCapacityAdminClientError,
+    SiteCapacityAuthenticationError,
     SiteCapacityClient,
     SiteCapacityClientError,
 )
@@ -603,6 +605,22 @@ async def test_site_capacity_buckets_projection_through_the_real_client(
 
 
 
+async def test_a_registration_restating_a_field_as_an_attribute_is_refused(
+    capacity: CapacityApi,
+):
+    """The admin client sends any attributes mapping, so the refusal is
+    observed through it: a 422 the site acknowledged, and nothing written."""
+    with pytest.raises(SiteCapacityAdminClientError) as refused:
+        await capacity.register(
+            "restated", pool_id="default", total_units=1,
+            attributes={"host_id": "kvm1", "gpu_model": "H200"},
+        )
+
+    assert not isinstance(refused.value, SiteCapacityAuthenticationError)
+    assert refused.value.status_code == 422
+    assert "host_id" in str(refused.value)
+    assert await capacity.snapshot() == []
+
 async def test_a_registration_without_a_pool_is_rejected(capacity: CapacityApi):
     """Rejection-path test (docs/development/TESTING.md): the typed admin
     client requires ``pool_id`` and cannot construct this registration, so
@@ -615,3 +633,42 @@ async def test_a_registration_without_a_pool_is_rejected(capacity: CapacityApi):
             "/api/v1/capacity/resources/no-pool", json={"total_units": 1},
         )
     assert resp.status_code == 422
+
+
+async def test_the_resource_pool_projection_publishes_declarations_not_hosts(
+    capacity: CapacityApi, client_and_queue,
+):
+    """An INI host gains a derived declaration and is projected from it, with
+    live availability; a host registered with no declaration is not projected
+    at all. Written through ProvisioningClient, read through
+    SiteCapacityClient.resource_pool_projection."""
+    from vm_provisioning_operator.models import HostCreate
+
+    provisioning_client, _ = client_and_queue
+    await provisioning_client.import_hosts_from_text(
+        "[kvm_hosts]\n"
+        "kvm1  ansible_host=10.0.0.1  ansible_user=ubuntu  "
+        "ansible_ssh_private_key_file=/keys/id  gpus=4  gpu_model=H200\n",
+        ssh_key_type="path",
+    )
+    await provisioning_client.register_host(HostCreate(
+        host_id="kvm2", ssh_host="10.0.0.2", ssh_user="ubuntu",
+        ssh_key_value="/keys/id", gpu_count=8,
+    ))
+    reserved = await capacity.reserve(
+        {"offering_mode": "vm", "gpu_count": 1, "resource_id": "kvm1"}, {}
+    )
+    assert reserved is not None
+
+    projection = await capacity.site.resource_pool_projection()
+
+    resources = {
+        row["physical_resource_id"]: row
+        for pool in projection["resource_pools"]
+        for row in pool["resources"]
+    }
+    assert set(resources) == {"kvm1"}
+    assert resources["kvm1"]["capacity"] == {"gpu_count": 4}
+    assert resources["kvm1"]["available"] == {"gpu_count": 3}
+    assert resources["kvm1"]["attributes"]["gpu_model"] == "H200"
+    assert "gpu_count" not in resources["kvm1"]["attributes"]

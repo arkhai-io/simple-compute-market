@@ -87,7 +87,7 @@ def site_app() -> tuple[FastAPI, CapacityLedgerService]:
         resource_id="kvm1",
         total_units=1,
         capacity={"gpu_count": 1},
-        attributes={"vm_host": "kvm1", "pool_id": "default"},
+        host_id="kvm1",
         pool_id="default",
     )
 

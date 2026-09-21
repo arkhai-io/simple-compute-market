@@ -331,6 +331,14 @@ expect_override_failure \
     "$CHART_DIR/fixtures/fiat-ed25519-values.yaml" \
     "enabled Stripe without publication pricing fails schema/render" \
     --set-json 'storefront.agents[0].config.pricing=null'
+# Each chart's own render tests (docs/development/TESTING.md, "Chart Render
+# Tests"), so this one target runs every render check.
+for chart_test in "$CHART_DIR"/charts/*/tests/test_render.py; do
+    if ! "${PYTHON:-python3}" "$chart_test"; then
+        echo "FAIL: $chart_test" >&2
+        errors=$((errors + 1))
+    fi
+done
 if [[ $errors -gt 0 ]]; then
     echo "$errors assertion(s) failed" >&2
     exit 1

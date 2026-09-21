@@ -156,12 +156,17 @@ def import_pool_definitions_if_configured() -> None:
     _definition_importer().import_pool_definitions()
 
 
+def import_capacity_definitions_if_configured() -> None:
+    _definition_importer().import_capacity_definitions()
+
+
 def _definition_importer() -> DefinitionDocumentImporter:
     return DefinitionDocumentImporter(
         session_factory=_container_module.resolved_session_factory,
         settings=settings,
         pool_service=_container_module.resolved_resource_pool_service,
         relay_service=_container_module.resolved_relay_service,
+        capacity_ledger=_container_module.resolved_capacity_ledger_service,
     )
 
 
@@ -193,6 +198,9 @@ def startup_steps() -> tuple[ComputeProvisioningStartupStep, ...]:
             "import-pool-definitions", import_pool_definitions_if_configured
         ),
         ComputeProvisioningStartupStep("seed-inventory", seed_inventory_if_empty),
+        ComputeProvisioningStartupStep(
+            "import-capacity-definitions", import_capacity_definitions_if_configured
+        ),
         ComputeProvisioningStartupStep("create-job-queue", create_job_queue),
     )
 

@@ -25,11 +25,27 @@ from compute_provisioning_service.db.database import create_session_factory
 from compute_provisioning_service.db.models import Base, DEFAULT_POOL_ID, Host, ResourcePool
 from vm_provisioning_operator.models import HostCreate, HostUpdate
 from vm_provisioning_adapter.services.host_service import HostService, _parse_ini
+from market_site import CapacityLedgerService
+from market_site.db import Base as SiteBase
+
+from compute_provisioning_service.services.capacity_derivation import (
+    LegacyHostCapacityDerivation,
+)
 
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
+
+def _derivation(session_factory) -> LegacyHostCapacityDerivation:
+    return LegacyHostCapacityDerivation(
+        CapacityLedgerService(
+            session_factory,
+            unit_claim_keys=("units", "gpu_count"),
+            mirror_dimension="gpu_count",
+        )
+    )
 
 
 @pytest.fixture
@@ -43,6 +59,9 @@ def db_engine():
     from market_resource_pools.db import Base as PoolsBase
     PoolsBase.metadata.create_all(bind=engine)
     Base.metadata.create_all(bind=engine)
+    # Applying INI hosts derives capacity declarations into the ledger's
+    # tables, which ride market_site's metadata.
+    SiteBase.metadata.create_all(bind=engine)
     # HostService requires pool_id to reference an existing pool. The real
     # migration always seeds "default" before hosts.pool_id can be NOT
     # NULL (see db/migrations.py); mirror that guarantee here since this
@@ -78,7 +97,11 @@ def settings():
 
 @pytest.fixture
 def svc(session_factory, settings):
-    return HostService(session_factory=session_factory, settings=settings)
+    return HostService(
+        session_factory=session_factory,
+        settings=settings,
+        capacity_derivation=_derivation(session_factory),
+    )
 
 
 # ---------------------------------------------------------------------------

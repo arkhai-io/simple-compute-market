@@ -30,6 +30,8 @@ from typing import Any, Optional
 import httpx
 
 from compute_provisioning import (
+    CapacityDefinitionsImportRequest,
+    CapacityDefinitionsImportResponse,
     PoolCreate,
     PoolImportRequest,
     PoolImportResponse,
@@ -454,6 +456,22 @@ class ProvisioningClient(_ProvisioningClientBase):
         """POST /api/v1/pools/validate"""
         return PoolValidateResponse(**(await self._post(
             "/api/v1/pools/validate", PoolImportRequest(yaml_text=yaml_text)
+        )))
+
+    async def import_capacity_definitions(
+        self, yaml_text: str, *, validate_only: bool = False
+    ) -> CapacityDefinitionsImportResponse:
+        """POST /api/v1/capacity/definitions/import
+
+        A refused import raises ``ProvisioningError`` with status 422, its
+        message carrying every problem; ``validate_only`` returns them as
+        structured problems, with the diff an import would produce.
+        """
+        return CapacityDefinitionsImportResponse(**(await self._post(
+            "/api/v1/capacity/definitions/import",
+            CapacityDefinitionsImportRequest(
+                yaml_text=yaml_text, validate_only=validate_only
+            ),
         )))
 
     # ------------------------------------------------------------------
@@ -951,6 +969,16 @@ class SyncProvisioningClient(_ProvisioningClientBase):
     def validate_pools(self, yaml_text: str) -> PoolValidateResponse:
         return PoolValidateResponse(**(self._post(
             "/api/v1/pools/validate", PoolImportRequest(yaml_text=yaml_text)
+        )))
+
+    def import_capacity_definitions(
+        self, yaml_text: str, *, validate_only: bool = False
+    ) -> CapacityDefinitionsImportResponse:
+        return CapacityDefinitionsImportResponse(**(self._post(
+            "/api/v1/capacity/definitions/import",
+            CapacityDefinitionsImportRequest(
+                yaml_text=yaml_text, validate_only=validate_only
+            ),
         )))
 
     # System / readiness (sync mirrors)

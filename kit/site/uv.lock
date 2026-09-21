@@ -72,6 +72,7 @@ dependencies = [
     { name = "arkhai-kit-resource-pools" },
     { name = "fastapi" },
     { name = "pydantic" },
+    { name = "pyyaml" },
     { name = "sqlalchemy" },
 ]
 
@@ -89,6 +90,7 @@ requires-dist = [
     { name = "arkhai-kit-resource-pools", specifier = ">=0.2.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "pydantic", specifier = ">=2.7" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "sqlalchemy", specifier = ">=2.0" },
 ]
 

@@ -134,8 +134,8 @@ def _register_dual_mode_host(ledger: CapacityLedgerService) -> None:
         resource_id="bare-metal-host-1",
         total_units=1,
         resource_subtype="h200",
+        host_id="node-1",
         attributes={
-            "host_id": "node-1",
             "gpu_model": "H200",
             "physical_host_id": "physical-host-1",
             "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
@@ -792,10 +792,10 @@ def _shared_host_ledger() -> CapacityLedgerService:
     ledger.register_resource(
         resource_id="host-1-bare-metal",
         total_units=1,
+        host_id="bm-node-1",
         attributes={
             "physical_host_id": "host-1",
             "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
-            "host_id": "bm-node-1",
             "gpu_model": "H200",
         },
         pool_id="default",
@@ -1209,15 +1209,18 @@ def test_re_registering_updates_pool_id():
 
 
 def test_attribute_view_prefers_real_pool_id_over_attributes_json():
-    """During the transition before the storefront's attributes-JSON-only
-    push is retired, a row could in principle carry both -- the real
-    column must win."""
+    """A row stored before registration refused declaration fields as
+    attributes may carry both; the column must win. Registration can no
+    longer write such a row, so the test stores it directly."""
+    from market_site.db import CapacityBucket
+
     ledger = _make_ledger()
     _declare_pool(ledger, "pool-a", "vm")
-    ledger.register_resource(
-        resource_id="r1", total_units=4, pool_id="pool-a",
-        attributes={"pool_id": "pool-stale-json-value"},
-    )
+    ledger.register_resource(resource_id="r1", total_units=4, pool_id="pool-a")
+    with ledger._session_factory() as db, db.begin():
+        db.query(CapacityBucket).filter_by(backing_resource_id="r1").one().attributes = {
+            "pool_id": "pool-stale-json-value"
+        }
     match = ledger.probe(claim={"offering_mode": "vm", **{"pool_id": "pool-a", "gpu_count": 1}})
     assert match is not None
     assert ledger.probe(claim={"offering_mode": "vm", **{"pool_id": "pool-stale-json-value", "gpu_count": 1}}) is None
@@ -1562,6 +1565,20 @@ def test_an_explicit_declaration_gets_no_mirror_dimension_added():
 
     assert resource["capacity"] == {"ram_gb": 64}
 
+
+@pytest.mark.parametrize(
+    "key", ["resource_id", "pool_id", "host_id", "resource_type", "resource_subtype"]
+)
+def test_an_attribute_naming_a_declaration_field_is_refused(key: str):
+    ledger = _make_ledger()
+
+    with pytest.raises(ValueError, match=key):
+        ledger.register_resource(
+            resource_id="r1", pool_id="default", total_units=1,
+            attributes={key: "restated", "gpu_model": "H200"},
+        )
+
+    assert ledger.snapshot() == []
 
 def test_a_declaration_naming_no_dimension_is_refused():
     with pytest.raises(ValueError, match="at least one dimension"):

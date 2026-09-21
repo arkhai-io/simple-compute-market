@@ -108,15 +108,7 @@ def make_capacity_router(
         """
         try:
             resource = ledger.register_resource(
-                resource_id=resource_id,
-                total_units=body.total_units,
-                resource_type=body.resource_type,
-                resource_subtype=body.resource_subtype,
-                pool_id=body.pool_id,
-                attributes=body.attributes,
-                capacity=body.capacity,
-                enabled=body.enabled,
-                host_id=body.host_id,
+                resource_id=resource_id, **dict(body)
             )
         except CapacityConflictError as exc:
             raise HTTPException(status_code=409, detail=str(exc))

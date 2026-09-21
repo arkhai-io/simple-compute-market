@@ -12,6 +12,8 @@ dependencies = [
     "arkhai-kit-resource-pools>=0.2.0",
     "fastapi>=0.115.0",
     "pydantic>=2.7",
+    # Capacity-definitions documents are YAML.
+    "pyyaml>=6.0",
     "sqlalchemy>=2.0",
 ]
 

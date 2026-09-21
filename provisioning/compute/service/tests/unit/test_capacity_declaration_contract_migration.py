@@ -14,7 +14,10 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+
+from market_site import CapacityLedgerService
 
 from compute_provisioning_service.db.migrations import apply_schema_migrations
 
@@ -131,3 +134,32 @@ def test_rerunning_changes_nothing():
             "SELECT * FROM capacity_buckets ORDER BY capacity_bucket_id"
         )).all()
     assert after == before
+
+
+def test_rows_stored_under_the_previous_default_read_as_they_did():
+    """The compute composition's mirror is the name the previous code wrote,
+    so a row it stored reads identically: a named ``gpu_count`` and an empty
+    capacity map (which the previous code, too, read as the scalar total)."""
+    engine = _engine_with_the_previous_table()
+    with engine.begin() as connection:
+        connection.execute(text(
+            "INSERT INTO capacity_buckets (capacity_bucket_id, backing_resource_id, "
+            "pool_id, resource_type, total_units, capacity, attributes, enabled, "
+            "created_at, updated_at) VALUES ('b3', 'r3', 'default', 'compute.gpu', "
+            "2, '{}', '{}', 1, '2026-01-01', '2026-01-01')"
+        ))
+    _migrate(engine)
+    ledger = CapacityLedgerService(
+        sessionmaker(bind=engine),
+        unit_claim_keys=("units", "gpu_count"),
+        mirror_dimension="gpu_count",
+    )
+
+    by_id = {row["resource_id"]: row for row in ledger.list_resources()}
+
+    for resource_id, units in (("r2", 2), ("r3", 2)):
+        row = by_id[resource_id]
+        assert row["capacity"] == {"gpu_count": units}
+        assert row["value"] == units
+        assert row["available_units"] == units
+        assert row["available"] == {"gpu_count": units}

@@ -136,6 +136,11 @@ class Settings:
         return Path(raw).resolve() if raw else None
 
     @property
+    def resolved_capacity_definitions_path(self) -> Path | None:
+        raw = str(getattr(self._source, "capacity_definitions_path", "") or "").strip()
+        return Path(raw).resolve() if raw else None
+
+    @property
     def resolved_relay_definitions_path(self) -> Path | None:
         raw = str(getattr(self._source, "relay_definitions_path", "") or "").strip()
         return Path(raw).resolve() if raw else None

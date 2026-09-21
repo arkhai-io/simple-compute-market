@@ -113,7 +113,7 @@ only the declaration surface.
 - **No payload this change touches is a versioned envelope.** The capacity
   registration body, `/api/v1/capacity/*` payloads, and projection rows carry no
   `kind`/`schema_version` and are not `VersionedContractModel`s; the
-  `bare_metal.v1` publication view's shape is unchanged. Wire changes are therefore
+  `bare_metal.v2` publication view's shape is unchanged. Wire changes are therefore
   versioned by distribution version only — see "Wire and distribution versioning".
 
 ## Goals / Non-Goals
@@ -384,6 +384,20 @@ A derived declaration is:
 
 Only a host with `gpu_count > 0` is derived. A zero-GPU host has no legacy capacity
 to preserve, and a zero declaration would publish a resource with nothing to sell.
+
+**A taken resource id is skipped, not overwritten (decided at implementation,
+2026-09-21; for owner review).** A derived declaration's `resource_id` is the host's
+`host_id`. If another declaration already uses that id without naming the host,
+registering would replace it, which "never overwrite" forbids. The derivation skips
+that host and logs a warning naming it; it has no declaration until an operator
+declares one. The alternative, deriving under a generated id, was rejected: an
+invented identifier is the kind of value this change otherwise refuses to supply.
+
+**Derivation reads the caller's pending writes (found at implementation).** The
+service's session factory does not autoflush, so hosts `seed_from_ini` has just
+added are invisible to a query in the same session until flushed. The derivation
+flushes before it reads. Without the flush, a first INI import derived nothing,
+and the next one derived from whatever the INI said by then.
 Once any declaration correlates to a host, later INI values for that host have no
 effect on capacity; the operator documentation says so.
 
@@ -480,9 +494,12 @@ without it.
   supplies nothing gets neutral behaviour rather than inheriting VM's. The provisioning
   container and the VM storefront's claim matcher (`VM_MIRROR_DIMENSION` in
   `capacity_client.py`) supply `gpu_count`; API credits supplies `units`.
-- *Payload aliases follow the mirror.* Reservation and resource payloads carry
-  `allocated_<mirror>` and `available_<mirror>` beside the generic fields, so a VM
-  payload is byte-identical to before and no domain sees another's name.
+- *Payload aliases follow the mirror.* Probe and reserve match payloads carry
+  `allocated_<mirror>` and `available_<mirror>` beside `allocated_units` and
+  `available_units`. Reservation payloads carry `allocated_<mirror>` beside
+  `units`. So a VM payload is byte-identical to before, and no domain sees
+  another's name. Resource listings carry no alias; they report the mirror through
+  `value` and `available_units` and every dimension through `available`.
 - *The unit total is a match fact only under the mirror name.* The feasibility view
   exposes the scalar total as a claim-matchable fact under `units` and under the
   composition's mirror. It previously used a hard-coded `gpu_count`, so where
@@ -608,6 +625,42 @@ accept `validate_only` and return the problems and the diff without committing, 
 `POST /api/v1/pools/import` does. It is proposed rather than assumed because it
 widens the endpoint this change adds; without it, an operator's only preview is a
 real import.
+
+### A capacity declaration is one type (decided 2026-09-21, from code review)
+
+Review found the declaration's fields restated wherever one was built, stored,
+compared, or accepted: the registration parameters and both of its write branches,
+the change classifier's two parallel tuples, the document parser's field sets, its
+entry dataclass and that dataclass's dict form, the registration request, the
+router's call, the reserved-key set, and the derivation's dict. The change that
+preceded this one had to touch nearly a hundred files for the same reason.
+
+`kit/site`'s `CapacityDeclaration` (`market_site/declarations.py`) is now the one
+definition: the fields, their rules (a finite non-negative amount per dimension, at
+least one dimension, no attribute restating an identity field), and the identity
+set. A document entry is that model, validated strictly so a quoted number or
+boolean is refused rather than coerced. The registration request shares its fields
+through `CapacityDeclarationFields`, overriding only what its existing callers need
+(`resource_type`'s default, an optional `capacity`, the legacy `total_units`). The
+ledger maps between the model and a stored row in exactly two places, and registers,
+compares, and derives through the model.
+
+What deliberately still restates fields:
+
+- **`register_resource` and `register_resource_in_session`'s keyword parameters**,
+  public signatures every existing caller uses. They resolve the legacy scalar and
+  construct the model.
+- **Wire payloads** (resource listings and match payloads): their keys are a
+  contract, not a restatement of the model.
+- **`20260921_003`'s literal key tuple.** A migration enforces its rule as written;
+  importing the live identity set would change what an already-shipped migration
+  does on a database that has not yet run it.
+- **`resource_feasibility_view`'s facts**, the claim-matching namespace, whose
+  parameter is still spelled `resource_kind`. Renaming it reaches `kit/fulfillment`
+  and is left to a later change.
+
+Moving the model into `kit-site-client`, so the client and server share the wire
+contract, was considered and declined by the owner for this change.
 
 ### Declared attributes shadow authoritative facts (found 2026-09-21)
 
@@ -802,7 +855,7 @@ endpoints and shows a document.
 ### Projected attributes are the declaration's, plus host connection fields (decided 2026-09-21)
 
 Every declaration attribute is copied into the resource-pool projection except
-`bare_metal_publication`, which is already published as the `bare_metal.v1` view.
+`bare_metal_publication`, which is already published as the `bare_metal.v2` view.
 The host's connection fields `public_host` (and `host_id` itself, as correlation) are
 written last so a declaration cannot override them. `attributes.gpu_count` is
 removed; the quantity lives in `capacity`.
@@ -818,9 +871,16 @@ names:
 | `region` | e2e | claims (equality) | from the declaration |
 | `physical_host_id` | declarations (top level after `unify-host-identity`) | ledger cross-mode accounting | from the declaration |
 | `allocation_mode` | declarations (top level after `unify-host-identity`) | ledger cross-mode accounting | from the declaration |
-| `bare_metal_publication` | bare-metal declarations | bare-metal provider; `bare_metal.v1` view | excluded — published as the view |
+| `bare_metal_publication` | bare-metal declarations | bare-metal provider; `bare_metal.v2` view | excluded — published as the view |
 | `sla` | none found on a declaration | storefront-local rows only | from the declaration if present |
 | `gpu_count` | none as an attribute | storefront-local readers only | removed |
+
+**Availability is projected only as the declaration reports it (found at
+implementation).** Storefronts trust a present `available` as live, so an empty map
+beside a positive capacity reads as zero available, not as unknown. The projection
+therefore emits `available` only when the declaration carries it, as `kit/site`'s
+resource-pool shaping already does. Declarations read from the ledger always carry
+it, so this protects the rule rather than changing current output.
 
 Everything a declaration carries in `attributes` is therefore public to storefronts;
 the operator documentation says so. Every key except the host link already reached

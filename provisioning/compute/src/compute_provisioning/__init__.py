@@ -63,6 +63,12 @@ from compute_provisioning.relays import (
     RelayTokenRotate,
     RelayUpdate,
 )
+from market_site import (
+    CapacityDefinitionProblem,
+    CapacityDefinitionsDiff,
+    CapacityDefinitionsImportRequest,
+    CapacityDefinitionsImportResponse,
+)
 from market_resource_pools import (
     PoolConfigHandler,
     PoolConfigValidationProblem,
@@ -130,6 +136,10 @@ __all__ = [
     "LogsReference",
     "ProvisioningErrorEnvelope",
     "ProvisioningJob",
+    "CapacityDefinitionProblem",
+    "CapacityDefinitionsDiff",
+    "CapacityDefinitionsImportRequest",
+    "CapacityDefinitionsImportResponse",
     "PoolConfigHandler",
     "PoolConfigValidationProblem",
     "PoolCreate",

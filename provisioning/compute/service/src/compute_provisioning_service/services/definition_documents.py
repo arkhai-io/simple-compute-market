@@ -1,7 +1,8 @@
 """Reconciling mounted definition documents, gated on the document changing.
 
 Import treats its document as authoritative: it overwrites entries that differ
-from it and, for pools, disables entries it does not name. That authority
+from it and, for pools, disables entries it does not name. Capacity and relay
+documents retain the entries they do not name. That authority
 belongs to the act of an operator submitting a document. A process start is not
 a submission.
 
@@ -27,6 +28,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from market_resource_pools import ResourcePool
+from market_site import (
+    CapacityDefinitionProblem,
+    CapacityDefinitionsOutcome,
+    CapacityLedgerService,
+    reconcile_capacity_definitions_in_session,
+)
+
 from compute_provisioning_service.db.models import DefinitionDocumentImport
 from compute_provisioning_service.services.relay_definitions import (
     import_relay_definitions_in_session,
@@ -34,8 +43,36 @@ from compute_provisioning_service.services.relay_definitions import (
 
 logger = logging.getLogger(__name__)
 
+_CAPACITY = "capacity"
 _POOLS = "pools"
 _RELAYS = "relays"
+
+
+class CapacityDefinitionsRejected(ValueError):
+    """A capacity-definitions document with problems; nothing was applied."""
+
+    def __init__(self, problems: tuple[CapacityDefinitionProblem, ...]) -> None:
+        self.problems = problems
+        super().__init__(
+            "capacity definitions refused: "
+            + "; ".join(f"{p.path}: {p.message}" for p in problems)
+        )
+
+
+def reconcile_capacity_document(
+    db: Any, ledger: CapacityLedgerService, yaml_text: str
+) -> CapacityDefinitionsOutcome:
+    """Reconcile a capacity-definitions document into ``db``'s transaction.
+
+    A declaration's pool must exist in this service's resource-pool table.
+    The caller commits only a valid outcome it means to apply.
+    """
+    return reconcile_capacity_definitions_in_session(
+        db,
+        ledger,
+        yaml_text,
+        pool_exists=lambda pool_id: db.get(ResourcePool, pool_id) is not None,
+    )
 
 
 @dataclass(frozen=True)
@@ -55,11 +92,13 @@ class DefinitionDocumentImporter:
         settings: Any,
         pool_service: Any,
         relay_service: Any,
+        capacity_ledger: CapacityLedgerService | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._settings = settings
         self._pool_service = pool_service
         self._relay_service = relay_service
+        self._capacity_ledger = capacity_ledger
 
     # ------------------------------------------------------------------
     # Entry points
@@ -81,6 +120,16 @@ class DefinitionDocumentImporter:
             path=getattr(self._settings, "resolved_pool_definitions_path", None),
             label="Pool-definitions",
             apply=self._apply_pools,
+        )
+
+    def import_capacity_definitions(self) -> ImportOutcome:
+        """Reconcile capacity declarations. They run after pools, which a
+        declaration names, and after host seeding."""
+        return self._import(
+            kind=_CAPACITY,
+            path=getattr(self._settings, "resolved_capacity_definitions_path", None),
+            label="Capacity-definitions",
+            apply=self._apply_capacity,
         )
 
     # ------------------------------------------------------------------
@@ -128,6 +177,22 @@ class DefinitionDocumentImporter:
         return (
             f"created={len(diff.created)} updated={len(diff.updated)} "
             f"disabled={len(diff.disabled)} unchanged={len(diff.unchanged)}"
+        )
+
+    def _apply_capacity(self, db: Any, yaml_text: str) -> str:
+        if self._capacity_ledger is None:
+            raise RuntimeError("capacity definitions need the capacity ledger")
+        outcome = reconcile_capacity_document(db, self._capacity_ledger, yaml_text)
+        if not outcome.valid:
+            # Raising rolls back the apply's transaction, so no entry lands
+            # and no digest is recorded: the next startup retries.
+            raise CapacityDefinitionsRejected(outcome.problems)
+        # No "disabled" count: a declaration the document stops naming is
+        # retained, as a relay is.
+        diff = outcome.diff
+        return (
+            f"created={len(diff.created)} updated={len(diff.updated)} "
+            f"unchanged={len(diff.unchanged)}"
         )
 
     def _apply_relays(self, db: Any, yaml_text: str) -> str:

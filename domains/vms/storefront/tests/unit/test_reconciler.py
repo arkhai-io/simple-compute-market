@@ -19,6 +19,7 @@ from core_storefront.domain_registry import (
 )
 from core_storefront.sqlite_migrations import migrate_storefront_domain_bindings_schema
 from market_identity import Identity
+from market_site.projections import resource_pool_projection
 
 from domains.vms.listings.pricing_resolution import GpuPricingFields
 from domains.vms.listings.reconciler import (
@@ -1319,6 +1320,41 @@ class TestProjectedResourceUsage:
             member_availability=None,
         )
         assert usage.available == 5
+
+    def test_a_derived_declarations_projection_is_read_as_live_availability(self):
+        """A host formerly projected from its host row (no ``available``)
+        now projects its declaration, which always reports availability.
+        Built through the site's own projection so the row is the one the
+        storefront receives: the reported figure is used, not a stale
+        member lookup, and a present value is never mistaken for unknown."""
+        declared = {
+            "resource_id": "kvm1",
+            "pool_id": "gpu-pool",
+            "resource_type": "compute.gpu",
+            "capacity": {"gpu_count": 4},
+            "available": {"gpu_count": 3},
+            "attributes": {"gpu_model": "H200", "host_id": "kvm1"},
+            "enabled": True,
+        }
+        unreported = {**declared, "resource_id": "kvm2"}
+        del unreported["available"]
+        (pool,) = resource_pool_projection([declared, unreported])
+        by_id = {row["physical_resource_id"]: row for row in pool["resources"]}
+
+        live = _projected_resource_usage(
+            by_id["kvm1"],
+            site_id="site-a",
+            member_availability={("site-a", "kvm1"): 4},
+        )
+        fallback = _projected_resource_usage(
+            by_id["kvm2"],
+            site_id="site-a",
+            member_availability={("site-a", "kvm2"): 1},
+        )
+
+        assert (live.total, live.available, live.gpu_model) == (4, 3, "H200")
+        assert "available" not in by_id["kvm2"]
+        assert fallback.available == 1
 
     def test_falls_back_to_member_availability_when_no_available_field(self):
         usage = _projected_resource_usage(

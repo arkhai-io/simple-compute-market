@@ -224,17 +224,25 @@ forward recovery under those bindings, not restoration of an unbound schema.
 ## Definition documents
 
 A service may be given the path to a YAML document describing resources it
-should hold — pools, relays. The document is mounted like any other
-configuration file and is not a Secret: it carries endpoints, windows, and the
-*names* of profile keys, never a credential.
+should hold — relays, pools, capacity declarations. The document is mounted
+like any other configuration file and is not a Secret: it carries endpoints,
+windows, quantities, and the *names* of profile keys, never a credential.
 
-Two settings name such a document. `pool_definitions_path` is read by the
-provisioning service; no chart supplies it, so declarative pools are opt-in for
-a deployment that sets it directly. `relay_definitions_path` is derived by the
-provisioning chart from the presence of `definitions.relays` rather than
-configured beside it, because two independent settings can disagree and the
-failure when they do is silent: the document renders, the volume mounts, and
-the service skips an unset path while everything looks configured.
+Three settings name such a document, all read by the provisioning service:
+`relay_definitions_path`, `pool_definitions_path`, and
+`capacity_definitions_path`. The provisioning chart derives each from the
+presence of its value under `definitions` (`relays`, `pools`, `capacity`) rather
+than configuring it beside the document, because two independent settings can
+disagree and the failure when they do is silent: the document renders, the
+volume mounts, and the service skips an unset path while everything looks
+configured. The chart's schema refuses the pool and capacity paths under
+`config` for that reason. Every value is empty by default, so a deployment that
+supplies none is managed entirely through the API.
+
+Startup imports them in dependency order: relays, then pools (which may name a
+relay), then host inventory, then capacity (whose declarations name a pool and
+may name a host). A capacity document naming a pool other than `default` needs
+that pool supplied beside it on a first boot.
 
 ### Reconciliation follows the document, not the process
 
@@ -262,7 +270,7 @@ The practical consequences for a deployment:
   through the API survives.
 - A failed apply records no digest, so the next start retries it.
 
-### Relays and pools differ in one rule
+### What a document does to entries it stops naming
 
 A pool absent from the document is **disabled**: the document declares what the
 deployment offers, and a pool it does not name should not be scheduled.
@@ -272,6 +280,46 @@ every pool referencing it and every live tunnel on it, which is a far worse
 outcome than a stale row and is not what an operator editing an unrelated entry
 is asking for. A relay established from a document and then administered through
 the API is one relay, not two.
+
+A capacity declaration absent from the document is **retained**, as a relay is.
+An unnamed declaration may have been registered through the API, derived from a
+host's inventory, or be backing a live reservation, and none of those is what an
+operator editing an unrelated entry means to switch off. A capacity document
+therefore adds and updates declarations and never removes one; disabling is an
+explicit `enabled: false`, in the document or through the API.
+
+### Capacity definitions
+
+A capacity document holds a top-level `resources` list. Each entry is a whole
+declaration with the registration API's field names — `resource_id`, `pool_id`,
+`resource_type`, and a `capacity` map of at least one dimension, plus optional
+`resource_subtype`, `host_id`, `attributes`, and `enabled` — and applying it has
+exactly the effect of the same `PUT /api/v1/capacity/resources/{resource_id}`.
+
+- **An entry replaces the declaration it names.** A field it omits is cleared,
+  not kept, so an entry adopting a declaration derived from host inventory must
+  restate its `host_id`, and an omitted `enabled` re-enables one disabled through
+  the API.
+- **Entries equal to the stored declaration write nothing** and emit no capacity
+  event, so reapplying a document — or one changed only in comments or layout —
+  does not make storefronts republish.
+- **Any problem leaves the whole document unapplied.** Validation is strict (a
+  quoted number is an error) and reports every problem with its location.
+  Refusals only stored state can decide — an unknown pool, a host another
+  declaration already names, moving a resource between pools while it holds a
+  live reservation — come from registration's own rules and are reported
+  together. A refused document at startup fails startup and records no digest.
+- **Exchanging hosts between two declarations takes two imports**, because
+  entries apply in order and the first would briefly name a host the second
+  still holds.
+- **Every declared attribute is published to storefronts.** Attributes are the
+  categorical facts claims match (`gpu_model`, `region`); none may repeat a
+  declaration field such as `host_id`.
+
+`POST /api/v1/capacity/definitions/import` submits a document: it always
+reconciles and records no startup digest. With `validate_only` it reports the
+problems and the planned creations, updates, and unchanged entries without
+applying anything.
 
 ### Secrets are named, not carried
 

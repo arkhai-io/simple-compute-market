@@ -35,7 +35,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-compute-provisioning"
-version = "0.6.1"
+version = "0.7.0"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-fulfillment" },
@@ -46,7 +46,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_compute_provisioning-0.6.1-py3-none-any.whl" },
+    { path = "arkhai_compute_provisioning-0.7.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -101,6 +101,7 @@ dependencies = [
     { name = "arkhai-kit-resource-pools" },
     { name = "fastapi" },
     { name = "pydantic" },
+    { name = "pyyaml" },
     { name = "sqlalchemy" },
 ]
 wheels = [
@@ -125,7 +126,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arkhai-compute-provisioning", specifier = ">=0.6.1" },
+    { name = "arkhai-compute-provisioning", specifier = ">=0.7.0" },
     { name = "arkhai-kit-identity", specifier = "==0.3.0" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "pydantic", specifier = ">=2.7" },

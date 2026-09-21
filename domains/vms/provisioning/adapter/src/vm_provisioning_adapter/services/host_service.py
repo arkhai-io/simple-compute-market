@@ -22,7 +22,8 @@ SSH key handling
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from collections.abc import Sequence
+from typing import Optional, Protocol
 
 from market_config import decrypt_secret, encrypt_secret
 from sqlalchemy.orm import Session, sessionmaker
@@ -44,12 +45,34 @@ class HostNotFoundError(Exception):
     """Raised when a requested host_id does not exist in the DB."""
 
 
+class HostCapacityDerivation(Protocol):
+    """Derives capacity declarations from hosts' legacy capacity.
+
+    Supplied by the composition root. Host inventory is connection identity;
+    what a site sells is declared elsewhere, so this service applies INI
+    hosts and leaves deciding their declarations to the port.
+    """
+
+    def derive_in_session(
+        self, db: Session, host_ids: Sequence[str] | None = None
+    ) -> Sequence[str]:
+        """Derive declarations for ``host_ids`` inside ``db``'s transaction."""
+        ...
+
+
 class HostService:
     """CRUD operations and inventory helpers for the ``hosts`` table."""
 
-    def __init__(self, session_factory: sessionmaker[Session], settings) -> None:
+    def __init__(
+        self,
+        session_factory: sessionmaker[Session],
+        settings,
+        *,
+        capacity_derivation: "HostCapacityDerivation",
+    ) -> None:
         self._session_factory = session_factory
         self._settings = settings
+        self._capacity_derivation = capacity_derivation
 
     # ------------------------------------------------------------------
     # Queries
@@ -229,6 +252,12 @@ class HostService:
         This is safe to call repeatedly — it is idempotent for the same
         input.
 
+        The capacity-derivation port runs for the upserted hosts in the same
+        transaction, declaring capacity for any host whose legacy
+        ``gpu_count`` would otherwise sell nothing. It only adds: a host a
+        declaration already names keeps that declaration, whatever the INI
+        now says.
+
         The INI is expected to contain ``[kvm_hosts]`` and/or
         ``[bare_metal_nodes]`` groups.  Lines in other groups or without a
         supported group header are skipped.
@@ -287,6 +316,11 @@ class HostService:
 
                 upserted_names.append(entry["host_id"])
 
+            # Same transaction as the upsert: a host applied from INI and the
+            # declaration derived from its legacy capacity land together, so
+            # a crash cannot leave a seeded host the skip-if-non-empty startup
+            # seed would then never revisit.
+            self._capacity_derivation.derive_in_session(db, upserted_names)
             db.commit()
 
         # Re-query after the session closes so callers receive fully-loaded,

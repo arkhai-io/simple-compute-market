@@ -483,9 +483,19 @@ async def client_and_queue(
     )
     replay_store = SqlAlchemyProvisioningReplayStore(session_factory)
 
+    from market_site.ledger import CapacityLedgerService
+    from compute_provisioning_service.services.capacity_derivation import (
+        LegacyHostCapacityDerivation,
+    )
+    capacity_ledger_service = CapacityLedgerService(
+        session_factory=session_factory,
+        unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count",
+    )
+
     host_service = HostService(
         session_factory=session_factory,
         settings=mock_settings,
+        capacity_derivation=LegacyHostCapacityDerivation(capacity_ledger_service),
     )
 
     from market_resource_pools import ResourcePoolService
@@ -500,12 +510,6 @@ async def client_and_queue(
         session_factory=session_factory,
         ansible_service=fake_ansible,
         host_service=host_service,
-    )
-
-    from market_site.ledger import CapacityLedgerService
-    capacity_ledger_service = CapacityLedgerService(
-        session_factory=session_factory,
-        unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count",
     )
 
     from market_fulfillment import PhysicalSettlementScheduler

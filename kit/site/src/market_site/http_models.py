@@ -14,9 +14,17 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
+from .declarations import CapacityDeclarationFields, DeclaredCapacity
 
-class ResourceRegisterRequest(BaseModel):
-    """Body accepted by ``PUT /api/v1/capacity/resources/{resource_id}``."""
+
+class ResourceRegisterRequest(CapacityDeclarationFields):
+    """Body accepted by ``PUT /api/v1/capacity/resources/{resource_id}``.
+
+    The declaration's fields, with the resource id taken from the path. Two
+    fields differ from a declaration for the endpoint's existing callers:
+    ``resource_type`` defaults, and ``capacity`` may be replaced by the
+    legacy scalar ``total_units``.
+    """
 
     total_units: Optional[int] = Field(
         default=None,
@@ -28,32 +36,7 @@ class ResourceRegisterRequest(BaseModel):
         ),
     )
     resource_type: str = Field(default="compute.gpu")
-    pool_id: str = Field(
-        min_length=1,
-        description=(
-            "The Resource Pool this declaration belongs to. Required: "
-            "registration replaces the whole declaration, so a defaulted pool "
-            "would move the resource."
-        ),
-    )
-    host_id: Optional[str] = Field(
-        default=None,
-        description=(
-            "The host this capacity is delivered through, if any. At most one "
-            "resource may name a given host."
-        ),
-    )
-    resource_subtype: Optional[str] = Field(
-        default=None, description="e.g. the GPU model slug ('h200')."
-    )
-    attributes: dict[str, Any] = Field(
-        default_factory=dict,
-        description=(
-            "Resource-domain attributes (gpu_model, region, …). "
-            "Market schema (pricing, escrows) stays on the storefront."
-        ),
-    )
-    capacity: Optional[dict[str, Any]] = Field(
+    capacity: Optional[DeclaredCapacity] = Field(
         default=None,
         description=(
             "Multidimensional total capacity, authoritative for exactly the "
@@ -62,7 +45,6 @@ class ResourceRegisterRequest(BaseModel):
             "is {<mirror dimension>: total_units}."
         ),
     )
-    enabled: bool = Field(default=True)
 
 
 class ResourceListResponse(BaseModel):

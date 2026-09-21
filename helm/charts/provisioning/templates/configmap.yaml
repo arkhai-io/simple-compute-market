@@ -21,6 +21,12 @@ data:
     {{- if .Values.definitions.relays -}}
       {{- $_ := set $config "relay_definitions_path" "/app/config/relay-definitions.yaml" -}}
     {{- end -}}
+    {{- if .Values.definitions.pools -}}
+      {{- $_ := set $config "pool_definitions_path" "/app/config/pool-definitions.yaml" -}}
+    {{- end -}}
+    {{- if .Values.definitions.capacity -}}
+      {{- $_ := set $config "capacity_definitions_path" "/app/config/capacity-definitions.yaml" -}}
+    {{- end -}}
     {{- $_ := set $config "storefront_identity" (first .Values.storefrontIdentity.principals) -}}
     {{- $_ := set $config "admin_identity" (first .Values.adminIdentity.principals) -}}
     {{- if not $config.storefront_url -}}
@@ -35,5 +41,21 @@ data:
     through the relay API is authoritative from then on.
   */}}
   relay-definitions.yaml: |
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.definitions.pools }}
+  {{- /*
+    Resource pools. Reconciled as a whole: a pool this document stops naming
+    is disabled. Imported before capacity, whose declarations name pools.
+  */}}
+  pool-definitions.yaml: |
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.definitions.capacity }}
+  {{- /*
+    Capacity declarations. Each entry replaces the declaration it names; a
+    declaration this document stops naming is retained.
+  */}}
+  capacity-definitions.yaml: |
     {{- toYaml . | nindent 4 }}
   {{- end }}

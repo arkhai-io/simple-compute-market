@@ -26,11 +26,13 @@ def load_capacity_resource_inventory(
     *,
     capacity_resources: Iterable[Mapping[str, Any]] = (),
 ) -> list[dict[str, Any]]:
-    """Return allowlisted host inventory with optional publication views.
+    """Return the declared capacity of each host, with publication views.
 
-    Capacity resources are authoritative for availability and Physical Resource
-    identity. Host rows supply only the connection fields a declaration's
-    ``host_id`` correlates; private host connection fields never enter a
+    A capacity declaration is the authority for what a host sells: its
+    capacity, availability, and attributes all come from the declaration
+    whose ``host_id`` names the host. The host supplies only its connection
+    fields, and a host no declaration names is not projected, because it has
+    nothing declared to report. Private host connection fields never enter a
     bare-metal publication view.
     """
     # A declaration names the host it is delivered through by its own
@@ -65,28 +67,35 @@ def load_capacity_resource_inventory(
     with session_factory() as db:
         hosts = db.query(Host).order_by(Host.pool_id.asc(), Host.host_id.asc()).all()
         return [
-            _project_host(host, capacity_resource=resources.get(str(host.host_id)))
+            _project_host(host, capacity_resource=resources[str(host.host_id)])
             for host in hosts
+            if str(host.host_id) in resources
         ]
 
 
 def _project_host(
     host: Any,
     *,
-    capacity_resource: Mapping[str, Any] | None = None,
+    capacity_resource: Mapping[str, Any],
 ) -> dict[str, Any]:
-    gpu_count = int(host.gpu_count or 0)
-    resource = dict(capacity_resource or {})
-    capacity = dict(resource.get("capacity") or {"gpu_count": gpu_count})
+    """One host's projected resource: the declaration, plus connection fields.
+
+    Every declared attribute is projected except the bare-metal publication
+    configuration, which is published as its own view. The host's
+    ``host_id`` and ``public_host`` are written last, so a declaration cannot
+    override how the host is reached.
+    """
+    resource = dict(capacity_resource)
+    capacity = dict(resource.get("capacity") or {})
     attributes: dict[str, Any] = {
-        "host_id": host.host_id,
-        "public_host": host.public_host or host.ssh_host,
-        "gpu_count": gpu_count,
+        key: value
+        for key, value in dict(resource.get("attributes") or {}).items()
+        if key != BARE_METAL_PUBLICATION_ATTR
     }
-    if host.gpu_model:
-        attributes["gpu_model"] = host.gpu_model
+    attributes["host_id"] = host.host_id
+    attributes["public_host"] = host.public_host or host.ssh_host
     projected: dict[str, Any] = {
-        "resource_id": str(resource.get("resource_id") or host.host_id),
+        "resource_id": str(resource["resource_id"]),
         "pool_id": str(resource.get("pool_id") or host.pool_id),
         "resource_type": resource.get("resource_type") or "compute.gpu",
         "resource_subtype": resource.get("resource_subtype"),
@@ -94,8 +103,11 @@ def _project_host(
         "attributes": attributes,
         "enabled": bool(host.enabled and resource.get("enabled", True)),
     }
-    if capacity_resource is not None:
-        projected["available"] = dict(resource.get("available") or {})
+    # Availability is projected only as the declaration reports it.
+    # Consumers trust a present ``available`` as live, so an unreported one
+    # must stay absent rather than become an empty map read as zero.
+    if resource.get("available") is not None:
+        projected["available"] = dict(resource["available"])
 
     publication_view = _bare_metal_publication_view(
         host=host,

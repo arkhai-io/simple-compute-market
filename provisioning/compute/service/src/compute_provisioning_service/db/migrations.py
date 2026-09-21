@@ -17,9 +17,10 @@ from dataclasses import dataclass
 
 from sqlalchemy import Engine, MetaData, inspect, text
 from sqlalchemy.engine import Connection
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.schema import CreateTable
 
+from market_site import CapacityLedgerService
 from market_site.db import CapacityBucket
 
 from compute_provisioning_service.db.models import (
@@ -27,6 +28,9 @@ from compute_provisioning_service.db.models import (
     Base,
     DEFAULT_POOL_ID,
     ResourcePool,
+)
+from compute_provisioning_service.services.capacity_derivation import (
+    LegacyHostCapacityDerivation,
 )
 
 logger = logging.getLogger(__name__)
@@ -2333,6 +2337,91 @@ def _migrate_capacity_declaration_contract(engine: Engine) -> None:
             index.create(connection, checkfirst=True)
 
 
+# The declaration fields a stored declaration's attributes may not repeat.
+# Fixed here rather than imported: this migration enforces the rule as it
+# stood when it was written.
+_DECLARATION_FIELD_ATTRIBUTE_KEYS = (
+    "host_id",
+    "pool_id",
+    "resource_id",
+    "resource_subtype",
+    "resource_type",
+)
+
+
+def _migrate_capacity_declaration_attributes(engine: Engine) -> None:
+    """Remove declaration fields from stored capacity-declaration attributes.
+
+    A declaration's own fields may not also appear as attribute keys, and
+    registration refuses them. A row stored earlier may still carry one,
+    which would turn the next write of an unchanged declaration into a
+    refusal. Only top-level keys are removed; a nested value that happens to
+    use one of these names is attribute content and is left alone. A removed
+    value is not promoted into its column: the column is authoritative, and
+    promoting a value that never was would change the declaration.
+
+    Every row is planned before the first write, so a malformed attributes
+    document fails the migration with nothing changed.
+    """
+    if not _table_exists(engine, "capacity_buckets"):
+        return
+    with engine.begin() as connection:
+        rows = connection.execute(text(
+            "SELECT capacity_bucket_id, backing_resource_id, attributes "
+            "FROM capacity_buckets ORDER BY capacity_bucket_id"
+        )).all()
+        planned: list[tuple[str, str, dict, list[str]]] = []
+        for bucket_id, resource_id, raw in rows:
+            attributes = _json_mapping(
+                raw, label=f"capacity_buckets[{resource_id}].attributes"
+            )
+            removed = [
+                key for key in _DECLARATION_FIELD_ATTRIBUTE_KEYS if key in attributes
+            ]
+            if removed:
+                kept = {k: v for k, v in attributes.items() if k not in removed}
+                planned.append((bucket_id, resource_id, kept, removed))
+        for bucket_id, resource_id, kept, removed in planned:
+            connection.execute(
+                text(
+                    "UPDATE capacity_buckets SET attributes=:attributes "
+                    "WHERE capacity_bucket_id=:bucket_id"
+                ),
+                {"attributes": _json_param(kept), "bucket_id": bucket_id},
+            )
+            logger.info(
+                "Removed declaration fields %s from the attributes of capacity "
+                "resource %s",
+                removed,
+                resource_id,
+            )
+
+
+def _migrate_legacy_host_capacity_declarations(engine: Engine) -> None:
+    """Declare capacity for hosts whose legacy ``gpu_count`` sells nothing yet.
+
+    Host inventory is connection identity; capacity resources declare what a
+    site sells. A host present at upgrade with GPUs and no declaration naming
+    it would stop being sold, so it gets the declaration INI application
+    derives for a newly applied host. This runs that same derivation rather
+    than restating it in SQL, so the two cannot disagree; it only adds
+    declarations and changes no host row.
+
+    The ledger is composed as the compute service composes it, so a derived
+    declaration's scalar total mirrors ``gpu_count``.
+    """
+    if not (_table_exists(engine, "hosts") and _table_exists(engine, "capacity_buckets")):
+        return
+    session_factory = sessionmaker(bind=engine, autoflush=False)
+    ledger = CapacityLedgerService(
+        session_factory,
+        unit_claim_keys=("units", "gpu_count"),
+        mirror_dimension="gpu_count",
+    )
+    with session_factory() as db, db.begin():
+        LegacyHostCapacityDerivation(ledger).derive_in_session(db)
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration("20260603_001_ansible_jobs_escrow_uid", _migrate_ansible_jobs_escrow_uid),
     Migration("20260603_002_hosts_public_host", _migrate_hosts_public_host),
@@ -2397,5 +2486,13 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260921_002_capacity_declaration_contract",
         _migrate_capacity_declaration_contract,
+    ),
+    Migration(
+        "20260921_003_capacity_declaration_attributes",
+        _migrate_capacity_declaration_attributes,
+    ),
+    Migration(
+        "20260921_004_legacy_host_capacity_declarations",
+        _migrate_legacy_host_capacity_declarations,
     ),
 )

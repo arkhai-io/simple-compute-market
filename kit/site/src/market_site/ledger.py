@@ -55,6 +55,7 @@ from market_resource_pools import (
     pool_delivers_offering_mode,
 )
 
+from .declarations import CapacityDeclaration
 from .db import (
     HELD_RESERVATION_STATES,
     ReservationState,
@@ -381,10 +382,15 @@ def resource_feasibility_view(
     was composed with: the scalar unit total is a matchable fact under that
     name and under ``units``, and under no other domain's dimension name.
     """
-    # ``host_id`` joins the matchable facts beside ``resource_id`` so a claim
-    # may still pin the host a resource is delivered through; it is a column
-    # of the resource, not one of its declared attributes.
+    # Claims match declared attributes and the resource's own facts in one
+    # namespace, so the facts are written last: a declaration's fields and the
+    # ledger's derived totals are authoritative, and an attribute of the same
+    # name (possible only in a row stored before registration refused them)
+    # must not restate them. ``host_id`` is a fact so a claim may pin the host
+    # a resource is delivered through.
+    authoritative_pool_id = pool_id or resource_id
     normalized = {
+        **dict(attributes or {}),
         "resource_id": resource_id,
         "host_id": host_id,
         "resource_type": resource_kind,
@@ -392,10 +398,8 @@ def resource_feasibility_view(
         "value": value,
         "units": units,
         mirror_dimension: units,
-        **dict(attributes or {}),
+        "pool_id": authoritative_pool_id,
     }
-    authoritative_pool_id = pool_id or resource_id
-    normalized["pool_id"] = authoritative_pool_id
     return ResourceFeasibilityView(
         resource_id=resource_id,
         pool_id=authoritative_pool_id,
@@ -703,14 +707,11 @@ class CapacityLedgerService:
         if not pool_id:
             raise ValueError("a capacity declaration must name its pool_id")
         mirror = self._mirror_dimension
-        bucket = self._bucket_by_backing_resource(db, resource_id)
-        old_capacity = _resource_capacity(bucket, mirror) if bucket is not None else {}
-        old_enabled = bool(bucket.enabled) if bucket is not None else None
         if capacity:
-            new_dimensions = dict(capacity)
-            if total_units is not None and mirror in new_dimensions:
+            dimensions = dict(capacity)
+            if total_units is not None and mirror in dimensions:
                 supplied = _to_decimal_nonneg(
-                    new_dimensions[mirror], label=f"capacity[{mirror}]"
+                    dimensions[mirror], label=f"capacity[{mirror}]"
                 )
                 if supplied != Decimal(int(total_units)):
                     raise ValueError(
@@ -718,55 +719,68 @@ class CapacityLedgerService:
                         f"total_units={total_units}; pass one consistent value"
                     )
         elif total_units is not None:
-            new_dimensions = {mirror: int(total_units)}
+            dimensions = {mirror: int(total_units)}
         else:
             raise ValueError(
                 "a capacity declaration must name at least one dimension"
             )
-        new_capacity = {
-            str(key): _to_decimal_nonneg(value, label=f"capacity[{key}]")
-            for key, value in new_dimensions.items()
-        }
-        mirrored_units = (
-            int(new_capacity[mirror]) if mirror in new_capacity else None
+        return self.register_declaration_in_session(
+            db,
+            CapacityDeclaration(
+                resource_id=resource_id,
+                pool_id=pool_id,
+                resource_type=resource_type,
+                resource_subtype=resource_subtype,
+                host_id=host_id,
+                capacity=dimensions,
+                attributes=dict(attributes or {}),
+                enabled=enabled,
+            ),
         )
-        if host_id is not None:
+
+    def register_declaration_in_session(
+        self, db: Session, declaration: CapacityDeclaration
+    ) -> dict[str, Any]:
+        """Insert or replace one whole declaration inside the caller's transaction.
+
+        The declaration is already valid in itself; what is refused here is
+        what only stored state can decide: a host another resource already
+        names, and a pool move while the resource holds a live obligation.
+        Both refusals happen before anything is written. See
+        :meth:`register_resource_in_session` for the event it emits.
+        """
+        resource_id = declaration.resource_id
+        bucket = self._bucket_by_backing_resource(db, resource_id)
+        old_capacity = (
+            _resource_capacity(bucket, self._mirror_dimension)
+            if bucket is not None else {}
+        )
+        old_enabled = bool(bucket.enabled) if bucket is not None else None
+        if declaration.host_id is not None:
             holder = (
                 db.query(CapacityBucket)
-                .filter(CapacityBucket.host_id == host_id)
+                .filter(CapacityBucket.host_id == declaration.host_id)
                 .one_or_none()
             )
             if holder is not None and holder.backing_resource_id != resource_id:
                 raise CapacityConflictError(
-                    f"host {host_id!r} already carries resource "
+                    f"host {declaration.host_id!r} already carries resource "
                     f"{holder.backing_resource_id!r}"
                 )
-        if bucket is not None and (bucket.pool_id or DEFAULT_POOL_ID) != pool_id:
-            self._refuse_reassignment_under_obligation(db, bucket, pool_id)
+        if (
+            bucket is not None
+            and (bucket.pool_id or DEFAULT_POOL_ID) != declaration.pool_id
+        ):
+            self._refuse_reassignment_under_obligation(db, bucket, declaration.pool_id)
         is_new = bucket is None
         if bucket is None:
             bucket = CapacityBucket(
                 capacity_bucket_id=str(uuid.uuid4()),
                 backing_resource_id=resource_id,
-                pool_id=pool_id,
-                resource_type=resource_type,
-                resource_subtype=resource_subtype,
-                total_units=mirrored_units,
-                capacity=_serialize_dimensions(new_capacity),
-                attributes=dict(attributes or {}),
-                enabled=enabled,
-                host_id=host_id,
             )
             db.add(bucket)
-        else:
-            bucket.pool_id = pool_id
-            bucket.resource_type = resource_type
-            bucket.resource_subtype = resource_subtype
-            bucket.total_units = mirrored_units
-            bucket.capacity = _serialize_dimensions(new_capacity)
-            bucket.attributes = dict(attributes or {})
-            bucket.enabled = enabled
-            bucket.host_id = host_id
+        self._write_declaration(bucket, declaration)
+        new_capacity = dict(declaration.capacity)
         delta = {
             key: new_capacity.get(key, Decimal(0))
             - old_capacity.get(key, Decimal(0))
@@ -778,7 +792,7 @@ class CapacityLedgerService:
             else _capacity_change_kind(
                 delta,
                 old_enabled=old_enabled,
-                new_enabled=enabled,
+                new_enabled=declaration.enabled,
             )
         )
         db.add(
@@ -790,6 +804,60 @@ class CapacityLedgerService:
         )
         db.flush()
         return self._resource_payload(db, bucket)
+
+    def _write_declaration(
+        self, bucket: CapacityBucket, declaration: CapacityDeclaration
+    ) -> None:
+        """Store a declaration on its row, replacing every declared field.
+
+        ``total_units`` is the service-maintained mirror of the composition's
+        mirror dimension, absent when the declaration does not name it.
+        """
+        mirror = self._mirror_dimension
+        bucket.pool_id = declaration.pool_id
+        bucket.resource_type = declaration.resource_type
+        bucket.resource_subtype = declaration.resource_subtype
+        bucket.host_id = declaration.host_id
+        bucket.capacity = _serialize_dimensions(declaration.capacity)
+        bucket.total_units = (
+            int(declaration.capacity[mirror]) if mirror in declaration.capacity else None
+        )
+        bucket.attributes = dict(declaration.attributes)
+        bucket.enabled = declaration.enabled
+
+    def _stored_declaration(self, bucket: CapacityBucket) -> CapacityDeclaration:
+        """A row read back as the declaration it stores, without revalidating:
+        stored state is compared as it is, including a row written before a
+        rule it would now fail."""
+        return CapacityDeclaration.model_construct(
+            resource_id=bucket.backing_resource_id,
+            pool_id=bucket.pool_id or DEFAULT_POOL_ID,
+            resource_type=bucket.resource_type,
+            resource_subtype=bucket.resource_subtype,
+            host_id=bucket.host_id,
+            capacity=_resource_capacity(bucket, self._mirror_dimension),
+            attributes=dict(bucket.attributes or {}),
+            enabled=bool(bucket.enabled),
+        )
+
+    def declaration_change_in_session(
+        self, db: Session, declaration: CapacityDeclaration
+    ) -> str:
+        """Classify a whole declaration against the stored one.
+
+        Returns ``"created"`` when nothing is stored under its resource id,
+        ``"unchanged"`` when registering it would store exactly what is
+        stored, and ``"updated"`` otherwise. Registration appends a capacity
+        event even when it changes nothing, so a caller reconciling many
+        declarations registers only those this does not call unchanged.
+        Capacity compares as stored, so ``8`` and ``8.0`` are equal.
+        """
+        bucket = self._bucket_by_backing_resource(db, declaration.resource_id)
+        if bucket is None:
+            return "created"
+        if self._stored_declaration(bucket) == declaration:
+            return "unchanged"
+        return "updated"
 
     def _refuse_reassignment_under_obligation(
         self, db: Session, bucket: CapacityBucket, new_pool_id: str

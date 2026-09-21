@@ -311,6 +311,7 @@ dependencies = [
     { name = "arkhai-kit-resource-pools" },
     { name = "fastapi" },
     { name = "pydantic" },
+    { name = "pyyaml" },
     { name = "sqlalchemy" },
 ]
 wheels = [

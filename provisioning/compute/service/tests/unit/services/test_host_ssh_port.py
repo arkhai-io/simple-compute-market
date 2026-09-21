@@ -26,6 +26,12 @@ from compute_provisioning_service.db.models import Base, DEFAULT_POOL_ID, Host, 
 from vm_provisioning_operator.models import HostCreate, HostResponse, HostUpdate
 from vm_provisioning_adapter.services.ansible_service import AnsibleService
 from vm_provisioning_adapter.services.host_service import HostService, _parse_ini
+from market_site import CapacityLedgerService
+from market_site.db import Base as SiteBase
+
+from compute_provisioning_service.services.capacity_derivation import (
+    LegacyHostCapacityDerivation,
+)
 
 
 _PLAYBOOK_PATH = "/configured/playbook.yaml"
@@ -45,12 +51,25 @@ def _sqlite_memory_engine():
     )
 
 
+def _derivation(session_factory) -> LegacyHostCapacityDerivation:
+    return LegacyHostCapacityDerivation(
+        CapacityLedgerService(
+            session_factory,
+            unit_claim_keys=("units", "gpu_count"),
+            mirror_dimension="gpu_count",
+        )
+    )
+
+
 @pytest.fixture
 def db_engine():
     engine = _sqlite_memory_engine()
     from market_resource_pools.db import Base as PoolsBase
     PoolsBase.metadata.create_all(bind=engine)
     Base.metadata.create_all(bind=engine)
+    # Applying INI hosts derives capacity declarations into the ledger's
+    # tables, which ride market_site's metadata.
+    SiteBase.metadata.create_all(bind=engine)
     with Session(engine) as session:
         session.add(ResourcePool(
             id=DEFAULT_POOL_ID, label="Default Pool", provider="ansible",
@@ -70,7 +89,12 @@ def settings():
 
 @pytest.fixture
 def svc(db_engine, settings):
-    return HostService(session_factory=create_session_factory(db_engine), settings=settings)
+    session_factory = create_session_factory(db_engine)
+    return HostService(
+        session_factory=session_factory,
+        settings=settings,
+        capacity_derivation=_derivation(session_factory),
+    )
 
 
 def _host_create(**overrides) -> HostCreate:
