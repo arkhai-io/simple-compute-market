@@ -975,10 +975,17 @@ caller's transaction through its commit. So the ledger offers `serialized()`, a
 context manager a caller holds around its whole transaction, and the in-session
 mutators refuse to run unless the calling thread holds it, which makes misuse an
 immediate error rather than a rule callers must know. The order is always ledger
-lock, then database, as every existing ledger operation already takes them. The
-older in-session methods `kit/fulfillment` calls (`update_lease_fields_in_session`,
-`iter_scheduling_candidates_in_session`) have the same shape but predate this change;
-they are flagged here, not changed.
+lock, then database, as every existing ledger operation already takes them. A second review found this too narrow. The rule
+belongs to the invariant, not to the operations this change added: every writer
+that can create or remove a live obligation must hold the lock through its commit.
+Settlement assignment is such a writer — `assign_settlement_resource_in_session`
+moves a reservation's debit and names its settlement resource, which is half of what
+the pool-move check reads — and `kit/fulfillment`'s scheduling unit of work called it
+in its own writer transaction without the lock. So it requires the lock too, and the
+scheduling unit of work takes it before its session (Section 7c).
+`update_lease_fields_in_session` writes only executor and lease-tail fields, never a
+reservation's state, debit, or settlement resource, so it cannot create or remove an
+obligation and is left as it is; the other in-session methods only read.
 
 **The ledger refuses an unknown pool.** Registration stored a declaration naming a
 pool that does not exist, while a capacity document refused the same entry, because

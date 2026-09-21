@@ -17,9 +17,9 @@ registry's `host_id` key from `unify-host-identity`, archived before this change
 resumed. Names in notes written before it follow its mapping: `name` → `host_id`,
 the `vm_host` attribute → the declaration's `host_id`, `kvm_host` → `ssh_host`.
 
-**Status (2026-09-21).** Every section is implemented and tested, including the
-review corrections in 7b; `make test` and the end-to-end pipeline passed on the
-owner's run. Each task's note records its final behaviour and evidence; the
+**Status (2026-09-21).** Every section through 7b is implemented and tested, and
+`make test` and the end-to-end pipeline passed on the owner's run. A second review
+reopened the change with Section 7c; archival waits on it. Each task's note records its final behaviour and evidence; the
 decisions behind them are in `design.md`.
 
 ## 1. Capacity declaration carrier and administration surface
@@ -883,6 +883,45 @@ so none moves.
       adapter 2, the VM adapter's target 38, e2e unit 237 plus its known
       failure, VM storefront 1170 plus its two known `test_alkahest` failures
       (in its existing environment).
+
+## 7c. Second review corrections (planned 2026-09-21)
+
+From the review after closeout; `design.md`'s "Review corrections" records the
+corrected serialization rule. `kit-site` 0.4.0 and `kit-fulfillment` 0.3.0 are
+unpublished minor bumps on this branch and cover these changes.
+
+- [ ] 7c.1 **Settlement assignment serializes with pool moves.**
+      `kit/site/src/market_site/ledger.py`: `assign_settlement_resource_in_session`
+      requires `serialized()`. `kit/fulfillment/src/market_fulfillment/scheduling_persistence.py`:
+      `SqlAlchemySchedulingUnitOfWork.transaction` takes `capacity_ledger.serialized()`
+      before opening its session (ledger lock, then database, as everywhere else).
+      `kit/site/tests/unit/test_settlement_assignment.py`'s two direct callers hold it.
+      Tests (component, `kit/site/tests/unit/test_ledger.py`): the assignment writer
+      refuses outside the lock; on a file-backed database with independent sessions,
+      a pool move paused after its obligation check races a settlement assignment onto
+      the resource, and no committed state has a held reservation debited to or
+      assigned to the moved resource. Break `serialized()` to confirm the race test
+      fails, as for 7b.1.
+- [ ] 7c.2 **Stale docstring.** `provisioning/compute/service/tests/integration/test_capacity_definitions_api.py`'s
+      `test_a_refused_import_reports_every_problem_and_applies_nothing` describes the
+      two requests it makes.
+- [ ] 7c.3 **`kit/site` → `kit/resource-pools` layering.** `ARCHITECTURE.md` allows
+      authority capabilities to depend on foundation capabilities only; `kit/site`
+      declares `kit-resource-pools` and reads `ResourcePool` for pool existence
+      (added here) and deliverable modes (pre-existing). Disposition per the owner's
+      decision; `design.md`'s "The ledger refuses an unknown pool" is corrected either
+      way, since "the dependency already exists" does not answer the layering rule.
+- [ ] 7c.4 **Image publication tag.** `Makefile`'s `push-images` retags the local
+      `arkhai:compute-provisioning-<sha>` the service build produces as the remote
+      `arkhai:provisioning-<sha>`; it named a local `arkhai:provisioning-<sha>` that no
+      build makes. `scripts/tests/test_image_publication_contract.py` asserts exactly
+      this and runs under `make test-release-tooling`, not `make test`.
+      **Done 2026-09-21:** one argument changed; both targets dry-run to the strings
+      the contract test asserts. The test itself needs `git rev-parse`, unavailable in
+      the implementation snapshot, so its first run is the owner's. Pre-existing and
+      unrelated to capacity; fixed here at the owner's request.
+- [ ] 7c.5 **Validation.** Rebuild `kit-site` and `kit-fulfillment`; rerun `kit/site`,
+      `kit/fulfillment`, the provisioning service, and every suite 7b.6 ran.
 
 ## 8. Closeout
 
