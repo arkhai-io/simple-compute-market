@@ -349,6 +349,44 @@ advertisement change's subset rule depend on a concept its own dependent owned.
 | [`share-site-projection-state`](share-site-projection-state/) | in design | — | Opened 2026-10-14 as the prerequisite of `unbacked-bare-metal-listings`, carved out of `kit-owned-listing-and-fulfillment-lifecycles`; three decisions taken, five questions to decide before planning | Moves VM's per-site projection state — resource-pool and capacity-bucket caches per site, their poller loop, the publication wake on a resource-pool generation change, per-site and topology-error refresh, and the status summary — into `kit/capacity-publication` over any aggregate. VM and bare metal both compose it: bare-metal publication derives from held projections and runs as a timer-driven loop on the storefront's lifecycle controller, held, stepped, and previewed as VM's is; its opening recheck reads the held projection; override writes refresh it and wake the loop. The pool-override write check stays live. No unbacked supply, no listing or fulfillment lifecycle extraction |
 | [`unbacked-bare-metal-listings`](unbacked-bare-metal-listings/) | ready for planning | `share-site-projection-state` | Design reviewed 2026-10-14, every question decided; its other prerequisite `encapsulate-capacity-backing` archived 2026-10-14. `bare-metal-mock-provisioned-deal` (archived 2026-10-09) composed bare metal onto the kit negotiation runtime | Bare metal publishes unbacked listings from unbacked pools through the same kit runtime, binding, and reconciliation as VM, settling by introduction through the promoted composition. Owns the bare-metal system evidence that unbacked discovery reaches a usable introduction, and that a rate-bounded query returns backed and unbacked bare-metal listings together (from `publish-indicative-listing-rates` 7.13). The site emits the bare-metal view for unbacked resources, delivery terms (host identity, access methods, availability) are carried only as the backing delegate passes them, introduction deals answer not found from the fulfillment routes, and bare metal's buyer settlement commands move under its own group. The two-seller scenario it once carried (from `compose-contact-exchange-across-compute` 6.5) is withdrawn to unowned work |
 
+## Roadmap goal — Sell metered inference as its own market domain
+
+```text
+add-inference-domain-contract ──► compose-inference-domain-stack ──┬──► extract-access-issuance-kit ──┐
+                                                                    └──► meter-inference-usage ────────┼──► package-inference-seller ──► qualify-inference-market
+                                                                                                        │
+                                                                    (extract and meter are sequenced, not ordered; whichever lands second rebases)
+```
+
+The campaign's sequencing rule is stated once, in
+[`add-inference-domain-contract`](add-inference-domain-contract/)'s `design.md`:
+define the vocabulary, compose a stack by **copying** the API-credits issuance
+machinery, prove one deal, and only then extract what two working consumers show
+to be shared. An earlier plan opened with the extraction; it was reordered
+because the boundary is not knowable from one consumer and the extraction is
+delicate — the issuance schema strings are inside SHA-256 digests and the
+authority mirrors the digest function — so it is done with a pinned API-credits
+regression suite and a second consumer in view.
+
+Consumption is a flat charge per request until `meter-inference-usage` lands;
+that separates proving the market plumbing from proving the billing, which are
+different risks.
+
+Excluded from this campaign by scope decision (2026-09-16): the Arkhai-hosted
+inference registry deployment, webapp integration, a hosted fiat option for
+inference, and any Stripe, Metronome, Formance, or WorkOS integration. Each is
+anticipated and unowned here; the Helm alias pattern the API-credits registry
+already uses makes the hosted registry a small change when it is opened.
+
+| Change | Status | Acceptance boundary |
+|---|---|---|
+| [`add-inference-domain-contract`](add-inference-domain-contract/) | active; no blocking dependency; design-complete | The `inference.v1` domain identity, `inference` schema identity, and `inference` offering mode; one listing per served model carrying a model card and an integer rate card; provision intent as the API-credits purchase shape under the new kind; the usage record and its deterministic charge derivation; secret-free usage evidence; the three-identity separation; the registry filter specification, its load test, and the image `COPY`; the `arkhai-inference-domain` wheel. One decision gate: the `model_id` naming authority |
+| [`compose-inference-domain-stack`](compose-inference-domain-stack/) | design phase; not yet planned; depends on `add-inference-domain-contract` | Storefront executable, authority service, OpenAI-compatible gateway, and buyer plugin composed by copying the API-credits roles; a local Compose stack with an inference registry and development identities; `e2e_inference_deal` through the shared helpers. Flat per-request consumption. The second consumer the extraction needs |
+| [`extract-access-issuance-kit`](extract-access-issuance-kit/) | design phase; not yet planned; depends on `compose-inference-domain-stack`'s green deal | Pins API-credits digest bytes first, then moves issuance models, fulfillment identity and request digest, the issuance client, fulfillment orchestration and rollback, evidence projection, and the gate's authority client and signing into kit under a domain label; deletes both domain-local copies; the authority composes the kit's digest so client and server cannot drift. Balances, quantities, quota, and consumption rules stay domain-owned |
+| [`meter-inference-usage`](meter-inference-usage/) | design phase; not yet planned; depends on `compose-inference-domain-stack`; sequenced with the extraction | Hold, settle, and release on the authority with server-side pricing against the pinned rate card; the gate estimates, holds before proxying, settles from `usage`, forces `stream_options.include_usage`, drains on disconnect, and disables batching; hold expiry, usage retention and rollup; metered conformance cases. One decision gate: pre-flight token estimation source |
+| [`package-inference-seller`](package-inference-seller/) | design phase; not yet planned; depends on `compose-inference-domain-stack` and `meter-inference-usage` | The thin seller path: a CLI that generates configuration and a Compose stack from the stack change's own files, generates signing material, checks reachability, and installs from published wheels. GPU detection, TLS automation, and price suggestion are deferred until three third-party sellers report where they got stuck |
+| [`qualify-inference-market`](qualify-inference-market/) | design phase; not yet planned; depends on `meter-inference-usage` and `package-inference-seller` | Multi-seller discovery, concurrency without overdraft, cancellation and disconnect charging, credential lifecycle, missing and late usage, retry safety, the buyer-profile matrix, and cross-language conformance for whichever non-Python gates are available; release-qualifies the per-domain deal path. Goal 8's completion test |
+
 ## Lesser goal — POOLS capacity and fulfillment foundation
 
 **What it adds up to.** The durable capacity and fulfillment substrate every roadmap goal builds on: a central Settlement Record, transactional scheduling and assignment, pull-correct fulfillment results, recovery, and the projections a storefront consumes instead of owning hardware itself. POOLS-1 through POOLS-6's foundations are archived. This is not a roadmap goal because it changes how the system is built rather than what the market can do — but nearly every goal has a dependency edge into it.
