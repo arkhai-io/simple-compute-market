@@ -16,6 +16,36 @@ fulfillment scheduling
 
 Putting the ledger outside storefronts allows several sellers or processes to share supply without treating independently refreshed caches as locks. It also lets a reservation outlive the storefront process that initiated it.
 
+## Declared capacity and connection identity
+
+What a site sells is declared by capacity declarations: a Physical Resource's shape
+and quantity across every dimension it names, its pool, the categorical attributes
+claims match, and, where it is delivered through a host, that host's `host_id`. A
+host record is connection identity — how the provisioner reaches a machine — and
+supplies no capacity. The resource-pool projection is built from declarations; a
+host that no declaration names is not projected.
+
+The alternatives each left capacity with more than one authority. Adding vCPU, RAM,
+and disk columns to hosts would have folded sellable capacity into records whose
+job is SSH users, key material, and addressing, and an Ansible inventory is a poor
+carrier for declarations because it exists to describe how to reach a machine.
+Keeping GPUs on hosts and moving the other dimensions to declarations would have
+left two partial authorities in one service. So declarations own every dimension,
+and a host's legacy GPU count is only input: where INI inventory enters, and once
+at upgrade, a host with GPUs that no declaration names gets a declaration derived
+from it, and after that its inventory no longer affects capacity.
+
+One declaration type serves every entry point — single registration, a mounted or
+submitted definitions document, and derivation — with the same validation and the
+same refusals, so a declaration means the same thing however it arrives.
+
+Administration composes with the ledger's serialization rather than around it. A
+declaration's checks against stored state (a pool move while the resource holds a
+live reservation, a host another declaration names) are true only until something
+else commits, so a caller writing declarations into its own transaction holds the
+ledger's serialization lock through that transaction's commit, and the ledger's
+in-session writers refuse to run without it.
+
 ## Private accounting
 
 Multidimensional balances are represented by private capacity buckets and current reservation debits. The public reservation identifies its lifecycle and reserved dimensions; it does not expose a backing bucket or physical-resource identity. Scheduling may atomically move the debit when selection binds the reservation to another eligible bucket.

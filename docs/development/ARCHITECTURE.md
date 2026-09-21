@@ -353,6 +353,7 @@ Within a service, controllers stay thin: HTTP routing, request/response schemas,
 | Marketplace principal normalization, proof dispatch, and canonical envelopes | Identity kit | Scheme-neutral foundation capability; roles inject signers and authorities own subject/role bindings |
 | Listing, negotiation, deal, and seller policy state | Storefront | Market-facing state, not physical inventory |
 | Capacity admission and reservation | Site authority | Serialization point for competing reservations |
+| Sellable capacity: each Physical Resource's declared shape, quantity, pool, and match attributes | Site authority | Declared by registration, a capacity-definitions document, or derivation from legacy host inventory; host records are connection identity only |
 | Resource-pool metadata and provider configuration | Resource-pool service | Provisioning routing metadata; disabled pools remain resolvable |
 | Pool deliverable-mode authorization | Resource-pool operator and service | One explicit set per pool; absence authorizes no mode, and each execution layer rechecks it |
 | Settlement-resource selection | Fulfillment scheduler | Placement occurs before provider execution |
@@ -427,6 +428,7 @@ Authenticated service-to-service calls use the scheme-neutral version 2 request 
 | **Capacity Projection** | Storefront view of capacity believed sellable | Storefront, sourced from sites |
 | **Capacity Reservation** | Admitted hold against authoritative capacity | Site authority |
 | **Physical Resource** | Real supply resource such as host, pod allocation, storage, power, or bandwidth | Site/provisioning |
+| **Capacity Declaration** | Authoritative statement of a Physical Resource's sellable shape and quantity, its pool, and the attributes claims match | Site authority |
 | **Resource Pool** | Provisioning-owned group and provider-routing context | Resource-pool service |
 | **Capacity Settlement Assignment** | Durable binding of a capacity reservation to one settlement resource | Site/fulfillment boundary |
 | **Settlement Resource** | Physical resource selected to satisfy a reservation | Fulfillment scheduler |

@@ -187,3 +187,44 @@ provider or different capacity backing.
 
 - **WHEN** a reassignment is requested for a capacity resource with no live capacity obligation
 - **THEN** the reassignment succeeds
+
+## MODIFIED Requirements
+
+### Requirement: Multidimensional capacity accounting
+A site resource MAY declare total capacity across more than one named quantity dimension (for example `gpu_count`, `vcpu_count`, `ram_gb`, `disk_gb`); a claim's requested quantities MUST be checked and held against every declared dimension, not only a single default quantity, with held/available accounting kept exact under concurrent holds. A dimension a resource does not declare MUST NOT be assumed to have room. This accounting is per resource row: it does not aggregate or cross-check declared or held capacity across multiple resource rows that happen to share a physical host (see "Cross-mode physical accounting" above for the one cross-row check that does exist, which is scoped to exclusive/shareable mode conflicts, not capacity sums).
+
+#### Scenario: A reservation would exceed a secondary dimension
+- **WHEN** a claim requests more of a declared dimension (for example memory) than the resource has available, even though another dimension (for example GPU count) would fit
+- **THEN** the reservation is rejected rather than admitted for a shape the resource cannot serve
+
+#### Scenario: Concurrent holds accumulate per dimension
+- **WHEN** two separate holds are placed on one shareable resource
+- **THEN** each declared dimension's available quantity reflects the sum of both holds, not just the dimension the first hold happened to request
+
+#### Scenario: Legacy single-quantity claims are unaffected
+- **WHEN** a claim requests a quantity using a legacy single-quantity key (`units`, or a composition's alias such as the VM domain's `gpu_count`) instead of a dimensions map
+- **THEN** it is checked and held exactly as it was before multidimensional capacity existed, translated internally to the composition's mirror dimension
+
+### Requirement: Site identity ownership boundary
+Provisioning-owned site-capacity persistence MUST NOT redundantly store storefront-owned `site_id` on pools, resources, or reservations. The storefront aggregation boundary assigns the trusted site identity associated with a configured provisioning connection. A remote counterparty MUST NOT self-assert that identity in capacity payloads.
+
+#### Scenario: Capacity payload attempts to assert site identity
+- **WHEN** a provisioning endpoint returns or accepts a payload containing a caller-selected `site_id`
+- **THEN** the storefront ignores that assertion and uses the identity bound to the configured connection
+- **AND** provisioning capacity rows remain scoped by the local database authority rather than a redundant site column
+
+
+**Internal capacity accounting**
+
+A storefront-facing capacity reservation identifies the durable hold by `capacity_reservation_id` and exposes lifecycle metadata, expiry, and reserved dimensions. It does not expose the provisioning authority's initial accounting choice.
+
+Within the site authority, a `CapacityBucket` is the host-level multidimensional accounting boundary. For the VM domain there is one current bucket per host. `backing_resource_id` is the declaration's resource id and `host_id` names the host its capacity is delivered through, while `CapacityReservationDebit` records the reservation's current bucket and debited dimensions. Scheduling may atomically replace that debit when it rebinds a reservation to another eligible host and then records `settlement_resource_id`.
+
+**Storefront projection families**
+
+The site authority publishes two independent pull projections:
+
+- `site_resource_pools` preserves resource-pool membership and the allowlisted per-resource inventory facts needed for individual-resource listings.
+- `site_capacity_buckets` vertically groups resources with identical canonical grouping criteria and currently available dimensions. Each group exposes a deterministic digest-derived `capacity_group_key` and `resource_count`, but no internal capacity-bucket identifiers or duplicated physical-resource identifier list.
+
+Each projection family has its own monotonic revision and canonical snapshot digest. Storefront caches replace complete generations atomically and retain the last complete generation when a refresh fails; unavailable projection state is distinct from an authoritative empty projection.

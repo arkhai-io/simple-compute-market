@@ -12,48 +12,15 @@ contract every later section writes through (`pool_id` required, `total_units`
 optional, in-session registration), and Section 2's derivation writes through
 Section 5's in-session reconciliation path.
 
-**Dependency.** Sections 2 and 4 consume the declaration's `host_id` and the renamed
-host registry from `unify-host-identity`, which lands first. Every decision gate in
-this file was resolved on 2026-09-21.
+**Dependency.** Sections 2 and 4 consume the declaration's `host_id` and the host
+registry's `host_id` key from `unify-host-identity`, archived before this change
+resumed. Names in notes written before it follow its mapping: `name` → `host_id`,
+the `vm_host` attribute → the declaration's `host_id`, `kvm_host` → `ssh_host`.
 
-**Progress at pause (2026-09-21).** Implemented and tested on the shared branch:
-task 1.3 and Sections 4b and 4c (4b.1–4b.5, 4b.7–4b.13; 4c.1–4c.3). Not started:
-Sections 1.2, 1.5, 2, 3, 4, 5, 6, 7, 8. Notes for resuming:
-
-- Mirror dimension: `CapacityLedgerService(mirror_dimension=...)`, default
-  `"units"`; the provisioning container and the VM storefront's claim matcher
-  pass `"gpu_count"`. Payload aliases are `allocated_<mirror>` /
-  `available_<mirror>`, byte-identical for VM. Record in `design.md`.
-- `register_resource_in_session` exists for Section 5's importer.
-- Migration `20260921_002_capacity_declaration_contract` (pool backfill,
-  nullable `total_units`) rebuilds `capacity_buckets` from the model inside
-  `_schema_transaction`; tests start from the previous-schema fixture.
-- Distribution versions were already bumped by `unify-host-identity` on this
-  branch and cover this work; bump again only for later contract changes.
-- Known leftover, deliberately not fixed: the feasibility view still adds a
-  `"gpu_count": units` match fact for every domain. It writes nothing into
-  declarations; decide in the resumed session whether it belongs here.
-  **Resolved 2026-09-21:** unfinished 4b.1 work; fixed there.
-- 4b.6 (legacy compute rows read correctly) and 4c.4 (no fixture or e2e setup
-  reassigns under a live obligation) remain to verify.
-
-**Planning pass (2026-09-21).** Names below follow `unify-host-identity`: the host
-registry's key is `host_id` (was `name`), a declaration's host link is its `host_id`
-field (was the `vm_host` attribute), and `ssh_host` is the host's address (was
-`kvm_host`). Where an earlier task note uses an old name, read it through that
-mapping; notes are amended rather than rewritten, per `AGENTS.md`.
-
-**Resumed 2026-09-21.** Section 1, 4b.6, 4c.4, and Section 5 are implemented and
-tested; see each task's note. Sections 2, 3 and 4 followed the same day, except
-4.5's e2e half, then Sections 6 and 7 except 7.1's e2e half. A review then added
-Section 7b; Section 8 follows it.
-
-**Planning pass (2026-09-21, after design of the document).** It adds tasks 1.6–1.8,
-5.11–5.12 and amends 1.2, 1.4, 1.5, 4b.6, 4c.4, 5.2, 5.9, 5.10, 6.3 and 7.1 for
-`design.md`'s "The capacity-definitions document", "Declared attributes shadow
-authoritative facts", and the three decisions recorded after them. It also records
-4b.14's disposition. Migration order becomes: 4b.12's schema entry, 1.8's attribute
-entry, then Section 3's derivation entry.
+**Status (2026-09-21).** Every section is implemented and tested, including the
+review corrections in 7b; `make test` and the end-to-end pipeline passed on the
+owner's run. Each task's note records its final behaviour and evidence; the
+decisions behind them are in `design.md`.
 
 ## 1. Capacity declaration carrier and administration surface
 
@@ -367,10 +334,11 @@ authority.
       `test_the_resource_pool_projection_publishes_declarations_not_hosts` in
       `test_capacity_api.py`, through `ProvisioningClient` and
       `SiteCapacityClient.resource_pool_projection`.
-- [ ] 4.5 Run the VM e2e scenarios that depend on projected capacity shape, and the
+- [x] 4.5 Run the VM e2e scenarios that depend on projected capacity shape, and the
       `kit/site` ledger and router suites.
       **Partly done 2026-09-21:** `kit/site` passes (221). The VM e2e scenarios
       run with the pipeline in 8.9.
+      **Done 2026-09-21:** The owner's end-to-end pipeline passed (8.9).
 - [x] 4.6 **Unit.** A host with no correlated declaration yields no projected entry;
       update `tests/unit/services/test_capacity_inventory.py`'s host-only cases, which
       currently assert the fallback.
@@ -566,11 +534,12 @@ depends on.
       **Done 2026-09-21:** Order asserted by
       `test_runtime_imports_capacity_after_the_pools_and_hosts_it_names` in
       `tests/unit/test_worker.py`.
-- [ ] 5.4 ~~Run the Section 2 derivation as part of startup for hosts with legacy data
+- [x] 5.4 ~~Run the Section 2 derivation as part of startup for hosts with legacy data
       and no declaration, so an INI-only deployment retains published capacity once
       the fallback is gone.~~ **Superseded 2026-09-21** by tasks 2.5 and 3.1:
       derivation runs where INI data is applied and once at upgrade, never as a
       recurring startup scan.
+      **Disposition:** Superseded as recorded above; nothing to do.
 - [x] 5.5 **Integration.** Definitions applied on a restart after an edit;
       configured-but-missing path fails startup; unconfigured path proceeds;
       declaration referencing a pool resolves.
@@ -711,10 +680,11 @@ depends on.
       explaining the unwired pool path is replaced. The relay idiom never
       forbade `config.relay_definitions_path`; that gap is left as found. The
       `settings.toml` part was done with 5.1.
-- [ ] 6.2 ~~Add CLI coverage for declaring and inspecting capacity, so registration is a
+- [x] 6.2 ~~Add CLI coverage for declaring and inspecting capacity, so registration is a
       documented workflow rather than a raw HTTP call.~~ **Superseded 2026-09-21:**
       no CLI. Site administrators configure through values files, configuration
       files, and the REST API; task 6.3 documents those.
+      **Disposition:** Superseded as recorded above; no CLI.
 - [x] 6.3 Update `docs/seller-quickstart.md` and the configuration reference with the
       capacity declaration workflow, including that a declaration wins over any
       derivable legacy host value — the intuition may run the other way. **Amended
@@ -772,7 +742,7 @@ depends on.
 
 ## 7. Validation
 
-- [ ] 7.1 Run the provisioning unit and integration suites, `kit/site`'s suites, and
+- [x] 7.1 Run the provisioning unit and integration suites, `kit/site`'s suites, and
       the affected VM e2e scenarios. Disclose any suite not run.
       **Amended 2026-09-21:** also `kit/site-client`, `kit/fulfillment`,
       `core/storefront`, `provisioning/compute`, the VM provisioning operator
@@ -787,6 +757,8 @@ depends on.
       storefront 1170 plus its two known `test_alkahest` failures (run in its
       existing environment, since its lock needs the `torch` index). The VM e2e
       scenarios run with the pipeline in 8.9.
+      **Done 2026-09-21:** The end-to-end half passed on the owner's pipeline
+      run (8.9).
 - [x] 7.2 Run `openspec validate --all --strict` and confirm no regression against the
       baseline current at implementation time.
       **Done 2026-09-21:** The failing items are identical to the upload's.
@@ -916,46 +888,86 @@ so none moves.
 
 Per `openspec/README.md#plan-closeout-requirements`.
 
-- [ ] 8.1 **Comment hygiene.** Run `make check-comment-hygiene` and resolve every
+- [x] 8.1 **Comment hygiene.** Run `make check-comment-hygiene` and resolve every
       match. Read the touched docstrings directly as well — several of them
       (`_project_host`, the capacity registration route, the two seeding steps)
       currently describe the arrangement this change replaces, and a stale docstring
       is what made this gap invisible in the first place.
-- [ ] 8.2 **Import placement.** Review imports this change adds or touches; move
+      **Done 2026-09-21:** `make check-comment-hygiene` passes. Read directly:
+      `_project_host`'s and `load_capacity_resource_inventory`'s docstrings
+      describe the cutover; the capacity registration route's docstring now
+      names the unknown-pool refusal; `seed_inventory_if_empty`'s comment now
+      says seeding also declares capacity.
+- [x] 8.2 **Import placement.** Review imports this change adds or touches; move
       function-level imports to module level where no genuine circular import or
       documented lazy-load reason applies, verified against the real suite.
-- [ ] 8.3 **Documentation compliance.** Re-check accepted decisions against
+      **Done 2026-09-21:** Every import this change added is at module level.
+      Moved: `LegacyHostCapacityDerivation` in the integration `conftest.py`
+      (the fixture's other imports stay local by its established pattern) and
+      `HostCreate` in `test_capacity_api.py`; earlier moves are in 4b.6 and 4.4.
+      The service suite passes (936).
+- [x] 8.3 **Documentation compliance.** Re-check accepted decisions against
       `openspec/README.md`'s placement rules; confirm the capability-boundary
       rationale landed in `site-capacity/architecture.md` and the authority statements
       in the two `spec.md` files rather than only in this change.
-- [ ] 8.4 **Narrative compression.** Compress completed-task notes to final behavior,
+      **Done 2026-09-21:** Normative rules are in
+      `openspec/specs/site-capacity/spec.md` and
+      `physical-provisioning/spec.md`; rationale in
+      `site-capacity/architecture.md`; the repository-wide authority row and
+      vocabulary in `ARCHITECTURE.md`; operator configuration in
+      `DEPLOYMENT_AND_CONFIG.md` and `docs/seller-quickstart.md`; test guidance
+      in `TESTING.md`. Nothing durable is left only in this directory; the rows
+      marked temporary below are change history by decision.
+- [x] 8.4 **Narrative compression.** Compress completed-task notes to final behavior,
       validation evidence, and promotion destinations; keep the rejected-alternatives
       analysis in `design.md`.
-- [ ] 8.5 **Roadmap currency.** Update the affected goal's current-state description
+      **Done 2026-09-21:** The history paragraphs at the top of this file (pause
+      notes, planning-pass notes, resume notes) are replaced by one status
+      paragraph; each fact they held is in a task note or `design.md`. Task
+      notes are kept: each records final behaviour, its evidence, or a
+      correction the review required.
+- [x] 8.5 **Roadmap currency.** Update the affected goal's current-state description
       and gap mapping in `docs/development/ROADMAP.md`. **Amended 2026-09-21:** the
       roadmap exists; the owed updates are Goal 1's gap row naming this change (remove
       it and absorb the result into Goal 1's current state), Goal 4's note that the
       compute-dimension leak rides with this change (state it fixed), and Goal 7's
       prerequisite mention. Record each in the promotion record.
-- [ ] 8.6 **Promotion.** Complete the design-promotion record below. Performed last,
+      **Done 2026-09-21:** Goal 1: its gap row naming this change is removed and
+      its current-state paragraph states the result. Goal 4: the
+      compute-dimension note states the leak fixed. Goal 7: no change owed; it
+      names no dependency on this change, and its row for declarations without a
+      host remains true.
+- [x] 8.6 **Promotion.** Complete the design-promotion record below. Performed last,
       after 8.7–8.9, per `openspec/README.md`'s closeout order; numbering is kept for
       stability.
-- [ ] 8.7 **Campaign index currency** (part seven, added when
+      **Done 2026-09-21:** Every accepted decision has a permanent destination
+      or a recorded temporary disposition below; the specs were synced from this
+      change's deltas, each requirement verbatim and exactly once, and both
+      validate strictly.
+- [x] 8.7 **Campaign index currency** (part seven, added when
       `openspec/README.md#plan-closeout-requirements` was extended from six parts to seven).
       Appended rather than folded into an existing task, per `AGENTS.md`'s rule to amend
       rather than replace implementation history. Update this change's row, and its
       campaign's dependency graph, in `openspec/changes/README.md` to match its state at
       completion, or record the disposition here if its status and campaign placement are
       both unchanged.
+      **Done 2026-09-21:** This change's row reads complete and ready to
+      archive; `pools-9-retire-local-physical-authority` and
+      `project-capacity-resources-without-hosts` record the dependency as
+      complete; the Goal 7 prerequisite paragraph states what was delivered. The
+      dependency graphs are unchanged until archival.
 
-- [ ] 8.8 **Documentation citations.** Run
+- [x] 8.8 **Documentation citations.** Run
       `make check-doc-citations CHANGE=capacity-resource-administration` and resolve every match.
       An unresolvable citation is a blocking defect under `AGENTS.md`'s
       cross-reference rule, and the target also rejects a citation whose
       target is a *tombstone*: a tombstoned file still exists on disk while
       its content is gone, so a plain existence test cannot fail on a
       rename-to-tombstone.
-- [ ] 8.9 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and
+      **Done 2026-09-21:** `make check-doc-citations
+      CHANGE=capacity-resource-administration` passes. The repository-wide count
+      is 17, unchanged from the upload.
+- [x] 8.9 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and
       record the evidence: the run, its result, and the scenarios that
       exercise this change's behaviour. Green unit and integration suites do
       not substitute -- this is the tier that catches a wire contract whose
@@ -964,6 +976,14 @@ Per `openspec/README.md#plan-closeout-requirements`.
       cannot run for a reason unrelated to this change, record that as an
       explicit blocker naming the cause and the change that owns it, and
       treat the validations it gates as unrun rather than passed.
+      **Done 2026-09-21:** The owner reported `make test` and the end-to-end
+      pipeline green on 2026-09-21, after committing the VM storefront lock the
+      earlier failed run lacked (5.12); no run identifier was supplied. The VM
+      scenarios declare capacity through `SiteCapacityAdminClient` and publish
+      through the declaration-driven projection, so they exercise the cutover
+      and the registration contract; the capacity-definitions document and INI
+      derivation are not exercised end to end, since Compose wires no document
+      and the scenarios declare through the API by design.
 ## Design promotion record
 
 | Accepted decision | Permanent location |
@@ -980,14 +1000,20 @@ Per `openspec/README.md#plan-closeout-requirements`.
 | Capacity and pool document wiring follow the relay idiom; both are opt-in Helm values | `docs/development/DEPLOYMENT_AND_CONFIG.md` — "Definition documents" |
 | Wire changes are versioned by distribution, not envelope | Temporary; change history only |
 | Projected attributes must not contradict projected capacity | `openspec/specs/site-capacity/spec.md` — "Projected inventory is internally consistent" |
-| Host inventory is connection identity, not capacity authority | `openspec/specs/physical-provisioning/spec.md` — "Host inventory is connection identity"; `docs/development/ARCHITECTURE.md` authority-boundaries table |
+| Host inventory is connection identity, not capacity authority | `openspec/specs/physical-provisioning/spec.md` — "Host inventory is connection identity"; `docs/development/ARCHITECTURE.md` authority-boundaries table and "Capacity Declaration" vocabulary entry |
 | Legacy host capacity is derived into declarations rather than retained as a fallback tier | `openspec/specs/physical-provisioning/spec.md` — "Legacy host capacity is derived into declarations" |
 | Capacity definitions import is digest-gated, after pool definitions and host seeding | `openspec/specs/physical-provisioning/spec.md` — "Capacity definitions are imported from a mounted document" |
-| Why capacity declaration is separate from host inventory, and why splitting dimensions across both was rejected | `openspec/specs/site-capacity/architecture.md` |
+| Why capacity declaration is separate from host inventory, and why splitting dimensions across both was rejected | `openspec/specs/site-capacity/architecture.md` — "Declared capacity and connection identity" |
 | A capacity-definitions entry uses the registration fields, replaces the whole declaration, and is refused with every problem reported; unchanged entries write nothing; refusals come from registration's own rules and leave the import unapplied; the import API has a validate-only mode | `openspec/specs/physical-provisioning/spec.md` — "Capacity definitions are imported from a mounted document"; `docs/development/DEPLOYMENT_AND_CONFIG.md` — "Definition documents" |
 | A declaration's attributes cannot restate its identity, and declaration fields win over attributes in matching | `openspec/specs/site-capacity/spec.md` — "A declaration's attributes cannot restate its identity" |
 | The unit total is a match fact only under the composition's mirror dimension | `openspec/specs/site-capacity/spec.md` — "A capacity declaration names no mandatory dimension" |
 | How chart render tests are written and run | `docs/development/TESTING.md` — "Chart Render Tests" (written directly as current guidance) |
 | A capacity declaration is one type, shared by registration, documents, the ledger, and derivation | Code: `kit/site/src/market_site/declarations.py` module docstring; temporary otherwise |
+| Administration holds the ledger's serialization lock through its caller's commit | `openspec/specs/site-capacity/architecture.md` — "Declared capacity and connection identity" |
+| A declaration naming an unknown pool is refused by registration itself, for every entry point | `openspec/specs/site-capacity/spec.md` — "Operator-administered capacity declarations" |
+| Structural validation completes before stored state is consulted | `openspec/specs/physical-provisioning/spec.md` — "Capacity definitions are imported from a mounted document" |
+| Legacy single-quantity claims translate to the composition's mirror dimension; a bucket's host link is its `host_id` | `openspec/specs/site-capacity/spec.md` — "Multidimensional capacity accounting" and "Site identity ownership boundary" (modified) |
+| The upgrade migration's derivation is frozen SQL, held equal to the runtime derivation by a parity test until it ships | Temporary; change history only (the migration's docstring states what it does) |
+| Test levels are stated as `TESTING.md` defines them | Temporary; change history only |
 | Stored reserved attribute keys are removed by migration, not promoted | Temporary; change history only (the migration's docstring states the rule it enforces) |
-| Capacity-definitions wire models live in `kit/site`, re-exported by `compute_provisioning` | `docs/development/ARCHITECTURE.md` — "Package and dependency layers" if the kit-layer description names model ownership; otherwise the code's module docstrings |
+| Capacity-definitions wire models live in `kit/site`, re-exported by `compute_provisioning` | Code: `kit/site/src/market_site/capacity_definitions.py` module docstring; `ARCHITECTURE.md`'s layers name no model ownership |

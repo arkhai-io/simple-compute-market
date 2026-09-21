@@ -103,8 +103,8 @@ def make_capacity_router(
         The request replaces the whole declaration, which is why ``pool_id``
         is required. Moving a resource to another pool is refused while it
         holds a live capacity obligation (409). A ``host_id`` another resource
-        already names is refused (409); an inconsistent or empty declaration
-        is refused (422).
+        already names is refused (409); a pool the site does not have, or an
+        inconsistent or empty declaration, is refused (422).
         """
         try:
             resource = ledger.register_resource(

@@ -105,6 +105,9 @@ def seed_inventory_if_empty() -> None:
     # operator changes made via the API (POST /hosts, PUT /hosts/{host}, etc.)
     # are not overwritten on pod restart.  To force a re-seed, use
     # POST /api/v1/hosts/import which always upserts regardless of table state.
+    #
+    # Seeding also declares capacity for each seeded host with GPUs that no
+    # capacity declaration names, in the same transaction as the hosts.
     # ------------------------------------------------------------------
     host_service = _container_module.resolved_host_service
     existing_hosts = host_service.list_hosts(enabled_only=False)

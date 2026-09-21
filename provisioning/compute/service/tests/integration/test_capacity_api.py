@@ -21,6 +21,7 @@ from market_site_client import (
     SiteCapacityClientError,
 )
 from compute_provisioning import PoolCreate
+from vm_provisioning_operator.models import HostCreate
 
 from .conftest import SERVICE_AUTHORITIES, STOREFRONT_SIGNER
 
@@ -654,8 +655,6 @@ async def test_the_resource_pool_projection_publishes_declarations_not_hosts(
     live availability; a host registered with no declaration is not projected
     at all. Written through ProvisioningClient, read through
     SiteCapacityClient.resource_pool_projection."""
-    from vm_provisioning_operator.models import HostCreate
-
     provisioning_client, _ = client_and_queue
     await provisioning_client.import_hosts_from_text(
         "[kvm_hosts]\n"

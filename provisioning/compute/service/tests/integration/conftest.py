@@ -271,6 +271,9 @@ from compute_provisioning_service.main import app
 from vm_provisioning_adapter.services.ansible_service import AnsibleResult, AnsibleRun, AnsibleService
 from compute_provisioning_service.services.async_job_queue import AsyncJobQueue
 from vm_provisioning_adapter.services.host_service import HostService
+from compute_provisioning_service.services.capacity_derivation import (
+    LegacyHostCapacityDerivation,
+)
 from vm_provisioning_adapter.services.job_service import AnsibleJobService
 from vm_provisioning_adapter.services.mock_ansible_service import ProgrammableMockAnsibleService
 from vm_provisioning_adapter.services.system_service import SystemService
@@ -484,9 +487,6 @@ async def client_and_queue(
     replay_store = SqlAlchemyProvisioningReplayStore(session_factory)
 
     from market_site.ledger import CapacityLedgerService
-    from compute_provisioning_service.services.capacity_derivation import (
-        LegacyHostCapacityDerivation,
-    )
     capacity_ledger_service = CapacityLedgerService(
         session_factory=session_factory,
         unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count",
