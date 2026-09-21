@@ -5,10 +5,10 @@ Sections 1–4 are pure vocabulary and tests with no runtime, deployment, or
 packaging effect; Section 5 touches the registry image; Section 6 packages.
 Nothing here starts a service or changes API credits.
 
-**Decision gate.** Task 7.1 gates the `model_id` naming authority, listed under
-`design.md`'s "Open questions". Section 1 may define the field as an opaque
-non-empty string and proceed; the gate decides what the filter specification
-documents as the expected form before Section 5 ships the specification.
+**Decision gate.** Task 7.1's question — the `model_id` naming authority — was
+decided on 2026-09-21 and is recorded in `design.md`'s decisions ("Model
+identity is domain-canonical"). The task remains as the record of the gate; no
+open gate remains in this change.
 
 ## 1. Domain identity and listing vocabulary
 
@@ -24,7 +24,11 @@ documents as the expected form before Section 5 ships the specification.
       `arkhai-core`, `arkhai-kit-identity`, `arkhai-kit-policy`, `pydantic`.
 - [ ] 1.3 `domains/inference/listings/models.py`: `INFERENCE_KIND =
       "inference.v1"`, `INFERENCE_OFFERING_MODE = "inference"`, and the
-      `InferenceModelCard` model (`listing_resource` payload) with `model_id`,
+      `InferenceModelCard` model (`listing_resource` payload) with `model_id`
+      (validated against the domain's canonical pattern: lowercase
+      `<org>/<name>`, no alias segment), `artifact_ref` (non-empty,
+      scheme-prefixed source reference), `artifact_digest` (optional,
+      `sha256:` hex), `display_name` (optional),
       `served_model_name`, `model_family`, `context_length` (positive int),
       `max_completion_tokens` (optional positive int), `quantization`,
       `architecture` (`modality`, `tokenizer`, `instruct_type`),
@@ -43,7 +47,10 @@ documents as the expected form before Section 5 ships the specification.
       validates; each comparison field missing is rejected with the field named;
       `offering_mode` other than `inference` is rejected; `api_style` other than
       `openai.v1` is rejected; a listing round-trips through JSON text as the
-      storefront's SQLite path stores it.
+      storefront's SQLite path stores it; a `model_id` with uppercase, an alias
+      segment, or an encoded quantization is rejected with the format rule
+      named; two cards sharing one `model_id` with different `artifact_ref` and
+      rate cards both validate independently.
 
 ## 2. Rate card and pricing arithmetic
 
@@ -119,12 +126,15 @@ documents as the expected form before Section 5 ships the specification.
 - [ ] 5.1 `domains/inference/registry/filter-spec.yaml`, version 1, `schema: {id:
       inference, version: 1}`. `listing_shape` requires `listing_id`,
       `listing_resource`, `storefront_url`, and inside `listing_resource`
-      requires `model_id`, `served_model_name`, `context_length`,
+      requires `model_id` (with the canonical `pattern`), `artifact_ref`,
+      `served_model_name`, `context_length`,
       `quantization`, `architecture.modality`, `supported_parameters`,
       `endpoint.base_url`, `rate_card.prompt_credits_per_million`,
       `rate_card.completion_credits_per_million`, and `offering_mode`
       (`const: inference`). Settlement-option and accepted-escrow shapes copied
-      from the API-credits specification.
+      from the API-credits specification. State in the `model_id` field
+      description that a registry operator may narrow it to an `enum` by
+      policy and that the registry never mints or resolves identifiers.
 - [ ] 5.2 Filters: `model_id`, `model_family`, `quantization`, `modality`
       (`$.listing_resource.architecture.modality`), and `supported_parameter`
       (`$.listing_resource.supported_parameters[*]`) as `in`, fail-on-missing
@@ -136,8 +146,9 @@ documents as the expected form before Section 5 ships the specification.
       API-credits specification.
 - [ ] 5.3 `core/registry/tests/unit/test_filter_spec.py`: add
       `test_repo_inference_spec_loads` beside `test_repo_api_credits_spec_loads`,
-      asserting schema identity `inference` version 1 and that every filter path
-      resolves against a sample listing built from Section 1's model.
+      asserting schema identity `inference` version 1, that every filter path
+      resolves against a sample listing built from Section 1's model, and that
+      a `model_id` violating the canonical pattern is refused at validation.
 - [ ] 5.4 `core/registry/Dockerfile`: `COPY domains/inference/registry/filter-spec.yaml
       ./filter-spec-inference.yaml` in the builder stage and the matching
       `COPY --from=builder` in the runtime stage, beside the API-credits lines.
@@ -165,13 +176,17 @@ documents as the expected form before Section 5 ships the specification.
 
 ## 7. Decision gates
 
-- [ ] 7.1 **Decision gate — `model_id` naming authority.** Decide whether
-      `model_id` is a Hugging Face repository identifier, a curated canonical
-      name, or seller-asserted with `model_family` as the comparison alias.
-      Record the decision and its reasoning in `design.md`'s decisions, move the
-      item out of "Open questions", and reflect the chosen form in the filter
-      specification's field description before Section 5 ships. Do not change
-      the field's type; every option is a non-empty string.
+- [x] 7.1 **Decision gate — `model_id` naming authority.** Decided 2026-09-21
+      and recorded in `design.md`, "Model identity is domain-canonical": the
+      domain owns a canonical lowercase `<org>/<name>` format identifying the
+      logical model at one version; `artifact_ref` and an optional
+      `artifact_digest` carry the exact source; quantization, runtime, and
+      context limits stay explicit fields; aliases are not in the protocol; a
+      registry validates the format and may narrow the vocabulary by operator
+      policy but never mints, resolves, or aliases identifiers; `deployment_id`
+      was rejected as a second name for `listing_id`. The item is out of "Open
+      questions". Sections 1.3, 1.5, 5.1, and 5.3 carry the resulting work. The
+      field's type is unchanged.
 
 ## 8. Closeout
 
@@ -222,4 +237,4 @@ documents as the expected form before Section 5 ships the specification.
 | No derived discovery price; comparability is on integer rates and asset until the exact-decimal primitives land | the `inference` capability's `architecture.md` — "Current limits" |
 | Copy first, extract after two consumers | the `inference` capability's `architecture.md` — "Implementation composition"; `docs/development/ROADMAP.md` Goal 8 current state |
 | `inference` joins the enumerated offering modes; **rate card** and **usage record** join the Terms table | `docs/development/ARCHITECTURE.md` — "One name per concept", "Terms" |
-| Model identity naming authority | Decided at task 7.1; destination the `inference` capability's `spec.md` — "One listing is one served model" |
+| Model identity is domain-canonical: a logical-model identifier in a domain-defined format, the exact source in `artifact_ref`, quantization as a field, no protocol aliases, and a registry that validates but never mints | the `inference` capability's `spec.md` — "One listing is one served model"; rationale in its `architecture.md` |
