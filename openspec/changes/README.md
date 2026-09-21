@@ -215,6 +215,44 @@ advertisement change's subset rule depend on a concept its own dependent owned.
 | [`publish-indicative-listing-rates`](publish-indicative-listing-rates/) | design-complete; unblocked for implementation, since `unbacked-listing-publication`'s backing field and source-publication reconciliation are implemented and promoted | A seller's asking rate for a listing's advertised shape as a frozen three-part object — decimal-text amount, opaque asset, `hour` period — declared at the listing's origin pool, with no storefront default reaching another origin. Filters match the period and asset rather than normalizing across either. Normatively a listing attribute rather than a settlement option rate: nothing is constructed from it. Carries two generic filter-engine primitives it cannot work without: an exact-decimal declared value type and declarative filter co-requirements. Closes Goal 7's comparison gap |
 | [`bare-metal-publication-reads-pool-declarations`](bare-metal-publication-reads-pool-declarations/) | proposed; not planned; starts after `unbacked-listing-publication` | Bare-metal publication resolves each candidate's pool through the kit's site declaration reader: no listing from a pool that does not advertise `bare_metal`, is disabled, or declares itself unbacked, and unresolvable pools held. Brings bare metal under the rule that a listing advertises only a mode its pool authorizes, and records its registry outcomes so every run converges its registry on local status, as VM and API credits do |
 
+## Roadmap goal — Sell metered inference as its own market domain
+
+```text
+add-inference-domain-contract ──► compose-inference-domain-stack ──┬──► extract-access-issuance-kit ──┐
+                                                                    └──► meter-inference-usage ────────┼──► package-inference-seller ──► qualify-inference-market
+                                                                                                        │
+                                                                    (extract and meter are sequenced, not ordered; whichever lands second rebases)
+```
+
+The campaign's sequencing rule is stated once, in
+[`add-inference-domain-contract`](add-inference-domain-contract/)'s `design.md`:
+define the vocabulary, compose a stack by **copying** the API-credits issuance
+machinery, prove one deal, and only then extract what two working consumers show
+to be shared. An earlier plan opened with the extraction; it was reordered
+because the boundary is not knowable from one consumer and the extraction is
+delicate — the issuance schema strings are inside SHA-256 digests and the
+authority mirrors the digest function — so it is done with a pinned API-credits
+regression suite and a second consumer in view.
+
+Consumption is a flat charge per request until `meter-inference-usage` lands;
+that separates proving the market plumbing from proving the billing, which are
+different risks.
+
+Excluded from this campaign by scope decision (2026-09-16): the Arkhai-hosted
+inference registry deployment, webapp integration, a hosted fiat option for
+inference, and any Stripe, Metronome, Formance, or WorkOS integration. Each is
+anticipated and unowned here; the Helm alias pattern the API-credits registry
+already uses makes the hosted registry a small change when it is opened.
+
+| Change | Status | Acceptance boundary |
+|---|---|---|
+| [`add-inference-domain-contract`](add-inference-domain-contract/) | active; no blocking dependency; design-complete | The `inference.v1` domain identity, `inference` schema identity, and `inference` offering mode; one listing per served model carrying a model card and an integer rate card; provision intent as the API-credits purchase shape under the new kind; the usage record and its deterministic charge derivation; secret-free usage evidence; the three-identity separation; the registry filter specification, its load test, and the image `COPY`; the `arkhai-inference-domain` wheel. One decision gate: the `model_id` naming authority |
+| [`compose-inference-domain-stack`](compose-inference-domain-stack/) | design phase; not yet planned; depends on `add-inference-domain-contract` | Storefront executable, authority service, OpenAI-compatible gateway, and buyer plugin composed by copying the API-credits roles; a local Compose stack with an inference registry and development identities; `e2e_inference_deal` through the shared helpers. Flat per-request consumption. The second consumer the extraction needs |
+| [`extract-access-issuance-kit`](extract-access-issuance-kit/) | design phase; not yet planned; depends on `compose-inference-domain-stack`'s green deal | Pins API-credits digest bytes first, then moves issuance models, fulfillment identity and request digest, the issuance client, fulfillment orchestration and rollback, evidence projection, and the gate's authority client and signing into kit under a domain label; deletes both domain-local copies; the authority composes the kit's digest so client and server cannot drift. Balances, quantities, quota, and consumption rules stay domain-owned |
+| [`meter-inference-usage`](meter-inference-usage/) | design phase; not yet planned; depends on `compose-inference-domain-stack`; sequenced with the extraction | Hold, settle, and release on the authority with server-side pricing against the pinned rate card; the gate estimates, holds before proxying, settles from `usage`, forces `stream_options.include_usage`, drains on disconnect, and disables batching; hold expiry, usage retention and rollup; metered conformance cases. One decision gate: pre-flight token estimation source |
+| [`package-inference-seller`](package-inference-seller/) | design phase; not yet planned; depends on `compose-inference-domain-stack` and `meter-inference-usage` | The thin seller path: a CLI that generates configuration and a Compose stack from the stack change's own files, generates signing material, checks reachability, and installs from published wheels. GPU detection, TLS automation, and price suggestion are deferred until three third-party sellers report where they got stuck |
+| [`qualify-inference-market`](qualify-inference-market/) | design phase; not yet planned; depends on `meter-inference-usage` and `package-inference-seller` | Multi-seller discovery, concurrency without overdraft, cancellation and disconnect charging, credential lifecycle, missing and late usage, retry safety, the buyer-profile matrix, and cross-language conformance for whichever non-Python gates are available; release-qualifies the per-domain deal path. Goal 8's completion test |
+
 ## Lesser goal — POOLS capacity and fulfillment foundation
 
 **What it adds up to.** The durable capacity and fulfillment substrate every roadmap goal builds on: a central Settlement Record, transactional scheduling and assignment, pull-correct fulfillment results, recovery, and the projections a storefront consumes instead of owning hardware itself. POOLS-1 through POOLS-6's foundations are archived. This is not a roadmap goal because it changes how the system is built rather than what the market can do — but nearly every goal has a dependency edge into it.
