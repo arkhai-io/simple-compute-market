@@ -14,7 +14,7 @@ A site authority MUST own physical resource capacity and allocations; a storefro
 - **THEN** it skips capacity-driven close/reopen actions rather than treating ignorance as zero capacity
 
 ### Requirement: Storefront capacity-claim identity
-VM compute listings MUST normalize surrounding whitespace and carry at least one valid `pool_id` or `resource_id`. Every supplied identity MUST begin with an alphanumeric character, contain only letters, digits, `.`, `_`, `:`, or `-`, and contain at most 128 characters. A pool-only listing produces a pool-scoped reservation claim. A listing carrying `resource_id`, whether alone or with `pool_id`, produces a resource-specific claim and excludes `pool_id`. Ordinary pool-scoped claims MUST NOT require or select a `vm_host` or `resource_id`.
+VM compute listings MUST normalize surrounding whitespace and carry at least one valid `pool_id` or `resource_id`. Every supplied identity MUST begin with an alphanumeric character, contain only letters, digits, `.`, `_`, `:`, or `-`, and contain at most 128 characters. A pool-only listing produces a pool-scoped reservation claim. A listing carrying `resource_id`, whether alone or with `pool_id`, produces a resource-specific claim and excludes `pool_id`. Ordinary pool-scoped claims MUST NOT require or select a `host_id` or `resource_id`.
 
 Claim construction MUST reject a missing, empty, or malformed settlement order and any extracted claim lacking both identities before probing or reserving capacity. Stored listings that violate the identity invariant MUST fail closed on publication or republication. Resuming such a listing MUST return an actionable conflict before changing pause state or contacting a registry; the seller-authenticated close operation MUST remain available without implicit identity backfill or automatic unpublication.
 
@@ -52,7 +52,7 @@ Claim construction MUST reject a missing, empty, or malformed settlement order a
 
 ### Requirement: Requested offering mode is explicit and bounded by the pool
 
-Every capacity probe and reservation claim MUST carry a non-empty canonical `offering_mode` naming the requested offering mode, and that key MUST be required. It is the same value a Resource Pool declares as deliverable, the same value the durable listing binding records, and the same value the published listing carries; no surface may name it `executor_kind`, `offering_type`, or `virtualization_type`. The site authority MUST persist that exact value on the Capacity Reservation and MUST NOT infer it from `vm_host`, `physical_host_id`, resource kind, market name, matched-resource attributes, or any default. A matching Resource Pool MUST currently declare the requested mode before a new hold is created.
+Every capacity probe and reservation claim MUST carry a non-empty canonical `offering_mode` naming the requested offering mode, and that key MUST be required. It is the same value a Resource Pool declares as deliverable, the same value the durable listing binding records, and the same value the published listing carries; no surface may name it `executor_kind`, `offering_type`, or `virtualization_type`. The site authority MUST persist that exact value on the Capacity Reservation and MUST NOT infer it from `host_id`, `physical_host_id`, resource kind, market name, matched-resource attributes, or any default. A matching Resource Pool MUST currently declare the requested mode before a new hold is created.
 
 The claim's site-inventory discriminator remains a separate field and a separate axis. Naming the offering mode consistently MUST NOT merge the two.
 
@@ -155,9 +155,15 @@ Site authorities MUST publish anonymous versioned capacity deltas for projection
 ### Requirement: Cross-mode physical accounting
 Shareable VM slices and exclusive bare-metal allocations referring to the same physical host MUST conflict according to allocation mode before executor work starts.
 
+A capacity declaration carries the fields this accounting reads — `physical_host_id` and `allocation_mode` — at the top level of its attributes and nowhere else. A domain's publication settings MUST NOT repeat them, so the value the site authority accounts with is the only value there is.
+
 #### Scenario: VM slice is held
 - **WHEN** an exclusive bare-metal reservation targets the same physical host
 - **THEN** the site ledger rejects the exclusive reservation
+
+#### Scenario: A bare-metal declaration is registered
+- **WHEN** a bare-metal declaration names its physical machine and allocation mode
+- **THEN** both are top-level attributes, and its publication settings carry neither
 
 ### Requirement: Multidimensional capacity accounting
 A site resource MAY declare total capacity across more than one named quantity dimension (for example `gpu_count`, `vcpu_count`, `ram_gb`, `disk_gb`); a claim's requested quantities MUST be checked and held against every declared dimension, not only a single default quantity, with held/available accounting kept exact under concurrent holds. A dimension a resource does not declare MUST NOT be assumed to have room. This accounting is per resource row: it does not aggregate or cross-check declared or held capacity across multiple resource rows that happen to share a physical host (see "Cross-mode physical accounting" above for the one cross-row check that does exist, which is scoped to exclusive/shareable mode conflicts, not capacity sums).
@@ -331,7 +337,7 @@ A storefront MUST report, per configured site and per independent projection fam
 - **THEN** a consumer uses the projection's own `available` field regardless of whether the fallback value is present or absent — the projection's own live data is never conditionally discarded in favor of a fallback source
 
 ### Requirement: Capacity accounting is private to the site authority
-The site authority SHALL account reservable capacity with `CapacityBucket` rows and SHALL store each active reservation's current backing in `CapacityReservationDebit`. A storefront-facing capacity reservation SHALL NOT expose a bucket identifier or backing physical-resource identifier. This extends to domain-specific physical-placement fields carried on the reservation (for example the VM domain's `vm_host`), not only the site authority's own generic accounting identifiers -- any field that identifies which concrete physical resource is serving a reservation is a backing physical-resource identifier for the purposes of this requirement, regardless of which domain named it. Scheduling MAY atomically replace the current debit when it selects a different eligible bucket.
+The site authority SHALL account reservable capacity with `CapacityBucket` rows and SHALL store each active reservation's current backing in `CapacityReservationDebit`. A storefront-facing capacity reservation SHALL NOT expose a bucket identifier or backing physical-resource identifier. This extends to domain-specific physical-placement fields carried on the reservation (for example the `host_id` a reservation's execution reference carries), not only the site authority's own generic accounting identifiers -- any field that identifies which concrete physical resource is serving a reservation is a backing physical-resource identifier for the purposes of this requirement, regardless of which domain named it. Scheduling MAY atomically replace the current debit when it selects a different eligible bucket.
 
 #### Scenario: Storefront reads a capacity reservation
 - **WHEN** a storefront reads an admitted reservation
@@ -355,3 +361,21 @@ Scheduling MUST NOT admit a dimension shape exceeding what the capacity reservat
 #### Scenario: Scheduling request exceeding the reservation is rejected
 - **WHEN** a scheduling request asks for more of a governed dimension than the reservation holds
 - **THEN** scheduling rejects the request before assignment or provider execution
+
+### Requirement: A capacity declaration names the host it is delivered through
+
+A capacity declaration MUST name the host its capacity is delivered through as a
+`host_id` field of the declaration, not as one of its attributes, and at most one
+declaration MAY name a given host. A registration naming a host another declaration
+names MUST be refused. Execution references and a reservation's claim facts MUST
+take the host from that field.
+
+#### Scenario: A second declaration names a held host
+
+- **WHEN** a declaration is registered with a `host_id` another declaration names
+- **THEN** the registration is refused as a conflict and neither declaration changes
+
+#### Scenario: A reservation is bound to a host
+
+- **WHEN** a reservation is admitted against a declaration that names a host
+- **THEN** its execution reference carries that declaration's `host_id`

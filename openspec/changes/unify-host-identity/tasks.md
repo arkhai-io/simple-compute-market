@@ -141,30 +141,24 @@ reference says so in a comment stating the invariant, not the history.
       `hosted_binding.py`, `hosted_lifecycle.py`, `negotiation.py`,
       `negotiation_service.py`, `publication_cli.py`, `settlement_service.py`,
       `sqlite_client.py`.
-- [x] 4.4 ~~Bare-metal storefront migration behind a drain guard.~~ **Superseded
-      2026-09-21** by `design.md`'s "Bare metal: reset the preprod storefront
-      database and drop `bare_metal.v1`". Instead: the bare-metal storefront's
-      `migrations.py` creates the renamed schema for a fresh database, and startup
-      refuses a database containing `derived_bare_metal_listings.machine_id`, naming
-      the reset procedure in 4.7. Test both, and that the refusal decodes and writes
-      nothing.
-      Done: `_refuse_retired_listing_kind`, ordered first; refusal and fresh-database
-      tests in the bare-metal storefront's `test_migrations.py`.
+- [x] 4.4 The bare-metal storefront creates the renamed schema for a fresh database
+      and refuses, at startup, a database containing
+      `derived_bare_metal_listings.machine_id`, naming the reset procedure (4.7).
+      Rationale: `design.md`, "Bare metal: reset the preprod storefront database".
+      Done: `_refuse_retired_listing_kind`, ordered first; `test_migrations.py`
+      covers the refusal (nothing decoded or written) and a fresh database.
 - [x] 4.5 Buyer plugin: `domains/bare_metal/buyer/src/arkhai_bare_metal_buyer/cli.py`
       decodes `bare_metal.v2`.
-\1- [ ] 4.7 **Manual migration — preprod bare-metal reset**, performed once when this
-      change is deployed to preprod, and recorded here with the date and result.
-      **Amended after review, 2026-09-21:** the earlier procedure deleted only the
-      storefront's database, and a fresh storefront cannot close the registry
-      listings the old one published, because listing ids are random and only the
-      deleted database tracks them. The procedure is now the owner's: terminate
-      active bare-metal leases at the provisioner, `helm uninstall` the bare-metal
-      release and delete its persistent volume claims, deploy (the provisioning
-      service, shared with VM, migrates in place and is never reset), and install
-      bare metal fresh. If its listings live in a registry shared with VM, close
-      them first by disabling the bare-metal declarations and running one publish
-      round. Documented in `docs/bare-metal-seller-quickstart.md`, "Resetting the
-      storefront database".
+\1- [x] 4.7 **Preprod bare-metal reset — moved out of band by the owner, 2026-09-21.**
+      It is performed once, at the joint deployment of this change with the others
+      deploying alongside it, which happens after this change is archived. The
+      procedure is `docs/bare-metal-seller-quickstart.md`, "Resetting the storefront
+      database": terminate active bare-metal leases at the provisioner, `helm
+      uninstall` the bare-metal release and delete its persistent volume claims,
+      deploy (the provisioning service, shared with VM, migrates in place and is
+      never reset), and install bare metal fresh; listings in a registry shared with
+      VM are closed first by disabling the bare-metal declarations and publishing
+      once.
 
 ## 5. Surviving storefront surfaces
 
@@ -188,10 +182,17 @@ reference says so in a comment stating the invariant, not the history.
       the host's identifier and `ssh_host` as its address, and state that
       `physical_host_id` is the physical machine across hosts. Update the
       `executor_ref` and "Identifiers" prose that names `vm_host`.
-- [ ] 6.2 `openspec/specs/physical-provisioning/spec.md` and
+- [x] 6.2 `openspec/specs/physical-provisioning/spec.md` and
       `openspec/specs/site-capacity/spec.md`: replace every `vm_host` reference in
       existing requirements (the Ansible fulfillment adapter's recorded target, the
       opaque-reservation requirement's example, claim-identity text).
+      Done 2026-09-21 at promotion: the requirements naming `vm_host` are carried
+      as `MODIFIED` deltas in this change (`physical-provisioning`: "Ansible
+      fulfillment adapter"; `site-capacity`: "Storefront capacity-claim
+      identity", "Requested offering mode is explicit and bounded by the pool",
+      "Cross-mode physical accounting", "Capacity accounting is private to the site
+      authority") and synced. The permanent specs name `vm_host` and `machine_id`
+      only where they prohibit or migrate them.
 - [x] 6.3 `docs/seller-quickstart.md`, `docs/bare-metal-seller-quickstart.md` (the
       registration body gains `host_id` and top-level cross-mode fields),
       `docs/development/VALIDATION_RUNBOOK.md`,
@@ -204,23 +205,16 @@ reference says so in a comment stating the invariant, not the history.
       operator client, `core/storefront`, `core/storefront-client`, the VM and
       bare-metal storefronts, the bare-metal core and buyer packages, and `e2e-tests`
       unit. Disclose any suite not run.
-      Done 2026-09-21 — at baseline or better everywhere: `kit/site` 192,
-      `kit/site-client` 36, `kit/fulfillment` 165, provisioning service 885,
-      `provisioning/compute` 129 + 1 pre-existing failure, `domains/bare_metal` 75,
-      bare-metal provisioning adapter 2, bare-metal storefront 126 (incl. 2 new
-      refusal tests), bare-metal buyer 11, `core/storefront` 158 + 2 skipped,
-      `core/storefront-client` 30, VM storefront 1168 + the 2 pre-existing
-      `test_alkahest` failures, e2e unit 236 + 1 pre-existing failure.
-      **Rerun after review at the bumped versions, installing from the locks
-      (`uv run --frozen`):** `kit/site` 200, `kit/site-client` 36,
-      `kit/fulfillment` 165, `core/storefront` 158 + 2 skipped,
-      `core/storefront-client` 30, `provisioning/compute` 129 + the 1 pre-existing
-      failure, provisioning service 890, `domains/bare_metal` 75, bare-metal
-      provisioning adapter 2, bare-metal storefront 126, bare-metal buyer 11,
-      API-credits service 63, API-credits storefront 79, VM storefront 1169 + the
-      2 pre-existing `test_alkahest` failures, e2e unit 236 + the 1 pre-existing
-      failure. (Counts include `capacity-resource-administration` Section 4b and
-      4c work on the same branch.)
+      Final, 2026-09-21, at the bumped versions installed from the locks
+      (`uv run --frozen`), at baseline or better everywhere: `kit/site` 200,
+      `kit/site-client` 36, `kit/fulfillment` 165, `core/storefront` 158 + 2
+      skipped, `core/storefront-client` 30, `provisioning/compute` 129 + 1
+      pre-existing failure, provisioning service 890, `domains/bare_metal` 75,
+      bare-metal provisioning adapter 2, bare-metal storefront 126, bare-metal buyer
+      11, API-credits service 63, API-credits storefront 79, VM storefront 1169 + 2
+      pre-existing `test_alkahest` failures, e2e unit 237 + 1 pre-existing failure.
+      Counts include `capacity-resource-administration` Sections 4b and 4c, on the
+      same branch.
 - [x] 7.2 Bump distribution versions and lower bounds. **Amended after review:**
       done in this change rather than deferred (`design.md`, "Review outcomes").
       Minor: `kit-site` 0.4.0, `kit-site-client` 0.3.0, `kit-fulfillment` 0.3.0,
@@ -260,52 +254,55 @@ Per `openspec/README.md#plan-closeout-requirements`, in that order.
       documented lazy-load reason applies, checked against the real suites.
       Done: the one function-level import this change added (a test's
       `RetiredListingKindError`) moved to module level; suite rerun green.
-- [ ] 8.3 **Documentation compliance.** Confirm the naming rule landed in
+- [x] 8.3 **Documentation compliance.** Confirm the naming rule landed in
       `ARCHITECTURE.md` and the two specs, not only in this change.
       Partly done: `ARCHITECTURE.md`'s "One name per concept" and its physical
       identity prose are current. Spec promotion (6.2) happens after code review,
       per `AGENTS.md`.
-- [ ] 8.4 **Narrative compression.** Compress completed-task notes to final behaviour,
+      Done 2026-09-21: `ARCHITECTURE.md` "One name per concept" and both specs
+      carry the rule; see the promotion record.
+- [x] 8.4 **Narrative compression.** Compress completed-task notes to final behaviour,
       evidence, and destinations; move rationale to `design.md`.
+      Done 2026-09-21: superseded text removed from 4.4; 7.1 and 8.8 reduced to
+      their final evidence; rationale for every amendment is in `design.md`,
+      "Decisions made during implementation" and "Review outcomes".
 - [x] 8.5 **Roadmap currency.** No roadmap goal names host identity; record that
       disposition here unless implementation finds one.
       Done: no roadmap goal names host identity; no roadmap edit is owed.
-- [ ] 8.6 **Campaign index currency.** Update this change's row and the
+- [x] 8.6 **Campaign index currency.** Update this change's row and the
       `unify-host-identity ──► capacity-resource-administration` edges in
       `openspec/changes/README.md`.
+      Done 2026-09-21: row reads "promoted; ready to archive"; the edges to
+      `capacity-resource-administration` were already current.
 - [x] 8.7 **Documentation citations.**
       `make check-doc-citations CHANGE=unify-host-identity`.
       Done 2026-09-21: every cited path resolves and none is a tombstone.
-- [ ] 8.8 **End-to-end pipeline.** Run it and record the run, result, and the VM and
-      bare-metal scenarios that exercise renamed execution references. A blocker
-      unrelated to this change is recorded with its cause and owner, and what it gates
-      is treated as unrun.
-      **Blocked in the implementation environment, 2026-09-21:** no deployed stack
-      or pipeline runner is available there, so the end-to-end tier is unrun, not
-      passed. All 126 e2e scenarios collect, which establishes import health only and is
-      not behavioural evidence for this change: the collected files still held
-      seven `HostResponse.name` accesses, found by review and fixed (task 9.3). Owed
-      before archival: a pipeline run covering the VM deal scenarios
-      (`test_full_deal`, `test_full_deal_buyer_cli`, `test_buy_oneshot_buyer_cli`,
-      `test_non_erc20_settlement`) and the bare-metal deal scenario.
-      **Pipeline run 1, 2026-09-21 — failed before any scenario.** The
-      provisioning container was unhealthy: `compute-provisioning-migrate` failed
-      on `no such column: cr.executor_kind`, SQL that exists in neither this branch
-      nor the snapshot it started from. Cause: the provisioning Dockerfile pinned
-      `arkhai-compute-provisioning-service[adapters]==0.2.0`. The wheelhouse held
-      only 0.3.0, so the resolver fetched the published 0.2.0 from the public
-      index, together with that release's own older dependencies
-      (`core-storefront-client` 0.17.0 among them), and the image ran old code.
-      The version-bump pin search in 7.2 missed this pin because of its extras
-      bracket. Fixed (pin to 0.3.0), and guarded:
-      `test_every_image_pins_the_version_its_package_declares` checks every
-      internal-package pin in every Dockerfile, extras included, against the
-      declaring `pyproject.toml`; a control run with the stale pin restored fails
-      it. An audit of every package installed during the run found no other
-      stale internal version. Reproduced outside Docker: the image's install
-      command now resolves every internal package at the repository's version,
-      and the full migration chain succeeds on a fresh database. Rerun owed.
-- [ ] 8.9 **Promotion.** Complete the record below.
+- [x] 8.8 **End-to-end pipeline.** Run it and record the run, result, and the VM and
+      bare-metal scenarios that exercise renamed execution references.
+      **Run 1, 2026-09-21 — failed at stack start.** The provisioning image pinned
+      `arkhai-compute-provisioning-service[adapters]==0.2.0`; the wheelhouse held
+      only 0.3.0, so the resolver fetched the published 0.2.0 and its older
+      dependencies from the public index and the container ran old migrations.
+      The pin search in 7.2 missed it because of the extras bracket. Fixed, and
+      guarded by `test_every_image_pins_the_version_its_package_declares`, which a
+      control run with the stale pin fails.
+      **Run 2, 2026-09-21 — passed:** 113 passed, 3 skipped, 264 deselected. The VM
+      scenarios exercising renamed execution references passed:
+      `test_full_deal` (32), `test_full_deal_buyer_cli` (28),
+      `test_buy_oneshot_buyer_cli` (9), `test_compute_dynamic_listings` (12), and
+      `test_multi_registry` (21, 2 skipped).
+      **Unrun at this tier, not passed:** `test_bare_metal_complete_deal` skipped
+      because the standard pipeline supplies neither the `BARE_METAL.*` settings nor
+      the bare-metal buyer plugin it requires; that predates this change and is
+      owned by bare-metal release qualification
+      (`docs/bare-metal-seller-quickstart.md`, "Release-qualified deal evidence").
+      `test_non_erc20_settlement` and the provisioning smoke tier are not selected by
+      this pipeline. Bare-metal renamed references are covered in process: the
+      fulfillment provider, lease service, and storefront suites (126) and the
+      storefront's retired-kind refusal tests.
+- [x] 8.9 **Promotion.** Complete the record below.
+      Done 2026-09-21: deltas synced to `physical-provisioning` and
+      `site-capacity`; every accepted decision has a permanent location below.
 
 ## 9. Code review corrections (2026-09-21)
 
@@ -335,18 +332,23 @@ rather than renumbering it, so the closeout keeps its references.
       exception.
 - [x] 9.7 Add a full sync/async storefront client parity guard in the VM storefront
       suite.
-- [ ] 9.8 **Follow-up, not this change:** give the bare-metal lease endpoints a
-      canonical client, or decide they are not an inter-service API, and move
-      `test_bare_metal_leases_api.py` onto it. File as an issue.
+- [x] 9.8 **Bare-metal lease client — moved out of band by the owner, 2026-09-21.**
+      Not this change's work: give the bare-metal lease endpoints a canonical client,
+      or decide they are not an inter-service API, and move
+      `test_bare_metal_leases_api.py` onto it. Tracked outside this change.
 
 ## Design promotion record
 
 | Accepted decision | Permanent location |
 |---|---|
-| The host's identity is `host_id` on every surface; its address is `ssh_host` | `docs/development/ARCHITECTURE.md` — "One name per concept"; `openspec/specs/physical-provisioning/spec.md` — "A host has one identity name" |
+| The host's identity is `host_id` on every interface; its address is `ssh_host` | `docs/development/ARCHITECTURE.md` — "One name per concept"; `openspec/specs/physical-provisioning/spec.md` — "A host has one identity name" |
 | `physical_host_id` identifies a physical machine across hosts | `docs/development/ARCHITECTURE.md` — "One name per concept" |
-| A capacity declaration names its host through a first-class `host_id` | `openspec/specs/site-capacity/spec.md` |
+| A capacity declaration names its host through a first-class `host_id`, at most one declaration per host | `openspec/specs/site-capacity/spec.md` — "A capacity declaration names the host it is delivered through" |
 | Cross-mode accounting fields have one location on a declaration | `openspec/specs/site-capacity/spec.md` — "Cross-mode physical accounting" |
-| Existing host identities migrate in one transaction and fail closed | `openspec/specs/physical-provisioning/spec.md` — "Existing host identities migrate without loss" |
+| Existing host identities migrate in one transaction covering schema and data, validated before the first write, rewriting only host-identity locations | `openspec/specs/physical-provisioning/spec.md` — "Existing host identities migrate without loss" |
 | A bare-metal storefront refuses state written under a retired listing kind; `bare_metal.v1` is dropped | `openspec/specs/physical-provisioning/spec.md` — "A bare-metal storefront refuses state written under a retired listing kind" |
-| Preprod bare-metal storefront is reset rather than migrated | Temporary; change history only. The durable evolution rule is owned by `version-accepted-artifacts` |
+| The bare-metal domain identity stays `bare_metal.v1` while the payload kind moves | Code: `domains/bare_metal/src/arkhai_bare_metal/schema.py`, the comments on `BARE_METAL_SCHEMA_KIND` and `BARE_METAL_DOMAIN_IDENTITY` |
+| Provider operation envelopes name the host at schema 2; kind strings never change | Code: the `_OPERATION_SCHEMA_VERSION` comments in the VM and bare-metal fulfillment providers |
+| An image pins the version its repository package declares | Test: `e2e-tests/tests/unit/test_domain_stack_configuration.py`, `test_every_image_pins_the_version_its_package_declares` |
+| Async and sync storefront clients expose one operation surface | Test: `domains/vms/storefront/tests/unit/test_lifecycle_client_parity.py` |
+| Preprod bare metal is reset by uninstalling and reinstalling its release rather than migrated | Temporary, while bare metal is unreleased: `docs/bare-metal-seller-quickstart.md`, "Resetting the storefront database". The durable evolution rule is owned by `version-accepted-artifacts` |
