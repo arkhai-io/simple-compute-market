@@ -163,7 +163,9 @@ None.
   composition and storefront seed registration, `kit/fulfillment` callers of the
   module-level matching helpers.
 - **Affected deployment:** a new `capacity_definitions_path` setting, set by Helm
-  only from a non-empty `definitions.capacity` value (no Compose wiring); an ordered
+  only from a non-empty `definitions.capacity` value, and `pool_definitions_path`
+  newly settable the same way from `definitions.pools` so a capacity document's pools
+  exist at first boot (both empty by default; no Compose wiring); an ordered
   compute migration that makes `capacity_buckets.total_units` nullable, backfills
   `NULL` pool ids, and derives capacity resources, applied by the init container
   before the application serves requests, per `deployment-state`'s service-owned
@@ -205,6 +207,8 @@ None.
 
 ## Dependencies and Related Changes
 
+- **Depends on `unify-host-identity`** (added 2026-09-21). Derivation and projection
+  correlation use the declaration's first-class `host_id` that change introduces.
 - `pools-9-retire-local-physical-authority` **depends on this change**. Retiring the
   storefront's CSV import before an operator path for multi-dimensional capacity
   exists is what would create the regression this change prevents.

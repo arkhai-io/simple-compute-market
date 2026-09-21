@@ -21,13 +21,14 @@ A change appears exactly once, in its primary home. Where a change serves more t
 ## Roadmap goal — Consolidate physical-resource authority in the provisioning service
 
 ```text
-capacity-resource-administration ──► pools-9-retire-local-physical-authority
+unify-host-identity ──► capacity-resource-administration ──► pools-9-retire-local-physical-authority
 fix-vm-fulfillment-capacity-boundary ──► retire-vm-remove-job-id
 ```
 
 | Change | Status | Acceptance boundary |
 |---|---|---|
-| [`capacity-resource-administration`](capacity-resource-administration/) | active; no blocking dependency | Site capacity resources become the single authoritative declaration of sellable capacity across every dimension, with a digest-gated startup import and an always-reconciling REST import, a composition-supplied mirror dimension, a required `pool_id` with a pool-reassignment drain rule, and derivation of declarations from legacy host GPU columns at INI seed time and once at upgrade. Two design questions remain open: projected attribute pass-through, and Helm first-boot pool references |
+| [`unify-host-identity`](unify-host-identity/) | design; no blocking dependency | Names the host `host_id` on every surface — host registry, capacity declarations, execution references, lease APIs, playbooks, and the bare-metal listing (`bare_metal.v2`) — replacing `name`, `vm_host`, `machine_id`, and `kvm_host` per `ARCHITECTURE.md`'s "One name per concept"; gives cross-mode accounting fields one location. Leaves `physical_host_id` and everything `pools-9` deletes |
+| [`capacity-resource-administration`](capacity-resource-administration/) | active; depends on `unify-host-identity` | Site capacity resources become the single authoritative declaration of sellable capacity across every dimension, with a digest-gated startup import and an always-reconciling REST import, a composition-supplied mirror dimension, a required `pool_id` with a pool-reassignment drain rule, and derivation of declarations from legacy host GPU columns at INI seed time and once at upgrade. Design complete; host correlation is the declaration's `host_id` from `unify-host-identity` |
 | [`pools-9-retire-local-physical-authority`](pools-9-retire-local-physical-authority/) | planned; blocked on `capacity-resource-administration` | Retires every remaining physical-resource concern from the VM storefront: local physical-authority tables, `compute_allocations`, CSV import and its deployment contract, the orphaned physical admin surface, and the always-`None` `vm_host` plumbing. The deployment-bake trigger for its own start remains undefined by design; the dependency is a necessary gate, not a sufficient one |
 | [`fix-vm-fulfillment-capacity-boundary`](fix-vm-fulfillment-capacity-boundary/) | complete; awaiting archival | Removes stale physical-placement fields from the current fulfillment path and derives fulfillment shape from committed reservation dimensions. Also serves Goal 2 | Proven by a green e2e run on 2026-09-14. Its one deferral, retiring the `vm_remove_job_id` mirror, is owned by `retire-vm-remove-job-id` below |
 | [`retire-vm-remove-job-id`](retire-vm-remove-job-id/) | planned; depends on `fix-vm-fulfillment-capacity-boundary` | Retires `capacity_reservations.vm_remove_job_id`, a VM-conditional mirror of `release_job_id` and the one domain-prefixed column on a reservation table bare-metal pools share. Scoped to the mirror only: the legacy `vm_leases` column the backfill reads and the storefront's own column are out of scope. Carries a wire decision, since the field is on a published lease model |
@@ -158,7 +159,7 @@ held is now owned by `repair-storefront-alkahest-configuration` above.
 ## Roadmap goal — Sell capacity the marketplace cannot admit against
 
 ```text
-capacity-resource-administration ──► project-capacity-resources-without-hosts ──┐
+unify-host-identity ──► capacity-resource-administration ──► project-capacity-resources-without-hosts ──┐
 settle-listing-vocabulary (archived) ─────────────────────────────────────┤
 pool-declared-advertisement-and-backing ────────────────────────────────────────┴──► unbacked-listing-publication ──► publish-indicative-listing-rates
 ```

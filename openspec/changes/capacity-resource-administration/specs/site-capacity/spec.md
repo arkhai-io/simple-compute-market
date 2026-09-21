@@ -57,8 +57,9 @@ as belonging to the default pool.
 Projected physical inventory MUST NOT report attribute values that contradict the
 same resource's projected capacity. A projected resource's capacity and its
 descriptive attributes MUST derive from one authoritative record for that resource:
-its capacity declaration. Connection-identity fields correlated from host inventory
-MAY accompany them, and MUST NOT be overridden by the declaration. A quantity MUST
+its capacity declaration, with every declared attribute projected except domain view
+configuration already published as a view. Connection-identity fields correlated from
+host inventory MAY accompany them, and MUST NOT be overridden by the declaration. A quantity MUST
 appear only in the projected capacity, never duplicated as an attribute.
 
 #### Scenario: Declared capacity disagrees with a legacy inventory value

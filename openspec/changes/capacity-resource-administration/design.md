@@ -249,8 +249,9 @@ submitting inventory.
 
 A declaration naming a pool that does not exist fails the whole import, naming the
 pool, with nothing applied and no digest recorded — the same posture relay import
-takes for a secret key the profile does not carry. See "Open Questions" for the
-first-boot consequence under Helm.
+takes for a secret key the profile does not carry. The first-boot consequence under
+Helm is resolved by wiring pool documents alongside capacity documents; see
+"Deployment wiring follows the relay idiom".
 
 ### Projected attributes must not contradict projected capacity
 
@@ -279,11 +280,8 @@ quantitative — matched by equality, per its own column comment — which is wh
 belongs in `attributes` rather than `capacity`, and why it must move to the capacity
 resource's attributes rather than being dropped.
 
-What the projected `attributes` map contains after the cutover — which fields come
-from the host, which from the declaration, and whether declaration attributes are
-passed through or allowlisted — is recorded under "Open Questions" as a proposed
-resolution awaiting confirmation. The invariant above holds under every option
-considered there.
+What the projected `attributes` map contains after the cutover is decided under
+"Projected attributes are the declaration's, plus host connection fields".
 
 ### The INI keeps its GPU variables as derivation input, not as capacity
 
@@ -346,7 +344,11 @@ the migration module's raw-SQL habit deliberately — two derivations that can d
 are the failure task 2.1 names — and is safe because the migration is recorded once
 and never re-runs against a later schema.
 
-### A host counts as declared by the projection's own correlation rule (decided 2026-09-21)
+### A host counts as declared by the projection's own correlation rule (decided 2026-09-21; superseded 2026-09-21)
+
+**Superseded 2026-09-21** by "A declaration names its host through `host_id`"
+below. The analysis that follows describes the code before `unify-host-identity`
+and the hazard any rule must avoid; it is retained as rationale, not as the rule.
 
 "Derive only for hosts with no existing declaration" needs a precise meaning of
 *existing declaration for this host*, because declarations and hosts are linked by
@@ -372,17 +374,36 @@ A derived declaration is:
 
 | Field | Value |
 |---|---|
-| `resource_id` | the host's name |
+| `resource_id` | the host's `host_id` |
+| `host_id` | the host's `host_id` (amended 2026-09-21; previously a `vm_host` attribute) |
 | `pool_id` | the host's `pool_id` |
 | `resource_type` | `compute.gpu` |
 | `capacity` | `{"gpu_count": host.gpu_count}` |
-| `attributes` | `{"vm_host": host.name}`, plus `gpu_model` when the host records one |
+| `attributes` | `gpu_model` when the host records one; otherwise empty |
 | `enabled` | the host's `enabled` |
 
 Only a host with `gpu_count > 0` is derived. A zero-GPU host has no legacy capacity
 to preserve, and a zero declaration would publish a resource with nothing to sell.
 Once any declaration correlates to a host, later INI values for that host have no
 effect on capacity; the operator documentation says so.
+
+### A declaration names its host through `host_id` (decided 2026-09-21)
+
+The repository owner asked why the declaration–host relationship has to be inferred.
+It does not: the link was an explicit reference spelled three ways inside a free-form
+attribute map. `unify-host-identity` gives the declaration a first-class `host_id`
+and renames every host-identity spelling to it, as a compliance fix against
+`ARCHITECTURE.md`'s "One name per concept". This change consumes it:
+
+- projection correlation is `declaration.host_id == host.host_id`, and the refusal of
+  two declarations per host is a uniqueness check on that field;
+- a host counts as declared when some declaration has its `host_id`;
+- a derived declaration sets `host_id` to the host's, and carries no `vm_host`
+  attribute.
+
+The multi-key rule and the `resource_id == host.name` match — the one genuinely
+fallback-shaped part — are gone. This change depends on `unify-host-identity`
+landing first.
 
 ### Derived declarations are admissible (decided 2026-09-21)
 
@@ -547,7 +568,10 @@ requires.
    does not wire `pool_definitions_path`: doing so would subject every deployment's
    pools to declarative reconciliation.
 
-So the provisioning chart gains `definitions.capacity`, empty by default:
+So the provisioning chart gains `definitions.capacity`, empty by default. The value
+is copied verbatim into the ConfigMap as `capacity-definitions.yaml` and read by the
+startup import on initialization — applied when its digest differs from the last one
+applied, so a pod restart with an unchanged value is a no-op:
 
 - when non-empty, `configmap.yaml` renders it as `capacity-definitions.yaml` and sets
   `capacity_definitions_path: /app/config/capacity-definitions.yaml` in the rendered
@@ -565,15 +589,74 @@ comments currently describe every-startup upserts the code no longer performs; t
 are corrected in the same edit, since a reader comparing the three would otherwise
 conclude capacity is the odd one out.
 
-Compose wires no capacity document. No Compose stack wires relay or pool documents
-either, and the e2e scenarios declare capacity through the REST API by design — a
-mounted document is shared state no scenario declares
-(`e2e-tests/tests/e2e/roles/scenarios/vms/host_registry.py`). A local operator who
-wants one sets the path in a profile file, as for pools.
+**Pools are wired the same way (decided 2026-09-21).** A capacity document may name
+non-default pools, and Helm did not wire pool documents, so on a fresh install such a
+pool would not exist at first boot: the capacity import fails, startup fails, and the
+operator cannot reach the API to create the pool. The chart therefore also gains
+`definitions.pools`, empty by default, rendered as `pool-definitions.yaml`, mounted by
+`subPath`, and setting `pool_definitions_path` only when non-empty, with
+`config.pool_definitions_path` forbidden in the schema. The reason pools were left
+unwired — that wiring would newly subject every deployment's pools to declarative
+reconciliation — does not apply to an empty-by-default value: nothing is reconciled
+until an operator supplies a document, and an operator who does is asking for exactly
+the pool rule (unnamed pools are disabled). The values file's comment explaining the
+old absence is replaced. The startup order already runs pools before capacity, so a
+first boot from both documents resolves. The rejected alternatives were documenting
+that a Helm capacity document may name only pre-existing pools, and demoting an
+unknown pool to a startup warning; the second breaks the fail-startup posture relay
+import already takes.
+
+Compose wires no capacity or pool document. Compose's only user is the e2e suite,
+and that use is temporary until a Tekton pipeline replaces the current GitHub
+Actions; the scenarios declare capacity through the REST API by design
+(`e2e-tests/tests/e2e/roles/scenarios/vms/host_registry.py`). The mounted-document
+path is covered by integration tests of the importer and by Helm render tests, and
+gains deployed coverage when the pipeline runs against the chart.
 
 There is no CLI deliverable. Site administrators configure through values files,
 configuration files, and the REST API; the operator documentation names the
 endpoints and shows a document.
+
+### Projected attributes are the declaration's, plus host connection fields (decided 2026-09-21)
+
+Every declaration attribute is copied into the resource-pool projection except
+`bare_metal_publication`, which is already published as the `bare_metal.v1` view.
+The host's connection fields `public_host` (and `host_id` itself, as correlation) are
+written last so a declaration cannot override them. `attributes.gpu_count` is
+removed; the quantity lives in `capacity`.
+
+The inventory the owner reviewed (searched 2026-09-21), with the post-`unify-host-identity`
+names:
+
+| Key | Written by | Read by | Under this decision |
+|---|---|---|---|
+| `host_id` | declaration field, not an attribute | `executor_ref`; providers; correlation | from the host, via correlation |
+| `public_host` | never on a declaration | tenant connection info | from the host, written last |
+| `gpu_model` | e2e, derivation | claims (equality); reconciler | from the declaration |
+| `region` | e2e | claims (equality) | from the declaration |
+| `physical_host_id` | declarations (top level after `unify-host-identity`) | ledger cross-mode accounting | from the declaration |
+| `allocation_mode` | declarations (top level after `unify-host-identity`) | ledger cross-mode accounting | from the declaration |
+| `bare_metal_publication` | bare-metal declarations | bare-metal provider; `bare_metal.v1` view | excluded — published as the view |
+| `sla` | none found on a declaration | storefront-local rows only | from the declaration if present |
+| `gpu_count` | none as an attribute | storefront-local readers only | removed |
+
+Everything a declaration carries in `attributes` is therefore public to storefronts;
+the operator documentation says so. Every key except the host link already reached
+storefronts through the capacity-bucket projection's `grouping_attributes`, so an
+allowlist here would protect nothing and would need editing whenever a domain added a
+match field.
+
+**Why `gpu_model` does not sit beside `gpu_count` in `capacity`.** The owner found the
+split odd; it is deliberate at the ledger and deliberately *not* the authoring shape.
+`capacity` is arithmetic: the ledger parses every value as a non-negative decimal and
+subtracts held quantities per key to compute availability, so a categorical value
+cannot live there. `attributes` are matched by equality. The two describe the same
+GPUs, and `structured-capacity-requirements` already owns the grouping the owner
+expects: a family-grouped authoring shape (`gpu: {count, model}`) that one shared
+utility flattens into `dimensions["gpu_count"]` and `attributes["gpu_model"]`, for
+claims and declarations alike. That change explicitly asks work landing earlier to use
+the flattened form rather than a one-off nested shape, so the capacity-definitions
+document here uses the flat form and gains the grouped form when that utility lands.
 
 ## Risks / Trade-offs
 
@@ -634,50 +717,8 @@ migration is not supported, per `deployment-state`'s forward-recovery posture.
 
 ## Open Questions
 
-### Proposed, awaiting confirmation
-
-- **What the projected `attributes` map contains after the cutover.** Today every
-  field comes from the host: `vm_host`, `public_host`, `gpu_count`, and `gpu_model`
-  when set. The declaration's own attributes never reach the resource-pool
-  projection, though they already reach the capacity-bucket projection's
-  `grouping_attributes` unfiltered. After the cutover the fields split by owner:
-
-  | Field | Today | Proposed | Why |
-  |---|---|---|---|
-  | `vm_host` | host name | host name | Connection identity; the host is authoritative for it |
-  | `public_host` | host | host | Connection identity; tenant addressing |
-  | `gpu_count` | host | removed | A quantity; it lives in `capacity`. No consumer reads it from the projection — the storefront readers of `attributes.gpu_count` read storefront-local tables `pools-9` retires |
-  | `gpu_model` | host | declaration | Categorical hardware identity the declaration owns |
-  | `region`, other categorical fields | absent | declaration | Match inputs a declaration already carries |
-  | `bare_metal_publication` | absent | not copied | Already projected as the `bare_metal.v1` view; copying the raw configuration would duplicate it |
-
-  The remaining choice is pass-through versus allowlist for the declaration's
-  attributes. **Proposed: pass-through, minus `bare_metal_publication`, with the
-  host's connection fields written last so a declaration cannot override them.**
-  Reasons: the same attributes already reach storefronts through the capacity-bucket
-  projection, so an allowlist here would not protect anything; and an allowlist would
-  have to be edited whenever a domain adds a categorical match field, which is the
-  VM-specific knowledge the site authority is being cleared of. The alternative —
-  an explicit allowlist of `gpu_model` and `region` — is safer against an operator
-  putting something private in a declaration, at that maintenance cost. No task
-  implements either until this is confirmed; task 4.2 is written as a gate.
-
 ### Open
 
-- **Can a Helm capacity document reference a pool created through the API?** A
-  declaration naming an unknown pool fails the import and therefore startup. Helm
-  does not wire pool documents, so on a fresh install any pool a capacity document
-  names — other than the system-created default — does not exist at first boot, the
-  pod fails, and the operator cannot reach the API to create the pool. Options:
-  (a) accept it and document that a Helm capacity document may name only the default
-  pool or pools that exist before it is supplied; (b) add an opt-in
-  `definitions.pools` wired exactly like `definitions.capacity` — empty by default,
-  so it does not change what an existing deployment means, which was the reason pools
-  were left unwired; (c) make an unknown pool a startup warning that records no
-  digest, so the next start retries. (c) breaks the "configured document that
-  cannot be applied fails startup" posture relays already follow, so the realistic
-  choice is (a) or (b). No task depends on the answer until Section 6; task 6.1 is
-  written as a gate.
 - **Should the scalar `total_units` / `units` mirror be retired entirely?** It predates
   multidimensional capacity and is the only reason a mirror dimension must exist.
   Deferrable: making the dimension name composition-supplied removes the cross-domain

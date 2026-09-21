@@ -12,9 +12,9 @@ contract every later section writes through (`pool_id` required, `total_units`
 optional, in-session registration), and Section 2's derivation writes through
 Section 5's in-session reconciliation path.
 
-**Decision gates.** Tasks 4.2 and 6.1 are gates on items `design.md` still lists
-under "Open Questions". Do not implement either past its gate until the question is
-answered and moved into `design.md`'s decisions.
+**Dependency.** Sections 2 and 4 consume the declaration's `host_id` and the renamed
+host registry from `unify-host-identity`, which lands first. Every decision gate in
+this file was resolved on 2026-09-21.
 
 ## 1. Capacity declaration carrier and administration surface
 
@@ -60,18 +60,18 @@ answered and moved into `design.md`'s decisions.
       writing through `CapacityLedgerService.register_resource_in_session`.
 - [ ] 2.2 Derive only for hosts with `gpu_count > 0` and no correlated declaration.
       Never overwrite, never merge. Report the derived set at INFO, matching how both
-      existing seeding steps report theirs. **Amended 2026-09-21:** "correlated" uses
-      the projection's own rule — `resource_id`, `vm_host` attribute, or enabled
-      bare-metal `machine_id`. Extract that rule from
-      `services/capacity_inventory.py` into one function both the projection and the
-      derivation call. Derived shape per `design.md`'s table.
+      existing seeding steps report theirs. **Amended 2026-09-21 (gate resolved):**
+      "correlated" means some declaration carries this host's `host_id`, per
+      `design.md`'s "A declaration names its host through `host_id`". Derived shape
+      per `design.md`'s table.
 - [ ] 2.3 Carry `gpu_model` into the declaration's attributes rather than dropping
       it — categorical, matched by equality, so it belongs in attributes and not in
       the capacity map.
 - [ ] 2.4 Focused tests: derivation for a host with legacy data; no derivation when a
       declaration exists; operator declaration retained unchanged when it disagrees
       with the legacy value; idempotent across repeated runs. **Added 2026-09-21:**
-      no derivation when a declaration correlates only by `vm_host` (the e2e shape);
+      no derivation when a declaration's `resource_id` differs from its `host_id`
+      (the e2e shape);
       none for a zero-GPU host; a derived declaration's pool and enabled state follow
       the host.
 - [ ] 2.5 Wire derivation into `HostService.seed_from_ini`
@@ -114,16 +114,15 @@ authority.
       capacity fallback. **Amended 2026-09-21:** a host no declaration correlates to is
       not projected (`design.md`, "A host with no declaration is not projected"). The
       loop remains host-driven; inverting it is
-      `project-capacity-resources-without-hosts`'s scope.
-- [ ] 4.2 **Decision gate.** Fix the divergence in the same edit: `attributes`
-      currently derives from the host unconditionally while `capacity` prefers the
-      resource, so a declaration disagreeing with a host row projects contradictory
-      values in one row. Both must come from one record. Which declaration attributes
-      are projected — pass-through or allowlist — is under `design.md`'s "Open
-      Questions"; confirm it and move it into the decisions before implementing past
-      these fixed points: `vm_host` and `public_host` come from the host and are
-      written last; `attributes.gpu_count` is removed; `gpu_model` comes from the
-      declaration.
+      `project-capacity-resources-without-hosts`'s scope. Correlation is
+      `declaration.host_id == host.host_id` (gate resolved 2026-09-21).
+- [ ] 4.2 Fix the divergence in the same edit: `attributes` currently derives from
+      the host unconditionally while `capacity` prefers the resource, so a
+      declaration disagreeing with a host row projects contradictory values in one
+      row. Both must come from one record. **Amended 2026-09-21 (gate resolved):**
+      copy every declaration attribute except `bare_metal_publication`; write the
+      host's `public_host` last; remove `attributes.gpu_count`. Per `design.md`'s
+      "Projected attributes are the declaration's, plus host connection fields".
 - [ ] 4.3 Confirm the bare-metal publication view survives the cutover. It reads
       `resource.attributes[bare_metal_publication]` together with `capacity` through
       `_whole_resource_available`, and the cutover changes where `capacity` comes
@@ -298,9 +297,11 @@ depends on.
       conditional `subPath` mount in `templates/deployment.yaml`, and
       `config.capacity_definitions_path` forbidden in `values.schema.json`. No Compose
       wiring. `settings.toml` gains the setting, and its stale `pool_definitions_path`
-      and `inventory_ini` comments are corrected. **Decision gate** on the first-boot
-      pool question under `design.md`'s "Open Questions": if option (b) is chosen,
-      `definitions.pools` is wired the same way in this task.
+      and `inventory_ini` comments are corrected. **Amended 2026-09-21 (gate
+      resolved):** `definitions.pools` is wired the same way in the same four files —
+      rendered as `pool-definitions.yaml`, `pool_definitions_path` set only when
+      non-empty, `config.pool_definitions_path` forbidden — and the `values.yaml`
+      comment explaining why pools were unwired is replaced.
 - [ ] 6.2 ~~Add CLI coverage for declaring and inspecting capacity, so registration is a
       documented workflow rather than a raw HTTP call.~~ **Superseded 2026-09-21:**
       no CLI. Site administrators configure through values files, configuration
@@ -309,8 +310,9 @@ depends on.
       capacity declaration workflow, including that a declaration wins over any
       derivable legacy host value — the intuition may run the other way. **Amended
       2026-09-21:** cover the document format, the startup digest rule, the REST
-      import, retention of unnamed declarations, the `pool_id` requirement, and the
-      Helm value. Add a "Capacity definitions" subsection to
+      import, retention of unnamed declarations, the `pool_id` requirement, the Helm
+      values (`definitions.capacity` and `definitions.pools`), and that everything in
+      a declaration's attributes is published to storefronts. Add a "Capacity definitions" subsection to
       `docs/development/DEPLOYMENT_AND_CONFIG.md`'s "Definition documents", stating
       how its retention rule differs from pools and matches relays.
 - [ ] 6.4 State the INI's `gpus=`/`gpu_model=` disposition in operator documentation:
@@ -318,9 +320,10 @@ depends on.
       projection except through derivation, and slated for removal with the later
       column drop. Include that INI values stop affecting capacity once a declaration
       correlates to the host.
-- [ ] 6.5 **Helm render test.** Empty `definitions.capacity` renders no document, no
-      mount, and no path; a non-empty one renders all three; setting
-      `config.capacity_definitions_path` fails schema validation.
+- [ ] 6.5 **Helm render test.** For each of `definitions.capacity` and
+      `definitions.pools`: empty renders no document, no mount, and no path; non-empty
+      renders all three; setting the corresponding `config.*_definitions_path` fails
+      schema validation. A render with both supplies both paths.
 
 ## 7. Validation
 
@@ -395,8 +398,10 @@ Per `openspec/README.md#plan-closeout-requirements`.
 | Capacity definitions reconcile on a document digest at startup; REST import always reconciles, records no digest, and retains unnamed declarations | `openspec/specs/physical-provisioning/spec.md` — "Capacity definitions are imported from a mounted document"; `docs/development/DEPLOYMENT_AND_CONFIG.md` — "Definition documents" |
 | Registration requires `pool_id`; `NULL` pool ids read as the default pool | `openspec/specs/site-capacity/spec.md` — "Operator-administered capacity declarations" |
 | Derivation runs where INI data is applied and once at upgrade, using the projection's correlation rule | `openspec/specs/physical-provisioning/spec.md` — "Legacy host capacity is derived into declarations" |
+| A declaration names its host through `host_id`; correlation is that field alone | `openspec/specs/physical-provisioning/spec.md` — "Legacy host capacity is derived into declarations" |
+| Projected attributes are the declaration's minus `bare_metal_publication`, plus host connection fields written last | `openspec/specs/site-capacity/spec.md` — "Projected inventory is internally consistent" |
 | A host with no declaration is not projected | `openspec/specs/physical-provisioning/spec.md` — "Host inventory is connection identity" |
-| Capacity document wiring follows the relay idiom | `docs/development/DEPLOYMENT_AND_CONFIG.md` — "Definition documents" |
+| Capacity and pool document wiring follow the relay idiom; both are opt-in Helm values | `docs/development/DEPLOYMENT_AND_CONFIG.md` — "Definition documents" |
 | Wire changes are versioned by distribution, not envelope | Temporary; change history only |
 | Projected attributes must not contradict projected capacity | `openspec/specs/site-capacity/spec.md` — "Projected inventory is internally consistent" |
 | Host inventory is connection identity, not capacity authority | `openspec/specs/physical-provisioning/spec.md` — "Host inventory is connection identity"; `docs/development/ARCHITECTURE.md` authority-boundaries table |

@@ -36,8 +36,9 @@ host upsert, and once, by ordered migration, for host records present at upgrade
 Derivation MUST NOT run on a process start that applies no inventory, and MUST NOT
 run when a host is created or updated through the individual host API.
 
-A host MUST be treated as already declared when any declaration correlates to it
-under the same rule the capacity projection uses to correlate declarations to hosts.
+A host MUST be treated as already declared when any declaration names it as its
+`host_id`, which is also the only rule the capacity projection uses to correlate
+declarations to hosts.
 Derivation MUST NOT overwrite or merge into an existing declaration, and an
 operator-supplied declaration MUST win over any derivable legacy value.
 
@@ -63,10 +64,10 @@ operator-supplied declaration MUST win over any derivable legacy value.
 - **THEN** the operator's declaration is retained unchanged and no derivation occurs
   for that resource
 
-#### Scenario: A declaration correlates to a host by attribute rather than by id
+#### Scenario: A declaration's resource id differs from its host
 
-- **WHEN** a declaration whose resource id differs from a host's name names that host
-  as its machine alias
+- **WHEN** a declaration whose resource id differs from a host's `host_id` names that
+  host as its `host_id`
 - **THEN** the host is treated as declared and no second declaration is derived for it
 
 #### Scenario: A host is created through the individual host API
