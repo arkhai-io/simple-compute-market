@@ -30,6 +30,7 @@ class ResourceRegistration(BaseModel):
     )
     resource_type: str = Field(default="compute.gpu")
     pool_id: Optional[str] = Field(default=None)
+    host_id: Optional[str] = Field(default=None)
     resource_subtype: Optional[str] = Field(default=None)
     attributes: dict[str, Any] = Field(default_factory=dict)
     capacity: Optional[dict[str, Any]] = Field(default=None)

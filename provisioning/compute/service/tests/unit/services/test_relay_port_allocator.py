@@ -96,11 +96,11 @@ class TestAllocation:
         _relay(session_factory)
         first = allocator.allocate(
             relay_id="site-a", owner_kind="fulfillment", owner_id="cr-1",
-            host_name="kvm1",
+            host_id="kvm1",
         )
         second = allocator.allocate(
             relay_id="site-a", owner_kind="fulfillment", owner_id="cr-2",
-            host_name="kvm2",
+            host_id="kvm2",
         )
         assert first.remote_port != second.remote_port
 

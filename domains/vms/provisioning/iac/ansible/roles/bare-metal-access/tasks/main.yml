@@ -2,9 +2,8 @@
 # Bare-metal node access grant/reclaim.
 #
 # These actions operate on the selected inventory host itself. The provisioning
-# service passes executor_target as the executor-local machine id, while
-# physical_host_id is the cross-mode accounting identity.  vm_host/vm_target are
-# accepted by the playbook as compatibility aliases for older persisted jobs.
+# service passes executor_target as the host's host_id, while physical_host_id
+# is the cross-mode accounting identity of the physical machine.
 
 - name: Validate bare-metal grant inputs
   fail:
@@ -141,7 +140,7 @@
   set_fact:
     node_grant_access_data:
       action: "node_grant_access"
-      machine_id: "{{ machine_id }}"
+      host_id: "{{ node_host_id }}"
       physical_host_id: "{{ physical_host_id | default('') }}"
       ssh_user: "{{ bare_metal_ssh_user }}"
       escrow_uid: "{{ escrow_uid | default('') }}"
@@ -172,7 +171,7 @@
   set_fact:
     node_reclaim_access_data:
       action: "node_reclaim_access"
-      machine_id: "{{ machine_id }}"
+      host_id: "{{ node_host_id }}"
       physical_host_id: "{{ physical_host_id | default('') }}"
       ssh_user: "{{ bare_metal_ssh_user }}"
       escrow_uid: "{{ escrow_uid | default('') }}"

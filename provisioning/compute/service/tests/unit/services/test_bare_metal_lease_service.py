@@ -49,11 +49,9 @@ def ledger() -> CapacityLedgerService:
     svc.register_resource(
         resource_id="bare-metal-1",
         total_units=1,
-        attributes={
-            "machine_id": "bm-node-1",
+        host_id="bm-node-1", attributes={
             "physical_host_id": "host-physical-1",
-            "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
-        },
+            "allocation_mode": ALLOCATION_MODE_EXCLUSIVE},
     )
     return svc
 
@@ -80,7 +78,7 @@ def test_register_bare_metal_lease_attaches_executor_metadata(
         BareMetalLeaseCreate(
             capacity_reservation_id=reserved["capacity_reservation_id"],
             escrow_uid="0xbm",
-            machine_id="bm-node-1",
+            host_id="bm-node-1",
             physical_host_id="host-physical-1",
             access_ref={"ssh_user": "tenant-a"},
             lease_start_utc=datetime(2099, 1, 1, 0, 0, tzinfo=timezone.utc),
@@ -96,7 +94,7 @@ def test_register_bare_metal_lease_attaches_executor_metadata(
         "physical_host_id": "host-physical-1",
         "ssh_user": "tenant-a",
     }
-    assert lease["vm_host"] is None
+    assert lease["host_id"] is None
     assert lease["vm_target"] is None
     assert lease["create_job_id"] == "grant-1"
 
@@ -122,7 +120,7 @@ def test_register_bare_metal_lease_by_escrow_when_capacity_reservation_id_omitte
         BareMetalLeaseCreate(
             capacity_reservation_id=None,
             escrow_uid="0xbm",
-            machine_id="bm-node-1",
+            host_id="bm-node-1",
             physical_host_id="host-physical-1",
             lease_end_utc=datetime(2099, 1, 1, 1, 0, tzinfo=timezone.utc),
         ),
@@ -143,7 +141,7 @@ def test_register_bare_metal_lease_missing_reservation_raises(
             BareMetalLeaseCreate(
                 capacity_reservation_id="missing",
                 escrow_uid="0xmissing",
-                machine_id="bm-node-1",
+                host_id="bm-node-1",
                 physical_host_id="host-physical-1",
                 lease_end_utc=datetime(2099, 1, 1, 1, 0, tzinfo=timezone.utc),
             ),

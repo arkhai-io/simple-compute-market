@@ -355,7 +355,7 @@ class FakeSite:
                 "resource_id": rid,
                 "pool_id": None,
                 "member_id": None,
-                "vm_host": attrs.get("vm_host"),
+                "host_id": attrs.get("host_id"),
                 "allocated_gpu_count": requested,
                 "available_gpu_count": available,
                 "attributes": attrs,

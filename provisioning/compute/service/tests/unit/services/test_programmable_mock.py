@@ -45,7 +45,7 @@ def _make_run(params: AnsibleJobParams | None = None) -> AnsibleRun:
 
 
 def _params(**kwargs) -> AnsibleJobParams:
-    defaults = dict(vm_host="kvm1", vm_action="create", offering_mode="vm")
+    defaults = dict(host_id="kvm1", vm_action="create", offering_mode="vm")
     defaults.update(kwargs)
     return AnsibleJobParams(**defaults)
 
@@ -53,7 +53,7 @@ def _params(**kwargs) -> AnsibleJobParams:
 def test_reserved_var_keys_match_production_renderer() -> None:
     keys = _make_service().reserved_var_keys(_params(vm_target="vm-1"))
 
-    assert {"vm_host", "vm_action", "vm_target"} <= keys
+    assert {"host_id", "vm_action", "vm_target"} <= keys
 
 
 # ---------------------------------------------------------------------------
@@ -82,12 +82,12 @@ class TestRuleMatching:
         svc.add_rule(
             MockRule(
                 rule_id="create-kvm1",
-                match={"vm_action": "create", "vm_host": "kvm1"},
+                match={"vm_action": "create", "host_id": "kvm1"},
                 result_stdout="WW1 CREATE OK",
             )
         )
         svc.add_rule(MockRule(rule_id="catchall", match={}, result_stdout="FALLBACK"))
-        run = _make_run(_params(vm_action="create", vm_host="kvm1"))
+        run = _make_run(_params(vm_action="create", host_id="kvm1"))
         result = await svc.wait_for_playbook(run, timeout_seconds=30)
         assert result.stdout == "WW1 CREATE OK"
 
@@ -110,9 +110,9 @@ class TestRuleMatching:
     async def test_non_matching_rule_falls_through_to_base(self):
         svc = _make_service()
         svc.add_rule(
-            MockRule(rule_id="ww2-only", match={"vm_host": "ww2"}, result_stdout="WW2")
+            MockRule(rule_id="ww2-only", match={"host_id": "ww2"}, result_stdout="WW2")
         )
-        run = _make_run(_params(vm_host="kvm1"))
+        run = _make_run(_params(host_id="kvm1"))
         result = await svc.wait_for_playbook(run, timeout_seconds=30)
         # Falls through to base fake stdout
         assert "mock-vm" in result.stdout
@@ -262,7 +262,7 @@ class TestEvaluateJob:
         from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
 
         return AnsibleJobParams(
-            vm_host=host,
+            host_id=host,
             vm_action=vm_action,
             vm_target="t1",
             offering_mode="vm",

@@ -44,6 +44,10 @@ if TYPE_CHECKING:
 
 _CREATE_KIND = "vm.ansible.create.v1"
 _TEARDOWN_KIND = "vm.ansible.teardown.v1"
+# Schema 2 names the execution host ``host_id``; schema 1 named it
+# ``vm_host``. Stored schema-1 operations are rewritten by the provisioning
+# service's host-identity migration, so dispatch accepts only schema 2.
+_OPERATION_SCHEMA_VERSION = 2
 _JOB_STATUS_TO_OPERATION_STATE = {
     "queued": ProviderOperationState.pending,
     "running": ProviderOperationState.pending,
@@ -123,7 +127,7 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
         *,
         config: AnsiblePoolConfig,
         capacity_reservation_id: str,
-        vm_host: str,
+        host_id: str,
         pool_id: str | None,
     ) -> int:
         """Lease a remote port on the relay this pool references.
@@ -143,7 +147,7 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
                 relay_id=config.relay_id,
                 owner_kind="fulfillment",
                 owner_id=capacity_reservation_id,
-                host_name=vm_host,
+                host_id=host_id,
                 pool_id=pool_id,
             )
         except Exception as exc:
@@ -160,11 +164,11 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
             ) from exc
 
     @staticmethod
-    def _vm_host(resource: SettlementResource) -> str:
-        value = resource.attributes.get("vm_host")
+    def _host_id(resource: SettlementResource) -> str:
+        value = resource.host_id
         if not isinstance(value, str) or not value.strip():
             raise ProviderConfigInvalidError(
-                "selected VM settlement resource requires a non-empty vm_host attribute"
+                "selected VM settlement resource is not delivered through a host"
             )
         return value
 
@@ -221,7 +225,7 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
         derived = resolve_requirement_delegate(
             config.requirement_delegate
         ).translate(resource.dimensions)
-        vm_host = self._vm_host(resource)
+        host_id = self._host_id(resource)
         # Checking which access path a pool selects is a pure read and belongs
         # in preparation, where a misconfiguration is rejected before anything
         # is written.
@@ -238,14 +242,14 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
             self._lease_remote_port(
                 config=config,
                 capacity_reservation_id=capacity_reservation_id,
-                vm_host=vm_host,
+                host_id=host_id,
                 pool_id=resource.pool_id,
             )
             if uses_relay and allocate
             else None
         )
         params = AnsibleJobParams(
-            vm_host=vm_host,
+            host_id=host_id,
             vm_action="create",
             offering_mode=resource.offering_mode,
             vm_target=requirements.vm_target,
@@ -277,7 +281,7 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
         )
         return VersionedEnvelope(
             kind=_CREATE_KIND,
-            schema_version=1,
+            schema_version=_OPERATION_SCHEMA_VERSION,
             payload=operation.model_dump(mode="json"),
         )
 
@@ -286,7 +290,7 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
         prepared: VersionedEnvelope[Any],
     ) -> FulfillmentResult:
         try:
-            if prepared.kind != _CREATE_KIND or prepared.schema_version != 1:
+            if prepared.kind != _CREATE_KIND or prepared.schema_version != _OPERATION_SCHEMA_VERSION:
                 raise ProviderConfigInvalidError(
                     "unsupported Ansible create envelope"
                 )
@@ -313,7 +317,7 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
             metadata = AnsibleFulfillmentMetadata(
                 create_job_id=response.job_id,
                 current_job_id=response.job_id,
-                vm_host=params.vm_host,
+                host_id=params.host_id,
                 vm_target=params.vm_target or "",
                 operation="create",
             )
@@ -359,7 +363,7 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
         # against a relay it never occupied.
         relay_id = self._leased_relay_id(settlement_result.capacity_reservation_id)
         params = AnsibleJobParams(
-            vm_host=metadata.vm_host,
+            host_id=metadata.host_id,
             vm_action="vm_remove",
             offering_mode=settlement_result.resource.offering_mode,
             vm_target=metadata.vm_target,
@@ -376,7 +380,7 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
         )
         return VersionedEnvelope(
             kind=_TEARDOWN_KIND,
-            schema_version=1,
+            schema_version=_OPERATION_SCHEMA_VERSION,
             payload=operation.model_dump(mode="json"),
         )
 
@@ -385,7 +389,7 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
         prepared: VersionedEnvelope[Any],
     ) -> FulfillmentResult:
         try:
-            if prepared.kind != _TEARDOWN_KIND or prepared.schema_version != 1:
+            if prepared.kind != _TEARDOWN_KIND or prepared.schema_version != _OPERATION_SCHEMA_VERSION:
                 raise ProviderConfigInvalidError(
                     "unsupported Ansible teardown envelope"
                 )
@@ -413,7 +417,7 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
                 create_job_id="",
                 teardown_job_id=response.job_id,
                 current_job_id=response.job_id,
-                vm_host=params.vm_host,
+                host_id=params.host_id,
                 vm_target=params.vm_target or "",
                 operation="teardown",
             )

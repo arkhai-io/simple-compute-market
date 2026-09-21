@@ -14,7 +14,7 @@ from market_core import (
 )
 
 from .schema import (
-    BARE_METAL_SCHEMA_KIND,
+    BARE_METAL_DOMAIN_IDENTITY,
     BareMetalAccessResult,
     BareMetalListing,
     BareMetalMaterialization,
@@ -55,7 +55,7 @@ def _publication_source(**kwargs: Any) -> Any:
 
 
 BARE_METAL_MARKET_DOMAIN = MarketDomainContract(
-    identity=DomainIdentity(BARE_METAL_SCHEMA_KIND),
+    identity=DomainIdentity(BARE_METAL_DOMAIN_IDENTITY),
     contract_version=MARKET_DOMAIN_CONTRACT_VERSION,
     codecs=ImmutableCodecCapability(
         normalize_listing=_normalize_listing,

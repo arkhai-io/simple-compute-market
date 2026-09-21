@@ -37,17 +37,17 @@ class FakeDb:
             "terminal_state": "success",
             "site_id": "site-a",
             "physical_resource_id": "resource-a",
-            "machine_id": "machine-a",
+            "host_id": "machine-a",
             "physical_host_id": "host-a",
         }
         self.terms = BareMetalTerms(
-            machine_id="machine-a",
+            host_id="machine-a",
             physical_host_id="host-a",
             duration_seconds=3600,
             ssh_public_key="ssh-ed25519 buyer",
         )
         self.listing = BareMetalListing(
-            machine_id="machine-a",
+            host_id="machine-a",
             physical_host_id="host-a",
             capabilities={"gpu_model": "H200"},
         )
@@ -176,7 +176,7 @@ class FakeFulfillment:
             attributes={
                 "bare_metal_publication": {
                     "enabled": True,
-                    "machine_id": "machine-a",
+                    "host_id": "machine-a",
                     "physical_host_id": "host-a",
                 }
             },
@@ -212,11 +212,11 @@ class FakeFulfillment:
                 "provisioned_resources": [],
                 "domain_result": {
                     "kind": "bare_metal.fulfillment.result.v1",
-                    "schema_version": 1,
+                    "schema_version": 2,
                     "payload": {
-                        "kind": "bare_metal.v1",
+                        "kind": "bare_metal.v2",
                         "action": "node_grant_access",
-                        "machine_id": "machine-a",
+                        "host_id": "machine-a",
                         "physical_host_id": "host-a",
                         "ssh_user": "tenant-a",
                         "status": "success",
@@ -292,7 +292,7 @@ async def test_selected_site_lifecycle_is_idempotent_and_restores_capacity() -> 
         "resource_kind": "compute.bare-metal"
     }
     assert len(fulfillment.begins) == 1
-    assert fulfillment.begins[0].fulfillment_request.payload["machine_id"] == "machine-a"
+    assert fulfillment.begins[0].fulfillment_request.payload["host_id"] == "machine-a"
 
     ready = await service.status(
         negotiation_id="neg-a",

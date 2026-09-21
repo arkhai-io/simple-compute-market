@@ -101,7 +101,7 @@ def _accepted_plan(
         buyer_principal=BUYER.model_dump(mode="json"),
         seller_principal=SELLER.model_dump(mode="json"),
         service_terms={
-            "bare_metal.v1": {
+            "bare_metal.v2": {
                 "listing_id": "listing-a",
                 "option_id": option.option.option_id,
                 "option_facts": option.facts.model_dump(mode="json", exclude_none=True),
@@ -128,7 +128,7 @@ def _accepted_plan(
 def test_accepted_plan_preserves_financial_and_physical_semantics() -> None:
     option = bind_bare_metal_hosted_option(_base_option(), facts=_facts())
     demand = _demand(option.option)
-    seller_terms = {"kind": "bare_metal.v1", "machine_id": "machine-a"}
+    seller_terms = {"kind": "bare_metal.v2", "host_id": "machine-a"}
     plan = _accepted_plan(option, demand, seller_terms)
 
     assert (
@@ -148,8 +148,8 @@ def test_accepted_plan_preserves_financial_and_physical_semantics() -> None:
         update={
             "service_terms": {
                 **plan.service_terms,
-                "bare_metal.v1": {
-                    **plan.service_terms["bare_metal.v1"],
+                "bare_metal.v2": {
+                    **plan.service_terms["bare_metal.v2"],
                     "listing_id": "substituted",
                 },
             }

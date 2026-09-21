@@ -95,8 +95,8 @@ class TestParseIni:
         )
         result = _parse_ini(ini)
         assert len(result) == 1
-        assert result[0]["name"] == "kvm1"
-        assert result[0]["kvm_host"] == "10.0.0.1"
+        assert result[0]["host_id"] == "kvm1"
+        assert result[0]["ssh_host"] == "10.0.0.1"
         assert result[0]["ssh_user"] == "ubuntu"
         assert result[0]["ansible_ssh_private_key_file"] == "/home/user/.ssh/id_ed25519"
 
@@ -108,7 +108,7 @@ class TestParseIni:
         )
         result = _parse_ini(ini)
         assert len(result) == 2
-        names = {r["name"] for r in result}
+        names = {r["host_id"] for r in result}
         assert names == {"kvm1", "ww2"}
 
     def test_parses_gpu_model(self):
@@ -134,7 +134,7 @@ class TestParseIni:
             "other  ansible_host=9.9.9.9  ansible_user=nobody\n"
         )
         result = _parse_ini(ini)
-        names = {r["name"] for r in result}
+        names = {r["host_id"] for r in result}
         assert "kvm1" in names
         assert "other" not in names
 
@@ -145,8 +145,8 @@ class TestParseIni:
         )
         result = _parse_ini(ini)
         assert len(result) == 1
-        assert result[0]["name"] == "bm-node-1"
-        assert result[0]["kvm_host"] == "10.0.1.1"
+        assert result[0]["host_id"] == "bm-node-1"
+        assert result[0]["ssh_host"] == "10.0.1.1"
         assert result[0]["ssh_user"] == "root"
 
     def test_parses_explicit_pool_id(self):
@@ -189,12 +189,12 @@ class TestSeedFromIni:
     def test_inserts_correct_rows(self, svc):
         hosts = svc.seed_from_ini(self._INI, ssh_key_type="path")
         assert len(hosts) == 2
-        names = {h.name for h in hosts}
+        names = {h.host_id for h in hosts}
         assert names == {"kvm1", "ww2"}
 
     def test_stores_key_path_verbatim(self, svc):
         hosts = svc.seed_from_ini(self._INI, ssh_key_type="path")
-        kvm1 = next(h for h in hosts if h.name == "kvm1")
+        kvm1 = next(h for h in hosts if h.host_id == "kvm1")
         assert kvm1.ssh_key_value == "/home/user/.ssh/id_ed25519"
         assert kvm1.ssh_key_type == "path"
 
@@ -228,7 +228,7 @@ class TestSeedFromIni:
         svc.seed_from_ini(self._INI, ssh_key_type="path")
         svc.seed_from_ini(self._INI, ssh_key_type="path")
         all_hosts = svc.list_hosts(enabled_only=False)
-        names = [h.name for h in all_hosts]
+        names = [h.host_id for h in all_hosts]
         # No duplicates
         assert len(names) == len(set(names))
         assert len(names) == 2
@@ -242,7 +242,7 @@ class TestSeedFromIni:
         )
         svc.seed_from_ini(updated_ini, ssh_key_type="path")
         kvm1 = svc.get_host("kvm1")
-        assert kvm1.kvm_host == "10.9.9.9"
+        assert kvm1.ssh_host == "10.9.9.9"
         assert kvm1.ssh_user == "newuser"
 
     def test_absent_hosts_not_touched(self, svc):
@@ -274,8 +274,8 @@ class TestRegisterHostEmbeddedKey:
 
         raw_pem = "-----BEGIN OPENSSH PRIVATE KEY-----\nfakedata\n-----END OPENSSH PRIVATE KEY-----\n"
         body = HostCreate(
-            name="enc-host",
-            kvm_host="1.2.3.4",
+            host_id="enc-host",
+            ssh_host="1.2.3.4",
             ssh_user="ubuntu",
             ssh_key_type="embedded",
             ssh_key_value=raw_pem,
@@ -296,8 +296,8 @@ class TestRegisterHostEmbeddedKey:
         raw_pem = "FAKE PEM CONTENT"
 
         body = HostCreate(
-            name="enc2",
-            kvm_host="5.6.7.8",
+            host_id="enc2",
+            ssh_host="5.6.7.8",
             ssh_user="root",
             ssh_key_type="embedded",
             ssh_key_value=raw_pem,
@@ -314,7 +314,7 @@ class TestRegisterHostEmbeddedKey:
 class TestRenderInventoryIni:
     def test_emits_kvm_hosts_group_header(self, svc):
         hosts = [
-            Host(name="kvm1", kvm_host="10.0.0.1", ssh_user="ubuntu",
+            Host(host_id="kvm1", ssh_host="10.0.0.1", ssh_user="ubuntu",
                  ssh_key_type="path", ssh_key_value="/key", gpu_count=0, enabled=True),
         ]
         ini = svc.render_inventory_ini(hosts)
@@ -322,7 +322,7 @@ class TestRenderInventoryIni:
 
     def test_path_host_writes_key_path_directly(self, svc):
         hosts = [
-            Host(name="kvm1", kvm_host="10.0.0.1", ssh_user="ubuntu",
+            Host(host_id="kvm1", ssh_host="10.0.0.1", ssh_user="ubuntu",
                  ssh_key_type="path", ssh_key_value="/home/appuser/.ssh/id_ed25519",
                  gpu_count=0, enabled=True),
         ]
@@ -331,7 +331,7 @@ class TestRenderInventoryIni:
 
     def test_embedded_host_uses_sentinel(self, svc):
         hosts = [
-            Host(name="kvm1", kvm_host="10.0.0.1", ssh_user="ubuntu",
+            Host(host_id="kvm1", ssh_host="10.0.0.1", ssh_user="ubuntu",
                  ssh_key_type="embedded", ssh_key_value="ENCRYPTED",
                  gpu_count=0, enabled=True),
         ]
@@ -340,7 +340,7 @@ class TestRenderInventoryIni:
 
     def test_correct_variable_names(self, svc):
         hosts = [
-            Host(name="kvm1", kvm_host="10.0.0.1", ssh_user="ubuntu",
+            Host(host_id="kvm1", ssh_host="10.0.0.1", ssh_user="ubuntu",
                  ssh_key_type="path", ssh_key_value="/key", gpu_count=0, enabled=True),
         ]
         ini = svc.render_inventory_ini(hosts)
@@ -349,9 +349,9 @@ class TestRenderInventoryIni:
 
     def test_multiple_hosts_all_present(self, svc):
         hosts = [
-            Host(name="kvm1", kvm_host="10.0.0.1", ssh_user="ubuntu",
+            Host(host_id="kvm1", ssh_host="10.0.0.1", ssh_user="ubuntu",
                  ssh_key_type="path", ssh_key_value="/key", gpu_count=0, enabled=True),
-            Host(name="ww2", kvm_host="10.0.0.2", ssh_user="root",
+            Host(host_id="ww2", ssh_host="10.0.0.2", ssh_user="root",
                  ssh_key_type="path", ssh_key_value="/key", gpu_count=1, enabled=True),
         ]
         ini = svc.render_inventory_ini(hosts)
@@ -367,7 +367,7 @@ class TestRenderInventoryIni:
 class TestListHosts:
     def test_enabled_only_excludes_disabled(self, svc):
         body = HostCreate(
-            name="kvm1", kvm_host="10.0.0.1", ssh_user="ubuntu",
+            host_id="kvm1", ssh_host="10.0.0.1", ssh_user="ubuntu",
             ssh_key_type="path", ssh_key_value="/key",
         )
         svc.register_host(body)
@@ -375,28 +375,28 @@ class TestListHosts:
 
         enabled = svc.list_hosts(enabled_only=True)
         assert all(h.enabled for h in enabled)
-        assert not any(h.name == "kvm1" for h in enabled)
+        assert not any(h.host_id == "kvm1" for h in enabled)
 
     def test_enabled_only_false_includes_disabled(self, svc):
         body = HostCreate(
-            name="kvm1", kvm_host="10.0.0.1", ssh_user="ubuntu",
+            host_id="kvm1", ssh_host="10.0.0.1", ssh_user="ubuntu",
             ssh_key_type="path", ssh_key_value="/key",
         )
         svc.register_host(body)
         svc.disable_host("kvm1")
 
         all_hosts = svc.list_hosts(enabled_only=False)
-        assert any(h.name == "kvm1" for h in all_hosts)
+        assert any(h.host_id == "kvm1" for h in all_hosts)
 
     def test_search_filter(self, svc):
         for name, ip in [("alpha", "10.0.0.1"), ("beta", "10.0.0.2"), ("gamma", "10.0.0.3")]:
             svc.register_host(HostCreate(
-                name=name, kvm_host=ip, ssh_user="ubuntu",
+                host_id=name, ssh_host=ip, ssh_user="ubuntu",
                 ssh_key_type="path", ssh_key_value="/key",
             ))
         result = svc.list_hosts(search="alph")
         assert len(result) == 1
-        assert result[0].name == "alpha"
+        assert result[0].host_id == "alpha"
 
 
 # ---------------------------------------------------------------------------
@@ -407,7 +407,7 @@ class TestListHosts:
 class TestHostPoolAssignment:
     def test_register_host_defaults_to_default_pool(self, svc):
         host = svc.register_host(HostCreate(
-            name="kvm1", kvm_host="10.0.0.1", ssh_user="ubuntu",
+            host_id="kvm1", ssh_host="10.0.0.1", ssh_user="ubuntu",
             ssh_key_type="path", ssh_key_value="/key",
         ))
         assert host.pool_id == DEFAULT_POOL_ID
@@ -421,7 +421,7 @@ class TestHostPoolAssignment:
             db.commit()
 
         host = svc.register_host(HostCreate(
-            name="kvm1", kvm_host="10.0.0.1", ssh_user="ubuntu",
+            host_id="kvm1", ssh_host="10.0.0.1", ssh_user="ubuntu",
             ssh_key_type="path", ssh_key_value="/key", pool_id="hetzner-eu",
         ))
         assert host.pool_id == "hetzner-eu"
@@ -429,13 +429,13 @@ class TestHostPoolAssignment:
     def test_register_host_with_nonexistent_pool_id_raises(self, svc):
         with pytest.raises(ValueError):
             svc.register_host(HostCreate(
-                name="kvm1", kvm_host="10.0.0.1", ssh_user="ubuntu",
+                host_id="kvm1", ssh_host="10.0.0.1", ssh_user="ubuntu",
                 ssh_key_type="path", ssh_key_value="/key", pool_id="does-not-exist",
             ))
 
     def test_update_host_reassigns_pool(self, svc, session_factory):
         svc.register_host(HostCreate(
-            name="kvm1", kvm_host="10.0.0.1", ssh_user="ubuntu",
+            host_id="kvm1", ssh_host="10.0.0.1", ssh_user="ubuntu",
             ssh_key_type="path", ssh_key_value="/key",
         ))
         with session_factory() as db:
@@ -450,7 +450,7 @@ class TestHostPoolAssignment:
 
     def test_update_host_with_nonexistent_pool_id_raises(self, svc):
         svc.register_host(HostCreate(
-            name="kvm1", kvm_host="10.0.0.1", ssh_user="ubuntu",
+            host_id="kvm1", ssh_host="10.0.0.1", ssh_user="ubuntu",
             ssh_key_type="path", ssh_key_value="/key",
         ))
         with pytest.raises(ValueError):
@@ -460,7 +460,7 @@ class TestHostPoolAssignment:
 class TestGpuModel:
     def test_register_host_stores_gpu_model(self, svc):
         host = svc.register_host(HostCreate(
-            name="kvm1", kvm_host="10.0.0.1", ssh_user="ubuntu",
+            host_id="kvm1", ssh_host="10.0.0.1", ssh_user="ubuntu",
             ssh_key_type="path", ssh_key_value="/key",
             gpu_count=8, gpu_model="H100",
         ))
@@ -468,14 +468,14 @@ class TestGpuModel:
 
     def test_register_host_gpu_model_defaults_to_none(self, svc):
         host = svc.register_host(HostCreate(
-            name="kvm1", kvm_host="10.0.0.1", ssh_user="ubuntu",
+            host_id="kvm1", ssh_host="10.0.0.1", ssh_user="ubuntu",
             ssh_key_type="path", ssh_key_value="/key",
         ))
         assert host.gpu_model is None
 
     def test_update_host_sets_gpu_model(self, svc):
         svc.register_host(HostCreate(
-            name="kvm1", kvm_host="10.0.0.1", ssh_user="ubuntu",
+            host_id="kvm1", ssh_host="10.0.0.1", ssh_user="ubuntu",
             ssh_key_type="path", ssh_key_value="/key",
         ))
         updated = svc.update_host("kvm1", HostUpdate(gpu_model="A100"))
@@ -483,8 +483,8 @@ class TestGpuModel:
 
     def test_update_host_omitting_gpu_model_leaves_it_unchanged(self, svc):
         svc.register_host(HostCreate(
-            name="kvm1", kvm_host="10.0.0.1", ssh_user="ubuntu",
+            host_id="kvm1", ssh_host="10.0.0.1", ssh_user="ubuntu",
             ssh_key_type="path", ssh_key_value="/key", gpu_model="H100",
         ))
-        updated = svc.update_host("kvm1", HostUpdate(kvm_host="10.0.0.2"))
+        updated = svc.update_host("kvm1", HostUpdate(ssh_host="10.0.0.2"))
         assert updated.gpu_model == "H100"

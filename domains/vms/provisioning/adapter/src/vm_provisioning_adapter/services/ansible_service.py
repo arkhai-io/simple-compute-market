@@ -340,7 +340,7 @@ class AnsibleService:
 
         For ``embedded`` hosts, companion key files are written alongside
         the inventory file (same temp directory, named
-        ``<host_name>_key``).  They are also deleted when the caller deletes
+        ``<host_id>_key``).  They are also deleted when the caller deletes
         the inventory file's parent directory, or the caller may choose to
         clean them up individually.
         """
@@ -360,7 +360,7 @@ class AnsibleService:
                 # Decrypt and write a companion temp key file
                 secret = getattr(self._settings, "ssh_decryption_key", "")
                 plaintext = decrypt_secret(host.ssh_key_value, secret)
-                key_file = _Path(tempfile.gettempdir()) / f"{host.name}_key_{nonce}"
+                key_file = _Path(tempfile.gettempdir()) / f"{host.host_id}_key_{nonce}"
                 key_file.write_text(plaintext, encoding="utf-8")
                 key_file.chmod(0o400)
                 companion_key_paths.append(key_file)
@@ -379,8 +379,8 @@ class AnsibleService:
             # differently depending on which path built its inventory is a
             # defect that only appears on one code path.
             lines.append(
-                f"{host.name}"
-                f"  ansible_host={host.kvm_host}"
+                f"{host.host_id}"
+                f"  ansible_host={host.ssh_host}"
                 f"{public_seg}"
                 f"  ansible_port={host.ssh_port}"
                 f"  ansible_user={host.ssh_user}"
@@ -419,7 +419,7 @@ class AnsibleService:
         two cannot disagree about which fields are built in.
         """
         lines = [
-            f"vm_host: {params.vm_host}",
+            f"host_id: {params.host_id}",
             f"vm_action: {params.vm_action}",
             f"offering_mode: {params.offering_mode}",
             f"executor_action: {params.executor_action}",
@@ -574,7 +574,7 @@ class AnsibleService:
     ) -> AnsibleRunResult:
         """Parse raw ``AnsibleResult`` output into a structured ``AnsibleRunResult``.
 
-        ``vm_host_ip`` (the tenant-facing address in the returned connection
+        ``host_ip`` (the tenant-facing address in the returned connection
         info) prefers the host's advertised ``public_host`` — passed in by the
         caller from the host record, or read from the inventory ``public_host``
         var — and only falls back to the management ``ansible_host`` when no
@@ -582,17 +582,17 @@ class AnsibleService:
         a different network than buyers do, so the management address is not
         necessarily reachable by the tenant.
         """
-        ssh_port = self._extract_ssh_port(result.stdout, params.vm_host)
-        tenant_user = self._extract_tenant_user(result.stdout, params.vm_host)
-        vm_host_ip = (
+        ssh_port = self._extract_ssh_port(result.stdout, params.host_id)
+        tenant_user = self._extract_tenant_user(result.stdout, params.host_id)
+        host_ip = (
             public_host
-            or self.lookup_public_host(params.vm_host)
-            or self.lookup_host_ip(params.vm_host)
+            or self.lookup_public_host(params.host_id)
+            or self.lookup_host_ip(params.host_id)
         )
         ssh_command = None
-        if ssh_port and tenant_user and vm_host_ip:
+        if ssh_port and tenant_user and host_ip:
             ssh_command = (
-                f"ssh -i <your_private_key> -p {ssh_port} {tenant_user}@{vm_host_ip}"
+                f"ssh -i <your_private_key> -p {ssh_port} {tenant_user}@{host_ip}"
             )
         ansible_result = self._extract_ansible_json(result.stdout, params.vm_action)
         return AnsibleRunResult(
@@ -600,20 +600,20 @@ class AnsibleService:
             stderr=result.stderr,
             ssh_port=ssh_port,
             tenant_user=tenant_user,
-            vm_host_ip=vm_host_ip,
+            host_ip=host_ip,
             ssh_command=ssh_command,
             ansible_result=ansible_result,
             process_id=result.process_id,
         )
 
     def _extract_ssh_port(
-        self, playbook_output: str, vm_host: str | None = None
+        self, playbook_output: str, host_id: str | None = None
     ) -> Optional[str]:
         patterns = [r'"external_ssh_port":\s*"(?P<port>\d+)"']
-        if vm_host:
+        if host_id:
             patterns.extend([
-                rf"-p\s*(?P<port>\d{{2,5}})\s+root@{re.escape(vm_host)}",
-                rf"-p\s*(?P<port>\d{{2,5}})\s+\S+@{re.escape(vm_host)}",
+                rf"-p\s*(?P<port>\d{{2,5}})\s+root@{re.escape(host_id)}",
+                rf"-p\s*(?P<port>\d{{2,5}})\s+\S+@{re.escape(host_id)}",
             ])
         patterns.append(r"-p\s*(?P<port>\d{2,5})\s+\S+@[\w\.-]+")
         for pattern in patterns:
@@ -623,12 +623,12 @@ class AnsibleService:
         return None
 
     def _extract_tenant_user(
-        self, playbook_output: str, vm_host: str | None = None
+        self, playbook_output: str, host_id: str | None = None
     ) -> Optional[str]:
         patterns = [r'"tenant_user":\s*"(?P<user>[^"]+)"']
-        if vm_host:
+        if host_id:
             patterns.append(
-                rf"-p\s*\d{{2,5}}\s+(?P<user>[A-Za-z0-9._-]+)@{re.escape(vm_host)}"
+                rf"-p\s*\d{{2,5}}\s+(?P<user>[A-Za-z0-9._-]+)@{re.escape(host_id)}"
             )
         patterns.append(r"-p\s*\d{2,5}\s+(?P<user>[A-Za-z0-9._-]+)@\S+")
         for pattern in patterns:
@@ -741,7 +741,7 @@ class AnsibleService:
 
             hosts.append(
                 InventoryHost(
-                    name=name,
+                    host_id=name,
                     ansible_host=host_vars.pop("ansible_host", None),
                     vars=host_vars,
                 )
@@ -757,29 +757,29 @@ class AnsibleService:
             hosts=hosts,
         )
 
-    def lookup_host_ip(self, vm_host: str) -> Optional[str]:
-        """Return the ``ansible_host`` value for *vm_host* from the inventory.
+    def lookup_host_ip(self, host_id: str) -> Optional[str]:
+        """Return the ``ansible_host`` value for *host_id* from the inventory.
 
         Returns ``None`` if the host is not found or the inventory is unreadable.
         """
         try:
             for host in self.parse_inventory():
-                if host.name == vm_host:
+                if host.host_id == host_id:
                     return host.ansible_host
         except Exception as exc:
             logger.warning("Failed to read inventory: %s", exc)
-        logger.warning("No ansible_host found for %s in inventory", vm_host)
+        logger.warning("No ansible_host found for %s in inventory", host_id)
         return None
 
-    def lookup_public_host(self, vm_host: str) -> Optional[str]:
-        """Return the ``public_host`` inventory var for *vm_host*, if set.
+    def lookup_public_host(self, host_id: str) -> Optional[str]:
+        """Return the ``public_host`` inventory var for *host_id*, if set.
 
         This is the tenant-facing address; returns ``None`` when the host
         doesn't declare one (callers then fall back to ``lookup_host_ip``).
         """
         try:
             for host in self.parse_inventory():
-                if host.name == vm_host:
+                if host.host_id == host_id:
                     return host.vars.get("public_host") or None
         except Exception as exc:
             logger.warning("Failed to read inventory: %s", exc)

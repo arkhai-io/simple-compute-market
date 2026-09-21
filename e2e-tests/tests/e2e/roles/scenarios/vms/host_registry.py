@@ -29,8 +29,8 @@ with one declaration each, never several declarations on one.
 A declaration's own id stays the commercial resource id the scenario's listing
 advertises, not the executor's alias: `compute_capacity_claim_from_order` pins the
 listing's `offer_resource.resource_id` into the claim, so the declaration must carry
-that id to be matched at all. The `vm_host` attribute carries the executor
-correlation instead.
+that id to be matched at all. The declaration's `host_id` field names the host it
+is delivered through instead.
 
 Registration goes through the admin APIs rather than a mounted inventory file:
 `inventory_path` is docker-compose-specific while the canonical Helm deployment
@@ -188,8 +188,8 @@ def register_e2e_host(
 
     if existing is None:
         provisioning_client.register_host(HostCreate(
-            name=name,
-            kvm_host="127.0.0.1",
+            host_id=name,
+            ssh_host="127.0.0.1",
             ssh_user="e2e",
             gpu_count=gpu_count,
             ssh_key_type="path",
@@ -214,7 +214,7 @@ def declare_e2e_capacity(
     site_admin_client: Any,
     *,
     resource_id: str,
-    vm_host: str,
+    host_id: str,
     attributes: dict[str, Any],
     pool_id: str,
     sellable_units: int,
@@ -247,7 +247,7 @@ def declare_e2e_capacity(
             resource_type="compute.gpu",
             pool_id=pool_id,
             capacity={"gpu_count": sellable_units},
-            attributes={**attributes, "vm_host": vm_host},
+            host_id=host_id, attributes={**attributes},
         )
     )
 
@@ -287,7 +287,7 @@ def provision_e2e_executor(
     declare_e2e_capacity(
         site_admin_client,
         resource_id=resource_id,
-        vm_host=host,
+        host_id=host,
         attributes=attributes,
         pool_id=pool_id,
         sellable_units=sellable_units,

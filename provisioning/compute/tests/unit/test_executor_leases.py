@@ -131,7 +131,7 @@ def test_update_executor_lease_uses_generic_authority_fields():
         "alloc-2",
         ExecutorLeaseUpdate(
             executor_target="migrated-vm",
-            executor_ref={"vm_host": "kvm-2"},
+            executor_ref={"host_id": "kvm-2"},
             lease_end_utc=datetime(2099, 2, 1, tzinfo=timezone.utc),
             release_job_id="remove-2",
         ),
@@ -139,7 +139,7 @@ def test_update_executor_lease_uses_generic_authority_fields():
 
     assert updated["offering_mode"] == "vm"
     assert updated["executor_target"] == "migrated-vm"
-    assert updated["executor_ref"] == {"vm_host": "kvm-2"}
+    assert updated["executor_ref"] == {"host_id": "kvm-2"}
     assert updated["lease_end_utc"] == "2099-02-01T00:00:00+00:00"
     assert updated["release_job_id"] == "remove-2"
 

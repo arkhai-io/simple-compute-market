@@ -26,7 +26,7 @@ Rule schema (POST /test/mock-rules body)
         "rule_id": "my-kvm1-create",     // optional; auto-assigned if absent
         "match": {                       // subset of AnsibleJobParams fields
             "vm_action": "create",
-            "vm_host": "kvm1"
+            "host_id": "kvm1"
         },
         "pause_before_result": true,     // block at wait_for_playbook until resumed
         "result_stdout": "...",          // Ansible stdout to inject (optional)
@@ -277,7 +277,7 @@ async def evaluate_job(body: EvaluateJobRequest) -> EvaluateJobResponse:
         raise HTTPException(status_code=503, detail="HostService not available")
 
     params = AnsibleJobParams(
-        vm_host=body.host,
+        host_id=body.host,
         vm_action=body.vm_action,
         offering_mode="vm",
         vm_target=body.vm_target,

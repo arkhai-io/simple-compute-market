@@ -145,7 +145,7 @@ class _DefaultBareMetalSellerRoundHook:
             )
 
         terms = BareMetalTerms(
-            machine_id=listing_resource.machine_id,
+            host_id=listing_resource.host_id,
             physical_host_id=listing_resource.physical_host_id,
             duration_seconds=requested.duration_seconds,
             access_method=requested.access_method,

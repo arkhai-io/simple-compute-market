@@ -142,8 +142,8 @@ async def _insert_contact_listing(runtime: BareMetalStorefrontRuntime) -> dict:
         pool_id="pool-a",
         physical_resource_id="resource-1",
         listing={
-            "kind": "bare_metal.v1",
-            "machine_id": "machine-1",
+            "kind": "bare_metal.v2",
+            "host_id": "machine-1",
             "physical_host_id": "physical-host-1",
             "access_methods": ["ssh"],
         },
@@ -159,7 +159,7 @@ def _opening(option: dict) -> dict:
         "buyer_principal": BUYER_SIGNER.identity.model_dump(mode="json"),
         "buyer_agent_url": "https://buyer.example",
         "provision_terms": {
-            "kind": "bare_metal.v1",
+            "kind": "bare_metal.v2",
             "version": 1,
             "payload": {"duration_seconds": 3600, "access_method": "none"},
         },
@@ -232,7 +232,7 @@ async def test_contact_options_publish_through_the_composition() -> None:
     )
     now = datetime.now(timezone.utc)
     payload = await composition.publication_payload(
-        candidate={"machine_id": "machine-1"},
+        candidate={"host_id": "machine-1"},
         clauses=[
             SettlementPublicationClause(
                 mechanism=CONTACT_MECHANISM,

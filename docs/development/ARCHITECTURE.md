@@ -445,7 +445,7 @@ exactly one name.
 | Concept | Name |
 |---|---|
 | What the seller is offering: `vm`, `bare_metal`, `container`, `api_credits` | `offering_mode` |
-| The machine and its connection identity | `host` |
+| The machine and its connection identity | `host`, identified by `host_id` |
 | The fulfillment implementation selected for a pool | `provider` |
 | The component that validates, submits, and polls an execution action | `executor` |
 
@@ -454,6 +454,16 @@ claim, the Resource Pool's deliverable and advertisable declarations, the durabl
 listing binding, and the published listing. It is a separate axis from the
 site-inventory `resource_kind`/`resource_type` discriminator, and naming it
 consistently does not merge the two.
+
+The host is named `host_id` on every surface that names it: the host registry's
+key, a capacity declaration's host link, a reservation's `executor_ref`,
+fulfillment metadata, job parameters, lease APIs, playbook variables, and the
+bare-metal listing. The address the provisioner connects to is the host's
+`ssh_host`. `physical_host_id` is a different concept and keeps its own name: the
+stable identity of a physical machine across hosts. A host belongs to exactly one
+Resource Pool, so one machine offered both as VM slices and as a whole host is
+registered as two hosts, and `physical_host_id` is what lets cross-mode accounting
+see one machine.
 
 A seller's published shape is a **listing**, never an offer. `offer` names a
 negotiation message either party sends. How many listing candidates a pool yields
@@ -508,7 +518,7 @@ Normal buyer commands apply two separate constraint layers in fixed order: one f
 
 Negotiation is a conversation of counter-offers over what capacity is being sold, not over which specific physical resource serves it. A buyer and seller negotiate pooled capacity ("4 GPUs", not "host `kvm-17`"); a counter-offer that changes the requested shape (fewer/more units, a different dimension mix) is a negotiation event, and a durable shape change is expressed by resizing the reservation for that negotiation, never by mutating an existing reservation or committed settlement assignment in place (see "Capacity reservation" below, and `openspec/specs/site-capacity/spec.md`'s reservation-supersede requirement). Today's negotiation rounds exchange hard counters; the same model extends to richer forms (a buyer asking what shape a given price can buy, or what price a given shape costs) without changing this premise.
 
-Physical resource identity (`resource_id`, `vm_host`, and equivalent per-domain identifiers) is an optional pinning/telemetry pathway, not the unit buyers and sellers negotiate over. It is deliberately not exposed across the capacity-reservation boundary (`openspec/specs/site-capacity/spec.md`'s opaque-reservation requirement) for exactly this reason: the storefront and buyer should not need to know or care which physical resource ultimately serves a deal in the ordinary case. Code that makes ordinary fulfillment depend on a physical resource identity being present is very likely encoding the wrong unit of negotiation.
+Physical resource identity (`resource_id`, `host_id`, and equivalent identifiers) is an optional pinning/telemetry pathway, not the unit buyers and sellers negotiate over. It is deliberately not exposed across the capacity-reservation boundary (`openspec/specs/site-capacity/spec.md`'s opaque-reservation requirement) for exactly this reason: the storefront and buyer should not need to know or care which physical resource ultimately serves a deal in the ordinary case. Code that makes ordinary fulfillment depend on a physical resource identity being present is very likely encoding the wrong unit of negotiation.
 
 ```text
 registry listing

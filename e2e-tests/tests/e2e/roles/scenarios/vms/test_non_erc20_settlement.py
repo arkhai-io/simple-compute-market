@@ -427,11 +427,11 @@ def test_scalar_non_erc20_settlement_reaches_ready(
         duration_seconds=_DURATION_SECONDS,
     )
     assert evaluate.get("would_submit") is True, evaluate
-    vm_host = evaluate.get("vm_host")
-    assert vm_host
+    host_id = evaluate.get("host_id")
+    assert host_id
 
     job_eval = provisioning_test_client.evaluate_job(
-        vm_host,
+        host_id,
         vm_target=evaluate.get("vm_target") or "eval-target",
         vm_action="create",
     )

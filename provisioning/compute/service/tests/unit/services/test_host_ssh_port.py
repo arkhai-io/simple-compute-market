@@ -1,7 +1,7 @@
 """The SSH port survives from operator input to an Ansible connection.
 
 A host that has no inbound route answers SSH on a tunnel port rather than on
-22 at ``kvm_host``. Four layers have to carry the port for that host to be
+22 at ``ssh_host``. Four layers have to carry the port for that host to be
 reachable: the INI parser, the wire models, the registry row, and both
 inventory renderers. A test at any single layer passes while the port is
 dropped at another, so the round trip at the end of this file is the property
@@ -75,8 +75,8 @@ def svc(db_engine, settings):
 
 def _host_create(**overrides) -> HostCreate:
     payload = {
-        "name": "kvm1",
-        "kvm_host": "10.0.0.5",
+        "host_id": "kvm1",
+        "ssh_host": "10.0.0.5",
         "ssh_user": "root",
         "ssh_key_value": "/home/appuser/.ssh/id_ed25519",
     }
@@ -131,7 +131,7 @@ class TestParseAnsiblePort:
             "kvm1 ansible_host=10.0.0.5 ansible_user=root ansible_port=oops\n"
             "kvm2 ansible_host=10.0.0.6 ansible_user=root ansible_port=6002\n"
         )
-        assert [(e["name"], e["ssh_port"]) for e in parsed] == [("kvm2", 6002)]
+        assert [(e["host_id"], e["ssh_port"]) for e in parsed] == [("kvm2", 6002)]
 
     def test_a_malformed_gpus_still_degrades_rather_than_skipping(self):
         """The two fields differ deliberately; assert the contrast holds."""
@@ -199,8 +199,8 @@ class TestRegistryCarriesThePort:
 
 def _host_row(**overrides) -> Host:
     fields = {
-        "name": "kvm1",
-        "kvm_host": "10.0.0.5",
+        "host_id": "kvm1",
+        "ssh_host": "10.0.0.5",
         "public_host": None,
         "ssh_user": "root",
         "ssh_port": 6000,
@@ -288,7 +288,7 @@ class TestMigration:
         with engine.begin() as connection:
             connection.execute(
                 text(
-                    "INSERT INTO hosts (name, kvm_host, ssh_user, ssh_key_type, "
+                    "INSERT INTO hosts (host_id, ssh_host, ssh_user, ssh_key_type, "
                     "ssh_key_value, gpu_count, enabled, pool_id) VALUES "
                     "(:n, '10.0.0.5', 'root', 'path', '/keys/id', 0, 1, :p)"
                 ),
@@ -308,7 +308,7 @@ class TestMigration:
 
         with engine.begin() as connection:
             ports = connection.execute(
-                text("SELECT ssh_port FROM hosts ORDER BY name")
+                text("SELECT ssh_port FROM hosts ORDER BY host_id")
             ).scalars().all()
         assert ports == [22, 22]
 

@@ -1019,7 +1019,7 @@ class SQLiteClient:
             return False
         try:
             # Strip None-valued fields so that a buyer's sparse demand
-            # (resource_id=None, vm_host=None) can match a seller's enriched
+            # (resource_id=None, host_id=None) can match a seller's enriched
             # listing_resource that has those fields populated.  Every non-null field in
             # `a` must be present and equal in `b`; extra fields in `b` are
             # ignored.

@@ -43,13 +43,13 @@ def _reserve(escrow_uid: str, *, gpu_count: int = 1) -> dict:
         ledger.register_resource(
             resource_id="compute-kvm1-001",
             total_units=8,
-            attributes={"vm_host": "kvm1"},
+            host_id="kvm1", attributes={},
         )
     reserved = ledger.reserve(
         claim={
             "offering_mode": "vm",
             "gpu_count": gpu_count,
-            "vm_host": "kvm1",
+            "host_id": "kvm1",
         },
         deal_ref={"escrow_uid": escrow_uid},
     )
@@ -63,7 +63,7 @@ async def _register(client, escrow_uid: str, **overrides) -> dict:
         "resource_id": "compute-kvm1-001",
         "capacity_reservation_id": reserved["capacity_reservation_id"],
         "escrow_uid": escrow_uid,
-        "vm_host": "kvm1",
+        "host_id": "kvm1",
         "vm_target": f"tenant-{escrow_uid[-4:]}",
         "lease_end_utc": _future_dt(),
     }
@@ -76,7 +76,7 @@ def _create_active_fulfillment(capacity_reservation_id: str, *, fulfillment_id: 
 
     VM release now begins durable fulfillment teardown rather than
     submitting an Ansible job straight from the reservation's own
-    `vm_host`/`vm_target` — it needs a fulfillment aggregate to resolve a
+    `host_id`/`vm_target` — it needs a fulfillment aggregate to resolve a
     `fulfillment_id` from. This file's tests exercise the lease API as an
     opaque surface over the ledger (see module docstring), so this helper
     fabricates the minimum aggregate release needs rather than running a
@@ -97,7 +97,7 @@ def _create_active_fulfillment(capacity_reservation_id: str, *, fulfillment_id: 
                 settlement_resource_id="kvm1",
                 pool_id="pool-1",
                 provider="ansible",
-                resource_attributes={"vm_host": "kvm1"},
+                resource_host_id="kvm1", resource_attributes={},
                 fulfillment_request={
                     "kind": "vm.fulfillment.request",
                     "schema_version": 1,
@@ -147,7 +147,7 @@ class TestCreateLease:
         lease = await _register(client, "escrow-attach-1")
         assert lease["status"] == "active"
         assert lease["escrow_uid"] == "escrow-attach-1"
-        assert lease["vm_host"] == "kvm1"
+        assert lease["host_id"] == "kvm1"
 
         ledger = _container_module.resolved_capacity_ledger_service
         reservation = ledger.get_reservation(lease["capacity_reservation_id"])
@@ -155,7 +155,7 @@ class TestCreateLease:
         assert reservation["vm_target"] == lease["vm_target"]
         assert reservation["offering_mode"] == "vm"
         assert reservation["executor_target"] == lease["vm_target"]
-        assert reservation["executor_ref"] == {"vm_host": "kvm1"}
+        assert reservation["executor_ref"] == {"host_id": "kvm1"}
 
     async def test_create_unknown_reservation_returns_404(self, client_and_queue):
         client, _ = client_and_queue
@@ -164,7 +164,7 @@ class TestCreateLease:
                 resource_id="compute-kvm1-001",
                 capacity_reservation_id="not-a-ledger-reservation",
                 escrow_uid="escrow-ghost",
-                vm_host="kvm1",
+                host_id="kvm1",
                 vm_target="tenant-ghost",
                 lease_end_utc=_future_dt(),
             )
@@ -268,15 +268,15 @@ class TestUpdateLease:
         assert reservation["lease_end_utc"].startswith(new_end[:19])
 
     async def test_patch_vm_host_and_vm_target(self, client_and_queue):
-        """PATCH can update vm_host and vm_target for migrated VMs."""
+        """PATCH can update host_id and vm_target for migrated VMs."""
         client, _ = client_and_queue
         lease = await _register(client, "escrow-patch-2")
 
         updated = await client.update_lease(
-            lease["id"], vm_host="kvm2", vm_target="migrated-vm",
+            lease["id"], host_id="kvm2", vm_target="migrated-vm",
         )
 
-        assert updated["vm_host"] == "kvm2"
+        assert updated["host_id"] == "kvm2"
         assert updated["vm_target"] == "migrated-vm"
         assert updated["status"] == "active"
 
@@ -301,11 +301,11 @@ class TestUpdateLease:
 
         updated = await client.update_lease(
             lease["id"],
-            vm_host="kvm-generic",
+            host_id="kvm-generic",
             vm_target="generic-migrated-vm",
         )
 
-        assert updated["vm_host"] == "kvm-generic"
+        assert updated["host_id"] == "kvm-generic"
         assert updated["vm_target"] == "generic-migrated-vm"
 
 

@@ -72,7 +72,7 @@ class AnsiblePoolConfig(BaseModel):
 class AnsiblePreparedJobParameters(BaseModel):
     """Validated, JSON-safe snapshot passed to the Ansible executor."""
 
-    vm_host: str = Field(min_length=1)
+    host_id: str = Field(min_length=1)
     vm_action: str = Field(min_length=1)
     vm_target: str | None = None
     offering_mode: str = Field(min_length=1)
@@ -118,7 +118,7 @@ class AnsiblePreparedOperation(BaseModel):
 
 class AnsibleFulfillmentMetadata(BaseModel):
     create_job_id: str
-    vm_host: str
+    host_id: str
     vm_target: str
     teardown_job_id: str | None = None
     current_job_id: str

@@ -43,7 +43,7 @@ def _lease_view(reservation: dict[str, Any]) -> BareMetalLeaseView:
     return BareMetalLeaseView(
         capacity_reservation_id=str(reservation["capacity_reservation_id"]),
         escrow_uid=reservation.get("escrow_uid"),
-        machine_id=str(reservation.get("executor_target") or ""),
+        host_id=str(reservation.get("executor_target") or ""),
         physical_host_id=_physical_host_id(reservation),
         lease_start_utc=reservation.get("lease_start_utc"),
         lease_end_utc=reservation.get("lease_end_utc"),
@@ -136,7 +136,7 @@ class BareMetalLeasesController:
                     operation_id=_request_operation_id(
                         request,
                         action="grant_access",
-                        target=body.machine_id,
+                        target=body.host_id,
                     ),
                 )
                 body = body.model_copy(update={"create_job_id": grant.job_id})
@@ -146,7 +146,7 @@ class BareMetalLeasesController:
         logger.info(
             "[BARE_METAL_LEASES] Attached lease to reservation %s (machine=%s escrow=%s)",
             attached["capacity_reservation_id"],
-            body.machine_id,
+            body.host_id,
             body.escrow_uid,
         )
         return _lease_view(attached)

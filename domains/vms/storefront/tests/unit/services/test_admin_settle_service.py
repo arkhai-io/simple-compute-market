@@ -183,11 +183,11 @@ class TestEvaluateSettleDryRun:
         assert result["reason"]
 
     async def test_returns_would_submit_true_with_host_details(self, svc, db):
-        """_build_provisioning_job_spec returns spec → would_submit=True with vm_host."""
+        """_build_provisioning_job_spec returns spec → would_submit=True with host_id."""
         db.load_listing.return_value = _LISTING_ROW
         fake_spec = {
             "resource_id": "r-1",
-            "vm_host": "host-1",
+            "host_id": "host-1",
             "vm_target": "tenant-abcd",
             "required_attributes": {"gpu_model": "H200"},
             "ssh_public_key": "ssh-ed25519 test",
@@ -205,7 +205,7 @@ class TestEvaluateSettleDryRun:
             )
         assert result["would_submit"] is True
         assert result["escrow_uid"] == _ESCROW_UID
-        assert result["vm_host"] == "host-1"
+        assert result["host_id"] == "host-1"
         assert result["vm_target"] == "tenant-abcd"
         assert result["required_attributes"] == {"gpu_model": "H200"}
 

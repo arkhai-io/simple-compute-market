@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 class InventoryHost(BaseModel):
     """A single host entry parsed from the Ansible INI inventory."""
 
-    name: str = Field(description="Host alias as it appears in the inventory.")
+    host_id: str = Field(description="The host's identity: its alias in the inventory.")
     ansible_host: str | None = Field(
         default=None, description="IP address or hostname resolved for SSH."
     )

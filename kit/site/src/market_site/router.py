@@ -98,16 +98,20 @@ def make_capacity_router(
         directly. Physical inventory projections are derived from the
         mounting provisioning service's authoritative inventory provider.
         """
-        resource = ledger.register_resource(
-            resource_id=resource_id,
-            total_units=body.total_units,
-            resource_type=body.resource_type,
-            resource_subtype=body.resource_subtype,
-            pool_id=body.pool_id,
-            attributes=body.attributes,
-            capacity=body.capacity,
-            enabled=body.enabled,
-        )
+        try:
+            resource = ledger.register_resource(
+                resource_id=resource_id,
+                total_units=body.total_units,
+                resource_type=body.resource_type,
+                resource_subtype=body.resource_subtype,
+                pool_id=body.pool_id,
+                attributes=body.attributes,
+                capacity=body.capacity,
+                enabled=body.enabled,
+                host_id=body.host_id,
+            )
+        except CapacityConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
         logger.info(
             "[CAPACITY] Registered resource %s (units=%d enabled=%s)",
             resource_id, body.total_units, body.enabled,
@@ -222,7 +226,7 @@ def make_capacity_router(
         if reservation is not None:
             reservation = {
                 key: value for key, value in reservation.items()
-                if key not in {"resource_id", "capacity_bucket_id", "backing_resource_id", "vm_host"}
+                if key not in {"resource_id", "capacity_bucket_id", "backing_resource_id", "host_id"}
             }
         return ReservationResponse(reservation=reservation)
 

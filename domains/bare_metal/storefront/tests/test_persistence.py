@@ -32,7 +32,7 @@ def _artifacts():
             ssh_public_key="ssh-ed25519 buyer",
         ),
         "terms": BareMetalTerms(
-            machine_id="machine-1",
+            host_id="machine-1",
             physical_host_id="host-1",
             duration_seconds=3600,
             ssh_public_key="ssh-ed25519 buyer",
@@ -40,7 +40,7 @@ def _artifacts():
         ),
         "materialization": BareMetalMaterialization(
             escrow_uid="escrow-1",
-            machine_id="machine-1",
+            host_id="machine-1",
             physical_host_id="host-1",
             lease_start_utc=NOW,
             lease_end_utc=LATER,
@@ -49,7 +49,7 @@ def _artifacts():
         ),
         "receipt": BareMetalReceipt(
             escrow_uid="escrow-1",
-            machine_id="machine-1",
+            host_id="machine-1",
             physical_host_id="host-1",
             lease_start_utc=NOW,
             lease_end_utc=LATER,
@@ -58,7 +58,7 @@ def _artifacts():
         ),
         "result": BareMetalAccessResult(
             action="node_grant_access",
-            machine_id="machine-1",
+            host_id="machine-1",
             physical_host_id="host-1",
             ssh_user="tenant-1",
             status="success",
@@ -68,7 +68,7 @@ def _artifacts():
 
 async def _seed_listing(client: SQLiteClient) -> BareMetalListing:
     listing = BareMetalListing(
-        machine_id="machine-1",
+        host_id="machine-1",
         physical_host_id="host-1",
         min_duration_seconds=900,
         max_duration_seconds=7200,
@@ -317,5 +317,5 @@ def test_common_artifact_table_contains_only_opaque_artifact_columns(tmp_path) -
         "artifact_json",
         "created_at",
     }
-    forbidden = {"vm_host", "vm_target", "ssh_public_key", "machine_id"}
+    forbidden = {"vm_host", "vm_target", "ssh_public_key", "host_id"}
     assert columns.isdisjoint(forbidden)

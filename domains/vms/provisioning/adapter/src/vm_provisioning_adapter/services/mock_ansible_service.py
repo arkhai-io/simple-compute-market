@@ -184,13 +184,13 @@ class MockAnsibleService:
         """Return a single fake host entry."""
         hosts = [
             InventoryHost(
-                name="kvm1",
+                host_id="kvm1",
                 ansible_host=self._host_ip,
                 vars={"ansible_ssh_private_key_file": "~/.ssh/id_ed25519"},
             )
         ]
         if search:
-            hosts = [h for h in hosts if search.lower() in h.name.lower()]
+            hosts = [h for h in hosts if search.lower() in h.host_id.lower()]
         return hosts
 
     def get_inventory(self, search: str | None = None) -> InventoryResponse:
@@ -201,7 +201,7 @@ class MockAnsibleService:
             hosts=self.parse_inventory(search=search),
         )
 
-    def lookup_host_ip(self, vm_host: str) -> Optional[str]:
+    def lookup_host_ip(self, host_id: str) -> Optional[str]:
         return self._host_ip
 
     # ------------------------------------------------------------------
@@ -385,11 +385,11 @@ class ProgrammableMockAnsibleService(MockAnsibleService):
 
         # Check host exists in inventory
         try:
-            host = host_service.get_host(params.vm_host)
+            host = host_service.get_host(params.host_id)
             host_exists = host is not None
             if not host_exists:
                 errors.append(
-                    f"Host {params.vm_host!r} not found in inventory. "
+                    f"Host {params.host_id!r} not found in inventory. "
                     "Register it with POST /api/v1/hosts before settling."
                 )
         except Exception as exc:
@@ -401,7 +401,7 @@ class ProgrammableMockAnsibleService(MockAnsibleService):
         would_pause = rule.pause_before_result if rule is not None else False
 
         params_valid = (
-            len(errors) == 0 and bool(params.vm_host) and bool(params.vm_action)
+            len(errors) == 0 and bool(params.host_id) and bool(params.vm_action)
         )
 
         return EvaluateJobResponse(

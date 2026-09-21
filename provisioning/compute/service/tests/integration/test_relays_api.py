@@ -143,7 +143,7 @@ class TestRebindingOverTheApi:
                     id=f"lease-{relay_id}",
                     relay_id=relay_id,
                     remote_port=port,
-                    host_name=host,
+                    host_id=host,
                     pool_id="gpu-pool",
                     owner_kind="fulfillment",
                     owner_id=f"cr-{relay_id}",

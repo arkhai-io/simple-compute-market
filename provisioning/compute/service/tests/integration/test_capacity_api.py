@@ -124,14 +124,15 @@ async def test_the_claim_names_the_offering_mode_through_the_canonical_client(
     await capacity.register(
         "site-claim-1",
         total_units=4,
-        attributes={"vm_host": "kvm1", "gpu_model": "H200"},
+        host_id="kvm1",
+        attributes={"gpu_model": "H200"},
     )
 
     client = _site_capacity_client(
         "http://test", transport=ASGITransport(app=app)
     )
     reservation = await client.reserve(
-        claim={"offering_mode": "vm", "gpu_count": 1, "vm_host": "kvm1"},
+        claim={"offering_mode": "vm", "gpu_count": 1, "host_id": "kvm1"},
         deal_ref={"escrow_uid": "escrow-claim-1"},
     )
 
@@ -143,14 +144,15 @@ async def test_the_claim_names_the_offering_mode_through_the_canonical_client(
 @pytest.mark.asyncio
 async def test_a_claim_omitting_the_offering_mode_is_refused(capacity: CapacityApi):
     """The field is required, so its absence is refused before any resource is
-    matched — never inferred from `vm_host` or a default."""
+    matched — never inferred from `host_id` or a default."""
     await capacity.register(
-        "site-claim-2", total_units=4, attributes={"vm_host": "kvm1"}
+        "site-claim-2", total_units=4, host_id="kvm1",
+        attributes={}
     )
 
     resp = await capacity._client.post(
         "/api/v1/capacity/reservations",
-        json={"claim": {"gpu_count": 1, "vm_host": "kvm1"}, "deal_ref": {}},
+        json={"claim": {"gpu_count": 1, "host_id": "kvm1"}, "deal_ref": {}},
     )
 
     assert resp.status_code == 422
@@ -165,13 +167,14 @@ async def test_a_claim_naming_the_mode_under_the_retired_key_is_refused(
     under a second spelling. Raw HTTP and status only: the typed client will
     not construct the retired key."""
     await capacity.register(
-        "site-claim-3", total_units=4, attributes={"vm_host": "kvm1"}
+        "site-claim-3", total_units=4, host_id="kvm1",
+        attributes={}
     )
 
     resp = await capacity._client.post(
         "/api/v1/capacity/reservations",
         json={
-            "claim": {"executor_kind": "vm", "gpu_count": 1, "vm_host": "kvm1"},
+            "claim": {"executor_kind": "vm", "gpu_count": 1, "host_id": "kvm1"},
             "deal_ref": {},
         },
     )
@@ -185,28 +188,29 @@ async def test_reserve_commit_release_lifecycle(capacity: CapacityApi):
         "compute-kvm1-001",
         total_units=8,
         resource_subtype="h200",
-        attributes={"vm_host": "kvm1", "gpu_model": "H200"},
+        host_id="kvm1",
+        attributes={"gpu_model": "H200"},
     )
 
     assert (await capacity.snapshot())[0]["available_units"] == 8
     assert await capacity.probe(
-        {"offering_mode": "vm", "gpu_model": "H200", "vm_host": "kvm1"}
+        {"offering_mode": "vm", "gpu_model": "H200", "host_id": "kvm1"}
     ) is not None
     assert await capacity.probe(
         {"offering_mode": "vm", "gpu_model": "A100"}
     ) is None
 
     reserved = await capacity.reserve(
-        {"offering_mode": "vm", "gpu_count": 3, "vm_host": "kvm1"},
+        {"offering_mode": "vm", "gpu_count": 3, "host_id": "kvm1"},
         {"listing_id": "lst-1", "escrow_uid": "0xesc"},
     )
-    # vm_host is intentionally opaque across this boundary (see
+    # host_id is intentionally opaque across this boundary (see
     # openspec/specs/site-capacity/spec.md's "Capacity accounting is
     # private to the site authority" requirement) -- the claim above
-    # already proves vm_host-attribute matching selected the right
+    # already proves host_id-attribute matching selected the right
     # resource, evidenced by the unit counts below, not by reading a
     # physical-placement field back off the reservation.
-    assert "vm_host" not in reserved
+    assert "host_id" not in reserved
     assert reserved["available_gpu_count"] == 5
     assert (await capacity.snapshot())[0]["available_units"] == 5
 
@@ -255,7 +259,7 @@ async def test_vm_and_bare_metal_claims_use_domain_attributes(capacity: Capacity
     )
 
     assert await capacity.probe(
-        {"offering_mode": "vm", "gpu_count": 1, "vm_host": "kvm1"}
+        {"offering_mode": "vm", "gpu_count": 1, "host_id": "kvm1"}
     ) is None
     reserved = await capacity.reserve(
         {
@@ -268,7 +272,7 @@ async def test_vm_and_bare_metal_claims_use_domain_attributes(capacity: Capacity
 
     assert reserved is not None
     assert "resource_id" not in reserved
-    assert "vm_host" not in reserved
+    assert "host_id" not in reserved
 
 
 @pytest.mark.asyncio
@@ -277,8 +281,8 @@ async def test_capacity_snapshot_blocks_cross_mode_siblings(capacity: CapacityAp
         "compute-host-1",
         total_units=8,
         resource_subtype="h200",
+        host_id="kvm1",
         attributes={
-            "vm_host": "kvm1",
             "gpu_model": "H200",
             "physical_host_id": "host-physical-1",
             "allocation_mode": ALLOCATION_MODE_SHAREABLE,
@@ -288,8 +292,8 @@ async def test_capacity_snapshot_blocks_cross_mode_siblings(capacity: CapacityAp
         "bare-metal-node-1",
         total_units=1,
         resource_subtype="h200",
+        host_id="node-1",
         attributes={
-            "machine_id": "node-1",
             "gpu_model": "H200",
             "physical_host_id": "host-physical-1",
             "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
@@ -301,7 +305,7 @@ async def test_capacity_snapshot_blocks_cross_mode_siblings(capacity: CapacityAp
     assert initial["bare-metal-node-1"]["available_units"] == 1
 
     reserved = await capacity.reserve(
-        {"offering_mode": "vm", "gpu_count": 2, "vm_host": "kvm1"},
+        {"offering_mode": "vm", "gpu_count": 2, "host_id": "kvm1"},
         {"escrow_uid": "0xvm-cross-mode"},
     )
 
@@ -329,10 +333,11 @@ async def test_register_lease_attaches_to_ledger_reservation(capacity: CapacityA
     from compute_provisioning_service import container as _container_module
 
     await capacity.register(
-        "compute-kvm1-001", total_units=8, attributes={"vm_host": "kvm1"},
+        "compute-kvm1-001", total_units=8, host_id="kvm1",
+        attributes={},
     )
     reserved = await capacity.reserve(
-        {"offering_mode": "vm", "gpu_count": 1, "vm_host": "kvm1"},
+        {"offering_mode": "vm", "gpu_count": 1, "host_id": "kvm1"},
         {"escrow_uid": "0xlease"},
     )
 
@@ -342,7 +347,7 @@ async def test_register_lease_attaches_to_ledger_reservation(capacity: CapacityA
             "resource_id": "compute-kvm1-001",
             "capacity_reservation_id": reserved["capacity_reservation_id"],
             "escrow_uid": "0xlease",
-            "vm_host": "kvm1",
+            "host_id": "kvm1",
             "vm_target": "tenant-led1",
             "lease_end_utc": "2099-01-01T00:00:00Z",
         })
@@ -374,7 +379,7 @@ async def test_register_lease_without_ledger_reservation_404s(
             "resource_id": "compute-legacy-001",
             "capacity_reservation_id": "local-alloc-1",
             "escrow_uid": "0xlegacy",
-            "vm_host": "kvm1",
+            "host_id": "kvm1",
             "vm_target": "tenant-leg1",
             "lease_end_utc": "2099-01-01T00:00:00Z",
         })
@@ -438,7 +443,7 @@ async def test_site_resource_pools_projection_surfaces_pool_metadata(
     # part still goes through the DB directly.
     with container.session_factory()() as db:
         db.add(Host(
-            name="kvm1", kvm_host="10.0.0.1", ssh_user="root",
+            host_id="kvm1", ssh_host="10.0.0.1", ssh_user="root",
             ssh_key_value="/dev/null", gpu_count=8, gpu_model="H200",
             pool_id="hetzner-eu",
         ))
@@ -449,7 +454,8 @@ async def test_site_resource_pools_projection_surfaces_pool_metadata(
         pool_id="hetzner-eu",
         total_units=8,
         resource_subtype="h200",
-        attributes={"vm_host": "kvm1", "gpu_model": "H200"},
+        host_id="kvm1",
+        attributes={"gpu_model": "H200"},
     )
 
     remote = _site_capacity_client("http://test", transport=ASGITransport(app=app))
@@ -513,7 +519,7 @@ async def test_site_resource_pools_projection_surfaces_region_sla_pricing_policy
 
     with container.session_factory()() as db:
         db.add(Host(
-            name="kvm1", kvm_host="10.0.0.1", ssh_user="root",
+            host_id="kvm1", ssh_host="10.0.0.1", ssh_user="root",
             ssh_key_value="/dev/null", gpu_count=8, gpu_model="H200",
             pool_id="hetzner-eu",
         ))
@@ -524,7 +530,8 @@ async def test_site_resource_pools_projection_surfaces_region_sla_pricing_policy
         pool_id="hetzner-eu",
         total_units=8,
         resource_subtype="h200",
-        attributes={"vm_host": "kvm1", "gpu_model": "H200"},
+        host_id="kvm1",
+        attributes={"gpu_model": "H200"},
     )
 
     remote = _site_capacity_client("http://test", transport=ASGITransport(app=app))
@@ -552,7 +559,7 @@ async def test_site_resource_pools_projection_omits_pool_views_with_no_defaults(
 
     with container.session_factory()() as db:
         db.add(Host(
-            name="kvm1", kvm_host="10.0.0.1", ssh_user="root",
+            host_id="kvm1", ssh_host="10.0.0.1", ssh_user="root",
             ssh_key_value="/dev/null", gpu_count=8, pool_id="default",
         ))
         db.commit()
@@ -561,7 +568,8 @@ async def test_site_resource_pools_projection_omits_pool_views_with_no_defaults(
         "compute-kvm1-001",
         pool_id="default",
         total_units=8,
-        attributes={"vm_host": "kvm1"},
+        host_id="kvm1",
+        attributes={},
     )
 
     remote = _site_capacity_client("http://test", transport=ASGITransport(app=app))
@@ -596,7 +604,7 @@ async def test_site_capacity_projection_version_endpoints_through_the_real_clien
 
     with container.session_factory()() as db:
         db.add(Host(
-            name="kvm-version-test", kvm_host="10.0.0.2", ssh_user="root",
+            host_id="kvm-version-test", ssh_host="10.0.0.2", ssh_user="root",
             ssh_key_value="/dev/null", gpu_count=4, pool_id="version-pool",
         ))
         db.commit()
@@ -604,7 +612,8 @@ async def test_site_capacity_projection_version_endpoints_through_the_real_clien
         "compute-version-test-001",
         pool_id="version-pool",
         total_units=4,
-        attributes={"vm_host": "kvm-version-test"},
+        host_id="kvm-version-test",
+        attributes={},
     )
 
     pool_version_after = await remote.resource_pool_projection_version()
@@ -639,14 +648,16 @@ async def test_site_capacity_buckets_projection_through_the_real_client(
         pool_id="hetzner-eu",
         total_units=8,
         resource_subtype="h200",
-        attributes={"vm_host": "kvm1", "gpu_model": "H200"},
+        host_id="kvm1",
+        attributes={"gpu_model": "H200"},
     )
     await capacity.register(
         "compute-kvm1-002",
         pool_id="hetzner-eu",
         total_units=6,
         resource_subtype="h200",
-        attributes={"vm_host": "kvm1-b", "gpu_model": "H200"},
+        host_id="kvm1-b",
+        attributes={"gpu_model": "H200"},
     )
 
     remote = _site_capacity_client("http://test", transport=ASGITransport(app=app))

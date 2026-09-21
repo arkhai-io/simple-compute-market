@@ -154,7 +154,8 @@ physical inventory. The storefront loads trusted `site_resource_pools` and
 listing input may still be supplied through `resources.csv`, but each VM row
 must reference a projected `pool_id` or `resource_id` and declare its sellable
 shape (`gpu_count`, `vcpu_count`, `ram_gb`, and `disk_gb`). Do not publish
-`vm_host`, authority URLs, API keys, or internal capacity-bucket IDs.
+host identities (`host_id`), authority URLs, API keys, or internal
+capacity-bucket IDs.
 
 ```csv
 resource_id,resource_type,resource_subtype,unit,value,state,max_duration_seconds,attribute.pool_id,attribute.gpu_model,attribute.region,attribute.gpu_count,attribute.vcpu_count,attribute.ram_gb,attribute.disk_gb
@@ -240,7 +241,7 @@ touching libvirt. To create real VMs:
 
    ```bash
    ssh-keygen -t ed25519 -N "" -f ./keys/id_ed25519
-   ssh-copy-id -i ./keys/id_ed25519 <ansible_user>@<kvm_host>
+   ssh-copy-id -i ./keys/id_ed25519 <ansible_user>@<ssh_host>
    chmod 600 ./keys/id_ed25519
    ```
 
@@ -254,7 +255,7 @@ touching libvirt. To create real VMs:
 
    The provisioning service imports these aliases into its authoritative Host
    and Resource Pool tables. Storefront listings reference trusted projected
-   `pool_id`/`resource_id`; they do not carry `vm_host`. Each host line's
+   `pool_id`/`resource_id`; they do not carry a `host_id`. Each host line's
    `ansible_host` is how the provisioning service reaches the host over SSH.
    If buyers reach that host
    on a **different** address than the provisioner does (e.g. the provisioner
@@ -352,7 +353,7 @@ audit/predicate evidence, not custody.
   supplies a settlement option's asset or rate. Put each decimal asset rate
   and unit in that resource's complete `settlements` clause list or in the
   selected command/config default list.
-- **Do not publish `vm_host`.** Listings use trusted projected `pool_id` or
+- **Do not publish a `host_id`.** Listings use trusted projected `pool_id` or
   `resource_id`; physical host selection is provisioning-owned. The admin
   settle evaluate endpoint validates canonical schedule/begin requests without
   reserving or probing a host.

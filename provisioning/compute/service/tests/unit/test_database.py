@@ -449,6 +449,7 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
         "20260815_001_pool_declared_offering_modes",
         "20260901_001_relay_reachable_hosts",
         "20260911_001_reservation_offering_mode_name",
+        "20260921_001_host_identity",
     }
 
 
@@ -508,7 +509,7 @@ def test_run_migrations_is_idempotent():
         migration_count = connection.execute(
             text("SELECT COUNT(*) FROM schema_migrations")
         ).scalar_one()
-    assert migration_count == 17
+    assert migration_count == 18
 
 
 # ---------------------------------------------------------------------------

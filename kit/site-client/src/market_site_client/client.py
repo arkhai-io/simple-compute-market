@@ -438,6 +438,7 @@ class SiteCapacityAdminClient(_AuthenticatedSiteClient):
         attributes: dict[str, Any] | None = None,
         capacity: dict[str, Any] | None = None,
         enabled: bool = True,
+        host_id: str | None = None,
         request_id: str | None = None,
     ) -> dict[str, Any]:
         body = ResourceRegistration(
@@ -448,6 +449,7 @@ class SiteCapacityAdminClient(_AuthenticatedSiteClient):
             attributes=attributes or {},
             capacity=capacity,
             enabled=enabled,
+            host_id=host_id,
         )
         result = await self._request(
             "PUT",

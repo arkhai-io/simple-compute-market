@@ -43,7 +43,7 @@ class BareMetalResourceProjection(BaseModel):
     physical_resource_id: str = Field(min_length=1)
     pool_id: str | None = Field(default=None, min_length=1)
     physical_host_id: str = Field(min_length=1)
-    machine_id: str = Field(min_length=1)
+    host_id: str = Field(min_length=1)
     available: bool
     allocation_mode: Literal["exclusive"] = EXCLUSIVE_ALLOCATION_MODE
     access_methods: list[str] = Field(
@@ -58,7 +58,7 @@ class BareMetalResourceProjection(BaseModel):
         for field_name in (
             "physical_resource_id",
             "physical_host_id",
-            "machine_id",
+            "host_id",
         ):
             if not getattr(self, field_name).strip():
                 raise ValueError(f"{field_name} must be non-empty")

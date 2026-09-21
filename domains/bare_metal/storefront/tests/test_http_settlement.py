@@ -167,8 +167,8 @@ async def _accepted_runtime(
         pool_id="pool-a",
         physical_resource_id="resource-1",
         listing={
-            "kind": "bare_metal.v1",
-            "machine_id": "machine-1",
+            "kind": "bare_metal.v2",
+            "host_id": "machine-1",
             "physical_host_id": "host-1",
             "access_methods": ["ssh"],
         },
@@ -197,7 +197,7 @@ async def _accepted_runtime(
         seller_action="accept",
         seller_amount=100,
         terms=BareMetalTerms(
-            machine_id="machine-1",
+            host_id="machine-1",
             physical_host_id="host-1",
             duration_seconds=3600,
             ssh_public_key="ssh-ed25519 persisted-key",
@@ -483,7 +483,7 @@ class _ProvisioningClient:
             attributes={
                 "bare_metal_publication": {
                     "enabled": True,
-                    "machine_id": "machine-1",
+                    "host_id": "machine-1",
                     "physical_host_id": "host-1",
                 }
             },
@@ -516,11 +516,11 @@ class _ProvisioningClient:
                 "provisioned_resources": [],
                 "domain_result": {
                     "kind": "bare_metal.fulfillment.result.v1",
-                    "schema_version": 1,
+                    "schema_version": 2,
                     "payload": {
-                        "kind": "bare_metal.v1",
+                        "kind": "bare_metal.v2",
                         "action": "node_grant_access",
-                        "machine_id": "machine-1",
+                        "host_id": "machine-1",
                         "physical_host_id": "host-1",
                         "ssh_user": "tenant-a",
                         "host": "203.0.113.25",

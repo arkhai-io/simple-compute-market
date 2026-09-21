@@ -76,7 +76,7 @@ def _lease(relay_id: str, port: int, **overrides) -> RelayPortLease:
         "id": str(uuid.uuid4()),
         "relay_id": relay_id,
         "remote_port": port,
-        "host_name": "kvm1",
+        "host_id": "kvm1",
         "pool_id": "gpu-pool",
         "owner_kind": "job",
         "owner_id": str(uuid.uuid4()),
@@ -104,9 +104,9 @@ class TestLeaseScoping:
         """
         engine = _engine()
         with Session(engine) as session:
-            session.add(_lease("10.0.0.9:7000", 6100, host_name="kvm1"))
+            session.add(_lease("10.0.0.9:7000", 6100, host_id="kvm1"))
             session.commit()
-            session.add(_lease("10.0.0.9:7000", 6100, host_name="kvm2"))
+            session.add(_lease("10.0.0.9:7000", 6100, host_id="kvm2"))
             with pytest.raises(IntegrityError):
                 session.commit()
 

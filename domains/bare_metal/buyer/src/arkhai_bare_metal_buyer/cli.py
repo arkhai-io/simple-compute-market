@@ -251,7 +251,7 @@ def buy_bare_metal(
         physical_host_id=facts.physical_host_id,
     )
     accepted_terms = BareMetalTerms(
-        machine_id=trusted_listing.machine_id,
+        host_id=trusted_listing.host_id,
         physical_host_id=trusted_listing.physical_host_id,
         duration_seconds=demand.duration_seconds,
         access_method=demand.access_method,

@@ -489,7 +489,7 @@ class AnsibleJobService:
             # always clean it up, including early returns.
             host_public_host = None
             if self._host_service is not None:
-                host = self._host_service.get_host(params.vm_host)
+                host = self._host_service.get_host(params.host_id)
                 if host is not None:
                     host_public_host = host.public_host
                     rendered_inv_path = self._ansible.write_inventory([host])
@@ -509,7 +509,7 @@ class AnsibleJobService:
                 playbook_path=self._playbook_path_for_params(params),
                 inventory_path=inventory_path,
                 extra_vars_path=vars_path,
-                limit=params.vm_host,
+                limit=params.host_id,
             )
             # Inject params onto the run handle so ProgrammableMockAnsibleService
             # can match rules in wait_for_playbook. Real AnsibleRun ignores it.
@@ -706,9 +706,9 @@ class AnsibleJobService:
         )
         executor_target = params.get("executor_target") or params.get("vm_target")
         return AnsibleJobParams(
-            vm_host=params.get(
-                "vm_host",
-                executor_target or self._settings.default_vm_host,
+            host_id=params.get(
+                "host_id",
+                executor_target or self._settings.default_host_id,
             ),
             vm_target=params.get("vm_target"),
             vm_action=params.get("vm_action") or executor_action,
@@ -807,7 +807,7 @@ class AnsibleJobService:
         payload: dict = {
             "ssh_port": result.ssh_port,
             "tenant_user": result.tenant_user,
-            "vm_host_ip": result.vm_host_ip,
+            "host_ip": result.host_ip,
             "ssh_command": result.ssh_command,
         }
         if not ar:

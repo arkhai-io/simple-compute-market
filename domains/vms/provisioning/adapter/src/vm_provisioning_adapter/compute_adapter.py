@@ -48,7 +48,7 @@ class VmComputeAdapter:
     ) -> str:
         reservation = self._site_authority.get_reservation(envelope.capacity_reservation_id) or {}
         host = str(
-            reservation.get("executor_target") or reservation.get("vm_host") or ""
+            reservation.get("executor_target") or reservation.get("host_id") or ""
         )
         if not host:
             raise ReservationNotProvisionableError(

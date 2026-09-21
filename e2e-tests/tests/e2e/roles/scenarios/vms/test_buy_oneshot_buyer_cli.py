@@ -676,8 +676,8 @@ class TestStageB5_SellerAndLease:
         # can read it -- the same strip that retired `resource_id` from the
         # reservation response. The host is what the authority does report,
         # and it is what an operator needs to find the VM.
-        assert lease.get("vm_host") == E2E_BUY_HOST, (
-            f"Lease bound to unexpected executor {lease.get('vm_host')!r}; "
+        assert lease.get("host_id") == E2E_BUY_HOST, (
+            f"Lease bound to unexpected executor {lease.get('host_id')!r}; "
             f"expected {E2E_BUY_HOST!r}. Lease: {lease}"
         )
         assert lease.get("status") in ("active", "pending"), (

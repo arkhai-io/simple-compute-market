@@ -122,6 +122,58 @@ metal: reset the preprod storefront database and drop `bare_metal.v1`".
 This change lands before `capacity-resource-administration`'s derivation and
 projection sections, which consume the declaration's `host_id`.
 
+### VM-storefront classification (task 0.2, 2026-09-21)
+
+Rule: a site `pools-9-retire-local-physical-authority` names for removal or freezing
+is left; everything else is renamed.
+
+| Site | Disposition | Why |
+|---|---|---|
+| `services/fulfillment_service.py` (`vm_host` parameters, `_do_shutdown`), `services/vm_fulfillment_service.py` (`reserved_vm_host`) | left | `pools-9` 3.5 removes the always-`None` threading |
+| `services/resource_capacity_validator.py` | left | `pools-9` 4.5 deletes it |
+| `utils/sqlite_client.py`, `utils/migrations.py` local physical tables and `compute_allocations.vm_host` | left | `pools-9` 2.3 and 4.4 freeze them |
+| `data/*.csv`, `listings/resource_csv_importer.py`, `listings/resources.py` and `listings/models.py` host-row denormalization | left | `pools-9` Section 5 retires CSV import and the local host table they read |
+| `models/capacity_admin_models.py`'s `UsageStartedEventRequest`, `controllers/admin_controller.py`'s usage-started route, `storefront_client`'s `notify_usage_started` | **renamed on the wire** to `host_id` | The route survives `pools-9`; only the table it writes into is frozen. The controller maps `host_id` onto the frozen column until `pools-9` removes the write |
+| `services/vm_job_spec_service.py`, `services/admin_settle_service.py`, `core_storefront` `EvaluateSettleResponse`, `storefront_client`'s settle evaluation | renamed | Surviving admin settle path; reads the site's probe payload, which now names `host_id` |
+| `services/fulfillment_resume_runtime.py` | left (reclassified during implementation) | Its `vm_host` reaches `_register_vm_lease_with_settings`, which sends the provisioning client's `LeaseRegistration` and ignores `vm_host` entirely — the always-`None` threading `pools-9` 3.5 removes |
+| `cli_publish.py`'s `machine_id` | renamed | Reads the bare-metal publication view |
+| `settings.toml`'s `default_vm_host` and its `groups/config.py` comment | **removed** | No storefront code reads it; the provisioning service owns the setting |
+
+### Decisions made during implementation (2026-09-21)
+
+- **Two more spellings.** The census missed `relay_port_leases.host_name` and the
+  job-result field `vm_host_ip` (the host's tenant-facing address). They became
+  `host_id` and `host_ip`.
+- **The bare-metal domain identity stays `bare_metal.v1`.** The domain contract's
+  identity had been derived from the payload kind. Operator `storefront_domains`
+  configuration and the combined storefront's durable listing and thread
+  bindings name the identity, so renaming it would have broken configuration and
+  orphaned bindings. `BARE_METAL_DOMAIN_IDENTITY` is now its own constant; only
+  the payload kind moved to `bare_metal.v2`. VM already keeps these apart
+  (`compute.v1` against its payload kinds).
+- **Provider operation envelopes move to schema 2; kinds do not change.** VM
+  `vm.ansible.create.v1`/`teardown.v1` and bare-metal
+  `bare_metal.fulfillment.create.v1`/`teardown.v1`/`result.v1` name the host in
+  their payloads. Their `schema_version` is 2; dispatch accepts only 2; the
+  migration rewrites stored schema-1 operations. Kind strings are never renamed.
+- **`SettlementResource.host_id` and `settlement_records.resource_host_id`.**
+  Providers read the host from a field rather than from the attribute snapshot.
+- **`host_id` stays matchable in claims.** The feasibility view adds it to its
+  normalized facts beside `resource_id`, and the migration rewrites
+  `claim_attributes`. Otherwise a stored reservation pinned to a host would
+  stop matching at scheduling.
+- **One declaration per host is enforced at write time.** `capacity_buckets.host_id`
+  is unique; registration naming a host another declaration holds is a 409.
+- **An enabled bare-metal publication requires the declaration's `host_id`.**
+  The projection's former requirement for an explicit `machine_id` moved to the
+  declaration's own field, keeping the fail-closed behaviour.
+- **The legacy `vm_leases` backfill emits the current shape** and joins the host
+  table on whichever key column exists, so it runs correctly before or after the
+  registry rename.
+- **Distribution version bumps are deferred** to one bump after
+  `capacity-resource-administration`, which changes the same packages. Each bump
+  relocks every consumer's `uv.lock`; doing it twice is churn.
+
 ## Risks / Trade-offs
 
 - **[Breadth]** Roughly 170 files across provisioning, kits, both compute domains,

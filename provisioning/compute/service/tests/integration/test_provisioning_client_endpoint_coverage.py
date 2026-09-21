@@ -23,8 +23,8 @@ VM_NAME = "agent-vm-01"
 async def _register_host(client) -> None:
     await client.register_host(
         HostCreate(
-            name=HOST,
-            kvm_host="10.0.0.1",
+            host_id=HOST,
+            ssh_host="10.0.0.1",
             ssh_user="root",
             ssh_key_value="~/.ssh/id_ed25519",
         )
@@ -65,7 +65,7 @@ class TestHostClientEndpointCoverage:
         result = await client.import_hosts_from_path(inventory, ssh_key_type="path")
 
         assert result.total == 1
-        assert result.hosts[0].name == HOST
+        assert result.hosts[0].host_id == HOST
 
 
 class TestJobClientEndpointCoverage:
@@ -103,13 +103,13 @@ class TestCapacityClientEndpointCoverage:
         ledger.register_resource(
             resource_id="compute-kvm1-001",
             total_units=8,
-            attributes={"vm_host": HOST},
+            host_id=HOST, attributes={},
         )
         reserved = ledger.reserve(
             claim={
                 "offering_mode": "vm",
                 "gpu_count": 1,
-                "vm_host": HOST,
+                "host_id": HOST,
             },
             deal_ref={"escrow_uid": "escrow-client-capacity"},
         )
@@ -145,13 +145,13 @@ class TestLeaseClientEndpointCoverage:
             ledger.register_resource(
                 resource_id="compute-kvm1-001",
                 total_units=8,
-                attributes={"vm_host": HOST},
+                host_id=HOST, attributes={},
             )
         reserved = ledger.reserve(
             claim={
                 "offering_mode": "vm",
                 "gpu_count": 1,
-                "vm_host": HOST,
+                "host_id": HOST,
             },
             deal_ref={"escrow_uid": "escrow-client-terminate"},
         )
@@ -161,7 +161,7 @@ class TestLeaseClientEndpointCoverage:
             resource_id="compute-kvm1-001",
             capacity_reservation_id=reserved["capacity_reservation_id"],
             escrow_uid="escrow-client-terminate",
-            vm_host=HOST,
+            host_id=HOST,
             vm_target=VM_NAME,
             lease_end_utc=datetime(2099, 1, 1, tzinfo=timezone.utc),
         )
@@ -179,7 +179,7 @@ class TestLeaseClientEndpointCoverage:
                     settlement_resource_id=HOST,
                     pool_id="pool-1",
                     provider="ansible",
-                    resource_attributes={"vm_host": HOST},
+                    resource_host_id=HOST, resource_attributes={},
                     fulfillment_request={
                         "kind": "vm.fulfillment.request",
                         "schema_version": 1,

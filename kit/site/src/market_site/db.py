@@ -81,6 +81,12 @@ class CapacityBucket(Base):
         String, nullable=False, index=True,
     )
     pool_id = Column(String, nullable=True, index=True)
+    # The host this capacity is delivered through, when there is one. Opaque
+    # to the ledger: it is stored and copied into a reservation's
+    # ``executor_ref``, never resolved. Unique because one host carries one
+    # declaration — a second would sell the same connection twice. Null for
+    # capacity with no host, such as logical quota.
+    host_id = Column(String, nullable=True, unique=True)
     resource_type = Column(String, nullable=False, default="compute.gpu")
     resource_subtype = Column(String, nullable=True)
     total_units = Column(Integer, nullable=False, default=0)

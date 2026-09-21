@@ -127,7 +127,7 @@ class EvaluateSettleResponse(BaseModel):
 
     would_submit: bool
     escrow_uid: str
-    vm_host: str | None = None
+    host_id: str | None = None
     vm_target: str | None = None
     required_attributes: dict[str, Any] = Field(default_factory=dict)
     reason: str | None = None

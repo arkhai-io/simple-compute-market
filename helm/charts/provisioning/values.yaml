@@ -132,7 +132,7 @@ config:
 
   # Ansible runtime
   ansible_timeout_seconds: 1800
-  default_vm_host: "kvm1"
+  default_host_id: "kvm1"
 
   # Golden image public settings. Credentials belong in the runtime Secret.
   golden_root_ssh_filename: ""

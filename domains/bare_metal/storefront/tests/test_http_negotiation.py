@@ -129,8 +129,8 @@ async def _insert_listing(runtime: BareMetalStorefrontRuntime) -> None:
         pool_id="pool-a",
         physical_resource_id="resource-1",
         listing={
-            "kind": "bare_metal.v1",
-            "machine_id": "machine-1",
+            "kind": "bare_metal.v2",
+            "host_id": "machine-1",
             "physical_host_id": "physical-host-1",
             "access_methods": ["ssh"],
             "min_duration_seconds": 60,
@@ -220,8 +220,8 @@ async def _insert_hosted_listing(
         pool_id="pool-a",
         physical_resource_id="resource-1",
         listing={
-            "kind": "bare_metal.v1",
-            "machine_id": "machine-1",
+            "kind": "bare_metal.v2",
+            "host_id": "machine-1",
             "physical_host_id": "physical-host-1",
             "access_methods": ["ssh"],
             "min_duration_seconds": 60,
@@ -250,7 +250,7 @@ def _hosted_opening(
         "buyer_principal": BUYER_SIGNER.identity.model_dump(mode="json"),
         "buyer_agent_url": "https://buyer.example",
         "provision_terms": {
-            "kind": "bare_metal.v1",
+            "kind": "bare_metal.v2",
             "version": 1,
             "payload": {
                 "duration_seconds": 5400,
@@ -271,7 +271,7 @@ def _opening(*, payload: dict | None = None) -> dict:
         "buyer_principal": BUYER_SIGNER.identity.model_dump(mode="json"),
         "buyer_agent_url": "https://buyer.example",
         "provision_terms": {
-            "kind": "bare_metal.v1",
+            "kind": "bare_metal.v2",
             "version": 1,
             "payload": payload
             or {
@@ -332,7 +332,7 @@ async def test_signed_opening_accepts_and_persists_domain_artifacts(tmp_path) ->
         await runtime.db.load_bare_metal_terms(
             negotiation_id=negotiation_id,
         )
-    ).machine_id == "machine-1"
+    ).host_id == "machine-1"
     binding = await runtime.db.load_thread_binding(
         negotiation_id=negotiation_id,
     )
@@ -368,8 +368,8 @@ async def test_hosted_only_opening_derives_exact_plan_and_first_binding(
     assert obligation.amount == 180
     assert obligation.params.get("funding_profile") == "card.v1"
     assert "bare_metal" not in obligation.params
-    assert plan.service_terms["bare_metal.v1"]["listing_id"] == "hosted-listing"
-    assert plan.service_terms["bare_metal.v1"]["option_id"] == option.option_id
+    assert plan.service_terms["bare_metal.v2"]["listing_id"] == "hosted-listing"
+    assert plan.service_terms["bare_metal.v2"]["option_id"] == option.option_id
     obligation_ref = derive_obligation_ref(
         payload["negotiation_id"],
         0,

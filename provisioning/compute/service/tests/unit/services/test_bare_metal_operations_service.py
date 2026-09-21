@@ -37,7 +37,7 @@ async def test_grant_access_submits_node_grant_job():
     response = await service.grant_access(
         BareMetalLeaseCreate(
             escrow_uid="0xbm",
-            machine_id="bm-node-1",
+            host_id="bm-node-1",
             physical_host_id="host-physical-1",
             lease_end_utc=datetime(2099, 1, 1, tzinfo=timezone.utc),
             access_ref={
@@ -50,7 +50,7 @@ async def test_grant_access_submits_node_grant_job():
     assert response.job_id == "grant-1"
     params, submitted_queue = job_service.submit.await_args.args
     assert submitted_queue is queue
-    assert params.vm_host == "bm-node-1"
+    assert params.host_id == "bm-node-1"
     assert params.vm_target == "bm-node-1"
     assert params.vm_action == NODE_GRANT_ACCESS_ACTION
     assert params.offering_mode == "bare_metal"
@@ -98,7 +98,7 @@ async def test_reclaim_access_submits_node_reclaim_job_from_reservation():
     assert job_id == "reclaim-1"
     params, submitted_queue = job_service.submit.await_args.args
     assert submitted_queue is queue
-    assert params.vm_host == "bm-node-1"
+    assert params.host_id == "bm-node-1"
     assert params.vm_target == "bm-node-1"
     assert params.vm_action == NODE_RECLAIM_ACCESS_ACTION
     assert params.offering_mode == "bare_metal"
@@ -143,7 +143,7 @@ async def test_grant_access_unknown_machine_raises_without_submitting_job():
         await service.grant_access(
             BareMetalLeaseCreate(
                 escrow_uid="0xbm",
-                machine_id="missing-node",
+                host_id="missing-node",
                 physical_host_id="host-physical-1",
                 lease_end_utc=datetime(2099, 1, 1, tzinfo=timezone.utc),
             ),
@@ -169,7 +169,7 @@ async def test_grant_access_disabled_machine_raises_without_submitting_job():
         await service.grant_access(
             BareMetalLeaseCreate(
                 escrow_uid="0xbm",
-                machine_id="disabled-node",
+                host_id="disabled-node",
                 physical_host_id="host-physical-1",
                 lease_end_utc=datetime(2099, 1, 1, tzinfo=timezone.utc),
             ),

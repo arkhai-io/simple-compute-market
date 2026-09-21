@@ -30,13 +30,13 @@ def _client():
             )
         )
     ledger = CapacityLedgerService(sessionmaker(bind=engine))
-    ledger.register_resource(
+    ledger.register_resource(host_id="host-a", 
         resource_id="host-a",
         pool_id="pool-a",
         total_units=8,
         resource_type="compute.vm",
         resource_subtype="h100",
-        attributes={"region": "eu", "vm_host": "host-a"},
+        attributes={"region": "eu", },
     )
     app = FastAPI()
     app.include_router(make_capacity_router(lambda: ledger), prefix="/api/v1")
@@ -55,13 +55,13 @@ def test_public_reservation_hides_private_accounting_identity():
     assert "resource_id" not in reservation
     assert "capacity_bucket_id" not in reservation
     assert "backing_resource_id" not in reservation
-    # vm_host is real, physical-placement data (populated from the
+    # host_id is real, physical-placement data (populated from the
     # matched resource's attributes at reserve() time -- see
     # openspec/specs/site-capacity/spec.md's opaque-reservation
     # requirement) and must not leak across this boundary either, even
     # though it's domain-specific (VM) rather than a generic accounting
     # identifier like the three above.
-    assert "vm_host" not in reservation
+    assert "host_id" not in reservation
 
 
 def test_projection_versions_are_independent_and_snapshots_are_canonical():
@@ -89,7 +89,7 @@ def test_resource_pool_projection_uses_authoritative_inventory_provider():
         "pool_id": "pool-a",
         "resource_type": "compute.gpu",
         "capacity": {"gpu_count": 8},
-        "attributes": {"vm_host": "host-from-repository"},
+        "attributes": {"host_id": "host-from-repository"},
         "enabled": True,
     }]
     app = FastAPI()
@@ -124,9 +124,9 @@ def test_get_pool_directory_surfaces_pool_metadata_on_the_projection():
     )
     Base.metadata.create_all(engine)
     ledger = CapacityLedgerService(sessionmaker(bind=engine))
-    ledger.register_resource(
+    ledger.register_resource(host_id="host-a", 
         resource_id="host-a", pool_id="pool-a", total_units=8,
-        attributes={"vm_host": "host-a"},
+        attributes={},
     )
     app = FastAPI()
     app.include_router(

@@ -18,7 +18,7 @@ async def test_create_vm_submits_create_params_to_resolved_queue():
 
     assert response.job_id == "job-1"
     params, queue = job_service.submit.await_args.args
-    assert params.vm_host == "kvm1"
+    assert params.host_id == "kvm1"
     assert params.vm_action == "create"
     assert params.vm_target == "vm-1"
     assert params.vm_ram == 2048
@@ -40,7 +40,7 @@ async def test_submit_action_builds_simple_vm_action_params():
     )
 
     params, queue = job_service.submit.await_args.args
-    assert params.vm_host == "kvm1"
+    assert params.host_id == "kvm1"
     assert params.vm_action == "reboot"
     assert params.vm_target == "vm-1"
     assert params.max_retries == 4
@@ -56,6 +56,6 @@ async def test_list_vms_builds_host_scoped_params_without_vm_target():
     await service.list_vms(host="kvm1", body=VmActionRequest())
 
     params, _ = job_service.submit.await_args.args
-    assert params.vm_host == "kvm1"
+    assert params.host_id == "kvm1"
     assert params.vm_action == "list"
     assert params.vm_target is None

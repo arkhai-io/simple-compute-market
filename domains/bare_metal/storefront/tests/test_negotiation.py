@@ -10,8 +10,8 @@ from market_policy.negotiation_middleware import NegotiationRound
 
 def _listing(**overrides):
     listing_resource = {
-        "kind": "bare_metal.v1",
-        "machine_id": "machine-trusted",
+        "kind": "bare_metal.v2",
+        "host_id": "machine-trusted",
         "physical_host_id": "host-trusted",
         "access_methods": ["ssh"],
         "min_duration_seconds": 900,
@@ -23,7 +23,7 @@ def _listing(**overrides):
 
 def _message(**overrides):
     message = {
-        "kind": "bare_metal.v1",
+        "kind": "bare_metal.v2",
         "duration_seconds": 3600,
         "access_method": "ssh",
         "ssh_public_key": "ssh-ed25519 buyer-key",
@@ -57,8 +57,8 @@ async def test_policy_accepts_ssh_request_at_duration_boundaries(duration) -> No
     assert result.decision.action == "accept"
     terms = result.intermediate["bare_metal_terms"]
     assert terms == {
-        "kind": "bare_metal.v1",
-        "machine_id": "machine-trusted",
+        "kind": "bare_metal.v2",
+        "host_id": "machine-trusted",
         "physical_host_id": "host-trusted",
         "duration_seconds": duration,
         "access_method": "ssh",

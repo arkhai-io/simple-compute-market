@@ -97,7 +97,7 @@ def build_accepted_hosted_plan(
     return SettlementPlan(
         buyer_principal=buyer_principal.model_dump(mode="json"),
         seller_principal=seller_principal.model_dump(mode="json"),
-        service_terms={"bare_metal.v1": physical_terms},
+        service_terms={"bare_metal.v2": physical_terms},
         obligations=[obligation],
     )
 
@@ -174,7 +174,7 @@ async def ensure_accepted_hosted_binding(
         or facts.physical_resource_id != listing_binding.physical_resource_id
         or facts.pool_id != listing_binding.pool_id
         or facts.physical_host_id != trusted_listing.physical_host_id
-        or terms.machine_id != trusted_listing.machine_id
+        or terms.host_id != trusted_listing.host_id
         or terms.physical_host_id != trusted_listing.physical_host_id
         or terms.listing_ref != listing_id
     ):

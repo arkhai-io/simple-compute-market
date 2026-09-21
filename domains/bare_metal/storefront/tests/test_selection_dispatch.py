@@ -146,8 +146,8 @@ async def _service(tmp_path) -> tuple[BareMetalNegotiationService, dict[str, Any
         pool_id="pool-a",
         physical_resource_id="resource-1",
         listing={
-            "kind": "bare_metal.v1",
-            "machine_id": "machine-1",
+            "kind": "bare_metal.v2",
+            "host_id": "machine-1",
             "physical_host_id": "physical-host-1",
             "access_methods": ["ssh"],
         },
@@ -171,7 +171,7 @@ def _request(option: dict[str, Any], *, fields: dict[str, Any] | None = None):
         buyer_principal=BUYER_SIGNER.identity,
         buyer_agent_url="https://buyer.example",
         provision_terms={
-            "kind": "bare_metal.v1",
+            "kind": "bare_metal.v2",
             "version": 1,
             "payload": {"duration_seconds": 3600, "access_method": "none"},
         },

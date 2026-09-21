@@ -113,8 +113,8 @@ class TestProvisioningSmoke:
     ):
         """Register -> GET -> disable -> re-enable -> cleanup a transient test host."""
         test_host = HostCreate(
-            name="smoke-test-host",
-            kvm_host="192.0.2.1",
+            host_id="smoke-test-host",
+            ssh_host="192.0.2.1",
             ssh_user="ubuntu",
             ssh_key_type="path",
             ssh_key_value="/home/appuser/.ssh/id_ed25519",
@@ -131,7 +131,7 @@ class TestProvisioningSmoke:
                 log.info("smoke-test-host already exists - updating instead of inserting")
                 reg = client.update_host(
                     "smoke-test-host",
-                    HostUpdate(kvm_host=test_host.kvm_host, ssh_user=test_host.ssh_user),
+                    HostUpdate(ssh_host=test_host.ssh_host, ssh_user=test_host.ssh_user),
                 )
                 client.enable_host("smoke-test-host")
 
@@ -139,7 +139,7 @@ class TestProvisioningSmoke:
             assert not hasattr(reg, "ssh_key_value"), "ssh_key_value must never be returned"
 
             got = client.get_host("smoke-test-host")
-            assert got.kvm_host == "192.0.2.1"
+            assert got.ssh_host == "192.0.2.1"
 
             disabled = client.disable_host("smoke-test-host")
             assert disabled.enabled is False

@@ -26,7 +26,7 @@ class ReserveCapacityResponse(BaseModel):
     """Response from POST /api/v1/admin/portfolio/reservations.
 
     No physical resource identity. The capacity boundary strips
-    `resource_id`, `backing_resource_id`, `capacity_bucket_id` and `vm_host`
+    `resource_id`, `backing_resource_id`, `capacity_bucket_id` and `host_id`
     from every reservation response, because which physical resource backs a
     reservation is the provisioning service's fact and not a commercial one.
     Declaring it required here made the field unsatisfiable for every
@@ -120,7 +120,7 @@ class UsageStartedEventRequest(BaseModel):
     provider_id: str | None = None
     provider_lease_id: str | None = None
     resource_id: str | None = None
-    vm_host: str | None = None
+    host_id: str | None = None
     vm_target: str | None = None
     gpu_count: int | None = None
     lease_end_utc: str | None = None

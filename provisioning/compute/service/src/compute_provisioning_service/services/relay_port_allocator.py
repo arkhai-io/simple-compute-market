@@ -53,7 +53,7 @@ class RelayPortAllocator:
         relay_id: str,
         owner_kind: str,
         owner_id: str,
-        host_name: str | None = None,
+        host_id: str | None = None,
         pool_id: str | None = None,
     ) -> PortLease:
         """Lease the lowest free port in the relay's window.
@@ -106,7 +106,7 @@ class RelayPortAllocator:
                     port=port,
                     owner_kind=owner_kind,
                     owner_id=owner_id,
-                    host_name=host_name,
+                    host_id=host_id,
                     pool_id=pool_id,
                 )
                 try:
@@ -125,7 +125,7 @@ class RelayPortAllocator:
         port: int,
         owner_kind: str,
         owner_id: str,
-        host_name: str | None,
+        host_id: str | None,
         pool_id: str | None,
     ) -> RelayPortLease:
         """Take the row for this port, reusing a released one if it exists.
@@ -153,7 +153,7 @@ class RelayPortAllocator:
         if existing is not None:
             existing.owner_kind = owner_kind
             existing.owner_id = owner_id
-            existing.host_name = host_name
+            existing.host_id = host_id
             existing.pool_id = pool_id
             existing.released_at = None
             existing.created_at = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -162,7 +162,7 @@ class RelayPortAllocator:
             id=str(uuid.uuid4()),
             relay_id=relay_id,
             remote_port=port,
-            host_name=host_name,
+            host_id=host_id,
             pool_id=pool_id,
             owner_kind=owner_kind,
             owner_id=owner_id,
@@ -379,11 +379,11 @@ class RelayPortAllocator:
         )
 
     @staticmethod
-    def active_leases_for_host(db: Session, host_name: str) -> list[RelayPortLease]:
+    def active_leases_for_host(db: Session, host_id: str) -> list[RelayPortLease]:
         return (
             db.query(RelayPortLease)
             .filter(
-                RelayPortLease.host_name == host_name,
+                RelayPortLease.host_id == host_id,
                 RelayPortLease.released_at.is_(None),
             )
             .all()

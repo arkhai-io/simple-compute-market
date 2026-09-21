@@ -68,8 +68,8 @@ def test_authority_delegates_reservation_queries_and_anonymous_events():
 def test_authority_maps_generic_vm_executor_metadata_only_at_ledger_boundary():
     """CapacityReservation carries no VM-domain-specific column names --
     the adapter passes offering_mode/executor_target/executor_ref straight
-    through to the ledger unchanged, with no legacy vm_host/vm_target
-    synthesis. Physical placement identity (vm_host) and lease-target
+    through to the ledger unchanged, with no legacy host_id/vm_target
+    synthesis. Physical placement identity (host_id) and lease-target
     identity (vm_target) both live in the generic executor_ref/
     executor_target fields, matching bare-metal's pattern.
     """
@@ -80,20 +80,20 @@ def test_authority_maps_generic_vm_executor_metadata_only_at_ledger_boundary():
         capacity_reservation_id="alloc-1",
         offering_mode="vm",
         executor_target="tenant-vm",
-        executor_ref={"vm_host": "kvm-1"},
+        executor_ref={"host_id": "kvm-1"},
     )
     updated = authority.update_reservation_fields(
         "alloc-1",
         offering_mode="vm",
         executor_target="tenant-vm-2",
-        executor_ref={"vm_host": "kvm-2"},
+        executor_ref={"host_id": "kvm-2"},
     )
 
-    assert attached["executor_ref"]["vm_host"] == "kvm-1"
+    assert attached["executor_ref"]["host_id"] == "kvm-1"
     assert attached["executor_target"] == "tenant-vm"
-    assert updated["executor_ref"]["vm_host"] == "kvm-2"
+    assert updated["executor_ref"]["host_id"] == "kvm-2"
     assert updated["executor_target"] == "tenant-vm-2"
-    assert "vm_host" not in inspect.signature(
+    assert "host_id" not in inspect.signature(
         authority.attach_lease_reservation
     ).parameters
     assert "vm_target" not in inspect.signature(

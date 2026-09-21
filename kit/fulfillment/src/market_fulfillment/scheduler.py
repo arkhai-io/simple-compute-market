@@ -58,6 +58,7 @@ def _resource_from_record(record: Any) -> SettlementResource:
         resource_kind=record.scheduling_requirements.get("resource_kind"),
         provider=record.provider,
         attributes=dict(record.resource_attributes or {}),
+        host_id=record.resource_host_id,
         dimensions=dict((record.scheduling_requirements or {}).get("dimensions") or {}),
     )
 
@@ -151,6 +152,7 @@ class PhysicalSettlementScheduler:
                 resource_kind=selected.resource_kind,
                 provider=selected.provider,
                 attributes=selected.attributes,
+                host_id=selected.host_id,
             )
             record = tx.schedule_assignment(
                 capacity_reservation_id=request.capacity_reservation_id, market=request.market,
@@ -300,6 +302,7 @@ class PhysicalSettlementScheduler:
                 resource_kind=payload.resource_kind, provider=pool.provider,
                 available=dict(payload.available),
                 attributes=dict(payload.attributes or {}),
+                host_id=getattr(payload, "host_id", None),
             ))
         if not candidates:
             raise NoEligibleSettlementResourceError("no eligible settlement resource exists")

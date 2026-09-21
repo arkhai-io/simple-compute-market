@@ -106,7 +106,7 @@ def ledger(session_factory) -> CapacityLedgerService:
     svc.register_resource(
         resource_id="compute-kvm1-001",
         total_units=8,
-        attributes={"vm_host": "kvm1"},
+        host_id="kvm1", attributes={},
     )
     return svc
 
@@ -151,7 +151,7 @@ def _create_active_fulfillment(
                 settlement_resource_id="kvm1",
                 pool_id="pool-1",
                 provider="ansible",
-                resource_attributes={"vm_host": "kvm1"},
+                resource_host_id="kvm1", resource_attributes={},
                 fulfillment_request={
                     "kind": "vm.fulfillment.request",
                     "schema_version": 1,
@@ -262,7 +262,7 @@ def _expired_reservation(ledger: CapacityLedgerService, escrow: str = "0xe") -> 
         claim={
             "offering_mode": VM_OFFERING_MODE,
             "gpu_count": 2,
-            "vm_host": "kvm1",
+            "host_id": "kvm1",
         },
         deal_ref={"escrow_uid": escrow},
     )
@@ -290,7 +290,7 @@ def _just_expired_reservation(
         claim={
             "offering_mode": offering_mode,
             "gpu_count": 2,
-            "vm_host": "kvm1",
+            "host_id": "kvm1",
         },
         deal_ref={"escrow_uid": escrow},
     )

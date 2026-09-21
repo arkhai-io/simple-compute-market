@@ -42,7 +42,7 @@ class BareMetalLeaseService:
                 capacity_reservation_id=body.capacity_reservation_id,
                 escrow_uid=body.escrow_uid,
                 offering_mode=BARE_METAL_OFFERING_MODE,
-                executor_target=body.machine_id,
+                executor_target=body.host_id,
                 executor_ref=bare_metal_executor_ref(
                     body.physical_host_id,
                     access_ref=body.access_ref,

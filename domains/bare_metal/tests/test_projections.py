@@ -13,7 +13,7 @@ def _resource(**overrides):
     values = {
         "physical_resource_id": "resource-1",
         "physical_host_id": "host-physical-1",
-        "machine_id": "executor-machine-1",
+        "host_id": "executor-machine-1",
         "available": True,
         "allocation_mode": "exclusive",
         "access_methods": ["ssh"],
@@ -29,7 +29,7 @@ def test_resource_projection_preserves_distinct_identities_and_public_data():
 
     assert projection.physical_resource_id == "resource-1"
     assert projection.physical_host_id == "host-physical-1"
-    assert projection.machine_id == "executor-machine-1"
+    assert projection.host_id == "executor-machine-1"
     assert projection.available is True
     assert projection.access_methods == ["ssh"]
     assert projection.capacity == {"gpu_count": 8, "ram_gb": 512}
@@ -41,7 +41,7 @@ def test_resource_projection_preserves_distinct_identities_and_public_data():
     [
         {"physical_resource_id": ""},
         {"physical_host_id": ""},
-        {"machine_id": ""},
+        {"host_id": ""},
         {"allocation_mode": "shareable"},
         {"access_methods": []},
         {"capabilities": {"service_url": "https://private.invalid"}},
@@ -67,7 +67,7 @@ def test_trusted_projection_injects_site_generation_provenance():
     )
 
     assert generation.site_id == "site-a"
-    assert generation.resources[0].machine_id == "executor-machine-1"
+    assert generation.resources[0].host_id == "executor-machine-1"
 
 
 def test_authoritative_empty_generation_is_distinct_from_unavailable_generation():
@@ -108,5 +108,5 @@ def test_resource_identity_is_unique_within_trusted_site():
             revision=1,
             digest="duplicate",
             complete=True,
-            resources=[_resource(), _resource(machine_id="other-machine")],
+            resources=[_resource(), _resource(host_id="other-machine")],
         )

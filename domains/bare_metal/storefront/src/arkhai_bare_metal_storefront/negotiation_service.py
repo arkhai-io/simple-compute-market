@@ -523,7 +523,7 @@ class BareMetalNegotiationService:
                 status_code=400,
             )
         terms = BareMetalTerms(
-            machine_id=trusted_listing.machine_id,
+            host_id=trusted_listing.host_id,
             physical_host_id=trusted_listing.physical_host_id,
             duration_seconds=message.duration_seconds,
             access_method=message.access_method,
@@ -536,7 +536,7 @@ class BareMetalNegotiationService:
             "option_facts": selected.facts.model_dump(mode="json", exclude_none=True),
             "provision_terms": terms.model_dump(mode="json", exclude_none=True),
         }
-        return terms, {"bare_metal.v1": physical_terms}
+        return terms, {"bare_metal.v2": physical_terms}
 
     def _build_accepted_obligation(
         self,

@@ -29,7 +29,7 @@ database_url = "sqlite:///provisioning.db"
 # mode overrides it back to "".
 ansible_cfg = "/opt/domains/vms/provisioning/iac/ansible/ansible.cfg"
 ansible_timeout_seconds = 1800
-default_vm_host = "kvm1"
+default_host_id = "kvm1"
 
 # Ansible filesystem paths.
 # Set to absolute paths via your active profile or PROVISIONING_* env vars.

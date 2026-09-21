@@ -29,8 +29,8 @@ def init() -> None:
     engine = create_db_engine(settings.database_url, settings.is_sqlite)
     run_migrations(engine)
     resolved_session_factory = create_session_factory(engine)
-    # No eligibility invariant: token quota resources carry no host
-    # (unlike the VM site's required vm_host). Uses the domain-neutral
+    # No eligibility invariant: token quota resources carry no host.
+    # Uses the domain-neutral
     # unit_claim_keys default (("units",)) — this domain has no VM-style
     # "gpu_count" alias to opt into.
     resolved_capacity_ledger_service = CapacityLedgerService(

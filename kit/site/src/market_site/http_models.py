@@ -24,13 +24,20 @@ class ResourceRegisterRequest(BaseModel):
     )
     resource_type: str = Field(default="compute.gpu")
     pool_id: Optional[str] = Field(default=None)
+    host_id: Optional[str] = Field(
+        default=None,
+        description=(
+            "The host this capacity is delivered through, if any. At most one "
+            "resource may name a given host."
+        ),
+    )
     resource_subtype: Optional[str] = Field(
         default=None, description="e.g. the GPU model slug ('h200')."
     )
     attributes: dict[str, Any] = Field(
         default_factory=dict,
         description=(
-            "Resource-domain attributes (vm_host, gpu_model, region, …). "
+            "Resource-domain attributes (gpu_model, region, …). "
             "Market schema (pricing, escrows) stays on the storefront."
         ),
     )

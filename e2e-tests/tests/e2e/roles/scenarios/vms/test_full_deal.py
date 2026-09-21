@@ -1133,13 +1133,13 @@ class TestStage08a_EvaluateSettle:
             f"reason={result.get('reason')!r}\n"
             "Check that at least one compute resource is registered in the "
             "storefront's resource inventory with state='available' and a "
-            "vm_host matching the listing's region/gpu_model requirements."
+            "host_id matching the listing's region/gpu_model requirements."
         )
-        deal_state._evaluate_settle_vm_host = result.get("vm_host")
+        deal_state._evaluate_settle_host_id = result.get("host_id")
         deal_state._evaluate_settle_vm_target = result.get("vm_target")
         deal_state._evaluate_settle_passed = True
-        log.info("[08a] Evaluate settle: vm_host=%s vm_target=%s",
-                 result.get("vm_host"), result.get("vm_target"))
+        log.info("[08a] Evaluate settle: host_id=%s vm_target=%s",
+                 result.get("host_id"), result.get("vm_target"))
 
 
 # ===========================================================================
@@ -1158,13 +1158,13 @@ class TestStage08c_EvaluateProvisioningJob:
         """
         require_state(deal_state, "_evaluate_settle_passed", "provisioning_gate_armed")
 
-        vm_host = deal_state._evaluate_settle_vm_host
-        assert vm_host, (
-            "vm_host not captured from stage 08a — cannot evaluate provisioning job."
+        host_id = deal_state._evaluate_settle_host_id
+        assert host_id, (
+            "host_id not captured from stage 08a — cannot evaluate provisioning job."
         )
 
         result = provisioning_test_client.evaluate_job(
-            vm_host,
+            host_id,
             vm_target=deal_state._evaluate_settle_vm_target or "eval-target",
             vm_action="create",
         )
@@ -1172,7 +1172,7 @@ class TestStage08c_EvaluateProvisioningJob:
             f"Provisioning job params invalid. errors={result.get('errors')!r}"
         )
         assert result.get("host_exists") is True, (
-            f"Host {vm_host!r} not found in provisioning inventory."
+            f"Host {host_id!r} not found in provisioning inventory."
         )
         assert result.get("rule_matched") == PROV_RULE_ID, (
             f"Expected mock rule {PROV_RULE_ID!r} to match, "
@@ -1181,7 +1181,7 @@ class TestStage08c_EvaluateProvisioningJob:
         assert result.get("would_pause") is True
         deal_state._provision_job_evaluated = True
         log.info("[08c] Provisioning job evaluate: host=%s rule=%s",
-                 vm_host, result.get("rule_matched"))
+                 host_id, result.get("rule_matched"))
 
 
 # ===========================================================================
@@ -1532,7 +1532,7 @@ class TestStage09c_LeaseRegistered:
     ):
         """Provisioning owns the happy-path lease row after fulfillment.
 
-        Placement is confirmed here, not at stage 08b, because ``vm_host`` is
+        Placement is confirmed here, not at stage 08b, because ``host_id`` is
         intentionally opaque across the ordinary buyer-facing reservation
         boundary (openspec/specs/site-capacity/spec.md's "Capacity accounting
         is private to the site authority" requirement) -- this admin-only
@@ -1559,9 +1559,9 @@ class TestStage09c_LeaseRegistered:
         lease_view = DealLease(provisioning_client, deal_state.real_escrow_uid)
         lease = lease_view.refresh()
         assert lease.get("escrow_uid") == deal_state.real_escrow_uid
-        assert lease.get("vm_host") == deal_state._evaluate_settle_vm_host, (
-            f"lease bound to executor {lease.get('vm_host')!r}; stage 08a's "
-            f"evaluate_settle chose {deal_state._evaluate_settle_vm_host!r}. "
+        assert lease.get("host_id") == deal_state._evaluate_settle_host_id, (
+            f"lease bound to executor {lease.get('host_id')!r}; stage 08a's "
+            f"evaluate_settle chose {deal_state._evaluate_settle_host_id!r}. "
             f"Lease: {lease}"
         )
         assert lease.get("create_job_id"), (

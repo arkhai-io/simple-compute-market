@@ -270,7 +270,7 @@ phases:
           fi
           curl -fsS -X POST http://localhost:8081/api/v1/hosts/ \
             -H 'Content-Type: application/json' \
-            -d '{"name":"kvm1","kvm_host":"127.0.0.1","ssh_user":"appuser","ssh_key_type":"path","ssh_key_value":"/home/appuser/.ssh/id_ed25519","gpu_count":1,"enabled":true}' \
+            -d '{"host_id":"kvm1","ssh_host":"127.0.0.1","ssh_user":"appuser","ssh_key_type":"path","ssh_key_value":"/home/appuser/.ssh/id_ed25519","gpu_count":1,"enabled":true}' \
             | jq .
 
   - id: smoke_marker_tests

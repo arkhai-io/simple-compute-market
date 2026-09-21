@@ -106,7 +106,7 @@ def engine():
         ))
         connection.execute(text(
             """
-            INSERT INTO hosts (name, kvm_host, ssh_user, ssh_key_type, ssh_key_value,
+            INSERT INTO hosts (host_id, ssh_host, ssh_user, ssh_key_type, ssh_key_value,
                                 gpu_count, enabled, pool_id)
             VALUES ('kvm1', '10.0.0.1', 'root', 'path', '/keys/id_ed25519', 0, 1, 'default')
             """

@@ -41,7 +41,7 @@ def site(signer_pair: tuple[Signer, Signer]) -> FakeSite:
     fake.add_resource(
         "compute-kvm1-001",
         8,
-        attributes={"vm_host": "kvm1", "gpu_model": "H200"},
+        attributes={"host_id": "kvm1", "gpu_model": "H200"},
     )
     return fake
 
@@ -102,7 +102,7 @@ async def test_every_public_async_method_uses_the_exact_route_contract(
         await capacity_client.probe(
             claim={"offering_mode": "vm", "gpu_model": "H200"}
         )
-    )["vm_host"] == "kvm1"
+    )["host_id"] == "kvm1"
 
     reserved = await capacity_client.reserve(
         claim={"offering_mode": "vm", "gpu_count": 3},

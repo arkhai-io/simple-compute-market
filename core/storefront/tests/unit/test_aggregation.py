@@ -41,7 +41,7 @@ class FakeSite:
             "value": self.units,
             "available_units": self.available,
             "state": "available" if self.available else "leased",
-            "attributes": {"vm_host": "h"},
+            "attributes": {"host_id": "h"},
         }]
 
     async def probe(

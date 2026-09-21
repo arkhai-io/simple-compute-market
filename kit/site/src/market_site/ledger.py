@@ -10,9 +10,9 @@ the ``/api/v1/capacity`` HTTP surface, which mirrors the
 Matching semantics: a claim is an exact-match attribute mapping plus a
 quantity request, checked first against the resource's attributes JSON
 and then against its top-level fields. Domain-specific eligibility should
-normally be expressed in those claims — for example VM claims name
-``vm_host`` while bare-metal claims name ``physical_host_id`` and
-``allocation_mode``. ``required_attributes`` remains available for
+normally be expressed in those claims — for example bare-metal claims
+name ``physical_host_id`` and ``allocation_mode``. The host a resource is
+delivered through is its ``host_id`` column, not a matchable attribute. ``required_attributes`` remains available for
 single-domain hosts that need a coarse local invariant, but multi-domain
 provisioners should pass none.
 
@@ -74,8 +74,7 @@ OFFERING_MODE_CLAIM_KEY = "offering_mode"
 
 def _executor_ref_for_resource(resource: CapacityBucket) -> dict[str, Any] | None:
     """Build the generic ``executor_ref`` a reservation should carry when
-    it binds to ``resource``, from that resource's domain-specific
-    ``vm_host`` attribute.
+    it binds to ``resource``, from that resource's ``host_id``.
 
     ``kit/site`` carries no VM-specific columns on the shared reservation
     table — physical placement identity lives uniformly in the generic
@@ -85,8 +84,7 @@ def _executor_ref_for_resource(resource: CapacityBucket) -> dict[str, Any] | Non
     (fresh reservation, resize-supersede, settlement-resource rebind) so
     they cannot drift from each other.
     """
-    vm_host = (resource.attributes or {}).get("vm_host")
-    return {"vm_host": vm_host} if vm_host else None
+    return {"host_id": resource.host_id} if resource.host_id else None
 
 
 class CapacityConflictError(Exception):
@@ -348,6 +346,7 @@ class ResourceFeasibilityView:
     resource_kind: str
     available: Mapping[str, Any]
     attributes: Mapping[str, Any]
+    host_id: str | None = None
 
 
 def resource_feasibility_view(
@@ -360,10 +359,15 @@ def resource_feasibility_view(
     resource_subtype: str | None = None,
     value: Any = None,
     units: Any = None,
+    host_id: str | None = None,
 ) -> ResourceFeasibilityView:
     """Build the immutable, authoritative view used for feasibility checks."""
+    # ``host_id`` joins the matchable facts beside ``resource_id`` so a claim
+    # may still pin the host a resource is delivered through; it is a column
+    # of the resource, not one of its declared attributes.
     normalized = {
         "resource_id": resource_id,
+        "host_id": host_id,
         "resource_type": resource_kind,
         "resource_subtype": resource_subtype,
         "value": value,
@@ -379,6 +383,7 @@ def resource_feasibility_view(
         resource_kind=resource_kind,
         available=MappingProxyType(dict(available)),
         attributes=MappingProxyType(normalized),
+        host_id=host_id,
     )
 
 
@@ -470,6 +475,7 @@ def dict_resource_satisfies_claim(
         resource_subtype=row.get("resource_subtype"),
         value=row.get("value"),
         units=row.get("available_units"),
+        host_id=row.get("host_id"),
     )
     return resource_satisfies_requirement(
         resource=resource,
@@ -491,6 +497,7 @@ def _resource_feasibility_view(
         resource_subtype=resource.resource_subtype,
         value=resource.total_units,
         units=resource.total_units,
+        host_id=resource.host_id,
     )
 
 
@@ -587,8 +594,13 @@ class CapacityLedgerService:
         attributes: Mapping[str, Any] | None = None,
         capacity: Mapping[str, Any] | None = None,
         enabled: bool = True,
+        host_id: str | None = None,
     ) -> dict[str, Any]:
         """Insert or update a ledger resource; emits a delta on change.
+
+        ``host_id`` names the host this capacity is delivered through. At
+        most one resource may name a given host; naming one another resource
+        already names raises ``CapacityConflictError``.
 
         ``capacity`` is the multidimensional total.
         ``total_units`` remains a service-maintained mirror of ``capacity["gpu_count"]``.
@@ -628,6 +640,17 @@ class CapacityLedgerService:
                 for key, value in new_dimensions.items()
             }
             mirrored_units = int(new_capacity[PRIMARY_DIMENSION])
+            if host_id is not None:
+                holder = (
+                    db.query(CapacityBucket)
+                    .filter(CapacityBucket.host_id == host_id)
+                    .one_or_none()
+                )
+                if holder is not None and holder.backing_resource_id != resource_id:
+                    raise CapacityConflictError(
+                        f"host {host_id!r} already carries resource "
+                        f"{holder.backing_resource_id!r}"
+                    )
             is_new = bucket is None
             effective_pool_id = pool_id
             if bucket is None:
@@ -641,6 +664,7 @@ class CapacityLedgerService:
                     capacity=_serialize_dimensions(new_capacity),
                     attributes=dict(attributes or {}),
                     enabled=enabled,
+                    host_id=host_id,
                 )
                 db.add(bucket)
             else:
@@ -651,6 +675,7 @@ class CapacityLedgerService:
                 bucket.capacity = _serialize_dimensions(new_capacity)
                 bucket.attributes = dict(attributes or {})
                 bucket.enabled = enabled
+                bucket.host_id = host_id
             delta = {
                 key: new_capacity.get(key, Decimal(0))
                 - old_capacity.get(key, Decimal(0))
@@ -1544,7 +1569,7 @@ class CapacityLedgerService:
         return self._reservation_payload(reservation)
 
     def find_active_lease_by_vm_target(
-        self, vm_host: str, vm_target: str
+        self, host_id: str, vm_target: str
     ) -> dict[str, Any] | None:
         """Return the first active (held) lease reservation for a VM, or None.
 
@@ -1552,7 +1577,7 @@ class CapacityLedgerService:
         watchdog-managed lease before submitting the explicit removal job,
         avoiding a double-fire when the lease would otherwise expire later.
 
-        ``vm_host`` is matched via ``executor_ref``'s JSON payload and
+        ``host_id`` is matched via ``executor_ref``'s JSON payload and
         ``vm_target`` via ``executor_target`` — neither
         ``CapacityReservation`` column exists anymore (see
         ``docs/development/ARCHITECTURE.md``, "Shared vocabulary and
@@ -1566,8 +1591,8 @@ class CapacityLedgerService:
             reservation = (
                 db.query(CapacityReservation)
                 .filter(
-                    func.json_extract(CapacityReservation.executor_ref, "$.vm_host")
-                    == vm_host,
+                    func.json_extract(CapacityReservation.executor_ref, "$.host_id")
+                    == host_id,
                     CapacityReservation.executor_target == vm_target,
                     CapacityReservation.state.in_(HELD_RESERVATION_STATES),
                     CapacityReservation.lease_end_utc.isnot(None),
@@ -2023,6 +2048,7 @@ class CapacityLedgerService:
             "pool_id": row.pool_id,
             "resource_type": row.resource_type,
             "resource_subtype": row.resource_subtype,
+            "host_id": row.host_id,
             "unit": "count",
             "value": total,
             "state": state,
@@ -2127,7 +2153,7 @@ class CapacityLedgerService:
             "resource_id": resource.backing_resource_id,
             "pool_id": None,
             "member_id": None,
-            "vm_host": attrs.get("vm_host"),
+            "host_id": resource.host_id,
             "resource_subtype": resource.resource_subtype,
             "unit": "count",
             "state": "available",
@@ -2161,7 +2187,7 @@ class CapacityLedgerService:
             "executor_target": reservation.executor_target,
             "release_job_id": reservation.release_job_id,
             "executor_ref": dict(reservation.executor_ref or {}),
-            "vm_host": (reservation.executor_ref or {}).get("vm_host"),
+            "host_id": (reservation.executor_ref or {}).get("host_id"),
             "vm_target": (
                 reservation.executor_target
                 if reservation.offering_mode == VM_OFFERING_MODE

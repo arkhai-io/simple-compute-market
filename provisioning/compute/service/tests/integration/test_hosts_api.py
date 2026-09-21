@@ -26,8 +26,8 @@ from vm_provisioning_operator.models import HostCreate, HostListResponse, HostRe
 
 
 _SAMPLE_HOST = HostCreate(
-    name="kvm1",
-    kvm_host="10.0.0.1",
+    host_id="kvm1",
+    ssh_host="10.0.0.1",
     ssh_user="ubuntu",
     ssh_key_type="path",
     ssh_key_value="/home/appuser/.ssh/id_ed25519",
@@ -61,8 +61,8 @@ class TestRegisterHost:
         client, _ = client_and_queue
         host = await _register(client)
         assert isinstance(host, HostResponse)
-        assert host.name == "kvm1"
-        assert host.kvm_host == "10.0.0.1"
+        assert host.host_id == "kvm1"
+        assert host.ssh_host == "10.0.0.1"
         assert host.ssh_user == "ubuntu"
         assert host.gpu_count == 2
         assert host.enabled is True
@@ -71,7 +71,7 @@ class TestRegisterHost:
         client, _ = client_and_queue
         await _register(client)
         result = await client.list_hosts()
-        assert any(h.name == "kvm1" for h in result.hosts)
+        assert any(h.host_id == "kvm1" for h in result.hosts)
         assert result.total == len(result.hosts)
 
     async def test_register_host_client_contract(self, client_and_queue):
@@ -79,15 +79,15 @@ class TestRegisterHost:
         client, _ = client_and_queue
         host = await _register(client)
         assert isinstance(host, HostResponse)
-        assert host.name == _SAMPLE_HOST.name
-        assert host.kvm_host == _SAMPLE_HOST.kvm_host
+        assert host.host_id == _SAMPLE_HOST.host_id
+        assert host.ssh_host == _SAMPLE_HOST.ssh_host
 
     async def test_register_with_gpu_model_round_trips_through_the_real_api(
         self, client_and_queue,
     ):
         client, _ = client_and_queue
         host = await client.register_host(HostCreate(
-            name="kvm1", kvm_host="10.0.0.1", ssh_user="ubuntu",
+            host_id="kvm1", ssh_host="10.0.0.1", ssh_user="ubuntu",
             ssh_key_type="path", ssh_key_value="/home/appuser/.ssh/id_ed25519",
             gpu_count=8, gpu_model="H100",
         ))
@@ -107,7 +107,7 @@ class TestGetHost:
         await _register(client)
         host = await client.get_host("kvm1")
         assert isinstance(host, HostResponse)
-        assert host.name == "kvm1"
+        assert host.host_id == "kvm1"
 
     async def test_get_unknown_host_raises_404(self, client_and_queue):
         client, _ = client_and_queue
@@ -120,9 +120,9 @@ class TestUpdateHost:
     async def test_update_kvm_host_ip(self, client_and_queue):
         client, _ = client_and_queue
         await _register(client)
-        updated = await client.update_host("kvm1", HostUpdate(kvm_host="10.0.0.99"))
+        updated = await client.update_host("kvm1", HostUpdate(ssh_host="10.0.0.99"))
         assert isinstance(updated, HostResponse)
-        assert updated.kvm_host == "10.0.0.99"
+        assert updated.ssh_host == "10.0.0.99"
 
     async def test_update_persisted_on_get(self, client_and_queue):
         client, _ = client_and_queue
@@ -142,7 +142,7 @@ class TestUpdateHost:
     async def test_update_unknown_host_raises_404(self, client_and_queue):
         client, _ = client_and_queue
         with pytest.raises(ProvisioningError) as exc_info:
-            await client.update_host("ghost", HostUpdate(kvm_host="1.2.3.4"))
+            await client.update_host("ghost", HostUpdate(ssh_host="1.2.3.4"))
         assert exc_info.value.status_code == 404
 
 
@@ -159,7 +159,7 @@ class TestEnableDisableHost:
         await _register(client)
         await client.disable_host("kvm1")
         result = await client.list_hosts()
-        assert not any(h.name == "kvm1" for h in result.hosts)
+        assert not any(h.host_id == "kvm1" for h in result.hosts)
         assert result.total == len(result.hosts)
 
     async def test_disabled_host_visible_with_include_disabled(self, client_and_queue):
@@ -167,7 +167,7 @@ class TestEnableDisableHost:
         await _register(client)
         await client.disable_host("kvm1")
         result = await client.list_hosts(include_disabled=True)
-        assert any(h.name == "kvm1" for h in result.hosts)
+        assert any(h.host_id == "kvm1" for h in result.hosts)
         assert result.total == len(result.hosts)
 
     async def test_enable_restores_visibility(self, client_and_queue):
@@ -176,7 +176,7 @@ class TestEnableDisableHost:
         await client.disable_host("kvm1")
         await client.enable_host("kvm1")
         result = await client.list_hosts()
-        assert any(h.name == "kvm1" for h in result.hosts)
+        assert any(h.host_id == "kvm1" for h in result.hosts)
         assert result.total == len(result.hosts)
 
     async def test_disable_unknown_host_raises_404(self, client_and_queue):
@@ -191,7 +191,7 @@ class TestImportHosts:
         client, _ = client_and_queue
         result = await client.import_hosts_from_text(_SAMPLE_INI, ssh_key_type="path")
         assert isinstance(result, HostListResponse)
-        names = [h.name for h in result.hosts]
+        names = [h.host_id for h in result.hosts]
         assert "kvm1" in names
         assert "ww2" in names
         assert result.total == len(result.hosts)
@@ -201,7 +201,7 @@ class TestImportHosts:
         for _ in range(2):
             await client.import_hosts_from_text(_SAMPLE_INI, ssh_key_type="path")
         result = await client.list_hosts()
-        names = [h.name for h in result.hosts]
+        names = [h.host_id for h in result.hosts]
         assert len(names) == len(set(names))
         assert "kvm1" in names
         assert "ww2" in names
@@ -236,7 +236,7 @@ class TestConnectivity:
         fake_ansible.write_inventory.assert_called_once()
         called_hosts = fake_ansible.write_inventory.call_args[0][0]
         assert len(called_hosts) == 1
-        assert called_hosts[0].name == "kvm1"
+        assert called_hosts[0].host_id == "kvm1"
 
     async def test_connectivity_unknown_host_raises_404(self, client_and_queue):
         client, _ = client_and_queue
@@ -249,7 +249,7 @@ class TestSshPort:
     """The SSH port survives the real client, API, service, and database.
 
     A host reached through a tunnel answers on a port rather than on 22 at
-    `kvm_host`. Unit tests cover each layer that has to carry the port; only
+    `ssh_host`. Unit tests cover each layer that has to carry the port; only
     this level proves the canonical client and the server model agree about the
     field, which is where a serialization mismatch would otherwise hide until a
     real host failed to connect.
@@ -258,7 +258,7 @@ class TestSshPort:
     async def test_register_with_a_tunnel_port_round_trips(self, client_and_queue):
         client, _ = client_and_queue
         host = await client.register_host(HostCreate(
-            name="kvm1", kvm_host="10.0.0.1", ssh_user="ubuntu",
+            host_id="kvm1", ssh_host="10.0.0.1", ssh_user="ubuntu",
             ssh_key_type="path", ssh_key_value="/home/appuser/.ssh/id_ed25519",
             ssh_port=6000,
         ))
@@ -280,7 +280,7 @@ class TestSshPort:
     async def test_update_without_a_port_leaves_it_alone(self, client_and_queue):
         client, _ = client_and_queue
         await client.register_host(HostCreate(
-            name="kvm1", kvm_host="10.0.0.1", ssh_user="ubuntu",
+            host_id="kvm1", ssh_host="10.0.0.1", ssh_user="ubuntu",
             ssh_key_type="path", ssh_key_value="/home/appuser/.ssh/id_ed25519",
             ssh_port=6000,
         ))
@@ -290,12 +290,12 @@ class TestSshPort:
     async def test_the_port_appears_in_the_list_response(self, client_and_queue):
         client, _ = client_and_queue
         await client.register_host(HostCreate(
-            name="kvm1", kvm_host="10.0.0.1", ssh_user="ubuntu",
+            host_id="kvm1", ssh_host="10.0.0.1", ssh_user="ubuntu",
             ssh_key_type="path", ssh_key_value="/home/appuser/.ssh/id_ed25519",
             ssh_port=6001,
         ))
         listed = await client.list_hosts()
-        assert [h.ssh_port for h in listed.hosts if h.name == "kvm1"] == [6001]
+        assert [h.ssh_port for h in listed.hosts if h.host_id == "kvm1"] == [6001]
 
     async def test_an_imported_inventory_port_reaches_the_registry(
         self, client_and_queue,
@@ -307,7 +307,7 @@ class TestSshPort:
             "ansible_ssh_private_key_file=/home/appuser/.ssh/id_ed25519\n",
             ssh_key_type="path",
         )
-        assert [h.ssh_port for h in result.hosts if h.name == "kvm1"] == [6000]
+        assert [h.ssh_port for h in result.hosts if h.host_id == "kvm1"] == [6000]
         assert (await client.get_host("kvm1")).ssh_port == 6000
 
     async def test_an_imported_inventory_without_a_port_defaults_to_22(
@@ -330,7 +330,7 @@ class TestSshPortRejection:
     async def test_the_typed_client_rejects_an_out_of_range_port(self):
         with pytest.raises(ValueError):
             HostCreate(
-                name="kvm1", kvm_host="10.0.0.1", ssh_user="ubuntu",
+                host_id="kvm1", ssh_host="10.0.0.1", ssh_user="ubuntu",
                 ssh_key_type="path", ssh_key_value="/keys/id", ssh_port=70000,
             )
 
@@ -340,7 +340,7 @@ class TestSshPortRejection:
         response = await client._client.post(  # noqa: SLF001 - malformed body by design
             "/api/v1/hosts/",
             json={
-                "name": "kvm1", "kvm_host": "10.0.0.1", "ssh_user": "ubuntu",
+                "host_id": "kvm1", "ssh_host": "10.0.0.1", "ssh_user": "ubuntu",
                 "ssh_key_type": "path", "ssh_key_value": "/keys/id",
                 "ssh_port": port,
             },

@@ -72,24 +72,22 @@ def _resource() -> SettlementResource:
         pool_id="pool-1",
         resource_kind="compute.bare-metal",
         provider="bare_metal.ansible",
+        host_id="machine-1",
         attributes={
-            "bare_metal_publication": {
-                "enabled": True,
-                "machine_id": "machine-1",
-                "physical_host_id": "physical-host-1",
-            }
+            "physical_host_id": "physical-host-1",
+            "bare_metal_publication": {"enabled": True},
         },
     )
 
 
-def _request(*, machine_id: str = "machine-1") -> VersionedEnvelope:
+def _request(*, host_id: str = "machine-1") -> VersionedEnvelope:
     return VersionedEnvelope(
-        kind="bare_metal.v1",
+        kind="bare_metal.v2",
         schema_version=1,
         payload={
-            "kind": "bare_metal.v1",
+            "kind": "bare_metal.v2",
             "escrow_uid": "escrow-1",
-            "machine_id": machine_id,
+            "host_id": host_id,
             "physical_host_id": "physical-host-1",
             "lease_start_utc": "2030-01-01T00:00:00Z",
             "lease_end_utc": "2030-01-02T00:00:00Z",
@@ -123,7 +121,7 @@ async def test_selected_resource_drives_idempotent_grant_result_and_teardown():
 
     created = await provider.dispatch_create(prepared)
     lease, create_contract = operations.create[0]
-    assert lease.machine_id == "machine-1"
+    assert lease.host_id == "machine-1"
     assert lease.physical_host_id == "physical-host-1"
     assert create_contract.idempotency_key == "reservation-1:grant-access"
     assert provider.resolve_provisioned_resources(created.provider_metadata) == (
@@ -139,9 +137,9 @@ async def test_selected_resource_drives_idempotent_grant_result_and_teardown():
 
     public_result = await provider.fetch_credentials(created.provider_metadata, ())
     assert public_result.payload == {
-        "kind": "bare_metal.v1",
+        "kind": "bare_metal.v2",
         "action": "node_grant_access",
-        "machine_id": "machine-1",
+        "host_id": "machine-1",
         "physical_host_id": "physical-host-1",
         "ssh_user": "buyer",
         "host": "203.0.113.25",
@@ -184,11 +182,11 @@ def test_buyer_payload_cannot_replace_selected_machine():
     provider, _ = _provider()
     with pytest.raises(
         ProviderConfigInvalidError,
-        match="machine_id does not match the selected resource",
+        match="host_id does not match the selected resource",
     ):
         provider.prepare_create(
             capacity_reservation_id="reservation-1",
-            request=_request(machine_id="attacker-machine"),
+            request=_request(host_id="attacker-machine"),
             resource=_resource(),
             pool_config={},
         )

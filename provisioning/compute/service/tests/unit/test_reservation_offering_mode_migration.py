@@ -163,7 +163,7 @@ class TestReservationColumnRename:
         with engine.begin() as connection:
             _reservation(
                 connection, "r1", "vm",
-                target="vm-a", ref=json.dumps({"vm_host": "host-1"}),
+                target="vm-a", ref=json.dumps({"host_id": "host-1"}),
             )
 
         _migrate_reservation_offering_mode_name(engine)
@@ -178,7 +178,7 @@ class TestReservationColumnRename:
                 )
             ).one()
         assert target == "vm-a"
-        assert json.loads(ref) == {"vm_host": "host-1"}
+        assert json.loads(ref) == {"host_id": "host-1"}
 
     def test_rerunning_is_a_no_op(self):
         engine = _pre_upgrade_engine()

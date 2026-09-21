@@ -465,7 +465,7 @@ def validate_accepted_hosted_plan(
     else:
         terms = dict(seller_terms)
     expected_service_terms = {
-        "bare_metal.v1": {
+        "bare_metal.v2": {
             "listing_id": listing_id,
             "option_id": option.option.option_id,
             "option_facts": option.facts.model_dump(mode="json", exclude_none=True),

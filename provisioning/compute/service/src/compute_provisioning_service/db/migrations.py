@@ -549,6 +549,11 @@ def _migrate_legacy_vm_leases_to_fulfillment(engine: Engine) -> None:
     from market_fulfillment.db import Base as FulfillmentBase
 
     FulfillmentBase.metadata.create_all(engine)
+    # A settlement table older than the host-identity migration lacks the
+    # column the backfill's drafts name their host in.
+    _add_column_if_missing(
+        engine, "settlement_records", "resource_host_id", "VARCHAR"
+    )
 
     with engine.begin() as connection:
         _apply_legacy_vm_lease_backfill(connection)
@@ -579,6 +584,7 @@ def _existing_settlement_row_conflicts(existing, draft) -> bool:
         draft.pool_id,
         draft.provider,
         draft.resource_attributes,
+        draft.resource_host_id,
         draft.provider_metadata,
         draft.teardown_provider_metadata,
         draft.prepared_teardown_operation,
@@ -589,6 +595,7 @@ def _existing_settlement_row_conflicts(existing, draft) -> bool:
         existing["pool_id"],
         existing["provider"],
         _normalize_json_column(existing["resource_attributes"]),
+        existing["resource_host_id"],
         _normalize_json_column(existing["provider_metadata"]),
         _normalize_json_column(existing["teardown_provider_metadata"]),
         _normalize_json_column(existing["prepared_teardown_operation"]),
@@ -632,6 +639,12 @@ def _apply_legacy_vm_lease_backfill(connection) -> None:
         compile_legacy_vm_fulfillment_backfill,
     )
 
+    # The retired ``vm_leases`` table names its host ``vm_host``; the host
+    # registry's key is ``host_id`` once the host-identity migration has run
+    # and ``name`` before it. This backfill runs before that migration on a
+    # real upgrade, but a database created from current models can hold both.
+    host_columns = {c["name"] for c in inspect(connection).get_columns("hosts")}
+    host_key = "host_id" if "host_id" in host_columns else "name"
     rows = connection.execute(text(
         """
         SELECT vl.id AS lease_id, vl.allocation_id, vl.escrow_uid,
@@ -642,12 +655,12 @@ def _apply_legacy_vm_lease_backfill(connection) -> None:
         FROM vm_leases vl
         LEFT JOIN capacity_reservations cr
           ON cr.capacity_reservation_id = vl.allocation_id
-        LEFT JOIN hosts h ON h.name = vl.vm_host
+        LEFT JOIN hosts h ON h.{host_key} = vl.vm_host
         LEFT JOIN resource_pools rp ON rp.id = h.pool_id
         LEFT JOIN ansible_pool_configs apc ON apc.pool_id = h.pool_id
         WHERE vl.status IN ('provisioning','leased','releasing','release_failed')
         ORDER BY vl.id
-        """
+        """.replace("{host_key}", _validate_sql_identifier(host_key))
     )).mappings().all()
 
     seen_reservations: set[str] = set()
@@ -710,7 +723,7 @@ def _apply_legacy_vm_lease_backfill(connection) -> None:
         existing = connection.execute(text(
             "SELECT capacity_reservation_id, state, scheduling_requirements, "
             "settlement_resource_id, pool_id, provider, resource_attributes, "
-            "provider_metadata, teardown_provider_metadata, prepared_teardown_operation "
+            "resource_host_id, provider_metadata, teardown_provider_metadata, prepared_teardown_operation "
             "FROM settlement_records WHERE capacity_reservation_id=:id"
         ), {"id": draft.capacity_reservation_id}).mappings().one_or_none()
         requirements = {
@@ -776,15 +789,16 @@ def _apply_legacy_vm_lease_backfill(connection) -> None:
         connection.execute(text(
             """INSERT INTO settlement_records (
                 capacity_reservation_id, fulfillment_id, market, scheduling_requirements,
-                settlement_resource_id, pool_id, provider, resource_attributes,
+                settlement_resource_id, pool_id, provider, resource_attributes, resource_host_id,
                 prepared_teardown_operation, provider_metadata, teardown_provider_metadata, state, attempt_count
-            ) VALUES (:rid,:fid,'vms',:requirements,:resource_id,:pool_id,:provider,:attributes,
+            ) VALUES (:rid,:fid,'vms',:requirements,:resource_id,:pool_id,:provider,:attributes,:host_id,
                       :prepared_teardown,:metadata,:teardown_metadata,:state,0)"""
         ), {
             "rid": draft.capacity_reservation_id, "fid": draft.fulfillment_id,
             "requirements": json.dumps(requirements, sort_keys=True), "resource_id": draft.settlement_resource_id,
             "pool_id": draft.pool_id, "provider": draft.provider,
             "attributes": json.dumps(draft.resource_attributes),
+            "host_id": draft.resource_host_id,
             "prepared_teardown": json.dumps(draft.prepared_teardown_operation) if draft.prepared_teardown_operation is not None else None,
             "metadata": json.dumps(draft.provider_metadata),
             "teardown_metadata": json.dumps(draft.teardown_provider_metadata) if draft.teardown_provider_metadata is not None else None,
@@ -1837,6 +1851,345 @@ def count_rows_carrying_retired_offering_mode_key(engine: Engine) -> int:
     return stale
 
 
+class HostIdentityMigrationError(RuntimeError):
+    """A persisted row names its host inconsistently; nothing was written."""
+
+
+# Columns carrying a host's identity or address under a name the host registry
+# no longer uses, as (table, retired column, current column).
+_HOST_IDENTITY_COLUMN_RENAMES: tuple[tuple[str, str, str], ...] = (
+    ("hosts", "name", "host_id"),
+    ("hosts", "kvm_host", "ssh_host"),
+    ("relay_port_leases", "host_name", "host_id"),
+)
+
+# JSON keys that named the host, or its address, before it had one name.
+_RETIRED_HOST_KEYS: dict[str, str] = {
+    "vm_host": "host_id",
+    "machine_id": "host_id",
+    "vm_host_ip": "host_ip",
+}
+
+# Provider operation envelopes whose payload names the host. Schema 2 of each
+# names it ``host_id``; a stored schema-1 operation is rewritten to schema 2 so
+# dispatch, which accepts only schema 2, can still run it.
+_HOST_NAMING_OPERATION_KINDS = frozenset({
+    "vm.ansible.create.v1",
+    "vm.ansible.teardown.v1",
+    "bare_metal.fulfillment.create.v1",
+    "bare_metal.fulfillment.teardown.v1",
+})
+_RETIRED_BARE_METAL_KIND = "bare_metal.v1"
+_BARE_METAL_KIND = "bare_metal.v2"
+
+# Settlement-record JSON columns that may name the host inside a nested value.
+_SETTLEMENT_JSON_COLUMNS = (
+    "prepared_create_operation",
+    "prepared_teardown_operation",
+    "provider_metadata",
+    "teardown_provider_metadata",
+    "fulfillment_request",
+)
+
+
+def _rename_retired_host_keys(value, *, where: str):
+    """Return ``value`` with every retired host key renamed, recursively.
+
+    A mapping carrying both a retired key and its current key with different
+    values names two hosts, so it is refused rather than resolved.
+    """
+    if isinstance(value, list):
+        return [_rename_retired_host_keys(item, where=where) for item in value]
+    if not isinstance(value, dict):
+        return value
+    renamed = {}
+    for key, item in value.items():
+        renamed[key] = _rename_retired_host_keys(item, where=where)
+    for retired, current in _RETIRED_HOST_KEYS.items():
+        if retired not in renamed:
+            continue
+        retired_value = renamed.pop(retired)
+        if current in renamed and renamed[current] != retired_value:
+            raise HostIdentityMigrationError(
+                f"{where} names two hosts: {retired}={retired_value!r} and "
+                f"{current}={renamed[current]!r}"
+            )
+        renamed[current] = retired_value
+    return renamed
+
+
+def _carries_retired_host_key(value) -> bool:
+    if isinstance(value, list):
+        return any(_carries_retired_host_key(item) for item in value)
+    if not isinstance(value, dict):
+        return False
+    return any(key in _RETIRED_HOST_KEYS for key in value) or any(
+        _carries_retired_host_key(item) for item in value.values()
+    )
+
+
+def _upgrade_host_naming_envelope(envelope, *, where: str):
+    """Rename host keys in a versioned envelope and raise its schema to match."""
+    if not isinstance(envelope, dict):
+        return envelope
+    upgraded = _rename_retired_host_keys(envelope, where=where)
+    if (
+        upgraded.get("kind") in _HOST_NAMING_OPERATION_KINDS
+        and upgraded.get("schema_version") == 1
+    ):
+        upgraded["schema_version"] = 2
+    if upgraded.get("kind") == _RETIRED_BARE_METAL_KIND:
+        upgraded["kind"] = _BARE_METAL_KIND
+    return upgraded
+
+
+def _normalize_declared_host(attributes, current_host, *, where: str):
+    """Split a declaration's host link and cross-mode fields out of attributes.
+
+    Returns ``(attributes, host_id)``. The host was named by a ``vm_host``
+    attribute on VM declarations and by an enabled publication's
+    ``machine_id`` on bare-metal ones; the physical-machine identity and
+    allocation mode lived at the top level for the ledger and inside the
+    publication for its view. Afterwards the host is one field and the
+    cross-mode fields have one location, the top level the ledger reads.
+    """
+    attributes = dict(attributes or {})
+    candidates = []
+    if current_host:
+        candidates.append(str(current_host))
+    vm_host = attributes.pop("vm_host", None)
+    if vm_host:
+        candidates.append(str(vm_host))
+    publication = attributes.get("bare_metal_publication")
+    if isinstance(publication, dict):
+        publication = dict(publication)
+        machine_id = publication.pop("machine_id", None)
+        if machine_id and publication.get("enabled"):
+            candidates.append(str(machine_id))
+        for field in ("physical_host_id", "allocation_mode"):
+            if field not in publication:
+                continue
+            nested = publication.pop(field)
+            if field in attributes and attributes[field] != nested:
+                raise HostIdentityMigrationError(
+                    f"{where} gives {field} as {attributes[field]!r} at the top "
+                    f"level and {nested!r} in its publication"
+                )
+            attributes[field] = nested
+        attributes["bare_metal_publication"] = publication
+    hosts = sorted(set(candidates))
+    if len(hosts) > 1:
+        raise HostIdentityMigrationError(
+            f"{where} names more than one host: {hosts}"
+        )
+    return attributes, (hosts[0] if hosts else None)
+
+
+def _add_column_in_connection(connection, table: str, column: str) -> None:
+    columns = {c["name"] for c in inspect(connection).get_columns(table)}
+    if column not in columns:
+        connection.execute(
+            text(
+                f"ALTER TABLE {_validate_sql_identifier(table)} "
+                f"ADD COLUMN {_validate_sql_identifier(column)} VARCHAR"
+            )
+        )
+
+
+def _json_param(value):
+    return None if value is None else json.dumps(
+        value, sort_keys=True, separators=(",", ":")
+    )
+
+
+def _migrate_host_identity(engine: Engine) -> None:
+    """Name the host ``host_id`` on every persisted surface, in one transaction.
+
+    A host's identity is one value, so every row naming it moves together:
+    a registry renamed while declarations or execution references still name
+    the old key would leave teardown looking up a key nothing writes. Every
+    row is checked and every rewrite computed before the first write, so a
+    row that names its host inconsistently aborts the whole migration with
+    nothing changed rather than leaving a partially renamed database.
+    """
+    with engine.begin() as connection:
+        existing = set(inspect(connection).get_table_names())
+        updates: list[tuple[str, dict]] = []
+
+        if "capacity_buckets" in existing:
+            _add_column_in_connection(connection, "capacity_buckets", "host_id")
+            owners: dict[str, str] = {}
+            for row in connection.execute(text(
+                "SELECT capacity_bucket_id, backing_resource_id, attributes, host_id "
+                "FROM capacity_buckets"
+            )).mappings().all():
+                where = f"capacity resource {row['backing_resource_id']!r}"
+                attributes, host_id = _normalize_declared_host(
+                    _normalize_json_column(row["attributes"]),
+                    row["host_id"],
+                    where=where,
+                )
+                if host_id is not None:
+                    holder = owners.setdefault(host_id, row["backing_resource_id"])
+                    if holder != row["backing_resource_id"]:
+                        raise HostIdentityMigrationError(
+                            f"capacity resources {holder!r} and "
+                            f"{row['backing_resource_id']!r} both name host {host_id!r}"
+                        )
+                updates.append((
+                    "UPDATE capacity_buckets SET attributes=:attributes, "
+                    "host_id=:host_id WHERE capacity_bucket_id=:id",
+                    {
+                        "attributes": _json_param(attributes),
+                        "host_id": host_id,
+                        "id": row["capacity_bucket_id"],
+                    },
+                ))
+
+        if "settlement_records" in existing:
+            _add_column_in_connection(
+                connection, "settlement_records", "resource_host_id"
+            )
+            columns = {
+                c["name"] for c in inspect(connection).get_columns("settlement_records")
+            }
+            json_columns = [c for c in _SETTLEMENT_JSON_COLUMNS if c in columns]
+            selected = ", ".join(
+                ["capacity_reservation_id", "resource_attributes", "resource_host_id",
+                 *json_columns]
+            )
+            for row in connection.execute(text(
+                f"SELECT {selected} FROM settlement_records"
+            )).mappings().all():
+                where = f"settlement record {row['capacity_reservation_id']!r}"
+                attributes, host_id = _normalize_declared_host(
+                    _normalize_json_column(row["resource_attributes"]),
+                    row["resource_host_id"],
+                    where=where,
+                )
+                params = {
+                    "id": row["capacity_reservation_id"],
+                    "attributes": _json_param(attributes),
+                    "host_id": host_id,
+                }
+                for column in json_columns:
+                    params[column] = _json_param(_upgrade_host_naming_envelope(
+                        _normalize_json_column(row[column]),
+                        where=f"{where} {column}",
+                    ))
+                assignments = ", ".join(
+                    ["resource_attributes=:attributes", "resource_host_id=:host_id",
+                     *(f"{column}=:{column}" for column in json_columns)]
+                )
+                updates.append((
+                    f"UPDATE settlement_records SET {assignments} "
+                    "WHERE capacity_reservation_id=:id",
+                    params,
+                ))
+
+        if "capacity_reservations" in existing:
+            # ``claim_attributes`` is what scheduling re-matches a reservation
+            # against; a host pinned there under a retired key would match no
+            # resource once the host is a column rather than an attribute.
+            reservation_columns = {
+                c["name"]
+                for c in inspect(connection).get_columns("capacity_reservations")
+            }
+            json_columns = [
+                c for c in ("executor_ref", "claim_attributes")
+                if c in reservation_columns
+            ]
+            for row in connection.execute(text(
+                f"SELECT capacity_reservation_id, {', '.join(json_columns)} "
+                "FROM capacity_reservations"
+            )).mappings().all():
+                where = f"reservation {row['capacity_reservation_id']!r}"
+                params = {"id": row["capacity_reservation_id"]}
+                for column in json_columns:
+                    params[column] = _json_param(_rename_retired_host_keys(
+                        _normalize_json_column(row[column]),
+                        where=f"{where} {column}",
+                    ))
+                assignments = ", ".join(f"{c}=:{c}" for c in json_columns)
+                updates.append((
+                    f"UPDATE capacity_reservations SET {assignments} "
+                    "WHERE capacity_reservation_id=:id",
+                    params,
+                ))
+
+        if "ansible_jobs" in existing:
+            for row in connection.execute(text(
+                "SELECT id, params, result FROM ansible_jobs"
+            )).mappings().all():
+                where = f"job {row['id']!r}"
+                updates.append((
+                    "UPDATE ansible_jobs SET params=:params, result=:result "
+                    "WHERE id=:id",
+                    {
+                        "id": row["id"],
+                        "params": _json_param(_rename_retired_host_keys(
+                            _normalize_json_column(row["params"]), where=where,
+                        )),
+                        "result": _json_param(_rename_retired_host_keys(
+                            _normalize_json_column(row["result"]), where=where,
+                        )),
+                    },
+                ))
+
+        for table, retired, current in _HOST_IDENTITY_COLUMN_RENAMES:
+            if table not in existing:
+                continue
+            columns = {c["name"] for c in inspect(connection).get_columns(table)}
+            if retired in columns and current not in columns:
+                connection.execute(
+                    text(
+                        f"ALTER TABLE {_validate_sql_identifier(table)} "
+                        f"RENAME COLUMN {_validate_sql_identifier(retired)} "
+                        f"TO {_validate_sql_identifier(current)}"
+                    )
+                )
+        for statement, params in updates:
+            connection.execute(text(statement), params)
+        if "capacity_buckets" in existing:
+            connection.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_capacity_buckets_host_id "
+                "ON capacity_buckets (host_id)"
+            ))
+
+
+def count_rows_carrying_retired_host_keys(engine: Engine) -> int:
+    """Rows whose persisted JSON still names the host under a retired key.
+
+    A cutover gate rather than a migration step, following the retired
+    offering-mode key's: the payloads are JSON, so a row the migration missed
+    is not a type error and would surface only at teardown or result read.
+    """
+    sources = (
+        ("capacity_buckets", ("attributes",)),
+        ("capacity_reservations", ("executor_ref", "claim_attributes")),
+        ("settlement_records", ("resource_attributes", *_SETTLEMENT_JSON_COLUMNS)),
+        ("ansible_jobs", ("params", "result")),
+    )
+    stale = 0
+    with engine.begin() as connection:
+        existing = set(inspect(connection).get_table_names())
+        for table, wanted in sources:
+            if table not in existing:
+                continue
+            columns = {c["name"] for c in inspect(connection).get_columns(table)}
+            present = [c for c in wanted if c in columns]
+            if not present:
+                continue
+            for row in connection.execute(text(
+                f"SELECT {', '.join(present)} FROM {_validate_sql_identifier(table)}"
+            )).all():
+                if any(
+                    _carries_retired_host_key(_normalize_json_column(value))
+                    for value in row
+                ):
+                    stale += 1
+    return stale
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration("20260603_001_ansible_jobs_escrow_uid", _migrate_ansible_jobs_escrow_uid),
     Migration("20260603_002_hosts_public_host", _migrate_hosts_public_host),
@@ -1893,5 +2246,9 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260911_001_reservation_offering_mode_name",
         _migrate_reservation_offering_mode_name,
+    ),
+    Migration(
+        "20260921_001_host_identity",
+        _migrate_host_identity,
     ),
 )

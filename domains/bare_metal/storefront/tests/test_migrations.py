@@ -7,6 +7,7 @@ from core_storefront.sqlite_client import SQLiteClient as CoreSQLiteClient
 from market_settlement_runtime import settlement_migrations
 from market_identity import Ed25519Signer
 
+from arkhai_bare_metal_storefront.migrations import RetiredListingKindError
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 
 
@@ -80,7 +81,7 @@ async def test_bare_metal_migration_upgrades_existing_core_database(tmp_path) ->
     assert {
         "site_id",
         "physical_resource_id",
-        "machine_id",
+        "host_id",
         "physical_host_id",
         "derivation_key",
     } <= derived_columns
@@ -97,14 +98,14 @@ def test_publication_migration_closes_unscoped_tracking_rows(tmp_path) -> None:
             """
             CREATE TABLE derived_bare_metal_listings (
               listing_id TEXT PRIMARY KEY,
-              machine_id TEXT NOT NULL,
+              host_id TEXT NOT NULL,
               physical_host_id TEXT NOT NULL,
               status TEXT NOT NULL,
               derivation_key TEXT NOT NULL UNIQUE,
               last_reconciled_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
             INSERT INTO derived_bare_metal_listings(
-              listing_id, machine_id, physical_host_id, status, derivation_key
+              listing_id, host_id, physical_host_id, status, derivation_key
             ) VALUES (
               'listing-old', 'machine-old', 'host-old', 'open',
               'bare-metal:machine-old'
@@ -127,3 +128,53 @@ def test_publication_migration_closes_unscoped_tracking_rows(tmp_path) -> None:
         conn.close()
 
     assert row == (None, None, "closed")
+
+
+def test_a_database_written_under_the_retired_listing_kind_is_refused(tmp_path) -> None:
+    """Accepted bare-metal state cannot be rewritten or decoded after the
+    listing kind that named the host ``machine_id`` was retired, so startup
+    refuses the database and names the remedy instead of failing later on a
+    decode."""
+    path = tmp_path / "storefront.db"
+    conn = sqlite3.connect(path)
+    conn.execute(
+        "CREATE TABLE derived_bare_metal_listings "
+        "(listing_id TEXT PRIMARY KEY, machine_id TEXT NOT NULL)"
+    )
+    conn.execute(
+        "INSERT INTO derived_bare_metal_listings VALUES ('listing-1', 'bm1')"
+    )
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(RetiredListingKindError, match="Resetting the storefront database"):
+        SQLiteClient(str(path))
+
+    conn = sqlite3.connect(path)
+    try:
+        # Nothing was decoded or rewritten: the retired row is byte-identical.
+        assert conn.execute(
+            "SELECT listing_id, machine_id FROM derived_bare_metal_listings"
+        ).fetchall() == [("listing-1", "bm1")]
+    finally:
+        conn.close()
+
+
+def test_a_fresh_database_passes_the_retired_kind_check(tmp_path) -> None:
+    path = tmp_path / "storefront.db"
+
+    SQLiteClient(str(path))
+
+    conn = sqlite3.connect(path)
+    try:
+        assert conn.execute(
+            "SELECT 1 FROM schema_migrations "
+            "WHERE id='bare-metal-storefront-0009-refuse-retired-listing-kind'"
+        ).fetchone() == (1,)
+        columns = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(derived_bare_metal_listings)")
+        }
+        assert "host_id" in columns and "machine_id" not in columns
+    finally:
+        conn.close()

@@ -24,13 +24,13 @@ from pydantic import BaseModel, Field, model_validator
 class HostCreate(BaseModel):
     """Body accepted by ``POST /api/v1/hosts/``."""
 
-    name: str = Field(description="Ansible alias / hostname key (e.g. 'kvm1').")
-    kvm_host: str = Field(description="IP/hostname the provisioner SSHes to.")
+    host_id: str = Field(description="The host's identity: its Ansible alias, e.g. 'kvm1'.")
+    ssh_host: str = Field(description="IP/hostname the provisioner SSHes to.")
     public_host: Optional[str] = Field(
         default=None,
         description=(
             "Address tenants use to reach this host's VM port-forwards "
-            "(public IP, DNS, or overlay IP). Defaults to kvm_host when "
+            "(public IP, DNS, or overlay IP). Defaults to ssh_host when "
             "omitted — set it when buyers reach the host on a different "
             "network than the provisioner does."
         ),
@@ -42,7 +42,7 @@ class HostCreate(BaseModel):
         le=65535,
         description=(
             "Port the provisioner connects to. Set it when the host answers "
-            "SSH somewhere other than port 22 at kvm_host — through a reverse "
+            "SSH somewhere other than port 22 at ssh_host — through a reverse "
             "tunnel, a NAT forward, or a bastion."
         ),
     )
@@ -71,9 +71,9 @@ class HostCreate(BaseModel):
 
 
 class HostUpdate(BaseModel):
-    """Body accepted by ``PUT /api/v1/hosts/{name}``."""
+    """Body accepted by ``PUT /api/v1/hosts/{host_id}``."""
 
-    kvm_host: Optional[str] = Field(default=None, description="Updated IP/hostname.")
+    ssh_host: Optional[str] = Field(default=None, description="Updated IP/hostname.")
     public_host: Optional[str] = Field(default=None, description="Updated public address.")
     ssh_user: Optional[str] = Field(default=None, description="Updated SSH user.")
     ssh_port: Optional[int] = Field(
@@ -94,8 +94,8 @@ class HostResponse(BaseModel):
     read back raw or encrypted key material.
     """
 
-    name: str
-    kvm_host: str
+    host_id: str
+    ssh_host: str
     public_host: Optional[str] = None
     ssh_user: str
     ssh_port: int
@@ -412,7 +412,7 @@ class LeaseCreate(BaseModel):
     escrow_uid: str = Field(
         description="On-chain escrow UID from the deal. Unique per lease."
     )
-    vm_host: str = Field(
+    host_id: str = Field(
         description="KVM host alias (Ansible inventory name, e.g. 'kvm1')."
     )
     vm_target: str = Field(
@@ -444,7 +444,7 @@ class LeaseUpdate(BaseModel):
     reservation.  State transitions are performed via dedicated action endpoints.
     """
 
-    vm_host: Optional[str] = Field(
+    host_id: Optional[str] = Field(
         default=None,
         description="KVM host alias — update when a VM migrates to a different host.",
     )
@@ -544,7 +544,7 @@ class LeaseResponse(BaseModel):
     resource_id: str
     capacity_reservation_id: Optional[str] = None
     escrow_uid: str
-    vm_host: str
+    host_id: str
     vm_target: str
     lease_start_utc: Optional[datetime] = None
     lease_end_utc: datetime

@@ -15,7 +15,13 @@ from pydantic import BaseModel, Field, model_validator
 
 from .provision_terms import BareMetalProvisionTerms
 
-BARE_METAL_SCHEMA_KIND = "bare_metal.v1"
+# The payload kind carried by listings, messages, terms, materializations,
+# receipts, and access results. Kind 2 names the host ``host_id``.
+BARE_METAL_SCHEMA_KIND = "bare_metal.v2"
+# The market-domain contract identity. A separate axis from the payload kind:
+# operator configuration and durable listing and thread bindings name it, so it
+# does not move when a payload kind is revised.
+BARE_METAL_DOMAIN_IDENTITY = "bare_metal.v1"
 BARE_METAL_OFFERING_MODE = "bare_metal"
 SSH_ACCESS_METHOD = "ssh"
 NODE_GRANT_ACCESS_ACTION = "node_grant_access"
@@ -42,9 +48,9 @@ def bare_metal_executor_ref(
 class BareMetalListing(BaseModel):
     """Bare-metal domain payload carried by a registry listing."""
 
-    kind: Literal["bare_metal.v1"] = BARE_METAL_SCHEMA_KIND
+    kind: Literal["bare_metal.v2"] = BARE_METAL_SCHEMA_KIND
     offering_mode: Literal["bare_metal"] = "bare_metal"
-    machine_id: str = Field(
+    host_id: str = Field(
         description="Bare-metal executor-local machine identity.",
     )
     physical_host_id: str = Field(
@@ -75,7 +81,7 @@ class BareMetalListing(BaseModel):
 
     @model_validator(mode="after")
     def _validate_listing(self) -> "BareMetalListing":
-        for field_name in ("machine_id", "physical_host_id"):
+        for field_name in ("host_id", "physical_host_id"):
             if not str(getattr(self, field_name)).strip():
                 raise ValueError(f"{field_name} must be non-empty")
         if not self.access_methods:
@@ -94,7 +100,7 @@ class BareMetalListing(BaseModel):
 class BareMetalMessage(BaseModel):
     """Bare-metal negotiation message payload."""
 
-    kind: Literal["bare_metal.v1"] = BARE_METAL_SCHEMA_KIND
+    kind: Literal["bare_metal.v2"] = BARE_METAL_SCHEMA_KIND
     duration_seconds: int = Field(
         ge=1,
         description="Requested bare-metal lease duration.",
@@ -140,8 +146,8 @@ class BareMetalMessage(BaseModel):
 class BareMetalTerms(BaseModel):
     """Canonical agreed bare-metal terms produced by negotiation."""
 
-    kind: Literal["bare_metal.v1"] = BARE_METAL_SCHEMA_KIND
-    machine_id: str = Field(
+    kind: Literal["bare_metal.v2"] = BARE_METAL_SCHEMA_KIND
+    host_id: str = Field(
         description="Bare-metal executor-local machine identity.",
     )
     physical_host_id: str = Field(
@@ -170,7 +176,7 @@ class BareMetalTerms(BaseModel):
 
     @model_validator(mode="after")
     def _validate_terms(self) -> "BareMetalTerms":
-        for field_name in ("machine_id", "physical_host_id", "access_method"):
+        for field_name in ("host_id", "physical_host_id", "access_method"):
             if not str(getattr(self, field_name)).strip():
                 raise ValueError(f"{field_name} must be non-empty")
         if self.access_method == SSH_ACCESS_METHOD and not (
@@ -183,7 +189,7 @@ class BareMetalTerms(BaseModel):
 class BareMetalMaterialization(BaseModel):
     """Settlement-to-fulfillment handoff for a bare-metal agreement."""
 
-    kind: Literal["bare_metal.v1"] = BARE_METAL_SCHEMA_KIND
+    kind: Literal["bare_metal.v2"] = BARE_METAL_SCHEMA_KIND
     escrow_uid: str | None = Field(
         default=None,
         description="Legacy Alkahest escrow UID from the accepted deal.",
@@ -192,7 +198,7 @@ class BareMetalMaterialization(BaseModel):
         default=None,
         description="Hosted settlement obligation identity from accepted state.",
     )
-    machine_id: str = Field(
+    host_id: str = Field(
         description="Bare-metal executor-local machine identity.",
     )
     physical_host_id: str = Field(
@@ -228,7 +234,7 @@ class BareMetalMaterialization(BaseModel):
 
     @model_validator(mode="after")
     def _validate_materialization(self) -> "BareMetalMaterialization":
-        for field_name in ("machine_id", "physical_host_id", "access_method"):
+        for field_name in ("host_id", "physical_host_id", "access_method"):
             if not str(getattr(self, field_name)).strip():
                 raise ValueError(f"{field_name} must be non-empty")
         settlement_ids = (self.escrow_uid, self.settlement_obligation_ref)
@@ -253,12 +259,12 @@ class BareMetalMaterialization(BaseModel):
 class BareMetalReceipt(BaseModel):
     """Domain receipt for bare-metal fulfillment/servicing state."""
 
-    kind: Literal["bare_metal.v1"] = BARE_METAL_SCHEMA_KIND
+    kind: Literal["bare_metal.v2"] = BARE_METAL_SCHEMA_KIND
     escrow_uid: str | None = Field(
         default=None,
         description="On-chain escrow UID associated with the lease.",
     )
-    machine_id: str = Field(
+    host_id: str = Field(
         description="Bare-metal executor-local machine identity.",
     )
     physical_host_id: str = Field(
@@ -275,7 +281,7 @@ class BareMetalReceipt(BaseModel):
 
     @model_validator(mode="after")
     def _validate_receipt(self) -> "BareMetalReceipt":
-        for field_name in ("machine_id", "physical_host_id", "status"):
+        for field_name in ("host_id", "physical_host_id", "status"):
             if not str(getattr(self, field_name)).strip():
                 raise ValueError(f"{field_name} must be non-empty")
         if (
@@ -302,7 +308,7 @@ class BareMetalLeaseCreate(BaseModel):
         default=None,
         description="Hosted settlement obligation identity from accepted state.",
     )
-    machine_id: str = Field(
+    host_id: str = Field(
         description=(
             "Bare-metal executor-local machine identity. This is not a global "
             "physical-host namespace."
@@ -335,7 +341,7 @@ class BareMetalLeaseCreate(BaseModel):
 
     @model_validator(mode="after")
     def _validate_non_empty_ids(self) -> "BareMetalLeaseCreate":
-        for field_name in ("machine_id", "physical_host_id"):
+        for field_name in ("host_id", "physical_host_id"):
             value = getattr(self, field_name)
             if not str(value).strip():
                 raise ValueError(f"{field_name} must be non-empty")
@@ -366,7 +372,7 @@ class BareMetalLeaseView(BaseModel):
 
     capacity_reservation_id: str
     escrow_uid: str | None = None
-    machine_id: str
+    host_id: str
     physical_host_id: str
     lease_start_utc: str | None = None
     lease_end_utc: str | None = None
@@ -378,11 +384,11 @@ class BareMetalLeaseView(BaseModel):
 class BareMetalAccessResult(BaseModel):
     """Result shape for bare-metal grant/reclaim executor slots."""
 
-    kind: Literal["bare_metal.v1"] = BARE_METAL_SCHEMA_KIND
+    kind: Literal["bare_metal.v2"] = BARE_METAL_SCHEMA_KIND
     action: str = Field(
         description="Bare-metal executor lifecycle action that completed.",
     )
-    machine_id: str = Field(
+    host_id: str = Field(
         description="Executor-local bare-metal machine identity.",
     )
     physical_host_id: str | None = Field(
@@ -438,8 +444,8 @@ class BareMetalAccessResult(BaseModel):
             raise ValueError(
                 f"action must be one of {', '.join(BARE_METAL_ACCESS_ACTIONS)}"
             )
-        if not self.machine_id.strip():
-            raise ValueError("machine_id must be non-empty")
+        if not self.host_id.strip():
+            raise ValueError("host_id must be non-empty")
         if self.host is not None and not self.host.strip():
             raise ValueError("host must be non-empty")
         if (self.host is None) != (self.port is None):
@@ -470,7 +476,7 @@ def materialization_to_lease_create(
         capacity_reservation_id=capacity_reservation_id,
         escrow_uid=materialization.escrow_uid,
         settlement_obligation_ref=materialization.settlement_obligation_ref,
-        machine_id=materialization.machine_id,
+        host_id=materialization.host_id,
         physical_host_id=materialization.physical_host_id,
         lease_start_utc=materialization.lease_start_utc,
         lease_end_utc=materialization.lease_end_utc,
@@ -487,7 +493,7 @@ def receipt_from_lease_view(
     """Adapt the current reservation-backed lease view into a domain receipt."""
     return BareMetalReceipt(
         escrow_uid=lease.escrow_uid,
-        machine_id=lease.machine_id,
+        host_id=lease.host_id,
         physical_host_id=lease.physical_host_id,
         lease_start_utc=_parse_optional_datetime(lease.lease_start_utc),
         lease_end_utc=_parse_optional_datetime(lease.lease_end_utc),

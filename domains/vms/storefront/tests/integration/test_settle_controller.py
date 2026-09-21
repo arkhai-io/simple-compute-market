@@ -292,7 +292,7 @@ class TestEvaluateSettle:
             attributes={
                 "gpu_model": "H200",
                 "region": "California, US",
-                "vm_host": "host1",
+                "host_id": "host1",
             },
         )
 
@@ -321,7 +321,7 @@ class TestEvaluateSettle:
         admin_client,
         capacity_site,
     ):
-        """Listing + matching site resource → would_submit=True with vm_host."""
+        """Listing + matching site resource → would_submit=True with host_id."""
         c, db = admin_client
         await _seed_listing(
             db,
@@ -343,7 +343,7 @@ class TestEvaluateSettle:
             attributes={
                 "gpu_model": "H200",
                 "region": "California, US",
-                "vm_host": "host-match",
+                "host_id": "host-match",
             },
         )
         result = await c.evaluate_settle(
@@ -356,5 +356,5 @@ class TestEvaluateSettle:
         assert result.get("would_submit") is True, (
             f"Expected would_submit=True with matching inventory. reason={result.get('reason')!r}"
         )
-        assert result.get("vm_host") == "host-match"
+        assert result.get("host_id") == "host-match"
         assert result.get("vm_target")  # non-empty generated target name

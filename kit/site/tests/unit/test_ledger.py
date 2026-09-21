@@ -75,11 +75,11 @@ def ledger() -> CapacityLedgerService:
 
 @pytest.fixture
 def seeded(ledger: CapacityLedgerService) -> CapacityLedgerService:
-    ledger.register_resource(
+    ledger.register_resource(host_id="kvm1", 
         resource_id="compute-kvm1-001",
         total_units=8,
         resource_subtype="h200",
-        attributes={"vm_host": "kvm1", "gpu_model": "H200", "region": "us-west"},
+        attributes={"gpu_model": "H200", "region": "us-west"},
     )
     return ledger
 
@@ -95,7 +95,7 @@ def test_snapshot_reports_availability(seeded: CapacityLedgerService):
 def test_probe_consumes_nothing(seeded: CapacityLedgerService):
     match = seeded.probe(claim={"offering_mode": "vm", **{"gpu_model": "H200", "gpu_count": 2}})
     assert match is not None
-    assert match["vm_host"] == "kvm1"
+    assert match["host_id"] == "kvm1"
     assert match["allocated_gpu_count"] == 2
     assert seeded.snapshot()[0]["available_units"] == 8
 
@@ -111,17 +111,16 @@ def test_vm_claim_with_vm_host_does_not_match_hostless_resource(
     ledger.register_resource(
         resource_id="hostless", total_units=8, attributes={"gpu_model": "H200"},
     )
-    assert ledger.probe(claim={"offering_mode": "vm", **{"gpu_count": 1, "vm_host": "kvm1"}}) is None
+    assert ledger.probe(claim={"offering_mode": "vm", **{"gpu_count": 1, "host_id": "kvm1"}}) is None
     assert ledger.probe(claim={"offering_mode": "vm", **{"gpu_count": 1}}) is not None
 
 
 def _register_dual_mode_host(ledger: CapacityLedgerService) -> None:
-    ledger.register_resource(
+    ledger.register_resource(host_id="kvm1", 
         resource_id="compute-host-1",
         total_units=8,
         resource_subtype="h200",
         attributes={
-            "vm_host": "kvm1",
             "gpu_model": "H200",
             "physical_host_id": "physical-host-1",
             "allocation_mode": ALLOCATION_MODE_SHAREABLE,
@@ -132,7 +131,7 @@ def _register_dual_mode_host(ledger: CapacityLedgerService) -> None:
         total_units=1,
         resource_subtype="h200",
         attributes={
-            "machine_id": "node-1",
+            "host_id": "node-1",
             "gpu_model": "H200",
             "physical_host_id": "physical-host-1",
             "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
@@ -149,7 +148,7 @@ def test_dual_mode_host_snapshot_exposes_vm_and_bare_metal_when_free(
 
     assert by_id["compute-host-1"]["available_units"] == 8
     assert by_id["bare-metal-host-1"]["available_units"] == 1
-    assert ledger.probe(claim={"offering_mode": "vm", **{"gpu_count": 2, "vm_host": "kvm1"}})["resource_id"] == "compute-host-1"
+    assert ledger.probe(claim={"offering_mode": "vm", **{"gpu_count": 2, "host_id": "kvm1"}})["resource_id"] == "compute-host-1"
     assert ledger.probe(claim={
         "offering_mode": "bare_metal",
         "physical_host_id": "physical-host-1",
@@ -162,7 +161,7 @@ def test_vm_slice_reservation_blocks_bare_metal_on_same_physical_host(
 ):
     _register_dual_mode_host(ledger)
 
-    vm = ledger.reserve(claim={"offering_mode": "vm", **{"gpu_count": 2, "vm_host": "kvm1"}}, deal_ref={"escrow_uid": "0xvm"},)
+    vm = ledger.reserve(claim={"offering_mode": "vm", **{"gpu_count": 2, "host_id": "kvm1"}}, deal_ref={"escrow_uid": "0xvm"},)
 
     assert vm is not None
     by_id = {row["resource_id"]: row for row in ledger.snapshot()}
@@ -175,7 +174,7 @@ def test_vm_slice_reservation_blocks_bare_metal_on_same_physical_host(
         "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
     }) is None
 
-    second_vm = ledger.reserve(claim={"offering_mode": "vm", **{"gpu_count": 6, "vm_host": "kvm1"}}, deal_ref={"escrow_uid": "0xvm2"},)
+    second_vm = ledger.reserve(claim={"offering_mode": "vm", **{"gpu_count": 6, "host_id": "kvm1"}}, deal_ref={"escrow_uid": "0xvm2"},)
     assert second_vm is not None
     assert second_vm["resource_id"] == "compute-host-1"
 
@@ -184,7 +183,7 @@ def test_pool_mode_permission_does_not_replace_cross_mode_physical_conflict(
 ):
     _register_dual_mode_host(ledger)
     assert ledger.reserve(
-        claim={"offering_mode": "vm", "gpu_count": 1, "vm_host": "kvm1"},
+        claim={"offering_mode": "vm", "gpu_count": 1, "host_id": "kvm1"},
         deal_ref={"escrow_uid": "0xvm-independent"},
     ) is not None
     bare_metal_claim = {
@@ -224,7 +223,7 @@ def test_bare_metal_reservation_blocks_vm_slices_on_same_physical_host(
     assert by_id["bare-metal-host-1"]["available_units"] == 0
     assert by_id["compute-host-1"]["available_units"] == 0
     assert by_id["compute-host-1"]["state"] == "leased"
-    assert ledger.probe(claim={"offering_mode": "vm", **{"gpu_count": 1, "vm_host": "kvm1"}}) is None
+    assert ledger.probe(claim={"offering_mode": "vm", **{"gpu_count": 1, "host_id": "kvm1"}}) is None
 
 
 def test_releasing_cross_mode_reservation_keeps_sibling_capacity_blocked(
@@ -244,14 +243,14 @@ def test_releasing_cross_mode_reservation_keeps_sibling_capacity_blocked(
 
     by_id = {row["resource_id"]: row for row in ledger.snapshot()}
     assert by_id["compute-host-1"]["available_units"] == 0
-    assert ledger.probe(claim={"offering_mode": "vm", **{"gpu_count": 1, "vm_host": "kvm1"}}) is None
+    assert ledger.probe(claim={"offering_mode": "vm", **{"gpu_count": 1, "host_id": "kvm1"}}) is None
 
 
 def test_release_restores_cross_mode_sibling_capacity(
     ledger: CapacityLedgerService,
 ):
     _register_dual_mode_host(ledger)
-    vm = ledger.reserve(claim={"offering_mode": "vm", **{"gpu_count": 2, "vm_host": "kvm1"}}, deal_ref={"escrow_uid": "0xvm"},)
+    vm = ledger.reserve(claim={"offering_mode": "vm", **{"gpu_count": 2, "host_id": "kvm1"}}, deal_ref={"escrow_uid": "0xvm"},)
 
     ledger.release(capacity_reservation_id=vm["capacity_reservation_id"])
 
@@ -261,7 +260,7 @@ def test_release_restores_cross_mode_sibling_capacity(
 
 
 def test_required_attributes_remains_available_as_local_guard():
-    guarded = _make_ledger(required_attributes=("vm_host",))
+    guarded = _make_ledger(required_attributes=("host_id",))
     guarded.register_resource(
         resource_id="hostless", total_units=8, attributes={"gpu_model": "H200"},
     )
@@ -360,19 +359,19 @@ def test_reserve_derives_executor_ref_but_records_the_requested_mode(
 ):
     """The matched resource supplies executor placement, never its mode.
 
-    ``reserve()`` writes ``executor_ref`` from the resource's ``vm_host``
+    ``reserve()`` writes ``executor_ref`` from the resource's ``host_id``
     attribute while persisting the claim's explicit ``offering_mode``. Its
     immediate return is the opaque match view; the durable reservation view
     exposes the recorded executor identity.
     """
     reserved = seeded.reserve(claim={"offering_mode": "vm", **{"gpu_count": 1}}, deal_ref={"escrow_uid": "0xn"})
     assert reserved is not None
-    assert reserved["vm_host"] == "kvm1"  # _match_payload, from the resource's own attributes
+    assert reserved["host_id"] == "kvm1"  # _match_payload, from the resource's own attributes
 
     row = seeded.get_reservation(reserved["capacity_reservation_id"])
-    assert row["executor_ref"] == {"vm_host": "kvm1"}
+    assert row["executor_ref"] == {"host_id": "kvm1"}
     assert row["offering_mode"] == "vm"
-    assert row["vm_host"] == "kvm1"  # _reservation_payload, now sourced from executor_ref
+    assert row["host_id"] == "kvm1"  # _reservation_payload, now sourced from executor_ref
 
 
 def test_reserve_decrements_and_releases_restore(seeded: CapacityLedgerService):
@@ -422,7 +421,7 @@ def test_reserve_idempotent_hit_includes_resource_id(seeded: CapacityLedgerServi
     first = seeded.reserve(claim={"offering_mode": "vm", **{"gpu_count": 1}}, deal_ref={"escrow_uid": "0xres"})
     second = seeded.reserve(claim={"offering_mode": "vm", **{"gpu_count": 1}}, deal_ref={"escrow_uid": "0xres"})
     assert second["resource_id"] == first["resource_id"] == "compute-kvm1-001"
-    assert second["vm_host"] == first["vm_host"] == "kvm1"
+    assert second["host_id"] == first["host_id"] == "kvm1"
 
 
 def test_reserve_idempotency_finds_a_committed_reservation_too(
@@ -670,14 +669,14 @@ def test_attach_lease_records_tail_on_reservation(seeded: CapacityLedgerService)
     """CapacityReservation carries no VM-domain-specific column names --
     callers pass offering_mode/executor_target/executor_ref directly (as
     kit/site/authority.py's adapter already does); attach_lease no longer
-    accepts or self-heals a vm_host/vm_target kwarg.
+    accepts or self-heals a host_id/vm_target kwarg.
     """
     reserved = seeded.reserve(claim={"offering_mode": "vm", **{"gpu_count": 1}}, deal_ref={"escrow_uid": "0xl"})
     attached = seeded.attach_lease(
         capacity_reservation_id=reserved["capacity_reservation_id"],
         offering_mode="vm",
         executor_target="tenant-abcd",
-        executor_ref={"vm_host": "kvm1"},
+        executor_ref={"host_id": "kvm1"},
         lease_end_utc="2099-01-01 00:00",
         create_job_id="job-1",
     )
@@ -685,7 +684,7 @@ def test_attach_lease_records_tail_on_reservation(seeded: CapacityLedgerService)
     assert attached["vm_target"] == "tenant-abcd"  # payload key, sourced from executor_target
     assert attached["offering_mode"] == "vm"
     assert attached["executor_target"] == "tenant-abcd"
-    assert attached["executor_ref"] == {"vm_host": "kvm1"}
+    assert attached["executor_ref"] == {"host_id": "kvm1"}
     assert attached["create_job_id"] == "job-1"
     # No availability change: attach emits no capacity event.
     events, _ = seeded.events_after(0)
@@ -696,7 +695,7 @@ def test_attach_lease_records_tail_on_reservation(seeded: CapacityLedgerService)
 
 
 def test_find_active_lease_by_vm_target_matches_via_executor_ref(seeded: CapacityLedgerService):
-    """vm_host is matched through executor_ref's JSON payload
+    """host_id is matched through executor_ref's JSON payload
     (func.json_extract) and vm_target through executor_target -- neither
     is a dedicated column. Previously untested -- this is new coverage,
     not just a migration of an existing test."""
@@ -705,7 +704,7 @@ def test_find_active_lease_by_vm_target_matches_via_executor_ref(seeded: Capacit
         capacity_reservation_id=reserved["capacity_reservation_id"],
         offering_mode="vm",
         executor_target="tenant-find-me",
-        executor_ref={"vm_host": "kvm1"},
+        executor_ref={"host_id": "kvm1"},
         lease_end_utc="2099-01-01 00:00",
     )
 
@@ -713,7 +712,7 @@ def test_find_active_lease_by_vm_target_matches_via_executor_ref(seeded: Capacit
     assert found is not None
     assert found["capacity_reservation_id"] == reserved["capacity_reservation_id"]
 
-    # A different vm_host must not match, even with the same vm_target --
+    # A different host_id must not match, even with the same vm_target --
     # proves the filter actually discriminates on the JSON value rather
     # than matching any row with a non-null executor_ref.
     assert seeded.find_active_lease_by_vm_target("kvm-wrong-host", "tenant-find-me") is None
@@ -773,13 +772,12 @@ def test_release_failed_still_holds_capacity(seeded: CapacityLedgerService):
 
 def _shared_host_ledger() -> CapacityLedgerService:
     ledger = _make_ledger()
-    ledger.register_resource(
+    ledger.register_resource(host_id="kvm1", 
         resource_id="host-1-vm-gpus",
         total_units=8,
         attributes={
             "physical_host_id": "host-1",
             "allocation_mode": ALLOCATION_MODE_SHAREABLE,
-            "vm_host": "kvm1",
             "gpu_model": "H200",
         },
     )
@@ -789,7 +787,7 @@ def _shared_host_ledger() -> CapacityLedgerService:
         attributes={
             "physical_host_id": "host-1",
             "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
-            "machine_id": "bm-node-1",
+            "host_id": "bm-node-1",
             "gpu_model": "H200",
         },
     )
@@ -929,11 +927,11 @@ def test_gpu_count_validation(seeded: CapacityLedgerService):
 
 @pytest.fixture
 def multidim(ledger: CapacityLedgerService) -> CapacityLedgerService:
-    ledger.register_resource(
+    ledger.register_resource(host_id="kvm2", 
         resource_id="compute-kvm2-001",
         total_units=8,
         resource_subtype="h200",
-        attributes={"vm_host": "kvm2", "gpu_model": "H200", "region": "us-west"},
+        attributes={"gpu_model": "H200", "region": "us-west"},
         capacity={"gpu_count": 8, "vcpu_count": 64, "ram_gb": 512, "disk_gb": 4000},
     )
     return ledger
