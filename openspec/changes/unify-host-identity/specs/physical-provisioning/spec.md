@@ -43,3 +43,22 @@ migration with nothing written, naming the row.
 
 - **WHEN** a declaration's `vm_host` and its publication `machine_id` name different hosts
 - **THEN** the migration aborts, names the declaration, and leaves the database unchanged
+
+### Requirement: A bare-metal storefront refuses state written under a retired listing kind
+
+A bare-metal storefront MUST refuse to start against a database whose persisted state
+was written under a listing kind it no longer decodes, and the refusal MUST name the
+operator procedure that resolves it. It MUST NOT start and then fail when a retired
+record is first decoded.
+
+#### Scenario: The storefront starts against a pre-rename database
+
+- **WHEN** a bare-metal storefront starts against a database written under
+  `bare_metal.v1`
+- **THEN** startup fails before serving requests, naming the reset procedure, and no
+  record is decoded or rewritten
+
+#### Scenario: The storefront starts against a fresh database
+
+- **WHEN** a bare-metal storefront starts against an empty database
+- **THEN** it creates its schema under the current listing kind and serves requests

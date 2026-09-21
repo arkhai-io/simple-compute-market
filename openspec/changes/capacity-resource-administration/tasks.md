@@ -16,6 +16,12 @@ Section 5's in-session reconciliation path.
 host registry from `unify-host-identity`, which lands first. Every decision gate in
 this file was resolved on 2026-09-21.
 
+**Planning pass (2026-09-21).** Names below follow `unify-host-identity`: the host
+registry's key is `host_id` (was `name`), a declaration's host link is its `host_id`
+field (was the `vm_host` attribute), and `ssh_host` is the host's address (was
+`kvm_host`). Where an earlier task note uses an old name, read it through that
+mapping; notes are amended rather than rewritten, per `AGENTS.md`.
+
 ## 1. Capacity declaration carrier and administration surface
 
 - [x] 1.1 Confirm by inspection, before writing anything, that the findings in
@@ -126,14 +132,22 @@ authority.
 - [ ] 4.3 Confirm the bare-metal publication view survives the cutover. It reads
       `resource.attributes[bare_metal_publication]` together with `capacity` through
       `_whole_resource_available`, and the cutover changes where `capacity` comes
-      from. Cover with a focused test rather than reasoning about it.
+      from. Cover with a focused test rather than reasoning about it. **Amended
+      2026-09-21:** after `unify-host-identity` the view also reads the declaration's
+      top-level `physical_host_id` and `allocation_mode`; the test uses that shape.
+      File: `provisioning/compute/service/tests/unit/services/test_capacity_inventory.py`.
 - [ ] 4.4 Handle the `available`-key semantics change explicitly. `_project_host`
       currently omits `available` when no capacity resource exists; after derivation,
       hosts that previously projected no `available` will project one, and the VM
       reconciler distinguishes an absent projection from a loaded empty one under its
       "ignorance is not zero" rule. Add storefront-side coverage, not only
-      provisioning-side — this is the highest-risk item in the change.
-- [ ] 4.5 Run the VM e2e scenarios that depend on projected capacity shape, and the
+      provisioning-side — \1
+      **Amended 2026-09-21:** files —
+      `domains/vms/storefront/tests/unit/test_reconciler.py` for
+      `_projected_resource_usage` with `available` present on every derived row, and
+      `provisioning/compute/service/tests/integration/test_capacity_api.py` for the
+      resource-pool projection read through the typed client.
+\2 Run the VM e2e scenarios that depend on projected capacity shape, and the
       `kit/site` ledger and router suites.
 - [ ] 4.6 **Unit.** A host with no correlated declaration yields no projected entry;
       update `tests/unit/services/test_capacity_inventory.py`'s host-only cases, which
@@ -358,9 +372,11 @@ Per `openspec/README.md#plan-closeout-requirements`.
       validation evidence, and promotion destinations; keep the rejected-alternatives
       analysis in `design.md`.
 - [ ] 8.5 **Roadmap currency.** Update the affected goal's current-state description
-      and gap mapping in `docs/development/ROADMAP.md`. If `add-development-roadmap`
-      has not landed when this change completes, record that disposition explicitly
-      rather than skipping the step.
+      and gap mapping in `docs/development/ROADMAP.md`. **Amended 2026-09-21:** the
+      roadmap exists; the owed updates are Goal 1's gap row naming this change (remove
+      it and absorb the result into Goal 1's current state), Goal 4's note that the
+      compute-dimension leak rides with this change (state it fixed), and Goal 7's
+      prerequisite mention. Record each in the promotion record.
 - [ ] 8.6 **Promotion.** Complete the design-promotion record below. Performed last,
       after 8.7–8.9, per `openspec/README.md`'s closeout order; numbering is kept for
       stability.

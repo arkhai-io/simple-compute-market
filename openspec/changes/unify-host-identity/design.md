@@ -114,7 +114,8 @@ strips both from attributes, lifts nested `physical_host_id`/`allocation_mode` t
 top level, and rewrites `executor_ref`, fulfillment-metadata, and job-parameter JSON
 keys. A declaration whose `vm_host` and `machine_id` disagree, or whose nested and
 top-level cross-mode fields disagree, aborts the migration with nothing written,
-naming the row. The bare-metal storefront migration renames its column.
+naming the row. The bare-metal storefront is reset rather than migrated; see "Bare
+metal: reset the preprod storefront database and drop `bare_metal.v1`".
 
 ### Sequencing
 
@@ -135,13 +136,45 @@ projection sections, which consume the declaration's `host_id`.
   sets targets `localhost` by default. Cover each playbook's rendered variables with
   a test rather than trusting the rename.
 
+### Bare metal: reset the preprod storefront database and drop `bare_metal.v1` (decided 2026-09-21)
+
+**Supersedes** an earlier same-day decision to migrate the bare-metal storefront
+database behind a guard that refused to run while any bare-metal agreement was
+non-terminal. The owner rejected that guard as a strategy: bare-metal contracts can
+run for a year, and forcing operators to drain them before patching is not viable.
+
+What the rename touches in bare-metal state (verified 2026-09-21): `machine_id`
+appears in signed negotiation terms, the listing, the materialization, the receipt,
+and the access result, and the `bare_metal.v1` kind keys the accepted plan's service
+terms, which feed the obligation identity shared with the hosted authority. The
+digest-pinned hosted records — the accepted binding, lease-ready result and evidence,
+and the derived fulfillment identity — do not contain `machine_id`, so this rename
+does not invalidate them.
+
+The durable way to evolve such state — keep producing only the new kind, keep a
+read-only decoder for the old one, retire it when a measured count of live
+references reaches zero, and verify stored proofs over stored bytes — is a
+repository-wide rule, and it is captured as its own change,
+`version-accepted-artifacts`, which must land before bare metal is released. Building
+it inside a rename would bury a policy decision in a mechanical change.
+
+For this change, bare metal is not in production and its only preprod deployment
+serves the owner's own nodes, so:
+
+- the bare-metal storefront database is **reset**, not migrated, following the
+  manual procedure in `tasks.md` Section 4;
+- `bare_metal.v1` is removed with no decoder;
+- the bare-metal storefront **refuses to start** against a database written under the
+  retired kind, naming the reset procedure, rather than failing later on a decode.
+  Detection is structural — the retired `machine_id` column in
+  `derived_bare_metal_listings` — so it needs no decoder;
+- the compute-provisioning database, which VM shares, is migrated normally
+  (Sections 1–3); its bare-metal rows are unsigned state.
+
+The drain guard is dropped entirely: it is throwaway effort that
+`version-accepted-artifacts` makes unnecessary.
+
 ## Open Questions
 
-- **Does bare metal need compatibility for `bare_metal.v1`?**
-  `DEPLOYMENT_AND_CONFIG.md` says the bare-metal stack is not release-qualified. If it
-  is unlaunched, as API credits is, `v1` is removed with no recovery decoder and
-  bare-metal storefront databases are migrated but not dual-read. If any accepted
-  bare-metal deal or published hosted evidence under `v1` must remain recoverable, a
-  recovery-only `v1` decoder is retained, as the hosted-fiat card profile retains its
-  historical rows. Assumed unlaunched until answered; no task depends on it before
-  planning.
+None. The bare-metal compatibility question was answered on 2026-09-21; see "Bare
+metal: reset the preprod storefront database and drop `bare_metal.v1`".

@@ -82,10 +82,12 @@ None.
   provisioning adapter, buyer), `core/storefront` and `core/storefront-client`
   settle surfaces not retired by `pools-9`, `e2e-tests`, and the bare-metal and
   seller quickstarts.
-- **Affected data:** compute-provisioning migration renaming host columns, adding and
+- **Affected data:** the preprod bare-metal storefront database is reset rather than
+  migrated (see `design.md`); compute-provisioning migration renaming host columns, adding and
   populating the declaration's `host_id`, stripping `vm_host` from declaration
   attributes, and rewriting `executor_ref`, fulfillment-metadata, and job-parameter
-  JSON keys; bare-metal storefront migration renaming its `machine_id` column.
+  JSON keys; bare-metal storefront startup refusing a database written under
+  `bare_metal.v1`.
 - **Wire:** host API, capacity registration, VM lease API, storefront settle
   models, and the bare-metal listing (`bare_metal.v1` → `bare_metal.v2`). None of
   these is a compute-provisioning `VersionedContractModel`; the listing kind is the
@@ -121,5 +123,9 @@ None.
 - **`market-platform-compute-40-multi-domain-proof`** proves cross-mode rejection;
   the single-location fix here is what makes a declaration written from the
   quickstart participate in the rule it proves.
+- **`version-accepted-artifacts`** owns the durable rule for evolving signed and
+  content-addressed state. This change resets the preprod bare-metal storefront
+  database instead of applying that rule, because bare metal is unreleased; that
+  change must land before bare metal is released.
 - **`retire-vm-remove-job-id`** removes a `vm_`-prefixed reservation column. No
   overlap: that column names a job, not a host.
