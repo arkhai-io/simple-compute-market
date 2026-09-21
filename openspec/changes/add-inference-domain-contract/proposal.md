@@ -45,13 +45,18 @@ shared.
   mode joins the enumerated values in `ARCHITECTURE.md`'s one-name table at
   promotion.
 - Define the published listing shape. One listing is one served model at one
-  seller. `listing_resource` is a **model card**: canonical `model_id`, the
-  seller's `served_model_name`, `model_family`, `context_length`,
+  seller. `listing_resource` is a **model card**: a canonical `model_id` in a
+  domain-defined format naming the logical model at one version, an
+  `artifact_ref` naming the exact weights served (optionally with an
+  `artifact_digest`), the seller's `served_model_name`, `model_family`, `context_length`,
   `max_completion_tokens`, `quantization`, an `architecture` block (modality,
   tokenizer, instruct type), `supported_parameters`, an `endpoint` block
   (`base_url`, `openapi_url`, `api_style: "openai.v1"`), a **rate card**, and
   the quota-backing fields API credits already uses (`capacity_site_id`,
-  `resource_id`). Every field a buyer compares on is required.
+  `resource_id`). Every field a buyer compares on is required; `display_name`
+  is an optional mutable label. The domain owns the identifier format; a
+  registry validates it and may narrow the vocabulary by operator policy but
+  never mints or resolves identifiers.
 - Define the **rate card** as exact integers: credits per million prompt
   tokens, credits per million completion tokens, an optional flat credits-per-
   request floor, and optional cached-prompt and image rates. Pricing in
@@ -168,6 +173,10 @@ shared.
   identities; the bearer credential is delivery, never payment authorization —
   the `inference` capability's `spec.md`, restating the API-credits companion's
   "Commercial and usage identity" for the new domain.
+- Model identity is domain-canonical: `model_id` names the logical model,
+  `artifact_ref` the exact source, quantization stays a field, and a registry
+  validates the format but never mints or resolves identifiers — the
+  `inference` capability's `spec.md` and `architecture.md`.
 - Charge derivation is a pure function of a usage record and a rate card —
   the `inference` capability's `spec.md`.
 - Why copy-first and extract-after-two-consumers is the sequencing rule for this
