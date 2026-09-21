@@ -3,8 +3,9 @@
 Becoming an inference seller after `compose-inference-domain-stack` means
 cloning the repository, building images, writing a storefront TOML by hand,
 generating signing material, and wiring four containers to a public URL. The
-`arkhai-vllm-apitokens-demo` repository is that done by hand, and it drifted
-from the main repository within weeks because nothing kept it honest.
+vLLM API-credits cookbook (`docs/cookbooks/vllm-apicredits-seller.md`) is that
+done by hand, and a stack assembled from it drifts as soon as the pinned
+versions move, because nothing keeps it honest.
 
 Supply is the side of a marketplace that has to be solved first, and the
 people with spare GPUs are comparing this against running a model server and
@@ -30,8 +31,8 @@ guesses until then.
   from outside the host and says plainly when it does not, because an
   unreachable storefront is the failure that otherwise costs an afternoon.
 - **Documentation.** An inference seller quickstart alongside the existing
-  seller quickstarts under `docs/`; the vLLM API-credits cookbook gains a pointer;
-  the demo repository is archived with a pointer once this lands.
+  seller quickstarts under `docs/`; the vLLM API-credits cookbook gains a pointer
+  to it.
 - **Distribution.** Installable with `uv tool install` from the published
   wheels; the templates ship inside the wheel, not in a cloned repository.
 
