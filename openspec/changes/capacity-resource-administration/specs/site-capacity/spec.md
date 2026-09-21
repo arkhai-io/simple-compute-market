@@ -18,8 +18,9 @@ projected capacity.
 Every declaration MUST name its Resource Pool. A registration request that omits the
 pool MUST be rejected at request validation rather than recorded against a default,
 because registration replaces the whole declaration and a silently defaulted pool is
-a reassignment nobody requested. A stored declaration with no recorded pool is read
-as belonging to the default pool.
+a reassignment nobody requested. A declaration naming a pool the site does not have
+MUST be refused, whether it arrives as a registration or a document entry. A stored
+declaration with no recorded pool is read as belonging to the default pool.
 
 #### Scenario: Shape authority is not admission authority
 
@@ -40,6 +41,11 @@ as belonging to the default pool.
   inventory record elsewhere describing the same resource
 - **THEN** the declared capacity resource is authoritative and the other record does
   not contribute capacity
+
+#### Scenario: Registration names a pool that does not exist
+
+- **WHEN** a capacity registration names a Resource Pool the site does not have
+- **THEN** it is refused as invalid and no declaration is written or changed
 
 #### Scenario: Registration omits the pool
 

@@ -304,11 +304,13 @@ exactly the effect of the same `PUT /api/v1/capacity/resources/{resource_id}`.
   event, so reapplying a document — or one changed only in comments or layout —
   does not make storefronts republish.
 - **Any problem leaves the whole document unapplied.** Validation is strict (a
-  quoted number is an error) and reports every problem with its location.
-  Refusals only stored state can decide — an unknown pool, a host another
-  declaration already names, moving a resource between pools while it holds a
-  live reservation — come from registration's own rules and are reported
-  together. A refused document at startup fails startup and records no digest.
+  quoted number is an error) and happens in two stages. Every structural problem
+  is reported with its location, and a document with any is not checked further.
+  Only a structurally valid document is checked against stored state, and every
+  refusal that stage finds is reported together: an unknown pool, a host another
+  declaration already names, or a move between pools while the resource holds a
+  live reservation. These are the rules a single registration meets too. A refused
+  document at startup fails startup and records no digest.
 - **Exchanging hosts between two declarations takes two imports**, because
   entries apply in order and the first would briefly name a host the second
   still holds.

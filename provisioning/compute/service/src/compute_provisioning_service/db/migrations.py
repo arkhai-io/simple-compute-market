@@ -17,10 +17,9 @@ from dataclasses import dataclass
 
 from sqlalchemy import Engine, MetaData, inspect, text
 from sqlalchemy.engine import Connection
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session
 from sqlalchemy.schema import CreateTable
 
-from market_site import CapacityLedgerService
 from market_site.db import CapacityBucket
 
 from compute_provisioning_service.db.models import (
@@ -28,9 +27,6 @@ from compute_provisioning_service.db.models import (
     Base,
     DEFAULT_POOL_ID,
     ResourcePool,
-)
-from compute_provisioning_service.services.capacity_derivation import (
-    LegacyHostCapacityDerivation,
 )
 
 logger = logging.getLogger(__name__)
@@ -2401,25 +2397,83 @@ def _migrate_legacy_host_capacity_declarations(engine: Engine) -> None:
     """Declare capacity for hosts whose legacy ``gpu_count`` sells nothing yet.
 
     Host inventory is connection identity; capacity resources declare what a
-    site sells. A host present at upgrade with GPUs and no declaration naming
-    it would stop being sold, so it gets the declaration INI application
-    derives for a newly applied host. This runs that same derivation rather
-    than restating it in SQL, so the two cannot disagree; it only adds
-    declarations and changes no host row.
+    site sells. A host present at upgrade with GPUs that no declaration names
+    would stop being sold, so it gets a declaration: ``resource_id`` and
+    ``host_id`` the host's, its pool, ``compute.gpu`` with
+    ``{"gpu_count": gpu_count}`` (mirrored into ``total_units``), its
+    ``gpu_model`` as the only attribute when recorded, and its enablement.
+    Each declaration is recorded with the ``released`` capacity event a first
+    registration records. A host whose id another declaration already uses
+    as its resource id is skipped and logged rather than overwritten. Host
+    rows are not changed.
 
-    The ledger is composed as the compute service composes it, so a derived
-    declaration's scalar total mirrors ``gpu_count``.
+    Written in SQL rather than through the service's derivation so that what
+    this migration does stays what it did when it shipped.
+
+    Every row is planned before the first write.
     """
     if not (_table_exists(engine, "hosts") and _table_exists(engine, "capacity_buckets")):
         return
-    session_factory = sessionmaker(bind=engine, autoflush=False)
-    ledger = CapacityLedgerService(
-        session_factory,
-        unit_claim_keys=("units", "gpu_count"),
-        mirror_dimension="gpu_count",
-    )
-    with session_factory() as db, db.begin():
-        LegacyHostCapacityDerivation(ledger).derive_in_session(db)
+    with engine.begin() as connection:
+        hosts = connection.execute(text(
+            "SELECT host_id, pool_id, gpu_count, gpu_model, enabled FROM hosts "
+            "WHERE gpu_count > 0 ORDER BY host_id"
+        )).all()
+        declared = {
+            row[0] for row in connection.execute(text(
+                "SELECT host_id FROM capacity_buckets WHERE host_id IS NOT NULL"
+            ))
+        }
+        resource_ids = {
+            row[0] for row in connection.execute(text(
+                "SELECT backing_resource_id FROM capacity_buckets"
+            ))
+        }
+        planned = []
+        for host_id, pool_id, gpu_count, gpu_model, enabled in hosts:
+            if host_id in declared:
+                continue
+            if host_id in resource_ids:
+                logger.warning(
+                    "Host %s not declared: a declaration already uses resource "
+                    "id %r without naming this host",
+                    host_id,
+                    host_id,
+                )
+                continue
+            planned.append({
+                "bucket": str(uuid.uuid4()),
+                "resource": host_id,
+                "pool": pool_id,
+                "units": int(gpu_count),
+                "capacity": _json_param({"gpu_count": int(gpu_count)}),
+                "attributes": _json_param({"gpu_model": gpu_model} if gpu_model else {}),
+                "enabled": bool(enabled),
+            })
+        for row in planned:
+            connection.execute(
+                text(
+                    "INSERT INTO capacity_buckets (capacity_bucket_id, "
+                    "backing_resource_id, pool_id, host_id, resource_type, "
+                    "resource_subtype, total_units, capacity, attributes, enabled) "
+                    "VALUES (:bucket, :resource, :pool, :resource, 'compute.gpu', "
+                    "NULL, :units, :capacity, :attributes, :enabled)"
+                ),
+                row,
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO capacity_events (kind, resource_id, dimensions) "
+                    "VALUES ('released', :resource, :capacity)"
+                ),
+                row,
+            )
+        if planned:
+            logger.info(
+                "Declared %d capacity resource(s) from legacy host capacity: %s",
+                len(planned),
+                ", ".join(row["resource"] for row in planned),
+            )
 
 
 MIGRATIONS: tuple[Migration, ...] = (

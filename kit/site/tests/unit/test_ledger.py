@@ -2,25 +2,27 @@
 
 from __future__ import annotations
 
+import threading
 from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.pool import NullPool, StaticPool
 from market_resource_pools.db import (
     Base as ResourcePoolBase,
     DEFAULT_POOL_ID,
     ResourcePool,
 )
 
-from market_site.db import Base
+from market_site.db import HELD_RESERVATION_STATES, Base
 from market_site.ledger import (
     ALLOCATION_MODE_EXCLUSIVE,
     ALLOCATION_MODE_SHAREABLE,
     CapacityConflictError,
     CapacityLedgerService,
     UndeclaredOfferingModeError,
+    UnknownPoolError,
 )
 
 
@@ -1186,6 +1188,7 @@ def test_scheduler_credit_back_covers_full_capacity_legacy_reservation():
 
 def test_registered_resource_carries_the_real_pool_id():
     ledger = _make_ledger()
+    _declare_pool(ledger, "pool-a", "vm")
     resource = ledger.register_resource(resource_id="r1", total_units=4, pool_id="pool-a")
     assert resource["pool_id"] == "pool-a"
     assert ledger.list_resources()[0]["pool_id"] == "pool-a"
@@ -1203,6 +1206,8 @@ def test_a_declaration_must_name_its_pool():
 
 def test_re_registering_updates_pool_id():
     ledger = _make_ledger()
+    _declare_pool(ledger, "pool-a", "vm")
+    _declare_pool(ledger, "pool-b", "vm")
     ledger.register_resource(resource_id="r1", total_units=4, pool_id="pool-a")
     resource = ledger.register_resource(resource_id="r1", total_units=4, pool_id="pool-b")
     assert resource["pool_id"] == "pool-b"
@@ -1632,3 +1637,143 @@ def test_a_legacy_row_with_no_stored_pool_is_in_the_default_pool():
     # Naming the default pool explicitly restates where the row already was.
     restated = ledger.register_resource(resource_id="r1", pool_id="default", total_units=4)
     assert restated["pool_id"] == "default"
+
+
+# ----------------------------------------------------------------------
+# Administration is serialized through its caller's commit
+# ----------------------------------------------------------------------
+
+def test_an_in_session_mutator_outside_the_serialized_region_is_refused():
+    """A caller writing into its own transaction must hold the ledger's lock
+    around it; otherwise the mutator refuses before writing anything."""
+    ledger = _make_ledger()
+
+    with ledger._session_factory() as db:
+        with pytest.raises(RuntimeError, match="serialized"):
+            ledger.register_resource_in_session(
+                db, resource_id="r1", pool_id="default", total_units=1
+            )
+
+    assert ledger.snapshot() == []
+
+
+def _pause_after_the_obligation_check(ledger, monkeypatch):
+    """Make a pool move stop just after it has checked live obligations,
+    until released. Returns (checked, release) events."""
+    checked, release = threading.Event(), threading.Event()
+    refuse = ledger._refuse_reassignment_under_obligation
+
+    def refuse_then_wait(db, bucket, new_pool_id):
+        refuse(db, bucket, new_pool_id)
+        checked.set()
+        assert release.wait(timeout=10), "test never released the pool move"
+
+    monkeypatch.setattr(ledger, "_refuse_reassignment_under_obligation", refuse_then_wait)
+    return checked, release
+
+
+def _move_in_one_transaction(ledger, resource_id: str, pool_id: str) -> None:
+    """A caller composing a pool move into its own transaction, as the
+    document importer does: serialized through its commit."""
+    with ledger.serialized(), ledger._session_factory() as db:
+        ledger.register_resource_in_session(
+            db, resource_id=resource_id, pool_id=pool_id, total_units=4
+        )
+        db.commit()
+
+
+def test_the_lock_is_held_from_the_obligation_check_through_the_commit(monkeypatch):
+    """Deterministic: while a pool move is paused between checking live
+    obligations and committing, no other thread can take the ledger's lock,
+    so no admission can run in that window."""
+    ledger = _make_ledger()
+    _declare_pool(ledger, "pool-b", "vm")
+    ledger.register_resource(resource_id="r1", pool_id="default", total_units=4)
+    checked, release = _pause_after_the_obligation_check(ledger, monkeypatch)
+    mover = threading.Thread(target=_move_in_one_transaction, args=(ledger, "r1", "pool-b"))
+
+    mover.start()
+    assert checked.wait(timeout=10), "the pool move never reached its check"
+    try:
+        acquired = ledger._lock.acquire(blocking=False)
+        if acquired:
+            ledger._lock.release()
+        assert not acquired, "another thread could enter the ledger mid-move"
+    finally:
+        release.set()
+        mover.join(timeout=10)
+
+    assert ledger.snapshot()[0]["pool_id"] == "pool-b"
+
+
+def test_a_reservation_racing_a_pool_move_never_survives_against_the_moved_resource(
+    tmp_path, monkeypatch
+):
+    """Independent sessions on a file-backed database. The move is paused
+    after its obligation check while a reserve for the same resource starts.
+    Whatever the order, no committed state has a live reservation on a
+    resource that now sits in a pool unable to deliver it."""
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'ledger.db'}",
+        connect_args={"check_same_thread": False, "timeout": 30},
+        poolclass=NullPool,
+    )
+    Base.metadata.create_all(bind=engine)
+    ResourcePoolBase.metadata.create_all(bind=engine)
+    session_factory = sessionmaker(bind=engine)
+    with session_factory() as db, db.begin():
+        db.add_all([
+            ResourcePool(id=DEFAULT_POOL_ID, label="Default", provider="test",
+                         enabled=True, policy_tags={"deliverable_modes": ["vm"]}),
+            ResourcePool(id="pool-b", label="B", provider="test",
+                         enabled=True, policy_tags={"deliverable_modes": []}),
+        ])
+    ledger = CapacityLedgerService(
+        session_factory, unit_claim_keys=("units", "gpu_count"),
+        mirror_dimension="gpu_count",
+    )
+    ledger.register_resource(resource_id="r1", pool_id="default", total_units=4)
+    checked, release = _pause_after_the_obligation_check(ledger, monkeypatch)
+    outcomes: dict[str, object] = {}
+
+    def reserve():
+        try:
+            outcomes["reserve"] = ledger.reserve(
+                claim={"offering_mode": "vm", "gpu_count": 1, "resource_id": "r1"},
+                deal_ref={},
+            )
+        except Exception as exc:  # the refusal is an acceptable outcome
+            outcomes["reserve"] = exc
+
+    mover = threading.Thread(target=_move_in_one_transaction, args=(ledger, "r1", "pool-b"))
+    reserver = threading.Thread(target=reserve)
+    mover.start()
+    assert checked.wait(timeout=10)
+    reserver.start()
+    # Give the reserve the whole pause to run in. Serialized, it cannot
+    # finish while the move holds the lock, so this wait expires and the
+    # move resumes; unserialized, it would finish here and commit against
+    # the old pool before the move writes. The assertion below does not
+    # depend on this wait, only whether the counterfactual is exercised.
+    reserver.join(timeout=1)
+    release.set()
+    mover.join(timeout=10)
+    reserver.join(timeout=10)
+
+    (resource,) = ledger.snapshot()
+    live = [
+        row for row in ledger.list_reservations()
+        if row["state"] in HELD_RESERVATION_STATES
+    ]
+    assert resource["pool_id"] == "pool-b"
+    assert live == [], f"a reservation survived the move: {outcomes['reserve']!r}"
+
+
+
+def test_a_declaration_naming_an_unknown_pool_is_refused():
+    ledger = _make_ledger()
+
+    with pytest.raises(UnknownPoolError, match="no-such-pool"):
+        ledger.register_resource(resource_id="r1", pool_id="no-such-pool", total_units=1)
+
+    assert ledger.snapshot() == []

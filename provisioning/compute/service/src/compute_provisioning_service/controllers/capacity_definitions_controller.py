@@ -65,7 +65,9 @@ class CapacityDefinitionsController:
         ``validate_only`` answers 200 with the problems and the diff an
         import would produce, applying nothing either way.
         """
-        with self._session_factory() as db:
+        # Serialized through the commit: a declaration's checks against
+        # stored state hold only until something else commits.
+        with self._ledger.serialized(), self._session_factory() as db:
             outcome = reconcile_capacity_document(db, self._ledger, body.yaml_text)
             applied = outcome.valid and not body.validate_only
             if applied:

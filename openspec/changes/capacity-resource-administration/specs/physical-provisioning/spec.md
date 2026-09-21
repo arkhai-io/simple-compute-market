@@ -106,15 +106,17 @@ A document entry MUST state a declaration with the registration contract's own f
 and MUST replace the whole declaration it names, exactly as a registration request
 does. The document MUST NOT accept the legacy scalar unit total, MUST require each
 entry's resource type rather than defaulting it, and MUST reject unknown fields.
-Document validation MUST report every problem it finds, each with its location,
-rather than stopping at the first.
+Document validation MUST report every structural problem it finds, each with its
+location, rather than stopping at the first. A document with any structural problem
+MUST NOT be evaluated against stored state.
 
 An import MUST compare each entry with the stored declaration before writing, and an
 entry equal to the stored declaration MUST write nothing and emit no capacity event,
 so reconciling an unchanged or reformatted document does not advance the capacity
 version. A refusal only stored state can decide (an unknown pool, a host already
 named by an unnamed declaration, a pool move under a live obligation) MUST come from
-the same rules registration enforces. Every such refusal MUST be reported, and any
+the same rules registration enforces. For a structurally valid document every such
+refusal MUST be reported, and any
 refusal MUST leave the whole import unapplied with no digest recorded. The import API
 MUST offer a validate-only mode that reports the problems and the planned changes
 without applying either.
@@ -169,6 +171,14 @@ without applying either.
 - **WHEN** a document carries an unknown field, a missing resource type, and two
   entries naming the same host
 - **THEN** the import reports all three with their locations and applies nothing
+
+#### Scenario: A document has structural and stored-state problems
+
+- **WHEN** a document has an unknown field in one entry and names an unknown pool in
+  another
+- **THEN** the unknown field is reported and the unknown pool is not, because stored
+  state is not consulted for a structurally invalid document
+- **AND** nothing is applied
 
 #### Scenario: A later entry is refused by stored state
 

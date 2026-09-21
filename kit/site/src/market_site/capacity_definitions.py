@@ -29,7 +29,7 @@ Declarations the document does not name are left as they are.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -38,7 +38,7 @@ from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy.orm import Session
 
 from .declarations import CapacityDeclaration
-from .ledger import CapacityConflictError, CapacityLedgerService
+from .ledger import CapacityConflictError, CapacityLedgerService, UnknownPoolError
 
 _ROOT_FIELDS = frozenset({"resources"})
 
@@ -221,22 +221,23 @@ def reconcile_capacity_definitions_in_session(
     db: Session,
     ledger: CapacityLedgerService,
     yaml_text: str,
-    *,
-    pool_exists: Callable[[str], bool],
 ) -> CapacityDefinitionsOutcome:
     """Reconcile a document into the caller's transaction and report the result.
 
-    Every created or updated entry is registered through
-    ``register_resource_in_session``, so the refusals only stored state can
-    decide (a host another declaration names, a pool move under a live
-    obligation) are registration's own. Each refusal is recorded as a problem
+    A structurally invalid document is reported and goes no further: stored
+    state is consulted only for a document whose every entry is a
+    declaration. Every created or updated entry is then registered through
+    ``register_declaration_in_session``, so the refusals only stored state
+    can decide (an unknown pool, a host another declaration names, a pool
+    move under a live obligation) are registration's own. Each refusal is recorded as a problem
     rather than ending the reconciliation, so one import reports all of them.
 
     Registration's refusals all happen before it writes, so the session holds
     exactly the accepted entries afterwards. The caller commits only when the
     outcome is valid and it means to apply the document; otherwise it rolls
     back, which is also how a validate-only request sees stored-state
-    refusals without applying anything. Neither opens a session nor commits.
+    refusals without applying anything. Neither opens a session nor commits,
+    and the caller holds ``ledger.serialized()`` around its whole transaction.
     """
     declarations, structural = parse_capacity_definitions(yaml_text)
     if structural:
@@ -246,21 +247,15 @@ def reconcile_capacity_definitions_in_session(
     diff = CapacityDefinitionsDiff()
     for index, declaration in enumerate(declarations):
         base = f"resources[{index}]"
-        if not pool_exists(declaration.pool_id):
-            problems.append(
-                _problem(
-                    f"{base}.pool_id",
-                    "unknown_pool",
-                    f"resource pool '{declaration.pool_id}' does not exist",
-                )
-            )
-            continue
         try:
             change = ledger.declaration_change_in_session(db, declaration)
             if change == "unchanged":
                 diff.unchanged.append(declaration.resource_id)
                 continue
             ledger.register_declaration_in_session(db, declaration)
+        except UnknownPoolError as exc:
+            problems.append(_problem(f"{base}.pool_id", "unknown_pool", str(exc)))
+            continue
         except CapacityConflictError as exc:
             problems.append(_problem(base, "conflict", str(exc)))
             continue

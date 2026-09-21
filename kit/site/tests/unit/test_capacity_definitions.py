@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import textwrap
-from collections.abc import Callable
 
 import pytest
 from market_resource_pools.db import Base as ResourcePoolBase
 from market_resource_pools.db import DEFAULT_POOL_ID, ResourcePool
 from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from market_site import (
@@ -54,17 +53,13 @@ def _ledger() -> CapacityLedgerService:
     )
 
 
-def _pools(db: Session) -> Callable[[str], bool]:
-    return lambda pool_id: db.get(ResourcePool, pool_id) is not None
-
-
 def _reconcile(
     ledger: CapacityLedgerService, document: str, *, commit: bool = True
 ) -> CapacityDefinitionsOutcome:
     """Reconcile as an applying caller does: commit only a valid outcome."""
-    with ledger._session_factory() as db:
+    with ledger.serialized(), ledger._session_factory() as db:
         outcome = reconcile_capacity_definitions_in_session(
-            db, ledger, textwrap.dedent(document), pool_exists=_pools(db)
+            db, ledger, textwrap.dedent(document)
         )
         if outcome.valid and commit:
             db.commit()

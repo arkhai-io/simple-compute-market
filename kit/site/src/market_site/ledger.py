@@ -40,6 +40,8 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
@@ -92,6 +94,10 @@ def _executor_ref_for_resource(resource: CapacityBucket) -> dict[str, Any] | Non
 
 class CapacityConflictError(Exception):
     """Raised when a mutation references a row in an incompatible state."""
+
+
+class UnknownPoolError(ValueError):
+    """A declaration names a Resource Pool the site does not have."""
 
 
 class UndeclaredOfferingModeError(CapacityConflictError):
@@ -618,6 +624,38 @@ class CapacityLedgerService:
         # raises "cannot commit - no transaction is active". One site's
         # ledger has exactly one serialization point; this is it.
         self._lock = threading.RLock()
+        # How deeply the current thread holds the lock through
+        # ``serialized()``, so an in-session mutator can refuse to run
+        # outside it.
+        self._holding = threading.local()
+
+    @contextmanager
+    def serialized(self) -> Iterator[None]:
+        """Hold the ledger's serialization lock for the enclosed work.
+
+        Every ledger operation runs inside it. A caller composing ledger
+        writes into its own transaction holds it around that whole
+        transaction, through its commit: a check the ledger makes (a pool
+        move against live obligations, say) is only true until something
+        else commits, so the lock must outlast the write it guards.
+        Re-entrant. Take it before opening the session, as every ledger
+        operation does, so the lock is always acquired ahead of the database.
+        """
+        with self._lock:
+            depth = getattr(self._holding, "depth", 0)
+            self._holding.depth = depth + 1
+            try:
+                yield
+            finally:
+                self._holding.depth = depth
+
+    def _require_serialized(self, operation: str) -> None:
+        if not getattr(self._holding, "depth", 0):
+            raise RuntimeError(
+                f"{operation} writes into the caller's transaction and must run "
+                "inside CapacityLedgerService.serialized(), held through that "
+                "transaction's commit"
+            )
 
     # ------------------------------------------------------------------
     # Resource registry
@@ -640,7 +678,7 @@ class CapacityLedgerService:
 
         See :meth:`register_resource_in_session` for the declaration rules.
         """
-        with self._lock, self._session_factory() as db:
+        with self.serialized(), self._session_factory() as db:
             payload = self.register_resource_in_session(
                 db,
                 resource_id=resource_id,
@@ -672,7 +710,8 @@ class CapacityLedgerService:
     ) -> dict[str, Any]:
         """Insert or update a ledger resource inside the caller's transaction.
 
-        Neither opens a session nor commits, so a caller can land a
+        The caller holds :meth:`serialized` around that transaction. Neither
+        opens a session nor commits, so a caller can land a
         declaration together with other writes — a definition document's
         reconciliation and the digest recording it, most immediately.
 
@@ -704,6 +743,7 @@ class CapacityLedgerService:
         First-time registration is always "released": brand new capacity
         appearing is unambiguous.
         """
+        self._require_serialized("register_resource_in_session")
         if not pool_id:
             raise ValueError("a capacity declaration must name its pool_id")
         mirror = self._mirror_dimension
@@ -744,11 +784,17 @@ class CapacityLedgerService:
         """Insert or replace one whole declaration inside the caller's transaction.
 
         The declaration is already valid in itself; what is refused here is
-        what only stored state can decide: a host another resource already
-        names, and a pool move while the resource holds a live obligation.
-        Both refusals happen before anything is written. See
+        what only stored state can decide: a pool the site does not have
+        (``UnknownPoolError``), a host another resource already names, and a
+        pool move while the resource holds a live obligation. Every refusal
+        happens before anything is written. See
         :meth:`register_resource_in_session` for the event it emits.
         """
+        self._require_serialized("register_declaration_in_session")
+        if db.get(ResourcePool, declaration.pool_id) is None:
+            raise UnknownPoolError(
+                f"resource pool {declaration.pool_id!r} does not exist"
+            )
         resource_id = declaration.resource_id
         bucket = self._bucket_by_backing_resource(db, resource_id)
         old_capacity = (
@@ -905,7 +951,7 @@ class CapacityLedgerService:
             )
 
     def list_resources(self) -> list[dict[str, Any]]:
-        with self._lock, self._session_factory() as db:
+        with self.serialized(), self._session_factory() as db:
             self._expire_stale_holds(db)
             rows = (
                 db.query(CapacityBucket).order_by(CapacityBucket.updated_at.asc()).all()
@@ -938,7 +984,7 @@ class CapacityLedgerService:
             lease_start_utc=lease_start_utc,
             lease_duration_seconds=lease_duration_seconds,
         )
-        with self._lock, self._session_factory() as db:
+        with self.serialized(), self._session_factory() as db:
             self._expire_stale_holds(db)
             match = self._find_candidate(db, claim, requested, window_start, window_end)
             if match is None:
@@ -995,7 +1041,7 @@ class CapacityLedgerService:
             lease_start_utc=lease_start_utc,
             lease_duration_seconds=lease_duration_seconds,
         )
-        with self._lock, self._session_factory() as db:
+        with self.serialized(), self._session_factory() as db:
             self._expire_stale_holds(db)
             if escrow_uid:
                 existing = self._find_reservation(db, escrow_uid=escrow_uid)
@@ -1070,7 +1116,7 @@ class CapacityLedgerService:
         should use ``assign_settlement_resource_in_session`` against a session
         they already hold open, not this method.
         """
-        with self._lock, self._session_factory() as db:
+        with self.serialized(), self._session_factory() as db:
             self._expire_stale_holds(db)
             result = self.assign_settlement_resource_in_session(
                 db,
@@ -1316,7 +1362,7 @@ class CapacityLedgerService:
             lease_start_utc=lease_start_utc,
             lease_end_utc=lease_end_utc,
         )
-        with self._lock, self._session_factory() as db:
+        with self.serialized(), self._session_factory() as db:
             reservation = self._find_reservation(
                 db,
                 capacity_reservation_id=capacity_reservation_id,
@@ -1359,7 +1405,7 @@ class CapacityLedgerService:
     ) -> dict[str, Any] | None:
         """Return a held/leased reservation's capacity to the pool."""
         escrow_uid = dict(deal_ref or {}).get("escrow_uid")
-        with self._lock, self._session_factory() as db:
+        with self.serialized(), self._session_factory() as db:
             reservation = self._find_reservation(
                 db,
                 capacity_reservation_id=capacity_reservation_id,
@@ -1462,7 +1508,7 @@ class CapacityLedgerService:
             lease_start_utc=lease_start_utc,
             lease_duration_seconds=lease_duration_seconds,
         )
-        with self._lock, self._session_factory() as db:
+        with self.serialized(), self._session_factory() as db:
             self._expire_stale_holds(db)
             old_reservation = db.get(
                 CapacityReservation, old_capacity_reservation_id, with_for_update=True
@@ -1568,7 +1614,7 @@ class CapacityLedgerService:
         lease_end_utc: str,
     ) -> dict[str, Any] | None:
         """End a lease early; injected compute lifecycle observes the new expiry."""
-        with self._lock, self._session_factory() as db:
+        with self.serialized(), self._session_factory() as db:
             reservation = self._find_reservation(
                 db, capacity_reservation_id=capacity_reservation_id
             )
@@ -1612,7 +1658,7 @@ class CapacityLedgerService:
         Returns None when no held reservation matches (the caller falls
         back to the legacy lease table).
         """
-        with self._lock, self._session_factory() as db:
+        with self.serialized(), self._session_factory() as db:
             reservation = self._find_reservation(
                 db,
                 capacity_reservation_id=capacity_reservation_id,
@@ -1643,7 +1689,7 @@ class CapacityLedgerService:
         if now.tzinfo is None:
             now = now.replace(tzinfo=timezone.utc)
         due: list[dict[str, Any]] = []
-        with self._lock, self._session_factory() as db:
+        with self.serialized(), self._session_factory() as db:
             rows = (
                 db.query(CapacityReservation)
                 .filter(
@@ -1670,7 +1716,7 @@ class CapacityLedgerService:
         No capacity event: releasing still holds the units — the workload
         may not be torn down yet.
         """
-        with self._lock, self._session_factory() as db:
+        with self.serialized(), self._session_factory() as db:
             reservation = db.get(CapacityReservation, capacity_reservation_id)
             if reservation is None or reservation.state not in HELD_RESERVATION_STATES:
                 return None
@@ -1710,7 +1756,7 @@ class CapacityLedgerService:
         caller itself is holding, so this form would wait out the busy
         timeout and then fail with ``database is locked``.
         """
-        with self._lock, self._session_factory() as db:
+        with self.serialized(), self._session_factory() as db:
             result = self.update_lease_fields_in_session(
                 db,
                 capacity_reservation_id,
@@ -1801,7 +1847,7 @@ class CapacityLedgerService:
         (``compute_provisioning_service/db/migrations.py``'s ``pool_id``
         backfill).
         """
-        with self._lock, self._session_factory() as db:
+        with self.serialized(), self._session_factory() as db:
             reservation = (
                 db.query(CapacityReservation)
                 .filter(
@@ -1833,7 +1879,7 @@ class CapacityLedgerService:
         ``release`` when capacity should become available and an event should be
         published.
         """
-        with self._lock, self._session_factory() as db:
+        with self.serialized(), self._session_factory() as db:
             reservation = db.get(CapacityReservation, capacity_reservation_id)
             if reservation is None:
                 return None
@@ -1862,7 +1908,7 @@ class CapacityLedgerService:
         page, so pollers know to keep paging; a subscriber that finds a
         gap versus what it last applied resyncs from a snapshot.
         """
-        with self._lock, self._session_factory() as db:
+        with self.serialized(), self._session_factory() as db:
             rows = (
                 db.query(CapacityEvent)
                 .filter(CapacityEvent.version > int(after_version))
@@ -1895,12 +1941,12 @@ class CapacityLedgerService:
     # ------------------------------------------------------------------
 
     def get_reservation(self, capacity_reservation_id: str) -> dict[str, Any] | None:
-        with self._lock, self._session_factory() as db:
+        with self.serialized(), self._session_factory() as db:
             reservation = db.get(CapacityReservation, capacity_reservation_id)
             return self._reservation_payload(reservation) if reservation else None
 
     def get_reservation_by_escrow(self, escrow_uid: str) -> dict[str, Any] | None:
-        with self._lock, self._session_factory() as db:
+        with self.serialized(), self._session_factory() as db:
             reservation = self._find_reservation(db, escrow_uid=escrow_uid)
             return self._reservation_payload(reservation) if reservation else None
 
@@ -1913,11 +1959,11 @@ class CapacityLedgerService:
         resource is intentionally absent from the storefront-facing reservation
         payload because admission does not create a durable placement commitment.
         """
-        with self._lock, self._session_factory() as db:
+        with self.serialized(), self._session_factory() as db:
             return self._backing_resource_id(db, capacity_reservation_id)
 
     def list_reservations(self, *, state: str | None = None) -> list[dict[str, Any]]:
-        with self._lock, self._session_factory() as db:
+        with self.serialized(), self._session_factory() as db:
             q = db.query(CapacityReservation)
             if state is not None:
                 q = q.filter(CapacityReservation.state == state)
@@ -1970,7 +2016,7 @@ class CapacityLedgerService:
         an idle site with no incoming requests — so a hold doesn't sit
         expired-but-unreleased indefinitely.
         """
-        with self._lock, self._session_factory() as db:
+        with self.serialized(), self._session_factory() as db:
             self._expire_stale_holds(db)
 
     def _expire_stale_holds(self, db: Session) -> None:

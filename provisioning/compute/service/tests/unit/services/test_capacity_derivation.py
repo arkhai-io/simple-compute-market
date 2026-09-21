@@ -131,8 +131,9 @@ def stores():
 
 def _derive(stores, host_ids=None) -> list[str]:
     session_factory, ledger = stores
-    with session_factory() as db, db.begin():
-        return LegacyHostCapacityDerivation(ledger).derive_in_session(db, host_ids)
+    derivation = LegacyHostCapacityDerivation(ledger)
+    with derivation.serialized(), session_factory() as db, db.begin():
+        return derivation.derive_in_session(db, host_ids)
 
 
 def _resources(ledger: CapacityLedgerService) -> dict[str, dict]:
@@ -205,7 +206,7 @@ def test_hosts_added_but_not_flushed_are_derived(stores):
     """The caller upserts hosts and derives in one transaction; its pending
     rows must be visible to the derivation."""
     session_factory, ledger = stores
-    with session_factory() as db, db.begin():
+    with ledger.serialized(), session_factory() as db, db.begin():
         db.add(Host(
             host_id="kvm3", ssh_host="10.0.0.3", ssh_user="root",
             ssh_key_value="/key", gpu_count=2, pool_id=DEFAULT_POOL_ID,

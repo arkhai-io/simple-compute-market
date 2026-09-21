@@ -45,7 +45,8 @@ mapping; notes are amended rather than rewritten, per `AGENTS.md`.
 
 **Resumed 2026-09-21.** Section 1, 4b.6, 4c.4, and Section 5 are implemented and
 tested; see each task's note. Sections 2, 3 and 4 followed the same day, except
-4.5's e2e half, then Sections 6 and 7 except 7.1's e2e half. Section 8 remains.
+4.5's e2e half, then Sections 6 and 7 except 7.1's e2e half. A review then added
+Section 7b; Section 8 follows it.
 
 **Planning pass (2026-09-21, after design of the document).** It adds tasks 1.6–1.8,
 5.11–5.12 and amends 1.2, 1.4, 1.5, 4b.6, 4c.4, 5.2, 5.9, 5.10, 6.3 and 7.1 for
@@ -223,6 +224,9 @@ entry, then Section 3's derivation entry.
       `LegacyHostCapacityDerivation.derive_in_session`, which flushes the
       caller's pending writes before reading (the service's sessions do not
       autoflush) and registers through `register_resource_in_session`.
+      **Superseded in part 2026-09-21:** the migration no longer calls this
+      unit; it derives in frozen migration-local SQL held equal by a parity test
+      (7b.4). INI application still uses it.
 - [x] 2.2 Derive only for hosts with `gpu_count > 0` and no correlated declaration.
       Never overwrite, never merge. Report the derived set at INFO, matching how both
       existing seeding steps report theirs. **Amended 2026-09-21 (gate resolved):**
@@ -281,6 +285,7 @@ entry, then Section 3's derivation entry.
       **Done 2026-09-21:** `20260921_004_legacy_host_capacity_declarations`,
       running `LegacyHostCapacityDerivation` imported at module level (no cycle,
       verified), with the ledger composed as the service composes it.
+      **Amended 2026-09-21:** frozen as migration-local SQL by 7b.4.
 - [x] 3.2 Keep the migration to the derivation only — no column drop, no host-row
       mutation. Freeze-then-redirect, matching the POOLS campaign's additive-only
       convention. **Amended 2026-09-21:** Section 4b's schema migration is a separate
@@ -455,6 +460,9 @@ depends on.
       `gpu_count`.
 - [x] 4b.9 **Integration.** One typed-client case registering a resource whose
       declaration names no compute dimension.
+      **Review 2026-09-21:** no such typed-client test exists; the declaration
+      naming no compute dimension is covered only at ledger level
+      (`test_ledger.py`). Added by 7b.3.
 - [x] 4b.10 Require `pool_id` on registration: required field on
       `ResourceRegisterRequest` and `ResourceRegistration`, required argument on
       `register_resource`. Update every caller —
@@ -503,6 +511,9 @@ depends on.
       `pool-declared-advertisement-and-backing`, so a backed-to-unbacked case would
       exercise terminology that may not exist yet when this lands. That
       specialization belongs to the Goal 7 change that introduces it.
+      **Review 2026-09-21:** the test calls the ledger directly, so it is a
+      component test, not an integration test. The integration case is added by
+      7b.3.
 - [x] 4c.4 Confirm no existing fixture, bulk import, or e2e setup reassigns a resource
       under a live obligation. If one does, drain it rather than exempting it.
       **Amended 2026-09-21 (method):**
@@ -570,12 +581,16 @@ depends on.
       restarts. The first start declares; an edit applies at the next start; a
       declaration may name a pre-existing pool; a missing configured path fails;
       an unconfigured one is skipped.
+      **Review 2026-09-21:** these call the startup entry point directly rather
+      than booting the app, so they are component tests, as the relay tests they
+      follow are.
 - [x] 5.6 **Integration.** An unchanged document at restart does not overwrite
       capacity administered through the API since the last import. This is the
       regression the digest gate exists to prevent and the happy-path cases above do
       not cover it.
       **Done 2026-09-21:** Same file: a declaration disabled through the ledger
       stays disabled across three restarts with the document unchanged.
+      **Review 2026-09-21:** component level, as 5.5.
 - [x] 5.7 **Integration.** An explicit import reconciles a document whose digest
       matches the recorded one.
       **Done 2026-09-21:** Covered by 5.11's reimport through the API
@@ -641,6 +656,10 @@ depends on.
       pool, and a pool move under a live obligation, applying none of its
       entries; `validate_only` reports the plan and a host conflict, applying
       nothing. The startup case is 5.8's.
+      **Correction 2026-09-21:** the structural problem was sent as a second
+      request, and a structurally invalid document is not evaluated against
+      stored state (`design.md`, "Review corrections"). The combined case
+      described above does not exist; 7b.3 adds the structural-first case.
 - [x] 5.12 Bump `compute-provisioning` to 0.7.0 (`design.md`, "Versions"):
       - `provisioning/compute/pyproject.toml`;
       - its bound to `>=0.7.0` in `domains/vms/provisioning/client/pyproject.toml`
@@ -660,6 +679,11 @@ depends on.
       where the bare-metal adapter locks it. No `==` pin exists. **The VM
       storefront lock is owed:** it needs the `torch` index; the owner's `make
       test` regenerates it.
+      **Amended 2026-09-21:** the e2e run failed at stack build:
+      `dev-env/generate_state.py` runs under the VM storefront lock, still
+      pinning `arkhai-compute-provisioning==0.6.1`, which the wheelhouse no
+      longer builds. The owner's passing `make test` regenerates that lock
+      locally; it must be committed.
 
 ## 6. Operator surface and deployment wiring
 
@@ -777,6 +801,116 @@ depends on.
       `kit-site-client` stays a test-only dev dependency. The VM adapter names
       its own `HostCapacityDerivation` port and never imports
       `capacity_derivation`. The new service modules import no domain model.
+
+## 7b. Review corrections (planned and done 2026-09-21)
+
+From the review after Section 7; decisions in `design.md`'s "Review corrections".
+Versions: every package touched here already carries an unpublished minor bump on
+this branch (`kit-site` 0.4.0, the VM adapter 0.3.0, the provisioning service 0.3.0),
+so none moves.
+
+- [x] 7b.1 **Serialization boundary.** In `kit/site/src/market_site/ledger.py`: add
+      `CapacityLedgerService.serialized()`, a context manager acquiring the existing
+      `RLock` and recording the holding thread; make every public operation that
+      takes the lock take it through `serialized()`; make
+      `register_resource_in_session` and `register_declaration_in_session` raise
+      `RuntimeError` when the calling thread does not hold it. Callers hold it around
+      their whole transaction through its commit:
+      - `provisioning/compute/service/src/compute_provisioning_service/services/definition_documents.py`:
+        the capacity kind's `_import` runs inside `serialized()`;
+      - `.../controllers/capacity_definitions_controller.py`: around its session;
+      - `domains/vms/provisioning/adapter/src/vm_provisioning_adapter/services/host_service.py`:
+        `HostCapacityDerivation` gains `serialized()`, and `seed_from_ini` holds it
+        around its session;
+      - `.../services/capacity_derivation.py`: implements it through the ledger.
+      Tests (`kit/site/tests/unit/test_ledger.py`, component level): an in-session
+      mutator outside `serialized()` raises; with a reconciliation paused just after
+      its obligation check, another thread's non-blocking acquire of the ledger lock
+      fails (deterministic, no timing); on a file-backed SQLite database with
+      independent sessions, a reserve racing a pool move never commits a live
+      reservation against a resource that has moved. The older `kit/fulfillment`
+      in-session methods are not changed (`design.md`).
+      **Done 2026-09-21:** `serialized()` records the holding thread in a
+      thread-local depth, so it stays re-entrant; all 21 of the ledger's lock
+      sites use it. Tests in `test_ledger.py`: the mutator refuses outside it;
+      the deterministic lock-held test; the race test, which gives the reserve a
+      bounded wait inside the paused move so that, unserialized, the violation
+      is actually produced (the assertion itself does not depend on the wait).
+      With `serialized()` changed to take no lock, both the deterministic and
+      the race tests fail on each of three runs; restored, both pass. The
+      migration no longer calls the ledger (7b.4), so it needs no lock.
+- [x] 7b.2 **The ledger refuses an unknown pool.** In `kit/site/src/market_site/ledger.py`:
+      `UnknownPoolError(ValueError)`, raised by `register_declaration_in_session` when
+      `ResourcePool` has no row for the declaration's pool. In
+      `kit/site/src/market_site/capacity_definitions.py`: map it to `unknown_pool` and
+      remove `pool_exists` from `reconcile_capacity_definitions_in_session`; remove it
+      from `reconcile_capacity_document` in `definition_documents.py`. Declare the
+      pools four `kit/site` tests register into without creating
+      (`test_ledger.py`'s `test_registered_resource_carries_the_real_pool_id` and
+      `test_re_registering_updates_pool_id`; `test_projection_router.py`'s two
+      projection tests), and any the provisioning and downstream suites reveal.
+      **Integration** (`provisioning/compute/service/tests/integration/test_capacity_api.py`):
+      a `PUT` naming an unknown pool through `SiteCapacityAdminClient` is 422 and
+      writes nothing.
+      **Done 2026-09-21:** `UnknownPoolError` in `ledger.py`, exported from
+      `market_site`. Beyond the four `kit/site` tests, two provisioning
+      integration tests registered into pools they never created
+      (`version-pool`, `hetzner-eu`); they now create them through
+      `ProvisioningClient.create_pool` (`_create_pool` in
+      `test_capacity_api.py`).
+      `test_a_declaration_naming_an_unknown_pool_is_refused` (unit) and
+      `test_a_registration_naming_an_unknown_pool_is_refused` (integration).
+- [x] 7b.3 **Test evidence.**
+      - 4b.9: add the typed-client case it claimed —
+        `SiteCapacityAdminClient` registers a declaration naming only `ram_gb` and reads
+        it back with `value` and `available_units` absent (`test_capacity_api.py`).
+      - 4c.3: relabel as a component test; add the integration case — a `PUT` moving a
+        resource with a live reservation to another pool is 409 through
+        `SiteCapacityAdminClient`, and succeeds after release (`test_capacity_api.py`).
+      - 5.5 and 5.6: relabel as component tests, as the relay restart-safety tests they
+        follow are.
+      - 5.11: correct its note (the structural problem was a second request) and add
+        the structural-first case to `test_capacity_definitions_api.py`: an unknown field
+        beside an unknown pool reports only the unknown field.
+      - `docs/development/DEPLOYMENT_AND_CONFIG.md`'s "Capacity definitions": state
+        structural-first validation.
+      **Done 2026-09-21:**
+      `test_a_declaration_naming_no_compute_dimension_is_stored_as_declared` and
+      `test_a_held_resource_moves_pools_only_once_released` in
+      `test_capacity_api.py`;
+      `test_a_structurally_invalid_document_is_not_checked_against_stored_state`
+      in `test_capacity_definitions_api.py`. Relabels and the 5.11 correction
+      are in those tasks' notes. `DEPLOYMENT_AND_CONFIG.md` describes the two
+      stages.
+- [x] 7b.4 **Freeze the upgrade migration.** In
+      `provisioning/compute/service/src/compute_provisioning_service/db/migrations.py`,
+      `_migrate_legacy_host_capacity_declarations` derives in migration-local SQL —
+      the same selection (GPUs, no declaration naming the host, resource id not taken),
+      the same declaration row, and the same `released` capacity event registration
+      appends — and the module no longer imports the derivation or the ledger.
+      Tests (`tests/unit/test_legacy_host_capacity_migration.py`): the existing three,
+      plus a parity test deriving the same hosts once through the migration and once
+      through `LegacyHostCapacityDerivation`, comparing declarations and events.
+      **Done 2026-09-21:** `_migrate_legacy_host_capacity_declarations` is SQL,
+      planning every row before writing; `migrations.py` no longer imports the
+      ledger or the derivation, and the two imports added for them are removed.
+      `test_the_migration_derives_what_the_runtime_derivation_derives` compares
+      declarations and events; making the migration drop `gpu_model`, or record
+      `capacity_changed` instead of `released`, fails it.
+- [x] 7b.5 **Records.** `design.md` done with this plan. Amend task notes 2.1, 3.1,
+      4b.9, 4c.3, 5.5, 5.6, 5.11, 5.12 as each correction lands.
+      **Done 2026-09-21:** Task notes amended when this section was planned;
+      each correction's evidence is in its 7b note.
+- [x] 7b.6 **Validation.** Rebuild the changed wheels and rerun `kit/site`, the
+      provisioning service, `kit/site-client`, `kit/fulfillment`, `core/storefront`,
+      API-credits service and storefront, bare-metal storefront and adapter, the VM
+      adapter's target, e2e unit, and the VM storefront.
+      **Done 2026-09-21:** `kit/site` 245, provisioning service 936,
+      `kit/site-client` 36, `kit/fulfillment` 165, `core/storefront` 158,
+      API-credits service 63 and storefront 79, bare-metal storefront 126 and
+      adapter 2, the VM adapter's target 38, e2e unit 237 plus its known
+      failure, VM storefront 1170 plus its two known `test_alkahest` failures
+      (in its existing environment).
 
 ## 8. Closeout
 

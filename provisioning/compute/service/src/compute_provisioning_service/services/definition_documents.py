@@ -23,12 +23,12 @@ recorded before a crash.
 from __future__ import annotations
 
 import hashlib
+from contextlib import nullcontext
 import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from market_resource_pools import ResourcePool
 from market_site import (
     CapacityDefinitionProblem,
     CapacityDefinitionsOutcome,
@@ -64,15 +64,10 @@ def reconcile_capacity_document(
 ) -> CapacityDefinitionsOutcome:
     """Reconcile a capacity-definitions document into ``db``'s transaction.
 
-    A declaration's pool must exist in this service's resource-pool table.
-    The caller commits only a valid outcome it means to apply.
+    The caller holds ``ledger.serialized()`` around its transaction and
+    commits only a valid outcome it means to apply.
     """
-    return reconcile_capacity_definitions_in_session(
-        db,
-        ledger,
-        yaml_text,
-        pool_exists=lambda pool_id: db.get(ResourcePool, pool_id) is not None,
-    )
+    return reconcile_capacity_definitions_in_session(db, ledger, yaml_text)
 
 
 @dataclass(frozen=True)
@@ -125,12 +120,21 @@ class DefinitionDocumentImporter:
     def import_capacity_definitions(self) -> ImportOutcome:
         """Reconcile capacity declarations. They run after pools, which a
         declaration names, and after host seeding."""
-        return self._import(
-            kind=_CAPACITY,
-            path=getattr(self._settings, "resolved_capacity_definitions_path", None),
-            label="Capacity-definitions",
-            apply=self._apply_capacity,
+        # The ledger's serialization lock spans the whole import, through the
+        # commit that records the digest, so no reservation is admitted
+        # between a declaration's checks and its commit.
+        guard = (
+            self._capacity_ledger.serialized()
+            if self._capacity_ledger is not None
+            else nullcontext()
         )
+        with guard:
+            return self._import(
+                kind=_CAPACITY,
+                path=getattr(self._settings, "resolved_capacity_definitions_path", None),
+                label="Capacity-definitions",
+                apply=self._apply_capacity,
+            )
 
     # ------------------------------------------------------------------
     # The gate

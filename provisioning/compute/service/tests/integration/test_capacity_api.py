@@ -20,6 +20,8 @@ from market_site_client import (
     SiteCapacityClient,
     SiteCapacityClientError,
 )
+from compute_provisioning import PoolCreate
+
 from .conftest import SERVICE_AUTHORITIES, STOREFRONT_SIGNER
 
 
@@ -94,6 +96,14 @@ class CapacityApi:
 
     async def events(self, after: int = 0) -> tuple[list[dict], int]:
         return await self.site.events_after(after)
+
+
+async def _create_pool(provisioning_client, pool_id: str) -> None:
+    """A declaration's pool must exist; create it through the operator client."""
+    await provisioning_client.create_pool(PoolCreate(
+        id=pool_id, label=pool_id, provider="ansible",
+        provider_config={"playbook_path": "playbooks/vm-operations.yaml"},
+    ))
 
 
 @pytest.fixture
@@ -508,7 +518,7 @@ async def test_site_resource_pools_projection_omits_pool_views_with_no_defaults(
 
 @pytest.mark.asyncio
 async def test_site_capacity_projection_version_endpoints_through_the_real_client(
-    capacity: CapacityApi,
+    capacity: CapacityApi, client_and_queue,
 ):
     """The one gap left after the four projection-data tests above: the
     `_version()` siblings (a cheap poll-for-change check, not the full
@@ -520,6 +530,7 @@ async def test_site_capacity_projection_version_endpoints_through_the_real_clien
     from compute_provisioning_service.db.models import Host
 
     remote = _site_capacity_client("http://test", transport=ASGITransport(app=app))
+    await _create_pool(client_and_queue[0], "version-pool")
 
     pool_version_before = await remote.resource_pool_projection_version()
     bucket_version_before = await remote.capacity_bucket_projection_version()
@@ -550,7 +561,7 @@ async def test_site_capacity_projection_version_endpoints_through_the_real_clien
 
 @pytest.mark.asyncio
 async def test_site_capacity_buckets_projection_through_the_real_client(
-    capacity: CapacityApi,
+    capacity: CapacityApi, client_and_queue,
 ):
     """Proves the real `SiteCapacityClient.capacity_bucket_projection()`
     wire contract end to end, mirroring `resource_pool_projection()`'s own
@@ -569,6 +580,7 @@ async def test_site_capacity_buckets_projection_through_the_real_client(
     """
     from market_site_client import SiteCapacityClient
 
+    await _create_pool(client_and_queue[0], "hetzner-eu")
     await capacity.register(
         "compute-kvm1-001",
         pool_id="hetzner-eu",
@@ -672,3 +684,55 @@ async def test_the_resource_pool_projection_publishes_declarations_not_hosts(
     assert resources["kvm1"]["available"] == {"gpu_count": 3}
     assert resources["kvm1"]["attributes"]["gpu_model"] == "H200"
     assert "gpu_count" not in resources["kvm1"]["attributes"]
+
+
+async def test_a_registration_naming_an_unknown_pool_is_refused(capacity: CapacityApi):
+    """The same rule a capacity document meets: the declaration's pool must
+    exist, and the refusal writes nothing."""
+    with pytest.raises(SiteCapacityAdminClientError) as refused:
+        await capacity.register("r-nowhere", pool_id="no-such-pool", total_units=1)
+
+    assert not isinstance(refused.value, SiteCapacityAuthenticationError)
+    assert refused.value.status_code == 422
+    assert "no-such-pool" in str(refused.value)
+    assert await capacity.snapshot() == []
+
+
+async def test_a_declaration_naming_no_compute_dimension_is_stored_as_declared(
+    capacity: CapacityApi,
+):
+    """Through the typed admin client: a declaration naming only memory has no
+    GPU dimension added, and no scalar total, since it names no dimension
+    the scalar mirrors."""
+    resource = await capacity.register(
+        "memory-only", pool_id="default", capacity={"ram_gb": 64},
+    )
+
+    assert resource["capacity"] == {"ram_gb": 64}
+    assert resource["value"] is None
+    assert resource["available_units"] is None
+    (listed,) = await capacity.admin.list_resources()
+    assert listed["capacity"] == {"ram_gb": 64}
+
+
+async def test_a_held_resource_moves_pools_only_once_released(
+    capacity: CapacityApi, client_and_queue,
+):
+    """Both halves in one test, so the refusal cannot be mistaken for a
+    resource that could never move."""
+    await _create_pool(client_and_queue[0], "pool-b")
+    await capacity.register("held", pool_id="default", total_units=4)
+    reserved = await capacity.reserve(
+        {"offering_mode": "vm", "gpu_count": 1, "resource_id": "held"}, {}
+    )
+    assert reserved is not None
+
+    with pytest.raises(SiteCapacityAdminClientError) as refused:
+        await capacity.register("held", pool_id="pool-b", total_units=4)
+    assert refused.value.status_code == 409
+    assert (await capacity.admin.list_resources())[0]["pool_id"] == "default"
+
+    await capacity.release(capacity_reservation_id=reserved["capacity_reservation_id"])
+    moved = await capacity.register("held", pool_id="pool-b", total_units=4)
+
+    assert moved["pool_id"] == "pool-b"

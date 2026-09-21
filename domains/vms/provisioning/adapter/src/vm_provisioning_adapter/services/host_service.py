@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
+from contextlib import AbstractContextManager
 from typing import Optional, Protocol
 
 from market_config import decrypt_secret, encrypt_secret
@@ -52,6 +53,11 @@ class HostCapacityDerivation(Protocol):
     what a site sells is declared elsewhere, so this service applies INI
     hosts and leaves deciding their declarations to the port.
     """
+
+    def serialized(self) -> AbstractContextManager[None]:
+        """The capacity authority's serialization lock. Held around the whole
+        transaction a derivation writes into, through its commit."""
+        ...
 
     def derive_in_session(
         self, db: Session, host_ids: Sequence[str] | None = None
@@ -277,7 +283,7 @@ class HostService:
             return []
 
         upserted_names: list[str] = []
-        with self._session_factory() as db:
+        with self._capacity_derivation.serialized(), self._session_factory() as db:
             for entry in parsed:
                 key_value = entry["ansible_ssh_private_key_file"]
 

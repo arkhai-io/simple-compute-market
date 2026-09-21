@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterable, Sequence
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 
 from market_site import CapacityDeclaration, CapacityLedgerService
@@ -112,13 +113,18 @@ class LegacyHostCapacityDerivation:
     def __init__(self, ledger: CapacityLedgerService) -> None:
         self._ledger = ledger
 
+    def serialized(self) -> AbstractContextManager[None]:
+        """The ledger's serialization lock, for the caller to hold around its
+        whole transaction."""
+        return self._ledger.serialized()
+
     def derive_in_session(
         self, db: Session, host_ids: Sequence[str] | None = None
     ) -> list[str]:
         """Derive for ``host_ids``, or for every host when ``None``.
 
         Returns the resource ids declared. Neither opens a session nor
-        commits. The caller's pending writes are flushed first, so hosts it
+        commits; the caller holds :meth:`serialized` around the transaction. The caller's pending writes are flushed first, so hosts it
         upserted in this transaction are what the derivation reads, whether
         or not its session autoflushes.
         """

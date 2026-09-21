@@ -144,3 +144,20 @@ async def test_validate_only_reports_the_plan_and_problems_without_applying(
     assert refused.applied is False
     assert [(p.path, p.code) for p in refused.problems] == [("resources[1]", "conflict")]
     assert set(await _resources(capacity)) == {"holder"}
+
+
+async def test_a_structurally_invalid_document_is_not_checked_against_stored_state(
+    client_and_queue, capacity: CapacityApi
+):
+    """An unknown field in one entry and an unknown pool in another: only the
+    structural problem is reported, because stored state is consulted only
+    for a document whose every entry is a declaration."""
+    client, _ = client_and_queue
+    document = _DOCUMENT + "    total_units: 8\n" + _entry("elsewhere", pool_id="no-such-pool")
+
+    report = await client.import_capacity_definitions(document, validate_only=True)
+
+    assert [(p.path, p.code) for p in report.problems] == [
+        ("resources[0].total_units", "unknown_field"),
+    ]
+    assert await _resources(capacity) == {}

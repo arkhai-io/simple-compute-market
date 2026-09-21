@@ -957,10 +957,71 @@ read by the restored reader through its existing `or 0` handling, which is the o
 place a rolled-back reader sees a value it did not write. Rolling back past the
 migration is not supported, per `deployment-state`'s forward-recovery posture.
 
+### Review corrections (decided 2026-09-21)
+
+A review after Section 7 found two defects and several overclaimed test levels. The
+owner accepted the following.
+
+**Administration holds the ledger's serialization lock for the whole transaction.**
+`CapacityLedgerService`'s `RLock` is the site's one serialization point, and every
+public operation takes it around its own session. The in-session mutators
+(`register_resource_in_session`, `register_declaration_in_session`) did not, and
+their callers — the capacity-document importer, the import API, and `seed_from_ini`'s
+derivation — held a transaction without it. A pool move checks for live obligations
+and then writes, and the caller commits later, so a reservation could be admitted in
+between and leave a live reservation against a resource that had already moved.
+Locking inside the mutator would not close that window; the lock must span the
+caller's transaction through its commit. So the ledger offers `serialized()`, a
+context manager a caller holds around its whole transaction, and the in-session
+mutators refuse to run unless the calling thread holds it, which makes misuse an
+immediate error rather than a rule callers must know. The order is always ledger
+lock, then database, as every existing ledger operation already takes them. The
+older in-session methods `kit/fulfillment` calls (`update_lease_fields_in_session`,
+`iter_scheduling_candidates_in_session`) have the same shape but predate this change;
+they are flagged here, not changed.
+
+**The ledger refuses an unknown pool.** Registration stored a declaration naming a
+pool that does not exist, while a capacity document refused the same entry, because
+only the document's reconciler checked. The reviewer proposed an injected pool port
+so `kit/site` need not depend on resource pools; that dependency already exists
+(`kit/site` declares `kit-resource-pools` and admission reads `ResourcePool`), so the
+check goes in the ledger's one registration path, raising `UnknownPoolError`: 422 on
+`PUT`, `unknown_pool` in a document. The reconciler's `pool_exists` parameter goes.
+
+**Structural validation completes before stored state is consulted.** A document
+with any structural problem reports all of its structural problems and nothing
+else; only a structurally valid document is evaluated against stored state, which
+then reports every refusal. Stored-state rules are meaningless for an entry that is
+not a declaration, so the two categories are not mixed. The spec and operator
+documentation said "every problem" without this distinction and are corrected.
+
+**The upgrade migration's derivation is frozen.** "Legacy host capacity is derived
+at seed time and once at upgrade" chose one derivation for both callers so the two
+could not drift. That holds only until the migration ships; afterwards a migration
+must keep doing what it did, for the same reason `20260921_003` freezes its key
+tuple. The migration affects the VM domain: it runs against the compute provisioning
+database VM shares with bare metal, whose `hosts` table INI inventory fills. So
+`20260921_004` derives in migration-local SQL, producing the same rows and events as
+the runtime derivation, and a parity test holds the two equal until it ships.
+Afterwards they may diverge by design. This supersedes that section's migration
+clause; its choice for INI application stands.
+
+**Test levels are stated as they are.** Tests that call the ledger or the startup
+entry point directly against a real database are component tests under `TESTING.md`,
+not integration tests; tasks that claimed otherwise are relabelled, and the two
+behaviours that need integration evidence (a declaration naming no compute dimension,
+and the 409 for a pool move under a live reservation) gain it through the typed
+clients.
+
 ## Open Questions
 
 ### Open
 
+- **Generic registration APIs still default `resource_type` to `compute.gpu`.** The
+  ledger's `register_resource` and the registration request keep the default for their
+  existing callers, so the reusable kit surface is not yet domain-neutral. Removing it
+  is a deliberate API change for a later change; the capacity-definitions document
+  already requires the field.
 - **Should the scalar `total_units` / `units` mirror be retired entirely?** It predates
   multidimensional capacity and is the only reason a mirror dimension must exist.
   Deferrable: making the dimension name composition-supplied removes the cross-domain

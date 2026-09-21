@@ -1,5 +1,8 @@
 """Hosts present at upgrade gain the declaration INI application derives.
 
+The migration is frozen SQL; a parity test holds it equal to the runtime
+derivation until it ships.
+
 These tests start from the schema the chain before this change leaves, where a
 declaration named its host through a ``vm_host`` attribute, and run the whole
 chain as a deployment does.
@@ -16,6 +19,9 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from compute_provisioning_service.db.migrations import apply_schema_migrations
+from compute_provisioning_service.services.capacity_derivation import (
+    LegacyHostCapacityDerivation,
+)
 
 _PREVIOUS_SCHEMA = Path(__file__).parent / "fixtures" / "schema_through_20260911_001.sql"
 
@@ -131,3 +137,44 @@ def test_rerunning_changes_nothing():
         events_after = connection.execute(text("SELECT COUNT(*) FROM capacity_events")).scalar_one()
     assert _resources(engine) == before
     assert events_after == events_before
+
+
+def _events(engine, resource_ids) -> list[tuple]:
+    with engine.begin() as connection:
+        rows = connection.execute(text(
+            "SELECT kind, resource_id, dimensions FROM capacity_events ORDER BY version"
+        )).all()
+    return [
+        (kind, resource_id, json.loads(dimensions) if isinstance(dimensions, str) else dimensions)
+        for kind, resource_id, dimensions in rows
+        if resource_id in resource_ids
+    ]
+
+
+def test_the_migration_derives_what_the_runtime_derivation_derives():
+    """Until the migration ships, the two derivations must agree on the same
+    hosts: the same declarations and the same events."""
+    migrated = _engine()
+    apply_schema_migrations(migrated)
+    derived_ids = {"kvm1", "kvm4"}
+
+    runtime = _engine()
+    apply_schema_migrations(runtime)
+    with runtime.begin() as connection:
+        connection.execute(text(
+            "DELETE FROM capacity_buckets WHERE backing_resource_id IN ('kvm1', 'kvm4')"
+        ))
+        connection.execute(text(
+            "DELETE FROM capacity_events WHERE resource_id IN ('kvm1', 'kvm4')"
+        ))
+    session_factory = sessionmaker(bind=runtime, autoflush=False)
+    ledger = CapacityLedgerService(
+        session_factory, unit_claim_keys=("units", "gpu_count"),
+        mirror_dimension="gpu_count",
+    )
+    derivation = LegacyHostCapacityDerivation(ledger)
+    with derivation.serialized(), session_factory() as db, db.begin():
+        assert set(derivation.derive_in_session(db)) == derived_ids
+
+    assert _resources(runtime) == _resources(migrated)
+    assert _events(runtime, derived_ids) == _events(migrated, derived_ids)

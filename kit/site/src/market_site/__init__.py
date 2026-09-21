@@ -32,6 +32,7 @@ from .ledger import (  # noqa: F401
     resource_satisfies_requirement,
     SettlementAbandonmentHook,
     UndeclaredOfferingModeError,
+    UnknownPoolError,
 )
 from .declarations import (  # noqa: F401
     CapacityDeclaration,
