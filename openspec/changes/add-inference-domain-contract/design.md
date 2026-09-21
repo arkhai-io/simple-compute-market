@@ -23,11 +23,10 @@ stated in any specification and the decisions below depend on it.
 | Domain conformance | `market_core.domain_conformance.assert_domain_conformance` | Shared harness every domain's six codecs pass |
 | Inference anywhere | — | Nothing. No identity, schema, filter spec, or change |
 
-### What the surrounding conversations settled
+### What planning settled before this change
 
-The Discord planning threads (2026-09-16 and 2026-09-19) and the earlier
-Stripe-integration thread converged on five points this design adopts without
-re-arguing them:
+Five points were settled during planning (2026-09-16 and 2026-09-19) and are
+adopted here without re-arguing them:
 
 1. Inference is its own domain, not API credits renamed.
 2. What is reusable from API credits is issuance, stable fulfillment identity,
@@ -267,8 +266,8 @@ canonical ownership (who may top up a key). Inference keeps all three separate
 and states the consequence normatively: the bearer credential is delivery of
 what was bought, and its balance is not payment authorization for anything
 else. A hosted route that adds a spending authority does so beside these, not
-by merging them. This is what the Discord threads meant by "an API credential
-is access — not the billing model."
+by merging them. In one sentence: an API credential is access, not the billing
+model.
 
 ### The authority stays synchronous; rating systems are downstream
 
