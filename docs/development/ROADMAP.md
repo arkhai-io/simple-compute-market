@@ -342,7 +342,7 @@ for readiness.
 | No inference roles: storefront, authority, gateway, buyer plugin, local stack, development identities, or end-to-end deal | [`compose-inference-domain-stack`](../../openspec/changes/compose-inference-domain-stack/) |
 | Bearer-credential issuance and evidence are namespaced to API credits and will be duplicated by the inference stack; the authority mirrors the digest function | [`extract-access-issuance-kit`](../../openspec/changes/extract-access-issuance-kit/) |
 | No admission hold, no post-response settlement from measured usage, no streaming usage capture, no cancellation or disconnect handling, no usage retention | [`meter-inference-usage`](../../openspec/changes/meter-inference-usage/) |
-| Becoming a seller requires a repository checkout, hand-written configuration, and manual identity generation; the demonstration repository has already drifted | [`package-inference-seller`](../../openspec/changes/package-inference-seller/) |
+| Becoming a seller requires a repository checkout, hand-written configuration, and manual identity generation, and a hand-assembled stack drifts as soon as its pinned versions move | [`package-inference-seller`](../../openspec/changes/package-inference-seller/) |
 | No multi-seller, concurrency, cancellation, lifecycle, late-usage, buyer-profile, or cross-language evidence; the per-domain deal path is not release-qualified | [`qualify-inference-market`](../../openspec/changes/qualify-inference-market/) |
 
 Three shapes are anticipated and unowned, by a scope decision of 2026-09-16
