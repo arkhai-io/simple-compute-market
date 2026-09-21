@@ -15,10 +15,12 @@ startup step creates capacity resources and nothing derives them from hosts.
 What fills the gap today is a fallback in
 `capacity_inventory._project_host`: a host with no matching capacity resource
 projects `capacity` as `{"gpu_count": host.gpu_count}`, `resource_id` as the host
-name, and `resource_type` as `compute.gpu`. That works, and it is why a host-seeded
-deployment publishes and sells today. But `Host` carries only `gpu_count` and
-`gpu_model` — there are no vCPU, RAM, or disk columns — so the fallback can never
-express more than GPU count.
+name, and `resource_type` as `compute.gpu`. That is why a host-seeded deployment
+publishes listings today — though it cannot sell against them, because admission
+matches only capacity resources and nothing creates one from a host (corrected
+2026-09-21; an earlier version said such a deployment "publishes and sells"). And
+`Host` carries only `gpu_count` and `gpu_model` — there are no vCPU, RAM, or disk
+columns — so the fallback can never express more than GPU count.
 
 The retiring `resources.csv` did carry all four dimensions; they are exactly the
 dimensions `resource_capacity_validator` checks and `host_capacity_remaining` sums.
@@ -38,7 +40,7 @@ consolidation exists to remove, so capacity moves in full.
   declaration of sellable capacity, across every dimension including GPU count and
   GPU model. Promote `PUT /api/v1/capacity/resources/{resource_id}` from a
   compatibility endpoint to a documented operator administration surface.
-- Add a startup capacity-definitions import mirroring
+- Add a capacity-definitions import mirroring
   `import_pool_definitions_if_configured` exactly: a new `capacity_definitions_path`
   setting resolved the same way as `pool_definitions_path`, reconciliation through
   the existing `DefinitionDocumentImporter`, and a registered
@@ -51,21 +53,32 @@ consolidation exists to remove, so capacity moves in full.
   document, do nothing for an unchanged one, reconcile regardless of digest on an
   explicit import, and commit the digest in the same transaction as the apply.
   Mirroring the pool import exactly is still the instruction; what that means has
-  changed underneath it.
+  changed underneath it. **Amended 2026-09-21:** an explicit
+  `POST /api/v1/capacity/definitions/import` follows the host import convention — it
+  always reconciles and records no digest — and both paths upsert only, retaining
+  declarations a document does not name.
 - Make the legacy scalar mirror's dimension name composition-supplied rather than the
-  hardcoded `PRIMARY_DIMENSION = "gpu_count"`, and stop writing it when a caller
-  declares capacity explicitly. Without this, the domain-neutral declaration contract
+  hardcoded `PRIMARY_DIMENSION = "gpu_count"` at every site that reads it, and stop
+  writing it when a caller declares capacity explicitly. VM supplies `gpu_count`;
+  API credits supplies `units`. Without this, the domain-neutral declaration contract
   below cannot be satisfied: an `api_credits`-only declaration acquires a manufactured
   GPU dimension on its way through `register_resource`.
+- **BREAKING (wire):** require `pool_id` on capacity registration, rejected by
+  validation when missing, and make `total_units` optional. Existing `NULL` pool ids
+  are migrated to the default pool.
 - Forbid moving a capacity resource between Resource Pools while it has live capacity
   obligations. A reservation's pool is resolved through the resource's *current*
   `pool_id`, so reassignment rewrites the authority under an existing reservation.
 - **BREAKING (deployment/data):** make `Host` connection identity only — addressing,
   SSH credentials, Ansible alias, pool membership, enabled state. Retire
   `gpu_count`/`gpu_model` as capacity sources and retire `_project_host`'s
-  host-derived capacity fallback. A migration derives a capacity resource from every
-  existing `Host` row carrying GPU data so INI-seeded deployments keep their current
-  published capacity across the upgrade without operator action.
+  host-derived capacity fallback. Derivation creates a capacity resource from every
+  `Host` row carrying GPU data and no correlated declaration — once by migration for
+  existing rows, and wherever INI host data is applied thereafter — so INI-seeded
+  deployments keep their current published capacity across the upgrade without
+  operator action. A derived declaration is admissible, so such a deployment also
+  becomes able to reserve against it. A host with no declaration is no longer
+  projected.
 - Follow the freeze-then-redirect pattern the POOLS campaign uses: stop reading
   `Host.gpu_count`/`gpu_model` for capacity and leave the columns in place. A schema
   `DROP` is explicitly a later follow-up, after a deployment cycle confirms the
@@ -89,9 +102,10 @@ consolidation exists to remove, so capacity moves in full.
   1000 GPUs. This belongs here rather than with the publication or kit-extraction work
   because it is a defect in `register_resource`, which this change already rewrites,
   and because this change's whole subject is making capacity declarations authoritative.
-- Add operator-facing coverage: CLI, `docs/seller-quickstart.md`, and the
-  configuration reference, so registering capacity is a documented workflow rather
-  than a raw HTTP call.
+- Add operator-facing coverage: `docs/seller-quickstart.md`, the configuration
+  reference, and Helm values, so registering capacity is a documented workflow.
+  **Amended 2026-09-21:** no CLI. Site administrators configure through values files,
+  configuration files, and the REST API.
 
 ## Capabilities
 
@@ -126,21 +140,34 @@ None.
   host-identity behavior, or the bare-metal publication view's contract beyond
   keeping it correct across the derivation.
 - Do not add a capacity declaration format for domains that register logical
-  (non-physical) capacity directly; the endpoint continues to serve them unchanged.
+  (non-physical) capacity directly; the endpoint continues to serve them, subject
+  to the `pool_id` requirement above.
+- Do not deliver storefront wiring for selling an individual physical resource end
+  to end. Derivation makes INI hosts reservable at the provisioning service; the
+  storefront path is separate work.
+- Do not preserve API-credits ledger data. The domain is not launched; its databases
+  are recreated rather than migrated.
+- Do not add a CLI.
 
 ## Impact
 
-- **Affected code:** `kit/site/src/market_site/ledger.py` (`register_resource`'s
-  `total_units` mirror and `_resource_capacity`'s fallback),
+- **Affected code:** `kit/site/src/market_site/ledger.py` (every mirror-dimension
+  site, `register_resource` and a new in-session variant, the drain rule, and the
+  capacity-document reconciliation),
   `provisioning/compute/service/src/compute_provisioning_service/`
   (`app_runtime.py` startup steps, `config.py` path resolution, `settings.toml`,
-  `services/capacity_inventory.py`, `db/models.py`, `db/migrations.py`),
+  `services/capacity_inventory.py`, `db/models.py`, `db/migrations.py`,
+  `services/definition_documents.py`, a capacity-definitions controller),
   `kit/site` (`router.py`, `http_models.py`) and `kit/site-client`,
-  `domains/vms/provisioning/adapter` host service and INI parser.
-- **Affected deployment:** a new `capacity_definitions_path` setting and its Helm and
-  compose wiring; an ordered migration that derives capacity resources before the
-  application serves requests, per `deployment-state`'s service-owned migration
-  history requirement.
+  `domains/vms/provisioning/adapter` host service, `domains/apicredits` service
+  composition and storefront seed registration, `kit/fulfillment` callers of the
+  module-level matching helpers.
+- **Affected deployment:** a new `capacity_definitions_path` setting, set by Helm
+  only from a non-empty `definitions.capacity` value (no Compose wiring); an ordered
+  compute migration that makes `capacity_buckets.total_units` nullable, backfills
+  `NULL` pool ids, and derives capacity resources, applied by the init container
+  before the application serves requests, per `deployment-state`'s service-owned
+  migration history requirement.
 - **Affected data:** every existing `Host` row with GPU data gains a derived capacity
   resource. Rollback within the freeze window is a code rollback; the derived rows
   are additive and harmless to a rolled-back reader.
@@ -148,9 +175,12 @@ None.
   derivation migration, and projection consistency; `kit/site` ledger and router
   suites; sync/async client parity for any new client method; the VM e2e scenarios
   that depend on projected capacity shape.
-- **Wire compatibility:** the projection's `capacity`/`attributes` shape is unchanged
-  structurally; only the divergence case changes value. `ResourceRegisterRequest`
-  gains no required field.
+- **Wire compatibility (amended 2026-09-21):** `ResourceRegisterRequest.pool_id`
+  becomes required and `total_units` optional; the projection's `attributes` lose
+  `gpu_count` and take categorical fields from the declaration; hosts with no
+  declaration leave the projection. None of these payloads is a versioned envelope,
+  so compatibility is carried by distribution versions of `kit/site`,
+  `kit/site-client`, and their consumers.
 
 ## Permanent documentation impact
 

@@ -15,6 +15,12 @@ dimension to be present. Where an operator has declared capacity for a Physical
 Resource, no other inventory record SHALL supply or override that resource's
 projected capacity.
 
+Every declaration MUST name its Resource Pool. A registration request that omits the
+pool MUST be rejected at request validation rather than recorded against a default,
+because registration replaces the whole declaration and a silently defaulted pool is
+a reassignment nobody requested. A stored declaration with no recorded pool is read
+as belonging to the default pool.
+
 #### Scenario: Shape authority is not admission authority
 
 - **WHEN** a consumer reads a declared capacity resource
@@ -35,6 +41,11 @@ projected capacity.
 - **THEN** the declared capacity resource is authoritative and the other record does
   not contribute capacity
 
+#### Scenario: Registration omits the pool
+
+- **WHEN** a capacity registration request carries no pool identifier
+- **THEN** it is rejected at request validation and no declaration is written or changed
+
 #### Scenario: Declaration omits a dimension
 
 - **WHEN** a capacity declaration carries only some dimensions
@@ -45,14 +56,18 @@ projected capacity.
 
 Projected physical inventory MUST NOT report attribute values that contradict the
 same resource's projected capacity. A projected resource's capacity and its
-descriptive attributes MUST derive from one authoritative record for that resource.
+descriptive attributes MUST derive from one authoritative record for that resource:
+its capacity declaration. Connection-identity fields correlated from host inventory
+MAY accompany them, and MUST NOT be overridden by the declaration. A quantity MUST
+appear only in the projected capacity, never duplicated as an attribute.
 
 #### Scenario: Declared capacity disagrees with a legacy inventory value
 
 - **WHEN** an operator-declared capacity resource reports a different quantity for a
   dimension than a legacy inventory record holds for the same resource
-- **THEN** the projection reports the declared value in both capacity and any
-  corresponding attribute, and never reports the two disagreeing in one projected row
+- **THEN** the projection reports the declared value in capacity, reports no
+  attribute carrying the same quantity, and never reports the two disagreeing in one
+  projected row
 
 #### Scenario: Categorical hardware identity is projected
 
@@ -89,6 +104,13 @@ for example a credit balance with no compute dimension — MUST be stored as dec
 - **THEN** the scalar unit total is absent rather than zero
 - **AND** the consistency check between the scalar and its mirrored dimension does not apply
 
+#### Scenario: A legacy single-quantity claim is translated
+
+- **WHEN** a claim requests a unit count through a legacy single-quantity key rather
+  than a dimensions map
+- **THEN** it is translated to the composition's mirror dimension, and the matching,
+  held-quantity, and payload mirror fields all read that same dimension
+
 #### Scenario: A composition supplies its mirror dimension
 
 - **WHEN** a composition root configures which dimension the legacy scalar mirror tracks
@@ -102,6 +124,11 @@ it has a live capacity obligation — a hold, a reservation, an assignment, or a
 workload — whose authority is resolved through its pool. A reassignment request in
 that state MUST be refused, and the resource MUST remain in its current pool.
 
+A live capacity obligation is a reservation in a capacity-holding state whose
+capacity is debited against the resource or whose settlement assignment names it.
+Every running workload holds such a reservation, so the site authority enforces this
+rule without consulting fulfillment state.
+
 A reservation's pool is resolved through the resource's current pool rather than
 recorded on the reservation, so reassignment would otherwise rewrite the authority
 underneath an existing obligation without that obligation changing. This applies to
@@ -111,6 +138,12 @@ provider or different capacity backing.
 #### Scenario: A resource with a live reservation is reassigned
 
 - **WHEN** a reassignment is requested for a capacity resource holding a live reservation
+- **THEN** the request is refused and the resource remains in its current pool
+
+#### Scenario: A resource assigned to a reservation is reassigned
+
+- **WHEN** a reassignment is requested for a capacity resource a held reservation has
+  been assigned to for settlement, though its capacity was debited elsewhere
 - **THEN** the request is refused and the resource remains in its current pool
 
 #### Scenario: A drained resource is reassigned
