@@ -288,6 +288,23 @@ Per `openspec/README.md#plan-closeout-requirements`, in that order.
       before archival: a pipeline run covering the VM deal scenarios
       (`test_full_deal`, `test_full_deal_buyer_cli`, `test_buy_oneshot_buyer_cli`,
       `test_non_erc20_settlement`) and the bare-metal deal scenario.
+      **Pipeline run 1, 2026-09-21 — failed before any scenario.** The
+      provisioning container was unhealthy: `compute-provisioning-migrate` failed
+      on `no such column: cr.executor_kind`, SQL that exists in neither this branch
+      nor the snapshot it started from. Cause: the provisioning Dockerfile pinned
+      `arkhai-compute-provisioning-service[adapters]==0.2.0`. The wheelhouse held
+      only 0.3.0, so the resolver fetched the published 0.2.0 from the public
+      index, together with that release's own older dependencies
+      (`core-storefront-client` 0.17.0 among them), and the image ran old code.
+      The version-bump pin search in 7.2 missed this pin because of its extras
+      bracket. Fixed (pin to 0.3.0), and guarded:
+      `test_every_image_pins_the_version_its_package_declares` checks every
+      internal-package pin in every Dockerfile, extras included, against the
+      declaring `pyproject.toml`; a control run with the stale pin restored fails
+      it. An audit of every package installed during the run found no other
+      stale internal version. Reproduced outside Docker: the image's install
+      command now resolves every internal package at the repository's version,
+      and the full migration chain succeeds on a fresh database. Rerun owed.
 - [ ] 8.9 **Promotion.** Complete the record below.
 
 ## 9. Code review corrections (2026-09-21)

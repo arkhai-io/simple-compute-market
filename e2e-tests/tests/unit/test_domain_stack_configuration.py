@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import tomllib
 from pathlib import Path
 
@@ -85,3 +86,49 @@ def test_bare_metal_stack_keeps_role_credentials_and_state_separate():
         "bare-metal-storefront-data",
     ):
         assert f"{name}:" in domain_compose
+
+
+_PIN = re.compile(r"(arkhai-[a-z0-9-]+)(?:\[[a-z0-9,_-]+\])?==([0-9][0-9a-z.+-]*)")
+
+
+def _declared_versions() -> dict[str, str]:
+    """Every repository-owned distribution's name and declared version."""
+    versions: dict[str, str] = {}
+    for pyproject in _REPO_ROOT.rglob("pyproject.toml"):
+        if any(part in {".venv", "node_modules", "build"} for part in pyproject.parts):
+            continue
+        project = tomllib.loads(pyproject.read_text(encoding="utf-8")).get("project", {})
+        if str(project.get("name", "")).startswith("arkhai-") and "version" in project:
+            versions[project["name"]] = project["version"]
+    return versions
+
+
+def test_every_image_pins_the_version_its_package_declares():
+    """An image's pin of a repository-owned package must name the version the
+    repository builds.
+
+    Images install from the staged wheelhouse *and* a public index. A pin the
+    wheelhouse cannot satisfy therefore does not fail the build: the resolver
+    fetches that version from the index instead, together with that release's
+    own dependency pins, and the image runs code other than the source being
+    tested. Checking every pin against its package's declared version turns
+    that silent substitution into a failure here.
+    """
+    declared = _declared_versions()
+    stale = []
+    pinned = 0
+    for dockerfile in _REPO_ROOT.rglob("Dockerfile*"):
+        if any(part in {".venv", "node_modules"} for part in dockerfile.parts):
+            continue
+        text = dockerfile.read_text(encoding="utf-8", errors="replace")
+        for name, version in _PIN.findall(text):
+            if name not in declared:
+                continue
+            pinned += 1
+            if declared[name] != version:
+                stale.append(
+                    f"{dockerfile.relative_to(_REPO_ROOT)}: {name}=={version}, "
+                    f"but the package declares {declared[name]}"
+                )
+    assert pinned, "no image pins were found; the pattern no longer matches"
+    assert not stale, "\n".join(stale)
