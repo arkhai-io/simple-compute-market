@@ -237,6 +237,24 @@ following. Each is implemented.
   compares every public method of the async and sync storefront clients, not
   only the lifecycle controls.
 
+A second review found no correctness or design blocker; the owner accepted the
+following corrections.
+
+- **The typed-client rule's exception is narrower than the helper assumed.**
+  Raw HTTP is permitted only for a body the canonical client *refuses to
+  construct*. `SiteCapacityClient.reserve` sends any claim mapping, so the
+  missing- and retired-key `offering_mode` refusals go through it and assert its
+  error status; that also proves the site's refusals are acknowledged under its
+  signature. The raw VM-lease tests in the capacity suite duplicated the lease
+  suite's canonical-client coverage and were removed rather than ported. The
+  helper holds no raw client, so any bypass is visible where it happens.
+- **Parity includes return annotations.** `TESTING.md` asks for matching
+  signatures, and a signature includes its return type.
+- **The bare-metal lease client stays out of band** by the owner's decision: no
+  production code calls those routes, the only operator client belongs to the
+  VM domain, and choosing an owner is a packaging decision this change did not
+  cause.
+
 ## Risks / Trade-offs
 
 - **[Breadth]** Roughly 170 files across provisioning, kits, both compute domains,

@@ -149,7 +149,19 @@ reference says so in a comment stating the invariant, not the history.
       covers the refusal (nothing decoded or written) and a fresh database.
 - [x] 4.5 Buyer plugin: `domains/bare_metal/buyer/src/arkhai_bare_metal_buyer/cli.py`
       decodes `bare_metal.v2`.
-\1- [x] 4.7 **Preprod bare-metal reset — moved out of band by the owner, 2026-09-21.**
+- [x] 4.6 **Integration.** A bare-metal declaration registered with top-level
+      `physical_host_id` and `allocation_mode` participates in the cross-mode rule;
+      republication replaces a `bare_metal.v1` registry listing.
+      **Restored 2026-09-21:** this task's text was lost to a substitution that
+      wrote its backreference literally, so it went unrecorded at closeout.
+      Done: `test_capacity_api.py::test_capacity_snapshot_blocks_cross_mode_siblings`
+      registers a bare-metal declaration with `host_id` and top-level
+      `physical_host_id` and `allocation_mode` through the typed clients, and a VM
+      reservation on the same physical machine blocks it. The republication half is
+      superseded by the reset decision (`design.md`, "Bare metal: reset the preprod
+      storefront database"): no `bare_metal.v1` listing survives to be replaced; the
+      procedure in 4.7 removes or closes them.
+- [x] 4.7 **Preprod bare-metal reset — moved out of band by the owner, 2026-09-21.**
       It is performed once, at the joint deployment of this change with the others
       deploying alongside it, which happens after this change is archived. The
       procedure is `docs/bare-metal-seller-quickstart.md`, "Resetting the storefront
@@ -231,6 +243,8 @@ reference says so in a comment stating the invariant, not the history.
       `torch` index is unreachable in the implementation environment; it is
       verified by `uv sync --frozen` and a full suite run, and **must be
       regenerated with `uv lock` where that index is reachable before merge.**
+      Regenerated 2026-09-21 by the owner's top-level `make test`, whose VM
+      storefront `reinit` relocks with the `torch` index reachable.
 - [x] 7.3 A repository search for `vm_host`, `machine_id`, `kvm_host`, and
       `default_vm_host` returns only the historical-schema reads the naming rule
       permits and sites 0.2 left to `pools-9`; record the residue in `design.md`.
@@ -272,8 +286,11 @@ Per `openspec/README.md#plan-closeout-requirements`, in that order.
 - [x] 8.6 **Campaign index currency.** Update this change's row and the
       `unify-host-identity ──► capacity-resource-administration` edges in
       `openspec/changes/README.md`.
-      Done 2026-09-21: row reads "promoted; ready to archive"; the edges to
-      `capacity-resource-administration` were already current.
+      Done 2026-09-21: row read "promoted; ready to archive once `make test`
+      passes; VM-storefront relock owed before merge"; the edges to
+      `capacity-resource-administration` were already current. At archival the
+      row is removed and the dependent change's row records the dependency as
+      satisfied.
 - [x] 8.7 **Documentation citations.**
       `make check-doc-citations CHANGE=unify-host-identity`.
       Done 2026-09-21: every cited path resolves and none is a tombstone.
@@ -326,6 +343,9 @@ rather than renumbering it, so the closeout keeps its references.
       procedure (task 4.7, `docs/bare-metal-seller-quickstart.md`).
 - [x] 9.5 Make `CapacityApi` delegate to `SiteCapacityAdminClient` and
       `SiteCapacityClient`; confine raw HTTP to rejection-path tests.
+      **Incomplete as first delivered; finished in 9.10.** Two rejection tests
+      and three other tests still posted raw bodies the canonical clients can
+      construct.
 - [x] 9.6 Rewrite the two provider comments and two migration comments as
       current-state rules; correct the negotiation docstring's service-terms kind;
       scope `ARCHITECTURE.md`'s rule to interfaces and name the VM-storefront
@@ -353,6 +373,24 @@ rather than renumbering it, so the closeout keeps its references.
       hosted-settlement 187; VM buyer 196 (`--frozen`; its `reinit` relocks and
       needs the `torch` index); provisioning IaC 65. The Rust middleware suite was
       not run (no `cargo` in the implementation environment).
+
+- [x] 9.10 **Second review, 2026-09-21** (`design.md`, "Review outcomes").
+      `test_capacity_api.py`: the missing- and retired-key `offering_mode`
+      claims and the unknown-reservation commit go through `SiteCapacityClient`
+      and assert its `SiteCapacityClientError` status (422, 422, 404), which also
+      proves the site's refusals carry a verified acknowledgement. The two
+      raw-HTTP VM-lease tests duplicated `test_leases_api.py`'s
+      `TestCreateLease`, which uses the canonical operator client, and are
+      removed; their one distinct assertion, `lease_end_utc` normalized to an
+      explicit offset, moved there. `CapacityApi` holds no raw client; the one
+      rejection-path test the admin client cannot construct (registration
+      without `pool_id`) opens its own. The sync/async storefront parity guard
+      now compares return annotations too (all 44 public methods already
+      matched; a differing return type fails it). Task 9.8 stays out of band by
+      the owner's decision. **Evidence:** provisioning service
+      `test_capacity_api.py` and `test_leases_api.py` 38 passed; parity guard 5
+      passed. The owner's top-level `make test` passed on 2026-09-21, including
+      the Rust middleware suite 9.9 could not run.
 
 ## Design promotion record
 

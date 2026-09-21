@@ -145,7 +145,9 @@ def _converge_fulfillment_teardown(fulfillment_id: str, *, failed: bool = False)
 class TestCreateLease:
     async def test_create_attaches_to_the_reservation(self, client_and_queue):
         client, _ = client_and_queue
-        lease = await _register(client, "escrow-attach-1")
+        lease = await _register(
+            client, "escrow-attach-1", lease_end_utc="2099-01-01T00:00:00Z"
+        )
         assert lease["status"] == "active"
         assert lease["escrow_uid"] == "escrow-attach-1"
         assert lease["host_id"] == "kvm1"
@@ -157,6 +159,7 @@ class TestCreateLease:
         assert reservation["offering_mode"] == "vm"
         assert reservation["executor_target"] == lease["vm_target"]
         assert reservation["executor_ref"] == {"host_id": "kvm1"}
+        assert reservation["lease_end_utc"] == "2099-01-01T00:00:00+00:00"
 
     async def test_create_unknown_reservation_returns_404(self, client_and_queue):
         client, _ = client_and_queue

@@ -56,12 +56,17 @@ def test_pause_and_resume_remain_paired() -> None:
         ), name
 
 
-def _public_operations(cls: type) -> dict[str, list[tuple[str, object, object, str]]]:
-    """Each public method as (name, kind, default, annotation) per parameter.
+def _public_operations(
+    cls: type,
+) -> dict[str, tuple[list[tuple[str, object, object, str]], str]]:
+    """Each public method as its parameters -- (name, kind, default,
+    annotation) each -- and its return annotation.
 
     Annotations are compared as text with surrounding quotes removed: under
     postponed evaluation one variant may spell an annotation ``"'str | None'"``
-    and the other ``'str | None'``, which name the same type.
+    and the other ``'str | None'``, which name the same type. An async
+    method's return annotation names what awaiting it yields, so it is
+    compared directly with the sync variant's.
     """
 
     def annotation(value: object) -> str:
@@ -69,14 +74,19 @@ def _public_operations(cls: type) -> dict[str, list[tuple[str, object, object, s
             return ""
         return str(value).strip("'\"")
 
-    return {
-        name: [
-            (p.name, p.kind, p.default, annotation(p.annotation))
-            for p in inspect.signature(member).parameters.values()
-        ]
-        for name, member in vars(cls).items()
-        if not name.startswith("_") and callable(member)
-    }
+    operations = {}
+    for name, member in vars(cls).items():
+        if name.startswith("_") or not callable(member):
+            continue
+        signature = inspect.signature(member)
+        operations[name] = (
+            [
+                (p.name, p.kind, p.default, annotation(p.annotation))
+                for p in signature.parameters.values()
+            ],
+            annotation(signature.return_annotation),
+        )
+    return operations
 
 
 def test_every_public_operation_matches_between_the_clients() -> None:

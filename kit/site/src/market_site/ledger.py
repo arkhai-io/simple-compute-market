@@ -373,8 +373,14 @@ def resource_feasibility_view(
     value: Any = None,
     units: Any = None,
     host_id: str | None = None,
+    mirror_dimension: str = _DEFAULT_MIRROR_DIMENSION,
 ) -> ResourceFeasibilityView:
-    """Build the immutable, authoritative view used for feasibility checks."""
+    """Build the immutable, authoritative view used for feasibility checks.
+
+    ``mirror_dimension`` must be the one the backing ``CapacityLedgerService``
+    was composed with: the scalar unit total is a matchable fact under that
+    name and under ``units``, and under no other domain's dimension name.
+    """
     # ``host_id`` joins the matchable facts beside ``resource_id`` so a claim
     # may still pin the host a resource is delivered through; it is a column
     # of the resource, not one of its declared attributes.
@@ -385,7 +391,7 @@ def resource_feasibility_view(
         "resource_subtype": resource_subtype,
         "value": value,
         "units": units,
-        "gpu_count": units,
+        mirror_dimension: units,
         **dict(attributes or {}),
     }
     authoritative_pool_id = pool_id or resource_id
@@ -494,6 +500,7 @@ def dict_resource_satisfies_claim(
         value=row.get("value"),
         units=row.get("available_units"),
         host_id=row.get("host_id"),
+        mirror_dimension=mirror_dimension,
     )
     return resource_satisfies_requirement(
         resource=resource,
@@ -504,7 +511,9 @@ def dict_resource_satisfies_claim(
 
 
 def _resource_feasibility_view(
-    resource: CapacityBucket, available: Mapping[str, Any]
+    resource: CapacityBucket,
+    available: Mapping[str, Any],
+    mirror_dimension: str,
 ) -> ResourceFeasibilityView:
     return resource_feasibility_view(
         resource_id=resource.backing_resource_id,
@@ -516,6 +525,7 @@ def _resource_feasibility_view(
         value=resource.total_units,
         units=resource.total_units,
         host_id=resource.host_id,
+        mirror_dimension=mirror_dimension,
     )
 
 
@@ -1204,7 +1214,7 @@ class CapacityLedgerService:
             if resource.backing_resource_id == own_backing_resource_id:
                 for key, amount in own_dimensions.items():
                     available[key] = available.get(key, Decimal(0)) + amount
-            views.append(_resource_feasibility_view(resource, available))
+            views.append(_resource_feasibility_view(resource, available, self._mirror_dimension))
         return views
 
     def commit(
@@ -2052,7 +2062,9 @@ class CapacityLedgerService:
                 continue
             capacity = _resource_capacity(resource, self._mirror_dimension)
             if not resource_satisfies_requirement(
-                resource=_resource_feasibility_view(resource, capacity),
+                resource=_resource_feasibility_view(
+                    resource, capacity, self._mirror_dimension
+                ),
                 required_resource_kind=required_resource_kind,
                 required_dimensions=requested,
                 required_attributes=required_attributes,
@@ -2077,7 +2089,9 @@ class CapacityLedgerService:
                 for key in capacity
             }
             if not resource_satisfies_requirement(
-                resource=_resource_feasibility_view(resource, available),
+                resource=_resource_feasibility_view(
+                    resource, available, self._mirror_dimension
+                ),
                 required_resource_kind=required_resource_kind,
                 required_dimensions=requested,
                 required_attributes=required_attributes,

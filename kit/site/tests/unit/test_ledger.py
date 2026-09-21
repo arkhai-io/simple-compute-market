@@ -1526,6 +1526,33 @@ def test_a_legacy_claim_requests_the_composition_mirror_dimension():
     assert reserved["allocated_gpu_count"] == 2
 
 
+def test_admission_matches_the_unit_total_only_under_the_composition_mirror():
+    """A claim attribute naming another domain's dimension is a requirement no
+    resource declares. Under the kit defaults ``gpu_count`` is such a name, so
+    a claim requiring it must not match a resource merely because its unit
+    total happens to be equal; the VM composition's scheduling view carries
+    the total under ``gpu_count`` and the neutral one does not."""
+    neutral = _neutral_ledger()
+    neutral.register_resource(resource_id="q", pool_id="default", capacity={"units": 3})
+
+    assert neutral.reserve(
+        claim={"offering_mode": "vm", "units": 1, "gpu_count": 3}, deal_ref={}
+    ) is None
+
+    vm = _make_ledger()
+    vm.register_resource(resource_id="h", pool_id="default", total_units=3)
+    with neutral._session_factory() as db:
+        (neutral_view,) = neutral.iter_scheduling_candidates_in_session(
+            db, resource_kind="compute.gpu", exclude_reservation_id=""
+        )
+    with vm._session_factory() as db:
+        (vm_view,) = vm.iter_scheduling_candidates_in_session(
+            db, resource_kind="compute.gpu", exclude_reservation_id=""
+        )
+    assert "gpu_count" not in neutral_view.attributes
+    assert neutral_view.attributes["units"] == 3
+    assert vm_view.attributes["gpu_count"] == 3
+
 def test_an_explicit_declaration_gets_no_mirror_dimension_added():
     vm = _make_ledger()
 

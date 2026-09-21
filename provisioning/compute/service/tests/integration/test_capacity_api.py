@@ -13,7 +13,11 @@ from httpx import ASGITransport, AsyncClient
 
 from market_site.ledger import ALLOCATION_MODE_EXCLUSIVE, ALLOCATION_MODE_SHAREABLE
 from compute_provisioning_service.main import app
-from market_site_client import SiteCapacityAdminClient, SiteCapacityClient
+from market_site_client import (
+    SiteCapacityAdminClient,
+    SiteCapacityClient,
+    SiteCapacityClientError,
+)
 from .conftest import SERVICE_AUTHORITIES, STOREFRONT_SIGNER
 
 
@@ -33,21 +37,18 @@ class CapacityApi:
     ``SiteCapacityClient`` (everything a storefront does), so a route, body,
     or response-shape change breaks these tests through the clients rather
     than through a second, test-local copy of the wire contract. This class
-    only shortens call sites; it builds no request of its own.
+    only shortens call sites; it builds no request of its own and holds no
+    raw HTTP client, so a test that bypasses the clients has to say so
+    locally.
     """
 
     def __init__(
         self,
         admin: SiteCapacityAdminClient,
         site: SiteCapacityClient,
-        rejection_http: AsyncClient,
     ) -> None:
         self.admin = admin
         self.site = site
-        # For rejection-path tests only, per TESTING.md's documented exception:
-        # they send bodies the typed clients refuse to construct, to prove the
-        # server's own validation. Status codes only.
-        self.rejection_http = rejection_http
 
     async def register(self, resource_id: str, **declaration: Any) -> dict:
         return await self.admin.register_resource(resource_id, **declaration)
@@ -100,21 +101,16 @@ async def capacity(client_and_queue) -> CapacityApi:
         "http://test", STOREFRONT_SIGNER, SERVICE_AUTHORITIES, transport=transport,
     )
     site = _site_capacity_client("http://test", transport=transport)
-    async with AsyncClient(transport=transport, base_url="http://test") as http:
-        yield CapacityApi(admin, site, http)
+    return CapacityApi(admin, site)
 
 
 @pytest.mark.asyncio
 async def test_the_claim_names_the_offering_mode_through_the_canonical_client(
-    client_and_queue, capacity: CapacityApi
+    capacity: CapacityApi,
 ):
-    """Closes the positive half of 9.4 explicitly.
-
-    The surrounding suite already reserves with `offering_mode` throughout, but
-    it does so through the raw helper. This asserts the same value crosses the
-    real app through `SiteCapacityClient` — the client every storefront uses —
-    and is persisted on the reservation rather than re-derived.
-    """
+    """The offering mode a storefront names crosses the site boundary through
+    `SiteCapacityClient` and is persisted on the reservation as sent, not
+    re-derived from the resource or reported under a second key."""
     await capacity.register(
         "site-claim-1", pool_id="default",
         total_units=4,
@@ -122,12 +118,9 @@ async def test_the_claim_names_the_offering_mode_through_the_canonical_client(
         attributes={"gpu_model": "H200"},
     )
 
-    client = _site_capacity_client(
-        "http://test", transport=ASGITransport(app=app)
-    )
-    reservation = await client.reserve(
-        claim={"offering_mode": "vm", "gpu_count": 1, "host_id": "kvm1"},
-        deal_ref={"escrow_uid": "escrow-claim-1"},
+    reservation = await capacity.reserve(
+        {"offering_mode": "vm", "gpu_count": 1, "host_id": "kvm1"},
+        {"escrow_uid": "escrow-claim-1"},
     )
 
     assert reservation is not None
@@ -138,42 +131,37 @@ async def test_the_claim_names_the_offering_mode_through_the_canonical_client(
 @pytest.mark.asyncio
 async def test_a_claim_omitting_the_offering_mode_is_refused(capacity: CapacityApi):
     """The field is required, so its absence is refused before any resource is
-    matched — never inferred from `host_id` or a default."""
+    matched — never inferred from `host_id` or a default. The refusal reaches
+    the storefront as the client's own error, carrying the site's status."""
     await capacity.register(
         "site-claim-2", pool_id="default", total_units=4, host_id="kvm1",
         attributes={}
     )
 
-    resp = await capacity.rejection_http.post(
-        "/api/v1/capacity/reservations",
-        json={"claim": {"gpu_count": 1, "host_id": "kvm1"}, "deal_ref": {}},
-    )
+    with pytest.raises(SiteCapacityClientError) as refused:
+        await capacity.reserve({"gpu_count": 1, "host_id": "kvm1"}, {})
 
-    assert resp.status_code == 422
+    assert refused.value.status_code == 422
 
 
 @pytest.mark.asyncio
 async def test_a_claim_naming_the_mode_under_the_retired_key_is_refused(
     capacity: CapacityApi,
 ):
-    """Rejection boundary. The retired key is not the required one, so the
-    claim carries no offering mode and is refused rather than being honoured
-    under a second spelling. Raw HTTP and status only: the typed client will
-    not construct the retired key."""
+    """The retired key is not the required one, so the claim carries no
+    offering mode and is refused rather than being honoured under a second
+    spelling."""
     await capacity.register(
         "site-claim-3", pool_id="default", total_units=4, host_id="kvm1",
         attributes={}
     )
 
-    resp = await capacity.rejection_http.post(
-        "/api/v1/capacity/reservations",
-        json={
-            "claim": {"executor_kind": "vm", "gpu_count": 1, "host_id": "kvm1"},
-            "deal_ref": {},
-        },
-    )
+    with pytest.raises(SiteCapacityClientError) as refused:
+        await capacity.reserve(
+            {"executor_kind": "vm", "gpu_count": 1, "host_id": "kvm1"}, {}
+        )
 
-    assert resp.status_code == 422
+    assert refused.value.status_code == 422
 
 
 @pytest.mark.asyncio
@@ -324,74 +312,13 @@ async def test_capacity_snapshot_blocks_cross_mode_siblings(capacity: CapacityAp
 
 
 @pytest.mark.asyncio
-async def test_register_lease_attaches_to_ledger_reservation(capacity: CapacityApi):
-    """POST /leases records the lease tail on the reservation row — the
-    leases surface is a view over the ledger."""
-    from compute_provisioning_service import container as _container_module
-
-    await capacity.register(
-        "compute-kvm1-001", pool_id="default", total_units=8, host_id="kvm1",
-        attributes={},
-    )
-    reserved = await capacity.reserve(
-        {"offering_mode": "vm", "gpu_count": 1, "host_id": "kvm1"},
-        {"escrow_uid": "0xlease"},
-    )
-
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as http:
-        resp = await http.post("/api/v1/leases/", json={
-            "resource_id": "compute-kvm1-001",
-            "capacity_reservation_id": reserved["capacity_reservation_id"],
-            "escrow_uid": "0xlease",
-            "host_id": "kvm1",
-            "vm_target": "tenant-led1",
-            "lease_end_utc": "2099-01-01T00:00:00Z",
-        })
-        assert resp.status_code == 201, resp.text
-        body = resp.json()
-        assert body["id"] == reserved["capacity_reservation_id"]
-        assert body["status"] == "active"
-
-        listing = await http.get("/api/v1/leases/")
-        assert listing.json()["total"] == 1
-        assert listing.json()["leases"][0]["id"] == reserved["capacity_reservation_id"]
-
-    ledger = _container_module.resolved_capacity_ledger_service
-    row = ledger.get_reservation(reserved["capacity_reservation_id"])
-    assert row["vm_target"] == "tenant-led1"
-    assert row["state"] == "leased"
-    assert row["lease_end_utc"] == "2099-01-01T00:00:00+00:00"
-
-
-@pytest.mark.asyncio
-async def test_register_lease_without_ledger_reservation_404s(
-    capacity: CapacityApi,
-):
-    """Every reservation lives in the ledger; an unknown reservation means
-    the hold lapsed or was already released — registration refuses."""
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as http:
-        resp = await http.post("/api/v1/leases/", json={
-            "resource_id": "compute-legacy-001",
-            "capacity_reservation_id": "local-alloc-1",
-            "escrow_uid": "0xlegacy",
-            "host_id": "kvm1",
-            "vm_target": "tenant-leg1",
-            "lease_end_utc": "2099-01-01T00:00:00Z",
-        })
-        assert resp.status_code == 404, resp.text
-
-
-@pytest.mark.asyncio
 async def test_commit_unknown_reservation_404s(capacity: CapacityApi):
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as http:
-        resp = await http.post(
-            "/api/v1/capacity/reservations/missing/commit",
-            json={"resource_id": "r", "lease_end_utc": "2099-01-01 00:00"},
+    with pytest.raises(SiteCapacityClientError) as refused:
+        await capacity.commit(
+            "missing", resource_id="r", lease_end_utc="2099-01-01 00:00"
         )
-        assert resp.status_code == 404
+
+    assert refused.value.status_code == 404
 
 
 @pytest.mark.asyncio
@@ -677,10 +604,14 @@ async def test_site_capacity_buckets_projection_through_the_real_client(
 
 
 async def test_a_registration_without_a_pool_is_rejected(capacity: CapacityApi):
-    """Rejection-path test: the typed client cannot construct a registration
-    without ``pool_id``, so this posts the body by hand to prove the server's
-    own validation boundary refuses it. Status code only."""
-    resp = await capacity.rejection_http.put(
-        "/api/v1/capacity/resources/no-pool", json={"total_units": 1},
-    )
+    """Rejection-path test (docs/development/TESTING.md): the typed admin
+    client requires ``pool_id`` and cannot construct this registration, so
+    the body is posted by hand to prove the server's own validation boundary
+    refuses it. Status code only."""
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as http:
+        resp = await http.put(
+            "/api/v1/capacity/resources/no-pool", json={"total_units": 1},
+        )
     assert resp.status_code == 422
