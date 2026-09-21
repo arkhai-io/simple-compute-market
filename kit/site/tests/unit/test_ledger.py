@@ -2,25 +2,27 @@
 
 from __future__ import annotations
 
+import threading
 from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.pool import NullPool, StaticPool
 from market_resource_pools.db import (
     Base as ResourcePoolBase,
     DEFAULT_POOL_ID,
     ResourcePool,
 )
 
-from market_site.db import Base
+from market_site.db import HELD_RESERVATION_STATES, Base
 from market_site.ledger import (
     ALLOCATION_MODE_EXCLUSIVE,
     ALLOCATION_MODE_SHAREABLE,
     CapacityConflictError,
     CapacityLedgerService,
     UndeclaredOfferingModeError,
+    UnknownPoolError,
 )
 
 
@@ -49,6 +51,7 @@ def _make_ledger(**kwargs) -> CapacityLedgerService:
     # composition root does — the ledger's own default is domain-neutral
     # ("units",).
     kwargs.setdefault("unit_claim_keys", ("units", "gpu_count"))
+    kwargs.setdefault("mirror_dimension", "gpu_count")
     return CapacityLedgerService(session_factory, **kwargs)
 
 def _declare_pool(
@@ -75,11 +78,12 @@ def ledger() -> CapacityLedgerService:
 
 @pytest.fixture
 def seeded(ledger: CapacityLedgerService) -> CapacityLedgerService:
-    ledger.register_resource(
+    ledger.register_resource(host_id="kvm1", 
         resource_id="compute-kvm1-001",
         total_units=8,
         resource_subtype="h200",
-        attributes={"vm_host": "kvm1", "gpu_model": "H200", "region": "us-west"},
+        attributes={"gpu_model": "H200", "region": "us-west"},
+        pool_id="default",
     )
     return ledger
 
@@ -95,7 +99,7 @@ def test_snapshot_reports_availability(seeded: CapacityLedgerService):
 def test_probe_consumes_nothing(seeded: CapacityLedgerService):
     match = seeded.probe(claim={"offering_mode": "vm", **{"gpu_model": "H200", "gpu_count": 2}})
     assert match is not None
-    assert match["vm_host"] == "kvm1"
+    assert match["host_id"] == "kvm1"
     assert match["allocated_gpu_count"] == 2
     assert seeded.snapshot()[0]["available_units"] == 8
 
@@ -110,33 +114,35 @@ def test_vm_claim_with_vm_host_does_not_match_hostless_resource(
 ):
     ledger.register_resource(
         resource_id="hostless", total_units=8, attributes={"gpu_model": "H200"},
+        pool_id="default",
     )
-    assert ledger.probe(claim={"offering_mode": "vm", **{"gpu_count": 1, "vm_host": "kvm1"}}) is None
+    assert ledger.probe(claim={"offering_mode": "vm", **{"gpu_count": 1, "host_id": "kvm1"}}) is None
     assert ledger.probe(claim={"offering_mode": "vm", **{"gpu_count": 1}}) is not None
 
 
 def _register_dual_mode_host(ledger: CapacityLedgerService) -> None:
-    ledger.register_resource(
+    ledger.register_resource(host_id="kvm1", 
         resource_id="compute-host-1",
         total_units=8,
         resource_subtype="h200",
         attributes={
-            "vm_host": "kvm1",
             "gpu_model": "H200",
             "physical_host_id": "physical-host-1",
             "allocation_mode": ALLOCATION_MODE_SHAREABLE,
         },
+        pool_id="default",
     )
     ledger.register_resource(
         resource_id="bare-metal-host-1",
         total_units=1,
         resource_subtype="h200",
+        host_id="node-1",
         attributes={
-            "machine_id": "node-1",
             "gpu_model": "H200",
             "physical_host_id": "physical-host-1",
             "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
         },
+        pool_id="default",
     )
 
 
@@ -149,7 +155,7 @@ def test_dual_mode_host_snapshot_exposes_vm_and_bare_metal_when_free(
 
     assert by_id["compute-host-1"]["available_units"] == 8
     assert by_id["bare-metal-host-1"]["available_units"] == 1
-    assert ledger.probe(claim={"offering_mode": "vm", **{"gpu_count": 2, "vm_host": "kvm1"}})["resource_id"] == "compute-host-1"
+    assert ledger.probe(claim={"offering_mode": "vm", **{"gpu_count": 2, "host_id": "kvm1"}})["resource_id"] == "compute-host-1"
     assert ledger.probe(claim={
         "offering_mode": "bare_metal",
         "physical_host_id": "physical-host-1",
@@ -162,7 +168,7 @@ def test_vm_slice_reservation_blocks_bare_metal_on_same_physical_host(
 ):
     _register_dual_mode_host(ledger)
 
-    vm = ledger.reserve(claim={"offering_mode": "vm", **{"gpu_count": 2, "vm_host": "kvm1"}}, deal_ref={"escrow_uid": "0xvm"},)
+    vm = ledger.reserve(claim={"offering_mode": "vm", **{"gpu_count": 2, "host_id": "kvm1"}}, deal_ref={"escrow_uid": "0xvm"},)
 
     assert vm is not None
     by_id = {row["resource_id"]: row for row in ledger.snapshot()}
@@ -175,7 +181,7 @@ def test_vm_slice_reservation_blocks_bare_metal_on_same_physical_host(
         "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
     }) is None
 
-    second_vm = ledger.reserve(claim={"offering_mode": "vm", **{"gpu_count": 6, "vm_host": "kvm1"}}, deal_ref={"escrow_uid": "0xvm2"},)
+    second_vm = ledger.reserve(claim={"offering_mode": "vm", **{"gpu_count": 6, "host_id": "kvm1"}}, deal_ref={"escrow_uid": "0xvm2"},)
     assert second_vm is not None
     assert second_vm["resource_id"] == "compute-host-1"
 
@@ -184,7 +190,7 @@ def test_pool_mode_permission_does_not_replace_cross_mode_physical_conflict(
 ):
     _register_dual_mode_host(ledger)
     assert ledger.reserve(
-        claim={"offering_mode": "vm", "gpu_count": 1, "vm_host": "kvm1"},
+        claim={"offering_mode": "vm", "gpu_count": 1, "host_id": "kvm1"},
         deal_ref={"escrow_uid": "0xvm-independent"},
     ) is not None
     bare_metal_claim = {
@@ -224,7 +230,7 @@ def test_bare_metal_reservation_blocks_vm_slices_on_same_physical_host(
     assert by_id["bare-metal-host-1"]["available_units"] == 0
     assert by_id["compute-host-1"]["available_units"] == 0
     assert by_id["compute-host-1"]["state"] == "leased"
-    assert ledger.probe(claim={"offering_mode": "vm", **{"gpu_count": 1, "vm_host": "kvm1"}}) is None
+    assert ledger.probe(claim={"offering_mode": "vm", **{"gpu_count": 1, "host_id": "kvm1"}}) is None
 
 
 def test_releasing_cross_mode_reservation_keeps_sibling_capacity_blocked(
@@ -244,14 +250,14 @@ def test_releasing_cross_mode_reservation_keeps_sibling_capacity_blocked(
 
     by_id = {row["resource_id"]: row for row in ledger.snapshot()}
     assert by_id["compute-host-1"]["available_units"] == 0
-    assert ledger.probe(claim={"offering_mode": "vm", **{"gpu_count": 1, "vm_host": "kvm1"}}) is None
+    assert ledger.probe(claim={"offering_mode": "vm", **{"gpu_count": 1, "host_id": "kvm1"}}) is None
 
 
 def test_release_restores_cross_mode_sibling_capacity(
     ledger: CapacityLedgerService,
 ):
     _register_dual_mode_host(ledger)
-    vm = ledger.reserve(claim={"offering_mode": "vm", **{"gpu_count": 2, "vm_host": "kvm1"}}, deal_ref={"escrow_uid": "0xvm"},)
+    vm = ledger.reserve(claim={"offering_mode": "vm", **{"gpu_count": 2, "host_id": "kvm1"}}, deal_ref={"escrow_uid": "0xvm"},)
 
     ledger.release(capacity_reservation_id=vm["capacity_reservation_id"])
 
@@ -261,9 +267,10 @@ def test_release_restores_cross_mode_sibling_capacity(
 
 
 def test_required_attributes_remains_available_as_local_guard():
-    guarded = _make_ledger(required_attributes=("vm_host",))
+    guarded = _make_ledger(required_attributes=("host_id",))
     guarded.register_resource(
         resource_id="hostless", total_units=8, attributes={"gpu_model": "H200"},
+        pool_id="default",
     )
     assert guarded.probe(claim={"offering_mode": "vm", **{"gpu_count": 1}}) is None
 
@@ -274,6 +281,7 @@ def test_generic_ledger_has_no_attribute_requirement():
     generic = _make_ledger()
     generic.register_resource(
         resource_id="svc-quota", total_units=1000, resource_type="api_credits",
+        pool_id="default",
     )
     match = generic.probe(claim={"offering_mode": "vm", **{"units": 250}})
     assert match is not None
@@ -360,19 +368,19 @@ def test_reserve_derives_executor_ref_but_records_the_requested_mode(
 ):
     """The matched resource supplies executor placement, never its mode.
 
-    ``reserve()`` writes ``executor_ref`` from the resource's ``vm_host``
+    ``reserve()`` writes ``executor_ref`` from the resource's ``host_id``
     attribute while persisting the claim's explicit ``offering_mode``. Its
     immediate return is the opaque match view; the durable reservation view
     exposes the recorded executor identity.
     """
     reserved = seeded.reserve(claim={"offering_mode": "vm", **{"gpu_count": 1}}, deal_ref={"escrow_uid": "0xn"})
     assert reserved is not None
-    assert reserved["vm_host"] == "kvm1"  # _match_payload, from the resource's own attributes
+    assert reserved["host_id"] == "kvm1"  # _match_payload, from the resource's own attributes
 
     row = seeded.get_reservation(reserved["capacity_reservation_id"])
-    assert row["executor_ref"] == {"vm_host": "kvm1"}
+    assert row["executor_ref"] == {"host_id": "kvm1"}
     assert row["offering_mode"] == "vm"
-    assert row["vm_host"] == "kvm1"  # _reservation_payload, now sourced from executor_ref
+    assert row["host_id"] == "kvm1"  # _reservation_payload, now sourced from executor_ref
 
 
 def test_reserve_decrements_and_releases_restore(seeded: CapacityLedgerService):
@@ -422,7 +430,7 @@ def test_reserve_idempotent_hit_includes_resource_id(seeded: CapacityLedgerServi
     first = seeded.reserve(claim={"offering_mode": "vm", **{"gpu_count": 1}}, deal_ref={"escrow_uid": "0xres"})
     second = seeded.reserve(claim={"offering_mode": "vm", **{"gpu_count": 1}}, deal_ref={"escrow_uid": "0xres"})
     assert second["resource_id"] == first["resource_id"] == "compute-kvm1-001"
-    assert second["vm_host"] == first["vm_host"] == "kvm1"
+    assert second["host_id"] == first["host_id"] == "kvm1"
 
 
 def test_reserve_idempotency_finds_a_committed_reservation_too(
@@ -670,14 +678,14 @@ def test_attach_lease_records_tail_on_reservation(seeded: CapacityLedgerService)
     """CapacityReservation carries no VM-domain-specific column names --
     callers pass offering_mode/executor_target/executor_ref directly (as
     kit/site/authority.py's adapter already does); attach_lease no longer
-    accepts or self-heals a vm_host/vm_target kwarg.
+    accepts or self-heals a host_id/vm_target kwarg.
     """
     reserved = seeded.reserve(claim={"offering_mode": "vm", **{"gpu_count": 1}}, deal_ref={"escrow_uid": "0xl"})
     attached = seeded.attach_lease(
         capacity_reservation_id=reserved["capacity_reservation_id"],
         offering_mode="vm",
         executor_target="tenant-abcd",
-        executor_ref={"vm_host": "kvm1"},
+        executor_ref={"host_id": "kvm1"},
         lease_end_utc="2099-01-01 00:00",
         create_job_id="job-1",
     )
@@ -685,7 +693,7 @@ def test_attach_lease_records_tail_on_reservation(seeded: CapacityLedgerService)
     assert attached["vm_target"] == "tenant-abcd"  # payload key, sourced from executor_target
     assert attached["offering_mode"] == "vm"
     assert attached["executor_target"] == "tenant-abcd"
-    assert attached["executor_ref"] == {"vm_host": "kvm1"}
+    assert attached["executor_ref"] == {"host_id": "kvm1"}
     assert attached["create_job_id"] == "job-1"
     # No availability change: attach emits no capacity event.
     events, _ = seeded.events_after(0)
@@ -696,7 +704,7 @@ def test_attach_lease_records_tail_on_reservation(seeded: CapacityLedgerService)
 
 
 def test_find_active_lease_by_vm_target_matches_via_executor_ref(seeded: CapacityLedgerService):
-    """vm_host is matched through executor_ref's JSON payload
+    """host_id is matched through executor_ref's JSON payload
     (func.json_extract) and vm_target through executor_target -- neither
     is a dedicated column. Previously untested -- this is new coverage,
     not just a migration of an existing test."""
@@ -705,7 +713,7 @@ def test_find_active_lease_by_vm_target_matches_via_executor_ref(seeded: Capacit
         capacity_reservation_id=reserved["capacity_reservation_id"],
         offering_mode="vm",
         executor_target="tenant-find-me",
-        executor_ref={"vm_host": "kvm1"},
+        executor_ref={"host_id": "kvm1"},
         lease_end_utc="2099-01-01 00:00",
     )
 
@@ -713,7 +721,7 @@ def test_find_active_lease_by_vm_target_matches_via_executor_ref(seeded: Capacit
     assert found is not None
     assert found["capacity_reservation_id"] == reserved["capacity_reservation_id"]
 
-    # A different vm_host must not match, even with the same vm_target --
+    # A different host_id must not match, even with the same vm_target --
     # proves the filter actually discriminates on the JSON value rather
     # than matching any row with a non-null executor_ref.
     assert seeded.find_active_lease_by_vm_target("kvm-wrong-host", "tenant-find-me") is None
@@ -773,25 +781,26 @@ def test_release_failed_still_holds_capacity(seeded: CapacityLedgerService):
 
 def _shared_host_ledger() -> CapacityLedgerService:
     ledger = _make_ledger()
-    ledger.register_resource(
+    ledger.register_resource(host_id="kvm1", 
         resource_id="host-1-vm-gpus",
         total_units=8,
         attributes={
             "physical_host_id": "host-1",
             "allocation_mode": ALLOCATION_MODE_SHAREABLE,
-            "vm_host": "kvm1",
             "gpu_model": "H200",
         },
+        pool_id="default",
     )
     ledger.register_resource(
         resource_id="host-1-bare-metal",
         total_units=1,
+        host_id="bm-node-1",
         attributes={
             "physical_host_id": "host-1",
             "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
-            "machine_id": "bm-node-1",
             "gpu_model": "H200",
         },
+        pool_id="default",
     )
     return ledger
 
@@ -910,9 +919,7 @@ def test_claim_matches_top_level_fields(seeded: CapacityLedgerService):
     assert seeded.probe(claim={"offering_mode": "vm", **{"resource_subtype": "h200"}}) is not None
     assert seeded.probe(claim={"offering_mode": "vm", **{"resource_id": "compute-kvm1-001"}}) is not None
     assert seeded.probe(claim={"offering_mode": "vm", **{"resource_id": "other"}}) is None
-    # Un-pooled inventory: the degenerate pool is keyed by resource_id,
-    # which is what storefront claims carry as pool_id.
-    assert seeded.probe(claim={"offering_mode": "vm", **{"pool_id": "compute-kvm1-001"}}) is not None
+    assert seeded.probe(claim={"offering_mode": "vm", **{"pool_id": "default"}}) is not None
     assert seeded.probe(claim={"offering_mode": "vm", **{"pool_id": "other-pool"}}) is None
 
 
@@ -929,12 +936,13 @@ def test_gpu_count_validation(seeded: CapacityLedgerService):
 
 @pytest.fixture
 def multidim(ledger: CapacityLedgerService) -> CapacityLedgerService:
-    ledger.register_resource(
+    ledger.register_resource(host_id="kvm2", 
         resource_id="compute-kvm2-001",
         total_units=8,
         resource_subtype="h200",
-        attributes={"vm_host": "kvm2", "gpu_model": "H200", "region": "us-west"},
+        attributes={"gpu_model": "H200", "region": "us-west"},
         capacity={"gpu_count": 8, "vcpu_count": 64, "ram_gb": 512, "disk_gb": 4000},
+        pool_id="default",
     )
     return ledger
 
@@ -1048,9 +1056,11 @@ def test_registration_event_delta_is_capacity_minus_previous_capacity(
 ):
     ledger.register_resource(
         resource_id="growing", total_units=2, capacity={"gpu_count": 2, "ram_gb": 100},
+        pool_id="default",
     )
     ledger.register_resource(
         resource_id="growing", total_units=4, capacity={"gpu_count": 4, "ram_gb": 100},
+        pool_id="default",
     )
     events, _ = ledger.events_after(0)
     deltas = [e["dimensions"] for e in events if e["resource_id"] == "growing"]
@@ -1101,10 +1111,12 @@ def test_register_resource_rejects_conflicting_total_units_and_capacity(
     with pytest.raises(ValueError):
         ledger.register_resource(
             resource_id="conflicted", total_units=8, capacity={"gpu_count": 4},
+            pool_id="default",
         )
     # Consistent values are fine.
     ledger.register_resource(
         resource_id="consistent", total_units=8, capacity={"gpu_count": 8, "ram_gb": 64},
+        pool_id="default",
     )
     assert ledger.snapshot()[0]["capacity"]["gpu_count"] == 8
 
@@ -1117,9 +1129,11 @@ def test_mixed_direction_capacity_change_gets_neutral_event_kind(
     only increased) or "reserved"."""
     ledger.register_resource(
         resource_id="host-1", total_units=4, capacity={"gpu_count": 4, "ram_gb": 512},
+        pool_id="default",
     )
     ledger.register_resource(
         resource_id="host-1", total_units=8, capacity={"gpu_count": 8, "ram_gb": 128},
+        pool_id="default",
     )
     events, _ = ledger.events_after(0)
     kinds = [e["kind"] for e in events if e["resource_id"] == "host-1"]
@@ -1129,12 +1143,15 @@ def test_mixed_direction_capacity_change_gets_neutral_event_kind(
 def test_pure_grow_and_pure_shrink_keep_their_kind(ledger: CapacityLedgerService):
     ledger.register_resource(
         resource_id="r", total_units=4, capacity={"gpu_count": 4, "ram_gb": 100},
+        pool_id="default",
     )
     ledger.register_resource(
         resource_id="r", total_units=8, capacity={"gpu_count": 8, "ram_gb": 200},
+        pool_id="default",
     )
     ledger.register_resource(
         resource_id="r", total_units=2, capacity={"gpu_count": 2, "ram_gb": 50},
+        pool_id="default",
     )
     events, _ = ledger.events_after(0)
     kinds = [e["kind"] for e in events if e["resource_id"] == "r"]
@@ -1144,8 +1161,8 @@ def test_pure_grow_and_pure_shrink_keep_their_kind(ledger: CapacityLedgerService
 def test_disabling_alone_is_reserved_even_with_unchanged_capacity(
     ledger: CapacityLedgerService,
 ):
-    ledger.register_resource(resource_id="r", total_units=4, enabled=True)
-    ledger.register_resource(resource_id="r", total_units=4, enabled=False)
+    ledger.register_resource(resource_id="r", total_units=4, enabled=True, pool_id="default")
+    ledger.register_resource(resource_id="r", total_units=4, enabled=False, pool_id="default")
     events, _ = ledger.events_after(0)
     kinds = [e["kind"] for e in events if e["resource_id"] == "r"]
     assert kinds == ["released", "reserved"]
@@ -1159,7 +1176,7 @@ def test_scheduler_credit_back_covers_full_capacity_legacy_reservation():
     credit-back logic depends on it never being empty for a
     pre-migration-style reservation."""
     ledger = _make_ledger()
-    ledger.register_resource(resource_id="r1", total_units=4)
+    ledger.register_resource(resource_id="r1", total_units=4, pool_id="default")
     reserved = ledger.reserve(claim={"offering_mode": "vm", **{"gpu_count": 4}}, deal_ref={})
     reservation = ledger.get_reservation(reserved["capacity_reservation_id"])
     assert reservation["dimensions"] == {"gpu_count": 4}
@@ -1171,46 +1188,60 @@ def test_scheduler_credit_back_covers_full_capacity_legacy_reservation():
 
 def test_registered_resource_carries_the_real_pool_id():
     ledger = _make_ledger()
+    _declare_pool(ledger, "pool-a", "vm")
     resource = ledger.register_resource(resource_id="r1", total_units=4, pool_id="pool-a")
     assert resource["pool_id"] == "pool-a"
     assert ledger.list_resources()[0]["pool_id"] == "pool-a"
 
 
-def test_pool_id_defaults_to_none_when_not_supplied():
-    """apicredits' resources carry no pool concept -- pool_id stays None,
-    not a silently-invented value."""
+def test_a_declaration_must_name_its_pool():
+    """Registration replaces the whole declaration, so a pool left out would
+    move the resource rather than leave it where it was."""
     ledger = _make_ledger()
-    resource = ledger.register_resource(resource_id="r1", total_units=4)
-    assert resource["pool_id"] is None
+    with pytest.raises(TypeError):
+        ledger.register_resource(resource_id="r1", total_units=4)
+    with pytest.raises(ValueError, match="pool_id"):
+        ledger.register_resource(resource_id="r1", total_units=4, pool_id="")
 
 
 def test_re_registering_updates_pool_id():
     ledger = _make_ledger()
+    _declare_pool(ledger, "pool-a", "vm")
+    _declare_pool(ledger, "pool-b", "vm")
     ledger.register_resource(resource_id="r1", total_units=4, pool_id="pool-a")
     resource = ledger.register_resource(resource_id="r1", total_units=4, pool_id="pool-b")
     assert resource["pool_id"] == "pool-b"
 
 
 def test_attribute_view_prefers_real_pool_id_over_attributes_json():
-    """During the transition before the storefront's attributes-JSON-only
-    push is retired, a row could in principle carry both -- the real
-    column must win."""
+    """A row stored before registration refused declaration fields as
+    attributes may carry both; the column must win. Registration can no
+    longer write such a row, so the test stores it directly."""
+    from market_site.db import CapacityBucket
+
     ledger = _make_ledger()
     _declare_pool(ledger, "pool-a", "vm")
-    ledger.register_resource(
-        resource_id="r1", total_units=4, pool_id="pool-a",
-        attributes={"pool_id": "pool-stale-json-value"},
-    )
+    ledger.register_resource(resource_id="r1", total_units=4, pool_id="pool-a")
+    with ledger._session_factory() as db, db.begin():
+        db.query(CapacityBucket).filter_by(backing_resource_id="r1").one().attributes = {
+            "pool_id": "pool-stale-json-value"
+        }
     match = ledger.probe(claim={"offering_mode": "vm", **{"pool_id": "pool-a", "gpu_count": 1}})
     assert match is not None
     assert ledger.probe(claim={"offering_mode": "vm", **{"pool_id": "pool-stale-json-value", "gpu_count": 1}}) is None
 
 
 def test_attribute_view_falls_back_to_resource_id_when_pool_id_unset():
-    """The degenerate single-resource pool: a claim addressing the
-    resource by its own id as a pool still matches when pool_id is None."""
+    """A legacy row stored with no pool: a claim addressing the resource by
+    its own id as a pool still matches. Registration can no longer write such
+    a row, so the test stores it directly."""
+    from market_site.db import CapacityBucket
+
     ledger = _make_ledger()
-    ledger.register_resource(resource_id="r1", total_units=4)
+    ledger.register_resource(resource_id="r1", total_units=4, pool_id="default")
+    with ledger._session_factory() as db:
+        db.query(CapacityBucket).filter_by(backing_resource_id="r1").one().pool_id = None
+        db.commit()
     match = ledger.probe(claim={"offering_mode": "vm", **{"pool_id": "r1", "gpu_count": 1}})
     assert match is not None
 
@@ -1221,7 +1252,7 @@ def test_attribute_view_falls_back_to_resource_id_when_pool_id_unset():
 
 def test_resize_reservation_supersedes_with_a_new_id():
     ledger = _make_ledger()
-    ledger.register_resource(resource_id="r1", total_units=4)
+    ledger.register_resource(resource_id="r1", total_units=4, pool_id="default")
     old = ledger.reserve(claim={"offering_mode": "vm", **{"gpu_count": 2}}, deal_ref={"market": "vms"})
     assert old is not None
     old_id = old["capacity_reservation_id"]
@@ -1242,7 +1273,7 @@ def test_resize_reservation_sees_capacity_the_old_hold_was_consuming():
     reservation up to a claim that still only needs 4 units total, even
     though the old hold is nominally still "using" all 4 until this call."""
     ledger = _make_ledger()
-    ledger.register_resource(resource_id="r1", total_units=4)
+    ledger.register_resource(resource_id="r1", total_units=4, pool_id="default")
     old = ledger.reserve(claim={"offering_mode": "vm", **{"gpu_count": 4}}, deal_ref={"market": "vms"})
     assert old is not None
     resized = ledger.resize_reservation(old_capacity_reservation_id=old["capacity_reservation_id"], new_claim={"offering_mode": "vm", **{"gpu_count": 4}}, deal_ref={"market": "vms"},)
@@ -1256,7 +1287,7 @@ def test_resize_reservation_rolls_back_fully_when_new_shape_is_unavailable():
     rolls back: the old reservation is left exactly as it was, still held,
     never actually released -- not two independently-reversible steps."""
     ledger = _make_ledger()
-    ledger.register_resource(resource_id="r1", total_units=4)
+    ledger.register_resource(resource_id="r1", total_units=4, pool_id="default")
     old = ledger.reserve(claim={"offering_mode": "vm", **{"gpu_count": 4}}, deal_ref={"market": "vms"})
     assert old is not None
     old_id = old["capacity_reservation_id"]
@@ -1282,7 +1313,7 @@ def test_resize_reservation_of_unknown_or_unheld_reservation_is_a_no_op():
 def test_release_invokes_the_abandonment_hook_unconditionally():
     calls = []
     ledger = _make_ledger(settlement_abandonment_hook=lambda db, rid: calls.append(rid))
-    ledger.register_resource(resource_id="r1", total_units=4)
+    ledger.register_resource(resource_id="r1", total_units=4, pool_id="default")
     result = ledger.reserve(claim={"offering_mode": "vm", **{"gpu_count": 1}}, deal_ref={"market": "vms"})
     assert result is not None
     reservation_id = result["capacity_reservation_id"]
@@ -1299,7 +1330,7 @@ def test_release_invokes_the_abandonment_hook_unconditionally():
 def test_expired_hold_lapse_invokes_the_abandonment_hook():
     calls = []
     ledger = _make_ledger(settlement_abandonment_hook=lambda db, rid: calls.append(rid))
-    ledger.register_resource(resource_id="r1", total_units=4)
+    ledger.register_resource(resource_id="r1", total_units=4, pool_id="default")
     result = ledger.reserve(claim={"offering_mode": "vm", **{"gpu_count": 1}}, deal_ref={"market": "vms"}, ttl_seconds=-1,)
     assert result is not None
     reservation_id = result["capacity_reservation_id"]
@@ -1311,7 +1342,7 @@ def test_expired_hold_lapse_invokes_the_abandonment_hook():
 def test_resize_reservation_invokes_the_abandonment_hook_for_the_old_reservation():
     calls = []
     ledger = _make_ledger(settlement_abandonment_hook=lambda db, rid: calls.append(rid))
-    ledger.register_resource(resource_id="r1", total_units=4)
+    ledger.register_resource(resource_id="r1", total_units=4, pool_id="default")
     old = ledger.reserve(claim={"offering_mode": "vm", **{"gpu_count": 2}}, deal_ref={"market": "vms"})
     assert old is not None
     old_id = old["capacity_reservation_id"]
@@ -1327,7 +1358,7 @@ def test_resize_reservation_rollback_does_not_invoke_the_abandonment_hook():
     report the old reservation as abandoned."""
     calls = []
     ledger = _make_ledger(settlement_abandonment_hook=lambda db, rid: calls.append(rid))
-    ledger.register_resource(resource_id="r1", total_units=4)
+    ledger.register_resource(resource_id="r1", total_units=4, pool_id="default")
     old = ledger.reserve(claim={"offering_mode": "vm", **{"gpu_count": 4}}, deal_ref={"market": "vms"})
     assert old is not None
 
@@ -1340,7 +1371,7 @@ def test_no_hook_configured_is_a_silent_no_op():
     """The default (no hook wired) must not raise -- most tests in this
     file construct a ledger with no hook at all."""
     ledger = _make_ledger()
-    ledger.register_resource(resource_id="r1", total_units=4)
+    ledger.register_resource(resource_id="r1", total_units=4, pool_id="default")
     result = ledger.reserve(claim={"offering_mode": "vm", **{"gpu_count": 1}}, deal_ref={"market": "vms"})
     assert result is not None
     ledger.release(capacity_reservation_id=result["capacity_reservation_id"])
@@ -1358,7 +1389,7 @@ def test_no_hook_configured_is_a_silent_no_op():
 
 
 def _held(ledger: CapacityLedgerService) -> str:
-    ledger.register_resource(resource_id="lease-r1", total_units=4)
+    ledger.register_resource(resource_id="lease-r1", total_units=4, pool_id="default")
     reservation = ledger.reserve(
         claim={"offering_mode": "vm", "gpu_count": 1},
         deal_ref={"market": "vms"},
@@ -1454,3 +1485,313 @@ def test_update_lease_fields_in_session_returns_none_for_a_terminal_reservation(
         assert ledger.update_lease_fields_in_session(
             db, capacity_reservation_id, create_job_id="job-7"
         ) is None
+
+
+# ----------------------------------------------------------------------
+# A capacity declaration names no mandatory dimension
+# ----------------------------------------------------------------------
+
+def _neutral_ledger() -> CapacityLedgerService:
+    """A ledger composed with the kit's own defaults, as a non-VM domain is."""
+    return _make_ledger(unit_claim_keys=("units",), mirror_dimension="units")
+
+
+def test_a_declaration_naming_no_compute_dimension_is_stored_as_declared():
+    ledger = _neutral_ledger()
+
+    resource = ledger.register_resource(
+        resource_id="quota", pool_id="default", capacity={"tokens": 1000},
+    )
+
+    assert resource["capacity"] == {"tokens": 1000}
+    assert "gpu_count" not in resource["capacity"]
+    # No mirror dimension named, so no scalar total: absent, not zero.
+    assert resource["value"] is None
+    assert resource["available_units"] is None
+
+
+def test_the_legacy_scalar_maps_to_the_composition_mirror_dimension():
+    neutral = _neutral_ledger()
+    vm = _make_ledger()
+
+    assert neutral.register_resource(
+        resource_id="q", pool_id="default", total_units=5,
+    )["capacity"] == {"units": 5}
+    assert vm.register_resource(
+        resource_id="h", pool_id="default", total_units=5,
+    )["capacity"] == {"gpu_count": 5}
+
+
+def test_a_legacy_claim_requests_the_composition_mirror_dimension():
+    vm = _make_ledger()
+    vm.register_resource(
+        resource_id="h", pool_id="default", capacity={"gpu_count": 4, "ram_gb": 64},
+    )
+
+    reserved = vm.reserve(claim={"offering_mode": "vm", "gpu_count": 2}, deal_ref={})
+
+    assert reserved["dimensions"] == {"gpu_count": 2}
+    assert reserved["allocated_gpu_count"] == 2
+
+
+def test_admission_matches_the_unit_total_only_under_the_composition_mirror():
+    """A claim attribute naming another domain's dimension is a requirement no
+    resource declares. Under the kit defaults ``gpu_count`` is such a name, so
+    a claim requiring it must not match a resource merely because its unit
+    total happens to be equal; the VM composition's scheduling view carries
+    the total under ``gpu_count`` and the neutral one does not."""
+    neutral = _neutral_ledger()
+    neutral.register_resource(resource_id="q", pool_id="default", capacity={"units": 3})
+
+    assert neutral.reserve(
+        claim={"offering_mode": "vm", "units": 1, "gpu_count": 3}, deal_ref={}
+    ) is None
+
+    vm = _make_ledger()
+    vm.register_resource(resource_id="h", pool_id="default", total_units=3)
+    with neutral._session_factory() as db:
+        (neutral_view,) = neutral.iter_scheduling_candidates_in_session(
+            db, resource_kind="compute.gpu", exclude_reservation_id=""
+        )
+    with vm._session_factory() as db:
+        (vm_view,) = vm.iter_scheduling_candidates_in_session(
+            db, resource_kind="compute.gpu", exclude_reservation_id=""
+        )
+    assert "gpu_count" not in neutral_view.attributes
+    assert neutral_view.attributes["units"] == 3
+    assert vm_view.attributes["gpu_count"] == 3
+
+def test_an_explicit_declaration_gets_no_mirror_dimension_added():
+    vm = _make_ledger()
+
+    resource = vm.register_resource(
+        resource_id="h", pool_id="default", capacity={"ram_gb": 64},
+    )
+
+    assert resource["capacity"] == {"ram_gb": 64}
+
+
+@pytest.mark.parametrize(
+    "key", ["resource_id", "pool_id", "host_id", "resource_type", "resource_subtype"]
+)
+def test_an_attribute_naming_a_declaration_field_is_refused(key: str):
+    ledger = _make_ledger()
+
+    with pytest.raises(ValueError, match=key):
+        ledger.register_resource(
+            resource_id="r1", pool_id="default", total_units=1,
+            attributes={key: "restated", "gpu_model": "H200"},
+        )
+
+    assert ledger.snapshot() == []
+
+def test_a_declaration_naming_no_dimension_is_refused():
+    with pytest.raises(ValueError, match="at least one dimension"):
+        _neutral_ledger().register_resource(resource_id="empty", pool_id="default")
+
+
+# ----------------------------------------------------------------------
+# A capacity resource does not move pools under live obligations
+# ----------------------------------------------------------------------
+
+def test_a_held_resource_cannot_change_pool_until_it_is_drained():
+    """One test covers both halves, so a refusal cannot be mistaken for a
+    resource that could never move."""
+    ledger = _make_ledger()
+    _declare_pool(ledger, "pool-b", "vm")
+    ledger.register_resource(resource_id="r1", pool_id="default", total_units=4)
+    reserved = ledger.reserve(claim={"offering_mode": "vm", "gpu_count": 1}, deal_ref={})
+
+    with pytest.raises(CapacityConflictError, match="cannot move"):
+        ledger.register_resource(resource_id="r1", pool_id="pool-b", total_units=4)
+    # Refused outright: nothing moved.
+    assert ledger.snapshot()[0]["pool_id"] == "default"
+
+    ledger.release(capacity_reservation_id=reserved["capacity_reservation_id"])
+    moved = ledger.register_resource(resource_id="r1", pool_id="pool-b", total_units=4)
+    assert moved["pool_id"] == "pool-b"
+
+
+def test_restating_the_same_pool_is_not_a_move():
+    ledger = _make_ledger()
+    ledger.register_resource(resource_id="r1", pool_id="default", total_units=4)
+    ledger.reserve(claim={"offering_mode": "vm", "gpu_count": 1}, deal_ref={})
+
+    updated = ledger.register_resource(
+        resource_id="r1", pool_id="default", total_units=6,
+    )
+
+    assert updated["capacity"] == {"gpu_count": 6}
+
+
+def test_a_legacy_row_with_no_stored_pool_is_in_the_default_pool():
+    from market_site.db import CapacityBucket
+
+    ledger = _make_ledger()
+    ledger.register_resource(resource_id="r1", pool_id="default", total_units=4)
+    with ledger._session_factory() as db:
+        db.query(CapacityBucket).filter_by(backing_resource_id="r1").one().pool_id = None
+        db.commit()
+    ledger.reserve(claim={"offering_mode": "vm", "gpu_count": 1}, deal_ref={})
+
+    # Naming the default pool explicitly restates where the row already was.
+    restated = ledger.register_resource(resource_id="r1", pool_id="default", total_units=4)
+    assert restated["pool_id"] == "default"
+
+
+# ----------------------------------------------------------------------
+# Administration is serialized through its caller's commit
+# ----------------------------------------------------------------------
+
+def test_an_in_session_mutator_outside_the_serialized_region_is_refused():
+    """A caller writing into its own transaction must hold the ledger's lock
+    around it; otherwise the mutator refuses before writing anything."""
+    ledger = _make_ledger()
+
+    with ledger._session_factory() as db:
+        with pytest.raises(RuntimeError, match="serialized"):
+            ledger.register_resource_in_session(
+                db, resource_id="r1", pool_id="default", total_units=1
+            )
+
+    assert ledger.snapshot() == []
+
+
+def _pause_after_the_obligation_check(ledger, monkeypatch):
+    """Make a pool move stop just after it has checked live obligations,
+    until released. Returns (checked, release) events."""
+    checked, release = threading.Event(), threading.Event()
+    refuse = ledger._refuse_reassignment_under_obligation
+
+    def refuse_then_wait(db, bucket, new_pool_id):
+        refuse(db, bucket, new_pool_id)
+        checked.set()
+        assert release.wait(timeout=10), "test never released the pool move"
+
+    monkeypatch.setattr(ledger, "_refuse_reassignment_under_obligation", refuse_then_wait)
+    return checked, release
+
+
+def _move_in_one_transaction(ledger, resource_id: str, pool_id: str) -> None:
+    """A caller composing a pool move into its own transaction, as the
+    document importer does: serialized through its commit."""
+    with ledger.serialized(), ledger._session_factory() as db:
+        ledger.register_resource_in_session(
+            db, resource_id=resource_id, pool_id=pool_id, total_units=4
+        )
+        db.commit()
+
+
+def test_the_lock_is_held_from_the_obligation_check_through_the_commit(monkeypatch):
+    """Deterministic: while a pool move is paused between checking live
+    obligations and committing, no other thread can take the ledger's lock,
+    so no admission can run in that window."""
+    ledger = _make_ledger()
+    _declare_pool(ledger, "pool-b", "vm")
+    ledger.register_resource(resource_id="r1", pool_id="default", total_units=4)
+    checked, release = _pause_after_the_obligation_check(ledger, monkeypatch)
+    mover = threading.Thread(target=_move_in_one_transaction, args=(ledger, "r1", "pool-b"))
+
+    mover.start()
+    assert checked.wait(timeout=10), "the pool move never reached its check"
+    try:
+        acquired = ledger._lock.acquire(blocking=False)
+        if acquired:
+            ledger._lock.release()
+        assert not acquired, "another thread could enter the ledger mid-move"
+    finally:
+        release.set()
+        mover.join(timeout=10)
+
+    assert ledger.snapshot()[0]["pool_id"] == "pool-b"
+
+
+def test_a_reservation_racing_a_pool_move_never_survives_against_the_moved_resource(
+    tmp_path, monkeypatch
+):
+    """Independent sessions on a file-backed database. The move is paused
+    after its obligation check while a reserve for the same resource starts.
+    Whatever the order, no committed state has a live reservation on a
+    resource that now sits in a pool unable to deliver it."""
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'ledger.db'}",
+        connect_args={"check_same_thread": False, "timeout": 30},
+        poolclass=NullPool,
+    )
+    Base.metadata.create_all(bind=engine)
+    ResourcePoolBase.metadata.create_all(bind=engine)
+    session_factory = sessionmaker(bind=engine)
+    with session_factory() as db, db.begin():
+        db.add_all([
+            ResourcePool(id=DEFAULT_POOL_ID, label="Default", provider="test",
+                         enabled=True, policy_tags={"deliverable_modes": ["vm"]}),
+            ResourcePool(id="pool-b", label="B", provider="test",
+                         enabled=True, policy_tags={"deliverable_modes": []}),
+        ])
+    ledger = CapacityLedgerService(
+        session_factory, unit_claim_keys=("units", "gpu_count"),
+        mirror_dimension="gpu_count",
+    )
+    ledger.register_resource(resource_id="r1", pool_id="default", total_units=4)
+    checked, release = _pause_after_the_obligation_check(ledger, monkeypatch)
+    outcomes: dict[str, object] = {}
+
+    def reserve():
+        try:
+            outcomes["reserve"] = ledger.reserve(
+                claim={"offering_mode": "vm", "gpu_count": 1, "resource_id": "r1"},
+                deal_ref={},
+            )
+        except Exception as exc:  # the refusal is an acceptable outcome
+            outcomes["reserve"] = exc
+
+    mover = threading.Thread(target=_move_in_one_transaction, args=(ledger, "r1", "pool-b"))
+    reserver = threading.Thread(target=reserve)
+    mover.start()
+    assert checked.wait(timeout=10)
+    reserver.start()
+    # Give the reserve the whole pause to run in. Serialized, it cannot
+    # finish while the move holds the lock, so this wait expires and the
+    # move resumes; unserialized, it would finish here and commit against
+    # the old pool before the move writes. The assertion below does not
+    # depend on this wait, only whether the counterfactual is exercised.
+    reserver.join(timeout=1)
+    release.set()
+    mover.join(timeout=10)
+    reserver.join(timeout=10)
+
+    (resource,) = ledger.snapshot()
+    live = [
+        row for row in ledger.list_reservations()
+        if row["state"] in HELD_RESERVATION_STATES
+    ]
+    assert resource["pool_id"] == "pool-b"
+    assert live == [], f"a reservation survived the move: {outcomes['reserve']!r}"
+
+
+
+def test_a_declaration_naming_an_unknown_pool_is_refused():
+    ledger = _make_ledger()
+
+    with pytest.raises(UnknownPoolError, match="no-such-pool"):
+        ledger.register_resource(resource_id="r1", pool_id="no-such-pool", total_units=1)
+
+    assert ledger.snapshot() == []
+
+
+def test_a_settlement_assignment_outside_the_serialized_region_is_refused():
+    """Assignment creates the live obligation a pool move checks for, so it
+    writes only under the lock that serializes it with that check."""
+    ledger = _make_ledger()
+    ledger.register_resource(resource_id="r1", pool_id="default", total_units=4)
+    reserved = ledger.reserve(claim={"offering_mode": "vm", "gpu_count": 1}, deal_ref={})
+
+    with ledger._session_factory() as db:
+        with pytest.raises(RuntimeError, match="serialized"):
+            ledger.assign_settlement_resource_in_session(
+                db,
+                capacity_reservation_id=reserved["capacity_reservation_id"],
+                settlement_resource_id="r1",
+            )
+
+    assert ledger.get_reservation(reserved["capacity_reservation_id"])["settlement_resource_id"] is None

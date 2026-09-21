@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-kit-site"
-version = "0.3.0"
+version = "0.4.0"
 license = "MIT"
 description = "Site-authority scaffold: capacity ledger, tables, and HTTP surface"
 requires-python = ">=3.12"
@@ -12,6 +12,8 @@ dependencies = [
     "arkhai-kit-resource-pools>=0.2.0",
     "fastapi>=0.115.0",
     "pydantic>=2.7",
+    # Capacity-definitions documents are YAML.
+    "pyyaml>=6.0",
     "sqlalchemy>=2.0",
 ]
 

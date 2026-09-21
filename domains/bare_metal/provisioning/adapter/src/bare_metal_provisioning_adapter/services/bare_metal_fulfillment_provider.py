@@ -41,6 +41,10 @@ _PROVIDER = "bare_metal.ansible"
 _CREATE_KIND = "bare_metal.fulfillment.create.v1"
 _TEARDOWN_KIND = "bare_metal.fulfillment.teardown.v1"
 _RESULT_KIND = "bare_metal.fulfillment.result.v1"
+# The operation and result schema this provider prepares, dispatches, and
+# returns; its lease names the host ``host_id``. Dispatch accepts no other
+# schema, so a persisted operation must already be at this version.
+_OPERATION_SCHEMA_VERSION = 2
 
 _JOB_STATUS_TO_OPERATION_STATE = {
     "pending": ProviderOperationState.pending,
@@ -66,7 +70,7 @@ class BareMetalFulfillmentMetadata(BaseModel):
     current_job_id: str = Field(min_length=1)
     teardown_job_id: str | None = None
     operation: Literal["create", "teardown"]
-    machine_id: str = Field(min_length=1)
+    host_id: str = Field(min_length=1)
     physical_host_id: str = Field(min_length=1)
     escrow_uid: str | None = Field(default=None, min_length=1)
     settlement_obligation_ref: str | None = Field(default=None, min_length=1)
@@ -118,16 +122,37 @@ class BareMetalFulfillmentProvider(FulfillmentProvider):
             ) from exc
 
     @staticmethod
-    def _resource_value(resource: SettlementResource, field: str) -> str:
+    def _require_publication(resource: SettlementResource) -> None:
         publication = resource.attributes.get("bare_metal_publication")
         if not isinstance(publication, dict) or publication.get("enabled") is not True:
             raise ProviderConfigInvalidError(
                 "selected bare-metal resource has no enabled publication view"
             )
-        value = publication.get(field)
+
+    @classmethod
+    def _resource_host_id(cls, resource: SettlementResource) -> str:
+        """The host the selected resource is delivered through."""
+        cls._require_publication(resource)
+        value = resource.host_id
         if not isinstance(value, str) or not value.strip():
             raise ProviderConfigInvalidError(
-                f"selected bare-metal resource requires a non-empty {field} attribute"
+                "selected bare-metal resource is not delivered through a host"
+            )
+        return value
+
+    @classmethod
+    def _resource_physical_host_id(cls, resource: SettlementResource) -> str:
+        """The physical machine the selected resource occupies.
+
+        Read from the declaration's top level, where the ledger's cross-mode
+        accounting reads it, so the provider and the admission rule cannot
+        disagree about which machine a resource is.
+        """
+        cls._require_publication(resource)
+        value = resource.attributes.get("physical_host_id")
+        if not isinstance(value, str) or not value.strip():
+            raise ProviderConfigInvalidError(
+                "selected bare-metal resource requires a non-empty physical_host_id"
             )
         return value
 
@@ -143,13 +168,13 @@ class BareMetalFulfillmentProvider(FulfillmentProvider):
                 "bare-metal provider cannot execute offering mode "
                 f"{resource.offering_mode!r}"
             )
-        expected_machine = cls._resource_value(resource, "machine_id")
-        expected_host = cls._resource_value(resource, "physical_host_id")
-        if materialization.machine_id != expected_machine:
+        expected_host = cls._resource_host_id(resource)
+        expected_physical_host = cls._resource_physical_host_id(resource)
+        if materialization.host_id != expected_host:
             raise ProviderConfigInvalidError(
-                "materialization machine_id does not match the selected resource"
+                "materialization host_id does not match the selected resource"
             )
-        if materialization.physical_host_id != expected_host:
+        if materialization.physical_host_id != expected_physical_host:
             raise ProviderConfigInvalidError(
                 "materialization physical_host_id does not match the selected resource"
             )
@@ -161,7 +186,7 @@ class BareMetalFulfillmentProvider(FulfillmentProvider):
         expected_kind: str,
         expected_action: Literal["create", "teardown"],
     ) -> BareMetalPreparedOperation:
-        if prepared.kind != expected_kind or prepared.schema_version != 1:
+        if prepared.kind != expected_kind or prepared.schema_version != _OPERATION_SCHEMA_VERSION:
             raise ProviderConfigInvalidError(
                 f"unsupported bare-metal {expected_action} envelope"
             )
@@ -217,7 +242,7 @@ class BareMetalFulfillmentProvider(FulfillmentProvider):
         )
         return VersionedEnvelope(
             kind=_CREATE_KIND,
-            schema_version=1,
+            schema_version=_OPERATION_SCHEMA_VERSION,
             payload=BareMetalPreparedOperation(
                 capacity_reservation_id=capacity_reservation_id,
                 action="create",
@@ -250,7 +275,7 @@ class BareMetalFulfillmentProvider(FulfillmentProvider):
                     create_job_id=response.job_id,
                     current_job_id=response.job_id,
                     operation="create",
-                    machine_id=lease.machine_id,
+                    host_id=lease.host_id,
                     physical_host_id=lease.physical_host_id,
                     escrow_uid=lease.escrow_uid,
                     settlement_obligation_ref=lease.settlement_obligation_ref,
@@ -277,12 +302,12 @@ class BareMetalFulfillmentProvider(FulfillmentProvider):
                 "bare-metal teardown cannot execute offering mode "
                 f"{resource.offering_mode!r}"
             )
-        if self._resource_value(resource, "machine_id") != metadata.machine_id:
+        if self._resource_host_id(resource) != metadata.host_id:
             raise ProviderConfigInvalidError(
-                "fulfillment metadata machine_id does not match the selected resource"
+                "fulfillment metadata host_id does not match the selected resource"
             )
         if (
-            self._resource_value(resource, "physical_host_id")
+            self._resource_physical_host_id(resource)
             != metadata.physical_host_id
         ):
             raise ProviderConfigInvalidError(
@@ -292,7 +317,7 @@ class BareMetalFulfillmentProvider(FulfillmentProvider):
             capacity_reservation_id=settlement_result.capacity_reservation_id,
             escrow_uid=metadata.escrow_uid,
             settlement_obligation_ref=metadata.settlement_obligation_ref,
-            machine_id=metadata.machine_id,
+            host_id=metadata.host_id,
             physical_host_id=metadata.physical_host_id,
             lease_start_utc=metadata.lease_start_utc,
             lease_end_utc=metadata.lease_end_utc,
@@ -301,7 +326,7 @@ class BareMetalFulfillmentProvider(FulfillmentProvider):
         )
         return VersionedEnvelope(
             kind=_TEARDOWN_KIND,
-            schema_version=1,
+            schema_version=_OPERATION_SCHEMA_VERSION,
             payload=BareMetalPreparedOperation(
                 capacity_reservation_id=settlement_result.capacity_reservation_id,
                 action="teardown",
@@ -332,7 +357,7 @@ class BareMetalFulfillmentProvider(FulfillmentProvider):
                 {
                     "capacity_reservation_id": operation.capacity_reservation_id,
                     lease.settlement_identity_kind: lease.settlement_identity,
-                    "executor_target": lease.machine_id,
+                    "executor_target": lease.host_id,
                     "access_ref": lease.access_ref,
                     "executor_ref": bare_metal_executor_ref(
                         lease.physical_host_id,
@@ -347,7 +372,7 @@ class BareMetalFulfillmentProvider(FulfillmentProvider):
                     teardown_job_id=response.job_id,
                     current_job_id=response.job_id,
                     operation="teardown",
-                    machine_id=lease.machine_id,
+                    host_id=lease.host_id,
                     physical_host_id=lease.physical_host_id,
                     escrow_uid=lease.escrow_uid,
                     settlement_obligation_ref=lease.settlement_obligation_ref,
@@ -429,7 +454,7 @@ class BareMetalFulfillmentProvider(FulfillmentProvider):
         }
         access_result = BareMetalAccessResult(
             action=NODE_GRANT_ACCESS_ACTION,
-            machine_id=metadata.machine_id,
+            host_id=metadata.host_id,
             physical_host_id=metadata.physical_host_id,
             ssh_user=ssh_user if isinstance(ssh_user, str) else None,
             escrow_uid=metadata.escrow_uid,
@@ -450,6 +475,6 @@ class BareMetalFulfillmentProvider(FulfillmentProvider):
         )
         return VersionedEnvelope(
             kind=_RESULT_KIND,
-            schema_version=1,
+            schema_version=_OPERATION_SCHEMA_VERSION,
             payload=access_result.model_dump(mode="json", exclude_none=True),
         )

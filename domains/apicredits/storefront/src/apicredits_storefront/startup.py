@@ -162,6 +162,11 @@ def _capacity_authority_site():
     return next(iter(sites.values()))
 
 
+# The quota resource belongs to the credits authority's system-created default
+# pool; a declaration must name its pool explicitly.
+_QUOTA_POOL_ID = "default"
+
+
 async def _register_seed_quota(*, resource_id: str, total_units: int) -> None:
     """Register the demo quota resource in the credits-service ledger.
 
@@ -189,7 +194,8 @@ async def _register_seed_quota(*, resource_id: str, total_units: int) -> None:
     try:
         await admin_client.register_resource(
             resource_id,
-            total_units=total_units,
+            pool_id=_QUOTA_POOL_ID,
+            capacity={"units": total_units},
             resource_type="api_credits",
         )
     except SiteCapacityAdminClientError as exc:

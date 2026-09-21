@@ -271,6 +271,9 @@ from compute_provisioning_service.main import app
 from vm_provisioning_adapter.services.ansible_service import AnsibleResult, AnsibleRun, AnsibleService
 from compute_provisioning_service.services.async_job_queue import AsyncJobQueue
 from vm_provisioning_adapter.services.host_service import HostService
+from compute_provisioning_service.services.capacity_derivation import (
+    LegacyHostCapacityDerivation,
+)
 from vm_provisioning_adapter.services.job_service import AnsibleJobService
 from vm_provisioning_adapter.services.mock_ansible_service import ProgrammableMockAnsibleService
 from vm_provisioning_adapter.services.system_service import SystemService
@@ -444,7 +447,7 @@ async def client_and_queue(
 
     _install_signed_asgi_transport(monkeypatch)
     mock_settings = MagicMock(
-        default_vm_host="kvm1",
+        default_host_id="kvm1",
         default_max_retries=3,
         retry_backoff_initial_seconds=60,
         retry_backoff_multiplier=2.0,
@@ -483,9 +486,16 @@ async def client_and_queue(
     )
     replay_store = SqlAlchemyProvisioningReplayStore(session_factory)
 
+    from market_site.ledger import CapacityLedgerService
+    capacity_ledger_service = CapacityLedgerService(
+        session_factory=session_factory,
+        unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count",
+    )
+
     host_service = HostService(
         session_factory=session_factory,
         settings=mock_settings,
+        capacity_derivation=LegacyHostCapacityDerivation(capacity_ledger_service),
     )
 
     from market_resource_pools import ResourcePoolService
@@ -500,12 +510,6 @@ async def client_and_queue(
         session_factory=session_factory,
         ansible_service=fake_ansible,
         host_service=host_service,
-    )
-
-    from market_site.ledger import CapacityLedgerService
-    capacity_ledger_service = CapacityLedgerService(
-        session_factory=session_factory,
-        unit_claim_keys=("units", "gpu_count"),
     )
 
     from market_fulfillment import PhysicalSettlementScheduler

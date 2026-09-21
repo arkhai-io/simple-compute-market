@@ -14,35 +14,37 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
+from .declarations import CapacityDeclarationFields, DeclaredCapacity
 
-class ResourceRegisterRequest(BaseModel):
-    """Body accepted by ``PUT /api/v1/capacity/resources/{resource_id}``."""
 
-    total_units: int = Field(
+class ResourceRegisterRequest(CapacityDeclarationFields):
+    """Body accepted by ``PUT /api/v1/capacity/resources/{resource_id}``.
+
+    The declaration's fields, with the resource id taken from the path. Two
+    fields differ from a declaration for the endpoint's existing callers:
+    ``resource_type`` defaults, and ``capacity`` may be replaced by the
+    legacy scalar ``total_units``.
+    """
+
+    total_units: Optional[int] = Field(
+        default=None,
         ge=0,
-        description="Unit count this resource contributes (e.g. GPUs).",
+        description=(
+            "Legacy scalar total of the composition's mirror dimension. Used "
+            "only when ``capacity`` is omitted; when both are given they must "
+            "agree on that dimension."
+        ),
     )
     resource_type: str = Field(default="compute.gpu")
-    pool_id: Optional[str] = Field(default=None)
-    resource_subtype: Optional[str] = Field(
-        default=None, description="e.g. the GPU model slug ('h200')."
-    )
-    attributes: dict[str, Any] = Field(
-        default_factory=dict,
-        description=(
-            "Resource-domain attributes (vm_host, gpu_model, region, …). "
-            "Market schema (pricing, escrows) stays on the storefront."
-        ),
-    )
-    capacity: Optional[dict[str, Any]] = Field(
+    capacity: Optional[DeclaredCapacity] = Field(
         default=None,
         description=(
-            "Multidimensional total capacity."
-            "e.g. {'gpu_count': 8, 'vcpu_count': 192, 'ram_gb': 2048, 'disk_gb': 20000}."
-            "When omitted, defaults to {'gpu_count': total_units}."
+            "Multidimensional total capacity, authoritative for exactly the "
+            "dimensions it names, e.g. {'gpu_count': 8, 'vcpu_count': 192, "
+            "'ram_gb': 2048, 'disk_gb': 20000}. When omitted, the declaration "
+            "is {<mirror dimension>: total_units}."
         ),
     )
-    enabled: bool = Field(default=True)
 
 
 class ResourceListResponse(BaseModel):

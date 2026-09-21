@@ -3,7 +3,11 @@ from __future__ import annotations
 from types import SimpleNamespace
 import pytest
 import arkhai_bare_metal_storefront.domain_runtime as domain_runtime
-from arkhai_bare_metal.schema import BARE_METAL_SCHEMA_KIND, BareMetalMessage
+from arkhai_bare_metal.schema import (
+    BARE_METAL_DOMAIN_IDENTITY,
+    BARE_METAL_SCHEMA_KIND,
+    BareMetalMessage,
+)
 from market_core import DomainCapability, validate_domain_contract
 from core_storefront import (
     StorefrontDomainBinding,
@@ -27,7 +31,7 @@ def test_storefront_contract_validates_current_bare_metal_capabilities() -> None
 
     assert contract is BARE_METAL_STOREFRONT_DOMAIN
     assert validate_domain_contract(contract) is contract
-    assert str(contract.identity) == BARE_METAL_SCHEMA_KIND
+    assert str(contract.identity) == BARE_METAL_DOMAIN_IDENTITY
     assert contract.has_capability(DomainCapability.PUBLICATION)
     assert contract.publication is not None
     assert callable(contract.publication.source_factory)

@@ -120,6 +120,7 @@ def build_vm_runtime(
     job_queue_provider: Callable[[], Any],
     settlement_repository,
     teardown_port: Any,
+    capacity_derivation: Any,
 ) -> VmProvisioningRuntime:
     active = [
         profile.strip()
@@ -138,6 +139,7 @@ def build_vm_runtime(
     host_service = HostService(
         session_factory=session_factory,
         settings=config,
+        capacity_derivation=capacity_derivation,
     )
     job_service = AnsibleJobService(
         settings=config,

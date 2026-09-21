@@ -333,7 +333,8 @@ class BareMetalNegotiationService:
         The mechanism is resolved exactly once — from the selection — and the
         obligation is built through the composed registry dispatch. The domain
         keeps only domain semantics: trusted physical facts for options that
-        provision a machine, and the plan's ``bare_metal.v1`` service terms.
+        provision a machine, and the plan's service terms under the current
+        payload kind (``BARE_METAL_SCHEMA_KIND``).
         """
 
         build_obligation = self.accepted_obligation_dispatch.get(selection.mechanism)
@@ -523,7 +524,7 @@ class BareMetalNegotiationService:
                 status_code=400,
             )
         terms = BareMetalTerms(
-            machine_id=trusted_listing.machine_id,
+            host_id=trusted_listing.host_id,
             physical_host_id=trusted_listing.physical_host_id,
             duration_seconds=message.duration_seconds,
             access_method=message.access_method,
@@ -536,7 +537,7 @@ class BareMetalNegotiationService:
             "option_facts": selected.facts.model_dump(mode="json", exclude_none=True),
             "provision_terms": terms.model_dump(mode="json", exclude_none=True),
         }
-        return terms, {"bare_metal.v1": physical_terms}
+        return terms, {"bare_metal.v2": physical_terms}
 
     def _build_accepted_obligation(
         self,

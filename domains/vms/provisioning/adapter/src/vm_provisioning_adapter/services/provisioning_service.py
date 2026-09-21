@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ProvisioningParams:
     """Structured representation of a ProvisionRequest for internal use."""
-    vm_host: str
+    host_id: str
     vm_target: Optional[str]
     vm_action: str
     image_setup_type: str = "scratch"
@@ -58,7 +58,7 @@ class ProvisioningResult:
     stderr: str
     ssh_port: Optional[str]
     tenant_user: Optional[str]
-    vm_host_ip: Optional[str]
+    host_ip: Optional[str]
     ssh_command: Optional[str]
     ansible_result: Optional[dict] = None
     process_id: Optional[int] = None
@@ -111,7 +111,7 @@ class ProvisioningService:
             playbook_path=self._settings.resolved_playbook_path,
             inventory_path=self._settings.resolved_inventory_path,
             extra_vars_path=vars_path,
-            limit=params.vm_host,
+            limit=params.host_id,
         )
 
     async def wait_for_playbook(
@@ -161,7 +161,7 @@ class ProvisioningService:
 
     def _build_vm_vars(self, params: ProvisioningParams) -> str:
         lines = [
-            f"vm_host: {params.vm_host}",
+            f"host_id: {params.host_id}",
             f"vm_action: {params.vm_action}",
         ]
         if params.vm_target:
@@ -223,13 +223,13 @@ class ProvisioningService:
     def _parse_result(
         self, result: AnsibleResult, params: ProvisioningParams
     ) -> ProvisioningResult:
-        ssh_port = self._extract_ssh_port(result.stdout, params.vm_host)
-        tenant_user = self._extract_tenant_user(result.stdout, params.vm_host)
-        vm_host_ip = self._ansible.lookup_host_ip(params.vm_host)
+        ssh_port = self._extract_ssh_port(result.stdout, params.host_id)
+        tenant_user = self._extract_tenant_user(result.stdout, params.host_id)
+        host_ip = self._ansible.lookup_host_ip(params.host_id)
         ssh_command = None
-        if ssh_port and tenant_user and vm_host_ip:
+        if ssh_port and tenant_user and host_ip:
             ssh_command = (
-                f"ssh -i <your_private_key> -p {ssh_port} {tenant_user}@{vm_host_ip}"
+                f"ssh -i <your_private_key> -p {ssh_port} {tenant_user}@{host_ip}"
             )
         ansible_result = self._extract_ansible_json(result.stdout, params.vm_action)
         return ProvisioningResult(
@@ -237,20 +237,20 @@ class ProvisioningService:
             stderr=result.stderr,
             ssh_port=ssh_port,
             tenant_user=tenant_user,
-            vm_host_ip=vm_host_ip,
+            host_ip=host_ip,
             ssh_command=ssh_command,
             ansible_result=ansible_result,
             process_id=result.process_id,
         )
 
     def _extract_ssh_port(
-        self, playbook_output: str, vm_host: str | None = None
+        self, playbook_output: str, host_id: str | None = None
     ) -> Optional[str]:
         patterns = [r'"external_ssh_port":\s*"(?P<port>\d+)"']
-        if vm_host:
+        if host_id:
             patterns.extend([
-                rf"-p\s*(?P<port>\d{{2,5}})\s+root@{re.escape(vm_host)}",
-                rf"-p\s*(?P<port>\d{{2,5}})\s+\S+@{re.escape(vm_host)}",
+                rf"-p\s*(?P<port>\d{{2,5}})\s+root@{re.escape(host_id)}",
+                rf"-p\s*(?P<port>\d{{2,5}})\s+\S+@{re.escape(host_id)}",
             ])
         patterns.append(r"-p\s*(?P<port>\d{2,5})\s+\S+@[\w\.-]+")
         for pattern in patterns:
@@ -260,12 +260,12 @@ class ProvisioningService:
         return None
 
     def _extract_tenant_user(
-        self, playbook_output: str, vm_host: str | None = None
+        self, playbook_output: str, host_id: str | None = None
     ) -> Optional[str]:
         patterns = [r'"tenant_user":\s*"(?P<user>[^"]+)"']
-        if vm_host:
+        if host_id:
             patterns.append(
-                rf"-p\s*\d{{2,5}}\s+(?P<user>[A-Za-z0-9._-]+)@{re.escape(vm_host)}"
+                rf"-p\s*\d{{2,5}}\s+(?P<user>[A-Za-z0-9._-]+)@{re.escape(host_id)}"
             )
         patterns.append(r"-p\s*\d{2,5}\s+(?P<user>[A-Za-z0-9._-]+)@\S+")
         for pattern in patterns:

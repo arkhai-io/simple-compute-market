@@ -30,8 +30,8 @@ def _ledger(tmp_path):
 
 def test_assignment_moves_existing_capacity_without_double_counting(tmp_path):
     ledger, engine = _ledger(tmp_path)
-    ledger.register_resource(resource_id="a", total_units=4)
-    ledger.register_resource(resource_id="b", total_units=4)
+    ledger.register_resource(resource_id="a", total_units=4, pool_id="default")
+    ledger.register_resource(resource_id="b", total_units=4, pool_id="default")
     reserved = ledger.reserve(claim={"offering_mode": "vm", **{"units": 4}}, deal_ref={})
 
     ledger.assign_settlement_resource(
@@ -49,8 +49,8 @@ def test_assignment_moves_existing_capacity_without_double_counting(tmp_path):
 
 def test_assignment_rejects_destination_without_capacity(tmp_path):
     ledger, _ = _ledger(tmp_path)
-    ledger.register_resource(resource_id="a", total_units=4)
-    ledger.register_resource(resource_id="b", total_units=2)
+    ledger.register_resource(resource_id="a", total_units=4, pool_id="default")
+    ledger.register_resource(resource_id="b", total_units=2, pool_id="default")
     reserved = ledger.reserve(claim={"offering_mode": "vm", **{"units": 4}}, deal_ref={})
 
     import pytest
@@ -65,7 +65,7 @@ def test_assignment_rejects_destination_without_capacity(tmp_path):
 
 def test_settlement_resource_id_set_without_reassignment(tmp_path):
     ledger, _ = _ledger(tmp_path)
-    ledger.register_resource(resource_id="a", total_units=4)
+    ledger.register_resource(resource_id="a", total_units=4, pool_id="default")
     reserved = ledger.reserve(claim={"offering_mode": "vm", **{"units": 1}}, deal_ref={})
     result = ledger.assign_settlement_resource(
         capacity_reservation_id=reserved["capacity_reservation_id"],
@@ -78,12 +78,12 @@ def test_settlement_resource_id_set_without_reassignment(tmp_path):
 def test_assign_settlement_resource_in_session_shares_caller_transaction(tmp_path):
     """A caller can fold the rebind into its own open session and commit once."""
     ledger, engine = _ledger(tmp_path)
-    ledger.register_resource(resource_id="a", total_units=4)
-    ledger.register_resource(resource_id="b", total_units=4)
+    ledger.register_resource(resource_id="a", total_units=4, pool_id="default")
+    ledger.register_resource(resource_id="b", total_units=4, pool_id="default")
     reserved = ledger.reserve(claim={"offering_mode": "vm", **{"units": 4}}, deal_ref={})
 
     session_factory = sessionmaker(bind=engine)
-    with session_factory() as db:
+    with ledger.serialized(), session_factory() as db:
         result = ledger.assign_settlement_resource_in_session(
             db,
             capacity_reservation_id=reserved["capacity_reservation_id"],
@@ -102,12 +102,12 @@ def test_assign_settlement_resource_in_session_shares_caller_transaction(tmp_pat
 def test_assign_settlement_resource_in_session_rolls_back_with_caller(tmp_path):
     """A caller's rollback undoes the rebind, proving no implicit commit happens."""
     ledger, engine = _ledger(tmp_path)
-    ledger.register_resource(resource_id="a", total_units=4)
-    ledger.register_resource(resource_id="b", total_units=4)
+    ledger.register_resource(resource_id="a", total_units=4, pool_id="default")
+    ledger.register_resource(resource_id="b", total_units=4, pool_id="default")
     reserved = ledger.reserve(claim={"offering_mode": "vm", **{"units": 4}}, deal_ref={})
 
     session_factory = sessionmaker(bind=engine)
-    with session_factory() as db:
+    with ledger.serialized(), session_factory() as db:
         ledger.assign_settlement_resource_in_session(
             db,
             capacity_reservation_id=reserved["capacity_reservation_id"],
@@ -122,7 +122,7 @@ def test_assign_settlement_resource_in_session_rolls_back_with_caller(tmp_path):
 
 def test_lock_reservation_returns_row_for_update(tmp_path):
     ledger, engine = _ledger(tmp_path)
-    ledger.register_resource(resource_id="a", total_units=1)
+    ledger.register_resource(resource_id="a", total_units=1, pool_id="default")
     reserved = ledger.reserve(claim={"offering_mode": "vm", **{"units": 1}}, deal_ref={})
 
     session_factory = sessionmaker(bind=engine)
@@ -141,7 +141,7 @@ def test_lock_reservation_missing_returns_none(tmp_path):
 
 def test_backing_resource_id_in_session_matches_public_lookup(tmp_path):
     ledger, engine = _ledger(tmp_path)
-    ledger.register_resource(resource_id="a", total_units=1)
+    ledger.register_resource(resource_id="a", total_units=1, pool_id="default")
     reserved = ledger.reserve(claim={"offering_mode": "vm", **{"units": 1}}, deal_ref={})
 
     session_factory = sessionmaker(bind=engine)

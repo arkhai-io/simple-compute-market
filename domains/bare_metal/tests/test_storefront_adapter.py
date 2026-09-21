@@ -25,7 +25,7 @@ def _projection(*, complete=True, resources=True):
             BareMetalResourceProjection(
                 physical_resource_id="resource-1",
                 physical_host_id="physical-host-1",
-                machine_id="machine-1",
+                host_id="machine-1",
                 available=True,
                 allocation_mode="exclusive",
                 access_methods=["ssh"],
@@ -86,7 +86,7 @@ def test_authoritative_empty_projection_closes_tracked_listing(tmp_path):
               listing_id TEXT PRIMARY KEY,
               site_id TEXT NOT NULL,
               physical_resource_id TEXT NOT NULL,
-              machine_id TEXT NOT NULL,
+              host_id TEXT NOT NULL,
               physical_host_id TEXT NOT NULL,
               status TEXT NOT NULL,
               derivation_key TEXT NOT NULL UNIQUE,

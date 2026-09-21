@@ -18,7 +18,7 @@ async def test_reserve_commit_send_no_placement_fields() -> None:
         authority=authority,
         deliverable_modes={"vm"},
     )
-    site.add_resource("host-private", 4, attributes={"vm_host": "kvm-private"})
+    site.add_resource("host-private", 4, attributes={"host_id": "kvm-private"})
     capacity = SiteCapacityClient(
         "http://capacity.test",
         caller,
@@ -36,7 +36,7 @@ async def test_reserve_commit_send_no_placement_fields() -> None:
     )
     assert reservation is not None
     assert "resource_id" not in reservation
-    assert "vm_host" not in reservation
+    assert "host_id" not in reservation
 
     await capacity.commit(
         capacity_reservation_id=reservation["capacity_reservation_id"],

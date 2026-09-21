@@ -113,7 +113,7 @@ only the declaration surface.
 - **No payload this change touches is a versioned envelope.** The capacity
   registration body, `/api/v1/capacity/*` payloads, and projection rows carry no
   `kind`/`schema_version` and are not `VersionedContractModel`s; the
-  `bare_metal.v1` publication view's shape is unchanged. Wire changes are therefore
+  `bare_metal.v2` publication view's shape is unchanged. Wire changes are therefore
   versioned by distribution version only — see "Wire and distribution versioning".
 
 ## Goals / Non-Goals
@@ -249,8 +249,9 @@ submitting inventory.
 
 A declaration naming a pool that does not exist fails the whole import, naming the
 pool, with nothing applied and no digest recorded — the same posture relay import
-takes for a secret key the profile does not carry. See "Open Questions" for the
-first-boot consequence under Helm.
+takes for a secret key the profile does not carry. The first-boot consequence under
+Helm is resolved by wiring pool documents alongside capacity documents; see
+"Deployment wiring follows the relay idiom".
 
 ### Projected attributes must not contradict projected capacity
 
@@ -279,11 +280,8 @@ quantitative — matched by equality, per its own column comment — which is wh
 belongs in `attributes` rather than `capacity`, and why it must move to the capacity
 resource's attributes rather than being dropped.
 
-What the projected `attributes` map contains after the cutover — which fields come
-from the host, which from the declaration, and whether declaration attributes are
-passed through or allowlisted — is recorded under "Open Questions" as a proposed
-resolution awaiting confirmation. The invariant above holds under every option
-considered there.
+What the projected `attributes` map contains after the cutover is decided under
+"Projected attributes are the declaration's, plus host connection fields".
 
 ### The INI keeps its GPU variables as derivation input, not as capacity
 
@@ -346,7 +344,11 @@ the migration module's raw-SQL habit deliberately — two derivations that can d
 are the failure task 2.1 names — and is safe because the migration is recorded once
 and never re-runs against a later schema.
 
-### A host counts as declared by the projection's own correlation rule (decided 2026-09-21)
+### A host counts as declared by the projection's own correlation rule (decided 2026-09-21; superseded 2026-09-21)
+
+**Superseded 2026-09-21** by "A declaration names its host through `host_id`"
+below. The analysis that follows describes the code before `unify-host-identity`
+and the hazard any rule must avoid; it is retained as rationale, not as the rule.
 
 "Derive only for hosts with no existing declaration" needs a precise meaning of
 *existing declaration for this host*, because declarations and hosts are linked by
@@ -372,17 +374,50 @@ A derived declaration is:
 
 | Field | Value |
 |---|---|
-| `resource_id` | the host's name |
+| `resource_id` | the host's `host_id` |
+| `host_id` | the host's `host_id` (amended 2026-09-21; previously a `vm_host` attribute) |
 | `pool_id` | the host's `pool_id` |
 | `resource_type` | `compute.gpu` |
 | `capacity` | `{"gpu_count": host.gpu_count}` |
-| `attributes` | `{"vm_host": host.name}`, plus `gpu_model` when the host records one |
+| `attributes` | `gpu_model` when the host records one; otherwise empty |
 | `enabled` | the host's `enabled` |
 
 Only a host with `gpu_count > 0` is derived. A zero-GPU host has no legacy capacity
 to preserve, and a zero declaration would publish a resource with nothing to sell.
+
+**A taken resource id is skipped, not overwritten (decided at implementation,
+2026-09-21; for owner review).** A derived declaration's `resource_id` is the host's
+`host_id`. If another declaration already uses that id without naming the host,
+registering would replace it, which "never overwrite" forbids. The derivation skips
+that host and logs a warning naming it; it has no declaration until an operator
+declares one. The alternative, deriving under a generated id, was rejected: an
+invented identifier is the kind of value this change otherwise refuses to supply.
+
+**Derivation reads the caller's pending writes (found at implementation).** The
+service's session factory does not autoflush, so hosts `seed_from_ini` has just
+added are invisible to a query in the same session until flushed. The derivation
+flushes before it reads. Without the flush, a first INI import derived nothing,
+and the next one derived from whatever the INI said by then.
 Once any declaration correlates to a host, later INI values for that host have no
 effect on capacity; the operator documentation says so.
+
+### A declaration names its host through `host_id` (decided 2026-09-21)
+
+The repository owner asked why the declaration–host relationship has to be inferred.
+It does not: the link was an explicit reference spelled three ways inside a free-form
+attribute map. `unify-host-identity` gives the declaration a first-class `host_id`
+and renames every host-identity spelling to it, as a compliance fix against
+`ARCHITECTURE.md`'s "One name per concept". This change consumes it:
+
+- projection correlation is `declaration.host_id == host.host_id`, and the refusal of
+  two declarations per host is a uniqueness check on that field;
+- a host counts as declared when some declaration has its `host_id`;
+- a derived declaration sets `host_id` to the host's, and carries no `vm_host`
+  attribute.
+
+The multi-key rule and the `resource_id == host.name` match — the one genuinely
+fallback-shaped part — are gone. This change depends on `unify-host-identity`
+landing first.
 
 ### Derived declarations are admissible (decided 2026-09-21)
 
@@ -451,6 +486,227 @@ had no implementation task while task 1.4 said to add nothing to
 `ResourceRegisterRequest`, so an implementer would have had to invent the semantics
 while coding. The domain-neutral declaration contract this change states cannot hold
 without it.
+
+**As implemented (recorded 2026-09-21).**
+
+- *The ledger's own default is `units`.* `CapacityLedgerService(mirror_dimension=...)`
+  defaults to `units`, the name that belongs to no domain, so a composition that
+  supplies nothing gets neutral behaviour rather than inheriting VM's. The provisioning
+  container and the VM storefront's claim matcher (`VM_MIRROR_DIMENSION` in
+  `capacity_client.py`) supply `gpu_count`; API credits supplies `units`.
+- *Payload aliases follow the mirror.* Probe and reserve match payloads carry
+  `allocated_<mirror>` and `available_<mirror>` beside `allocated_units` and
+  `available_units`. Reservation payloads carry `allocated_<mirror>` beside
+  `units`. So a VM payload is byte-identical to before, and no domain sees
+  another's name. Resource listings carry no alias; they report the mirror through
+  `value` and `available_units` and every dimension through `available`.
+- *The unit total is a match fact only under the mirror name.* The feasibility view
+  exposes the scalar total as a claim-matchable fact under `units` and under the
+  composition's mirror. It previously used a hard-coded `gpu_count`, so where
+  `gpu_count` is not a unit claim key, a claim naming it matched the unit total as
+  an attribute. This was found after 4b.1 was checked and is fixed there.
+- *The nullable-column migration rebuilds from the model.*
+  `20260921_002_capacity_declaration_contract` makes `total_units` nullable, which
+  SQLite cannot do in place. The table is rebuilt from `CapacityBucket`'s current
+  definition inside `_schema_transaction`, with foreign keys off and a
+  `foreign_key_check` before commit. The repository's existing rebuild helper was
+  rejected: it reconstructs the table from `PRAGMA table_info`, which carries no
+  table-level constraints, so it would silently drop the unnamed `UNIQUE`
+  constraints the model declares.
+
+### The capacity-definitions document (decided 2026-09-21)
+
+Task 1.2 fixed the posture (mirror the pool document, and report every problem
+together) but not the shape. This section was proposed on 2026-09-21. The owner
+accepted it, including every item then awaiting confirmation, by moving the change
+to planning.
+
+**Shape.** One root field, `resources`, holding a list of declarations. Each entry
+is the registration contract, field for field, minus the legacy scalar:
+
+```yaml
+resources:
+  - resource_id: compute-kvm1-001
+    pool_id: default
+    resource_type: compute.gpu
+    resource_subtype: h200        # optional
+    host_id: kvm1                 # optional
+    capacity:                     # required, at least one dimension
+      gpu_count: 8
+      vcpu_count: 192
+      ram_gb: 2048
+    attributes:                   # optional
+      gpu_model: H200
+      region: us-west
+    enabled: true                 # optional, default true
+```
+
+Using the API's field names means a declaration reads the same in a document, a
+`PUT` body, and a `GET` response. That is why the key is `resource_id`, not the pool
+document's `id`: each document follows its own API.
+
+**Validation.** Validation is structural, and every problem is reported together as
+`path`/`code`/`message`, like `PoolValidationProblem`:
+
+- an unknown root or entry field;
+- a missing `resource_id`, `pool_id`, `resource_type` or `capacity`;
+- a `capacity` that is not a non-empty mapping of non-negative numbers;
+- a non-boolean `enabled`;
+- a duplicate `resource_id`, or a duplicate `host_id` among entries.
+
+Unknown-field rejection is what catches a stray `total_units` or a misspelt `pool`.
+
+- **`total_units` is not accepted.** The scalar exists for legacy
+  single-quantity callers. A new document format has none, and accepting it would
+  mean carrying the consistency rule between it and `capacity` into a surface that
+  has no reason to need it.
+- **`resource_type` is required, not defaulted.** The `PUT` body defaults
+  it to `compute.gpu` for its existing callers. A domain-neutral document that did
+  the same would repeat the defect this change removes from the mirror dimension:
+  a GPU name supplied where the author wrote nothing.
+- **Attribute keys may not name a declaration field.** An attribute
+  named `resource_id`, `pool_id`, `host_id`, `resource_type` or `resource_subtype`
+  is refused. This matters beyond readability: the feasibility view spreads
+  attributes after the authoritative facts and re-asserts only `pool_id`. So
+  today, a declaration whose attributes say `host_id: kvm9` matches claims as
+  `kvm9` while its column says `kvm1`. The companion fix is to make the view's
+  facts win, and to refuse such keys at `PUT` as well, so the document is not
+  stricter than the API it mirrors. See "Declared attributes shadow authoritative
+  facts" below.
+
+**An entry replaces the whole declaration.** Applying an entry has exactly the
+effect of the same `PUT`: an optional field the entry omits is cleared, not kept.
+A document entry is then a complete statement of a declaration, and the document
+and the API never disagree about what an entry means. The consequence is
+deliberate and needs stating in the operator documentation. Adopting a derived
+declaration into a document by naming its `resource_id` means restating its
+`host_id`. Otherwise the link is cleared and, under "A host with no declaration is
+not projected", the host stops being published. Likewise `enabled` defaults to
+true, so an entry that omits it re-enables a declaration someone disabled
+through the API: once a document names a declaration, the document owns its
+enablement. A field-level merge was rejected:
+a document whose entries are partial could no longer be read as the declarations
+it produces.
+
+**Applying is planned, and unchanged entries write nothing.** Every
+registration appends a capacity event, even one that changes nothing; an identical
+re-registration was observed to append `released`. The REST import always
+reconciles, and the startup import reconciles whenever the raw text's digest
+changes, including a comment or whitespace edit. Without a plan, every such
+import would emit one event per entry and advance the capacity version that
+storefronts republish on. So reconciliation compares each entry with the stored
+declaration first, classifies it as created, updated, or unchanged (the pool
+reconciliation's `ReconciliationPlan` shape, without `disabled`, since documents
+retain), and registers only the first two. The REST response reports that diff.
+
+**Refusals are collected from the registration authority itself.** Some problems
+only exist against stored state:
+
+- an unknown pool;
+- a `host_id` already carried by a declaration the document does not name;
+- a pool move under a live obligation.
+
+These are not re-implemented as validation rules. The reconciliation applies each
+changed entry through `register_resource_in_session` inside the import's
+transaction and records each refusal (`CapacityConflictError`, `ValueError`, or the
+missing-pool check) as a problem instead of stopping at the first. If any problem
+was recorded, the transaction rolls back: nothing is applied and no digest is
+recorded. One import is atomic, and the ledger stays the only place those rules
+live.
+
+One limitation follows from applying in order: two entries that exchange host ids
+conflict with each other part-way through. Exchanging hosts takes two imports, or
+an API edit between them. It is rare enough to document rather than to engineer a
+two-phase apply for.
+
+**A validate-only import.** Because an import already plans inside a
+transaction it may roll back, a dry run costs only a flag. The REST endpoint would
+accept `validate_only` and return the problems and the diff without committing, as
+`POST /api/v1/pools/import` does. It is proposed rather than assumed because it
+widens the endpoint this change adds; without it, an operator's only preview is a
+real import.
+
+### A capacity declaration is one type (decided 2026-09-21, from code review)
+
+Review found the declaration's fields restated wherever one was built, stored,
+compared, or accepted: the registration parameters and both of its write branches,
+the change classifier's two parallel tuples, the document parser's field sets, its
+entry dataclass and that dataclass's dict form, the registration request, the
+router's call, the reserved-key set, and the derivation's dict. The change that
+preceded this one had to touch nearly a hundred files for the same reason.
+
+`kit/site`'s `CapacityDeclaration` (`market_site/declarations.py`) is now the one
+definition: the fields, their rules (a finite non-negative amount per dimension, at
+least one dimension, no attribute restating an identity field), and the identity
+set. A document entry is that model, validated strictly so a quoted number or
+boolean is refused rather than coerced. The registration request shares its fields
+through `CapacityDeclarationFields`, overriding only what its existing callers need
+(`resource_type`'s default, an optional `capacity`, the legacy `total_units`). The
+ledger maps between the model and a stored row in exactly two places, and registers,
+compares, and derives through the model.
+
+What deliberately still restates fields:
+
+- **`register_resource` and `register_resource_in_session`'s keyword parameters**,
+  public signatures every existing caller uses. They resolve the legacy scalar and
+  construct the model.
+- **Wire payloads** (resource listings and match payloads): their keys are a
+  contract, not a restatement of the model.
+- **`20260921_003`'s literal key tuple.** A migration enforces its rule as written;
+  importing the live identity set would change what an already-shipped migration
+  does on a database that has not yet run it.
+- **`resource_feasibility_view`'s facts**, the claim-matching namespace, whose
+  parameter is still spelled `resource_kind`. Renaming it reaches `kit/fulfillment`
+  and is left to a later change.
+
+Moving the model into `kit-site-client`, so the client and server share the wire
+contract, was considered and declined by the owner for this change.
+
+### Declared attributes shadow authoritative facts (found 2026-09-21)
+
+`resource_feasibility_view` builds the claim-matchable facts as `resource_id`,
+`host_id`, `resource_type`, `resource_subtype`, `value`, `units`, and the mirror,
+then spreads the declaration's attributes over them. It then re-asserts only
+`pool_id`. A declaration can therefore override its own identity for matching, as
+reproduced with a view whose column `host_id` is `kvm1` and whose attributes name
+`kvm9`. Since host identity became a column, nothing legitimate writes these keys
+into attributes. So the proposed fix is to build the facts after the attributes, so
+the columns win, and to refuse the reserved keys at registration. Scoping this here
+was accepted with the document design: it is the same function 4b.1 changes, and the document's
+attribute rule depends on it.
+
+**Stored declarations are brought under the rule by migration (decided 2026-09-21).**
+Refusing reserved keys at registration protects new writes, and making facts win
+makes a stored reserved key inert for matching. A stored key would still turn the
+next write of that declaration into a refusal: an operator who `GET`s a declaration
+and `PUT`s it back would receive a 422 for a key they never wrote. The only stored
+source found is historical, the storefront's retired push of `pool_id` inside
+attributes. So a migration removes top-level reserved keys from stored declaration
+attributes. It rewrites by path, never recursively. It logs each removed key with
+its resource at INFO, and it is its own ordered entry rather than an amendment to
+`20260921_002`, because a database that already ran that entry would never run
+the amendment. An attribute `host_id` is removed rather than promoted into the
+column: the column has been authoritative for correlation since host identity
+became a column, and promoting a value that was never authoritative would change
+which host a declaration is published through.
+
+**Where the wire models live (decided 2026-09-21).** The import request, response,
+diff, and problem models live in `kit/site` beside the document parser, which owns
+the shape. `compute_provisioning` re-exports them, and the operator client
+(`vm_provisioning_operator.ProvisioningClient`, async and sync) imports them from
+there, exactly as the pool import's models travel from `kit/resource-pools`. The
+client gains `import_capacity_definitions(yaml_text, *, validate_only=False)`.
+
+**Versions (decided 2026-09-21).** Every package this change alters is published,
+and all of its unpublished versions ride this branch with `unify-host-identity`.
+`kit-site` 0.4.0, `vms-provisioning-operator-client` 0.4.0, and
+`compute-provisioning-service` 0.3.0 already carry minor bumps for this merge, and
+the additions here fall inside them. `compute-provisioning` carries only a patch
+bump (0.6.1), so the new route contract and re-exported models take it to 0.7.0.
+Its bound moves only in the operator client and the provisioning service, the two
+that sign and verify the new route. Every consumer's lock is regenerated with that
+one package upgraded. This supersedes 4b.14's earlier disposition only for
+`compute-provisioning`.
 
 ### The import contract changed underneath this change (added 2026-09-09)
 
@@ -547,7 +803,10 @@ requires.
    does not wire `pool_definitions_path`: doing so would subject every deployment's
    pools to declarative reconciliation.
 
-So the provisioning chart gains `definitions.capacity`, empty by default:
+So the provisioning chart gains `definitions.capacity`, empty by default. The value
+is copied verbatim into the ConfigMap as `capacity-definitions.yaml` and read by the
+startup import on initialization — applied when its digest differs from the last one
+applied, so a pod restart with an unchanged value is a no-op:
 
 - when non-empty, `configmap.yaml` renders it as `capacity-definitions.yaml` and sets
   `capacity_definitions_path: /app/config/capacity-definitions.yaml` in the rendered
@@ -565,15 +824,81 @@ comments currently describe every-startup upserts the code no longer performs; t
 are corrected in the same edit, since a reader comparing the three would otherwise
 conclude capacity is the odd one out.
 
-Compose wires no capacity document. No Compose stack wires relay or pool documents
-either, and the e2e scenarios declare capacity through the REST API by design — a
-mounted document is shared state no scenario declares
-(`e2e-tests/tests/e2e/roles/scenarios/vms/host_registry.py`). A local operator who
-wants one sets the path in a profile file, as for pools.
+**Pools are wired the same way (decided 2026-09-21).** A capacity document may name
+non-default pools, and Helm did not wire pool documents, so on a fresh install such a
+pool would not exist at first boot: the capacity import fails, startup fails, and the
+operator cannot reach the API to create the pool. The chart therefore also gains
+`definitions.pools`, empty by default, rendered as `pool-definitions.yaml`, mounted by
+`subPath`, and setting `pool_definitions_path` only when non-empty, with
+`config.pool_definitions_path` forbidden in the schema. The reason pools were left
+unwired — that wiring would newly subject every deployment's pools to declarative
+reconciliation — does not apply to an empty-by-default value: nothing is reconciled
+until an operator supplies a document, and an operator who does is asking for exactly
+the pool rule (unnamed pools are disabled). The values file's comment explaining the
+old absence is replaced. The startup order already runs pools before capacity, so a
+first boot from both documents resolves. The rejected alternatives were documenting
+that a Helm capacity document may name only pre-existing pools, and demoting an
+unknown pool to a startup warning; the second breaks the fail-startup posture relay
+import already takes.
+
+Compose wires no capacity or pool document. Compose's only user is the e2e suite,
+and that use is temporary until a Tekton pipeline replaces the current GitHub
+Actions; the scenarios declare capacity through the REST API by design
+(`e2e-tests/tests/e2e/roles/scenarios/vms/host_registry.py`). The mounted-document
+path is covered by integration tests of the importer and by Helm render tests, and
+gains deployed coverage when the pipeline runs against the chart.
 
 There is no CLI deliverable. Site administrators configure through values files,
 configuration files, and the REST API; the operator documentation names the
 endpoints and shows a document.
+
+### Projected attributes are the declaration's, plus host connection fields (decided 2026-09-21)
+
+Every declaration attribute is copied into the resource-pool projection except
+`bare_metal_publication`, which is already published as the `bare_metal.v2` view.
+The host's connection fields `public_host` (and `host_id` itself, as correlation) are
+written last so a declaration cannot override them. `attributes.gpu_count` is
+removed; the quantity lives in `capacity`.
+
+The inventory the owner reviewed (searched 2026-09-21), with the post-`unify-host-identity`
+names:
+
+| Key | Written by | Read by | Under this decision |
+|---|---|---|---|
+| `host_id` | declaration field, not an attribute | `executor_ref`; providers; correlation | from the host, via correlation |
+| `public_host` | never on a declaration | tenant connection info | from the host, written last |
+| `gpu_model` | e2e, derivation | claims (equality); reconciler | from the declaration |
+| `region` | e2e | claims (equality) | from the declaration |
+| `physical_host_id` | declarations (top level after `unify-host-identity`) | ledger cross-mode accounting | from the declaration |
+| `allocation_mode` | declarations (top level after `unify-host-identity`) | ledger cross-mode accounting | from the declaration |
+| `bare_metal_publication` | bare-metal declarations | bare-metal provider; `bare_metal.v2` view | excluded — published as the view |
+| `sla` | none found on a declaration | storefront-local rows only | from the declaration if present |
+| `gpu_count` | none as an attribute | storefront-local readers only | removed |
+
+**Availability is projected only as the declaration reports it (found at
+implementation).** Storefronts trust a present `available` as live, so an empty map
+beside a positive capacity reads as zero available, not as unknown. The projection
+therefore emits `available` only when the declaration carries it, as `kit/site`'s
+resource-pool shaping already does. Declarations read from the ledger always carry
+it, so this protects the rule rather than changing current output.
+
+Everything a declaration carries in `attributes` is therefore public to storefronts;
+the operator documentation says so. Every key except the host link already reached
+storefronts through the capacity-bucket projection's `grouping_attributes`, so an
+allowlist here would protect nothing and would need editing whenever a domain added a
+match field.
+
+**Why `gpu_model` does not sit beside `gpu_count` in `capacity`.** The owner found the
+split odd; it is deliberate at the ledger and deliberately *not* the authoring shape.
+`capacity` is arithmetic: the ledger parses every value as a non-negative decimal and
+subtracts held quantities per key to compute availability, so a categorical value
+cannot live there. `attributes` are matched by equality. The two describe the same
+GPUs, and `structured-capacity-requirements` already owns the grouping the owner
+expects: a family-grouped authoring shape (`gpu: {count, model}`) that one shared
+utility flattens into `dimensions["gpu_count"]` and `attributes["gpu_model"]`, for
+claims and declarations alike. That change explicitly asks work landing earlier to use
+the flattened form rather than a one-off nested shape, so the capacity-definitions
+document here uses the flat form and gains the grouped form when that utility lands.
 
 ## Risks / Trade-offs
 
@@ -632,52 +957,83 @@ read by the restored reader through its existing `or 0` handling, which is the o
 place a rolled-back reader sees a value it did not write. Rolling back past the
 migration is not supported, per `deployment-state`'s forward-recovery posture.
 
+### Review corrections (decided 2026-09-21)
+
+A review after Section 7 found two defects and several overclaimed test levels. The
+owner accepted the following.
+
+**Administration holds the ledger's serialization lock for the whole transaction.**
+`CapacityLedgerService`'s `RLock` is the site's one serialization point, and every
+public operation takes it around its own session. The in-session mutators
+(`register_resource_in_session`, `register_declaration_in_session`) did not, and
+their callers — the capacity-document importer, the import API, and `seed_from_ini`'s
+derivation — held a transaction without it. A pool move checks for live obligations
+and then writes, and the caller commits later, so a reservation could be admitted in
+between and leave a live reservation against a resource that had already moved.
+Locking inside the mutator would not close that window; the lock must span the
+caller's transaction through its commit. So the ledger offers `serialized()`, a
+context manager a caller holds around its whole transaction, and the in-session
+mutators refuse to run unless the calling thread holds it, which makes misuse an
+immediate error rather than a rule callers must know. The order is always ledger
+lock, then database, as every existing ledger operation already takes them. A second review found this too narrow. The rule
+belongs to the invariant, not to the operations this change added: every writer
+that can create or remove a live obligation must hold the lock through its commit.
+Settlement assignment is such a writer — `assign_settlement_resource_in_session`
+moves a reservation's debit and names its settlement resource, which is half of what
+the pool-move check reads — and `kit/fulfillment`'s scheduling unit of work called it
+in its own writer transaction without the lock. So it requires the lock too, and the
+scheduling unit of work takes it before its session (Section 7c).
+`update_lease_fields_in_session` writes only executor and lease-tail fields, never a
+reservation's state, debit, or settlement resource, so it cannot create or remove an
+obligation and is left as it is; the other in-session methods only read.
+
+**The ledger refuses an unknown pool.** Registration stored a declaration naming a
+pool that does not exist, while a capacity document refused the same entry, because
+only the document's reconciler checked. The check goes in the ledger's one
+registration path, raising `UnknownPoolError`: 422 on `PUT`, `unknown_pool` in a
+document, and the reconciler's `pool_exists` parameter goes. It reads `ResourcePool`
+through `kit/site`'s existing dependency on `kit/resource-pools`, as admission
+already does for a pool's deliverable modes. That dependency contradicts
+`ARCHITECTURE.md`'s kit layers, which allow an authority capability foundation
+dependencies only; the reviewer's alternative is an injected pool-authority port.
+This change does not resolve it: the owner declined to add scope this late, and the
+conflict is recorded as an open question in `pool-declared-advertisement-and-backing`,
+whose pool declarations are what the site reads.
+
+**Structural validation completes before stored state is consulted.** A document
+with any structural problem reports all of its structural problems and nothing
+else; only a structurally valid document is evaluated against stored state, which
+then reports every refusal. Stored-state rules are meaningless for an entry that is
+not a declaration, so the two categories are not mixed. The spec and operator
+documentation said "every problem" without this distinction and are corrected.
+
+**The upgrade migration's derivation is frozen.** "Legacy host capacity is derived
+at seed time and once at upgrade" chose one derivation for both callers so the two
+could not drift. That holds only until the migration ships; afterwards a migration
+must keep doing what it did, for the same reason `20260921_003` freezes its key
+tuple. The migration affects the VM domain: it runs against the compute provisioning
+database VM shares with bare metal, whose `hosts` table INI inventory fills. So
+`20260921_004` derives in migration-local SQL, producing the same rows and events as
+the runtime derivation, and a parity test holds the two equal until it ships.
+Afterwards they may diverge by design. This supersedes that section's migration
+clause; its choice for INI application stands.
+
+**Test levels are stated as they are.** Tests that call the ledger or the startup
+entry point directly against a real database are component tests under `TESTING.md`,
+not integration tests; tasks that claimed otherwise are relabelled, and the two
+behaviours that need integration evidence (a declaration naming no compute dimension,
+and the 409 for a pool move under a live reservation) gain it through the typed
+clients.
+
 ## Open Questions
-
-### Proposed, awaiting confirmation
-
-- **What the projected `attributes` map contains after the cutover.** Today every
-  field comes from the host: `vm_host`, `public_host`, `gpu_count`, and `gpu_model`
-  when set. The declaration's own attributes never reach the resource-pool
-  projection, though they already reach the capacity-bucket projection's
-  `grouping_attributes` unfiltered. After the cutover the fields split by owner:
-
-  | Field | Today | Proposed | Why |
-  |---|---|---|---|
-  | `vm_host` | host name | host name | Connection identity; the host is authoritative for it |
-  | `public_host` | host | host | Connection identity; tenant addressing |
-  | `gpu_count` | host | removed | A quantity; it lives in `capacity`. No consumer reads it from the projection — the storefront readers of `attributes.gpu_count` read storefront-local tables `pools-9` retires |
-  | `gpu_model` | host | declaration | Categorical hardware identity the declaration owns |
-  | `region`, other categorical fields | absent | declaration | Match inputs a declaration already carries |
-  | `bare_metal_publication` | absent | not copied | Already projected as the `bare_metal.v1` view; copying the raw configuration would duplicate it |
-
-  The remaining choice is pass-through versus allowlist for the declaration's
-  attributes. **Proposed: pass-through, minus `bare_metal_publication`, with the
-  host's connection fields written last so a declaration cannot override them.**
-  Reasons: the same attributes already reach storefronts through the capacity-bucket
-  projection, so an allowlist here would not protect anything; and an allowlist would
-  have to be edited whenever a domain adds a categorical match field, which is the
-  VM-specific knowledge the site authority is being cleared of. The alternative —
-  an explicit allowlist of `gpu_model` and `region` — is safer against an operator
-  putting something private in a declaration, at that maintenance cost. No task
-  implements either until this is confirmed; task 4.2 is written as a gate.
 
 ### Open
 
-- **Can a Helm capacity document reference a pool created through the API?** A
-  declaration naming an unknown pool fails the import and therefore startup. Helm
-  does not wire pool documents, so on a fresh install any pool a capacity document
-  names — other than the system-created default — does not exist at first boot, the
-  pod fails, and the operator cannot reach the API to create the pool. Options:
-  (a) accept it and document that a Helm capacity document may name only the default
-  pool or pools that exist before it is supplied; (b) add an opt-in
-  `definitions.pools` wired exactly like `definitions.capacity` — empty by default,
-  so it does not change what an existing deployment means, which was the reason pools
-  were left unwired; (c) make an unknown pool a startup warning that records no
-  digest, so the next start retries. (c) breaks the "configured document that
-  cannot be applied fails startup" posture relays already follow, so the realistic
-  choice is (a) or (b). No task depends on the answer until Section 6; task 6.1 is
-  written as a gate.
+- **Generic registration APIs still default `resource_type` to `compute.gpu`.** The
+  ledger's `register_resource` and the registration request keep the default for their
+  existing callers, so the reusable kit surface is not yet domain-neutral. Removing it
+  is a deliberate API change for a later change; the capacity-definitions document
+  already requires the field.
 - **Should the scalar `total_units` / `units` mirror be retired entirely?** It predates
   multidimensional capacity and is the only reason a mirror dimension must exist.
   Deferrable: making the dimension name composition-supplied removes the cross-domain

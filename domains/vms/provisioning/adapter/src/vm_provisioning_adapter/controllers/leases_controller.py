@@ -53,7 +53,7 @@ def _lease_view(reservation: dict[str, Any]) -> LeaseResponse:
         resource_id=str(reservation.get("resource_id") or ""),
         capacity_reservation_id=str(reservation["capacity_reservation_id"]),
         escrow_uid=str(reservation.get("escrow_uid") or ""),
-        vm_host=str(reservation.get("vm_host") or ""),
+        host_id=str(reservation.get("host_id") or ""),
         vm_target=str(reservation.get("vm_target") or ""),
         lease_start_utc=_parse_utc(reservation.get("lease_start_utc")),
         lease_end_utc=_parse_utc(reservation.get("lease_end_utc")) or now,
@@ -99,14 +99,14 @@ class LeasesController:
     def list_leases(
         self,
         status: str | None = Query(default=None, description="Filter by lease status."),
-        vm_host: str | None = Query(default=None, description="Filter by KVM host alias."),
+        host_id: str | None = Query(default=None, description="Filter by KVM host alias."),
         escrow_uid: str | None = Query(default=None, description="Filter by on-chain escrow UID."),
     ) -> LeaseListResponse:
         leases = [_lease_view(a) for a in self._leases.list_leases()]
         if status is not None:
             leases = [lease for lease in leases if lease.status == status]
-        if vm_host is not None:
-            leases = [lease for lease in leases if lease.vm_host == vm_host]
+        if host_id is not None:
+            leases = [lease for lease in leases if lease.host_id == host_id]
         if escrow_uid is not None:
             leases = [lease for lease in leases if lease.escrow_uid == escrow_uid]
         return LeaseListResponse(leases=leases, total=len(leases))
@@ -125,7 +125,7 @@ class LeasesController:
                     escrow_uid=body.escrow_uid,
                     offering_mode=_VM_OFFERING_MODE,
                     executor_target=body.vm_target,
-                    executor_ref={"vm_host": body.vm_host},
+                    executor_ref={"host_id": body.host_id},
                     lease_start_utc=body.lease_start_utc,
                     lease_end_utc=body.lease_end_utc,
                     create_job_id=body.create_job_id,
@@ -172,10 +172,10 @@ class LeasesController:
                 lease_id,
                 ExecutorLeaseUpdate(
                     offering_mode=(
-                        _VM_OFFERING_MODE if body.vm_host or body.vm_target else None
+                        _VM_OFFERING_MODE if body.host_id or body.vm_target else None
                     ),
                     executor_target=body.vm_target,
-                    executor_ref={"vm_host": body.vm_host} if body.vm_host else None,
+                    executor_ref={"host_id": body.host_id} if body.host_id else None,
                     lease_start_utc=body.lease_start_utc,
                     lease_end_utc=body.lease_end_utc,
                     release_job_id=body.vm_remove_job_id,

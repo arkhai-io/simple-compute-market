@@ -1291,7 +1291,7 @@ def _relay_and_lease(session_factory, *, owner_id="cr-1", port=6100):
                 id=f"lease-{owner_id}",
                 relay_id="site-a",
                 remote_port=port,
-                host_name="kvm1",
+                host_id="kvm1",
                 owner_kind="fulfillment",
                 owner_id=owner_id,
             )

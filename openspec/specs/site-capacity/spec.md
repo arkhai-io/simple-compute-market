@@ -14,7 +14,7 @@ A site authority MUST own physical resource capacity and allocations; a storefro
 - **THEN** it skips capacity-driven close/reopen actions rather than treating ignorance as zero capacity
 
 ### Requirement: Storefront capacity-claim identity
-VM compute listings MUST normalize surrounding whitespace and carry at least one valid `pool_id` or `resource_id`. Every supplied identity MUST begin with an alphanumeric character, contain only letters, digits, `.`, `_`, `:`, or `-`, and contain at most 128 characters. A pool-only listing produces a pool-scoped reservation claim. A listing carrying `resource_id`, whether alone or with `pool_id`, produces a resource-specific claim and excludes `pool_id`. Ordinary pool-scoped claims MUST NOT require or select a `vm_host` or `resource_id`.
+VM compute listings MUST normalize surrounding whitespace and carry at least one valid `pool_id` or `resource_id`. Every supplied identity MUST begin with an alphanumeric character, contain only letters, digits, `.`, `_`, `:`, or `-`, and contain at most 128 characters. A pool-only listing produces a pool-scoped reservation claim. A listing carrying `resource_id`, whether alone or with `pool_id`, produces a resource-specific claim and excludes `pool_id`. Ordinary pool-scoped claims MUST NOT require or select a `host_id` or `resource_id`.
 
 Claim construction MUST reject a missing, empty, or malformed settlement order and any extracted claim lacking both identities before probing or reserving capacity. Stored listings that violate the identity invariant MUST fail closed on publication or republication. Resuming such a listing MUST return an actionable conflict before changing pause state or contacting a registry; the seller-authenticated close operation MUST remain available without implicit identity backfill or automatic unpublication.
 
@@ -52,7 +52,7 @@ Claim construction MUST reject a missing, empty, or malformed settlement order a
 
 ### Requirement: Requested offering mode is explicit and bounded by the pool
 
-Every capacity probe and reservation claim MUST carry a non-empty canonical `offering_mode` naming the requested offering mode, and that key MUST be required. It is the same value a Resource Pool declares as deliverable, the same value the durable listing binding records, and the same value the published listing carries; no surface may name it `executor_kind`, `offering_type`, or `virtualization_type`. The site authority MUST persist that exact value on the Capacity Reservation and MUST NOT infer it from `vm_host`, `physical_host_id`, resource kind, market name, matched-resource attributes, or any default. A matching Resource Pool MUST currently declare the requested mode before a new hold is created.
+Every capacity probe and reservation claim MUST carry a non-empty canonical `offering_mode` naming the requested offering mode, and that key MUST be required. It is the same value a Resource Pool declares as deliverable, the same value the durable listing binding records, and the same value the published listing carries; no surface may name it `executor_kind`, `offering_type`, or `virtualization_type`. The site authority MUST persist that exact value on the Capacity Reservation and MUST NOT infer it from `host_id`, `physical_host_id`, resource kind, market name, matched-resource attributes, or any default. A matching Resource Pool MUST currently declare the requested mode before a new hold is created.
 
 The claim's site-inventory discriminator remains a separate field and a separate axis. Naming the offering mode consistently MUST NOT merge the two.
 
@@ -155,9 +155,15 @@ Site authorities MUST publish anonymous versioned capacity deltas for projection
 ### Requirement: Cross-mode physical accounting
 Shareable VM slices and exclusive bare-metal allocations referring to the same physical host MUST conflict according to allocation mode before executor work starts.
 
+A capacity declaration carries the fields this accounting reads — `physical_host_id` and `allocation_mode` — at the top level of its attributes and nowhere else. A domain's publication settings MUST NOT repeat them, so the value the site authority accounts with is the only value there is.
+
 #### Scenario: VM slice is held
 - **WHEN** an exclusive bare-metal reservation targets the same physical host
 - **THEN** the site ledger rejects the exclusive reservation
+
+#### Scenario: A bare-metal declaration is registered
+- **WHEN** a bare-metal declaration names its physical machine and allocation mode
+- **THEN** both are top-level attributes, and its publication settings carry neither
 
 ### Requirement: Multidimensional capacity accounting
 A site resource MAY declare total capacity across more than one named quantity dimension (for example `gpu_count`, `vcpu_count`, `ram_gb`, `disk_gb`); a claim's requested quantities MUST be checked and held against every declared dimension, not only a single default quantity, with held/available accounting kept exact under concurrent holds. A dimension a resource does not declare MUST NOT be assumed to have room. This accounting is per resource row: it does not aggregate or cross-check declared or held capacity across multiple resource rows that happen to share a physical host (see "Cross-mode physical accounting" above for the one cross-row check that does exist, which is scoped to exclusive/shareable mode conflicts, not capacity sums).
@@ -171,8 +177,8 @@ A site resource MAY declare total capacity across more than one named quantity d
 - **THEN** each declared dimension's available quantity reflects the sum of both holds, not just the dimension the first hold happened to request
 
 #### Scenario: Legacy single-quantity claims are unaffected
-- **WHEN** a claim requests a quantity using the legacy `units`/`gpu_count` key instead of a dimensions map
-- **THEN** it is checked and held exactly as it was before multidimensional capacity existed, translated internally to the primary dimension
+- **WHEN** a claim requests a quantity using a legacy single-quantity key (`units`, or a composition's alias such as the VM domain's `gpu_count`) instead of a dimensions map
+- **THEN** it is checked and held exactly as it was before multidimensional capacity existed, translated internally to the composition's mirror dimension
 
 ### Requirement: Executor-neutral site authority
 The site authority MUST own Physical Resources, settlement-relevant Resource Pool identities, Capacity Reservations, committed allocations, deal ownership references, capacity versions, and capacity events without depending on lease watchdogs, job runners, or concrete executor teardown states. A provisioner MAY stage administrative pool membership and provider configuration, but those records MUST NOT alter settlement selection until integrated through the site-authority boundary.
@@ -273,7 +279,7 @@ Provisioning-owned site-capacity persistence MUST NOT redundantly store storefro
 
 A storefront-facing capacity reservation identifies the durable hold by `capacity_reservation_id` and exposes lifecycle metadata, expiry, and reserved dimensions. It does not expose the provisioning authority's initial accounting choice.
 
-Within the site authority, a `CapacityBucket` is the host-level multidimensional accounting boundary. For the VM domain there is one current bucket per host. `backing_resource_id` links the bucket to its physical inventory record, while `CapacityReservationDebit` records the reservation's current bucket and debited dimensions. Scheduling may atomically replace that debit when it rebinds a reservation to another eligible host and then records `settlement_resource_id`.
+Within the site authority, a `CapacityBucket` is the host-level multidimensional accounting boundary. For the VM domain there is one current bucket per host. `backing_resource_id` is the declaration's resource id and `host_id` names the host its capacity is delivered through, while `CapacityReservationDebit` records the reservation's current bucket and debited dimensions. Scheduling may atomically replace that debit when it rebinds a reservation to another eligible host and then records `settlement_resource_id`.
 
 **Storefront projection families**
 
@@ -331,7 +337,7 @@ A storefront MUST report, per configured site and per independent projection fam
 - **THEN** a consumer uses the projection's own `available` field regardless of whether the fallback value is present or absent — the projection's own live data is never conditionally discarded in favor of a fallback source
 
 ### Requirement: Capacity accounting is private to the site authority
-The site authority SHALL account reservable capacity with `CapacityBucket` rows and SHALL store each active reservation's current backing in `CapacityReservationDebit`. A storefront-facing capacity reservation SHALL NOT expose a bucket identifier or backing physical-resource identifier. This extends to domain-specific physical-placement fields carried on the reservation (for example the VM domain's `vm_host`), not only the site authority's own generic accounting identifiers -- any field that identifies which concrete physical resource is serving a reservation is a backing physical-resource identifier for the purposes of this requirement, regardless of which domain named it. Scheduling MAY atomically replace the current debit when it selects a different eligible bucket.
+The site authority SHALL account reservable capacity with `CapacityBucket` rows and SHALL store each active reservation's current backing in `CapacityReservationDebit`. A storefront-facing capacity reservation SHALL NOT expose a bucket identifier or backing physical-resource identifier. This extends to domain-specific physical-placement fields carried on the reservation (for example the `host_id` a reservation's execution reference carries), not only the site authority's own generic accounting identifiers -- any field that identifies which concrete physical resource is serving a reservation is a backing physical-resource identifier for the purposes of this requirement, regardless of which domain named it. Scheduling MAY atomically replace the current debit when it selects a different eligible bucket.
 
 #### Scenario: Storefront reads a capacity reservation
 - **WHEN** a storefront reads an admitted reservation
@@ -355,3 +361,209 @@ Scheduling MUST NOT admit a dimension shape exceeding what the capacity reservat
 #### Scenario: Scheduling request exceeding the reservation is rejected
 - **WHEN** a scheduling request asks for more of a governed dimension than the reservation holds
 - **THEN** scheduling rejects the request before assignment or provider execution
+
+### Requirement: A capacity declaration names the host it is delivered through
+
+A capacity declaration MUST name the host its capacity is delivered through as a
+`host_id` field of the declaration, not as one of its attributes, and at most one
+declaration MAY name a given host. A registration naming a host another declaration
+names MUST be refused. Execution references and a reservation's claim facts MUST
+take the host from that field.
+
+#### Scenario: A second declaration names a held host
+
+- **WHEN** a declaration is registered with a `host_id` another declaration names
+- **THEN** the registration is refused as a conflict and neither declaration changes
+
+#### Scenario: A reservation is bound to a host
+
+- **WHEN** a reservation is admitted against a declaration that names a host
+- **THEN** its execution reference carries that declaration's `host_id`
+
+### Requirement: Operator-administered capacity declarations
+
+A site authority MUST accept operator-administered capacity resources as the
+authoritative declaration of sellable capacity for one Physical Resource identity,
+across every capacity dimension the declaration carries. A declaration is
+authoritative for shape and quantity — what is declared sellable and how much of
+it there is. Whether that declaration may be admitted against is a separate
+property resolved outside the declaration, and a capacity resource MUST remain a
+complete and authoritative declaration of its own shape regardless of that
+property. A capacity declaration MUST be able to
+express more than one dimension, and the authority MUST NOT require any particular
+dimension to be present. Where an operator has declared capacity for a Physical
+Resource, no other inventory record SHALL supply or override that resource's
+projected capacity.
+
+Every declaration MUST name its Resource Pool. A registration request that omits the
+pool MUST be rejected at request validation rather than recorded against a default,
+because registration replaces the whole declaration and a silently defaulted pool is
+a reassignment nobody requested. A declaration naming a pool the site does not have
+MUST be refused, whether it arrives as a registration or a document entry. A stored
+declaration with no recorded pool is read as belonging to the default pool.
+
+#### Scenario: Shape authority is not admission authority
+
+- **WHEN** a consumer reads a declared capacity resource
+- **THEN** the declared shape and quantity are authoritative
+- **AND** whether the declaration may be admitted against is resolved outside the declaration itself
+
+#### Scenario: Operator declares multidimensional capacity
+
+- **WHEN** an operator registers a capacity resource declaring several dimensions for
+  a Physical Resource
+- **THEN** the site authority records every declared dimension and admission,
+  matching, and projection all read the declared values
+
+#### Scenario: Declared capacity supersedes any other inventory record
+
+- **WHEN** a Physical Resource has both an operator-declared capacity resource and an
+  inventory record elsewhere describing the same resource
+- **THEN** the declared capacity resource is authoritative and the other record does
+  not contribute capacity
+
+#### Scenario: Registration names a pool that does not exist
+
+- **WHEN** a capacity registration names a Resource Pool the site does not have
+- **THEN** it is refused as invalid and no declaration is written or changed
+
+#### Scenario: Registration omits the pool
+
+- **WHEN** a capacity registration request carries no pool identifier
+- **THEN** it is rejected at request validation and no declaration is written or changed
+
+#### Scenario: Declaration omits a dimension
+
+- **WHEN** a capacity declaration carries only some dimensions
+- **THEN** the authority accepts it and treats the omitted dimensions as undeclared
+  rather than rejecting the declaration or substituting a value from another record
+
+### Requirement: Projected inventory is internally consistent
+
+Projected physical inventory MUST NOT report attribute values that contradict the
+same resource's projected capacity. A projected resource's capacity and its
+descriptive attributes MUST derive from one authoritative record for that resource:
+its capacity declaration, with every declared attribute projected except domain view
+configuration already published as a view. Connection-identity fields correlated from
+host inventory MAY accompany them, and MUST NOT be overridden by the declaration. A quantity MUST
+appear only in the projected capacity, never duplicated as an attribute.
+
+#### Scenario: Declared capacity disagrees with a legacy inventory value
+
+- **WHEN** an operator-declared capacity resource reports a different quantity for a
+  dimension than a legacy inventory record holds for the same resource
+- **THEN** the projection reports the declared value in capacity, reports no
+  attribute carrying the same quantity, and never reports the two disagreeing in one
+  projected row
+
+#### Scenario: Categorical hardware identity is projected
+
+- **WHEN** a capacity declaration carries a categorical hardware attribute matched by
+  equality rather than by sufficiency
+- **THEN** the projection reports it as an attribute rather than as a capacity
+  dimension, sourced from the same authoritative record as the capacity
+
+### Requirement: A capacity declaration names no mandatory dimension
+
+A capacity authority MUST accept a declaration expressing any set of dimensions and
+MUST NOT write a dimension the caller did not declare. Where a legacy scalar unit
+mirror is maintained, the dimension it mirrors MUST be supplied by the composition
+root, the way domain-specific claim aliases already are, rather than fixed in the
+shared capacity module.
+
+Where a caller declares capacity explicitly, the authority MUST NOT add a mirror
+dimension to that declaration. The legacy scalar unit total MUST be optional, and
+MUST be absent where the declaration names no mirror dimension — the existing
+consistency check between the scalar and its mirrored dimension compares them when
+both are present, so absence rather than a substituted zero is what keeps that check
+meaningful. A declaration naming only dimensions a domain owns —
+for example a credit balance with no compute dimension — MUST be stored as declared.
+
+#### Scenario: A declaration names no compute dimension
+
+- **WHEN** an operator declares capacity consisting only of a domain's own unit dimension
+- **THEN** the stored declaration contains exactly that dimension
+- **AND** no GPU or other compute dimension is manufactured
+
+#### Scenario: A declaration has no mirror dimension to total
+
+- **WHEN** a declaration names no dimension the legacy scalar mirrors
+- **THEN** the scalar unit total is absent rather than zero
+- **AND** the consistency check between the scalar and its mirrored dimension does not apply
+
+#### Scenario: A legacy single-quantity claim is translated
+
+- **WHEN** a claim requests a unit count through a legacy single-quantity key rather
+  than a dimensions map
+- **THEN** it is translated to the composition's mirror dimension, and the matching,
+  held-quantity, and payload mirror fields all read that same dimension
+
+#### Scenario: A composition supplies its mirror dimension
+
+- **WHEN** a composition root configures which dimension the legacy scalar mirror tracks
+- **THEN** that dimension is used for the mirror in that composition
+- **AND** no other composition's dimension name appears in it
+
+#### Scenario: A claim names another domain's dimension as an attribute
+
+- **GIVEN** a composition whose mirror dimension and unit claim keys do not include
+  `gpu_count`
+- **WHEN** a claim requires `gpu_count` equal to a resource's unit total
+- **THEN** the resource does not match, because the unit total is a matchable fact
+  only under the composition's own mirror dimension
+
+### Requirement: A declaration's attributes cannot restate its identity
+
+A capacity authority MUST refuse a declaration whose attributes use a key naming one
+of the declaration's own fields: the resource id, pool, host, resource type, or
+resource subtype. Those are declaration fields, and an attribute of the same name
+would be a second, disagreeing statement of the same fact. Wherever claims are
+matched against a resource, its declaration fields MUST take precedence over any
+attribute of the same name, so a stored declaration written before this rule
+cannot change its own identity for matching.
+
+#### Scenario: A registration puts the host in attributes
+
+- **WHEN** a registration request's attributes include `host_id`
+- **THEN** it is refused as invalid and no declaration is written or changed
+
+#### Scenario: A stored declaration carries a conflicting attribute
+
+- **GIVEN** a stored declaration whose host is `kvm1` and whose attributes name
+  `host_id` as `kvm9`
+- **WHEN** a claim requires `host_id` `kvm1`
+- **THEN** the declaration matches, and a claim requiring `kvm9` does not
+
+### Requirement: A capacity resource does not move pools under live obligations
+
+A capacity resource MUST NOT be reassigned from one Resource Pool to another while
+it has a live capacity obligation — a hold, a reservation, an assignment, or a
+workload — whose authority is resolved through its pool. A reassignment request in
+that state MUST be refused, and the resource MUST remain in its current pool.
+
+A live capacity obligation is a reservation in a capacity-holding state whose
+capacity is debited against the resource or whose settlement assignment names it.
+Every running workload holds such a reservation, so the site authority enforces this
+rule without consulting fulfillment state.
+
+A reservation's pool is resolved through the resource's current pool rather than
+recorded on the reservation, so reassignment would otherwise rewrite the authority
+underneath an existing obligation without that obligation changing. This applies to
+every reassignment, including moving a resource to a pool declaring a different
+provider or different capacity backing.
+
+#### Scenario: A resource with a live reservation is reassigned
+
+- **WHEN** a reassignment is requested for a capacity resource holding a live reservation
+- **THEN** the request is refused and the resource remains in its current pool
+
+#### Scenario: A resource assigned to a reservation is reassigned
+
+- **WHEN** a reassignment is requested for a capacity resource a held reservation has
+  been assigned to for settlement, though its capacity was debited elsewhere
+- **THEN** the request is refused and the resource remains in its current pool
+
+#### Scenario: A drained resource is reassigned
+
+- **WHEN** a reassignment is requested for a capacity resource with no live capacity obligation
+- **THEN** the reassignment succeeds

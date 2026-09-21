@@ -41,7 +41,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-site-client"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-kit-identity" },

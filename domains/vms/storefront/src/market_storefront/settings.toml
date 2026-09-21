@@ -55,7 +55,6 @@ claims_sweep_interval = 30
 # Advertised buyer-heartbeat cadence (seconds) echoed by the deals
 # endpoint; gating collection on heartbeats is lifecycle policy (I.5).
 heartbeat_interval_seconds = 60
-default_vm_host               = "kvm1"
 # Installed storefront contributions are public, version-pinned assertions
 # supplied by the operator. This list has no packaged default because Dynaconf
 # merges arrays across layers; a default would remain alongside the explicit

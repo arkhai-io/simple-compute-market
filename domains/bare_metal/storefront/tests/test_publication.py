@@ -32,7 +32,7 @@ def _projection():
                 physical_resource_id="resource-1",
                 pool_id="pool-1",
                 physical_host_id="physical-host-1",
-                machine_id="machine-1",
+                host_id="machine-1",
                 available=True,
                 allocation_mode="exclusive",
                 access_methods=["ssh"],
@@ -55,11 +55,11 @@ def test_projections_use_allowlisted_bare_metal_publication_metadata():
                     "available": {"gpu_count": 1, "units": 0},
                     "enabled": True,
                     "attributes": {
-                        "vm_host": "private-executor-alias",
+                        "host_id": "private-executor-alias",
                         "bare_metal_publication": {
                             "enabled": True,
                             "physical_host_id": "physical-host-1",
-                            "machine_id": "machine-1",
+                            "host_id": "machine-1",
                             "allocation_mode": "exclusive",
                             "access_methods": ["ssh"],
                             "capabilities": {"gpu_model": "H200"},
@@ -79,7 +79,7 @@ def test_projections_use_allowlisted_bare_metal_publication_metadata():
     assert resource.pool_id == "pool-1"
     assert resource.physical_resource_id == "resource-1"
     assert resource.physical_host_id == "physical-host-1"
-    assert resource.machine_id == "machine-1"
+    assert resource.host_id == "machine-1"
     assert resource.capabilities == {"gpu_model": "H200"}
     assert resource.available is False
 
@@ -95,7 +95,7 @@ def test_registry_republication_replaces_the_complete_listing_payload():
     result = publication_cli._publish_registry_listing(
         Client(),
         listing_id="listing-1",
-        listing_resource={"kind": "bare_metal.v1"},
+        listing_resource={"kind": "bare_metal.v2"},
         accepted_escrows=[],
         settlement_options=[{"option_id": "hosted-1"}],
         demands=[],
@@ -158,9 +158,9 @@ def test_core_runner_publishes_exact_opaque_bare_metal_payload(tmp_path):
     assert offers == [
         (
             {
-                "kind": "bare_metal.v1",
+                "kind": "bare_metal.v2",
                 "offering_mode": "bare_metal",
-                "machine_id": "machine-1",
+                "host_id": "machine-1",
                 "physical_host_id": "physical-host-1",
                 "access_methods": ["ssh"],
                 "capabilities": {"gpu_count": 8, "gpu_model": "H200"},

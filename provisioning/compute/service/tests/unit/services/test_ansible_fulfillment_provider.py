@@ -45,7 +45,7 @@ def _resource(**overrides) -> SettlementResource:
         "offering_mode": "vm",
         "resource_kind": "vm",
         "provider": "ansible",
-        "attributes": {"vm_host": "kvm1"},
+        "host_id": "kvm1",
     }
     values.update(overrides)
     return SettlementResource(**values)
@@ -61,7 +61,7 @@ def _metadata(**overrides) -> dict:
     values = {
         "create_job_id": "job-1",
         "current_job_id": "job-1",
-        "vm_host": "kvm1",
+        "host_id": "kvm1",
         "vm_target": "vm-alloc-1",
         "operation": "create",
     }
@@ -362,7 +362,7 @@ class TestRelayAccessPath:
 
         call = allocator.calls[0]
         assert call["pool_id"] == _resource().pool_id
-        assert call["host_name"] == "kvm1"
+        assert call["host_id"] == "kvm1"
 
     def test_the_port_is_leased_before_dispatch(self, job_service):
         """Allocating after dispatch would let a crash between the two leave a
@@ -476,12 +476,12 @@ class TestGetStatus:
 
 class TestExtraVarsCollision:
     def test_create_rejects_collision_on_a_named_builtin(self, provider):
-        with pytest.raises(ProviderConfigInvalidError, match="vm_host"):
+        with pytest.raises(ProviderConfigInvalidError, match="host_id"):
             provider.prepare_create(
                 capacity_reservation_id="alloc-1",
                 request=_request(),
                 resource=_resource(),
-                pool_config=_pool_config(extra_vars={"vm_host": "hijacked"}),
+                pool_config=_pool_config(extra_vars={"host_id": "hijacked"}),
             )
 
     def test_create_rejects_collision_on_a_dynamically_derived_builtin(self, provider):
@@ -514,11 +514,11 @@ class TestExtraVarsCollision:
     def test_reserved_var_keys_matches_what_build_vm_vars_actually_emits(self):
         ansible_service = AnsibleService(settings=MagicMock())
         params = AnsibleJobParams(
-            vm_host="kvm1", vm_action="create", offering_mode="vm"
+            host_id="kvm1", vm_action="create", offering_mode="vm"
         )
         reserved = ansible_service.reserved_var_keys(params)
         assert "offering_mode" in reserved
-        assert "vm_host" in reserved
+        assert "host_id" in reserved
 
         with pytest.raises(ValueError, match="offering_mode"):
             ansible_service._build_vm_vars(

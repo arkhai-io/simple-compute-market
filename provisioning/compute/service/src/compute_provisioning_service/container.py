@@ -12,6 +12,9 @@ from market_site.ledger import CapacityLedgerService
 
 from bare_metal_provisioning_adapter.runtime import build_bare_metal_runtime
 from vm_provisioning_adapter.runtime import build_vm_runtime
+from compute_provisioning_service.services.capacity_derivation import (
+    LegacyHostCapacityDerivation,
+)
 
 from compute_provisioning_service.config import settings
 from compute_provisioning_service.db.database import create_db_engine, create_session_factory
@@ -219,6 +222,28 @@ class Container(containers.DeclarativeContainer):
 
     fulfillment_teardown_port = providers.Singleton(DeferredFulfillmentTeardownPort)
 
+    capacity_ledger_service = providers.Singleton(
+        CapacityLedgerService,
+        session_factory=session_factory,
+        # "gpu_count" is this domain's alias for the generic "units" claim
+        # key and the dimension its legacy scalar mirrors — kept explicit here
+        # rather than hardcoded in kit/site so the ledger stays domain-neutral.
+        unit_claim_keys=("units", "gpu_count"),
+        mirror_dimension="gpu_count",
+        settlement_abandonment_hook=providers.Callable(
+            lambda repository: repository.abandon_if_assigned,
+            repository=settlement_repository,
+        ),
+    )
+
+    # Declared ahead of vm_runtime: host inventory derives capacity
+    # declarations from INI hosts through this port, inside its own upsert
+    # transaction.
+    capacity_derivation = providers.Singleton(
+        LegacyHostCapacityDerivation,
+        ledger=capacity_ledger_service,
+    )
+
     vm_runtime = providers.Singleton(
         build_vm_runtime,
         config=config,
@@ -226,6 +251,7 @@ class Container(containers.DeclarativeContainer):
         job_queue_provider=providers.Object(_resolved_job_queue),
         settlement_repository=settlement_repository,
         teardown_port=fulfillment_teardown_port,
+        capacity_derivation=capacity_derivation,
     )
 
     ansible_service = providers.Callable(
@@ -257,19 +283,6 @@ class Container(containers.DeclarativeContainer):
         _runtime_value,
         runtime=vm_runtime,
         name=providers.Object("host_operations_service"),
-    )
-
-    capacity_ledger_service = providers.Singleton(
-        CapacityLedgerService,
-        session_factory=session_factory,
-        # "gpu_count" is this domain's alias for the generic "units" claim
-        # key — kept explicit here rather than hardcoded in kit/site so the
-        # ledger stays domain-neutral.
-        unit_claim_keys=("units", "gpu_count"),
-        settlement_abandonment_hook=providers.Callable(
-            lambda repository: repository.abandon_if_assigned,
-            repository=settlement_repository,
-        ),
     )
 
     site_authority = providers.Singleton(

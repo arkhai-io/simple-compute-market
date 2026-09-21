@@ -17,7 +17,7 @@ from compute_provisioning_service.db.models import AnsiblePoolConfig, Host
 
 SessionFactory = Callable[[], Session]
 BARE_METAL_PUBLICATION_ATTR = "bare_metal_publication"
-BARE_METAL_PUBLICATION_VIEW = "bare_metal.v1"
+BARE_METAL_PUBLICATION_VIEW = "bare_metal.v2"
 VM_ANSIBLE_POOL_DEFAULTS_VIEW = "vm.ansible_pool_defaults.v1"
 
 
@@ -26,60 +26,76 @@ def load_capacity_resource_inventory(
     *,
     capacity_resources: Iterable[Mapping[str, Any]] = (),
 ) -> list[dict[str, Any]]:
-    """Return allowlisted host inventory with optional publication views.
+    """Return the declared capacity of each host, with publication views.
 
-    Capacity resources are authoritative for availability and Physical Resource
-    identity. Host rows supply only executor inventory needed to correlate the
-    configured machine alias; private host connection fields never enter a
+    A capacity declaration is the authority for what a host sells: its
+    capacity, availability, and attributes all come from the declaration
+    whose ``host_id`` names the host. The host supplies only its connection
+    fields, and a host no declaration names is not projected, because it has
+    nothing declared to report. Private host connection fields never enter a
     bare-metal publication view.
     """
+    # A declaration names the host it is delivered through by its own
+    # ``host_id``; that field is the only link between the two. Two
+    # declarations naming one host would sell the same connection twice, so
+    # the projection refuses rather than choosing one.
     resources: dict[str, dict[str, Any]] = {}
     for raw_resource in capacity_resources:
         resource = dict(raw_resource)
-        attributes = dict(resource.get("attributes") or {})
-        bare_metal = attributes.get(BARE_METAL_PUBLICATION_ATTR)
-        keys = {str(resource["resource_id"])}
-        if attributes.get("vm_host"):
-            keys.add(str(attributes["vm_host"]))
-        if isinstance(bare_metal, Mapping) and bare_metal.get("enabled", False):
-            machine_id = str(bare_metal.get("machine_id") or "").strip()
-            if not machine_id:
-                raise ValueError(
-                    "enabled bare_metal_publication requires explicit machine_id",
-                )
-            keys.add(machine_id)
-        for key in keys:
-            existing = resources.get(key)
-            if existing is not None and existing != resource:
-                raise ValueError(
-                    f"several capacity resources map to host identity {key!r}",
-                )
-            resources[key] = resource
+        host_id = resource.get("host_id")
+        publication = dict(resource.get("attributes") or {}).get(
+            BARE_METAL_PUBLICATION_ATTR
+        )
+        if (
+            not host_id
+            and isinstance(publication, Mapping)
+            and publication.get("enabled", False)
+        ):
+            # A published bare-metal resource is sold as one specific host;
+            # without the host it cannot be correlated or executed.
+            raise ValueError(
+                "enabled bare_metal_publication requires the resource's host_id",
+            )
+        if not host_id:
+            continue
+        existing = resources.get(str(host_id))
+        if existing is not None and existing != resource:
+            raise ValueError(
+                f"several capacity resources name host {host_id!r}",
+            )
+        resources[str(host_id)] = resource
     with session_factory() as db:
-        hosts = db.query(Host).order_by(Host.pool_id.asc(), Host.name.asc()).all()
+        hosts = db.query(Host).order_by(Host.pool_id.asc(), Host.host_id.asc()).all()
         return [
-            _project_host(host, capacity_resource=resources.get(str(host.name)))
+            _project_host(host, capacity_resource=resources[str(host.host_id)])
             for host in hosts
+            if str(host.host_id) in resources
         ]
 
 
 def _project_host(
     host: Any,
     *,
-    capacity_resource: Mapping[str, Any] | None = None,
+    capacity_resource: Mapping[str, Any],
 ) -> dict[str, Any]:
-    gpu_count = int(host.gpu_count or 0)
-    resource = dict(capacity_resource or {})
-    capacity = dict(resource.get("capacity") or {"gpu_count": gpu_count})
+    """One host's projected resource: the declaration, plus connection fields.
+
+    Every declared attribute is projected except the bare-metal publication
+    configuration, which is published as its own view. The host's
+    ``host_id`` and ``public_host`` are written last, so a declaration cannot
+    override how the host is reached.
+    """
+    resource = dict(capacity_resource)
+    capacity = dict(resource.get("capacity") or {})
     attributes: dict[str, Any] = {
-        "vm_host": host.name,
-        "public_host": host.public_host or host.kvm_host,
-        "gpu_count": gpu_count,
+        key: value
+        for key, value in dict(resource.get("attributes") or {}).items()
+        if key != BARE_METAL_PUBLICATION_ATTR
     }
-    if host.gpu_model:
-        attributes["gpu_model"] = host.gpu_model
+    attributes["host_id"] = host.host_id
+    attributes["public_host"] = host.public_host or host.ssh_host
     projected: dict[str, Any] = {
-        "resource_id": str(resource.get("resource_id") or host.name),
+        "resource_id": str(resource["resource_id"]),
         "pool_id": str(resource.get("pool_id") or host.pool_id),
         "resource_type": resource.get("resource_type") or "compute.gpu",
         "resource_subtype": resource.get("resource_subtype"),
@@ -87,8 +103,11 @@ def _project_host(
         "attributes": attributes,
         "enabled": bool(host.enabled and resource.get("enabled", True)),
     }
-    if capacity_resource is not None:
-        projected["available"] = dict(resource.get("available") or {})
+    # Availability is projected only as the declaration reports it.
+    # Consumers trust a present ``available`` as live, so an unreported one
+    # must stay absent rather than become an empty map read as zero.
+    if resource.get("available") is not None:
+        projected["available"] = dict(resource["available"])
 
     publication_view = _bare_metal_publication_view(
         host=host,
@@ -123,13 +142,17 @@ def _bare_metal_publication_view(
     return project_bare_metal_resource({
         "physical_resource_id": str(resource.get("resource_id") or ""),
         "pool_id": pool_id,
-        "physical_host_id": str(raw_config.get("physical_host_id") or ""),
-        "machine_id": str(raw_config.get("machine_id") or ""),
+        # Identity and cross-mode accounting come from the declaration itself
+        # — its host link and the top-level fields the ledger's cross-mode
+        # rule reads — so the view cannot name a different machine than
+        # admission accounts for.
+        "physical_host_id": str(attributes.get("physical_host_id") or ""),
+        "host_id": str(resource.get("host_id") or ""),
         "available": (
             bool(host.enabled and resource.get("enabled", True))
             and _whole_resource_available(capacity, available)
         ),
-        "allocation_mode": str(raw_config.get("allocation_mode") or ""),
+        "allocation_mode": str(attributes.get("allocation_mode") or ""),
         "access_methods": list(raw_config.get("access_methods") or []),
         "capacity": dict(capacity),
         "capabilities": dict(raw_config.get("capabilities") or {}),

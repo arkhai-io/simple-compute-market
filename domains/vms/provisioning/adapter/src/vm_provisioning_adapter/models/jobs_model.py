@@ -32,7 +32,7 @@ class AnsibleJobParams:
     Never serialised directly into the OpenAPI schema.
     """
 
-    vm_host: str
+    host_id: str
     vm_action: str
     offering_mode: str
     vm_target: Optional[str] = None
@@ -97,7 +97,7 @@ class AnsibleJobParams:
         if not self.executor_action:
             self.executor_action = self.vm_action
         if self.executor_target is None:
-            self.executor_target = self.vm_target or self.vm_host
+            self.executor_target = self.vm_target or self.host_id
         if not self.vm_action:
             self.vm_action = self.executor_action
 
@@ -115,7 +115,7 @@ class AnsibleRunResult:
     stderr: str
     ssh_port: Optional[str]
     tenant_user: Optional[str]
-    vm_host_ip: Optional[str]
+    host_ip: Optional[str]
     ssh_command: Optional[str]
     ansible_result: Optional[dict] = None
     process_id: Optional[int] = None

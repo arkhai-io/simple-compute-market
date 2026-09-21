@@ -98,6 +98,7 @@ class FulfillmentOrchestrator:
             ),
             provider=record.provider,
             attributes=dict(record.resource_attributes or {}),
+            host_id=record.resource_host_id,
             dimensions=dict(
                 (record.scheduling_requirements or {}).get("dimensions") or {}
             ),

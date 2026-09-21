@@ -311,6 +311,7 @@ PROVISIONING_ROUTE_CONTRACTS = (
     ProvisioningRouteContract("DELETE", re.compile(r"/api/v1/pools/(?P<pool_id>[^/]+)"), "provisioning_pool_disable", path_resource="pool_id"),
     ProvisioningRouteContract("POST", re.compile(r"/api/v1/pools/import"), "provisioning_pools_import"),
     ProvisioningRouteContract("POST", re.compile(r"/api/v1/pools/validate"), "provisioning_pools_validate"),
+    ProvisioningRouteContract("POST", re.compile(r"/api/v1/capacity/definitions/import"), "provisioning_capacity_definitions_import"),
     # Relay administration. Ordered so the token, enable, and disable
     # sub-resources match before the bare relay id pattern, which would
     # otherwise swallow them and authenticate a rotation as an ordinary read.
@@ -412,6 +413,7 @@ ADMIN_PROVISIONING_OPERATIONS = frozenset(
         "provisioning_pool_disable",
         "provisioning_pools_import",
         "provisioning_pools_validate",
+        "provisioning_capacity_definitions_import",
         "provisioning_test_rule_add",
         "provisioning_test_rules_list",
         "provisioning_test_rule_delete",

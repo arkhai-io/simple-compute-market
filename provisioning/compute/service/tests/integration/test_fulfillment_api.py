@@ -211,7 +211,7 @@ async def _reserved_capacity(pool_id: str, *, claim: dict[str, Any] | None = Non
         resource_type="compute.gpu",
         total_units=4,
         pool_id=pool_id,
-        attributes={"vm_host": "kvm-fulfillment-1"},
+        host_id="kvm-fulfillment-1", attributes={},
         capacity={"gpu_count": 4, "vcpu_count": 32, "ram_gb": 256, "disk_gb": 2000},
     )
     reservation_claim = {"offering_mode": "vm", **(claim or {"gpu_count": 1})}
@@ -276,14 +276,14 @@ class TestBeginPersistsPreparedCreateInput:
             assert record is not None
             prepared = record.prepared_create_operation
             assert prepared["kind"] == "vm.ansible.create.v1"
-            assert prepared["schema_version"] == 1
+            assert prepared["schema_version"] == 2
 
             operation = prepared["payload"]
             assert operation["capacity_reservation_id"] == capacity_reservation_id
             assert operation["action"] == "create"
 
             params = operation["parameters"]
-            assert params["vm_host"] == "kvm-fulfillment-1"
+            assert params["host_id"] == "kvm-fulfillment-1"
             assert params["vm_target"] == "vm-fulfillment-1"
             assert params["vm_ram"] == 8192
             assert params["vm_vcpus"] == 4
@@ -297,7 +297,7 @@ class TestBeginPersistsPreparedCreateInput:
             assert params["vm_gpu_count"] == 1
 
             metadata = record.provider_metadata
-            assert metadata["vm_host"] == "kvm-fulfillment-1"
+            assert metadata["host_id"] == "kvm-fulfillment-1"
             assert metadata["vm_target"] == "vm-fulfillment-1"
             assert metadata["operation"] == "create"
             assert metadata["create_job_id"]
@@ -433,7 +433,7 @@ class TestTeardownPreparation:
                 pool_id=pool_id,
                 resource_kind="compute.gpu",
                 provider="ansible",
-                attributes={"vm_host": "kvm-fulfillment-1"},
+                host_id="kvm-fulfillment-1", attributes={},
             ),
             provisioned_resources=(),
             provider_metadata=provider_metadata,
@@ -441,11 +441,11 @@ class TestTeardownPreparation:
 
         prepared = provider.prepare_teardown(settlement_result, pool_config)
         assert prepared.kind == "vm.ansible.teardown.v1"
-        assert prepared.schema_version == 1
+        assert prepared.schema_version == 2
         assert prepared.payload["capacity_reservation_id"] == capacity_reservation_id
         assert prepared.payload["action"] == "teardown"
         teardown_params = prepared.payload["parameters"]
-        assert teardown_params["vm_host"] == "kvm-fulfillment-1"
+        assert teardown_params["host_id"] == "kvm-fulfillment-1"
         assert teardown_params["vm_target"] == "vm-fulfillment-1"
         assert teardown_params["vm_action"] == "vm_remove"
         assert teardown_params["escrow_uid"] == capacity_reservation_id

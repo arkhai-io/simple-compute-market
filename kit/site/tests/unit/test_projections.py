@@ -16,7 +16,8 @@ def _resources():
             "resource_subtype": "h100",
             "capacity": {"gpu_count": 8, "ram_gb": 512},
             "available": {"gpu_count": 8, "ram_gb": 512},
-            "attributes": {"region": "eu", "vm_host": "host-a"},
+            "attributes": {"region": "eu"},
+            "host_id": "host-a",
             "enabled": True,
         },
         {
@@ -26,7 +27,8 @@ def _resources():
             "resource_subtype": "h100",
             "capacity": {"ram_gb": 512, "gpu_count": 8},
             "available": {"ram_gb": 512, "gpu_count": 8},
-            "attributes": {"vm_host": "host-b", "region": "eu"},
+            "attributes": {"region": "eu"},
+            "host_id": "host-b",
             "enabled": True,
         },
     ]
@@ -49,10 +51,10 @@ def test_resource_pool_projection_preserves_individual_inventory():
 def test_resource_pool_projection_preserves_allowlisted_publication_views():
     resources = _resources()
     resources[0]["publication_views"] = {
-        "bare_metal.v1": {
+        "bare_metal.v2": {
             "physical_resource_id": "host-a",
             "physical_host_id": "physical-host-a",
-            "machine_id": "machine-a",
+            "host_id": "machine-a",
             "available": True,
         },
     }
@@ -60,10 +62,10 @@ def test_resource_pool_projection_preserves_allowlisted_publication_views():
     rows = resource_pool_projection(resources)
 
     assert rows[0]["resources"][0]["publication_views"] == {
-        "bare_metal.v1": {
+        "bare_metal.v2": {
             "physical_resource_id": "host-a",
             "physical_host_id": "physical-host-a",
-            "machine_id": "machine-a",
+            "host_id": "machine-a",
             "available": True,
         },
     }
@@ -72,10 +74,10 @@ def test_resource_pool_projection_preserves_allowlisted_publication_views():
 def test_resource_pool_digest_changes_with_publication_availability():
     resources = _resources()
     resources[0]["publication_views"] = {
-        "bare_metal.v1": {"available": True},
+        "bare_metal.v2": {"available": True},
     }
     before = canonical_digest(resource_pool_projection(resources))
-    resources[0]["publication_views"]["bare_metal.v1"]["available"] = False
+    resources[0]["publication_views"]["bare_metal.v2"]["available"] = False
 
     after = canonical_digest(resource_pool_projection(resources))
 
@@ -110,14 +112,14 @@ def test_projection_revisions_are_digest_driven():
 def test_resource_pool_revision_tracks_publication_view_changes():
     resources = _resources()
     resources[0]["publication_views"] = {
-        "bare_metal.v1": {"available": True},
+        "bare_metal.v2": {"available": True},
     }
     service = SiteProjectionService(
         object(),
         resource_inventory=lambda: resources,
     )
     first, _ = service.resource_pools()
-    resources[0]["publication_views"]["bare_metal.v1"]["available"] = False
+    resources[0]["publication_views"]["bare_metal.v2"]["available"] = False
 
     changed, _ = service.resource_pools()
 

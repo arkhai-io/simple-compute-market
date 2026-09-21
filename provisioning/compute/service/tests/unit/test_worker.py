@@ -46,3 +46,14 @@ async def test_worker_runs_background_tasks_and_cancels_them_cleanly(monkeypatch
 def test_runtime_imports_pools_before_seeding_inventory():
     names = [step.name for step in worker.app_runtime.startup_steps()]
     assert names.index("import-pool-definitions") < names.index("seed-inventory")
+
+
+def test_runtime_imports_capacity_after_the_pools_and_hosts_it_names():
+    """A declaration names a pool and may name a host, so both exist first on
+    a first boot from documents; the job queue starts only once capacity is
+    declared."""
+    names = [step.name for step in worker.app_runtime.startup_steps()]
+    capacity = names.index("import-capacity-definitions")
+    assert names.index("import-pool-definitions") < capacity
+    assert names.index("seed-inventory") < capacity
+    assert capacity < names.index("create-job-queue")

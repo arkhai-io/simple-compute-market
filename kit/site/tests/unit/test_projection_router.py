@@ -30,13 +30,13 @@ def _client():
             )
         )
     ledger = CapacityLedgerService(sessionmaker(bind=engine))
-    ledger.register_resource(
+    ledger.register_resource(host_id="host-a", 
         resource_id="host-a",
         pool_id="pool-a",
         total_units=8,
         resource_type="compute.vm",
         resource_subtype="h100",
-        attributes={"region": "eu", "vm_host": "host-a"},
+        attributes={"region": "eu", },
     )
     app = FastAPI()
     app.include_router(make_capacity_router(lambda: ledger), prefix="/api/v1")
@@ -55,13 +55,13 @@ def test_public_reservation_hides_private_accounting_identity():
     assert "resource_id" not in reservation
     assert "capacity_bucket_id" not in reservation
     assert "backing_resource_id" not in reservation
-    # vm_host is real, physical-placement data (populated from the
+    # host_id is real, physical-placement data (populated from the
     # matched resource's attributes at reserve() time -- see
     # openspec/specs/site-capacity/spec.md's opaque-reservation
     # requirement) and must not leak across this boundary either, even
     # though it's domain-specific (VM) rather than a generic accounting
     # identifier like the three above.
-    assert "vm_host" not in reservation
+    assert "host_id" not in reservation
 
 
 def test_projection_versions_are_independent_and_snapshots_are_canonical():
@@ -75,13 +75,25 @@ def test_projection_versions_are_independent_and_snapshots_are_canonical():
     assert capacity["capacity_buckets"][0]["capacity_group_key"]
 
 
-def test_resource_pool_projection_uses_authoritative_inventory_provider():
+def _engine_with_pools(*pool_ids: str):
+    """An in-memory site database holding the pools a test registers into;
+    registration refuses a pool the site does not have."""
     engine = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
     Base.metadata.create_all(engine)
+    ResourcePoolBase.metadata.create_all(engine)
+    with sessionmaker(bind=engine)() as db, db.begin():
+        for pool_id in pool_ids:
+            db.add(ResourcePool(id=pool_id, label=pool_id, provider="test",
+                                enabled=True, policy_tags={}))
+    return engine
+
+
+def test_resource_pool_projection_uses_authoritative_inventory_provider():
+    engine = _engine_with_pools("pool-a")
     ledger = CapacityLedgerService(sessionmaker(bind=engine))
     ledger.register_resource(resource_id="bucket-host", pool_id="pool-a", total_units=8)
     inventory = [{
@@ -89,7 +101,7 @@ def test_resource_pool_projection_uses_authoritative_inventory_provider():
         "pool_id": "pool-a",
         "resource_type": "compute.gpu",
         "capacity": {"gpu_count": 8},
-        "attributes": {"vm_host": "host-from-repository"},
+        "attributes": {"host_id": "host-from-repository"},
         "enabled": True,
     }]
     app = FastAPI()
@@ -117,16 +129,11 @@ def test_public_reservation_rejects_invalid_unit_claims(value):
 
 
 def test_get_pool_directory_surfaces_pool_metadata_on_the_projection():
-    engine = create_engine(
-        "sqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    Base.metadata.create_all(engine)
+    engine = _engine_with_pools("pool-a")
     ledger = CapacityLedgerService(sessionmaker(bind=engine))
-    ledger.register_resource(
+    ledger.register_resource(host_id="host-a", 
         resource_id="host-a", pool_id="pool-a", total_units=8,
-        attributes={"vm_host": "host-a"},
+        attributes={},
     )
     app = FastAPI()
     app.include_router(

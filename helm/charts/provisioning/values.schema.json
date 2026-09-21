@@ -20,7 +20,17 @@
         "relay_token": false,
         "ssh_decryption_key": false,
         "inventory_ini": false,
-        "storefront_admin_key": false
+        "storefront_admin_key": false,
+        "pool_definitions_path": false,
+        "capacity_definitions_path": false
+      }
+    },
+    "definitions": {
+      "type": "object",
+      "properties": {
+        "relays": {"type": "object"},
+        "pools": {"type": "object"},
+        "capacity": {"type": "object"}
       }
     },
     "sshDecryptionKey": {"$ref": "#/definitions/secretReference"},

@@ -39,7 +39,7 @@ def _add_derived_publication_tracking(conn: sqlite3.Connection) -> None:
               listing_id TEXT PRIMARY KEY,
               site_id TEXT NOT NULL,
               physical_resource_id TEXT NOT NULL,
-              machine_id TEXT NOT NULL,
+              host_id TEXT NOT NULL,
               physical_host_id TEXT NOT NULL,
               status TEXT NOT NULL,
               derivation_key TEXT NOT NULL UNIQUE,
@@ -264,7 +264,7 @@ def _migrate_common_domain_bindings(conn: sqlite3.Connection) -> None:
     rows = conn.execute(
         """
         SELECT d.listing_id, d.site_id, d.physical_resource_id,
-               d.machine_id, d.physical_host_id, d.derivation_key,
+               d.host_id, d.physical_host_id, d.derivation_key,
                d.last_reconciled_at, l.listing_resource
         FROM derived_bare_metal_listings d
         JOIN listings l ON l.listing_id=d.listing_id
@@ -288,7 +288,7 @@ def _migrate_common_domain_bindings(conn: sqlite3.Connection) -> None:
         source_envelope = json.dumps(
             {
                 "kind": "bare_metal.resource-projection.v1",
-                "machine_id": row[3],
+                "host_id": row[3],
                 "physical_host_id": row[4],
                 "physical_resource_id": row[2],
                 "schema_version": 1,
@@ -396,7 +396,41 @@ def _migrate_common_domain_bindings(conn: sqlite3.Connection) -> None:
     conn.execute("DROP TABLE bare_metal_agreement_payloads")
 
 
+class RetiredListingKindError(RuntimeError):
+    """The database holds state this storefront can no longer decode."""
+
+
+def _refuse_retired_listing_kind(conn: sqlite3.Connection) -> None:
+    """Refuse a database written before listings named their host ``host_id``.
+
+    Accepted bare-metal state is signed or digest-pinned, so it cannot be
+    rewritten in place, and no decoder for the earlier listing kind is kept.
+    Starting against such a database would fail only later, on the first
+    decode of a retired record; refusing here names the remedy instead. The
+    retired schema is recognized by structure rather than by decoding, since
+    decoding is exactly what is no longer possible.
+    """
+    columns = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(derived_bare_metal_listings)")
+    }
+    if "machine_id" in columns:
+        raise RetiredListingKindError(
+            "this bare-metal storefront database was written under a retired "
+            "listing kind and cannot be decoded; reset it as described in "
+            "docs/bare-metal-seller-quickstart.md, "
+            "\"Resetting the storefront database\""
+        )
+
+
 BARE_METAL_STOREFRONT_MIGRATIONS = (
+    # First, so a database written under the retired listing kind is refused
+    # before any other pending migration touches a renamed column. On a fresh
+    # database it finds no table and records itself.
+    Migration(
+        id="bare-metal-storefront-0009-refuse-retired-listing-kind",
+        apply=_refuse_retired_listing_kind,
+    ),
     Migration(
         id="bare-metal-storefront-0001-agreement-payloads",
         apply=_add_agreement_payloads,

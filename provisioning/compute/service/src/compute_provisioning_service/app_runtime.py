@@ -105,6 +105,9 @@ def seed_inventory_if_empty() -> None:
     # operator changes made via the API (POST /hosts, PUT /hosts/{host}, etc.)
     # are not overwritten on pod restart.  To force a re-seed, use
     # POST /api/v1/hosts/import which always upserts regardless of table state.
+    #
+    # Seeding also declares capacity for each seeded host with GPUs that no
+    # capacity declaration names, in the same transaction as the hosts.
     # ------------------------------------------------------------------
     host_service = _container_module.resolved_host_service
     existing_hosts = host_service.list_hosts(enabled_only=False)
@@ -156,12 +159,17 @@ def import_pool_definitions_if_configured() -> None:
     _definition_importer().import_pool_definitions()
 
 
+def import_capacity_definitions_if_configured() -> None:
+    _definition_importer().import_capacity_definitions()
+
+
 def _definition_importer() -> DefinitionDocumentImporter:
     return DefinitionDocumentImporter(
         session_factory=_container_module.resolved_session_factory,
         settings=settings,
         pool_service=_container_module.resolved_resource_pool_service,
         relay_service=_container_module.resolved_relay_service,
+        capacity_ledger=_container_module.resolved_capacity_ledger_service,
     )
 
 
@@ -193,6 +201,9 @@ def startup_steps() -> tuple[ComputeProvisioningStartupStep, ...]:
             "import-pool-definitions", import_pool_definitions_if_configured
         ),
         ComputeProvisioningStartupStep("seed-inventory", seed_inventory_if_empty),
+        ComputeProvisioningStartupStep(
+            "import-capacity-definitions", import_capacity_definitions_if_configured
+        ),
         ComputeProvisioningStartupStep("create-job-queue", create_job_queue),
     )
 

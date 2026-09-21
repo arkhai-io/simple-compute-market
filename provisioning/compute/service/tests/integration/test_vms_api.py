@@ -126,7 +126,7 @@ class TestCreateVmViaClient:
         assert result["vm_name"] == VM_NAME
         assert result["tenant_user"] == "agentvm01"
         assert result["ssh_port"] == "54321"
-        assert result["vm_host_ip"] == "10.0.0.1"
+        assert result["host_ip"] == "10.0.0.1"
 
     async def test_create_vm_ansible_called_with_correct_params(self, client_and_queue, fake_ansible):
         client, job_queue = client_and_queue

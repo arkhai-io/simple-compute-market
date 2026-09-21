@@ -102,6 +102,21 @@ publication running for longer than necessary.
   now comes from `make dist` rather than from ordering, and the test asserts
   the workflow still reaches it.
 
+- [ ] 2.7 **Finding (2026-09-21, from `capacity-resource-administration`'s
+  branch): this change's workflow edits are not in the tree, though its tasks
+  say they are.** `.github/workflows/publish-pypi.yml` is still the publishing
+  workflow: it keeps the `publish` job and its `pypa/gh-action-pypi-publish`
+  step (2.1), heredocs its own package table rather than reading
+  `manifests/published-distributions.json` (1.3), keeps its publishing name
+  (2.2), and creates `.dist` with `mkdir -p` rather than building it with
+  `make dist`. The rewritten `scripts/tests/test_publish_matrix.py` (2.6) is
+  present, so `make test-release-tooling` fails
+  `test_the_workflow_builds_the_directory_those_packages_look_in`, contrary to
+  2.4. The failure is identical on the upload that branch started from, so no
+  edit on it caused this. Recover the workflow from wherever 1.3, 2.1, 2.2, and
+  2.5 were implemented, confirm 2.4 against it, and re-verify that no workflow
+  path reaches a PyPI upload.
+
 ## 3. Publish to the development registry on merge
 
 **Blocked on a writer identity for the development registry.**

@@ -54,3 +54,50 @@ def test_pause_and_resume_remain_paired() -> None:
             inspect.signature(getattr(StorefrontClient, name))
             == inspect.signature(getattr(SyncStorefrontClient, name))
         ), name
+
+
+def _public_operations(
+    cls: type,
+) -> dict[str, tuple[list[tuple[str, object, object, str]], str]]:
+    """Each public method as its parameters -- (name, kind, default,
+    annotation) each -- and its return annotation.
+
+    Annotations are compared as text with surrounding quotes removed: under
+    postponed evaluation one variant may spell an annotation ``"'str | None'"``
+    and the other ``'str | None'``, which name the same type. An async
+    method's return annotation names what awaiting it yields, so it is
+    compared directly with the sync variant's.
+    """
+
+    def annotation(value: object) -> str:
+        if value is inspect.Parameter.empty:
+            return ""
+        return str(value).strip("'\"")
+
+    operations = {}
+    for name, member in vars(cls).items():
+        if name.startswith("_") or not callable(member):
+            continue
+        signature = inspect.signature(member)
+        operations[name] = (
+            [
+                (p.name, p.kind, p.default, annotation(p.annotation))
+                for p in signature.parameters.values()
+            ],
+            annotation(signature.return_annotation),
+        )
+    return operations
+
+
+def test_every_public_operation_matches_between_the_clients() -> None:
+    """The whole public surface, not only the lifecycle controls.
+
+    A method added to one variant, or a parameter renamed on one and not the
+    other, would otherwise surface only when a caller of the other variant
+    reached it.
+    """
+    async_ops = _public_operations(StorefrontClient)
+    sync_ops = _public_operations(SyncStorefrontClient)
+
+    assert set(async_ops) == set(sync_ops)
+    assert async_ops == sync_ops

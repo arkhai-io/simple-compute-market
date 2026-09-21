@@ -92,9 +92,9 @@ class DealState(DomainDealState):
     # synthetic-buyer scenario.
     settle_run_handle: Optional[Any] = None
     # Synthetic-buyer (test_full_deal.py) only: 08a evaluate-settle
-    # dry-run capture; the buyer-CLI scenario reads vm_host from the
+    # dry-run capture; the buyer-CLI scenario reads host_id from the
     # lease instead (see below).
-    _evaluate_settle_vm_host: Optional[str] = None
+    _evaluate_settle_host_id: Optional[str] = None
     _evaluate_settle_vm_target: Optional[str] = None
     _evaluate_settle_passed: bool = False
     # Synthetic-buyer only: phase 09a evaluate-provisioning-job dry-run
@@ -105,10 +105,10 @@ class DealState(DomainDealState):
     provisioning_result_injected: bool = False
     lease_id: Optional[str] = None
     lease_status: Optional[str] = None
-    # vm_host captured from the lease in 09c; used by 10a/11b to arm
+    # host_id captured from the lease in 09c; used by 10a/11b to arm
     # the check-job mock rule (was previously sourced from the
     # 08a evaluate-settle dry-run, now dropped from this flow).
-    vm_host: Optional[str] = None
+    host_id: Optional[str] = None
     settlement_status: Optional[str] = None
     tenant_credentials: Optional[dict[str, Any]] = None
     seller_listing_final_status: Optional[str] = None
@@ -123,7 +123,7 @@ class DealState(DomainDealState):
     fulfillment_id: Optional[str] = None
     # Reserved resource, captured at stage 09c from the admin-only
     # DealLease view (``get_capacity_reservation``), never from a
-    # buyer-facing response -- ``resource_id``/``vm_host`` are
+    # buyer-facing response -- ``resource_id``/``host_id`` are
     # intentionally opaque across the ordinary reservation boundary (see
     # openspec/specs/site-capacity/spec.md's "Capacity accounting is
     # private to the site authority" requirement). Admin introspection is
@@ -654,8 +654,8 @@ def _ensure_provisioning_host_registered(provisioning_client):
         return
 
     body = HostCreate(
-        name=host_name,
-        kvm_host="127.0.0.1",
+        host_id=host_name,
+        ssh_host="127.0.0.1",
         ssh_user="stub",
         ssh_key_type="path",
         ssh_key_value="/tmp/stub-e2e-key",
@@ -949,7 +949,7 @@ class DealLease:
             "id": data.get("capacity_reservation_id") or self.lease_id,
             "escrow_uid": row.get("escrow_uid"),
             "resource_id": row.get("resource_id"),
-            "vm_host": row.get("vm_host"),
+            "host_id": row.get("host_id"),
             "vm_target": row.get("vm_target"),
             "status": data.get("status"),
             "fulfillment_id": data.get("release_job_id"),

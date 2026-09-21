@@ -80,7 +80,7 @@ def test_full_deal_flow(client):
     # Seller quota: the resource a listing derives from.
     r = client.put(
         "/api/v1/capacity/resources/svc-quota",
-        json={"total_units": 1000, "resource_type": "api_credits"},
+        json={"total_units": 1000, "resource_type": "api_credits", "pool_id": "default"},
         headers=AUTH,
     )
     assert r.status_code == 200

@@ -230,12 +230,12 @@ Useful inputs:
   to use the seller's advertised rate.
 - `--settlement-timeout` — default 600s. Real cloud-init can take 5–10 minutes.
 
-The terminal output includes a `Connection` block. Use the `vm_host_ip`
+The terminal output includes a `Connection` block. Use the `host_ip`
 field (the printed `ssh_command` references the inventory alias, not the
 DNS name):
 
 ```bash
-ssh -i ~/.ssh/mms_buyer_id_ed25519 -p <port> tenant<id>@<vm_host_ip>
+ssh -i ~/.ssh/mms_buyer_id_ed25519 -p <port> tenant<id>@<host_ip>
 ```
 
 ## 5. Resume an interrupted buy
@@ -338,7 +338,7 @@ chain, RPC, or gas configuration.
 - **Prices on the CLI are human asset units.** Publication normalizes each
   mechanism's explicit asset-scoped rate exactly once. Negotiation logs retain
   canonical values required by the accepted plan.
-- **VM SSH uses `vm_host_ip`, not the alias** the `ssh_command` field
+- **VM SSH uses `host_ip`, not the alias** the `ssh_command` field
   prints (`tenant<id>@kvm1` etc. — the host name is the seller's
   inventory alias, not DNS).
 - **The tenant user has no sudo password.** Cloud-init only injects

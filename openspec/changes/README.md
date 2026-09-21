@@ -21,14 +21,14 @@ A change appears exactly once, in its primary home. Where a change serves more t
 ## Roadmap goal — Consolidate physical-resource authority in the provisioning service
 
 ```text
-capacity-resource-administration ──► pools-9-retire-local-physical-authority
+unify-host-identity (archived) ──► capacity-resource-administration (archived) ──► pools-9-retire-local-physical-authority
 fix-vm-fulfillment-capacity-boundary ──► retire-vm-remove-job-id
 ```
 
 | Change | Status | Acceptance boundary |
 |---|---|---|
-| [`capacity-resource-administration`](capacity-resource-administration/) | active; no blocking dependency | Site capacity resources become the single authoritative declaration of sellable capacity across every dimension, with a digest-gated startup import and an always-reconciling REST import, a composition-supplied mirror dimension, a required `pool_id` with a pool-reassignment drain rule, and derivation of declarations from legacy host GPU columns at INI seed time and once at upgrade. Two design questions remain open: projected attribute pass-through, and Helm first-boot pool references |
-| [`pools-9-retire-local-physical-authority`](pools-9-retire-local-physical-authority/) | planned; blocked on `capacity-resource-administration` | Retires every remaining physical-resource concern from the VM storefront: local physical-authority tables, `compute_allocations`, CSV import and its deployment contract, the orphaned physical admin surface, and the always-`None` `vm_host` plumbing. The deployment-bake trigger for its own start remains undefined by design; the dependency is a necessary gate, not a sufficient one |
+| [`version-accepted-artifacts`](version-accepted-artifacts/) | proposed; not planned; must land before bare-metal release | A repository-wide rule for evolving signed and content-addressed state: never rewrite accepted bytes, verify over stored bytes, retire a kind by stopping production while keeping a read-only decoder, and remove the decoder only when a measured count of live references is zero. Fixes bare-metal digest verification, which re-serializes through the live model. Found by `unify-host-identity` |
+| [`pools-9-retire-local-physical-authority`](pools-9-retire-local-physical-authority/) | planned; its dependency `capacity-resource-administration` is archived | Retires every remaining physical-resource concern from the VM storefront: local physical-authority tables, `compute_allocations`, CSV import and its deployment contract, the orphaned physical admin surface, and the always-`None` `vm_host` plumbing. The deployment-bake trigger for its own start remains undefined by design; the dependency is a necessary gate, not a sufficient one |
 | [`fix-vm-fulfillment-capacity-boundary`](fix-vm-fulfillment-capacity-boundary/) | complete; awaiting archival | Removes stale physical-placement fields from the current fulfillment path and derives fulfillment shape from committed reservation dimensions. Also serves Goal 2 | Proven by a green e2e run on 2026-09-14. Its one deferral, retiring the `vm_remove_job_id` mirror, is owned by `retire-vm-remove-job-id` below |
 | [`retire-vm-remove-job-id`](retire-vm-remove-job-id/) | planned; depends on `fix-vm-fulfillment-capacity-boundary` | Retires `capacity_reservations.vm_remove_job_id`, a VM-conditional mirror of `release_job_id` and the one domain-prefixed column on a reservation table bare-metal pools share. Scoped to the mirror only: the legacy `vm_leases` column the backfill reads and the storefront's own column are out of scope. Carries a wire decision, since the field is on a published lease model |
 
@@ -158,15 +158,15 @@ held is now owned by `repair-storefront-alkahest-configuration` above.
 ## Roadmap goal — Sell capacity the marketplace cannot admit against
 
 ```text
-capacity-resource-administration ──► project-capacity-resources-without-hosts ──┐
+unify-host-identity (archived) ──► capacity-resource-administration (archived) ──► project-capacity-resources-without-hosts ──┐
 settle-listing-vocabulary (archived) ─────────────────────────────────────┤
 pool-declared-advertisement-and-backing ────────────────────────────────────────┴──► unbacked-listing-publication ──► publish-indicative-listing-rates
 ```
 
-`capacity-resource-administration` is a Goal 7 prerequisite and was groomed for it
-(2026-09-09): digest-gated capacity-definition import, a planned
-composition-supplied mirror dimension, and a drain invariant forbidding a capacity
-resource from moving pools under a live obligation.
+`capacity-resource-administration`, a Goal 7 prerequisite archived 2026-09-21,
+delivered what Goal 7 relies on: digest-gated capacity-definition import, a composition-supplied mirror
+dimension, and a drain invariant forbidding a capacity resource from moving pools
+under a live obligation.
 `pools-9-retire-local-physical-authority` depends on that invariant too — its
 two-pool executor-migration path has the same hazard.
 
@@ -193,7 +193,7 @@ advertisement change's subset rule depend on a concept its own dependent owned.
 |---|---|---|
 | [`settle-listing-vocabulary`](archive/2026-09-15-settle-listing-vocabulary/) | **archived** 2026-09-15 | One name for the offering mode across the claim wire, pool declarations, the durable binding, and the published listing. Provisioning contract on 2.0 with majors {2}; the registry refuses the retired spellings at the publish boundary, not only in its dry run; the deprecated `listing_mode` cardinality alias is retained one-way and proven across deployed services. Closed on a green end-to-end run of 113 passed following the `filter-spec` v6 bump |
 | [`pool-declared-advertisement-and-backing`](pool-declared-advertisement-and-backing/) | active; no blocking dependency | Two pool declarations: what a pool's listings may advertise, separate from what its provider proves it can deliver; and whether the pool can be admitted against. A backed pool's advertisable set is constrained to a subset of its deliverable set, a malformed backing value fails closed, and both are derived for every existing pool on upgrade. Leaves `deliverable_modes` and every execution recheck untouched. Observable to operators only — no listing behaviour changes until `unbacked-listing-publication` reads the tags |
-| [`project-capacity-resources-without-hosts`](project-capacity-resources-without-hosts/) | blocked on `capacity-resource-administration` | Inverts the resource-pool projection to iterate declared capacity resources and correlate host rows in, so a declaration with no executor host reaches storefronts instead of succeeding into a void. Also serves Goal 1 |
+| [`project-capacity-resources-without-hosts`](project-capacity-resources-without-hosts/) | ready to plan; its dependency `capacity-resource-administration` is archived | Inverts the resource-pool projection to iterate declared capacity resources and correlate host rows in, so a declaration with no executor host reaches storefronts instead of succeeding into a void. Also serves Goal 1 |
 | [`unbacked-listing-publication`](unbacked-listing-publication/) | blocked on the three above, plus a completion dependency on `pools-9-retire-local-physical-authority` | Backing as an explicit declared listing property: a tagged union over admission provenance, a binding discriminator distinct from the listing's origin site, pool advertise-authorization separated from execute-authorization, capacity-availability reconciliation scoped to backed listings while source-publication reconciliation applies to all, and an exact backing filter in the compute registry schema |
 | [`publish-indicative-listing-rates`](publish-indicative-listing-rates/) | blocked on `unbacked-listing-publication`; design-complete | A seller's asking rate for a listing's advertised shape as a frozen three-part object — decimal-text amount, opaque asset, `hour` period — declared at the listing's origin pool, with no storefront default reaching another origin. Filters match the period and asset rather than normalizing across either. Normatively a listing attribute rather than a settlement option rate: nothing is constructed from it. Carries two generic filter-engine primitives it cannot work without: an exact-decimal declared value type and declarative filter co-requirements. Closes Goal 7's comparison gap |
 

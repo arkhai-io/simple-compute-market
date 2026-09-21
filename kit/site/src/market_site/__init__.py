@@ -32,5 +32,19 @@ from .ledger import (  # noqa: F401
     resource_satisfies_requirement,
     SettlementAbandonmentHook,
     UndeclaredOfferingModeError,
+    UnknownPoolError,
+)
+from .declarations import (  # noqa: F401
+    CapacityDeclaration,
+    CapacityDeclarationFields,
+)
+from .capacity_definitions import (  # noqa: F401
+    CapacityDefinitionProblem,
+    CapacityDefinitionsDiff,
+    CapacityDefinitionsImportRequest,
+    CapacityDefinitionsImportResponse,
+    CapacityDefinitionsOutcome,
+    parse_capacity_definitions,
+    reconcile_capacity_definitions_in_session,
 )
 from .router import make_capacity_router  # noqa: F401

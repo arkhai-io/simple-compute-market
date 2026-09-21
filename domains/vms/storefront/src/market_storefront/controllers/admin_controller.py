@@ -1134,7 +1134,9 @@ class AdminController:
             provider_id=body.provider_id,
             provider_lease_id=body.provider_lease_id,
             provider_resource_id=body.resource_id,
-            vm_host=body.vm_host,
+            # The usage record's host column predates the host's one name;
+            # the record is local bookkeeping that carries the value as given.
+            vm_host=body.host_id,
             vm_target=body.vm_target,
             lease_end_utc=body.lease_end_utc,
         )

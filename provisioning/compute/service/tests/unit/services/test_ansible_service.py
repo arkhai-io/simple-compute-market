@@ -10,6 +10,8 @@ wrappers and are exercised in integration tests against a mock boundary.
 from __future__ import annotations
 
 import json
+import re
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -44,7 +46,7 @@ def _make_service(
 
 def _base_params(**overrides) -> AnsibleJobParams:
     defaults = dict(
-        vm_host="kvm1",
+        host_id="kvm1",
         vm_target="test-vm",
         vm_action="create",
         offering_mode="vm",
@@ -76,7 +78,7 @@ def _lines(yaml_str: str) -> dict[str, str]:
 class TestBuildVmVarsRequired:
     def test_vm_host_always_present(self):
         svc = _make_service()
-        assert "vm_host: kvm1" in _build(svc)
+        assert "host_id: kvm1" in _build(svc)
 
     def test_vm_action_always_present(self):
         svc = _make_service()
@@ -90,7 +92,7 @@ class TestBuildVmVarsRequired:
         svc = _make_service()
         yaml = svc._build_vm_vars(
             AnsibleJobParams(
-                vm_host="kvm1",
+                host_id="kvm1",
                 vm_target=None,
                 vm_action="list",
                 offering_mode="vm",
@@ -195,7 +197,7 @@ class TestBuildVmVarsCreate:
         svc = _make_service()
         yaml = _build(
             svc,
-            vm_host="bm-node-1",
+            host_id="bm-node-1",
             vm_target="bm-node-1",
             vm_action=NODE_GRANT_ACCESS_ACTION,
             escrow_uid="0xbm",
@@ -217,7 +219,7 @@ class TestBuildVmVarsCreate:
         svc = _make_service()
         yaml = _build(
             svc,
-            vm_host="bm-node-1",
+            host_id="bm-node-1",
             vm_action=NODE_GRANT_ACCESS_ACTION,
             offering_mode="bare_metal",
             executor_action=NODE_GRANT_ACCESS_ACTION,
@@ -296,7 +298,7 @@ class TestExtractSshPort:
     def test_extracts_from_ssh_command_with_host(self):
         svc = _make_service()
         output = "ssh -i key -p 2222 root@kvm1"
-        assert svc._extract_ssh_port(output, vm_host="kvm1") == "2222"
+        assert svc._extract_ssh_port(output, host_id="kvm1") == "2222"
 
     def test_fallback_to_generic_pattern_without_host(self):
         svc = _make_service()
@@ -306,7 +308,7 @@ class TestExtractSshPort:
     def test_json_field_takes_precedence_over_ssh_command(self):
         svc = _make_service()
         output = '"external_ssh_port": "1111" and also ssh -p 2222 root@kvm1'
-        assert svc._extract_ssh_port(output, vm_host="kvm1") == "1111"
+        assert svc._extract_ssh_port(output, host_id="kvm1") == "1111"
 
     def test_returns_none_when_no_port_found(self):
         svc = _make_service()
@@ -331,12 +333,12 @@ class TestExtractTenantUser:
     def test_extracts_from_ssh_command_with_host(self):
         svc = _make_service()
         output = "ssh -p 2222 myuser@kvm1"
-        assert svc._extract_tenant_user(output, vm_host="kvm1") == "myuser"
+        assert svc._extract_tenant_user(output, host_id="kvm1") == "myuser"
 
     def test_json_field_takes_precedence(self):
         svc = _make_service()
         output = '"tenant_user": "fromjson" and ssh -p 22 fromcmd@kvm1'
-        assert svc._extract_tenant_user(output, vm_host="kvm1") == "fromjson"
+        assert svc._extract_tenant_user(output, host_id="kvm1") == "fromjson"
 
     def test_returns_none_when_no_user_found(self):
         svc = _make_service()
@@ -433,16 +435,16 @@ class TestExtractAnsibleJson:
 
 
 # ---------------------------------------------------------------------------
-# public_host -- tenant-facing advertised SSH host (distinct from kvm_host)
+# public_host -- tenant-facing advertised SSH host (distinct from ssh_host)
 # ---------------------------------------------------------------------------
 
 
 class _FakeHost:
     """Stands in for a Host row; carries every attribute the renderer reads."""
 
-    def __init__(self, name, kvm_host, public_host=None, ssh_port=22):
-        self.name = name
-        self.kvm_host = kvm_host
+    def __init__(self, host_id, ssh_host, public_host=None, ssh_port=22):
+        self.host_id = host_id
+        self.ssh_host = ssh_host
         self.public_host = public_host
         self.ssh_user = "ubuntu"
         self.ssh_port = ssh_port
@@ -482,9 +484,9 @@ class TestPublicHostConnection:
             process_id=123,
         )
         parsed = svc.parse_playbook_result(
-            result, _base_params(vm_host="kvm1"), public_host="203.0.113.9"
+            result, _base_params(host_id="kvm1"), public_host="203.0.113.9"
         )
-        assert parsed.vm_host_ip == "203.0.113.9"
+        assert parsed.host_ip == "203.0.113.9"
         assert parsed.ssh_command == "ssh -i <your_private_key> -p 9000 tenantx@203.0.113.9"
 
 
@@ -576,3 +578,42 @@ class TestStreamingDebugLoggingIsRedacted:
         debug_records = [r.getMessage() for r in caplog.records if r.levelno == logging.DEBUG]
         assert any("ansible stdout" in m for m in debug_records), debug_records
         assert not any("aB3xY9zQ1mK7pL2n" in m for m in debug_records), debug_records
+
+
+# ---------------------------------------------------------------------------
+# Host variable contract between the adapter and the playbooks
+# ---------------------------------------------------------------------------
+
+_ANSIBLE_ROOT = (
+    Path(__file__).resolve().parents[6] / "domains/vms/provisioning/iac/ansible"
+)
+
+
+class TestHostVariableContract:
+    """The adapter renders the host as ``host_id`` and every playbook reads it.
+
+    Both playbooks default an unset host variable to ``localhost``, so a
+    playbook reading a name the adapter no longer renders would run against
+    the provisioner itself rather than fail. Pinning both ends is what keeps a
+    rename from degrading into that.
+    """
+
+    def test_the_rendered_vars_name_the_host_host_id(self):
+        lines = _make_service()._build_builtin_var_lines(_base_params(host_id="kvm7"))
+        assert "host_id: kvm7" in lines
+        assert not any(line.startswith("vm_host") for line in lines)
+
+    def test_host_id_is_a_reserved_builtin(self):
+        assert "host_id" in _make_service().reserved_var_keys(_base_params())
+
+    def test_the_vm_playbook_targets_host_id(self):
+        text = (_ANSIBLE_ROOT / "playbooks/single-tenant/vm-operations.yaml").read_text()
+        assert "target_host: \"{{ host_id | default('localhost') }}\"" in text
+        assert not re.search(r"\bvm_host\b", text)
+
+    def test_the_bare_metal_playbook_targets_host_id(self):
+        playbook = (_ANSIBLE_ROOT / "playbooks/bare-metal/node-access.yaml").read_text()
+        role = (_ANSIBLE_ROOT / "roles/bare-metal-access/tasks/main.yml").read_text()
+        assert "default(host_id | default('localhost'))" in playbook
+        assert not re.search(r"\b(vm_host|machine_id)\b", playbook)
+        assert not re.search(r"\bmachine_id\b", role)

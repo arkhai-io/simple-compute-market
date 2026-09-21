@@ -23,59 +23,113 @@ def _session_for(host):
 
 def _host():
     return SimpleNamespace(
-        name="compute-kvm1-001",
+        host_id="compute-kvm1-001",
         pool_id="gpu-pool",
         gpu_count=8,
         gpu_model=None,
         public_host="203.0.113.10",
-        kvm_host="10.0.0.10",
+        ssh_host="10.0.0.10",
         enabled=True,
     )
 
 
-def test_load_capacity_resource_inventory_projects_allowlisted_host_fields():
-    host = _host()
-    session = _session_for(host)
+def _declaration(**overrides):
+    declaration = {
+        "resource_id": "listing-1",
+        "pool_id": "gpu-pool",
+        "resource_type": "compute.gpu",
+        "resource_subtype": "h200",
+        "host_id": "compute-kvm1-001",
+        "capacity": {"gpu_count": 2, "ram_gb": 256},
+        "available": {"gpu_count": 1, "ram_gb": 256},
+        "attributes": {"gpu_model": "H200", "region": "us-west"},
+        "enabled": True,
+    }
+    declaration.update(overrides)
+    return declaration
 
-    result = load_capacity_resource_inventory(lambda: session)
+
+def test_a_host_no_declaration_names_is_not_projected():
+    """A host's own gpu_count is legacy connection data, not a declaration;
+    with nothing declared there is nothing to report."""
+    session = _session_for(_host())
+
+    assert load_capacity_resource_inventory(lambda: session) == []
+    assert load_capacity_resource_inventory(
+        lambda: session,
+        capacity_resources=[_declaration(host_id="some-other-host")],
+    ) == []
+
+
+def test_a_declared_host_projects_the_declaration_and_its_connection_fields():
+    """Capacity, availability, and attributes all come from the declaration,
+    even where the host row disagrees (it says 8 GPUs and no model)."""
+    session = _session_for(_host())
+
+    result = load_capacity_resource_inventory(
+        lambda: session, capacity_resources=[_declaration()]
+    )
 
     assert result == [
         {
-            "resource_id": "compute-kvm1-001",
+            "resource_id": "listing-1",
             "pool_id": "gpu-pool",
             "resource_type": "compute.gpu",
-            "resource_subtype": None,
-            "capacity": {"gpu_count": 8},
+            "resource_subtype": "h200",
+            "capacity": {"gpu_count": 2, "ram_gb": 256},
+            "available": {"gpu_count": 1, "ram_gb": 256},
             "attributes": {
-                "vm_host": "compute-kvm1-001",
+                "gpu_model": "H200",
+                "region": "us-west",
+                "host_id": "compute-kvm1-001",
                 "public_host": "203.0.113.10",
-                "gpu_count": 8,
             },
             "enabled": True,
         }
     ]
 
 
-def test_load_capacity_resource_inventory_includes_gpu_model_when_set():
+def test_a_declaration_cannot_override_how_its_host_is_reached():
+    """Registration refuses a host_id attribute, but a stored row may predate
+    that; the host's connection fields are written last either way."""
+    session = _session_for(_host())
+
+    (projected,) = load_capacity_resource_inventory(
+        lambda: session,
+        capacity_resources=[_declaration(attributes={
+            "gpu_model": "H200",
+            "public_host": "198.51.100.1",
+            "host_id": "elsewhere",
+        })],
+    )
+
+    assert projected["attributes"]["public_host"] == "203.0.113.10"
+    assert projected["attributes"]["host_id"] == "compute-kvm1-001"
+
+
+def test_no_gpu_model_is_projected_unless_declared():
     host = _host()
     host.gpu_model = "H100"
     session = _session_for(host)
 
-    result = load_capacity_resource_inventory(lambda: session)
+    (projected,) = load_capacity_resource_inventory(
+        lambda: session, capacity_resources=[_declaration(attributes={})]
+    )
 
-    assert result[0]["attributes"]["gpu_model"] == "H100"
+    assert "gpu_model" not in projected["attributes"]
+    assert "gpu_count" not in projected["attributes"]
 
 
-def test_load_capacity_resource_inventory_omits_gpu_model_when_unset():
-    """A host with no recorded GPU model must not project an empty/null
-    gpu_model key -- absence, not a null placeholder."""
+def test_a_disabled_host_projects_its_declaration_disabled():
     host = _host()
-    assert host.gpu_model is None
+    host.enabled = False
     session = _session_for(host)
 
-    result = load_capacity_resource_inventory(lambda: session)
+    (projected,) = load_capacity_resource_inventory(
+        lambda: session, capacity_resources=[_declaration()]
+    )
 
-    assert "gpu_model" not in result[0]["attributes"]
+    assert projected["enabled"] is False
 
 
 def test_bare_metal_view_uses_explicit_identities_and_same_generation_availability():
@@ -88,12 +142,12 @@ def test_bare_metal_view_uses_explicit_identities_and_same_generation_availabili
         "capacity": {"gpu_count": 8, "ram_gb": 512},
         "available": {"gpu_count": 8, "ram_gb": 512},
         "enabled": True,
+        "host_id": "compute-kvm1-001",
         "attributes": {
+            "physical_host_id": "physical-host-1",
+            "allocation_mode": "exclusive",
             "bare_metal_publication": {
                 "enabled": True,
-                "physical_host_id": "physical-host-1",
-                "machine_id": "compute-kvm1-001",
-                "allocation_mode": "exclusive",
                 "access_methods": ["ssh"],
                 "capabilities": {"gpu_model": "H200", "ram_gb": 512},
                 "provider_config": {"ignored": "not projected"},
@@ -106,12 +160,12 @@ def test_bare_metal_view_uses_explicit_identities_and_same_generation_availabili
         capacity_resources=[resource],
     )
 
-    view = result[0]["publication_views"]["bare_metal.v1"]
+    view = result[0]["publication_views"]["bare_metal.v2"]
     assert view == {
         "physical_resource_id": "physical-resource-1",
         "pool_id": "gpu-pool",
         "physical_host_id": "physical-host-1",
-        "machine_id": "compute-kvm1-001",
+        "host_id": "compute-kvm1-001",
         "available": True,
         "allocation_mode": "exclusive",
         "access_methods": ["ssh"],
@@ -131,12 +185,12 @@ def test_bare_metal_view_becomes_unavailable_when_any_dimension_is_held():
         "capacity": {"gpu_count": 8, "ram_gb": 512},
         "available": {"gpu_count": 7, "ram_gb": 512},
         "enabled": True,
+        "host_id": "compute-kvm1-001",
         "attributes": {
+            "physical_host_id": "physical-host-1",
+            "allocation_mode": "exclusive",
             "bare_metal_publication": {
                 "enabled": True,
-                "physical_host_id": "physical-host-1",
-                "machine_id": "compute-kvm1-001",
-                "allocation_mode": "exclusive",
                 "access_methods": ["ssh"],
             },
         },
@@ -147,37 +201,45 @@ def test_bare_metal_view_becomes_unavailable_when_any_dimension_is_held():
         capacity_resources=[resource],
     )
 
-    assert result[0]["publication_views"]["bare_metal.v1"]["available"] is False
+    assert result[0]["publication_views"]["bare_metal.v2"]["available"] is False
 
 
 @pytest.mark.parametrize(
-    "publication_config",
+    ("host_id", "publication_config"),
     [
-        {
-            "enabled": True,
-            "physical_host_id": "physical-host-1",
-            "allocation_mode": "exclusive",
-            "access_methods": ["ssh"],
-        },
-        {
-            "enabled": True,
-            "physical_host_id": "physical-host-1",
-            "machine_id": "compute-kvm1-001",
-            "allocation_mode": "exclusive",
-            "access_methods": ["ssh"],
-            "capabilities": {"service_url": "https://private.invalid"},
-        },
+        # An enabled publication on a resource that names no host.
+        (
+            None,
+            {
+                "enabled": True,
+                "access_methods": ["ssh"],
+            },
+        ),
+        # A publication exposing a capability that is not allowlisted.
+        (
+            "compute-kvm1-001",
+            {
+                "enabled": True,
+                "access_methods": ["ssh"],
+                "capabilities": {"service_url": "https://private.invalid"},
+            },
+        ),
     ],
 )
-def test_invalid_or_private_bare_metal_view_fails_closed(publication_config):
+def test_invalid_or_private_bare_metal_view_fails_closed(host_id, publication_config):
     host = _host()
     session = _session_for(host)
     resource = {
         "resource_id": "physical-resource-1",
         "pool_id": "gpu-pool",
+        "host_id": host_id,
         "capacity": {"gpu_count": 8},
         "available": {"gpu_count": 8},
-        "attributes": {"bare_metal_publication": publication_config},
+        "attributes": {
+            "physical_host_id": "physical-host-1",
+            "allocation_mode": "exclusive",
+            "bare_metal_publication": publication_config,
+        },
     }
 
     with pytest.raises(ValueError):
@@ -365,3 +427,45 @@ def test_load_capacity_pool_metadata_ignores_stale_ansible_config_for_non_ansibl
 
     assert result["gpu-pool"]["mechanism"] == "k8s"
     assert "pool_views" not in result["gpu-pool"]
+
+
+def test_the_bare_metal_view_reads_the_declaration_the_projection_reads():
+    """The view and the resource share one declaration: its capacity and
+    availability decide whole-machine availability, and the publication
+    configuration is published only as the view, never as an attribute."""
+    session = _session_for(_host())
+    publication = {"enabled": True, "access_methods": ["ssh"], "capabilities": {}}
+    declaration = _declaration(
+        resource_id="physical-resource-1",
+        capacity={"gpu_count": 8},
+        available={"gpu_count": 7},
+        attributes={
+            "physical_host_id": "physical-host-1",
+            "allocation_mode": "exclusive",
+            "bare_metal_publication": publication,
+        },
+    )
+
+    (projected,) = load_capacity_resource_inventory(
+        lambda: session, capacity_resources=[declaration]
+    )
+
+    view = projected["publication_views"]["bare_metal.v2"]
+    assert view["capacity"] == projected["capacity"] == {"gpu_count": 8}
+    assert view["available"] is False, "one GPU is held, so the machine is not whole"
+    assert "bare_metal_publication" not in projected["attributes"]
+    assert projected["attributes"]["physical_host_id"] == "physical-host-1"
+
+
+def test_unreported_availability_is_not_projected_as_zero():
+    """A present ``available`` is read downstream as live availability, so a
+    declaration that reports none must project none."""
+    session = _session_for(_host())
+    declaration = _declaration()
+    del declaration["available"]
+
+    (projected,) = load_capacity_resource_inventory(
+        lambda: session, capacity_resources=[declaration]
+    )
+
+    assert "available" not in projected

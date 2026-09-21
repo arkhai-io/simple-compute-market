@@ -116,7 +116,7 @@ async def build_provisioning_job_spec(
     make_vm_target = vm_target_factory or (lambda: f"tenant-{uuid.uuid4().hex[:4]}")
     return {
         "resource_id": str(selected["resource_id"]),
-        "vm_host": selected["vm_host"],
+        "host_id": selected["host_id"],
         "vm_target": make_vm_target(),
         "required_attributes": capacity_claim,
         "ssh_public_key": ssh_public_key,

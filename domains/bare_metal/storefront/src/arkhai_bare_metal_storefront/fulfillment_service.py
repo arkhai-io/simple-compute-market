@@ -130,7 +130,7 @@ class BareMetalFulfillmentService:
         if terms is None:
             raise BareMetalFulfillmentError("accepted bare-metal terms are missing")
         if (
-            terms.machine_id != context["machine_id"]
+            terms.host_id != context["host_id"]
             or terms.physical_host_id != context["physical_host_id"]
         ):
             raise BareMetalFulfillmentError(
@@ -210,7 +210,7 @@ class BareMetalFulfillmentService:
             if (
                 not isinstance(publication, dict)
                 or publication.get("enabled") is not True
-                or publication.get("machine_id") != terms.machine_id
+                or publication.get("host_id") != terms.host_id
                 or publication.get("physical_host_id") != terms.physical_host_id
             ):
                 raise BareMetalFulfillmentError(
@@ -233,7 +233,7 @@ class BareMetalFulfillmentService:
         )
         expected_materialization = BareMetalMaterialization(
             escrow_uid=escrow_uid,
-            machine_id=terms.machine_id,
+            host_id=terms.host_id,
             physical_host_id=terms.physical_host_id,
             lease_start_utc=materialization_start,
             lease_end_utc=materialization_start
@@ -261,7 +261,7 @@ class BareMetalFulfillmentService:
                 capacity_reservation_id=str(reservation_id),
                 market="bare_metal",
                 fulfillment_request=VersionedEnvelope(
-                    kind="bare_metal.v1",
+                    kind="bare_metal.v2",
                     schema_version=1,
                     payload=materialization.model_dump(
                         mode="json",
@@ -305,7 +305,7 @@ class BareMetalFulfillmentService:
             ) from exc
         if (
             domain_envelope.kind != "bare_metal.fulfillment.result.v1"
-            or domain_envelope.schema_version != 1
+            or domain_envelope.schema_version != 2
         ):
             raise BareMetalFulfillmentError(
                 "provisioning returned an unsupported bare-metal result envelope"
@@ -400,7 +400,7 @@ class BareMetalFulfillmentService:
                 negotiation_id=negotiation_id,
                 receipt=BareMetalReceipt(
                     escrow_uid=materialization.escrow_uid,
-                    machine_id=materialization.machine_id,
+                    host_id=materialization.host_id,
                     physical_host_id=materialization.physical_host_id,
                     lease_start_utc=materialization.lease_start_utc,
                     lease_end_utc=materialization.lease_end_utc,

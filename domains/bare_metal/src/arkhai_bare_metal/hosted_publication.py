@@ -94,7 +94,7 @@ def build_ready_bare_metal_hosted_options(
         "projection_revision",
         "projection_digest",
         "physical_resource_id",
-        "machine_id",
+        "host_id",
         "physical_host_id",
     }
     missing = sorted(
@@ -104,7 +104,7 @@ def build_ready_bare_metal_hosted_options(
         raise ValueError(
             "trusted bare-metal candidate is missing " + ", ".join(missing)
         )
-    if listing.machine_id != str(candidate["machine_id"]):
+    if listing.host_id != str(candidate["host_id"]):
         raise ValueError(
             "candidate machine identity conflicts with its trusted listing"
         )

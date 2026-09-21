@@ -22,7 +22,9 @@ SSH key handling
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from collections.abc import Sequence
+from contextlib import AbstractContextManager
+from typing import Optional, Protocol
 
 from market_config import decrypt_secret, encrypt_secret
 from sqlalchemy.orm import Session, sessionmaker
@@ -41,15 +43,42 @@ _DEFAULT_KEY_PATH = "/home/appuser/.ssh/id_ed25519"
 
 
 class HostNotFoundError(Exception):
-    """Raised when a requested host name does not exist in the DB."""
+    """Raised when a requested host_id does not exist in the DB."""
+
+
+class HostCapacityDerivation(Protocol):
+    """Derives capacity declarations from hosts' legacy capacity.
+
+    Supplied by the composition root. Host inventory is connection identity;
+    what a site sells is declared elsewhere, so this service applies INI
+    hosts and leaves deciding their declarations to the port.
+    """
+
+    def serialized(self) -> AbstractContextManager[None]:
+        """The capacity authority's serialization lock. Held around the whole
+        transaction a derivation writes into, through its commit."""
+        ...
+
+    def derive_in_session(
+        self, db: Session, host_ids: Sequence[str] | None = None
+    ) -> Sequence[str]:
+        """Derive declarations for ``host_ids`` inside ``db``'s transaction."""
+        ...
 
 
 class HostService:
     """CRUD operations and inventory helpers for the ``hosts`` table."""
 
-    def __init__(self, session_factory: sessionmaker[Session], settings) -> None:
+    def __init__(
+        self,
+        session_factory: sessionmaker[Session],
+        settings,
+        *,
+        capacity_derivation: "HostCapacityDerivation",
+    ) -> None:
         self._session_factory = session_factory
         self._settings = settings
+        self._capacity_derivation = capacity_derivation
 
     # ------------------------------------------------------------------
     # Queries
@@ -63,7 +92,7 @@ class HostService:
         """Return hosts from the DB, optionally filtered.
 
         Args:
-            search: Case-insensitive substring filter on ``name``.
+            search: Case-insensitive substring filter on ``host_id``.
             enabled_only: When True (default) only ``enabled=True`` rows are returned.
         """
         with self._session_factory() as db:
@@ -71,24 +100,24 @@ class HostService:
             if enabled_only:
                 q = q.filter(Host.enabled.is_(True))
             if search:
-                q = q.filter(Host.name.ilike(f"%{search}%"))
-            hosts = q.order_by(Host.name).all()
+                q = q.filter(Host.host_id.ilike(f"%{search}%"))
+            hosts = q.order_by(Host.host_id).all()
             for h in hosts:
                 db.expunge(h)
             return hosts
 
-    def get_host(self, name: str) -> Optional[Host]:
-        """Return the host row for *name*, or ``None`` if not found."""
+    def get_host(self, host_id: str) -> Optional[Host]:
+        """Return the host row for *host_id*, or ``None`` if not found."""
         with self._session_factory() as db:
-            host = db.query(Host).filter(Host.name == name).one_or_none()
+            host = db.query(Host).filter(Host.host_id == host_id).one_or_none()
             if host is not None:
                 db.expunge(host)
             return host
 
-    def _require_host(self, db: Session, name: str) -> Host:
-        host = db.query(Host).filter(Host.name == name).one_or_none()
+    def _require_host(self, db: Session, host_id: str) -> Host:
+        host = db.query(Host).filter(Host.host_id == host_id).one_or_none()
         if host is None:
-            raise HostNotFoundError(f"Host '{name}' not found")
+            raise HostNotFoundError(f"Host '{host_id}' not found")
         return host
 
     def _require_pool_exists(self, db: Session, pool_id: str) -> None:
@@ -120,8 +149,8 @@ class HostService:
         pool_id = data.pool_id or DEFAULT_POOL_ID
 
         host = Host(
-            name=data.name,
-            kvm_host=data.kvm_host,
+            host_id=data.host_id,
+            ssh_host=data.ssh_host,
             public_host=data.public_host,
             ssh_user=data.ssh_user,
             ssh_port=data.ssh_port,
@@ -140,7 +169,7 @@ class HostService:
             db.expunge(host)
             return host
 
-    def update_host(self, name: str, data: HostUpdate) -> Host:
+    def update_host(self, host_id: str, data: HostUpdate) -> Host:
         """Update mutable fields on an existing host.
 
         If ``ssh_key_type`` is changed to ``'embedded'`` and
@@ -149,10 +178,10 @@ class HostService:
         the current ``ssh_key_type`` determines whether to encrypt.
         """
         with self._session_factory() as db:
-            host = self._require_host(db, name)
+            host = self._require_host(db, host_id)
 
-            if data.kvm_host is not None:
-                host.kvm_host = data.kvm_host
+            if data.ssh_host is not None:
+                host.ssh_host = data.ssh_host
             if data.public_host is not None:
                 host.public_host = data.public_host
             if data.ssh_user is not None:
@@ -172,7 +201,7 @@ class HostService:
                 # cannot follow and their buyers hold the old address.
                 check_host_pool_change(
                     db,
-                    host_name=host.name,
+                    host_id=host.host_id,
                     current_pool_id=host.pool_id,
                     new_pool_id=data.pool_id,
                 )
@@ -193,24 +222,24 @@ class HostService:
             db.expunge(host)
             return host
 
-    def enable_host(self, name: str) -> Host:
-        """Set ``enabled=True`` on *name*."""
+    def enable_host(self, host_id: str) -> Host:
+        """Set ``enabled=True`` on *host_id*."""
         with self._session_factory() as db:
-            host = self._require_host(db, name)
+            host = self._require_host(db, host_id)
             host.enabled = True
             db.commit()
             db.refresh(host)
             db.expunge(host)
             return host
 
-    def disable_host(self, name: str) -> Host:
-        """Set ``enabled=False`` on *name*.
+    def disable_host(self, host_id: str) -> Host:
+        """Set ``enabled=False`` on *host_id*.
 
         Hosts are never hard-deleted so that job history references
-        (``vm_host`` name) remain resolvable.
+        (``host_id``) remain resolvable.
         """
         with self._session_factory() as db:
-            host = self._require_host(db, name)
+            host = self._require_host(db, host_id)
             host.enabled = False
             db.commit()
             db.refresh(host)
@@ -228,6 +257,12 @@ class HostService:
         inserted or updated; hosts absent from the INI are not touched.
         This is safe to call repeatedly — it is idempotent for the same
         input.
+
+        The capacity-derivation port runs for the upserted hosts in the same
+        transaction, declaring capacity for any host whose legacy
+        ``gpu_count`` would otherwise sell nothing. It only adds: a host a
+        declaration already names keeps that declaration, whatever the INI
+        now says.
 
         The INI is expected to contain ``[kvm_hosts]`` and/or
         ``[bare_metal_nodes]`` groups.  Lines in other groups or without a
@@ -248,7 +283,7 @@ class HostService:
             return []
 
         upserted_names: list[str] = []
-        with self._session_factory() as db:
+        with self._capacity_derivation.serialized(), self._session_factory() as db:
             for entry in parsed:
                 key_value = entry["ansible_ssh_private_key_file"]
 
@@ -257,10 +292,10 @@ class HostService:
                     raw = Path(key_value).read_text(encoding="utf-8")
                     key_value = encrypt_secret(raw, self._settings.ssh_decryption_key)
 
-                existing = db.query(Host).filter(Host.name == entry["name"]).one_or_none()
+                existing = db.query(Host).filter(Host.host_id == entry["host_id"]).one_or_none()
                 if existing is not None:
                     self._require_pool_exists(db, entry["pool_id"])
-                    existing.kvm_host = entry["kvm_host"]
+                    existing.ssh_host = entry["ssh_host"]
                     existing.public_host = entry["public_host"]
                     existing.ssh_user = entry["ssh_user"]
                     existing.ssh_port = entry["ssh_port"]
@@ -272,8 +307,8 @@ class HostService:
                 else:
                     self._require_pool_exists(db, entry["pool_id"])
                     db.add(Host(
-                        name=entry["name"],
-                        kvm_host=entry["kvm_host"],
+                        host_id=entry["host_id"],
+                        ssh_host=entry["ssh_host"],
                         public_host=entry["public_host"],
                         ssh_user=entry["ssh_user"],
                         ssh_port=entry["ssh_port"],
@@ -285,8 +320,13 @@ class HostService:
                         pool_id=entry["pool_id"],
                     ))
 
-                upserted_names.append(entry["name"])
+                upserted_names.append(entry["host_id"])
 
+            # Same transaction as the upsert: a host applied from INI and the
+            # declaration derived from its legacy capacity land together, so
+            # a crash cannot leave a seeded host the skip-if-non-empty startup
+            # seed would then never revisit.
+            self._capacity_derivation.derive_in_session(db, upserted_names)
             db.commit()
 
         # Re-query after the session closes so callers receive fully-loaded,
@@ -295,7 +335,7 @@ class HostService:
         upserted = []
         with self._session_factory() as db:
             for name in upserted_names:
-                host = db.query(Host).filter(Host.name == name).one_or_none()
+                host = db.query(Host).filter(Host.host_id == name).one_or_none()
                 if host is not None:
                     db.expunge(host)
                     upserted.append(host)
@@ -331,15 +371,15 @@ class HostService:
             if host.ssh_key_type == "path":
                 key_ref = host.ssh_key_value
             else:
-                key_ref = f"__embedded_key_{host.name}__"
+                key_ref = f"__embedded_key_{host.host_id}__"
 
             # ansible_port is emitted for every host, including port 22.
             # The column is NOT NULL, so the registry always holds a port;
             # rendering it unconditionally means the INI states what the
             # registry holds rather than leaving 22 implied by an absent line.
             lines.append(
-                f"{host.name}"
-                f"  ansible_host={host.kvm_host}"
+                f"{host.host_id}"
+                f"  ansible_host={host.ssh_host}"
                 f"  ansible_port={host.ssh_port}"
                 f"  ansible_user={host.ssh_user}"
                 f"  ansible_ssh_private_key_file={key_ref}"
@@ -369,7 +409,7 @@ def _parse_ini(ini_text: str) -> list[dict]:
     skipped — they describe infrastructure that manages the provisioning
     service itself, not machines the provisioning service sells.
 
-    Returns a list of ``{"name", "kvm_host", "ssh_user", "ssh_port",
+    Returns a list of ``{"host_id", "ssh_host", "ssh_user", "ssh_port",
     "gpu_count", "gpu_model", "pool_id", "ansible_ssh_private_key_file"}``
     dicts. Entries missing ``ansible_host`` or ``ansible_user`` are skipped
     with a warning.
@@ -410,10 +450,10 @@ def _parse_ini(ini_text: str) -> list[dict]:
                 k, _, v = part.partition("=")
                 host_vars[k] = v
 
-        kvm_host = host_vars.get("ansible_host")
+        ssh_host = host_vars.get("ansible_host")
         ssh_user = host_vars.get("ansible_user")
 
-        if not kvm_host or not ssh_user:
+        if not ssh_host or not ssh_user:
             logger.warning(
                 "seed_from_ini: skipping '%s' — missing ansible_host or ansible_user",
                 name,
@@ -446,8 +486,8 @@ def _parse_ini(ini_text: str) -> list[dict]:
                 continue
 
         results.append({
-            "name": name,
-            "kvm_host": kvm_host,
+            "host_id": name,
+            "ssh_host": ssh_host,
             "public_host": host_vars.get("public_host"),
             "ssh_user": ssh_user,
             "ssh_port": ssh_port,

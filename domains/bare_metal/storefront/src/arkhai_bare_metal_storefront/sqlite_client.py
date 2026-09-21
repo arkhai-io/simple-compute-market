@@ -368,7 +368,7 @@ class SQLiteClient(CoreSQLiteClient):
             "site_id": site_id,
             "pool_id": pool_id,
             "physical_resource_id": physical_resource_id,
-            "machine_id": normalized.machine_id,
+            "host_id": normalized.host_id,
             "physical_host_id": normalized.physical_host_id,
         }
         binding = StorefrontListingBinding.from_source_envelope(
@@ -634,7 +634,7 @@ class SQLiteClient(CoreSQLiteClient):
                 "site_id": thread_binding.site_id,
                 "physical_resource_id": listing_binding.physical_resource_id,
                 "pool_id": listing_binding.pool_id,
-                "machine_id": listing.machine_id,
+                "host_id": listing.host_id,
                 "physical_host_id": listing.physical_host_id,
             }
         )

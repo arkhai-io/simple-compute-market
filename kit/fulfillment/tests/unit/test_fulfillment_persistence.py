@@ -202,7 +202,7 @@ def ledger_services(tmp_path):
     SiteBase.metadata.create_all(bind=engine)
     factory = sessionmaker(bind=engine)
     ledger = CapacityLedgerService(
-        factory, unit_claim_keys=("units", "gpu_count")
+        factory, unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count"
     )
 
     class _Handler:
@@ -361,7 +361,7 @@ def contended_ledger_services(tmp_path):
     PoolsBase.metadata.create_all(bind=engine)
     SiteBase.metadata.create_all(bind=engine)
     factory = sessionmaker(bind=engine)
-    ledger = CapacityLedgerService(factory, unit_claim_keys=("units", "gpu_count"))
+    ledger = CapacityLedgerService(factory, unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count")
 
     class _Handler:
         provider = "ansible"

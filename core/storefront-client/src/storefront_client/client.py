@@ -1211,7 +1211,7 @@ class StorefrontClient(_StorefrontClientBase):
         provider_id: "str | None" = None,
         provider_lease_id: "str | None" = None,
         resource_id: "str | None" = None,
-        vm_host: "str | None" = None,
+        host_id: "str | None" = None,
         vm_target: "str | None" = None,
         gpu_count: "int | None" = None,
         lease_end_utc: "str | None" = None,
@@ -1236,8 +1236,8 @@ class StorefrontClient(_StorefrontClientBase):
             body["provider_lease_id"] = provider_lease_id
         if resource_id is not None:
             body["resource_id"] = resource_id
-        if vm_host is not None:
-            body["vm_host"] = vm_host
+        if host_id is not None:
+            body["host_id"] = host_id
         if vm_target is not None:
             body["vm_target"] = vm_target
         if gpu_count is not None:
@@ -1708,7 +1708,7 @@ class StorefrontClient(_StorefrontClientBase):
         """POST /api/v1/admin/settle/{escrow_uid}/evaluate.
 
         Resolves a host from inventory and builds the job spec without chain reads,
-        DB writes, or provisioning calls. Returns dict with would_submit, vm_host,
+        DB writes, or provisioning calls. Returns dict with would_submit, host_id,
         vm_target, required_attributes. Used by e2e stage 8a.
         """
         body = {
@@ -2596,7 +2596,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
         provider_id: str | None = None,
         provider_lease_id: str | None = None,
         resource_id: str | None = None,
-        vm_host: str | None = None,
+        host_id: str | None = None,
         vm_target: str | None = None,
         gpu_count: int | None = None,
         lease_end_utc: str | None = None,
@@ -2612,7 +2612,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
             "provider_id": provider_id,
             "provider_lease_id": provider_lease_id,
             "resource_id": resource_id,
-            "vm_host": vm_host,
+            "host_id": host_id,
             "vm_target": vm_target,
             "gpu_count": gpu_count,
             "lease_end_utc": lease_end_utc,
@@ -3081,7 +3081,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
         """POST /api/v1/admin/settle/{escrow_uid}/evaluate.
 
         Resolves a host from inventory and builds the job spec without chain reads,
-        DB writes, or provisioning calls. Returns dict with would_submit, vm_host,
+        DB writes, or provisioning calls. Returns dict with would_submit, host_id,
         vm_target, required_attributes. Used by e2e stage 8a.
         """
         body = {

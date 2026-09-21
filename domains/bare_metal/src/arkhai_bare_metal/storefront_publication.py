@@ -47,7 +47,7 @@ def bare_metal_listing_candidates(
                     "projection_digest": projection.digest,
                     "physical_resource_id": resource.physical_resource_id,
                     "pool_id": resource.pool_id,
-                    "machine_id": listing.machine_id,
+                    "host_id": listing.host_id,
                     "physical_host_id": listing.physical_host_id,
                     "listing_resource": listing.model_dump(
                         mode="json",
@@ -149,7 +149,7 @@ def load_derived_bare_metal_listing(
         row = conn.execute(
             """
             SELECT d.listing_id, d.site_id, d.physical_resource_id,
-                   d.machine_id, d.physical_host_id, d.status,
+                   d.host_id, d.physical_host_id, d.status,
                    d.derivation_key, l.status AS listing_status
             FROM derived_bare_metal_listings d
             LEFT JOIN listings l ON l.listing_id = d.listing_id
@@ -166,7 +166,7 @@ def load_derived_bare_metal_listing(
         "listing_id",
         "site_id",
         "physical_resource_id",
-        "machine_id",
+        "host_id",
         "physical_host_id",
         "status",
         "derivation_key",
@@ -188,7 +188,7 @@ def record_derived_bare_metal_listing(
         conn.execute(
             """
             INSERT INTO derived_bare_metal_listings(
-              listing_id, site_id, physical_resource_id, machine_id,
+              listing_id, site_id, physical_resource_id, host_id,
               physical_host_id, status, derivation_key, last_reconciled_at
             )
             VALUES (?, ?, ?, ?, ?, ?, ?, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
@@ -196,7 +196,7 @@ def record_derived_bare_metal_listing(
               listing_id=excluded.listing_id,
               site_id=excluded.site_id,
               physical_resource_id=excluded.physical_resource_id,
-              machine_id=excluded.machine_id,
+              host_id=excluded.host_id,
               physical_host_id=excluded.physical_host_id,
               status=excluded.status,
               last_reconciled_at=excluded.last_reconciled_at
@@ -205,7 +205,7 @@ def record_derived_bare_metal_listing(
                 listing_id,
                 str(candidate["site_id"]),
                 str(candidate["physical_resource_id"]),
-                listing.machine_id,
+                listing.host_id,
                 listing.physical_host_id,
                 status,
                 str(candidate["derivation_key"]),

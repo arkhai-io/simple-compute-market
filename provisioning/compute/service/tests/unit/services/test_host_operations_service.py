@@ -12,8 +12,8 @@ from vm_provisioning_adapter.services.host_service import HostNotFoundError
 
 def _host() -> Host:
     return Host(
-        name="kvm1",
-        kvm_host="10.0.0.1",
+        host_id="kvm1",
+        ssh_host="10.0.0.1",
         public_host="host.example",
         ssh_user="ubuntu",
         ssh_key_type="path",
@@ -56,7 +56,7 @@ async def test_check_capacity_submits_check_job_to_resolved_queue():
 
     assert response.job_id == "job-1"
     params, queue = job_service.submit.await_args.args
-    assert params.vm_host == "kvm1"
+    assert params.host_id == "kvm1"
     assert params.vm_action == "check"
     assert params.vm_target is None
     assert params.max_retries == 2

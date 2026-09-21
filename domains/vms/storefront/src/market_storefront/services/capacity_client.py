@@ -62,6 +62,12 @@ a VM-domain package, so it is necessarily duplicated at this composition
 site.
 """
 
+VM_MIRROR_DIMENSION = "gpu_count"
+"""Must match the VM capacity authority's mirror dimension, for the same
+reason as ``VM_UNIT_CLAIM_KEYS``: a legacy single-quantity claim is
+translated into this dimension on both sides of the boundary.
+"""
+
 SQLiteClientFactory = Callable[[], Any]
 
 
@@ -196,6 +202,7 @@ def build_capacity_runtime_for(
             claim_matcher=functools.partial(
                 dict_resource_satisfies_claim,
                 unit_claim_keys=VM_UNIT_CLAIM_KEYS,
+                mirror_dimension=VM_MIRROR_DIMENSION,
             ),
         )
     db_path = str(getattr(sqlite_client_factory(), "db_path", ""))

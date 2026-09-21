@@ -21,6 +21,12 @@ from typing import AsyncIterator
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from market_site import CapacityLedgerService
+
+from compute_provisioning_service.services.capacity_derivation import (
+    LegacyHostCapacityDerivation,
+)
+
 from .conftest import (
     ADMIN_SIGNER,
     SERVICE_AUTHORITIES,
@@ -97,7 +103,7 @@ async def client_and_queue(
 ) -> AsyncIterator[tuple[ProvisioningClient, AsyncJobQueue, ProgrammableMockAnsibleService, AsyncProvisioningTestClient]]:
     _install_signed_asgi_transport(monkeypatch)
     mock_settings = MagicMock(
-        default_vm_host="kvm1",
+        default_host_id="kvm1",
         default_max_retries=3,
         retry_backoff_initial_seconds=60,
         retry_backoff_multiplier=2.0,
@@ -127,11 +133,21 @@ async def client_and_queue(
     app.container.principal_authority.override(principal_authority)
     app.container.provisioning_replay_store.override(replay_store)
 
-    host_service = HostService(session_factory=session_factory, settings=mock_settings)
+    host_service = HostService(
+        session_factory=session_factory,
+        settings=mock_settings,
+        capacity_derivation=LegacyHostCapacityDerivation(
+            CapacityLedgerService(
+                session_factory,
+                unit_claim_keys=("units", "gpu_count"),
+                mirror_dimension="gpu_count",
+            )
+        ),
+    )
     from vm_provisioning_operator.models import HostCreate
     host_service.register_host(HostCreate(
-        name=HOST,
-        kvm_host="10.0.0.1",
+        host_id=HOST,
+        ssh_host="10.0.0.1",
         ssh_user="root",
         ssh_key_type="path",
         ssh_key_value="~/.ssh/id_ed25519",

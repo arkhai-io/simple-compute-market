@@ -161,11 +161,18 @@ None.
   `kit/site` (`router.py`, `http_models.py`) and `kit/site-client`,
   `domains/vms/provisioning/adapter` host service, `domains/apicredits` service
   composition and storefront seed registration, `kit/fulfillment` callers of the
-  module-level matching helpers.
+  module-level matching helpers. **Amended 2026-09-21:** also a new
+  `kit/site/src/market_site/capacity_definitions.py` (document shape, validation,
+  planned reconciliation, wire models); `resource_feasibility_view`'s fact order and
+  mirror-keyed unit fact; `compute_provisioning`'s re-exports and route contract; and
+  `vm_provisioning_operator.ProvisioningClient` (async and sync).
 - **Affected deployment:** a new `capacity_definitions_path` setting, set by Helm
-  only from a non-empty `definitions.capacity` value (no Compose wiring); an ordered
+  only from a non-empty `definitions.capacity` value, and `pool_definitions_path`
+  newly settable the same way from `definitions.pools` so a capacity document's pools
+  exist at first boot (both empty by default; no Compose wiring); an ordered
   compute migration that makes `capacity_buckets.total_units` nullable, backfills
-  `NULL` pool ids, and derives capacity resources, applied by the init container
+  `NULL` pool ids, removes reserved keys from stored declaration attributes, and
+  derives capacity resources, applied by the init container
   before the application serves requests, per `deployment-state`'s service-owned
   migration history requirement.
 - **Affected data:** every existing `Host` row with GPU data gains a derived capacity
@@ -180,7 +187,10 @@ None.
   `gpu_count` and take categorical fields from the declaration; hosts with no
   declaration leave the projection. None of these payloads is a versioned envelope,
   so compatibility is carried by distribution versions of `kit/site`,
-  `kit/site-client`, and their consumers.
+  `kit/site-client`, and their consumers. **Amended 2026-09-21:** registration
+  refuses attribute keys naming a declaration field (422); a new
+  `POST /api/v1/capacity/definitions/import` with a validate-only mode; and
+  `compute-provisioning` moves to 0.7.0 for its route contract.
 
 ## Permanent documentation impact
 
@@ -205,6 +215,8 @@ None.
 
 ## Dependencies and Related Changes
 
+- **Depends on `unify-host-identity`** (added 2026-09-21). Derivation and projection
+  correlation use the declaration's first-class `host_id` that change introduces.
 - `pools-9-retire-local-physical-authority` **depends on this change**. Retiring the
   storefront's CSV import before an operator path for multi-dimensional capacity
   exists is what would create the regression this change prevents.

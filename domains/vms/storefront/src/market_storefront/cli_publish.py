@@ -1174,7 +1174,7 @@ def _print_publish_table(
             else res
         )
         resource_label = (
-            res.get("pool_id") or res.get("resource_id") or res.get("machine_id") or "-"
+            res.get("pool_id") or res.get("resource_id") or res.get("host_id") or "-"
         )
         gpu_model = listing_resource.get("gpu_model") or listing_resource.get("capabilities", {}).get(
             "gpu_model"
@@ -1200,7 +1200,7 @@ def _print_publish_table(
             else res
         )
         resource_label = (
-            res.get("pool_id") or res.get("resource_id") or res.get("machine_id") or "-"
+            res.get("pool_id") or res.get("resource_id") or res.get("host_id") or "-"
         )
         gpu_model = listing_resource.get("gpu_model") or listing_resource.get("capabilities", {}).get(
             "gpu_model"

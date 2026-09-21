@@ -65,8 +65,8 @@ def _ensure_bare_metal_host(name: str = "bm-node-1", *, enabled: bool = True) ->
     if existing is None:
         host_service.register_host(
             HostCreate(
-                name=name,
-                kvm_host="192.0.2.10",
+                host_id=name,
+                ssh_host="192.0.2.10",
                 ssh_user="root",
                 ssh_key_type="path",
                 ssh_key_value="/fake/id_ed25519",
@@ -88,11 +88,10 @@ def _reserve_bare_metal(escrow_uid: str) -> dict:
         ledger.register_resource(
             resource_id="bare-metal-node-1",
             total_units=1,
-            attributes={
-                "machine_id": "bm-node-1",
+            host_id="bm-node-1", attributes={
                 "physical_host_id": "host-physical-1",
-                "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
-            },
+                "allocation_mode": ALLOCATION_MODE_EXCLUSIVE},
+            pool_id="default",
         )
     reserved = ledger.reserve(
         claim={
@@ -182,7 +181,7 @@ async def test_register_bare_metal_lease_uses_bare_metal_endpoint_and_view(
     lease = await bare_metal_client.register_lease(
         capacity_reservation_id=reserved["capacity_reservation_id"],
         escrow_uid="escrow-bm-api-1",
-        machine_id="bm-node-1",
+        host_id="bm-node-1",
         physical_host_id="host-physical-1",
         access_ref={"ssh_user": "tenant-a"},
         lease_end_utc=_future_dt(),
@@ -190,7 +189,7 @@ async def test_register_bare_metal_lease_uses_bare_metal_endpoint_and_view(
 
     assert lease["capacity_reservation_id"] == reserved["capacity_reservation_id"]
     assert lease["escrow_uid"] == "escrow-bm-api-1"
-    assert lease["machine_id"] == "bm-node-1"
+    assert lease["host_id"] == "bm-node-1"
     assert lease["physical_host_id"] == "host-physical-1"
     assert lease["state"] == "leased"
     assert lease["access_ref"] == {"ssh_user": "tenant-a"}
@@ -211,7 +210,7 @@ async def test_register_bare_metal_lease_uses_bare_metal_endpoint_and_view(
         job = db.get(AnsibleJob, reservation["create_job_id"])
         assert job is not None
         assert job.params["vm_action"] == NODE_GRANT_ACCESS_ACTION
-        assert job.params["vm_host"] == "bm-node-1"
+        assert job.params["host_id"] == "bm-node-1"
         assert job.params["offering_mode"] == "bare_metal"
         assert job.params["executor_action"] == NODE_GRANT_ACCESS_ACTION
         assert job.params["executor_target"] == "bm-node-1"
@@ -226,7 +225,7 @@ async def test_list_and_get_bare_metal_leases_exclude_vm_leases(
     lease = await bare_metal_client.register_lease(
         capacity_reservation_id=reserved["capacity_reservation_id"],
         escrow_uid="escrow-bm-api-2",
-        machine_id="bm-node-1",
+        host_id="bm-node-1",
         physical_host_id="host-physical-1",
         lease_end_utc=_future_dt(),
     )
@@ -254,7 +253,7 @@ async def test_generic_market_lease_terminate_dispatches_bare_metal_reclaim(
     lease = await bare_metal_client.register_lease(
         capacity_reservation_id=reserved["capacity_reservation_id"],
         escrow_uid="escrow-bm-api-reclaim",
-        machine_id="bm-node-1",
+        host_id="bm-node-1",
         physical_host_id="host-physical-1",
         access_ref={"ssh_user": "tenant-a"},
         lease_end_utc=_future_dt(),
@@ -279,7 +278,7 @@ async def test_generic_market_lease_terminate_dispatches_bare_metal_reclaim(
         job = db.get(AnsibleJob, reservation["release_job_id"])
         assert job is not None
         assert job.params["vm_action"] == NODE_RECLAIM_ACCESS_ACTION
-        assert job.params["vm_host"] == "bm-node-1"
+        assert job.params["host_id"] == "bm-node-1"
         assert job.params["offering_mode"] == "bare_metal"
         assert job.params["executor_action"] == NODE_RECLAIM_ACCESS_ACTION
         assert job.params["executor_target"] == "bm-node-1"
@@ -303,7 +302,7 @@ async def test_bare_metal_grant_and_reclaim_jobs_succeed_with_executor_playbook(
         lease = await bare_metal_client.register_lease(
             capacity_reservation_id=reserved["capacity_reservation_id"],
             escrow_uid="escrow-bm-api-smoke",
-            machine_id="bm-node-1",
+            host_id="bm-node-1",
             physical_host_id="host-physical-1",
             access_ref={
                 "ssh_user": "tenant-a",
@@ -368,7 +367,7 @@ async def test_register_bare_metal_lease_for_unknown_machine_does_not_queue_job(
         await bare_metal_client.register_lease(
             capacity_reservation_id=reserved["capacity_reservation_id"],
             escrow_uid="escrow-bm-api-unknown",
-            machine_id="missing-bm-node",
+            host_id="missing-bm-node",
             physical_host_id="host-physical-1",
             lease_end_utc=_future_dt(),
         )

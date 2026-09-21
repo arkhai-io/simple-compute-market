@@ -14,7 +14,7 @@ def _view(**overrides):
     value = {
         "physical_resource_id": "resource-1",
         "physical_host_id": "physical-host-1",
-        "machine_id": "machine-1",
+        "host_id": "machine-1",
         "available": True,
         "allocation_mode": "exclusive",
         "access_methods": ["ssh", "serial-console"],
@@ -28,7 +28,7 @@ def _view(**overrides):
 def _resource(view=None, **overrides):
     value = {
         "physical_resource_id": "resource-1",
-        "publication_views": {"bare_metal.v1": view or _view()},
+        "publication_views": {"bare_metal.v2": view or _view()},
     }
     value.update(overrides)
     return value
@@ -47,7 +47,7 @@ def test_interpreter_preserves_distinct_identities_and_listing_semantics():
 
     assert generation.site_id == "site-a"
     assert generation.resources[0].physical_resource_id == "resource-1"
-    assert listings[0].machine_id == "machine-1"
+    assert listings[0].host_id == "machine-1"
     assert listings[0].physical_host_id == "physical-host-1"
     assert listings[0].access_methods == ["ssh", "serial-console"]
     assert listings[0].capabilities == {
@@ -130,7 +130,7 @@ def test_interpreter_rejects_conflicting_containing_resource_identity():
 
 def test_interpreter_requires_explicit_machine_identity():
     view = _view()
-    view.pop("machine_id")
+    view.pop("host_id")
 
     with pytest.raises(ValidationError):
         trusted_bare_metal_projection(

@@ -125,7 +125,7 @@ class TestCreateVmToParams:
     def test_host_comes_from_argument_not_body(self):
         req = CreateVmRequest(vm_target="my-vm")
         params = build_create_params("kvm1", req)
-        assert params.vm_host == "kvm1"
+        assert params.host_id == "kvm1"
         assert params.vm_target == "my-vm"
         assert params.vm_action == "create"
 
@@ -213,7 +213,7 @@ class TestBuildSimpleParams:
         body = VmActionRequest(max_retries=1)
         p = build_simple_params(action, "kvm1", body, "my-vm")
         assert p.vm_action == action
-        assert p.vm_host == "kvm1"
+        assert p.host_id == "kvm1"
         assert p.vm_target == "my-vm"
         assert p.max_retries == 1
 
@@ -222,5 +222,5 @@ class TestBuildSimpleParams:
         body = VmActionRequest()
         p = build_simple_params(action, "kvm1", body)
         assert p.vm_action == action
-        assert p.vm_host == "kvm1"
+        assert p.host_id == "kvm1"
         assert p.vm_target is None

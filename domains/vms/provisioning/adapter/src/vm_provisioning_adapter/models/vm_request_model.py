@@ -27,7 +27,7 @@ def build_create_params(host: str, body: CreateVmRequest) -> AnsibleJobParams:
     because ``AnsibleJobParams`` is a server-private type.
     """
     return AnsibleJobParams(
-        vm_host=host,
+        host_id=host,
         vm_action="create",
         offering_mode="vm",
         vm_target=body.vm_target,
@@ -66,7 +66,7 @@ def build_simple_params(
     ``vm_name`` is ``None`` for host-level actions (list, check).
     """
     return AnsibleJobParams(
-        vm_host=host,
+        host_id=host,
         vm_action=action,
         offering_mode="vm",
         vm_target=vm_name,

@@ -376,7 +376,7 @@ class FakeSite:
             public_match = {
                 key: value
                 for key, value in match.items()
-                if key not in {"resource_id", "vm_host"}
+                if key not in {"resource_id", "host_id"}
             }
             return 200, {
                 "reservation": {
@@ -507,7 +507,7 @@ class FakeSite:
                 "resource_id": resource_id,
                 "pool_id": None,
                 "member_id": None,
-                "vm_host": attributes.get("vm_host"),
+                "host_id": attributes.get("host_id"),
                 "allocated_gpu_count": requested,
                 "available_gpu_count": self._available(resource_id),
                 "attributes": attributes,

@@ -120,7 +120,7 @@ class AdminSettleService:
         Uses the capacity ledger probe (read-only — consumes nothing).
 
         Returns:
-            {"would_submit": True, "escrow_uid": ..., "vm_host": ..., "vm_target": ..., "required_attributes": {...}}
+            {"would_submit": True, "escrow_uid": ..., "host_id": ..., "vm_target": ..., "required_attributes": {...}}
             {"would_submit": False, "escrow_uid": ..., "reason": "<why>"}
 
         Raises:
@@ -150,7 +150,7 @@ class AdminSettleService:
         return {
             "would_submit": True,
             "escrow_uid": escrow_uid,
-            "vm_host": spec["vm_host"],
+            "host_id": spec["host_id"],
             "vm_target": spec["vm_target"],
             "required_attributes": spec["required_attributes"],
         }

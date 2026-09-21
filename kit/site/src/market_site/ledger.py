@@ -10,9 +10,9 @@ the ``/api/v1/capacity`` HTTP surface, which mirrors the
 Matching semantics: a claim is an exact-match attribute mapping plus a
 quantity request, checked first against the resource's attributes JSON
 and then against its top-level fields. Domain-specific eligibility should
-normally be expressed in those claims — for example VM claims name
-``vm_host`` while bare-metal claims name ``physical_host_id`` and
-``allocation_mode``. ``required_attributes`` remains available for
+normally be expressed in those claims — for example bare-metal claims
+name ``physical_host_id`` and ``allocation_mode``. The host a resource is
+delivered through is its ``host_id`` column, not a matchable attribute. ``required_attributes`` remains available for
 single-domain hosts that need a coarse local invariant, but multi-domain
 provisioners should pass none.
 
@@ -20,10 +20,12 @@ A claim's ``dimensions`` mapping is authoritative when present and is
 checked against every dimension a candidate resource declares in its
 ``capacity`` map.
 
-Legacy single-quantity claims (``units``/``gpu_count``) keep working.
-They translate internally to ``dimensions={"gpu_count": n}``.
-``CapacityBucket.total_units`` and ``CapacityReservation.units`` remain
-service-maintained mirrors for payload and caller compatibility.
+Legacy single-quantity claims (``units`` and composition-supplied aliases)
+keep working. They translate to ``dimensions={<mirror>: n}``, where the
+mirror dimension is supplied by the composition root. ``CapacityBucket
+.total_units`` and ``CapacityReservation.units`` remain service-maintained
+mirrors of that one dimension for payload and caller compatibility; a
+declaration that names no mirror dimension has no ``total_units``.
 
 ``capacity``/``dimensions`` are the source of truth.
 
@@ -38,6 +40,8 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
@@ -53,6 +57,7 @@ from market_resource_pools import (
     pool_delivers_offering_mode,
 )
 
+from .declarations import CapacityDeclaration
 from .db import (
     HELD_RESERVATION_STATES,
     ReservationState,
@@ -74,8 +79,7 @@ OFFERING_MODE_CLAIM_KEY = "offering_mode"
 
 def _executor_ref_for_resource(resource: CapacityBucket) -> dict[str, Any] | None:
     """Build the generic ``executor_ref`` a reservation should carry when
-    it binds to ``resource``, from that resource's domain-specific
-    ``vm_host`` attribute.
+    it binds to ``resource``, from that resource's ``host_id``.
 
     ``kit/site`` carries no VM-specific columns on the shared reservation
     table — physical placement identity lives uniformly in the generic
@@ -85,12 +89,15 @@ def _executor_ref_for_resource(resource: CapacityBucket) -> dict[str, Any] | Non
     (fresh reservation, resize-supersede, settlement-resource rebind) so
     they cannot drift from each other.
     """
-    vm_host = (resource.attributes or {}).get("vm_host")
-    return {"vm_host": vm_host} if vm_host else None
+    return {"host_id": resource.host_id} if resource.host_id else None
 
 
 class CapacityConflictError(Exception):
     """Raised when a mutation references a row in an incompatible state."""
+
+
+class UnknownPoolError(ValueError):
+    """A declaration names a Resource Pool the site does not have."""
 
 
 class UndeclaredOfferingModeError(CapacityConflictError):
@@ -162,10 +169,11 @@ def _windows_overlap(
 _DEFAULT_UNIT_CLAIM_KEYS: tuple[str, ...] = ("units",)
 _DIMENSIONS_CLAIM_KEY = "dimensions"
 
-# The dimension that CapacityBucket.total_units / CapacityReservation.units /
-# legacy single-quantity claims all mean. Every pre-pass-1 caller speaks
-# only this one dimension, so it's what they mirror into/out of.
-PRIMARY_DIMENSION = "gpu_count"
+# The dimension CapacityBucket.total_units / CapacityReservation.units and
+# legacy single-quantity claims mirror when the composition root names none.
+# Domain-neutral on purpose: a composition whose unit is something else (a
+# VM's GPU count, say) supplies its own, the way it supplies unit_claim_keys.
+_DEFAULT_MIRROR_DIMENSION = "units"
 
 def _requested_offering_mode(
     claim: Mapping[str, Any] | None,
@@ -228,6 +236,7 @@ def _requested_dimensions(
     claim: Mapping[str, Any] | None,
     *,
     unit_claim_keys: Sequence[str] = _DEFAULT_UNIT_CLAIM_KEYS,
+    mirror_dimension: str = _DEFAULT_MIRROR_DIMENSION,
 ) -> dict[str, Decimal]:
     """Parse a claim's quantity request as a dimensions map.
 
@@ -238,13 +247,13 @@ def _requested_dimensions(
     request the caller never actually made.
     Only the *absence* of the key falls back to the legacy
     single-quantity claim (``units``/domain-specific aliases), translated
-    to ``{"gpu_count": n}`` so every existing caller's claim shape keeps
+    to ``{mirror_dimension: n}`` so every existing caller's claim shape keeps
     working unchanged.
     """
     claim = claim or {}
     if _DIMENSIONS_CLAIM_KEY not in claim:
         return {
-            PRIMARY_DIMENSION: Decimal(
+            mirror_dimension: Decimal(
                 _requested_units(claim, unit_claim_keys=unit_claim_keys)
             )
         }
@@ -285,32 +294,41 @@ def _to_decimal_nonneg(value: Any, *, label: str) -> Decimal:
     return amount
 
 
-def _resource_capacity(resource: CapacityBucket) -> dict[str, Decimal]:
+def _resource_capacity(
+    resource: CapacityBucket,
+    mirror_dimension: str = _DEFAULT_MIRROR_DIMENSION,
+) -> dict[str, Decimal]:
     """A resource's declared total capacity per dimension.
 
-    Falls back to ``{"gpu_count": total_units}`` when the dimension map is absent
-    that have never had ``capacity`` populated.
+    Falls back to ``{mirror_dimension: total_units}`` for a row whose
+    ``capacity`` map was never populated, and to no dimension at all when it
+    has no ``total_units`` either.
     """
     if resource.capacity:
         return {
             str(key): _to_decimal_nonneg(value, label=f"capacity[{key}]")
             for key, value in resource.capacity.items()
         }
-    return {PRIMARY_DIMENSION: Decimal(int(resource.total_units or 0))}
+    if resource.total_units is None:
+        return {}
+    return {mirror_dimension: Decimal(int(resource.total_units))}
 
 
-def _reservation_dimensions(reservation: CapacityReservation) -> dict[str, Decimal]:
-    """An reservation's held quantity per dimension.
+def _reservation_dimensions(
+    reservation: CapacityReservation,
+    mirror_dimension: str = _DEFAULT_MIRROR_DIMENSION,
+) -> dict[str, Decimal]:
+    """A reservation's held quantity per dimension.
 
-    Falls back to ``{"gpu_count": units}`` for rows that
-    have never had ``dimensions`` populated.
+    Falls back to ``{mirror_dimension: units}`` for rows that have never had
+    ``dimensions`` populated.
     """
     if reservation.dimensions:
         return {
             str(key): Decimal(str(value))
             for key, value in reservation.dimensions.items()
         }
-    return {PRIMARY_DIMENSION: Decimal(int(reservation.units or 0))}
+    return {mirror_dimension: Decimal(int(reservation.units or 0))}
 
 
 def _capacity_change_kind(
@@ -348,6 +366,7 @@ class ResourceFeasibilityView:
     resource_kind: str
     available: Mapping[str, Any]
     attributes: Mapping[str, Any]
+    host_id: str | None = None
 
 
 def resource_feasibility_view(
@@ -360,25 +379,40 @@ def resource_feasibility_view(
     resource_subtype: str | None = None,
     value: Any = None,
     units: Any = None,
+    host_id: str | None = None,
+    mirror_dimension: str = _DEFAULT_MIRROR_DIMENSION,
 ) -> ResourceFeasibilityView:
-    """Build the immutable, authoritative view used for feasibility checks."""
+    """Build the immutable, authoritative view used for feasibility checks.
+
+    ``mirror_dimension`` must be the one the backing ``CapacityLedgerService``
+    was composed with: the scalar unit total is a matchable fact under that
+    name and under ``units``, and under no other domain's dimension name.
+    """
+    # Claims match declared attributes and the resource's own facts in one
+    # namespace, so the facts are written last: a declaration's fields and the
+    # ledger's derived totals are authoritative, and an attribute of the same
+    # name (possible only in a row stored before registration refused them)
+    # must not restate them. ``host_id`` is a fact so a claim may pin the host
+    # a resource is delivered through.
+    authoritative_pool_id = pool_id or resource_id
     normalized = {
+        **dict(attributes or {}),
         "resource_id": resource_id,
+        "host_id": host_id,
         "resource_type": resource_kind,
         "resource_subtype": resource_subtype,
         "value": value,
         "units": units,
-        "gpu_count": units,
-        **dict(attributes or {}),
+        mirror_dimension: units,
+        "pool_id": authoritative_pool_id,
     }
-    authoritative_pool_id = pool_id or resource_id
-    normalized["pool_id"] = authoritative_pool_id
     return ResourceFeasibilityView(
         resource_id=resource_id,
         pool_id=authoritative_pool_id,
         resource_kind=resource_kind,
         available=MappingProxyType(dict(available)),
         attributes=MappingProxyType(normalized),
+        host_id=host_id,
     )
 
 
@@ -426,6 +460,7 @@ def dict_resource_satisfies_claim(
     claim: Mapping[str, Any] | None,
     *,
     unit_claim_keys: Sequence[str] = _DEFAULT_UNIT_CLAIM_KEYS,
+    mirror_dimension: str = _DEFAULT_MIRROR_DIMENSION,
 ) -> bool:
     """Match a plain-dict ``snapshot()`` row against a claim, using the
     same requirement-parsing and feasibility semantics admission uses.
@@ -448,8 +483,8 @@ def dict_resource_satisfies_claim(
     only if the claim itself requires ``None`` — never treated as
     "unconstrained".
 
-    ``unit_claim_keys`` must match whatever the backing
-    ``CapacityLedgerService`` was composed with (e.g. VM's
+    ``unit_claim_keys`` and ``mirror_dimension`` must match whatever the
+    backing ``CapacityLedgerService`` was composed with (e.g. VM's
     ``("units", "gpu_count")`` in ``container.py``) for the legacy
     non-dimensional claim fallback to agree with admission; the default
     here is the module-wide default, not any particular domain's.
@@ -460,7 +495,11 @@ def dict_resource_satisfies_claim(
         claim,
         unit_claim_keys=unit_claim_keys,
     )
-    required_dimensions = _requested_dimensions(claim, unit_claim_keys=unit_claim_keys)
+    required_dimensions = _requested_dimensions(
+        claim,
+        unit_claim_keys=unit_claim_keys,
+        mirror_dimension=mirror_dimension,
+    )
     resource = resource_feasibility_view(
         resource_id=str(row.get("resource_id") or ""),
         pool_id=row.get("pool_id") or row.get("resource_id"),
@@ -470,6 +509,8 @@ def dict_resource_satisfies_claim(
         resource_subtype=row.get("resource_subtype"),
         value=row.get("value"),
         units=row.get("available_units"),
+        host_id=row.get("host_id"),
+        mirror_dimension=mirror_dimension,
     )
     return resource_satisfies_requirement(
         resource=resource,
@@ -480,7 +521,9 @@ def dict_resource_satisfies_claim(
 
 
 def _resource_feasibility_view(
-    resource: CapacityBucket, available: Mapping[str, Any]
+    resource: CapacityBucket,
+    available: Mapping[str, Any],
+    mirror_dimension: str,
 ) -> ResourceFeasibilityView:
     return resource_feasibility_view(
         resource_id=resource.backing_resource_id,
@@ -491,6 +534,8 @@ def _resource_feasibility_view(
         resource_subtype=resource.resource_subtype,
         value=resource.total_units,
         units=resource.total_units,
+        host_id=resource.host_id,
+        mirror_dimension=mirror_dimension,
     )
 
 
@@ -538,6 +583,7 @@ class CapacityLedgerService:
         *,
         required_attributes: Sequence[str] = (),
         unit_claim_keys: Sequence[str] = _DEFAULT_UNIT_CLAIM_KEYS,
+        mirror_dimension: str = _DEFAULT_MIRROR_DIMENSION,
         settlement_abandonment_hook: SettlementAbandonmentHook | None = None,
     ) -> None:
         """``required_attributes`` is an optional coarse local eligibility
@@ -552,6 +598,12 @@ class CapacityLedgerService:
         existing claim shape working. Kept out of the ledger's own default
         so this module carries no VM-specific knowledge.
 
+        ``mirror_dimension`` is the one dimension the legacy scalar
+        ``total_units``/``units`` mirror and a legacy single-quantity claim
+        requests. Supplied by the composition root for the same reason as
+        ``unit_claim_keys``: the VM composition passes ``"gpu_count"``, and
+        the domain-neutral default is ``"units"``.
+
         ``settlement_abandonment_hook``, if supplied, is called
         unconditionally, in the same open transaction, from every internal
         path that can strand a reservation's fulfillment-scheduling state
@@ -564,6 +616,7 @@ class CapacityLedgerService:
         self._session_factory = session_factory
         self._required_attributes = tuple(required_attributes)
         self._unit_claim_keys = tuple(unit_claim_keys)
+        self._mirror_dimension = mirror_dimension
         self._settlement_abandonment_hook = settlement_abandonment_hook
         # Re-entrant and held across READS too: the service's SQLite
         # engine is a StaticPool — every session shares one connection,
@@ -571,6 +624,38 @@ class CapacityLedgerService:
         # raises "cannot commit - no transaction is active". One site's
         # ledger has exactly one serialization point; this is it.
         self._lock = threading.RLock()
+        # How deeply the current thread holds the lock through
+        # ``serialized()``, so an in-session mutator can refuse to run
+        # outside it.
+        self._holding = threading.local()
+
+    @contextmanager
+    def serialized(self) -> Iterator[None]:
+        """Hold the ledger's serialization lock for the enclosed work.
+
+        Every ledger operation runs inside it. A caller composing ledger
+        writes into its own transaction holds it around that whole
+        transaction, through its commit: a check the ledger makes (a pool
+        move against live obligations, say) is only true until something
+        else commits, so the lock must outlast the write it guards.
+        Re-entrant. Take it before opening the session, as every ledger
+        operation does, so the lock is always acquired ahead of the database.
+        """
+        with self._lock:
+            depth = getattr(self._holding, "depth", 0)
+            self._holding.depth = depth + 1
+            try:
+                yield
+            finally:
+                self._holding.depth = depth
+
+    def _require_serialized(self, operation: str) -> None:
+        if not getattr(self._holding, "depth", 0):
+            raise RuntimeError(
+                f"{operation} writes into the caller's transaction and must run "
+                "inside CapacityLedgerService.serialized(), held through that "
+                "transaction's commit"
+            )
 
     # ------------------------------------------------------------------
     # Resource registry
@@ -580,20 +665,72 @@ class CapacityLedgerService:
         self,
         *,
         resource_id: str,
-        total_units: int,
+        pool_id: str,
+        total_units: int | None = None,
         resource_type: str = "compute.gpu",
         resource_subtype: str | None = None,
-        pool_id: str | None = None,
         attributes: Mapping[str, Any] | None = None,
         capacity: Mapping[str, Any] | None = None,
         enabled: bool = True,
+        host_id: str | None = None,
     ) -> dict[str, Any]:
-        """Insert or update a ledger resource; emits a delta on change.
+        """Insert or update a ledger resource in its own transaction.
 
-        ``capacity`` is the multidimensional total.
-        ``total_units`` remains a service-maintained mirror of ``capacity["gpu_count"]``.
-        When ``capacity`` includes ``gpu_count`` *and* it disagrees with
-        ``total_units``, that is a caller bug, raises ``ValueError``.
+        See :meth:`register_resource_in_session` for the declaration rules.
+        """
+        with self.serialized(), self._session_factory() as db:
+            payload = self.register_resource_in_session(
+                db,
+                resource_id=resource_id,
+                pool_id=pool_id,
+                total_units=total_units,
+                resource_type=resource_type,
+                resource_subtype=resource_subtype,
+                attributes=attributes,
+                capacity=capacity,
+                enabled=enabled,
+                host_id=host_id,
+            )
+            db.commit()
+            return payload
+
+    def register_resource_in_session(
+        self,
+        db: Session,
+        *,
+        resource_id: str,
+        pool_id: str,
+        total_units: int | None = None,
+        resource_type: str = "compute.gpu",
+        resource_subtype: str | None = None,
+        attributes: Mapping[str, Any] | None = None,
+        capacity: Mapping[str, Any] | None = None,
+        enabled: bool = True,
+        host_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Insert or update a ledger resource inside the caller's transaction.
+
+        The caller holds :meth:`serialized` around that transaction. Neither
+        opens a session nor commits, so a caller can land a
+        declaration together with other writes — a definition document's
+        reconciliation and the digest recording it, most immediately.
+
+        A declaration is authoritative for exactly the dimensions it names.
+        ``capacity`` is the multidimensional total; when a caller supplies
+        it, no dimension is added to it. Only a caller that declares no
+        ``capacity`` falls back to the legacy scalar, which becomes
+        ``{mirror_dimension: total_units}``. ``total_units`` is the
+        service-maintained mirror of the mirror dimension and is absent when
+        the declaration does not name that dimension: absent rather than
+        zero, so the consistency check below never asserts a false equality.
+        A ``total_units`` that disagrees with the declared mirror dimension is
+        a caller bug and raises ``ValueError``, as does a declaration naming
+        no dimension at all.
+
+        ``pool_id`` is required. Registration replaces the whole
+        declaration, so a defaulted pool would move the resource without
+        anyone asking. ``host_id`` names the host this capacity is delivered
+        through; at most one resource may name a given host.
 
         An upsert emits a signed per-dimension delta on the event
         (authoritative). ``kind`` is a coarser hint for legacy
@@ -606,77 +743,215 @@ class CapacityLedgerService:
         First-time registration is always "released": brand new capacity
         appearing is unambiguous.
         """
-        with self._lock, self._session_factory() as db:
-            bucket = self._bucket_by_backing_resource(db, resource_id)
-            old_capacity = _resource_capacity(bucket) if bucket is not None else {}
-            old_enabled = bool(bucket.enabled) if bucket is not None else None
-            new_dimensions = dict(capacity or {})
-            if PRIMARY_DIMENSION in new_dimensions:
+        self._require_serialized("register_resource_in_session")
+        if not pool_id:
+            raise ValueError("a capacity declaration must name its pool_id")
+        mirror = self._mirror_dimension
+        if capacity:
+            dimensions = dict(capacity)
+            if total_units is not None and mirror in dimensions:
                 supplied = _to_decimal_nonneg(
-                    new_dimensions[PRIMARY_DIMENSION],
-                    label="capacity[gpu_count]",
+                    dimensions[mirror], label=f"capacity[{mirror}]"
                 )
                 if supplied != Decimal(int(total_units)):
                     raise ValueError(
-                        f"capacity['gpu_count']={supplied} disagrees with "
+                        f"capacity[{mirror!r}]={supplied} disagrees with "
                         f"total_units={total_units}; pass one consistent value"
                     )
-            else:
-                new_dimensions[PRIMARY_DIMENSION] = int(total_units)
-            new_capacity = {
-                str(key): _to_decimal_nonneg(value, label=f"capacity[{key}]")
-                for key, value in new_dimensions.items()
-            }
-            mirrored_units = int(new_capacity[PRIMARY_DIMENSION])
-            is_new = bucket is None
-            effective_pool_id = pool_id
-            if bucket is None:
-                bucket = CapacityBucket(
-                    capacity_bucket_id=str(uuid.uuid4()),
-                    backing_resource_id=resource_id,
-                    pool_id=effective_pool_id,
-                    resource_type=resource_type,
-                    resource_subtype=resource_subtype,
-                    total_units=mirrored_units,
-                    capacity=_serialize_dimensions(new_capacity),
-                    attributes=dict(attributes or {}),
-                    enabled=enabled,
-                )
-                db.add(bucket)
-            else:
-                bucket.pool_id = effective_pool_id
-                bucket.resource_type = resource_type
-                bucket.resource_subtype = resource_subtype
-                bucket.total_units = mirrored_units
-                bucket.capacity = _serialize_dimensions(new_capacity)
-                bucket.attributes = dict(attributes or {})
-                bucket.enabled = enabled
-            delta = {
-                key: new_capacity.get(key, Decimal(0))
-                - old_capacity.get(key, Decimal(0))
-                for key in set(new_capacity) | set(old_capacity)
-            }
-            kind = (
-                "released"
-                if is_new
-                else _capacity_change_kind(
-                    delta,
-                    old_enabled=old_enabled,
-                    new_enabled=enabled,
-                )
+        elif total_units is not None:
+            dimensions = {mirror: int(total_units)}
+        else:
+            raise ValueError(
+                "a capacity declaration must name at least one dimension"
             )
-            db.add(
-                CapacityEvent(
-                    kind=kind,
-                    resource_id=resource_id,
-                    dimensions=_serialize_dimensions(delta),
-                )
+        return self.register_declaration_in_session(
+            db,
+            CapacityDeclaration(
+                resource_id=resource_id,
+                pool_id=pool_id,
+                resource_type=resource_type,
+                resource_subtype=resource_subtype,
+                host_id=host_id,
+                capacity=dimensions,
+                attributes=dict(attributes or {}),
+                enabled=enabled,
+            ),
+        )
+
+    def register_declaration_in_session(
+        self, db: Session, declaration: CapacityDeclaration
+    ) -> dict[str, Any]:
+        """Insert or replace one whole declaration inside the caller's transaction.
+
+        The declaration is already valid in itself; what is refused here is
+        what only stored state can decide: a pool the site does not have
+        (``UnknownPoolError``), a host another resource already names, and a
+        pool move while the resource holds a live obligation. Every refusal
+        happens before anything is written. See
+        :meth:`register_resource_in_session` for the event it emits.
+        """
+        self._require_serialized("register_declaration_in_session")
+        if db.get(ResourcePool, declaration.pool_id) is None:
+            raise UnknownPoolError(
+                f"resource pool {declaration.pool_id!r} does not exist"
             )
-            db.commit()
-            return self._resource_payload(db, bucket)
+        resource_id = declaration.resource_id
+        bucket = self._bucket_by_backing_resource(db, resource_id)
+        old_capacity = (
+            _resource_capacity(bucket, self._mirror_dimension)
+            if bucket is not None else {}
+        )
+        old_enabled = bool(bucket.enabled) if bucket is not None else None
+        if declaration.host_id is not None:
+            holder = (
+                db.query(CapacityBucket)
+                .filter(CapacityBucket.host_id == declaration.host_id)
+                .one_or_none()
+            )
+            if holder is not None and holder.backing_resource_id != resource_id:
+                raise CapacityConflictError(
+                    f"host {declaration.host_id!r} already carries resource "
+                    f"{holder.backing_resource_id!r}"
+                )
+        if (
+            bucket is not None
+            and (bucket.pool_id or DEFAULT_POOL_ID) != declaration.pool_id
+        ):
+            self._refuse_reassignment_under_obligation(db, bucket, declaration.pool_id)
+        is_new = bucket is None
+        if bucket is None:
+            bucket = CapacityBucket(
+                capacity_bucket_id=str(uuid.uuid4()),
+                backing_resource_id=resource_id,
+            )
+            db.add(bucket)
+        self._write_declaration(bucket, declaration)
+        new_capacity = dict(declaration.capacity)
+        delta = {
+            key: new_capacity.get(key, Decimal(0))
+            - old_capacity.get(key, Decimal(0))
+            for key in set(new_capacity) | set(old_capacity)
+        }
+        kind = (
+            "released"
+            if is_new
+            else _capacity_change_kind(
+                delta,
+                old_enabled=old_enabled,
+                new_enabled=declaration.enabled,
+            )
+        )
+        db.add(
+            CapacityEvent(
+                kind=kind,
+                resource_id=resource_id,
+                dimensions=_serialize_dimensions(delta),
+            )
+        )
+        db.flush()
+        return self._resource_payload(db, bucket)
+
+    def _write_declaration(
+        self, bucket: CapacityBucket, declaration: CapacityDeclaration
+    ) -> None:
+        """Store a declaration on its row, replacing every declared field.
+
+        ``total_units`` is the service-maintained mirror of the composition's
+        mirror dimension, absent when the declaration does not name it.
+        """
+        mirror = self._mirror_dimension
+        bucket.pool_id = declaration.pool_id
+        bucket.resource_type = declaration.resource_type
+        bucket.resource_subtype = declaration.resource_subtype
+        bucket.host_id = declaration.host_id
+        bucket.capacity = _serialize_dimensions(declaration.capacity)
+        bucket.total_units = (
+            int(declaration.capacity[mirror]) if mirror in declaration.capacity else None
+        )
+        bucket.attributes = dict(declaration.attributes)
+        bucket.enabled = declaration.enabled
+
+    def _stored_declaration(self, bucket: CapacityBucket) -> CapacityDeclaration:
+        """A row read back as the declaration it stores, without revalidating:
+        stored state is compared as it is, including a row written before a
+        rule it would now fail."""
+        return CapacityDeclaration.model_construct(
+            resource_id=bucket.backing_resource_id,
+            pool_id=bucket.pool_id or DEFAULT_POOL_ID,
+            resource_type=bucket.resource_type,
+            resource_subtype=bucket.resource_subtype,
+            host_id=bucket.host_id,
+            capacity=_resource_capacity(bucket, self._mirror_dimension),
+            attributes=dict(bucket.attributes or {}),
+            enabled=bool(bucket.enabled),
+        )
+
+    def declaration_change_in_session(
+        self, db: Session, declaration: CapacityDeclaration
+    ) -> str:
+        """Classify a whole declaration against the stored one.
+
+        Returns ``"created"`` when nothing is stored under its resource id,
+        ``"unchanged"`` when registering it would store exactly what is
+        stored, and ``"updated"`` otherwise. Registration appends a capacity
+        event even when it changes nothing, so a caller reconciling many
+        declarations registers only those this does not call unchanged.
+        Capacity compares as stored, so ``8`` and ``8.0`` are equal.
+        """
+        bucket = self._bucket_by_backing_resource(db, declaration.resource_id)
+        if bucket is None:
+            return "created"
+        if self._stored_declaration(bucket) == declaration:
+            return "unchanged"
+        return "updated"
+
+    def _refuse_reassignment_under_obligation(
+        self, db: Session, bucket: CapacityBucket, new_pool_id: str
+    ) -> None:
+        """Refuse to move a resource between pools while it holds a live obligation.
+
+        A reservation's pool is not recorded on the reservation; it is
+        resolved through the resource's current ``pool_id``
+        (``backing_pool_id_in_session``). Moving the resource would therefore
+        change which pool governs an existing reservation without the
+        reservation changing. A live obligation is a reservation in a
+        capacity-holding state that is debited against this resource or
+        assigned to it for settlement; every running workload holds one, so
+        the rule needs no knowledge of fulfillment state.
+        """
+        debited = (
+            db.query(CapacityReservation.capacity_reservation_id)
+            .join(
+                CapacityReservationDebit,
+                CapacityReservationDebit.capacity_reservation_id
+                == CapacityReservation.capacity_reservation_id,
+            )
+            .filter(
+                CapacityReservationDebit.capacity_bucket_id
+                == bucket.capacity_bucket_id,
+                CapacityReservation.state.in_(HELD_RESERVATION_STATES),
+            )
+            .first()
+        )
+        assigned = (
+            db.query(CapacityReservation.capacity_reservation_id)
+            .filter(
+                CapacityReservation.settlement_resource_id
+                == bucket.backing_resource_id,
+                CapacityReservation.state.in_(HELD_RESERVATION_STATES),
+            )
+            .first()
+        )
+        live = debited or assigned
+        if live is not None:
+            raise CapacityConflictError(
+                f"resource {bucket.backing_resource_id!r} cannot move from pool "
+                f"{bucket.pool_id or DEFAULT_POOL_ID!r} to {new_pool_id!r} while "
+                f"reservation {live[0]!r} holds it"
+            )
 
     def list_resources(self) -> list[dict[str, Any]]:
-        with self._lock, self._session_factory() as db:
+        with self.serialized(), self._session_factory() as db:
             self._expire_stale_holds(db)
             rows = (
                 db.query(CapacityBucket).order_by(CapacityBucket.updated_at.asc()).all()
@@ -700,12 +975,16 @@ class CapacityLedgerService:
     ) -> dict[str, Any] | None:
         """Dry-run match for ``claim`` — consumes nothing."""
         _requested_offering_mode(claim, required=True)
-        requested = _requested_dimensions(claim, unit_claim_keys=self._unit_claim_keys)
+        requested = _requested_dimensions(
+            claim,
+            unit_claim_keys=self._unit_claim_keys,
+            mirror_dimension=self._mirror_dimension,
+        )
         window_start, window_end = _lease_window(
             lease_start_utc=lease_start_utc,
             lease_duration_seconds=lease_duration_seconds,
         )
-        with self._lock, self._session_factory() as db:
+        with self.serialized(), self._session_factory() as db:
             self._expire_stale_holds(db)
             match = self._find_candidate(db, claim, requested, window_start, window_end)
             if match is None:
@@ -737,7 +1016,11 @@ class CapacityLedgerService:
         ``HELD_RESERVATION_STATES``), so a genuinely new attempt after
         expiry still reserves fresh, correctly.
         """
-        requested = _requested_dimensions(claim, unit_claim_keys=self._unit_claim_keys)
+        requested = _requested_dimensions(
+            claim,
+            unit_claim_keys=self._unit_claim_keys,
+            mirror_dimension=self._mirror_dimension,
+        )
         requested_mode = _requested_offering_mode(claim, required=True)
         # The same split `_find_candidate` matches on, recorded rather than
         # left to be recomputed. Admission already evaluates these; scheduling
@@ -758,7 +1041,7 @@ class CapacityLedgerService:
             lease_start_utc=lease_start_utc,
             lease_duration_seconds=lease_duration_seconds,
         )
-        with self._lock, self._session_factory() as db:
+        with self.serialized(), self._session_factory() as db:
             self._expire_stale_holds(db)
             if escrow_uid:
                 existing = self._find_reservation(db, escrow_uid=escrow_uid)
@@ -777,7 +1060,7 @@ class CapacityLedgerService:
                 hold_expires_at = (
                     datetime.now(timezone.utc) + timedelta(seconds=float(ttl_seconds))
                 ).isoformat()
-            mirrored_units = int(requested.get(PRIMARY_DIMENSION, Decimal(0)))
+            mirrored_units = int(requested.get(self._mirror_dimension, Decimal(0)))
             reservation = CapacityReservation(
                 capacity_reservation_id=str(uuid.uuid4()),
                 units=mirrored_units,
@@ -833,7 +1116,7 @@ class CapacityLedgerService:
         should use ``assign_settlement_resource_in_session`` against a session
         they already hold open, not this method.
         """
-        with self._lock, self._session_factory() as db:
+        with self.serialized(), self._session_factory() as db:
             self._expire_stale_holds(db)
             result = self.assign_settlement_resource_in_session(
                 db,
@@ -850,7 +1133,9 @@ class CapacityLedgerService:
 
         Does not commit or expire stale holds: the caller owns the
         transaction boundary and decides when those happen relative to its
-        own writes in the same session. Availability accounting is
+        own writes in the same session, and holds :meth:`serialized` around
+        it through the commit, because an assignment creates the live
+        obligation a concurrent pool move checks for. Availability accounting is
         unchanged by this method: it still keys off ``resource_id``, which
         this method still moves on an actual reassignment, exactly as
         before ``settlement_resource_id`` existed. ``settlement_resource_id``
@@ -858,6 +1143,7 @@ class CapacityLedgerService:
         assignment it identifies the concrete resource selected for
         fulfillment. Repeating the same assignment is idempotent.
         """
+        self._require_serialized("assign_settlement_resource_in_session")
         reservation = self._find_reservation(
             db, capacity_reservation_id=capacity_reservation_id
         )
@@ -889,9 +1175,9 @@ class CapacityLedgerService:
             if reservation.settlement_resource_id != settlement_resource_id:
                 reservation.settlement_resource_id = settlement_resource_id
             return self._reservation_payload(reservation)
-        reservation_dims = _reservation_dimensions(reservation)
+        reservation_dims = _reservation_dimensions(reservation, self._mirror_dimension)
         held = self._held_dimensions(db, settlement_resource_id)
-        capacity = _resource_capacity(destination)
+        capacity = _resource_capacity(destination, self._mirror_dimension)
         insufficient = any(
             capacity.get(dim, Decimal(0)) - held.get(dim, Decimal(0)) < amount
             for dim, amount in reservation_dims.items()
@@ -1011,7 +1297,7 @@ class CapacityLedgerService:
         own_backing_resource_id = self._backing_resource_id(db, exclude_reservation_id)
         own_reservation = db.get(CapacityReservation, exclude_reservation_id)
         own_dimensions = (
-            _reservation_dimensions(own_reservation)
+            _reservation_dimensions(own_reservation, self._mirror_dimension)
             if own_reservation is not None
             else {}
         )
@@ -1034,7 +1320,7 @@ class CapacityLedgerService:
                 exclude_reservation_id=exclude_reservation_id,
             ):
                 continue
-            capacity = _resource_capacity(resource)
+            capacity = _resource_capacity(resource, self._mirror_dimension)
             held = self._held_dimensions(
                 db, resource.backing_resource_id, now, instant_end
             )
@@ -1045,7 +1331,7 @@ class CapacityLedgerService:
             if resource.backing_resource_id == own_backing_resource_id:
                 for key, amount in own_dimensions.items():
                     available[key] = available.get(key, Decimal(0)) + amount
-            views.append(_resource_feasibility_view(resource, available))
+            views.append(_resource_feasibility_view(resource, available, self._mirror_dimension))
         return views
 
     def commit(
@@ -1079,7 +1365,7 @@ class CapacityLedgerService:
             lease_start_utc=lease_start_utc,
             lease_end_utc=lease_end_utc,
         )
-        with self._lock, self._session_factory() as db:
+        with self.serialized(), self._session_factory() as db:
             reservation = self._find_reservation(
                 db,
                 capacity_reservation_id=capacity_reservation_id,
@@ -1122,7 +1408,7 @@ class CapacityLedgerService:
     ) -> dict[str, Any] | None:
         """Return a held/leased reservation's capacity to the pool."""
         escrow_uid = dict(deal_ref or {}).get("escrow_uid")
-        with self._lock, self._session_factory() as db:
+        with self.serialized(), self._session_factory() as db:
             reservation = self._find_reservation(
                 db,
                 capacity_reservation_id=capacity_reservation_id,
@@ -1157,7 +1443,7 @@ class CapacityLedgerService:
                         db, reservation.capacity_reservation_id
                     ),
                     dimensions=_serialize_dimensions(
-                        _reservation_dimensions(reservation)
+                        _reservation_dimensions(reservation, self._mirror_dimension)
                     ),
                 )
             )
@@ -1215,7 +1501,9 @@ class CapacityLedgerService:
         shape.
         """
         requested = _requested_dimensions(
-            new_claim, unit_claim_keys=self._unit_claim_keys
+            new_claim,
+            unit_claim_keys=self._unit_claim_keys,
+            mirror_dimension=self._mirror_dimension,
         )
         requested_mode = _requested_offering_mode(new_claim, required=True)
         deal = dict(deal_ref or {})
@@ -1223,7 +1511,7 @@ class CapacityLedgerService:
             lease_start_utc=lease_start_utc,
             lease_duration_seconds=lease_duration_seconds,
         )
-        with self._lock, self._session_factory() as db:
+        with self.serialized(), self._session_factory() as db:
             self._expire_stale_holds(db)
             old_reservation = db.get(
                 CapacityReservation, old_capacity_reservation_id, with_for_update=True
@@ -1236,7 +1524,7 @@ class CapacityLedgerService:
             old_backing_resource_id = self._backing_resource_id(
                 db, old_capacity_reservation_id
             )
-            old_dimensions = _reservation_dimensions(old_reservation)
+            old_dimensions = _reservation_dimensions(old_reservation, self._mirror_dimension)
             old_reservation.state = ReservationState.released.value
             old_reservation.released_at = datetime.now(timezone.utc).isoformat()
             old_reservation.failure_reason = "superseded"
@@ -1262,7 +1550,7 @@ class CapacityLedgerService:
                 hold_expires_at = (
                     datetime.now(timezone.utc) + timedelta(seconds=float(ttl_seconds))
                 ).isoformat()
-            mirrored_units = int(requested.get(PRIMARY_DIMENSION, Decimal(0)))
+            mirrored_units = int(requested.get(self._mirror_dimension, Decimal(0)))
             new_reservation = CapacityReservation(
                 capacity_reservation_id=str(uuid.uuid4()),
                 units=mirrored_units,
@@ -1329,7 +1617,7 @@ class CapacityLedgerService:
         lease_end_utc: str,
     ) -> dict[str, Any] | None:
         """End a lease early; injected compute lifecycle observes the new expiry."""
-        with self._lock, self._session_factory() as db:
+        with self.serialized(), self._session_factory() as db:
             reservation = self._find_reservation(
                 db, capacity_reservation_id=capacity_reservation_id
             )
@@ -1373,7 +1661,7 @@ class CapacityLedgerService:
         Returns None when no held reservation matches (the caller falls
         back to the legacy lease table).
         """
-        with self._lock, self._session_factory() as db:
+        with self.serialized(), self._session_factory() as db:
             reservation = self._find_reservation(
                 db,
                 capacity_reservation_id=capacity_reservation_id,
@@ -1404,7 +1692,7 @@ class CapacityLedgerService:
         if now.tzinfo is None:
             now = now.replace(tzinfo=timezone.utc)
         due: list[dict[str, Any]] = []
-        with self._lock, self._session_factory() as db:
+        with self.serialized(), self._session_factory() as db:
             rows = (
                 db.query(CapacityReservation)
                 .filter(
@@ -1431,7 +1719,7 @@ class CapacityLedgerService:
         No capacity event: releasing still holds the units — the workload
         may not be torn down yet.
         """
-        with self._lock, self._session_factory() as db:
+        with self.serialized(), self._session_factory() as db:
             reservation = db.get(CapacityReservation, capacity_reservation_id)
             if reservation is None or reservation.state not in HELD_RESERVATION_STATES:
                 return None
@@ -1471,7 +1759,7 @@ class CapacityLedgerService:
         caller itself is holding, so this form would wait out the busy
         timeout and then fail with ``database is locked``.
         """
-        with self._lock, self._session_factory() as db:
+        with self.serialized(), self._session_factory() as db:
             result = self.update_lease_fields_in_session(
                 db,
                 capacity_reservation_id,
@@ -1544,7 +1832,7 @@ class CapacityLedgerService:
         return self._reservation_payload(reservation)
 
     def find_active_lease_by_vm_target(
-        self, vm_host: str, vm_target: str
+        self, host_id: str, vm_target: str
     ) -> dict[str, Any] | None:
         """Return the first active (held) lease reservation for a VM, or None.
 
@@ -1552,7 +1840,7 @@ class CapacityLedgerService:
         watchdog-managed lease before submitting the explicit removal job,
         avoiding a double-fire when the lease would otherwise expire later.
 
-        ``vm_host`` is matched via ``executor_ref``'s JSON payload and
+        ``host_id`` is matched via ``executor_ref``'s JSON payload and
         ``vm_target`` via ``executor_target`` — neither
         ``CapacityReservation`` column exists anymore (see
         ``docs/development/ARCHITECTURE.md``, "Shared vocabulary and
@@ -1562,12 +1850,12 @@ class CapacityLedgerService:
         (``compute_provisioning_service/db/migrations.py``'s ``pool_id``
         backfill).
         """
-        with self._lock, self._session_factory() as db:
+        with self.serialized(), self._session_factory() as db:
             reservation = (
                 db.query(CapacityReservation)
                 .filter(
-                    func.json_extract(CapacityReservation.executor_ref, "$.vm_host")
-                    == vm_host,
+                    func.json_extract(CapacityReservation.executor_ref, "$.host_id")
+                    == host_id,
                     CapacityReservation.executor_target == vm_target,
                     CapacityReservation.state.in_(HELD_RESERVATION_STATES),
                     CapacityReservation.lease_end_utc.isnot(None),
@@ -1594,7 +1882,7 @@ class CapacityLedgerService:
         ``release`` when capacity should become available and an event should be
         published.
         """
-        with self._lock, self._session_factory() as db:
+        with self.serialized(), self._session_factory() as db:
             reservation = db.get(CapacityReservation, capacity_reservation_id)
             if reservation is None:
                 return None
@@ -1623,7 +1911,7 @@ class CapacityLedgerService:
         page, so pollers know to keep paging; a subscriber that finds a
         gap versus what it last applied resyncs from a snapshot.
         """
-        with self._lock, self._session_factory() as db:
+        with self.serialized(), self._session_factory() as db:
             rows = (
                 db.query(CapacityEvent)
                 .filter(CapacityEvent.version > int(after_version))
@@ -1656,12 +1944,12 @@ class CapacityLedgerService:
     # ------------------------------------------------------------------
 
     def get_reservation(self, capacity_reservation_id: str) -> dict[str, Any] | None:
-        with self._lock, self._session_factory() as db:
+        with self.serialized(), self._session_factory() as db:
             reservation = db.get(CapacityReservation, capacity_reservation_id)
             return self._reservation_payload(reservation) if reservation else None
 
     def get_reservation_by_escrow(self, escrow_uid: str) -> dict[str, Any] | None:
-        with self._lock, self._session_factory() as db:
+        with self.serialized(), self._session_factory() as db:
             reservation = self._find_reservation(db, escrow_uid=escrow_uid)
             return self._reservation_payload(reservation) if reservation else None
 
@@ -1674,11 +1962,11 @@ class CapacityLedgerService:
         resource is intentionally absent from the storefront-facing reservation
         payload because admission does not create a durable placement commitment.
         """
-        with self._lock, self._session_factory() as db:
+        with self.serialized(), self._session_factory() as db:
             return self._backing_resource_id(db, capacity_reservation_id)
 
     def list_reservations(self, *, state: str | None = None) -> list[dict[str, Any]]:
-        with self._lock, self._session_factory() as db:
+        with self.serialized(), self._session_factory() as db:
             q = db.query(CapacityReservation)
             if state is not None:
                 q = q.filter(CapacityReservation.state == state)
@@ -1731,7 +2019,7 @@ class CapacityLedgerService:
         an idle site with no incoming requests — so a hold doesn't sit
         expired-but-unreleased indefinitely.
         """
-        with self._lock, self._session_factory() as db:
+        with self.serialized(), self._session_factory() as db:
             self._expire_stale_holds(db)
 
     def _expire_stale_holds(self, db: Session) -> None:
@@ -1810,7 +2098,7 @@ class CapacityLedgerService:
         totals: dict[str, Decimal] = {}
 
         def _accumulate(row: CapacityReservation) -> None:
-            for key, amount in _reservation_dimensions(row).items():
+            for key, amount in _reservation_dimensions(row, self._mirror_dimension).items():
                 totals[key] = totals.get(key, Decimal(0)) + amount
 
         if lease_start is None and lease_end is None:
@@ -1844,7 +2132,7 @@ class CapacityLedgerService:
     ) -> int:
         """Legacy single-dimension accessor, kept for the primary mirror."""
         held = self._held_dimensions(db, resource_id, lease_start, lease_end)
-        return int(held.get(PRIMARY_DIMENSION, Decimal(0)))
+        return int(held.get(self._mirror_dimension, Decimal(0)))
     @staticmethod
     def _pool_declares_mode(
         db: Session,
@@ -1889,9 +2177,11 @@ class CapacityLedgerService:
                 for key in self._required_attributes
             ):
                 continue
-            capacity = _resource_capacity(resource)
+            capacity = _resource_capacity(resource, self._mirror_dimension)
             if not resource_satisfies_requirement(
-                resource=_resource_feasibility_view(resource, capacity),
+                resource=_resource_feasibility_view(
+                    resource, capacity, self._mirror_dimension
+                ),
                 required_resource_kind=required_resource_kind,
                 required_dimensions=requested,
                 required_attributes=required_attributes,
@@ -1916,7 +2206,9 @@ class CapacityLedgerService:
                 for key in capacity
             }
             if not resource_satisfies_requirement(
-                resource=_resource_feasibility_view(resource, available),
+                resource=_resource_feasibility_view(
+                    resource, available, self._mirror_dimension
+                ),
                 required_resource_kind=required_resource_kind,
                 required_dimensions=requested,
                 required_attributes=required_attributes,
@@ -1983,15 +2275,18 @@ class CapacityLedgerService:
 
     def _resource_payload(self, db: Session, row: CapacityBucket) -> dict[str, Any]:
         now = datetime.now(timezone.utc)
-        capacity = _resource_capacity(row)
+        capacity = _resource_capacity(row, self._mirror_dimension)
         held = self._held_dimensions(
             db,
             row.backing_resource_id,
             now,
             now + timedelta(microseconds=1),
         )
-        total = int(row.total_units or 0)
-        held_primary = int(held.get(PRIMARY_DIMENSION, Decimal(0)))
+        mirror = self._mirror_dimension
+        # The scalar fields report the mirror dimension only when the
+        # declaration names it; a declaration without it has no scalar total,
+        # and reporting zero would read as a declared empty resource.
+        mirrored = mirror in capacity
         blocked = self._has_physical_host_conflict(
             db,
             row,
@@ -2000,7 +2295,6 @@ class CapacityLedgerService:
         )
         if blocked:
             available_map = {key: Decimal(0) for key in capacity}
-            state = "leased"
         else:
             available_map = {
                 key: max(
@@ -2009,26 +2303,31 @@ class CapacityLedgerService:
                 )
                 for key in capacity
             }
-            available_primary = int(
-                available_map.get(PRIMARY_DIMENSION, Decimal(total))
+        nothing_held = not any(amount > 0 for amount in held.values())
+        if blocked:
+            state = "leased"
+        elif mirrored:
+            state = (
+                "available"
+                if available_map[mirror] > 0 or nothing_held
+                else "leased"
             )
-            if available_primary >= total or held_primary <= 0:
-                state = "available"
-            elif available_primary > 0:
-                state = "available"
-            else:
-                state = "leased"
+        else:
+            state = (
+                "available"
+                if nothing_held or any(amount > 0 for amount in available_map.values())
+                else "leased"
+            )
         return {
             "resource_id": row.backing_resource_id,
             "pool_id": row.pool_id,
             "resource_type": row.resource_type,
             "resource_subtype": row.resource_subtype,
+            "host_id": row.host_id,
             "unit": "count",
-            "value": total,
+            "value": int(capacity[mirror]) if mirrored else None,
             "state": state,
-            "available_units": int(
-                available_map.get(PRIMARY_DIMENSION, Decimal(total))
-            ),
+            "available_units": int(available_map[mirror]) if mirrored else None,
             "capacity": _serialize_dimensions(capacity),
             "available": _serialize_dimensions(available_map),
             "attributes": dict(row.attributes or {}),
@@ -2105,8 +2404,8 @@ class CapacityLedgerService:
             return value
         return None
 
-    @staticmethod
     def _match_payload(
+        self,
         resource: CapacityBucket,
         available: Mapping[str, Decimal],
         requested: Mapping[str, Decimal],
@@ -2115,44 +2414,43 @@ class CapacityLedgerService:
 
         pool/member are storefront (aggregator) concepts the site does not
         know; they are present-and-None for payload compatibility.
-        ``requested``/``available`` are full per-dimension maps (
-        pass 1); ``allocated_units``/``available_units`` and their
-        ``*_gpu_count`` aliases stay byte-compatible by mirroring the
-        primary (``gpu_count``) dimension.
+        ``requested``/``available`` are full per-dimension maps;
+        ``allocated_units``/``available_units`` and the
+        ``allocated_<mirror>``/``available_<mirror>`` aliases carry the mirror
+        dimension, so a composition whose mirror is ``gpu_count`` keeps the
+        ``allocated_gpu_count``/``available_gpu_count`` fields its callers read.
         """
         attrs = dict(resource.attributes or {})
-        allocated_primary = int(requested.get(PRIMARY_DIMENSION, Decimal(0)))
-        available_primary = int(available.get(PRIMARY_DIMENSION, Decimal(0)))
+        mirror = self._mirror_dimension
+        allocated_primary = int(requested.get(mirror, Decimal(0)))
+        available_primary = int(available.get(mirror, Decimal(0)))
         return {
             "resource_id": resource.backing_resource_id,
             "pool_id": None,
             "member_id": None,
-            "vm_host": attrs.get("vm_host"),
+            "host_id": resource.host_id,
             "resource_subtype": resource.resource_subtype,
             "unit": "count",
             "state": "available",
-            "value": int(resource.total_units or 0),
+            "value": resource.total_units,
             "allocated_units": allocated_primary,
             "available_units": available_primary,
-            # VM-domain aliases, kept so the remote client stays
-            # byte-compatible with the embedded adapter it replaced.
-            "allocated_gpu_count": allocated_primary,
-            "available_gpu_count": available_primary,
+            f"allocated_{mirror}": allocated_primary,
+            f"available_{mirror}": available_primary,
             "dimensions": _serialize_dimensions(requested),
             "available": _serialize_dimensions(available),
-            "capacity": _serialize_dimensions(_resource_capacity(resource)),
+            "capacity": _serialize_dimensions(_resource_capacity(resource, self._mirror_dimension)),
             "attributes": attrs,
         }
 
-    @staticmethod
-    def _reservation_payload(reservation: CapacityReservation) -> dict[str, Any]:
+    def _reservation_payload(self, reservation: CapacityReservation) -> dict[str, Any]:
         return {
             "capacity_reservation_id": reservation.capacity_reservation_id,
             "settlement_resource_id": reservation.settlement_resource_id,
             "pool_id": None,
             "units": int(reservation.units or 0),
-            "allocated_gpu_count": int(reservation.units or 0),
-            "dimensions": _serialize_dimensions(_reservation_dimensions(reservation)),
+            f"allocated_{self._mirror_dimension}": int(reservation.units or 0),
+            "dimensions": _serialize_dimensions(_reservation_dimensions(reservation, self._mirror_dimension)),
             "state": reservation.state,
             "deal_ref": dict(reservation.deal_ref or {}),
             "escrow_uid": reservation.escrow_uid,
@@ -2161,7 +2459,7 @@ class CapacityLedgerService:
             "executor_target": reservation.executor_target,
             "release_job_id": reservation.release_job_id,
             "executor_ref": dict(reservation.executor_ref or {}),
-            "vm_host": (reservation.executor_ref or {}).get("vm_host"),
+            "host_id": (reservation.executor_ref or {}).get("host_id"),
             "vm_target": (
                 reservation.executor_target
                 if reservation.offering_mode == VM_OFFERING_MODE

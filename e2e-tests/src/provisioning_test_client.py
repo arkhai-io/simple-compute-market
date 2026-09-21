@@ -17,7 +17,7 @@ Usage::
     # Add a rule that pauses before returning
     client.add_mock_rule(
         rule_id="pause-create",
-        match={"vm_action": "create", "vm_host": "kvm1"},
+        match={"vm_action": "create", "host_id": "kvm1"},
         pause_before_result=True,
     )
 

@@ -82,12 +82,12 @@ def site_app() -> tuple[FastAPI, CapacityLedgerService]:
                 policy_tags={"deliverable_modes": ["vm"]},
             )
         )
-    ledger = CapacityLedgerService(session_factory, unit_claim_keys=("units", "gpu_count"))
+    ledger = CapacityLedgerService(session_factory, unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count")
     ledger.register_resource(
         resource_id="kvm1",
         total_units=1,
         capacity={"gpu_count": 1},
-        attributes={"vm_host": "kvm1", "pool_id": "default"},
+        host_id="kvm1",
         pool_id="default",
     )
 

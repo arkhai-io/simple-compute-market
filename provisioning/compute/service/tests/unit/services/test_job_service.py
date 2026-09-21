@@ -29,7 +29,7 @@ from vm_provisioning_adapter.services.job_service import AnsibleJobService
 
 def _make_service(**settings_overrides) -> AnsibleJobService:
     settings = MagicMock()
-    settings.default_vm_host = "kvm1"
+    settings.default_host_id = "kvm1"
     settings.default_max_retries = 3
     settings.retry_backoff_initial_seconds = 60
     settings.retry_backoff_multiplier = 2.0
@@ -63,19 +63,19 @@ class TestBuildParams:
     def test_basic_fields_mapped(self):
         svc = _make_service()
         params = svc._build_params({
-            "vm_host": "ww2",
+            "host_id": "ww2",
             "offering_mode": "vm",
             "vm_target": "my-vm",
             "vm_action": "shutdown",
         })
-        assert params.vm_host == "ww2"
+        assert params.host_id == "ww2"
         assert params.vm_target == "my-vm"
         assert params.vm_action == "shutdown"
 
     def test_defaults_applied_for_missing_keys(self):
         svc = _make_service()
         params = svc._build_params({"offering_mode": "vm"})
-        assert params.vm_host == "kvm1"  # from settings.default_vm_host
+        assert params.host_id == "kvm1"  # from settings.default_host_id
         assert params.vm_action == "create"
         assert params.image_setup_type == "scratch"
 
@@ -83,7 +83,7 @@ class TestBuildParams:
         svc = _make_service()
         params = svc._build_params({
             "offering_mode": "vm",
-            "vm_host": "kvm1",
+            "host_id": "kvm1",
             "vm_action": "list",
         })
         assert params.vm_ram is None
@@ -94,7 +94,7 @@ class TestBuildParams:
     def test_all_optional_fields_mapped(self):
         svc = _make_service()
         raw = {
-            "vm_host": "kvm1",
+            "host_id": "kvm1",
             "vm_target": "test-vm",
             "vm_action": "create",
             "offering_mode": "vm",
@@ -143,7 +143,7 @@ class TestBuildParams:
         or it is absent."""
         svc = _make_service()
         params = svc._build_params(
-            {"vm_host": "kvm1", "vm_action": "create", "offering_mode": "vm"}
+            {"host_id": "kvm1", "vm_action": "create", "offering_mode": "vm"}
         )
         assert params.relay_id is None
         assert params.vm_remote_port is None
@@ -158,7 +158,7 @@ class TestBuildParams:
     def test_bare_metal_fields_mapped(self):
         svc = _make_service()
         params = svc._build_params({
-            "vm_host": "bm-node-1",
+            "host_id": "bm-node-1",
             "vm_target": "bm-node-1",
             "vm_action": NODE_GRANT_ACCESS_ACTION,
             "offering_mode": "bare_metal",
@@ -194,7 +194,7 @@ class TestBuildParams:
         svc = _make_service()
         params = svc._build_params({
             "offering_mode": "vm",
-            "vm_host": "kvm1",
+            "host_id": "kvm1",
             "vm_target": "test-vm",
             "vm_action": "shutdown",
         })
@@ -208,7 +208,7 @@ class TestBuildParams:
 
         with pytest.raises(KeyError, match="offering_mode"):
             svc._build_params({
-                "vm_host": "kvm1",
+                "host_id": "kvm1",
                 "vm_target": "test-vm",
                 "vm_action": "shutdown",
             })
@@ -216,7 +216,7 @@ class TestBuildParams:
     def test_executor_target_does_not_force_vm_target(self):
         svc = _make_service()
         params = svc._build_params({
-            "vm_host": "kvm1",
+            "host_id": "kvm1",
             "vm_action": "list",
             "offering_mode": "vm",
             "executor_action": "list",
@@ -231,7 +231,7 @@ class TestPlaybookSelection:
     def test_vm_actions_use_vm_playbook(self):
         svc = _make_service()
         params = AnsibleJobParams(
-            vm_host="kvm1", vm_action="create", offering_mode="vm"
+            host_id="kvm1", vm_action="create", offering_mode="vm"
         )
 
         assert svc._playbook_path_for_params(params) == Path("/playbooks/vm-operations.yaml")
@@ -239,7 +239,7 @@ class TestPlaybookSelection:
     def test_bare_metal_actions_use_bare_metal_playbook(self):
         svc = _make_service()
         params = AnsibleJobParams(
-            vm_host="bm-node-1",
+            host_id="bm-node-1",
             vm_action=NODE_RECLAIM_ACCESS_ACTION,
             offering_mode="bare_metal",
         )
@@ -249,7 +249,7 @@ class TestPlaybookSelection:
     def test_bare_metal_offering_mode_uses_bare_metal_playbook(self):
         svc = _make_service()
         params = AnsibleJobParams(
-            vm_host="bm-node-1",
+            host_id="bm-node-1",
             vm_action="grant_access",
             offering_mode="bare_metal",
             executor_action="grant_access",
@@ -431,7 +431,7 @@ def _base_run_result(**overrides) -> AnsibleRunResult:
         stderr="",
         ssh_port=None,
         tenant_user=None,
-        vm_host_ip=None,
+        host_ip=None,
         ssh_command=None,
         ansible_result=None,
         process_id=12345,
@@ -443,11 +443,11 @@ def _base_run_result(**overrides) -> AnsibleRunResult:
 class TestBuildResultPayload:
     def test_no_ansible_result_returns_base_fields(self):
         svc = _make_service()
-        result = _base_run_result(ssh_port="2222", tenant_user="agent", vm_host_ip="10.0.0.1")
+        result = _base_run_result(ssh_port="2222", tenant_user="agent", host_ip="10.0.0.1")
         payload = svc._build_result_payload(result)
         assert payload["ssh_port"] == "2222"
         assert payload["tenant_user"] == "agent"
-        assert payload["vm_host_ip"] == "10.0.0.1"
+        assert payload["host_ip"] == "10.0.0.1"
         assert payload["ansible_result"] is None
 
     def test_ansible_result_fields_promoted(self):

@@ -476,7 +476,7 @@ class TestRebinding:
                     id=f"lease-{relay_id}",
                     relay_id=relay_id,
                     remote_port=6100,
-                    host_name=host,
+                    host_id=host,
                     pool_id=pool_id,
                     owner_kind="fulfillment",
                     owner_id=f"cr-{relay_id}",
@@ -617,7 +617,7 @@ class TestExecutionTimeTokenResolution:
     def _params(self, **overrides):
         from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
 
-        fields = {"vm_host": "kvm1", "vm_action": "create", "offering_mode": "vm"}
+        fields = {"host_id": "kvm1", "vm_action": "create", "offering_mode": "vm"}
         fields.update(overrides)
         return AnsibleJobParams(**fields)
 
@@ -656,7 +656,7 @@ class TestExecutionTimeTokenResolution:
 
         _make_relay(relays, token="original")
         params = AnsibleJobParams(
-            vm_host="kvm1",
+            host_id="kvm1",
             vm_action="create",
             offering_mode="vm",
             relay_id="site-a",

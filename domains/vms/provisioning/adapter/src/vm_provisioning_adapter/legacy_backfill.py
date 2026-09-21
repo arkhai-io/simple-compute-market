@@ -49,6 +49,8 @@ class LegacyVmLeaseCandidate:
     lease_id: str
     capacity_reservation_id: str
     status: str
+    # Named for the retired ``vm_leases`` column it is read from; it holds the
+    # host's identity and becomes ``host_id`` in everything compiled from it.
     vm_host: str | None
     pool_id: str | None
     provider: str | None
@@ -75,7 +77,7 @@ def prepare_historical_vm_teardown(
     class _PreparationOnlyJobService:
         @staticmethod
         def reserved_var_keys(params):
-            return frozenset({"vm_host", "vm_action", "vm_target", "escrow_uid"})
+            return frozenset({"host_id", "vm_action", "vm_target", "escrow_uid"})
 
     provider = AnsibleFulfillmentProvider(
         job_service=_PreparationOnlyJobService(),
@@ -147,7 +149,7 @@ def compile_legacy_vm_fulfillment_backfill(
     metadata = {
         "create_job_id": candidate.create_job_id,
         "current_job_id": candidate.create_job_id,
-        "vm_host": candidate.vm_host,
+        "host_id": candidate.vm_host,
         "vm_target": target or "",
         "operation": "create",
     }
@@ -156,7 +158,7 @@ def compile_legacy_vm_fulfillment_backfill(
         teardown_metadata = {
             "create_job_id": candidate.create_job_id,
             "current_job_id": candidate.vm_remove_job_id,
-            "vm_host": candidate.vm_host,
+            "host_id": candidate.vm_host,
             "vm_target": target or "",
             "operation": "teardown",
         }
@@ -178,7 +180,7 @@ def compile_legacy_vm_fulfillment_backfill(
             offering_mode=_LEGACY_OFFERING_MODE,
             resource_kind="vm",
             provider="ansible",
-            attributes={"vm_host": candidate.vm_host},
+            host_id=candidate.vm_host,
         )
         result = SettlementResult(
             capacity_reservation_id=candidate.capacity_reservation_id,
@@ -205,7 +207,8 @@ def compile_legacy_vm_fulfillment_backfill(
         pool_id=candidate.pool_id,
         offering_mode=_LEGACY_OFFERING_MODE,
         provider="ansible",
-        resource_attributes={"vm_host": candidate.vm_host},
+        resource_attributes={},
+        resource_host_id=candidate.vm_host,
         provider_metadata=metadata,
         teardown_provider_metadata=teardown_metadata,
         prepared_teardown_operation=prepared_teardown,

@@ -36,8 +36,9 @@ host upsert, and once, by ordered migration, for host records present at upgrade
 Derivation MUST NOT run on a process start that applies no inventory, and MUST NOT
 run when a host is created or updated through the individual host API.
 
-A host MUST be treated as already declared when any declaration correlates to it
-under the same rule the capacity projection uses to correlate declarations to hosts.
+A host MUST be treated as already declared when any declaration names it as its
+`host_id`, which is also the only rule the capacity projection uses to correlate
+declarations to hosts.
 Derivation MUST NOT overwrite or merge into an existing declaration, and an
 operator-supplied declaration MUST win over any derivable legacy value.
 
@@ -63,10 +64,10 @@ operator-supplied declaration MUST win over any derivable legacy value.
 - **THEN** the operator's declaration is retained unchanged and no derivation occurs
   for that resource
 
-#### Scenario: A declaration correlates to a host by attribute rather than by id
+#### Scenario: A declaration's resource id differs from its host
 
-- **WHEN** a declaration whose resource id differs from a host's name names that host
-  as its machine alias
+- **WHEN** a declaration whose resource id differs from a host's `host_id` names that
+  host as its `host_id`
 - **THEN** the host is treated as declared and no second declaration is derived for it
 
 #### Scenario: A host is created through the individual host API
@@ -101,6 +102,25 @@ applied. A configured document that cannot be read or applied MUST fail startup
 rather than be skipped silently, and the startup import MUST run after resource-pool
 definitions and host inventory seeding.
 
+A document entry MUST state a declaration with the registration contract's own fields
+and MUST replace the whole declaration it names, exactly as a registration request
+does. The document MUST NOT accept the legacy scalar unit total, MUST require each
+entry's resource type rather than defaulting it, and MUST reject unknown fields.
+Document validation MUST report every structural problem it finds, each with its
+location, rather than stopping at the first. A document with any structural problem
+MUST NOT be evaluated against stored state.
+
+An import MUST compare each entry with the stored declaration before writing, and an
+entry equal to the stored declaration MUST write nothing and emit no capacity event,
+so reconciling an unchanged or reformatted document does not advance the capacity
+version. A refusal only stored state can decide (an unknown pool, a host already
+named by an unnamed declaration, a pool move under a live obligation) MUST come from
+the same rules registration enforces. For a structurally valid document every such
+refusal MUST be reported, and any
+refusal MUST leave the whole import unapplied with no digest recorded. The import API
+MUST offer a validate-only mode that reports the problems and the planned changes
+without applying either.
+
 #### Scenario: Capacity definitions change between restarts
 
 - **WHEN** an operator edits the configured capacity-definitions document and
@@ -132,6 +152,47 @@ definitions and host inventory seeding.
 - **WHEN** a capacity-definitions document names a resource pool that does not exist
 - **THEN** the import fails naming the pool, no declaration from the document is
   applied, and no digest is recorded
+
+#### Scenario: A document is reapplied unchanged
+
+- **WHEN** an import names declarations identical to the stored ones
+- **THEN** no declaration is written and no capacity event is emitted
+- **AND** the import reports them as unchanged
+
+#### Scenario: An entry omits an optional field
+
+- **WHEN** a document entry names an existing declaration but omits its host or
+  attributes
+- **THEN** the declaration is replaced as a registration request would replace it,
+  and the omitted fields are cleared rather than retained
+
+#### Scenario: A document has several problems
+
+- **WHEN** a document carries an unknown field, a missing resource type, and two
+  entries naming the same host
+- **THEN** the import reports all three with their locations and applies nothing
+
+#### Scenario: A document has structural and stored-state problems
+
+- **WHEN** a document has an unknown field in one entry and names an unknown pool in
+  another
+- **THEN** the unknown field is reported and the unknown pool is not, because stored
+  state is not consulted for a structurally invalid document
+- **AND** nothing is applied
+
+#### Scenario: A later entry is refused by stored state
+
+- **WHEN** an import's earlier entries are acceptable and a later entry would move a
+  resource that holds a live obligation to another pool
+- **THEN** the refusal is reported, no entry from the document is applied, and no
+  digest is recorded
+
+#### Scenario: An operator validates a document
+
+- **WHEN** an operator submits a document to the import API in validate-only mode
+- **THEN** the response reports the problems and the planned creations, updates, and
+  unchanged entries
+- **AND** nothing is applied
 
 #### Scenario: Configured document is missing
 

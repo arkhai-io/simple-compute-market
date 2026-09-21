@@ -408,8 +408,8 @@ class TestDeletePool:
         # Still the fallback for hosts that omit pool_id.
         host = await client.register_host(
             HostCreate(
-                name="kvm1",
-                kvm_host="10.0.0.1",
+                host_id="kvm1",
+                ssh_host="10.0.0.1",
                 ssh_user="ubuntu",
                 ssh_key_type="path",
                 ssh_key_value="/key",
@@ -492,8 +492,8 @@ class TestHostPoolIntegration:
 
         host = await client.register_host(
             HostCreate(
-                name="kvm1",
-                kvm_host="10.0.0.1",
+                host_id="kvm1",
+                ssh_host="10.0.0.1",
                 ssh_user="ubuntu",
                 ssh_key_type="path",
                 ssh_key_value="/key",
@@ -506,8 +506,8 @@ class TestHostPoolIntegration:
         client, _ = client_and_queue
         host = await client.register_host(
             HostCreate(
-                name="kvm1",
-                kvm_host="10.0.0.1",
+                host_id="kvm1",
+                ssh_host="10.0.0.1",
                 ssh_user="ubuntu",
                 ssh_key_type="path",
                 ssh_key_value="/key",
@@ -522,8 +522,8 @@ class TestHostPoolIntegration:
         with pytest.raises(ProvisioningError) as exc_info:
             await client.register_host(
                 HostCreate(
-                    name="kvm1",
-                    kvm_host="10.0.0.1",
+                    host_id="kvm1",
+                    ssh_host="10.0.0.1",
                     ssh_user="ubuntu",
                     ssh_key_type="path",
                     ssh_key_value="/key",
@@ -537,8 +537,8 @@ class TestHostPoolIntegration:
         await _create_pool(client)
         await client.register_host(
             HostCreate(
-                name="kvm1",
-                kvm_host="10.0.0.1",
+                host_id="kvm1",
+                ssh_host="10.0.0.1",
                 ssh_user="ubuntu",
                 ssh_key_type="path",
                 ssh_key_value="/key",

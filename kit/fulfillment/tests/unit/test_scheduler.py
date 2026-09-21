@@ -67,7 +67,7 @@ def services():
     # This test suite's claims are VM-flavored ("gpu_count"); opt into
     # that alias explicitly the same way the VM composition root does
     # (kit/site's own default is domain-neutral -- see ledger.py).
-    ledger = CapacityLedgerService(factory, unit_claim_keys=("units", "gpu_count"))
+    ledger = CapacityLedgerService(factory, unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count")
     scheduler = PhysicalSettlementScheduler(
         pools, ledger, session_factory=factory, default_resource_kind="compute.gpu"
     )
@@ -213,7 +213,13 @@ def test_explicit_resource_bypasses_policy_not_eligibility(services):
 def test_resource_without_pool_is_not_schedulable(services):
     pools, ledger, scheduler = services
     _pool(pools, DEFAULT_POOL_ID)
-    ledger.register_resource(resource_id="orphan", total_units=4, attributes={})
+    ledger.register_resource(resource_id="orphan", total_units=4, attributes={}, pool_id="default")
+    # A legacy row stored with no pool; registration can no longer write one.
+    from market_site.db import CapacityBucket
+
+    with ledger._session_factory() as db:
+        db.query(CapacityBucket).filter_by(backing_resource_id="orphan").one().pool_id = None
+        db.commit()
     capacity_reservation_id = _reserve(ledger)
     with pytest.raises(NoEligibleSettlementResourceError):
         scheduler.schedule_resource(_request(capacity_reservation_id))
@@ -653,7 +659,7 @@ def test_independent_sessions_serialize_cursor_updates_deterministically(tmp_pat
     FulfillmentBase.metadata.create_all(bind=engine)
     factory = sessionmaker(bind=engine)
     pools = ResourcePoolService(factory, {"ansible": _Handler()})
-    ledger = CapacityLedgerService(factory, unit_claim_keys=("units", "gpu_count"))
+    ledger = CapacityLedgerService(factory, unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count")
     _pool(pools, "pool-a")
     _pool(pools, "pool-b")
     _resource(ledger, "a1", "pool-a", units=10)
@@ -743,7 +749,7 @@ def test_independent_sessions_rollback_leaves_no_partial_state_for_next_writer(t
     FulfillmentBase.metadata.create_all(bind=engine)
     factory = sessionmaker(bind=engine)
     pools = ResourcePoolService(factory, {"ansible": _Handler()})
-    ledger = CapacityLedgerService(factory, unit_claim_keys=("units", "gpu_count"))
+    ledger = CapacityLedgerService(factory, unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count")
     _pool(pools, "pool-a")
     _pool(pools, "pool-b")
     _resource(ledger, "a1", "pool-a", units=10)
@@ -831,7 +837,7 @@ def test_interleaved_independent_sessions_do_not_perturb_other_resource_kind_cur
     FulfillmentBase.metadata.create_all(bind=engine)
     factory = sessionmaker(bind=engine)
     pools = ResourcePoolService(factory, {"ansible": _Handler()})
-    ledger = CapacityLedgerService(factory, unit_claim_keys=("units", "gpu_count"))
+    ledger = CapacityLedgerService(factory, unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count")
     _pool(pools, "pool-a")
     _pool(pools, "pool-b")
     _resource(ledger, "gpu-a", "pool-a", units=10)
@@ -1009,3 +1015,91 @@ def test_a_request_may_narrow_the_claim_but_not_contradict_it(services):
         scheduler.schedule_resource(
             _request(other, requirements={"attributes": {"gpu_model": "H200"}})
         )
+
+
+def test_a_settlement_assignment_racing_a_pool_move_never_survives_on_the_moved_resource(
+    tmp_path, monkeypatch
+):
+    """Independent sessions on a file-backed database. A pool move of `dest`
+    is paused after checking `dest` for live obligations while the scheduler
+    reassigns a held reservation onto `dest`. The move's check must still be
+    true when it commits, so the assignment may not commit inside that
+    window: it either commits after the move, against `dest` in its new pool,
+    or not at all. Assigning onto a resource after it has moved is not what
+    the rule forbids; moving a resource that holds a live obligation is."""
+    import threading
+
+    from market_fulfillment import SqlAlchemySchedulingUnitOfWork
+
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'scheduling.db'}",
+        connect_args={"check_same_thread": False, "timeout": 30},
+    )
+    PoolsBase.metadata.create_all(bind=engine)
+    SiteBase.metadata.create_all(bind=engine)
+    FulfillmentBase.metadata.create_all(bind=engine)
+    factory = sessionmaker(bind=engine)
+    pools = ResourcePoolService(factory, {"ansible": _Handler()})
+    ledger = CapacityLedgerService(
+        factory, unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count"
+    )
+    _pool(pools, "pool-a")
+    _pool(pools, "pool-b")
+    _resource(ledger, "src", "pool-a", units=4)
+    _resource(ledger, "dest", "pool-a", units=4)
+    reservation_id = _reserve(ledger, agreement="race")
+    assert ledger.get_reservation_backing_resource_id(reservation_id) == "src"
+
+    checked, release = threading.Event(), threading.Event()
+    refuse = ledger._refuse_reassignment_under_obligation
+
+    def refuse_then_wait(db, bucket, new_pool_id):
+        refuse(db, bucket, new_pool_id)
+        checked.set()
+        assert release.wait(timeout=10), "test never released the pool move"
+
+    monkeypatch.setattr(ledger, "_refuse_reassignment_under_obligation", refuse_then_wait)
+
+    commits: list[str] = []
+
+    def move():
+        with ledger.serialized(), factory() as db:
+            ledger.register_resource_in_session(
+                db, resource_id="dest", pool_id="pool-b", total_units=4
+            )
+            db.commit()
+        commits.append("move")
+
+    outcomes: dict[str, object] = {}
+
+    def assign():
+        try:
+            with SqlAlchemySchedulingUnitOfWork(factory, pools, ledger).transaction() as tx:
+                tx.rebind_capacity(
+                    capacity_reservation_id=reservation_id, settlement_resource_id="dest"
+                )
+            commits.append("assign")
+            outcomes["assign"] = "committed"
+        except Exception as exc:  # a refusal is an acceptable outcome
+            outcomes["assign"] = exc
+
+    mover = threading.Thread(target=move)
+    assigner = threading.Thread(target=assign)
+    mover.start()
+    assert checked.wait(timeout=10), "the pool move never reached its check"
+    assigner.start()
+    # The assignment gets the whole pause to run in. Serialized, it cannot
+    # start its transaction while the move holds the ledger lock, so this
+    # wait expires and the move resumes; unserialized, it would commit here,
+    # against `dest` in its old pool. The assertion does not depend on it.
+    assigner.join(timeout=1)
+    release.set()
+    mover.join(timeout=10)
+    assigner.join(timeout=10)
+
+    dest = next(row for row in ledger.list_resources() if row["resource_id"] == "dest")
+    assert dest["pool_id"] == "pool-b"
+    assert commits[0] == "move", (
+        f"the assignment committed inside the move's window: {commits}, "
+        f"assignment {outcomes['assign']!r}"
+    )

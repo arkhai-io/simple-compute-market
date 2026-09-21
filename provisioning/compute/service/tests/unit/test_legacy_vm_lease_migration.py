@@ -69,7 +69,7 @@ def _insert_host(engine, *, name="kvm1", pool_id="default"):
     with engine.begin() as connection:
         connection.execute(text(
             """
-            INSERT INTO hosts (name, kvm_host, ssh_user, ssh_key_type, ssh_key_value,
+            INSERT INTO hosts (host_id, ssh_host, ssh_user, ssh_key_type, ssh_key_value,
                                 gpu_count, enabled, pool_id)
             VALUES (:name, '10.0.0.1', 'root', 'path', '/keys/id_ed25519', 0, 1, :pool_id)
             """
@@ -97,7 +97,7 @@ def _insert_vm_lease(
     lease_id,
     allocation_id,
     status,
-    vm_host="kvm1",
+    host_id="kvm1",
     vm_target=None,
     create_job_id=None,
     vm_remove_job_id=None,
@@ -111,7 +111,7 @@ def _insert_vm_lease(
                     :create_job_id, :vm_remove_job_id)
             """
         ), {
-            "id": lease_id, "allocation_id": allocation_id, "vm_host": vm_host,
+            "id": lease_id, "allocation_id": allocation_id, "vm_host": host_id,
             "vm_target": vm_target, "status": status,
             "create_job_id": create_job_id, "vm_remove_job_id": vm_remove_job_id,
         })

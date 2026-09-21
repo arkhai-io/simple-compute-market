@@ -70,7 +70,7 @@ class BareMetalOperationsService:
         contract: ExecutorActionEnvelope | None = None,
         operation_id: str | None = None,
     ) -> JobSubmitResponse:
-        self._validate_machine(body.machine_id)
+        self._validate_host(body.host_id)
         access_ref = dict(body.access_ref or {})
         resolved_operation_id = operation_id
         if resolved_operation_id is None and contract is not None:
@@ -83,17 +83,17 @@ class BareMetalOperationsService:
                 NODE_GRANT_ACCESS_ACTION,
                 body.capacity_reservation_id,
                 body.escrow_uid,
-                body.machine_id,
+                body.host_id,
                 body.physical_host_id,
             )
         return await self._job_service.submit(
             AnsibleJobParams(
-                vm_host=body.machine_id,
+                host_id=body.host_id,
                 vm_action=NODE_GRANT_ACCESS_ACTION,
-                vm_target=body.machine_id,
+                vm_target=body.host_id,
                 offering_mode=BARE_METAL_OFFERING_MODE,
                 executor_action=NODE_GRANT_ACCESS_ACTION,
-                executor_target=body.machine_id,
+                executor_target=body.host_id,
                 executor_ref=bare_metal_executor_ref(
                     body.physical_host_id,
                     access_ref=access_ref or None,
@@ -129,8 +129,8 @@ class BareMetalOperationsService:
         contract: ExecutorActionEnvelope | None = None,
         operation_id: str | None = None,
     ) -> JobSubmitResponse:
-        machine_id = str(reservation.get("executor_target") or "")
-        self._validate_machine(machine_id)
+        host_id = str(reservation.get("executor_target") or "")
+        self._validate_host(host_id)
         access_ref = bare_metal_access_ref(reservation)
         resolved_operation_id = operation_id
         if resolved_operation_id is None and contract is not None:
@@ -143,17 +143,17 @@ class BareMetalOperationsService:
                 NODE_RECLAIM_ACCESS_ACTION,
                 reservation.get("capacity_reservation_id"),
                 reservation.get("escrow_uid"),
-                machine_id,
+                host_id,
                 get_physical_host_id(reservation),
             )
         return await self._job_service.submit(
             AnsibleJobParams(
-                vm_host=machine_id,
+                host_id=host_id,
                 vm_action=NODE_RECLAIM_ACCESS_ACTION,
-                vm_target=machine_id,
+                vm_target=host_id,
                 offering_mode=BARE_METAL_OFFERING_MODE,
                 executor_action=NODE_RECLAIM_ACCESS_ACTION,
-                executor_target=machine_id,
+                executor_target=host_id,
                 executor_ref=reservation.get("executor_ref"),
                 escrow_uid=reservation.get("escrow_uid"),
                 physical_host_id=get_physical_host_id(reservation),
@@ -177,18 +177,18 @@ class BareMetalOperationsService:
         except AttributeError:
             return DEFAULT_BARE_METAL_RECLAIM_POLICY
 
-    def _validate_machine(self, machine_id: str) -> None:
+    def _validate_host(self, host_id: str) -> None:
         if self._host_service is None:
             return
-        host = self._host_service.get_host(machine_id)
+        host = self._host_service.get_host(host_id)
         if host is None:
             raise BareMetalHostValidationError(
-                f"Bare-metal machine {machine_id!r} is not registered in host inventory.",
+                f"Bare-metal machine {host_id!r} is not registered in host inventory.",
                 status_code=404,
             )
         if not bool(getattr(host, "enabled", False)):
             raise BareMetalHostValidationError(
-                f"Bare-metal machine {machine_id!r} is disabled in host inventory.",
+                f"Bare-metal machine {host_id!r} is disabled in host inventory.",
                 status_code=409,
             )
 

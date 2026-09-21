@@ -96,6 +96,18 @@ spec:
               subPath: relay-definitions.yaml
               readOnly: true
             {{- end }}
+            {{- if .Values.definitions.pools }}
+            - name: config
+              mountPath: /app/config/pool-definitions.yaml
+              subPath: pool-definitions.yaml
+              readOnly: true
+            {{- end }}
+            {{- if .Values.definitions.capacity }}
+            - name: config
+              mountPath: /app/config/capacity-definitions.yaml
+              subPath: capacity-definitions.yaml
+              readOnly: true
+            {{- end }}
           livenessProbe:
             httpGet:
               path: /health

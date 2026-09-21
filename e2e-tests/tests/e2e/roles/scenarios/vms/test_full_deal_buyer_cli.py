@@ -442,7 +442,7 @@ class TestStage00f1_ExecutorHostRegistry:
                 "sla": "90.0",
             },
         )
-        assert host.name == E2E_DEAL_CLI_HOST
+        assert host.host_id == E2E_DEAL_CLI_HOST
         assert (host.gpu_count or 0) >= E2E_HOST_GPU_COUNT, (
             f"executor host {E2E_DEAL_CLI_HOST} reports {host.gpu_count} GPU(s); "
             f"scenarios reserve up to {E2E_HOST_GPU_COUNT}"
@@ -1361,9 +1361,9 @@ class TestStage09c_LeaseRegistered:
         lease_view = DealLease(provisioning_client, deal_state.real_escrow_uid)
         lease = lease_view.refresh()
         assert lease.get("escrow_uid") == deal_state.real_escrow_uid
-        vm_host = lease.get("vm_host")
-        assert vm_host == E2E_DEAL_CLI_HOST, (
-            f"lease bound to executor {vm_host!r}; this scenario's deal was "
+        host_id = lease.get("host_id")
+        assert host_id == E2E_DEAL_CLI_HOST, (
+            f"lease bound to executor {host_id!r}; this scenario's deal was "
             f"admitted against {E2E_DEAL_CLI_HOST!r}. Lease: {lease!r}"
         )
         assert lease.get("create_job_id"), (
@@ -1381,7 +1381,7 @@ class TestStage09c_LeaseRegistered:
         deal_state.reserved_resource_id = E2E_RESOURCE_ID
         deal_state.lease_id = lease.get("id")
         deal_state.lease_status = lease.get("status")
-        deal_state.vm_host = vm_host
+        deal_state.host_id = host_id
         log.info(
             "[09c] Lease %s registered for escrow %s (resource=%s status=%s mode=%s)",
             deal_state.lease_id,

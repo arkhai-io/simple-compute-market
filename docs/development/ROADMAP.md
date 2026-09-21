@@ -36,11 +36,10 @@ Buyer-access infrastructure is provisioning-owned. A tunnel relay is a resource 
 
 The committed claim now governs the fulfillment request. A reservation carries its admitted claim -- dimensions and categorical constraints both -- and the scheduler reads it back rather than trusting the request, so a GPU-reserving listing can no longer fulfill without a GPU, and the durable create handle is written by the service that dispatches it. One cleanup is outstanding from that work: `capacity_reservations.vm_remove_job_id` is still a VM-conditional mirror of `release_job_id` on a table bare-metal pools share, retired by [`retire-vm-remove-job-id`](../../openspec/changes/retire-vm-remove-job-id/).
 
-Capacity declaration is the one place the provisioning service is not yet the fuller authority. Host inventory carries GPU count and model only, so the projection's host-derived fallback cannot express vCPU, RAM, or disk. The retiring storefront CSV has been the system's only operator-facing expression of multi-dimensional capacity — which is why capacity administration is a prerequisite of the retirement rather than a parallel improvement.
+Sellable capacity is declared in the site authority, across every dimension a resource names — GPUs, vCPU, RAM, disk, or a domain's own units — and host inventory is connection identity only. Operators declare through the registration API or a capacity-definitions document, mounted through the provisioning chart or submitted to its import API; a host's legacy INI GPU count is derived into a declaration once, where it enters or at upgrade. So the storefront CSV is no longer the only operator-facing expression of multi-dimensional capacity, which was the prerequisite its retirement waited on.
 
 | Open gap | Owned by |
 |---|---|
-| Sellable capacity has no authoritative multi-dimensional declaration or operator path in the provisioning service | [`capacity-resource-administration`](../../openspec/changes/capacity-resource-administration/) |
 | The VM storefront retains local physical tables, the local-table derivation path, CSV import and its deployment contract, the dead execution ledger, the orphaned physical admin surface, and dead physical-identity plumbing | [`pools-9-retire-local-physical-authority`](../../openspec/changes/pools-9-retire-local-physical-authority/) |
 | Buyer VM tunnels coordinated through a relay's management dashboard, with relay location and credential held in storefront configuration | [`relay-vm-access-without-a-dashboard`](../../openspec/changes/relay-vm-access-without-a-dashboard/) |
 | One SSH key reaches every host in an environment, so a host prepared by another party cannot be registered with its own credential | [`contain-embedded-host-key-material`](../../openspec/changes/contain-embedded-host-key-material/) |
@@ -196,7 +195,7 @@ test compatibility specifications and repository architecture/deployment/test
 guides. Remaining signed-producer, protected Stripe, and live resolver evidence
 is recorded as external rather than replaced with local simulation.
 
-A compute-dimension name leaking into every domain's capacity declaration is a real defect but too small to own a gap row here; it rides with [`capacity-resource-administration`](../../openspec/changes/capacity-resource-administration/), which already rewrites the code that causes it.
+No domain's capacity declaration carries another domain's dimension name: the dimension the legacy scalar total mirrors is supplied by each composition, and a declaration holds exactly the dimensions it names.
 
 ---|---|
 | The offering mode falls back implicitly to VM where durable identity is absent, which a growing set of offering modes cannot tolerate | [`market-platform-compute-40-multi-domain-proof`](../../openspec/changes/market-platform-compute-40-multi-domain-proof/) |

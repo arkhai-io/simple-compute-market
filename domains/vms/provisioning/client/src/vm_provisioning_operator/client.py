@@ -30,6 +30,8 @@ from typing import Any, Optional
 import httpx
 
 from compute_provisioning import (
+    CapacityDefinitionsImportRequest,
+    CapacityDefinitionsImportResponse,
     PoolCreate,
     PoolImportRequest,
     PoolImportResponse,
@@ -364,25 +366,25 @@ class ProvisioningClient(_ProvisioningClientBase):
             params["include_disabled"] = "true"
         return HostListResponse(**(await self._get("/api/v1/hosts/", params=params or None)))
 
-    async def get_host(self, name: str) -> HostResponse:
-        """GET /api/v1/hosts/{name}"""
-        return HostResponse(**(await self._get(f"/api/v1/hosts/{name}")))
+    async def get_host(self, host_id: str) -> HostResponse:
+        """GET /api/v1/hosts/{host_id}"""
+        return HostResponse(**(await self._get(f"/api/v1/hosts/{host_id}")))
 
     async def register_host(self, body: HostCreate) -> HostResponse:
         """POST /api/v1/hosts/"""
         return HostResponse(**(await self._post("/api/v1/hosts/", body)))
 
-    async def update_host(self, name: str, body: HostUpdate) -> HostResponse:
-        """PUT /api/v1/hosts/{name}"""
-        return HostResponse(**(await self._put(f"/api/v1/hosts/{name}", body)))
+    async def update_host(self, host_id: str, body: HostUpdate) -> HostResponse:
+        """PUT /api/v1/hosts/{host_id}"""
+        return HostResponse(**(await self._put(f"/api/v1/hosts/{host_id}", body)))
 
-    async def enable_host(self, name: str) -> HostResponse:
-        """POST /api/v1/hosts/{name}/enable"""
-        return HostResponse(**(await self._post(f"/api/v1/hosts/{name}/enable", {})))
+    async def enable_host(self, host_id: str) -> HostResponse:
+        """POST /api/v1/hosts/{host_id}/enable"""
+        return HostResponse(**(await self._post(f"/api/v1/hosts/{host_id}/enable", {})))
 
-    async def disable_host(self, name: str) -> HostResponse:
-        """POST /api/v1/hosts/{name}/disable"""
-        return HostResponse(**(await self._post(f"/api/v1/hosts/{name}/disable", {})))
+    async def disable_host(self, host_id: str) -> HostResponse:
+        """POST /api/v1/hosts/{host_id}/disable"""
+        return HostResponse(**(await self._post(f"/api/v1/hosts/{host_id}/disable", {})))
 
     async def check_connectivity(self, host: str) -> HostConnectivityResponse:
         """GET /api/v1/hosts/{host}/connectivity — run ansible -m ping.
@@ -454,6 +456,22 @@ class ProvisioningClient(_ProvisioningClientBase):
         """POST /api/v1/pools/validate"""
         return PoolValidateResponse(**(await self._post(
             "/api/v1/pools/validate", PoolImportRequest(yaml_text=yaml_text)
+        )))
+
+    async def import_capacity_definitions(
+        self, yaml_text: str, *, validate_only: bool = False
+    ) -> CapacityDefinitionsImportResponse:
+        """POST /api/v1/capacity/definitions/import
+
+        A refused import raises ``ProvisioningError`` with status 422, its
+        message carrying every problem; ``validate_only`` returns them as
+        structured problems, with the diff an import would produce.
+        """
+        return CapacityDefinitionsImportResponse(**(await self._post(
+            "/api/v1/capacity/definitions/import",
+            CapacityDefinitionsImportRequest(
+                yaml_text=yaml_text, validate_only=validate_only
+            ),
         )))
 
     # ------------------------------------------------------------------
@@ -572,7 +590,7 @@ class ProvisioningClient(_ProvisioningClientBase):
         *,
         resource_id: str,
         escrow_uid: str,
-        vm_host: str,
+        host_id: str,
         vm_target: str,
         lease_end_utc,
         lease_start_utc=None,
@@ -583,7 +601,7 @@ class ProvisioningClient(_ProvisioningClientBase):
         body: dict = {
             "resource_id": resource_id,
             "escrow_uid": escrow_uid,
-            "vm_host": vm_host,
+            "host_id": host_id,
             "vm_target": vm_target,
             "lease_end_utc": lease_end_utc.isoformat() if hasattr(lease_end_utc, "isoformat") else str(lease_end_utc),
         }
@@ -599,15 +617,15 @@ class ProvisioningClient(_ProvisioningClientBase):
         self,
         *,
         status: Optional[str] = None,
-        vm_host: Optional[str] = None,
+        host_id: Optional[str] = None,
         escrow_uid: Optional[str] = None,
     ) -> dict:
         """GET /api/v1/leases — list leases with optional filters."""
         params: dict = {}
         if status is not None:
             params["status"] = status
-        if vm_host is not None:
-            params["vm_host"] = vm_host
+        if host_id is not None:
+            params["host_id"] = host_id
         if escrow_uid is not None:
             params["escrow_uid"] = escrow_uid
         return await self._get("/api/v1/leases/", params=params)
@@ -885,20 +903,20 @@ class SyncProvisioningClient(_ProvisioningClientBase):
             params["include_disabled"] = "true"
         return HostListResponse(**(self._get("/api/v1/hosts/", params=params or None)))
 
-    def get_host(self, name: str) -> HostResponse:
-        return HostResponse(**(self._get(f"/api/v1/hosts/{name}")))
+    def get_host(self, host_id: str) -> HostResponse:
+        return HostResponse(**(self._get(f"/api/v1/hosts/{host_id}")))
 
     def register_host(self, body: HostCreate) -> HostResponse:
         return HostResponse(**(self._post("/api/v1/hosts/", body)))
 
-    def update_host(self, name: str, body: HostUpdate) -> HostResponse:
-        return HostResponse(**(self._put(f"/api/v1/hosts/{name}", body)))
+    def update_host(self, host_id: str, body: HostUpdate) -> HostResponse:
+        return HostResponse(**(self._put(f"/api/v1/hosts/{host_id}", body)))
 
-    def enable_host(self, name: str) -> HostResponse:
-        return HostResponse(**(self._post(f"/api/v1/hosts/{name}/enable", {})))
+    def enable_host(self, host_id: str) -> HostResponse:
+        return HostResponse(**(self._post(f"/api/v1/hosts/{host_id}/enable", {})))
 
-    def disable_host(self, name: str) -> HostResponse:
-        return HostResponse(**(self._post(f"/api/v1/hosts/{name}/disable", {})))
+    def disable_host(self, host_id: str) -> HostResponse:
+        return HostResponse(**(self._post(f"/api/v1/hosts/{host_id}/disable", {})))
 
     def check_connectivity(self, host: str) -> HostConnectivityResponse:
         """GET /api/v1/hosts/{host}/connectivity — run ansible -m ping."""
@@ -951,6 +969,16 @@ class SyncProvisioningClient(_ProvisioningClientBase):
     def validate_pools(self, yaml_text: str) -> PoolValidateResponse:
         return PoolValidateResponse(**(self._post(
             "/api/v1/pools/validate", PoolImportRequest(yaml_text=yaml_text)
+        )))
+
+    def import_capacity_definitions(
+        self, yaml_text: str, *, validate_only: bool = False
+    ) -> CapacityDefinitionsImportResponse:
+        return CapacityDefinitionsImportResponse(**(self._post(
+            "/api/v1/capacity/definitions/import",
+            CapacityDefinitionsImportRequest(
+                yaml_text=yaml_text, validate_only=validate_only
+            ),
         )))
 
     # System / readiness (sync mirrors)
@@ -1047,7 +1075,7 @@ class SyncProvisioningClient(_ProvisioningClientBase):
         *,
         resource_id: str,
         escrow_uid: str,
-        vm_host: str,
+        host_id: str,
         vm_target: str,
         lease_end_utc,
         lease_start_utc=None,
@@ -1058,7 +1086,7 @@ class SyncProvisioningClient(_ProvisioningClientBase):
         body: dict = {
             "resource_id": resource_id,
             "escrow_uid": escrow_uid,
-            "vm_host": vm_host,
+            "host_id": host_id,
             "vm_target": vm_target,
             "lease_end_utc": lease_end_utc.isoformat() if hasattr(lease_end_utc, "isoformat") else str(lease_end_utc),
         }
@@ -1074,15 +1102,15 @@ class SyncProvisioningClient(_ProvisioningClientBase):
         self,
         *,
         status: Optional[str] = None,
-        vm_host: Optional[str] = None,
+        host_id: Optional[str] = None,
         escrow_uid: Optional[str] = None,
     ) -> dict:
         """GET /api/v1/leases — list leases with optional filters."""
         params: dict = {}
         if status is not None:
             params["status"] = status
-        if vm_host is not None:
-            params["vm_host"] = vm_host
+        if host_id is not None:
+            params["host_id"] = host_id
         if escrow_uid is not None:
             params["escrow_uid"] = escrow_uid
         return self._get("/api/v1/leases/", params=params)

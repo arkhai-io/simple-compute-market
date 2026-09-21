@@ -306,7 +306,7 @@ class RelayPortLease(Base):
     relay_id = Column(String, ForeignKey("relays.id"), nullable=False, index=True)
     remote_port = Column(Integer, nullable=False)
     # Recorded for operator visibility and reconciliation, not for uniqueness.
-    host_name = Column(String, nullable=True)
+    host_id = Column(String, nullable=True)
     pool_id = Column(String, nullable=True)
     # The job or fulfillment whose terminal state releases this lease.
     owner_kind = Column(String, nullable=False)
@@ -347,8 +347,9 @@ class Host(Base):
     file is an input format only (via ``POST /hosts/import`` or the
     ``PROVISIONING_INVENTORY_INI`` env var at startup); at runtime, all host
     lookups and inventory rendering use this table. Rows may represent KVM
-    hypervisors, bare-metal nodes, or future executor hosts; the row name is
-    the Ansible alias used by executor jobs.
+    hypervisors, bare-metal nodes, or future executor hosts; ``host_id`` is
+    the host's one identity everywhere it is named, including the Ansible
+    inventory alias used by executor jobs.
 
     ssh_key_type:
         "path"     — ssh_key_value is a filesystem path (e.g. a mounted
@@ -359,7 +360,7 @@ class Host(Base):
     enabled:
         False hosts are excluded from list queries and inventory rendering.
         Hosts are never hard-deleted (append-only) so that job history FKs
-        (vm_host name references) remain resolvable.
+        (host_id references) remain resolvable.
 
     ssh_port:
         Port the provisioner connects to, defaulting to 22. The registry is
@@ -378,17 +379,17 @@ class Host(Base):
 
     __tablename__ = "hosts"
 
-    name = Column(String, primary_key=True)  # Ansible alias, e.g. "kvm1"
-    kvm_host = Column(String, nullable=False)  # IP/hostname the provisioner SSHes to
+    host_id = Column(String, primary_key=True)  # Ansible alias, e.g. "kvm1"
+    ssh_host = Column(String, nullable=False)  # IP/hostname the provisioner SSHes to
     # Address tenants use to reach this host's VM port-forwards (public IP,
-    # DNS, or overlay IP). Distinct from kvm_host: the provisioner may reach
+    # DNS, or overlay IP). Distinct from ssh_host: the provisioner may reach
     # the host over a different network than buyers do. NULL → fall back to
-    # kvm_host in tenant-facing connection info.
+    # ssh_host in tenant-facing connection info.
     public_host = Column(String, nullable=True)
     ssh_user = Column(String, nullable=False)  # SSH login user on the KVM host
     # Port the provisioner connects to. Non-default when the host answers
     # through a reverse tunnel, a NAT forward, or a bastion rather than on 22
-    # at kvm_host. NOT NULL with a server default so the registry never holds
+    # at ssh_host. NOT NULL with a server default so the registry never holds
     # an "unspecified" state that each reader would resolve independently.
     ssh_port = Column(Integer, nullable=False, default=22, server_default="22")
     ssh_key_type = Column(String, nullable=False, default="path")  # "path" | "embedded"

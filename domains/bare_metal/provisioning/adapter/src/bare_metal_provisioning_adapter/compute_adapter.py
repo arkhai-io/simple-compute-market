@@ -59,7 +59,7 @@ class BareMetalComputeAdapter:
                 "capacity_reservation_id": envelope.capacity_reservation_id,
                 "escrow_uid": deal_ref.get("escrow_uid")
                 or reservation.get("escrow_uid"),
-                "machine_id": reservation.get("executor_target"),
+                "host_id": reservation.get("executor_target"),
                 "physical_host_id": executor_ref.get("physical_host_id"),
                 "lease_start_utc": reservation.get("lease_start_utc"),
                 "lease_end_utc": reservation.get("lease_end_utc"),

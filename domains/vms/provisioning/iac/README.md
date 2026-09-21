@@ -350,7 +350,7 @@ Create a variables file with your VM configuration and run the playbook:
 
 ```bash
 cat > /tmp/vm_vars.yml << 'EOF'
-vm_host: kvm1
+host_id: kvm1
 vm_target: vm-base-gpu  
 vm_action: create
 vm_ram: 4096
@@ -373,7 +373,7 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 
 **Parameter Explanations**:
 - `@inventory/management-vars.yaml`: Variables file containing Golden Image Management configuration (Image Name, Bucket and Image Path, Root SSH details)
-- `vm_host`: The KVM host where the VM will be created (from your inventory)
+- `host_id`: The host where the VM will be created (from your inventory)
 - `vm_target`: Name of the VM to create
 - `vm_action`: Action to perform (create, start, stop, etc.)
 - `vm_ram`: RAM allocation in MB (4096 = 4GB)
@@ -401,14 +401,14 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 ### 4. Monitor VM Performance
 ```bash
 ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=kvm1 \
+    -e host_id=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=monitor \
     --limit kvm1
 ```
 
 **Parameter Explanations**:
-- `vm_host`: The KVM host where the VM is running (from your inventory)
+- `host_id`: The host where the VM is running (from your inventory)
 - `vm_target`: Name of the VM to monitor
 - `vm_action`: Action to perform (monitor for performance metrics)
 
@@ -417,7 +417,7 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 **Shutdown VM Gracefully**:
 ```bash
 ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=kvm1 \
+    -e host_id=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=shutdown \
     --limit kvm1
@@ -426,7 +426,7 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 **Reboot VM**:
 ```bash
 ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=kvm1 \
+    -e host_id=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=reboot \
     --limit kvm1
@@ -435,7 +435,7 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 **Force Shutdown/Destroy VM**:
 ```bash
 ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=kvm1 \
+    -e host_id=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=destroy \
     --limit kvm1
@@ -445,7 +445,7 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 ```bash
 ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
     -e "@inventory/management-vars.yaml" \
-    -e vm_host=kvm1 \
+    -e host_id=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=undefine \
     --limit kvm1
@@ -454,7 +454,7 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 **Schedule VM Lease End** (set when the lease will expire and VM will be destroyed):
 ```bash
 ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=kvm1 \
+    -e host_id=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=lease_end \
     -e '{"vm_lease_end":"2026-02-23 10:45"}' \
@@ -462,7 +462,7 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 ```
 
 **Parameter Explanations** (applies to all Additional VM operation commands above):
-- `vm_host`: The KVM host where the VM operation will be performed (from your inventory)
+- `host_id`: The host where the VM operation will be performed (from your inventory)
 - `vm_target`: Name of the VM to operate on
 - `vm_action`: Action to perform (shutdown, reboot, destroy, undefine)
 
@@ -1044,7 +1044,7 @@ The modular architecture orchestrates VM operations in the following flow:
 **Create VM with GPU Passthrough** (recommended method using variables file):
 ```bash
 cat > /tmp/vm_vars.yml << 'EOF'
-vm_host: kvm1
+host_id: kvm1
 vm_target: vm-base-gpu
 vm_action: create
 vm_ram: 8192
@@ -1068,7 +1068,7 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 **Create VM without GPU**:
 ```bash
 cat > /tmp/vm_vars.yml << 'EOF'
-vm_host: kvm1
+host_id: kvm1
 vm_target: vm-base-gpu
 vm_action: create
 vm_ram: 4096
@@ -1091,7 +1091,7 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 **Start VM**:
 ```bash
 ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=kvm1 \
+    -e host_id=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=start \
     --limit kvm1
@@ -1100,7 +1100,7 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 **Shutdown VM Gracefully**:
 ```bash
 ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=kvm1 \
+    -e host_id=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=shutdown \
     --limit kvm1
@@ -1109,7 +1109,7 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 **Reboot VM**:
 ```bash
 ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=kvm1 \
+    -e host_id=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=reboot \
     --limit kvm1
@@ -1118,7 +1118,7 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 **Force Destroy VM** (immediate shutdown):
 ```bash
 ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=kvm1 \
+    -e host_id=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=destroy \
     --limit kvm1
@@ -1128,7 +1128,7 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 ```bash
 ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
     -e "@inventory/management-vars.yaml" \
-    -e vm_host=kvm1 \
+    -e host_id=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=undefine \
     --limit kvm1
@@ -1137,7 +1137,7 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 **Monitor VM Performance**:
 ```bash
 ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=kvm1 \
+    -e host_id=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=monitor \
     --limit kvm1
@@ -1146,7 +1146,7 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 **List All VMs on Host**:
 ```bash
 ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=kvm1 \
+    -e host_id=kvm1 \
     -e vm_action=list \
     --limit kvm1
 ```
@@ -1154,7 +1154,7 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 **Check Host Resources and Status**:
 ```bash
 ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=kvm1 \
+    -e host_id=kvm1 \
     -e vm_action=check \
     --limit kvm1
 ```
@@ -1162,7 +1162,7 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 **Reset VM Tenant Password**:
 ```bash
 ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=kvm1 \
+    -e host_id=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=reset_password \
     --limit kvm1
@@ -1171,7 +1171,7 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 **Schedule VM Lease End** (set when lease expires and VM will be automatically destroyed and cleaned up):
 ```bash
 ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=kvm1 \
+    -e host_id=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=lease_end \
     -e '{"vm_lease_end":"2026-02-23 10:45"}' \
@@ -1186,7 +1186,7 @@ ssh kvm1 'cat /var/log/vm-lease-end/vm-base-gpu/lease_end_*.log'
 **Cancel Scheduled Lease End** (remove scheduled lease termination):
 ```bash
 ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=kvm1 \
+    -e host_id=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=lease_remove \
     --limit kvm1
@@ -1202,7 +1202,7 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 
 # Only run monitoring tasks
 ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
-    -e vm_host=kvm1 \
+    -e host_id=kvm1 \
     -e vm_target=vm-base-gpu \
     -e vm_action=monitor \
     --tags vm_monitor \
@@ -1210,7 +1210,7 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 ```
 
 **Parameter Reference for VM Creation**:
-- `vm_host`: KVM host where VM will be created (from inventory, e.g., `kvm1`)
+- `host_id`: Host where VM will be created (from inventory, e.g., `kvm1`)
 - `vm_target`: Name/identifier for the VM (e.g., `vm-base-gpu`, `customer-vm-001`)
 - `vm_action`: Operation to perform (`create`, `start`, `shutdown`, `reboot`, `destroy`, `undefine`, `monitor`, `list`, `check`, `reset_password`, `lease_end`, `lease_remove`)
 - `vm_ram`: RAM allocation in MB (e.g., `4096` = 4GB, `8192` = 8GB)
@@ -1259,7 +1259,7 @@ All VM operations provide JSON-formatted output for API integration. Example cre
 ```json
 {
   "vm_name": "vm-base-gpu",
-  "vm_host": "kvm1",
+  "host_id": "kvm1",
   "status": "running",
   "resources": {
     "ram_mb": 8192,

@@ -20,22 +20,50 @@ global:
 mockMode: false
 
 # ---------------------------------------------------------------------------
-# Declarative pools and relays.
+# Declarative relays, pools, and capacity.
 #
-# Rendered into the ConfigMap and mounted into the application container. They
-# carry no credentials: a relay entry names *which key* of the
-# provisioning-secrets profile holds its admission token, never the token.
-# Leave a list empty to manage that resource entirely through the API.
+# Each value is a whole definition document, rendered verbatim into the
+# ConfigMap and mounted into the application container; the service reads a
+# document only when its value is non-empty, so leaving one empty manages that
+# resource entirely through the API. They carry no credentials: a relay entry
+# names *which key* of the provisioning-secrets profile holds its admission
+# token, never the token.
 #
 # Reconciled when the document's content changes, not on every start: import is
 # authoritative over the document it is given, so applying one nobody submitted
-# would revert relays administered through the API on any pod restart.
+# would revert administration done through the API on any pod restart.
 #
-# A relay the document stops naming is retained, unlike a pool. Disabling one
-# would break every pool referencing it and every live tunnel on it.
+# What a document does to entries it stops naming differs:
+#   relays   - retained. Disabling one would break every pool referencing it
+#              and every live tunnel on it.
+#   pools    - disabled. The pool document is authoritative for the whole set.
+#   capacity - retained, as relays are. A capacity entry replaces the whole
+#              declaration it names, and every declared attribute is published
+#              to storefronts.
+#
+# A capacity declaration names its pool, so a pool it names must exist on the
+# first boot: supply `pools` alongside `capacity` when capacity names a pool
+# other than "default". Pools are imported before capacity.
+#
+#   pools:
+#     pools:
+#       - id: default
+#         label: Default Pool
+#         provider: ansible
+#         provider_config: {playbook_path: playbooks/vm-operations.yaml}
+#   capacity:
+#     resources:
+#       - resource_id: compute-kvm1
+#         pool_id: default
+#         resource_type: compute.gpu
+#         host_id: kvm1
+#         capacity: {gpu_count: 8}
+#         attributes: {gpu_model: H200}
 # ---------------------------------------------------------------------------
 definitions:
   relays: {}
+  pools: {}
+  capacity: {}
 
 # ---------------------------------------------------------------------------
 # Helm smoke-test configuration.
@@ -114,14 +142,12 @@ storefront:
 config:
   database_url: "sqlite:////app/data/provisioning.db"
 
-  # relay_definitions_path is NOT set here. The chart derives it from
-  # `definitions.relays` below, so the mount and the path cannot disagree — a
-  # rendered-and-mounted document that the service skips because its path is
-  # unset is a silent no-op that looks like configuration.
-  #
-  # pool_definitions_path is likewise absent, deliberately: wiring it would
-  # newly subject every deployment's pools to declarative reconciliation, which
-  # is a change to what a deployment means rather than a bug fix.
+  # relay_definitions_path, pool_definitions_path, and
+  # capacity_definitions_path are NOT set here. The chart derives each from
+  # its `definitions` value above, so the mount and the path cannot disagree —
+  # a rendered-and-mounted document that the service skips because its path is
+  # unset is a silent no-op that looks like configuration. The schema refuses
+  # the pool and capacity paths here for that reason.
 
   # Ansible paths — set to the IaC tree location inside the container.
   # Override here for environments that mount the IaC at a different path.
@@ -132,7 +158,7 @@ config:
 
   # Ansible runtime
   ansible_timeout_seconds: 1800
-  default_vm_host: "kvm1"
+  default_host_id: "kvm1"
 
   # Golden image public settings. Credentials belong in the runtime Secret.
   golden_root_ssh_filename: ""

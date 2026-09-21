@@ -412,8 +412,8 @@ class NetworkMarketplacePort:
         ) as provisioning_admin:
             provisioning_admin.register_host(
                 HostCreate(
-                    name=self._host_id,
-                    kvm_host="127.0.0.1",
+                    host_id=self._host_id,
+                    ssh_host="127.0.0.1",
                     ssh_user="hosted-e2e",
                     ssh_key_type="path",
                     ssh_key_value="/tmp/hosted-e2e-key",
@@ -435,12 +435,10 @@ class NetworkMarketplacePort:
                 resource_type="compute.gpu",
                 pool_id="default",
                 resource_subtype="h100",
-                attributes={
+                host_id=self._host_id, attributes={
                     "gpu_model": "H100",
                     "region": "local",
-                    "vm_host": self._host_id,
-                    "physical_host_id": self._host_id,
-                },
+                    "physical_host_id": self._host_id},
                 capacity={"gpu_count": 1},
                 request_id=f"hosted-e2e-capacity-{self._resource_id}",
             )

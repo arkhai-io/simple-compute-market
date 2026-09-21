@@ -34,7 +34,8 @@ def _leased_vm_reservation() -> dict:
     ledger.register_resource(
         resource_id="contract-kvm1",
         total_units=1,
-        attributes={"vm_host": "kvm1"},
+        host_id="kvm1", attributes={},
+        pool_id="default",
     )
     reserved = ledger.reserve(
         claim={"offering_mode": "vm"},
@@ -53,11 +54,10 @@ def _leased_bare_metal_reservation() -> dict:
     ledger.register_resource(
         resource_id="contract-bare-metal-1",
         total_units=1,
-        attributes={
-            "machine_id": "bm-contract-1",
+        host_id="bm-contract-1", attributes={
             "physical_host_id": "physical-contract-1",
-            "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
-        },
+            "allocation_mode": ALLOCATION_MODE_EXCLUSIVE},
+        pool_id="default",
     )
     reserved = ledger.reserve(
         claim={
@@ -101,8 +101,8 @@ def _vm_action(reservation: dict, **overrides) -> ExecutorActionEnvelope:
 async def test_contract_submission_is_idempotent_and_correlated(client_and_queue):
     legacy_client, _ = client_and_queue
     await legacy_client.register_host(HostCreate(
-        name="kvm1",
-        kvm_host="127.0.0.1",
+        host_id="kvm1",
+        ssh_host="127.0.0.1",
         ssh_user="ubuntu",
         ssh_key_type="path",
         ssh_key_value="/tmp/test-key",
@@ -128,8 +128,8 @@ async def test_contract_submission_is_idempotent_and_correlated(client_and_queue
 async def test_bare_metal_uses_same_offering_mode_neutral_client(client_and_queue):
     legacy_client, _ = client_and_queue
     await legacy_client.register_host(HostCreate(
-        name="bm-contract-1",
-        kvm_host="192.0.2.10",
+        host_id="bm-contract-1",
+        ssh_host="192.0.2.10",
         ssh_user="root",
         ssh_key_type="path",
         ssh_key_value="/tmp/test-key",
@@ -173,8 +173,8 @@ async def test_terminal_executor_error_uses_structured_contract_envelope(
 ):
     legacy_client, _ = client_and_queue
     await legacy_client.register_host(HostCreate(
-        name="kvm1",
-        kvm_host="127.0.0.1",
+        host_id="kvm1",
+        ssh_host="127.0.0.1",
         ssh_user="ubuntu",
         ssh_key_type="path",
         ssh_key_value="/tmp/test-key",
@@ -214,8 +214,8 @@ async def test_adapter_is_selected_by_the_offering_mode(client_and_queue):
     """
     legacy_client, _ = client_and_queue
     await legacy_client.register_host(HostCreate(
-        name="kvm-sel",
-        kvm_host="127.0.0.1",
+        host_id="kvm-sel",
+        ssh_host="127.0.0.1",
         ssh_user="ubuntu",
         ssh_key_type="path",
         ssh_key_value="/tmp/test-key",
@@ -412,7 +412,7 @@ def _create_fulfillment_aggregate(
                 settlement_resource_id="kvm1",
                 pool_id="pool-1",
                 provider="ansible",
-                resource_attributes={"vm_host": "kvm1"},
+                resource_host_id="kvm1", resource_attributes={},
                 fulfillment_request={
                     "kind": "vm.fulfillment.request",
                     "schema_version": 1,
@@ -490,7 +490,7 @@ async def test_contract_register_lease_never_sends_executor_ref_and_it_self_heal
     actually use, distinct from the VM-domain-branded `/leases` surface --
     has no `executor_ref` field on its request contract at all. Confirms
     that omission is harmless: `executor_ref` is expected to self-heal in
-    `market_site.ledger._sync_executor_fields` from the `vm_host` already
+    `market_site.ledger._sync_executor_fields` from the `host_id` already
     set on the reservation at commit time, and `executor_target` (backing
     `vm_target`, which has no independent write path) is retained exactly
     as sent.
@@ -513,4 +513,4 @@ async def test_contract_register_lease_never_sends_executor_ref_and_it_self_heal
     ledger = _container_module.resolved_capacity_ledger_service
     row = ledger.get_reservation(reservation["capacity_reservation_id"])
     assert row["vm_target"] == "tenant-self-heal"
-    assert row["executor_ref"] == {"vm_host": "kvm1"}
+    assert row["executor_ref"] == {"host_id": "kvm1"}

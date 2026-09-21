@@ -221,6 +221,20 @@ specification directly, which is the ordinary path.
   representable — a seller with real execution integration who chooses to trade out
   of band — and nothing here forbids it. Whether that combination should be
   allowed, warned about, or refused is deferred; no task decides it.
+- **How should the site authority read pool declarations?** `ARCHITECTURE.md`'s
+  kit layers let an authority capability (`kit/site`, `kit/resource-pools`) depend
+  on foundation capabilities only, yet `kit/site` declares `kit-resource-pools` and
+  its ledger reads `ResourcePool` directly: a pool's deliverable modes at admission,
+  and whether a declaration's pool exists at registration (added by
+  `capacity-resource-administration`, which recorded the conflict rather than widen
+  its scope). A site that consumes this change's backing declaration would add a
+  third such read. The alternative the review of that change proposed is a small
+  pool-authority port the ledger receives from its composition root, covering
+  existence and every pool fact admission reads, with `DEFAULT_POOL_ID` moved to a
+  foundation home; the cost is a change to how every composition constructs the
+  ledger. Whether to introduce the port, and in which change, is undecided; no task
+  decides it. If the dependency is instead intended, `ARCHITECTURE.md`'s layer
+  diagram is what changes.
 
 ## Migration Plan
 

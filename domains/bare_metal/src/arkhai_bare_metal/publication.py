@@ -8,7 +8,7 @@ from typing import Any
 from .projections import BareMetalResourceProjection, TrustedBareMetalProjection
 from .schema import BareMetalListing
 
-BARE_METAL_PUBLICATION_VIEW = "bare_metal.v1"
+BARE_METAL_PUBLICATION_VIEW = "bare_metal.v2"
 
 
 def _length_prefixed(value: str) -> str:
@@ -137,7 +137,7 @@ def available_bare_metal_listings(
             capabilities[key] = value
         listings.append(
             BareMetalListing(
-                machine_id=resource.machine_id,
+                host_id=resource.host_id,
                 physical_host_id=resource.physical_host_id,
                 access_methods=list(resource.access_methods),
                 min_duration_seconds=min_duration_seconds,

@@ -106,7 +106,7 @@ class BareMetalSettlementService:
         )
         assert listing_resource is not None
         if (
-            listing_resource.machine_id != terms.machine_id
+            listing_resource.host_id != terms.host_id
             or listing_resource.physical_host_id != terms.physical_host_id
             or terms.listing_ref != thread["our_listing_id"]
         ):

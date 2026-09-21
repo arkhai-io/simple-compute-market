@@ -159,14 +159,13 @@ administrator signer and exact provisioning-authority trust. The authenticated
   "total_units": 1,
   "resource_type": "compute.bare-metal",
   "pool_id": "whole-host-california",
+  "host_id": "host-ca-h200-01",
   "capacity": {"units": 1},
   "attributes": {
-    "vm_host": "host-ca-h200-01",
+    "physical_host_id": "<provider-stable-host-id>",
+    "allocation_mode": "exclusive",
     "bare_metal_publication": {
       "enabled": true,
-      "physical_host_id": "<provider-stable-host-id>",
-      "machine_id": "host-ca-h200-01",
-      "allocation_mode": "exclusive",
       "access_methods": ["ssh"],
       "capabilities": {}
     }
@@ -175,11 +174,16 @@ administrator signer and exact provisioning-authority trust. The authenticated
 }
 ```
 
-The URL path's Physical Resource id, `vm_host`, publication `machine_id`, and
-inventory alias are separate authority fields with the exact values shown by
-their roles; do not substitute the provider id or public IP for the inventory
-alias. Registration is independently idempotent and must complete before
-publication.
+The URL path's Physical Resource id, the `host_id`, and `physical_host_id` are
+separate fields with the exact values shown by their roles. `host_id` is the
+host's inventory alias, the first token of its line in the Ansible inventory;
+`physical_host_id` identifies the physical machine for cross-mode accounting.
+Do not substitute the provider id or public IP for the inventory alias.
+`physical_host_id` and `allocation_mode` belong at the top level of
+`attributes`, where the site authority's exclusive/shareable accounting reads
+them; `bare_metal_publication` carries only what the listing view exposes.
+Everything in `attributes` is published to storefronts. Registration is
+independently idempotent and must complete before publication.
 
 The stack persists registry, Redis, provisioning, and storefront state in
 separate named volumes. Do not treat an HTTP 200 alone as deal readiness:
@@ -189,6 +193,36 @@ capacity, fulfillment, or the configured settlement mechanism is unavailable.
 The dedicated image includes the bare-metal publication command. Run one authenticated publication round with `bare-metal-storefront publish` after all configured sites report a fresh complete signed projection. It publishes independent typed settlement options and closes stale open listings through the common publication runner; it does not manufacture availability or substitute a different site/resource.
 
 `BARE_METAL_STOREFRONT_EVM_ADDRESS` is required only when Alkahest is enabled. Hosted-only startup leaves it empty and constructs no wallet, RPC, chain, or Alkahest client. The shared settlement JSON is mounted read-only and contains public authority/account/trust/release settings only. The runtime registers the ready mechanisms, the shared hosted route service, and bare-owned lifecycle callbacks; a disabled or unready mechanism is omitted rather than represented by a fake adapter.
+
+### Resetting the storefront database
+
+The bare-metal storefront refuses to start against a database written under a
+listing kind it can no longer decode, and names this section. Accepted
+bare-metal state is signed or pinned by content digest, so it is never rewritten
+in place, and no decoder for a retired listing kind is kept. The remedy is to
+remove the bare-metal deployment and install it fresh:
+
+1. Terminate every active bare-metal lease through the provisioning service's
+   lease API, force-releasing any whose teardown cannot complete after
+   verifying the node externally. The provisioning service outlives the reset,
+   so a lease left active there is orphaned rather than removed.
+2. `helm uninstall` the bare-metal release and delete its persistent volume
+   claims. Its registry listings go with it only if the registry belongs to
+   that release. A registry shared with other roles keeps them, and nothing in
+   a fresh storefront knows their listing ids; before uninstalling, disable the
+   bare-metal capacity declarations at the provisioning service and run one
+   `bare-metal-storefront publish` round, which closes every listing the
+   storefront tracks once its sites report no bare-metal resources.
+3. Deploy the upgrade. The provisioning service migrates its own database in
+   place. It is shared with VM fulfillment and is never reset.
+4. Install the bare-metal release fresh, re-enable its capacity declarations,
+   and publish.
+5. Discard bare-metal buyer run logs that reference deals made before the
+   reset; nothing can decode them afterwards.
+
+This applies only while bare metal is unreleased. A released deployment cannot
+drain long-running contracts to patch, so a retired kind must keep a read-only
+decoder until nothing references it.
 
 ## Release-qualified deal evidence
 

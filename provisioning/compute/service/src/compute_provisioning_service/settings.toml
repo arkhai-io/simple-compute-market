@@ -29,7 +29,7 @@ database_url = "sqlite:///provisioning.db"
 # mode overrides it back to "".
 ansible_cfg = "/opt/domains/vms/provisioning/iac/ansible/ansible.cfg"
 ansible_timeout_seconds = 1800
-default_vm_host = "kvm1"
+default_host_id = "kvm1"
 
 # Ansible filesystem paths.
 # Set to absolute paths via your active profile or PROVISIONING_* env vars.
@@ -104,18 +104,20 @@ rate_limit_requests_per_minute = 30
 ssh_decryption_key = ""
 
 # Inventory seeding
-# When set, this INI content is parsed and upserted into the hosts table
-# at every service startup (idempotent).  Used by the Helm chart to inject
-# inventory via a Kubernetes Secret without requiring a POST /hosts/import call.
+# When set, this INI content seeds the hosts table at startup, and only while
+# the table is empty, so hosts administered through the API survive a pod
+# restart. POST /api/v1/hosts/import always upserts. Used by the Helm chart to
+# inject inventory via a Kubernetes Secret.
 inventory_ini = ""
 
 # Resource pool definitions
 # Path to a YAML file of pool definitions (see ARCHITECTURE.md § Physical
 # Settlement Scheduler and FulfillmentProvider Architecture, "Pool seeding
-# and admin surfaces" for the format). When set, imported at every service
-# startup (idempotent upsert — same pattern as inventory_ini). Empty by
-# default: the system-created "default" pool (seeded by the resource_pools
-# migration) is enough for a fresh checkout with no operator-supplied pools.
+# and admin surfaces" for the format). Reconciled at startup only when the
+# document differs from the one last reconciled, like relay definitions; a
+# reconciliation disables pools the document does not name. Empty by default:
+# the system-created "default" pool (seeded by the resource_pools migration)
+# is enough for a fresh checkout with no operator-supplied pools.
 pool_definitions_path = ""
 
 # Relay definitions
@@ -126,6 +128,14 @@ pool_definitions_path = ""
 # key of the secrets profile holds its admission token; that key is read once,
 # when the relay is created.
 relay_definitions_path = ""
+
+# Capacity definitions
+# Path to a YAML file of capacity declarations under a top-level `resources`
+# list. Reconciled at startup only when the document differs from the one last
+# reconciled, after pool definitions and host seeding. Each entry replaces the
+# declaration it names; a declaration the document does not name is left as it
+# is. POST /api/v1/capacity/definitions/import always reconciles.
+capacity_definitions_path = ""
 
 # Legacy/default pool migration configuration. Existing hosts are backfilled
 # into this real Ansible pool. Override the inventory group where needed.

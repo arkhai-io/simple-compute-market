@@ -169,6 +169,7 @@ class SettlementRepository:
             pool_id=resource.pool_id,
             provider=resource.provider,
             resource_attributes=dict(resource.attributes),
+            resource_host_id=resource.host_id,
             state=SettlementRecordState.assigned.value,
         )
         try:

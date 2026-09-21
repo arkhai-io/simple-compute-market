@@ -148,13 +148,14 @@ The full schema is at
 
 ## 3. Commercial listing input and capacity identity
 
-Provisioning Host, Resource Pool, and capacity tables are authoritative for
-physical inventory. The storefront loads trusted `site_resource_pools` and
+Capacity declarations are authoritative for what a site sells; a provisioning
+Host record is only how the site reaches a machine. The storefront loads trusted `site_resource_pools` and
 `site_capacity_buckets` projections from each configured site. Commercial
 listing input may still be supplied through `resources.csv`, but each VM row
 must reference a projected `pool_id` or `resource_id` and declare its sellable
 shape (`gpu_count`, `vcpu_count`, `ram_gb`, and `disk_gb`). Do not publish
-`vm_host`, authority URLs, API keys, or internal capacity-bucket IDs.
+host identities (`host_id`), authority URLs, API keys, or internal
+capacity-bucket IDs.
 
 ```csv
 resource_id,resource_type,resource_subtype,unit,value,state,max_duration_seconds,attribute.pool_id,attribute.gpu_model,attribute.region,attribute.gpu_count,attribute.vcpu_count,attribute.ram_gb,attribute.disk_gb
@@ -167,6 +168,43 @@ replaces command and config clauses in full. `min_price` remains only a
 negotiation-policy floor and never constructs a settlement option. Capacity
 admission, physical selection, prepared execution, and teardown are owned by
 the selected provisioning site rather than this CSV.
+
+### Declaring capacity
+
+A site sells what its capacity declarations say. A declaration names its Resource
+Pool, a `capacity` map of the dimensions it sells (`gpu_count`, `vcpu_count`,
+`ram_gb`, …), the categorical `attributes` claims match (`gpu_model`, `region`),
+and, when it is delivered through a host, that host's `host_id`. A host that no
+declaration names is not published.
+
+There are three ways to declare, and they describe the same declaration:
+
+- `PUT /api/v1/capacity/resources/{resource_id}` for one declaration.
+- A capacity-definitions document, submitted with
+  `POST /api/v1/capacity/definitions/import` (add `"validate_only": true` to
+  preview the changes), or mounted at startup through the chart's
+  `definitions.capacity` value:
+
+  ```yaml
+  resources:
+    - resource_id: compute-kvm1
+      pool_id: default
+      resource_type: compute.gpu
+      host_id: kvm1
+      capacity: {gpu_count: 8, vcpu_count: 192, ram_gb: 2048}
+      attributes: {gpu_model: H200, region: "California, US"}
+  ```
+
+- Host inventory, once: see step 3 of "Live KVM provisioning".
+
+Every entry replaces the whole declaration it names, so restate everything you
+want to keep. Declarations a document does not name are left as they are. Every
+declared attribute is published to storefronts. `DEPLOYMENT_AND_CONFIG.md`'s
+"Capacity definitions" describes the document's rules in full.
+
+A declaration wins over any GPU count recorded on its host. That can be
+surprising: once a declaration names a host, editing the host's inventory no
+longer changes what is sold. Change the declaration instead.
 
 ## 4. Bring it up
 
@@ -240,7 +278,7 @@ touching libvirt. To create real VMs:
 
    ```bash
    ssh-keygen -t ed25519 -N "" -f ./keys/id_ed25519
-   ssh-copy-id -i ./keys/id_ed25519 <ansible_user>@<kvm_host>
+   ssh-copy-id -i ./keys/id_ed25519 <ansible_user>@<ssh_host>
    chmod 600 ./keys/id_ed25519
    ```
 
@@ -254,7 +292,7 @@ touching libvirt. To create real VMs:
 
    The provisioning service imports these aliases into its authoritative Host
    and Resource Pool tables. Storefront listings reference trusted projected
-   `pool_id`/`resource_id`; they do not carry `vm_host`. Each host line's
+   `pool_id`/`resource_id`; they do not carry a `host_id`. Each host line's
    `ansible_host` is how the provisioning service reaches the host over SSH.
    If buyers reach that host
    on a **different** address than the provisioner does (e.g. the provisioner
@@ -268,6 +306,18 @@ touching libvirt. To create real VMs:
    ```
 
    Without `public_host`, the connection details fall back to `ansible_host`.
+
+   An inventory line's `gpus=` and `gpu_model=` declare capacity **once**: when
+   the inventory is applied, a host with GPUs that no capacity declaration names
+   gets one (`resource_id` and `host_id` both the host's name, `capacity`
+   `{gpu_count: <gpus>}`, `gpu_model` as an attribute, in the host's pool).
+   After that, later values on the line are still stored on the host but no
+   longer affect capacity; change the declaration instead. Hosts added through
+   `POST /api/v1/hosts` never derive one. These inventory values are slated for
+   removal once every deployment declares capacity directly. Upgrading derives
+   declarations the same way for hosts that already exist. Rolling back past the
+   upgrade is a code rollback: the derived declarations remain, and stay
+   reservable.
    The provisioning image bakes the inventory in at build time — rebuild
    after edits:
 
@@ -352,7 +402,7 @@ audit/predicate evidence, not custody.
   supplies a settlement option's asset or rate. Put each decimal asset rate
   and unit in that resource's complete `settlements` clause list or in the
   selected command/config default list.
-- **Do not publish `vm_host`.** Listings use trusted projected `pool_id` or
+- **Do not publish a `host_id`.** Listings use trusted projected `pool_id` or
   `resource_id`; physical host selection is provisioning-owned. The admin
   settle evaluate endpoint validates canonical schedule/begin requests without
   reserving or probing a host.

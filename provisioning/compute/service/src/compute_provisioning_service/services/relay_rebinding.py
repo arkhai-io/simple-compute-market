@@ -52,8 +52,8 @@ _DRAIN_HINT = (
 
 def _describe(leases: Sequence[RelayPortLease], limit: int = 5) -> str:
     shown = [
-        f"{lease.host_name or '<unknown host>'}:{lease.remote_port}"
-        for lease in sorted(leases, key=lambda l: (l.host_name or "", l.remote_port))[:limit]
+        f"{lease.host_id or '<unknown host>'}:{lease.remote_port}"
+        for lease in sorted(leases, key=lambda l: (l.host_id or "", l.remote_port))[:limit]
     ]
     more = len(leases) - len(shown)
     if more > 0:
@@ -141,7 +141,7 @@ def check_pool_relay_change(
 def check_host_pool_change(
     db: Session,
     *,
-    host_name: str,
+    host_id: str,
     current_pool_id: str | None,
     new_pool_id: str | None,
 ) -> None:
@@ -155,10 +155,10 @@ def check_host_pool_change(
         return
     if _relay_of_pool(db, current_pool_id) == _relay_of_pool(db, new_pool_id):
         return
-    held = RelayPortAllocator.active_leases_for_host(db, host_name)
+    held = RelayPortAllocator.active_leases_for_host(db, host_id)
     if held:
         raise _refuse(
-            f"Host '{host_name}' cannot move from pool "
+            f"Host '{host_id}' cannot move from pool "
             f"{current_pool_id or '<none>'} to {new_pool_id or '<none>'}, which "
             f"dials a different relay",
             held,

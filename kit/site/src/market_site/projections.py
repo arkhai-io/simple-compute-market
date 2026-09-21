@@ -133,7 +133,7 @@ def resource_pool_projection(
 def _grouping_attributes(resource: Mapping[str, Any]) -> dict[str, Any]:
     attrs = dict(resource.get("attributes") or {})
     # Identity and volatile operational details are intentionally excluded.
-    for key in ("resource_id", "physical_resource_id", "vm_host", "updated_at", "created_at"):
+    for key in ("resource_id", "physical_resource_id", "updated_at", "created_at"):
         attrs.pop(key, None)
     return attrs
 

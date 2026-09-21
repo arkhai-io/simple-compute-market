@@ -117,7 +117,7 @@ def _projections(
                 physical_resource_id=resource_id,
                 pool_id=str(row.get("pool_id") or "") or None,
                 physical_host_id=str(publication.get("physical_host_id") or ""),
-                machine_id=str(publication.get("machine_id") or ""),
+                host_id=str(publication.get("host_id") or ""),
                 available=_whole_resource_available(row),
                 allocation_mode=publication.get("allocation_mode", "exclusive"),
                 access_methods=list(publication.get("access_methods") or []),

@@ -673,7 +673,7 @@ class ReserveCapacityResponse:
     pool_id: str | None = None
     member_id: str | None = None
     #: No physical resource identity. The capacity boundary strips
-    #: `resource_id`, `backing_resource_id`, `capacity_bucket_id` and `vm_host`
+    #: `resource_id`, `backing_resource_id`, `capacity_bucket_id` and `host_id`
     #: from every reservation response, because which physical resource backs a
     #: reservation is the provisioning service's fact and not a commercial
     #: one. This response carried a `resource_id` from before that strip, so it

@@ -198,14 +198,14 @@ async def test_the_storefronts_quota_registration_is_served(client):
     """
     response = await client.put(
         "/api/v1/capacity/resources/weather-quota",
-        json={"total_units": 100, "resource_type": "api.credits"},
+        json={"total_units": 100, "resource_type": "api.credits", "pool_id": "default"},
         headers=_headers(
             signer=STOREFRONT_SIGNER,
             role="seller",
             method="PUT",
             operation="capacity_resource_put",
             resource="weather-quota",
-            body={"total_units": 100, "resource_type": "api.credits"},
+            body={"total_units": 100, "resource_type": "api.credits", "pool_id": "default"},
         ),
     )
     assert response.status_code < 400, response.text
@@ -469,6 +469,7 @@ async def _seed_quota(signed_app, resource_id: str = "weather-quota", units: int
         total_units=units,
         resource_type="api.credits",
         attributes={"service": "weather-api"},
+        pool_id="default",
     )
 
 

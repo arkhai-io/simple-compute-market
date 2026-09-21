@@ -648,7 +648,7 @@ class BareMetalHostedLifecycleCallbacks:
             scheduled_publication = publication
             if facts.resource_selection == "specific" and (
                 publication.get("physical_host_id") != facts.physical_host_id
-                or publication.get("machine_id") != context.get("machine_id")
+                or publication.get("host_id") != context.get("host_id")
             ):
                 raise BareMetalHostedLifecycleError(
                     "scheduler changed accepted Physical Resource"
@@ -661,10 +661,10 @@ class BareMetalHostedLifecycleCallbacks:
             )
         fulfillment_id = lifecycle.fulfillment_id
         if fulfillment_id is None:
-            machine_id = (
-                str(scheduled_publication.get("machine_id"))
+            host_id = (
+                str(scheduled_publication.get("host_id"))
                 if scheduled_publication is not None
-                else str(context["machine_id"])
+                else str(context["host_id"])
             )
             physical_host_id = (
                 str(scheduled_publication.get("physical_host_id"))
@@ -672,7 +672,7 @@ class BareMetalHostedLifecycleCallbacks:
                 else str(context["physical_host_id"])
             )
             if facts.resource_selection == "specific" and (
-                machine_id != context["machine_id"]
+                host_id != context["host_id"]
                 or physical_host_id != facts.physical_host_id
             ):
                 raise BareMetalHostedLifecycleError(
@@ -688,7 +688,7 @@ class BareMetalHostedLifecycleCallbacks:
             )
             expected_materialization = BareMetalMaterialization(
                 settlement_obligation_ref=binding.obligation_ref,
-                machine_id=machine_id,
+                host_id=host_id,
                 physical_host_id=physical_host_id,
                 lease_start_utc=materialization_start,
                 lease_end_utc=materialization_start
@@ -716,7 +716,7 @@ class BareMetalHostedLifecycleCallbacks:
                     capacity_reservation_id=reservation_id,
                     market="bare_metal",
                     fulfillment_request=VersionedEnvelope(
-                        kind="bare_metal.v1",
+                        kind="bare_metal.v2",
                         schema_version=1,
                         payload=materialization.model_dump(
                             mode="json", exclude_none=True
@@ -773,7 +773,7 @@ class BareMetalHostedLifecycleCallbacks:
         domain = VersionedEnvelope.model_validate(payload.get("domain_result"))
         if (
             domain.kind != "bare_metal.fulfillment.result.v1"
-            or domain.schema_version != 1
+            or domain.schema_version != 2
         ):
             raise BareMetalHostedLifecycleError(
                 "provisioning returned unsupported bare-metal result"

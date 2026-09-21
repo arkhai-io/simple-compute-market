@@ -353,6 +353,7 @@ Within a service, controllers stay thin: HTTP routing, request/response schemas,
 | Marketplace principal normalization, proof dispatch, and canonical envelopes | Identity kit | Scheme-neutral foundation capability; roles inject signers and authorities own subject/role bindings |
 | Listing, negotiation, deal, and seller policy state | Storefront | Market-facing state, not physical inventory |
 | Capacity admission and reservation | Site authority | Serialization point for competing reservations |
+| Sellable capacity: each Physical Resource's declared shape, quantity, pool, and match attributes | Site authority | Declared by registration, a capacity-definitions document, or derivation from legacy host inventory; host records are connection identity only |
 | Resource-pool metadata and provider configuration | Resource-pool service | Provisioning routing metadata; disabled pools remain resolvable |
 | Pool deliverable-mode authorization | Resource-pool operator and service | One explicit set per pool; absence authorizes no mode, and each execution layer rechecks it |
 | Settlement-resource selection | Fulfillment scheduler | Placement occurs before provider execution |
@@ -427,6 +428,7 @@ Authenticated service-to-service calls use the scheme-neutral version 2 request 
 | **Capacity Projection** | Storefront view of capacity believed sellable | Storefront, sourced from sites |
 | **Capacity Reservation** | Admitted hold against authoritative capacity | Site authority |
 | **Physical Resource** | Real supply resource such as host, pod allocation, storage, power, or bandwidth | Site/provisioning |
+| **Capacity Declaration** | Authoritative statement of a Physical Resource's sellable shape and quantity, its pool, and the attributes claims match | Site authority |
 | **Resource Pool** | Provisioning-owned group and provider-routing context | Resource-pool service |
 | **Capacity Settlement Assignment** | Durable binding of a capacity reservation to one settlement resource | Site/fulfillment boundary |
 | **Settlement Resource** | Physical resource selected to satisfy a reservation | Fulfillment scheduler |
@@ -445,7 +447,7 @@ exactly one name.
 | Concept | Name |
 |---|---|
 | What the seller is offering: `vm`, `bare_metal`, `container`, `api_credits` | `offering_mode` |
-| The machine and its connection identity | `host` |
+| The machine and its connection identity | `host`, identified by `host_id` |
 | The fulfillment implementation selected for a pool | `provider` |
 | The component that validates, submits, and polls an execution action | `executor` |
 
@@ -454,6 +456,20 @@ claim, the Resource Pool's deliverable and advertisable declarations, the durabl
 listing binding, and the published listing. It is a separate axis from the
 site-inventory `resource_kind`/`resource_type` discriminator, and naming it
 consistently does not merge the two.
+
+The host is named `host_id` on every interface that names it: the host
+registry's key, a capacity declaration's host link, a reservation's
+`executor_ref`, fulfillment metadata, job parameters, lease APIs, playbook
+variables, and the bare-metal listing. One exception remains: the VM
+storefront's local physical-inventory tables and the plumbing that reads them
+still say `vm_host`. They are no longer an authority for anything this
+paragraph lists and are scheduled for removal rather than renaming, as
+[`ROADMAP.md`](ROADMAP.md)'s Goal 1 records. The address the provisioner connects to is the host's
+`ssh_host`. `physical_host_id` is a different concept and keeps its own name: the
+stable identity of a physical machine across hosts. A host belongs to exactly one
+Resource Pool, so one machine offered both as VM slices and as a whole host is
+registered as two hosts, and `physical_host_id` is what lets cross-mode accounting
+see one machine.
 
 A seller's published shape is a **listing**, never an offer. `offer` names a
 negotiation message either party sends. How many listing candidates a pool yields
@@ -508,7 +524,7 @@ Normal buyer commands apply two separate constraint layers in fixed order: one f
 
 Negotiation is a conversation of counter-offers over what capacity is being sold, not over which specific physical resource serves it. A buyer and seller negotiate pooled capacity ("4 GPUs", not "host `kvm-17`"); a counter-offer that changes the requested shape (fewer/more units, a different dimension mix) is a negotiation event, and a durable shape change is expressed by resizing the reservation for that negotiation, never by mutating an existing reservation or committed settlement assignment in place (see "Capacity reservation" below, and `openspec/specs/site-capacity/spec.md`'s reservation-supersede requirement). Today's negotiation rounds exchange hard counters; the same model extends to richer forms (a buyer asking what shape a given price can buy, or what price a given shape costs) without changing this premise.
 
-Physical resource identity (`resource_id`, `vm_host`, and equivalent per-domain identifiers) is an optional pinning/telemetry pathway, not the unit buyers and sellers negotiate over. It is deliberately not exposed across the capacity-reservation boundary (`openspec/specs/site-capacity/spec.md`'s opaque-reservation requirement) for exactly this reason: the storefront and buyer should not need to know or care which physical resource ultimately serves a deal in the ordinary case. Code that makes ordinary fulfillment depend on a physical resource identity being present is very likely encoding the wrong unit of negotiation.
+Physical resource identity (`resource_id`, `host_id`, and equivalent identifiers) is an optional pinning/telemetry pathway, not the unit buyers and sellers negotiate over. It is deliberately not exposed across the capacity-reservation boundary (`openspec/specs/site-capacity/spec.md`'s opaque-reservation requirement) for exactly this reason: the storefront and buyer should not need to know or care which physical resource ultimately serves a deal in the ordinary case. Code that makes ordinary fulfillment depend on a physical resource identity being present is very likely encoding the wrong unit of negotiation.
 
 ```text
 registry listing

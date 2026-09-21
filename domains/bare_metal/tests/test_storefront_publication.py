@@ -22,7 +22,7 @@ def _projection(
     *,
     site_id="site-a",
     resource_id="resource-1",
-    machine_id="machine-1",
+    host_id="machine-1",
     available=True,
     complete=True,
 ):
@@ -32,7 +32,7 @@ def _projection(
             BareMetalResourceProjection(
                 physical_resource_id=resource_id,
                 physical_host_id=f"physical-{resource_id}",
-                machine_id=machine_id,
+                host_id=host_id,
                 available=available,
                 allocation_mode="exclusive",
                 access_methods=["ssh"],
@@ -71,7 +71,7 @@ def db(tmp_path):
               listing_id TEXT PRIMARY KEY,
               site_id TEXT NOT NULL,
               physical_resource_id TEXT NOT NULL,
-              machine_id TEXT NOT NULL,
+              host_id TEXT NOT NULL,
               physical_host_id TEXT NOT NULL,
               status TEXT NOT NULL,
               derivation_key TEXT NOT NULL UNIQUE,
@@ -108,7 +108,7 @@ def test_candidates_preserve_projection_provenance_and_site_scoped_key():
 
     assert first["site_id"] == "site-a"
     assert first["physical_resource_id"] == "resource-1"
-    assert first["machine_id"] == "machine-1"
+    assert first["host_id"] == "machine-1"
     assert first["listing_resource"]["capabilities"] == {
         "gpu_count": 8,
         "gpu_model": "H200",
@@ -221,7 +221,7 @@ def test_a_pre_length_prefix_derivation_key_does_not_block_re_derivation(db):
         conn.execute(
             """
             INSERT INTO derived_bare_metal_listings(
-              listing_id, site_id, physical_resource_id, machine_id,
+              listing_id, site_id, physical_resource_id, host_id,
               physical_host_id, status, derivation_key, last_reconciled_at
             )
             VALUES (?, 'site-a', 'resource-1', 'machine-1', 'physical-resource-1',

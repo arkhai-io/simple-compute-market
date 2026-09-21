@@ -85,32 +85,38 @@ def make_capacity_router(
 
     @router.put(
         "/resources/{resource_id}",
-        summary="Register or update a ledger resource",
+        summary="Declare or update a capacity resource",
     )
     def register_resource(
         resource_id: str,
         body: ResourceRegisterRequest,
         ledger: CapacityLedgerService = Depends(get_ledger),
     ) -> dict:
-        """Upsert a resource row in the site ledger.
+        """Declare, or replace the declaration of, one capacity resource.
 
-        Compatibility endpoint for domains that register logical capacity
-        directly. Physical inventory projections are derived from the
-        mounting provisioning service's authoritative inventory provider.
+        The operator administration surface for sellable capacity. A
+        declaration is authoritative for the shape and quantity it names —
+        every dimension in ``capacity``, including any GPU count — and for
+        nothing it omits. Whether it may be admitted against is decided by its
+        pool, not by the declaration.
+
+        The request replaces the whole declaration, which is why ``pool_id``
+        is required. Moving a resource to another pool is refused while it
+        holds a live capacity obligation (409). A ``host_id`` another resource
+        already names is refused (409); a pool the site does not have, or an
+        inconsistent or empty declaration, is refused (422).
         """
-        resource = ledger.register_resource(
-            resource_id=resource_id,
-            total_units=body.total_units,
-            resource_type=body.resource_type,
-            resource_subtype=body.resource_subtype,
-            pool_id=body.pool_id,
-            attributes=body.attributes,
-            capacity=body.capacity,
-            enabled=body.enabled,
-        )
+        try:
+            resource = ledger.register_resource(
+                resource_id=resource_id, **dict(body)
+            )
+        except CapacityConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
         logger.info(
-            "[CAPACITY] Registered resource %s (units=%d enabled=%s)",
-            resource_id, body.total_units, body.enabled,
+            "[CAPACITY] Registered resource %s (capacity=%s enabled=%s)",
+            resource_id, resource.get("capacity"), body.enabled,
         )
         return resource
 
@@ -222,7 +228,7 @@ def make_capacity_router(
         if reservation is not None:
             reservation = {
                 key: value for key, value in reservation.items()
-                if key not in {"resource_id", "capacity_bucket_id", "backing_resource_id", "vm_host"}
+                if key not in {"resource_id", "capacity_bucket_id", "backing_resource_id", "host_id"}
             }
         return ReservationResponse(reservation=reservation)
 

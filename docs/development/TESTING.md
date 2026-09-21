@@ -296,7 +296,9 @@ it once the producer gains coverage.
 A service's tests split into `unit/` and `integration/` subdirectories
 under its own `tests/` root, matching the four-level hierarchy above.
 System-level tests live in the separate `e2e-tests` package, itself
-split into `unit/` (its own helper logic), `smoke/`, and `e2e/`.
+split into `unit/` (its own helper logic), `smoke/`, and `e2e/`. A Helm
+chart's render tests live in its own `tests/` directory (see "Chart Render
+Tests").
 
 ## Pool Offering-Mode Enforcement
 
@@ -508,6 +510,59 @@ wheel inventory and build order. A job that consumes the separately released
 hosted-settlement client declares that prerequisite in its matrix entry, stages
 and verifies the signed client wheel, and then builds the repository-owned
 adapter against the assembled wheelhouse.
+
+## Chart Render Tests
+
+A chart render test runs `helm template` against a chart with chosen values and
+asserts on the manifests it produces, or on its refusal to produce them. It is a
+static configuration test, like `e2e-tests/tests/unit/`'s image-pin and stack
+checks: it needs Helm, not a cluster.
+
+**What they cover:** what a deployment's manifests contain for a given set of
+values — which documents render into a ConfigMap, which files mount, which
+settings the chart derives — and which values the chart's schema refuses. This
+is where a derived setting is checked against the thing it is derived from, so a
+document that renders and mounts while its path is unset is caught before any
+pod runs.
+
+**What they do not cover:** whether a cluster accepts the manifests, whether the
+service starts with them, or whether it then behaves. Deploying to the dev
+cluster and the smoke and end-to-end tiers remain the evidence for those; a
+passing render is not deployment evidence, just as it is not deal evidence.
+
+**Where they live and how they run:**
+
+- Umbrella-chart assertions are in `helm/scripts/test-render.sh`, run by
+  `make -C helm test-render` and by the top-level `make test-deployment-packaging`.
+- A chart's own render tests are `helm/charts/<chart>/tests/test_render.py`. Call
+  each from `test-render.sh` so that one target runs every render check; a test
+  reachable only through its chart's own Makefile is easily never run.
+- None of this is part of `make test`, and all of it needs `helm` on `PATH`.
+
+**How to write one:**
+
+- Use the standard library only. `test-render.sh` runs a plain `python3`, so pass
+  values as a JSON file (JSON is YAML) and assert on the rendered text, rather
+  than depending on a YAML parser.
+- Assert related artifacts together. When the chart derives a setting from a
+  value, assert the rendered artifact, its mount, and the derived setting in one
+  helper, both present and all absent, so a test cannot pass with one of the
+  three missing.
+- For a schema refusal, assert a non-zero exit and that the error names the
+  offending key; a render that fails for an unrelated reason must not count.
+- Break the template once while writing the test (remove the mount, say) and
+  confirm the test fails, then restore it.
+- When the rendered artifact is a document a service parses, parse one rendered
+  instance with the service's own parser as well. The render test proves the
+  chart emits what it was given; only the parser proves the service accepts it.
+
+**Obtaining Helm where its download host is unreachable.** Helm's official
+binaries are served from `get.helm.sh`. An environment that cannot reach it can
+use a redistribution such as the npm package `helm-binary-linux`, which ships
+one binary with no install scripts. Such a copy is unverified and may be an
+older release, so treat its results as a local check: inspect the package before
+running it, keep it out of the repository, and rely on the pinned Helm of the
+release environment for anything recorded as evidence.
 
 ## Cross-Language Contract Conformance
 

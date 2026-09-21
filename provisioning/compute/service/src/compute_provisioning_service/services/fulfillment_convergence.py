@@ -375,6 +375,7 @@ class FulfillmentConvergenceWatchdog:
             resource_kind=str(requirements.get("resource_kind") or "compute"),
             provider=record.provider,
             attributes=dict(record.resource_attributes or {}),
+            host_id=record.resource_host_id,
         )
 
     def _apply_provider_failure(

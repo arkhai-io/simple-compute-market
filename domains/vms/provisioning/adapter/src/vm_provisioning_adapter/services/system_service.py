@@ -128,13 +128,13 @@ def collect_ssh_keys_from_hosts(hosts: list) -> list[SshKeyInfo]:
 
     for host in hosts:
         if host.ssh_key_type == "path":
-            path_to_hosts.setdefault(host.ssh_key_value, []).append(host.name)
+            path_to_hosts.setdefault(host.ssh_key_value, []).append(host.host_id)
         else:
-            embedded_hosts.append(host.name)
+            embedded_hosts.append(host.host_id)
 
     results: list[SshKeyInfo] = []
 
-    for raw_path, host_names in path_to_hosts.items():
+    for raw_path, host_ids in path_to_hosts.items():
         expanded = Path(os.path.expanduser(raw_path))
         exists = expanded.exists()
         results.append(
@@ -144,11 +144,11 @@ def collect_ssh_keys_from_hosts(hosts: list) -> list[SshKeyInfo]:
                 path=str(expanded),
                 exists=exists,
                 sha256=sha256_file(expanded) if exists else None,
-                referenced_by=sorted(host_names),
+                referenced_by=sorted(host_ids),
             )
         )
 
-    for host_name in embedded_hosts:
+    for host_id in embedded_hosts:
         results.append(
             SshKeyInfo(
                 key_type="embedded",
@@ -156,7 +156,7 @@ def collect_ssh_keys_from_hosts(hosts: list) -> list[SshKeyInfo]:
                 path="<encrypted>",
                 exists=True,
                 sha256=None,
-                referenced_by=[host_name],
+                referenced_by=[host_id],
             )
         )
 

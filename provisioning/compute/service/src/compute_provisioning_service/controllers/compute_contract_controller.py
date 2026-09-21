@@ -52,7 +52,7 @@ def _lease_view(reservation: dict[str, Any]) -> LeaseView:
         executor_target=str(
             reservation.get("executor_target")
             or reservation.get("vm_target")
-            or reservation.get("vm_host")
+            or reservation.get("host_id")
             or executor_ref.get("physical_host_id")
             or ""
         ),

@@ -1,11 +1,11 @@
 [project]
 name = "arkhai-kit-storefront"
-version = "0.1.0"
+version = "0.1.1"
 license = "MIT"
 description = "Domain-neutral storefront application, lifecycle, route, and reusable service composition."
 requires-python = ">=3.12,<3.14"
 dependencies = [
-    "arkhai-core-storefront>=0.4.0",
+    "arkhai-core-storefront>=0.5.0",
     "arkhai-kit-alkahest",
     "alkahest-py==1.1.2",
 ]
