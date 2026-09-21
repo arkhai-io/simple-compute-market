@@ -44,9 +44,9 @@ if TYPE_CHECKING:
 
 _CREATE_KIND = "vm.ansible.create.v1"
 _TEARDOWN_KIND = "vm.ansible.teardown.v1"
-# Schema 2 names the execution host ``host_id``; schema 1 named it
-# ``vm_host``. Stored schema-1 operations are rewritten by the provisioning
-# service's host-identity migration, so dispatch accepts only schema 2.
+# The operation schema this provider prepares and dispatches; its parameters
+# name the execution host ``host_id``. Dispatch accepts no other schema, so a
+# persisted operation must already be at this version when it is dispatched.
 _OPERATION_SCHEMA_VERSION = 2
 _JOB_STATUS_TO_OPERATION_STATE = {
     "queued": ProviderOperationState.pending,

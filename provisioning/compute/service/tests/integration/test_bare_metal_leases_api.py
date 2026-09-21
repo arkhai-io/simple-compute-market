@@ -91,6 +91,7 @@ def _reserve_bare_metal(escrow_uid: str) -> dict:
             host_id="bm-node-1", attributes={
                 "physical_host_id": "host-physical-1",
                 "allocation_mode": ALLOCATION_MODE_EXCLUSIVE},
+            pool_id="default",
         )
     reserved = ledger.reserve(
         claim={

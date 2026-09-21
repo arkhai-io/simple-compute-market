@@ -41,9 +41,9 @@ _PROVIDER = "bare_metal.ansible"
 _CREATE_KIND = "bare_metal.fulfillment.create.v1"
 _TEARDOWN_KIND = "bare_metal.fulfillment.teardown.v1"
 _RESULT_KIND = "bare_metal.fulfillment.result.v1"
-# Schema 2 names the host ``host_id``; schema 1 named it ``machine_id``.
-# Stored schema-1 operations are rewritten by the provisioning service's
-# host-identity migration, so dispatch accepts only schema 2.
+# The operation and result schema this provider prepares, dispatches, and
+# returns; its lease names the host ``host_id``. Dispatch accepts no other
+# schema, so a persisted operation must already be at this version.
 _OPERATION_SCHEMA_VERSION = 2
 
 _JOB_STATUS_TO_OPERATION_STATE = {

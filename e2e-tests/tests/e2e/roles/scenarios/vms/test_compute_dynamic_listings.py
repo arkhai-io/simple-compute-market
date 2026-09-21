@@ -420,7 +420,7 @@ class TestFungibleComputeDynamicListings:
 
         for host in hosts:
             assert (host.gpu_count or 0) >= E2E_HOST_GPU_COUNT, (
-                f"executor host {host.name} reports {host.gpu_count} GPU(s); "
+                f"executor host {host.host_id} reports {host.gpu_count} GPU(s); "
                 f"this scenario reserves up to {E2E_HOST_GPU_COUNT} from one member"
             )
 

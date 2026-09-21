@@ -177,11 +177,13 @@ async def test_resource_registration_body_uses_json_defaults_and_omits_none(
     admin_client: SiteCapacityAdminClient, site: FakeSite
 ) -> None:
     await admin_client.register_resource(
-        "r1", total_units=1, request_id="registration-defaults"
+        "r1", total_units=1, request_id="registration-defaults",
+        pool_id="default",
     )
     assert site.seen_requests[-1]["resource"] == "r1"
     assert site.seen_requests[-1]["body"] == {
         "total_units": 1,
+        "pool_id": "default",
         "resource_type": "compute.gpu",
         "attributes": {},
         "enabled": True,
@@ -425,7 +427,8 @@ async def test_admin_transport_failure_keeps_the_typed_error_contract(
     )
     with pytest.raises(SiteCapacityAdminClientError) as excinfo:
         await client.register_resource(
-            "r1", total_units=1, request_id="transport-failure"
+            "r1", total_units=1, request_id="transport-failure",
+            pool_id="default",
         )
 
     assert excinfo.value.status_code is None

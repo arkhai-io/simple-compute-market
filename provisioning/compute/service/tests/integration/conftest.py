@@ -505,7 +505,7 @@ async def client_and_queue(
     from market_site.ledger import CapacityLedgerService
     capacity_ledger_service = CapacityLedgerService(
         session_factory=session_factory,
-        unit_claim_keys=("units", "gpu_count"),
+        unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count",
     )
 
     from market_fulfillment import PhysicalSettlementScheduler

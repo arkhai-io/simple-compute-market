@@ -85,18 +85,26 @@ def make_capacity_router(
 
     @router.put(
         "/resources/{resource_id}",
-        summary="Register or update a ledger resource",
+        summary="Declare or update a capacity resource",
     )
     def register_resource(
         resource_id: str,
         body: ResourceRegisterRequest,
         ledger: CapacityLedgerService = Depends(get_ledger),
     ) -> dict:
-        """Upsert a resource row in the site ledger.
+        """Declare, or replace the declaration of, one capacity resource.
 
-        Compatibility endpoint for domains that register logical capacity
-        directly. Physical inventory projections are derived from the
-        mounting provisioning service's authoritative inventory provider.
+        The operator administration surface for sellable capacity. A
+        declaration is authoritative for the shape and quantity it names —
+        every dimension in ``capacity``, including any GPU count — and for
+        nothing it omits. Whether it may be admitted against is decided by its
+        pool, not by the declaration.
+
+        The request replaces the whole declaration, which is why ``pool_id``
+        is required. Moving a resource to another pool is refused while it
+        holds a live capacity obligation (409). A ``host_id`` another resource
+        already names is refused (409); an inconsistent or empty declaration
+        is refused (422).
         """
         try:
             resource = ledger.register_resource(
@@ -112,9 +120,11 @@ def make_capacity_router(
             )
         except CapacityConflictError as exc:
             raise HTTPException(status_code=409, detail=str(exc))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
         logger.info(
-            "[CAPACITY] Registered resource %s (units=%d enabled=%s)",
-            resource_id, body.total_units, body.enabled,
+            "[CAPACITY] Registered resource %s (capacity=%s enabled=%s)",
+            resource_id, resource.get("capacity"), body.enabled,
         )
         return resource
 

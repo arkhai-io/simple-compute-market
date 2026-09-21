@@ -455,10 +455,14 @@ listing binding, and the published listing. It is a separate axis from the
 site-inventory `resource_kind`/`resource_type` discriminator, and naming it
 consistently does not merge the two.
 
-The host is named `host_id` on every surface that names it: the host registry's
-key, a capacity declaration's host link, a reservation's `executor_ref`,
-fulfillment metadata, job parameters, lease APIs, playbook variables, and the
-bare-metal listing. The address the provisioner connects to is the host's
+The host is named `host_id` on every interface that names it: the host
+registry's key, a capacity declaration's host link, a reservation's
+`executor_ref`, fulfillment metadata, job parameters, lease APIs, playbook
+variables, and the bare-metal listing. One exception remains: the VM
+storefront's local physical-inventory tables and the plumbing that reads them
+still say `vm_host`. They are no longer an authority for anything this
+paragraph lists and are scheduled for removal rather than renaming, as
+[`ROADMAP.md`](ROADMAP.md)'s Goal 1 records. The address the provisioner connects to is the host's
 `ssh_host`. `physical_host_id` is a different concept and keeps its own name: the
 stable identity of a physical machine across hosts. A host belongs to exactly one
 Resource Pool, so one machine offered both as VM slices and as a whole host is

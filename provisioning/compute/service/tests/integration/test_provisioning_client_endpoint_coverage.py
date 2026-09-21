@@ -104,6 +104,7 @@ class TestCapacityClientEndpointCoverage:
             resource_id="compute-kvm1-001",
             total_units=8,
             host_id=HOST, attributes={},
+            pool_id="default",
         )
         reserved = ledger.reserve(
             claim={
@@ -146,6 +147,7 @@ class TestLeaseClientEndpointCoverage:
                 resource_id="compute-kvm1-001",
                 total_units=8,
                 host_id=HOST, attributes={},
+                pool_id="default",
             )
         reserved = ledger.reserve(
             claim={

@@ -102,7 +102,7 @@ class TestProvisioningSmoke:
             hosts = client.list_hosts().hosts
             if not hosts:
                 pytest.skip("No hosts registered - skipping connectivity check")
-            first = hosts[0].name
+            first = hosts[0].host_id
             data = client.check_connectivity(first)
         assert isinstance(data.reachable, bool), f"Missing reachable field: {data}"
         log.info("Connectivity for %s: reachable=%s", first, data.reachable)
@@ -135,7 +135,7 @@ class TestProvisioningSmoke:
                 )
                 client.enable_host("smoke-test-host")
 
-            assert reg.name == "smoke-test-host"
+            assert reg.host_id == "smoke-test-host"
             assert not hasattr(reg, "ssh_key_value"), "ssh_key_value must never be returned"
 
             got = client.get_host("smoke-test-host")
@@ -144,7 +144,7 @@ class TestProvisioningSmoke:
             disabled = client.disable_host("smoke-test-host")
             assert disabled.enabled is False
 
-            names = [h.name for h in client.list_hosts().hosts]
+            names = [h.host_id for h in client.list_hosts().hosts]
             assert "smoke-test-host" not in names
 
             enabled = client.enable_host("smoke-test-host")

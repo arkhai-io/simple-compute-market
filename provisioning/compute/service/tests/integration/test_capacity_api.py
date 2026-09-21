@@ -13,7 +13,7 @@ from httpx import ASGITransport, AsyncClient
 
 from market_site.ledger import ALLOCATION_MODE_EXCLUSIVE, ALLOCATION_MODE_SHAREABLE
 from compute_provisioning_service.main import app
-from market_site_client import SiteCapacityClient
+from market_site_client import SiteCapacityAdminClient, SiteCapacityClient
 from .conftest import SERVICE_AUTHORITIES, STOREFRONT_SIGNER
 
 
@@ -27,39 +27,43 @@ def _site_capacity_client(base_url: str, *, transport):
 
 
 class CapacityApi:
-    """Typed helper over the capacity endpoints (no raw HTTP in tests)."""
+    """The capacity surface as the canonical typed clients present it.
 
-    def __init__(self, client: AsyncClient) -> None:
-        self._client = client
+    Every call goes through ``SiteCapacityAdminClient`` (registration) or
+    ``SiteCapacityClient`` (everything a storefront does), so a route, body,
+    or response-shape change breaks these tests through the clients rather
+    than through a second, test-local copy of the wire contract. This class
+    only shortens call sites; it builds no request of its own.
+    """
 
-    async def register(self, resource_id: str, **body: Any) -> dict:
-        resp = await self._client.put(
-            f"/api/v1/capacity/resources/{resource_id}", json=body
-        )
-        assert resp.status_code == 200, resp.text
-        return resp.json()
+    def __init__(
+        self,
+        admin: SiteCapacityAdminClient,
+        site: SiteCapacityClient,
+        rejection_http: AsyncClient,
+    ) -> None:
+        self.admin = admin
+        self.site = site
+        # For rejection-path tests only, per TESTING.md's documented exception:
+        # they send bodies the typed clients refuse to construct, to prove the
+        # server's own validation. Status codes only.
+        self.rejection_http = rejection_http
+
+    async def register(self, resource_id: str, **declaration: Any) -> dict:
+        return await self.admin.register_resource(resource_id, **declaration)
 
     async def snapshot(self) -> list[dict]:
-        resp = await self._client.get("/api/v1/capacity/snapshot")
-        assert resp.status_code == 200, resp.text
-        return resp.json()["resources"]
+        return await self.site.snapshot()
 
     async def probe(self, claim: dict) -> dict | None:
-        resp = await self._client.post(
-            "/api/v1/capacity/probe", json={"claim": claim}
-        )
-        assert resp.status_code == 200, resp.text
-        return resp.json()["match"]
+        return await self.site.probe(claim=claim)
 
     async def reserve(
         self, claim: dict, deal_ref: dict, ttl_seconds: float | None = None
     ) -> dict | None:
-        body: dict = {"claim": claim, "deal_ref": deal_ref}
-        if ttl_seconds is not None:
-            body["ttl_seconds"] = ttl_seconds
-        resp = await self._client.post("/api/v1/capacity/reservations", json=body)
-        assert resp.status_code == 200, resp.text
-        return resp.json()["reservation"]
+        return await self.site.reserve(
+            claim=claim, deal_ref=deal_ref, ttl_seconds=ttl_seconds
+        )
 
     async def commit(
         self,
@@ -68,46 +72,36 @@ class CapacityApi:
         resource_id: str,
         lease_start_utc: str | None = None,
         lease_end_utc: str | None = None,
-    ) -> dict:
-        body: dict = {"resource_id": resource_id}
-        if lease_start_utc is not None:
-            body["lease_start_utc"] = lease_start_utc
-        if lease_end_utc is not None:
-            body["lease_end_utc"] = lease_end_utc
-        resp = await self._client.post(
-            f"/api/v1/capacity/reservations/{capacity_reservation_id}/commit",
-            json=body,
+    ) -> None:
+        await self.site.commit(
+            capacity_reservation_id=capacity_reservation_id,
+            resource_id=resource_id,
+            lease_start_utc=lease_start_utc,
+            lease_end_utc=lease_end_utc,
         )
-        assert resp.status_code == 200, resp.text
-        return resp.json()["reservation"]
 
-    async def release(self, **body: Any) -> dict | None:
-        resp = await self._client.post("/api/v1/capacity/releases", json=body)
-        assert resp.status_code == 200, resp.text
-        return resp.json()["reservation"]
+    async def release(self, **target: Any) -> dict | None:
+        return await self.site.release(**target)
 
     async def truncate(self, capacity_reservation_id: str, lease_end_utc: str) -> dict | None:
-        resp = await self._client.post(
-            f"/api/v1/capacity/reservations/{capacity_reservation_id}/truncate-lease",
-            json={"lease_end_utc": lease_end_utc},
+        return await self.site.truncate_lease(
+            capacity_reservation_id=capacity_reservation_id,
+            lease_end_utc=lease_end_utc,
         )
-        assert resp.status_code == 200, resp.text
-        return resp.json()["reservation"]
 
     async def events(self, after: int = 0) -> tuple[list[dict], int]:
-        resp = await self._client.get(
-            "/api/v1/capacity/events", params={"after": after}
-        )
-        assert resp.status_code == 200, resp.text
-        data = resp.json()
-        return data["events"], data["latest_version"]
+        return await self.site.events_after(after)
 
 
 @pytest.fixture
 async def capacity(client_and_queue) -> CapacityApi:
     transport = ASGITransport(app=app)
+    admin = SiteCapacityAdminClient(
+        "http://test", STOREFRONT_SIGNER, SERVICE_AUTHORITIES, transport=transport,
+    )
+    site = _site_capacity_client("http://test", transport=transport)
     async with AsyncClient(transport=transport, base_url="http://test") as http:
-        yield CapacityApi(http)
+        yield CapacityApi(admin, site, http)
 
 
 @pytest.mark.asyncio
@@ -122,7 +116,7 @@ async def test_the_claim_names_the_offering_mode_through_the_canonical_client(
     and is persisted on the reservation rather than re-derived.
     """
     await capacity.register(
-        "site-claim-1",
+        "site-claim-1", pool_id="default",
         total_units=4,
         host_id="kvm1",
         attributes={"gpu_model": "H200"},
@@ -146,11 +140,11 @@ async def test_a_claim_omitting_the_offering_mode_is_refused(capacity: CapacityA
     """The field is required, so its absence is refused before any resource is
     matched — never inferred from `host_id` or a default."""
     await capacity.register(
-        "site-claim-2", total_units=4, host_id="kvm1",
+        "site-claim-2", pool_id="default", total_units=4, host_id="kvm1",
         attributes={}
     )
 
-    resp = await capacity._client.post(
+    resp = await capacity.rejection_http.post(
         "/api/v1/capacity/reservations",
         json={"claim": {"gpu_count": 1, "host_id": "kvm1"}, "deal_ref": {}},
     )
@@ -167,11 +161,11 @@ async def test_a_claim_naming_the_mode_under_the_retired_key_is_refused(
     under a second spelling. Raw HTTP and status only: the typed client will
     not construct the retired key."""
     await capacity.register(
-        "site-claim-3", total_units=4, host_id="kvm1",
+        "site-claim-3", pool_id="default", total_units=4, host_id="kvm1",
         attributes={}
     )
 
-    resp = await capacity._client.post(
+    resp = await capacity.rejection_http.post(
         "/api/v1/capacity/reservations",
         json={
             "claim": {"executor_kind": "vm", "gpu_count": 1, "host_id": "kvm1"},
@@ -185,7 +179,7 @@ async def test_a_claim_naming_the_mode_under_the_retired_key_is_refused(
 @pytest.mark.asyncio
 async def test_reserve_commit_release_lifecycle(capacity: CapacityApi):
     await capacity.register(
-        "compute-kvm1-001",
+        "compute-kvm1-001", pool_id="default",
         total_units=8,
         resource_subtype="h200",
         host_id="kvm1",
@@ -214,12 +208,15 @@ async def test_reserve_commit_release_lifecycle(capacity: CapacityApi):
     assert reserved["available_gpu_count"] == 5
     assert (await capacity.snapshot())[0]["available_units"] == 5
 
-    committed = await capacity.commit(
+    # The client's commit returns nothing; the committed reservation is read
+    # back through the same client, as a storefront would.
+    await capacity.commit(
         reserved["capacity_reservation_id"],
         resource_id="compute-kvm1-001",
         lease_start_utc="2099-01-01T00:00:00Z",
         lease_end_utc="2099-01-01T01:00:00Z",
     )
+    committed = await capacity.site.get_reservation(reserved["capacity_reservation_id"])
     assert committed["state"] == "leased"
 
     truncated = await capacity.truncate(reserved["capacity_reservation_id"], "2026-06-01 00:00")
@@ -250,7 +247,7 @@ async def test_no_capacity_is_a_null_answer_not_an_error(capacity: CapacityApi):
 @pytest.mark.asyncio
 async def test_vm_and_bare_metal_claims_use_domain_attributes(capacity: CapacityApi):
     await capacity.register(
-        "bare-metal-node-1",
+        "bare-metal-node-1", pool_id="default",
         total_units=1,
         attributes={
             "physical_host_id": "host-physical-1",
@@ -278,7 +275,7 @@ async def test_vm_and_bare_metal_claims_use_domain_attributes(capacity: Capacity
 @pytest.mark.asyncio
 async def test_capacity_snapshot_blocks_cross_mode_siblings(capacity: CapacityApi):
     await capacity.register(
-        "compute-host-1",
+        "compute-host-1", pool_id="default",
         total_units=8,
         resource_subtype="h200",
         host_id="kvm1",
@@ -289,7 +286,7 @@ async def test_capacity_snapshot_blocks_cross_mode_siblings(capacity: CapacityAp
         },
     )
     await capacity.register(
-        "bare-metal-node-1",
+        "bare-metal-node-1", pool_id="default",
         total_units=1,
         resource_subtype="h200",
         host_id="node-1",
@@ -333,7 +330,7 @@ async def test_register_lease_attaches_to_ledger_reservation(capacity: CapacityA
     from compute_provisioning_service import container as _container_module
 
     await capacity.register(
-        "compute-kvm1-001", total_units=8, host_id="kvm1",
+        "compute-kvm1-001", pool_id="default", total_units=8, host_id="kvm1",
         attributes={},
     )
     reserved = await capacity.reserve(
@@ -676,3 +673,14 @@ async def test_site_capacity_buckets_projection_through_the_real_client(
     assert by_available[8]["resource_count"] == 1
     assert by_available[6]["resource_count"] == 1
     assert by_available[8]["grouping_attributes"].get("gpu_model") == "H200"
+
+
+
+async def test_a_registration_without_a_pool_is_rejected(capacity: CapacityApi):
+    """Rejection-path test: the typed client cannot construct a registration
+    without ``pool_id``, so this posts the body by hand to prove the server's
+    own validation boundary refuses it. Status code only."""
+    resp = await capacity.rejection_http.put(
+        "/api/v1/capacity/resources/no-pool", json={"total_units": 1},
+    )
+    assert resp.status_code == 422

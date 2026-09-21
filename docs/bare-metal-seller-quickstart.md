@@ -200,23 +200,28 @@ The bare-metal storefront refuses to start against a database written under a
 listing kind it can no longer decode, and names this section. Accepted
 bare-metal state is signed or pinned by content digest, so it is never rewritten
 in place, and no decoder for a retired listing kind is kept. The remedy is to
-start from an empty database:
+remove the bare-metal deployment and install it fresh:
 
-1. Before upgrading, terminate every active bare-metal lease through the
-   provisioning service's lease API. Force-release any lease whose teardown
-   cannot complete, after verifying the node externally; otherwise the reset
-   leaves it orphaned at the provisioner.
-2. Stop the bare-metal storefront and delete its database volume.
-3. Deploy the upgrade. The provisioning service migrates its own database; it
-   is shared with other roles and is never reset.
-4. Start the bare-metal storefront on the empty volume and confirm it
-   republishes, so the registry's listings under the retired kind are replaced
-   or closed rather than left discoverable.
+1. Terminate every active bare-metal lease through the provisioning service's
+   lease API, force-releasing any whose teardown cannot complete after
+   verifying the node externally. The provisioning service outlives the reset,
+   so a lease left active there is orphaned rather than removed.
+2. `helm uninstall` the bare-metal release and delete its persistent volume
+   claims. Its registry listings go with it only if the registry belongs to
+   that release. A registry shared with other roles keeps them, and nothing in
+   a fresh storefront knows their listing ids; before uninstalling, disable the
+   bare-metal capacity declarations at the provisioning service and run one
+   `bare-metal-storefront publish` round, which closes every listing the
+   storefront tracks once its sites report no bare-metal resources.
+3. Deploy the upgrade. The provisioning service migrates its own database in
+   place. It is shared with VM fulfillment and is never reset.
+4. Install the bare-metal release fresh, re-enable its capacity declarations,
+   and publish.
 5. Discard bare-metal buyer run logs that reference deals made before the
    reset; nothing can decode them afterwards.
 
 This applies only while bare metal is unreleased. A released deployment cannot
-drain year-long contracts to patch, so a retired kind must keep a read-only
+drain long-running contracts to patch, so a retired kind must keep a read-only
 decoder until nothing references it.
 
 ## Release-qualified deal evidence

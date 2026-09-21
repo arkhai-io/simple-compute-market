@@ -501,7 +501,7 @@ class TestStage00f1_ExecutorHostRegistry:
                 "sla": "90.0",
             },
         )
-        assert host.name == E2E_DEAL_HOST
+        assert host.host_id == E2E_DEAL_HOST
         assert (host.gpu_count or 0) >= E2E_HOST_GPU_COUNT, (
             f"executor host {E2E_DEAL_HOST} reports {host.gpu_count} GPU(s); "
             f"scenarios reserve up to {E2E_HOST_GPU_COUNT}"

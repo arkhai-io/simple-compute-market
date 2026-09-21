@@ -31,8 +31,8 @@ def init() -> None:
     resolved_session_factory = create_session_factory(engine)
     # No eligibility invariant: token quota resources carry no host.
     # Uses the domain-neutral
-    # unit_claim_keys default (("units",)) — this domain has no VM-style
-    # "gpu_count" alias to opt into.
+    # unit_claim_keys default (("units",)) and mirror dimension default
+    # ("units") — a quota is counted in units and has no other alias.
     resolved_capacity_ledger_service = CapacityLedgerService(
         session_factory=resolved_session_factory,
     )

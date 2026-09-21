@@ -30,7 +30,9 @@ def _row(**overrides):
         "resource_subtype": None,
         "available_units": 4,
         "value": 4,
-        "available": {"gpu_count": 4, "ram_gb": 128},
+        # "units" is the ledger's default mirror dimension, which an empty
+        # claim requests one of on the admission path.
+        "available": {"gpu_count": 4, "ram_gb": 128, "units": 4},
         "attributes": {"region": "eu-west", "gpu_model": "A100"},
     }
     row.update(overrides)
@@ -130,8 +132,8 @@ def test_unit_claim_keys_must_match_the_backing_ledger_service_configuration():
     assert dict_resource_satisfies_claim(row, {"gpu_count": 2}) is False
     # With VM's actual configured unit_claim_keys, it's a quantity check.
     assert dict_resource_satisfies_claim(
-        row, {"gpu_count": 2}, unit_claim_keys=("units", "gpu_count"),
+        row, {"gpu_count": 2}, unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count",
     ) is True
     assert dict_resource_satisfies_claim(
-        row, {"gpu_count": 5}, unit_claim_keys=("units", "gpu_count"),
+        row, {"gpu_count": 5}, unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count",
     ) is False

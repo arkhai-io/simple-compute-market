@@ -44,6 +44,7 @@ def _reserve(escrow_uid: str, *, gpu_count: int = 1) -> dict:
             resource_id="compute-kvm1-001",
             total_units=8,
             host_id="kvm1", attributes={},
+            pool_id="default",
         )
     reserved = ledger.reserve(
         claim={

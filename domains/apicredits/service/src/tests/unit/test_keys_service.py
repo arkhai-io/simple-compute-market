@@ -159,6 +159,7 @@ def ledger_and_service() -> tuple[CapacityLedgerService, KeysService, object]:
         resource_id="svc-quota",
         total_units=1000,
         resource_type="api_credits",
+        pool_id="default",
     )
     return (
         ledger,

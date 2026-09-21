@@ -333,7 +333,8 @@ class BareMetalNegotiationService:
         The mechanism is resolved exactly once — from the selection — and the
         obligation is built through the composed registry dispatch. The domain
         keeps only domain semantics: trusted physical facts for options that
-        provision a machine, and the plan's ``bare_metal.v1`` service terms.
+        provision a machine, and the plan's service terms under the current
+        payload kind (``BARE_METAL_SCHEMA_KIND``).
         """
 
         build_obligation = self.accepted_obligation_dispatch.get(selection.mechanism)

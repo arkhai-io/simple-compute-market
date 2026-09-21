@@ -101,12 +101,13 @@ def session_factory():
 @pytest.fixture
 def ledger(session_factory) -> CapacityLedgerService:
     svc = CapacityLedgerService(
-        session_factory, unit_claim_keys=("units", "gpu_count")
+        session_factory, unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count"
     )
     svc.register_resource(
         resource_id="compute-kvm1-001",
         total_units=8,
         host_id="kvm1", attributes={},
+        pool_id="default",
     )
     return svc
 

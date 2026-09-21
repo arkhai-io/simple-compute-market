@@ -52,6 +52,7 @@ def ledger() -> CapacityLedgerService:
         host_id="bm-node-1", attributes={
             "physical_host_id": "host-physical-1",
             "allocation_mode": ALLOCATION_MODE_EXCLUSIVE},
+        pool_id="default",
     )
     return svc
 

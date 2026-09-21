@@ -18,12 +18,24 @@ from pydantic import BaseModel, Field
 class ResourceRegisterRequest(BaseModel):
     """Body accepted by ``PUT /api/v1/capacity/resources/{resource_id}``."""
 
-    total_units: int = Field(
+    total_units: Optional[int] = Field(
+        default=None,
         ge=0,
-        description="Unit count this resource contributes (e.g. GPUs).",
+        description=(
+            "Legacy scalar total of the composition's mirror dimension. Used "
+            "only when ``capacity`` is omitted; when both are given they must "
+            "agree on that dimension."
+        ),
     )
     resource_type: str = Field(default="compute.gpu")
-    pool_id: Optional[str] = Field(default=None)
+    pool_id: str = Field(
+        min_length=1,
+        description=(
+            "The Resource Pool this declaration belongs to. Required: "
+            "registration replaces the whole declaration, so a defaulted pool "
+            "would move the resource."
+        ),
+    )
     host_id: Optional[str] = Field(
         default=None,
         description=(
@@ -44,9 +56,10 @@ class ResourceRegisterRequest(BaseModel):
     capacity: Optional[dict[str, Any]] = Field(
         default=None,
         description=(
-            "Multidimensional total capacity."
-            "e.g. {'gpu_count': 8, 'vcpu_count': 192, 'ram_gb': 2048, 'disk_gb': 20000}."
-            "When omitted, defaults to {'gpu_count': total_units}."
+            "Multidimensional total capacity, authoritative for exactly the "
+            "dimensions it names, e.g. {'gpu_count': 8, 'vcpu_count': 192, "
+            "'ram_gb': 2048, 'disk_gb': 20000}. When omitted, the declaration "
+            "is {<mirror dimension>: total_units}."
         ),
     )
     enabled: bool = Field(default=True)

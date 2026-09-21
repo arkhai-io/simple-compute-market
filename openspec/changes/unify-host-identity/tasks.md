@@ -61,6 +61,12 @@ reference says so in a comment stating the invariant, not the history.
       operator client; a rendered inventory for an INI-seeded host names it by
       `host_id` and connects to `ssh_host`.
       Done: provisioning suite 885 passed (baseline 875 plus new tests).
+      **Amended after review:** two levels, stated separately. Integration
+      (`test_hosts_api.py`, real app and database, typed `ProvisioningClient`):
+      host CRUD and import, and that the connectivity path hands
+      `write_inventory` a host whose `host_id` is the registered one — it stops at
+      the renderer boundary. Unit (`test_ansible_service.py`): the rendered
+      inventory line uses `host_id` as the alias and `ssh_host` as `ansible_host`.
 
 ## 2. Declaration `host_id`
 
@@ -147,18 +153,18 @@ reference says so in a comment stating the invariant, not the history.
 - [x] 4.5 Buyer plugin: `domains/bare_metal/buyer/src/arkhai_bare_metal_buyer/cli.py`
       decodes `bare_metal.v2`.
 \1- [ ] 4.7 **Manual migration — preprod bare-metal reset**, performed once when this
-      change is deployed to preprod, and recorded here with the date and result:
-      1. Before upgrading, list active bare-metal leases at the compute provisioner
-         and terminate each through the lease API; force-release any whose teardown
-         cannot complete, after verifying the node externally. Otherwise the reset
-         orphans them at the provisioner.
-      2. Stop the bare-metal storefront and delete its database volume.
-      3. Deploy; the compute provisioner applies Sections 1–3's migrations.
-      4. Start the bare-metal storefront on the empty volume; confirm it republishes
-         and that the registry's previous `bare_metal.v1` listings are replaced or
-         closed rather than left discoverable.
-      5. Discard preprod bare-metal buyer run logs; they reference `v1` deals no
-         decoder can recover.
+      change is deployed to preprod, and recorded here with the date and result.
+      **Amended after review, 2026-09-21:** the earlier procedure deleted only the
+      storefront's database, and a fresh storefront cannot close the registry
+      listings the old one published, because listing ids are random and only the
+      deleted database tracks them. The procedure is now the owner's: terminate
+      active bare-metal leases at the provisioner, `helm uninstall` the bare-metal
+      release and delete its persistent volume claims, deploy (the provisioning
+      service, shared with VM, migrates in place and is never reset), and install
+      bare metal fresh. If its listings live in a registry shared with VM, close
+      them first by disabling the bare-metal declarations and running one publish
+      round. Documented in `docs/bare-metal-seller-quickstart.md`, "Resetting the
+      storefront database".
 
 ## 5. Surviving storefront surfaces
 
@@ -205,12 +211,32 @@ reference says so in a comment stating the invariant, not the history.
       refusal tests), bare-metal buyer 11, `core/storefront` 158 + 2 skipped,
       `core/storefront-client` 30, VM storefront 1168 + the 2 pre-existing
       `test_alkahest` failures, e2e unit 236 + 1 pre-existing failure.
-- [ ] 7.2 **Deferred to one bump after `capacity-resource-administration`** (see
-      `design.md`). Bump distribution versions and consumer lower bounds for every package whose
-      public model or wire changed: `arkhai-kit-site`, `arkhai-kit-site-client`, the
-      provisioning service, both provisioning adapters, the operator client,
-      `arkhai-bare-metal` and its storefront and buyer, `core/storefront` and its
-      client. The one versioned envelope is the bare-metal kind (4.1).
+      **Rerun after review at the bumped versions, installing from the locks
+      (`uv run --frozen`):** `kit/site` 200, `kit/site-client` 36,
+      `kit/fulfillment` 165, `core/storefront` 158 + 2 skipped,
+      `core/storefront-client` 30, `provisioning/compute` 129 + the 1 pre-existing
+      failure, provisioning service 890, `domains/bare_metal` 75, bare-metal
+      provisioning adapter 2, bare-metal storefront 126, bare-metal buyer 11,
+      API-credits service 63, API-credits storefront 79, VM storefront 1169 + the
+      2 pre-existing `test_alkahest` failures, e2e unit 236 + the 1 pre-existing
+      failure. (Counts include `capacity-resource-administration` Section 4b and
+      4c work on the same branch.)
+- [x] 7.2 Bump distribution versions and lower bounds. **Amended after review:**
+      done in this change rather than deferred (`design.md`, "Review outcomes").
+      Minor: `kit-site` 0.4.0, `kit-site-client` 0.3.0, `kit-fulfillment` 0.3.0,
+      `core-storefront` 0.5.0, `core-storefront-client` 0.19.0, `bare-metal` 0.3.0,
+      `bare-metal-storefront` 0.3.0, `bare-metal-buyer` 0.2.0,
+      `bare-metal-provisioning-adapter` 0.2.0, `vms-provisioning-adapter` 0.3.0,
+      `vms-provisioning-operator-client` 0.4.0, `vms-storefront` 0.4.0,
+      `compute-provisioning-service` 0.3.0, `apicredits-service` 0.3.0,
+      `apicredits-storefront` 0.3.0. Patch: `compute-provisioning` 0.6.1,
+      `kit-capacity-publication` 0.1.1, `kit-storefront` 0.1.1. Consumer bounds,
+      exact pins, and three Dockerfile pins follow. Twenty locks regenerated with
+      only the bumped packages upgraded; nineteen pass `uv lock --check`. The VM
+      storefront's lock is hand-assembled from `uv`-generated blocks because its
+      `torch` index is unreachable in the implementation environment; it is
+      verified by `uv sync --frozen` and a full suite run, and **must be
+      regenerated with `uv lock` where that index is reachable before merge.**
 - [x] 7.3 A repository search for `vm_host`, `machine_id`, `kvm_host`, and
       `default_vm_host` returns only the historical-schema reads the naming rule
       permits and sites 0.2 left to `pools-9`; record the residue in `design.md`.
@@ -256,12 +282,45 @@ Per `openspec/README.md#plan-closeout-requirements`, in that order.
       is treated as unrun.
       **Blocked in the implementation environment, 2026-09-21:** no deployed stack
       or pipeline runner is available there, so the end-to-end tier is unrun, not
-      passed. Evidence available instead: all 126 e2e scenarios collect against
-      the renamed APIs, and every in-process suite is at baseline (7.1). Owed
+      passed. All 126 e2e scenarios collect, which establishes import health only and is
+      not behavioural evidence for this change: the collected files still held
+      seven `HostResponse.name` accesses, found by review and fixed (task 9.3). Owed
       before archival: a pipeline run covering the VM deal scenarios
       (`test_full_deal`, `test_full_deal_buyer_cli`, `test_buy_oneshot_buyer_cli`,
       `test_non_erc20_settlement`) and the bare-metal deal scenario.
 - [ ] 8.9 **Promotion.** Complete the record below.
+
+## 9. Code review corrections (2026-09-21)
+
+Appended after review; see `design.md`, "Review outcomes". Numbered after Section 8
+rather than renumbering it, so the closeout keeps its references.
+
+- [x] 9.1 Make the host-identity migration fail before effect: plan every rewrite
+      before writing (`_plan_host_identity_rewrites`) and run the writes in
+      `_schema_transaction`, which covers DDL on SQLite. Apply the helper to the
+      capacity-declaration table rebuild. Evidence:
+      `fixtures/schema_through_20260911_001.sql`, generated by running the
+      preceding chain; `test_host_identity_migration.py` (6) and
+      `test_capacity_declaration_contract_migration.py` (4) start from it, and the
+      failure tests compare every schema object and every row.
+- [x] 9.2 Replace the recursive JSON key rename with path-specific rewrites per
+      stored shape. A test proves an operator `provider_extra_vars` entry named
+      `machine_id` is not touched.
+- [x] 9.3 Fix the seven `HostResponse.name` accesses in the provisioning smoke test
+      and the VM scenarios; audit every call site of a host-returning method.
+- [x] 9.4 Rewrite the bare-metal reset as the owner's uninstall-and-reinstall
+      procedure (task 4.7, `docs/bare-metal-seller-quickstart.md`).
+- [x] 9.5 Make `CapacityApi` delegate to `SiteCapacityAdminClient` and
+      `SiteCapacityClient`; confine raw HTTP to rejection-path tests.
+- [x] 9.6 Rewrite the two provider comments and two migration comments as
+      current-state rules; correct the negotiation docstring's service-terms kind;
+      scope `ARCHITECTURE.md`'s rule to interfaces and name the VM-storefront
+      exception.
+- [x] 9.7 Add a full sync/async storefront client parity guard in the VM storefront
+      suite.
+- [ ] 9.8 **Follow-up, not this change:** give the bare-metal lease endpoints a
+      canonical client, or decide they are not an inter-service API, and move
+      `test_bare_metal_leases_api.py` onto it. File as an issue.
 
 ## Design promotion record
 

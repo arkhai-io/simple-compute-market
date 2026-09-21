@@ -260,7 +260,11 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
     # capacity/dimensions left NULL) reads correctly through the real
     # ledger's fallback-to-legacy-fields logic, not just via a raw column
     # check.
-    ledger = CapacityLedgerService(sessionmaker(bind=engine))
+    ledger = CapacityLedgerService(
+        sessionmaker(bind=engine),
+        unit_claim_keys=("units", "gpu_count"),
+        mirror_dimension="gpu_count",
+    )
     snapshot = {row["resource_id"]: row for row in ledger.snapshot()}
     pre_existing = snapshot["pre-existing-gpu"]
     assert pre_existing["capacity"] == {"gpu_count": 8}
@@ -450,6 +454,7 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
         "20260901_001_relay_reachable_hosts",
         "20260911_001_reservation_offering_mode_name",
         "20260921_001_host_identity",
+        "20260921_002_capacity_declaration_contract",
     }
 
 
@@ -509,7 +514,7 @@ def test_run_migrations_is_idempotent():
         migration_count = connection.execute(
             text("SELECT COUNT(*) FROM schema_migrations")
         ).scalar_one()
-    assert migration_count == 18
+    assert migration_count == 19
 
 
 # ---------------------------------------------------------------------------

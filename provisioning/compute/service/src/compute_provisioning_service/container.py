@@ -263,9 +263,10 @@ class Container(containers.DeclarativeContainer):
         CapacityLedgerService,
         session_factory=session_factory,
         # "gpu_count" is this domain's alias for the generic "units" claim
-        # key — kept explicit here rather than hardcoded in kit/site so the
-        # ledger stays domain-neutral.
+        # key and the dimension its legacy scalar mirrors — kept explicit here
+        # rather than hardcoded in kit/site so the ledger stays domain-neutral.
         unit_claim_keys=("units", "gpu_count"),
+        mirror_dimension="gpu_count",
         settlement_abandonment_hook=providers.Callable(
             lambda repository: repository.abandon_if_assigned,
             repository=settlement_repository,

@@ -35,6 +35,7 @@ def _leased_vm_reservation() -> dict:
         resource_id="contract-kvm1",
         total_units=1,
         host_id="kvm1", attributes={},
+        pool_id="default",
     )
     reserved = ledger.reserve(
         claim={"offering_mode": "vm"},
@@ -56,6 +57,7 @@ def _leased_bare_metal_reservation() -> dict:
         host_id="bm-contract-1", attributes={
             "physical_host_id": "physical-contract-1",
             "allocation_mode": ALLOCATION_MODE_EXCLUSIVE},
+        pool_id="default",
     )
     reserved = ledger.reserve(
         claim={

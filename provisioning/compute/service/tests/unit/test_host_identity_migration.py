@@ -1,158 +1,165 @@
 """The host-identity migration: one name for the host on every persisted surface.
 
-Each test builds a database at the current schema, writes rows in the shapes
-that existed before the host had one name, and runs the migration directly.
-Starting from the current schema rather than replaying every historical
-migration keeps each case about this migration's own rewrite.
+Every test starts from the schema the preceding migration chain actually
+leaves (``fixtures/schema_through_20260911_001.sql``), writes rows in the
+shapes that schema held, and runs the pending migrations. Starting from the
+real previous schema is what lets a failure be checked against the whole
+database — its schema objects as well as its rows.
 """
 
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.pool import StaticPool
 
-from compute_provisioning_service.db.database import run_migrations
 from compute_provisioning_service.db.migrations import (
     HostIdentityMigrationError,
-    _migrate_host_identity,
+    apply_schema_migrations,
     count_rows_carrying_retired_host_keys,
 )
 
-_PLAYBOOK_PATH = "/opt/playbooks/vm-operations.yaml"
-_INVENTORY_GROUP = "kvm_hosts"
+_PREVIOUS_SCHEMA = Path(__file__).parent / "fixtures" / "schema_through_20260911_001.sql"
 
 
-def _engine():
+def _previous_engine():
     engine = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    run_migrations(
-        engine,
-        default_playbook_path=_PLAYBOOK_PATH,
-        default_inventory_group=_INVENTORY_GROUP,
-    )
+    raw = engine.raw_connection()
+    try:
+        raw.driver_connection.executescript(_PREVIOUS_SCHEMA.read_text())
+    finally:
+        raw.close()
     return engine
 
 
-def _bucket(engine, resource_id, attributes, *, host_id=None):
+def _snapshot(engine):
+    """Every schema object and every row, for before/after comparison."""
     with engine.begin() as connection:
-        connection.execute(
-            text(
-                "INSERT INTO capacity_buckets (capacity_bucket_id, backing_resource_id, "
-                "pool_id, resource_type, total_units, capacity, attributes, enabled, "
-                "host_id) VALUES (:id, :rid, 'default', 'compute.gpu', 1, "
-                "'{\"gpu_count\": 1}', :attributes, 1, :host_id)"
-            ),
-            {
-                "id": f"bucket-{resource_id}",
-                "rid": resource_id,
-                "attributes": json.dumps(attributes),
-                "host_id": host_id,
-            },
-        )
+        schema = connection.execute(text(
+            "SELECT type, name, sql FROM sqlite_master ORDER BY type, name"
+        )).all()
+        tables = [row[1] for row in schema if row[0] == "table"]
+        rows = {
+            table: connection.execute(text(f'SELECT * FROM "{table}"')).all()
+            for table in tables
+        }
+    return schema, rows
 
 
-def _reservation(engine, reservation_id, executor_ref, claim_attributes=None):
+def _execute(engine, sql, **params):
     with engine.begin() as connection:
-        connection.execute(
-            text(
-                "INSERT INTO capacity_reservations (capacity_reservation_id, units, "
-                "state, executor_ref, claim_attributes) "
-                "VALUES (:id, 1, 'leased', :ref, :claim)"
-            ),
-            {
-                "id": reservation_id,
-                "ref": json.dumps(executor_ref),
-                "claim": json.dumps(claim_attributes) if claim_attributes else None,
-            },
-        )
+        connection.execute(text(sql), params)
 
 
-def _settlement_record(engine, reservation_id, *, attributes, prepared, metadata):
+def _json(engine, sql):
     with engine.begin() as connection:
-        connection.execute(
-            text(
-                "INSERT INTO settlement_records (capacity_reservation_id, market, "
-                "scheduling_requirements, settlement_resource_id, pool_id, provider, "
-                "resource_attributes, prepared_create_operation, provider_metadata, "
-                "state, attempt_count) VALUES (:id, 'vms', "
-                "'{\"offering_mode\": \"vm\"}', 'kvm1', 'default', 'ansible', "
-                ":attributes, :prepared, :metadata, 'active', 0)"
-            ),
-            {
-                "id": reservation_id,
-                "attributes": json.dumps(attributes),
-                "prepared": json.dumps(prepared),
-                "metadata": json.dumps(metadata),
-            },
-        )
-
-
-def _job(engine, job_id, params, result):
-    with engine.begin() as connection:
-        connection.execute(
-            text(
-                "INSERT INTO ansible_jobs (id, status, params, result, retry_count, "
-                "max_retries) VALUES (:id, 'succeeded', :params, :result, 0, 3)"
-            ),
-            {"id": job_id, "params": json.dumps(params), "result": json.dumps(result)},
-        )
-
-
-def _json(engine, sql, **params):
-    with engine.begin() as connection:
-        value = connection.execute(text(sql), params).scalar_one()
+        value = connection.execute(text(sql)).scalar_one()
     return json.loads(value) if isinstance(value, str) else value
 
 
-def _populate_retired_shapes(engine):
-    _bucket(engine, "vm-slice-1", {"vm_host": "kvm1", "gpu_model": "H200"})
-    _bucket(
+def _bucket(engine, bucket_id, resource_id, attributes):
+    _execute(
         engine,
-        "bm-node-1",
-        {
-            "bare_metal_publication": {
-                "enabled": True,
-                "machine_id": "bm1",
-                "physical_host_id": "physical-1",
-                "allocation_mode": "exclusive",
-                "access_methods": ["ssh"],
-            },
+        "INSERT INTO capacity_buckets (capacity_bucket_id, backing_resource_id, "
+        "pool_id, resource_type, total_units, capacity, attributes, enabled, "
+        "created_at, updated_at) VALUES (:id, :rid, 'default', 'compute.gpu', 1, "
+        "'{\"gpu_count\": 1}', :attributes, 1, '2026-01-01', '2026-01-01')",
+        id=bucket_id, rid=resource_id, attributes=json.dumps(attributes),
+    )
+
+
+def _populate(engine):
+    # The chain seeds the system-owned default pool; the schema dump carries
+    # no rows, so the fixture does.
+    _execute(
+        engine,
+        "INSERT INTO resource_pools (id, label, provider, enabled, policy_tags) "
+        "VALUES ('default', 'Default Pool', 'ansible', 1, "
+        "'{\"deliverable_modes\": [\"vm\"]}')",
+    )
+    _execute(
+        engine,
+        "INSERT INTO hosts (name, kvm_host, ssh_user, ssh_key_type, ssh_key_value, "
+        "gpu_count, enabled, pool_id, created_at, updated_at) VALUES ('kvm1', "
+        "'10.0.0.1', 'root', 'path', '/keys/id', 1, 1, 'default', '2026-01-01', "
+        "'2026-01-01')",
+    )
+    _bucket(engine, "b1", "vm-slice-1", {"vm_host": "kvm1", "gpu_model": "H200"})
+    _bucket(engine, "b2", "bm-node-1", {
+        "bare_metal_publication": {
+            "enabled": True,
+            "machine_id": "bm1",
+            "physical_host_id": "physical-1",
+            "allocation_mode": "exclusive",
+            "access_methods": ["ssh"],
         },
-    )
-    _reservation(
+    })
+    _execute(
         engine,
-        "reservation-1",
-        {"vm_host": "kvm1"},
-        claim_attributes={"vm_host": "kvm1", "region": "eu"},
+        "INSERT INTO capacity_reservations (capacity_reservation_id, units, state, "
+        "executor_ref, claim_attributes, created_at, updated_at) VALUES "
+        "('reservation-1', 1, 'leased', :ref, :claim, '2026-01-01', '2026-01-01')",
+        ref=json.dumps({"vm_host": "kvm1"}),
+        claim=json.dumps({"vm_host": "kvm1", "region": "eu"}),
     )
-    _settlement_record(
+    _execute(
         engine,
-        "reservation-1",
-        attributes={"vm_host": "kvm1"},
-        prepared={
+        "INSERT INTO settlement_records (capacity_reservation_id, market, "
+        "scheduling_requirements, settlement_resource_id, pool_id, provider, "
+        "resource_attributes, prepared_create_operation, provider_metadata, "
+        "state, attempt_count, created_at, updated_at) VALUES ('reservation-1', "
+        "'vms', '{\"offering_mode\": \"vm\"}', 'kvm1', 'default', 'ansible', "
+        ":attributes, :prepared, :metadata, 'active', 0, '2026-01-01', '2026-01-01')",
+        attributes=json.dumps({"vm_host": "kvm1"}),
+        prepared=json.dumps({
             "kind": "vm.ansible.create.v1",
             "schema_version": 1,
-            "payload": {"parameters": {"vm_host": "kvm1", "vm_target": "t1"}},
-        },
-        metadata={"vm_host": "kvm1", "vm_target": "t1", "create_job_id": "job-1"},
+            "payload": {"parameters": {
+                "vm_host": "kvm1",
+                "vm_target": "t1",
+                # Operator-supplied variables are never rewritten, whatever
+                # their names.
+                "provider_extra_vars": {"machine_id": "operator-value"},
+            }},
+        }),
+        metadata=json.dumps({"vm_host": "kvm1", "vm_target": "t1"}),
     )
-    _job(engine, "job-1", {"vm_host": "kvm1"}, {"vm_host_ip": "203.0.113.9"})
+    _execute(
+        engine,
+        "INSERT INTO ansible_jobs (id, status, params, result, retry_count, "
+        "max_retries, created_at, updated_at) VALUES ('job-1', 'succeeded', "
+        ":params, :result, 0, 3, '2026-01-01', '2026-01-01')",
+        params=json.dumps({"vm_host": "kvm1"}),
+        result=json.dumps({"vm_host_ip": "203.0.113.9"}),
+    )
 
 
-def test_every_surface_names_the_host_host_id():
-    engine = _engine()
-    _populate_retired_shapes(engine)
-    assert count_rows_carrying_retired_host_keys(engine) == 5
+def test_the_previous_schema_is_migrated_on_every_surface():
+    engine = _previous_engine()
+    _populate(engine)
+    indexes_before = {
+        index["name"] for index in inspect(engine).get_indexes("hosts")
+    }
 
-    _migrate_host_identity(engine)
+    apply_schema_migrations(engine)
 
+    host_columns = {c["name"] for c in inspect(engine).get_columns("hosts")}
+    assert {"host_id", "ssh_host"} <= host_columns
+    assert not {"name", "kvm_host"} & host_columns
+    # A column rename keeps the table's indexes.
+    assert {i["name"] for i in inspect(engine).get_indexes("hosts")} == indexes_before
+    assert "host_id" in {
+        c["name"] for c in inspect(engine).get_columns("relay_port_leases")
+    }
     assert count_rows_carrying_retired_host_keys(engine) == 0
+
     with engine.begin() as connection:
         buckets = {
             row[0]: (row[1], json.loads(row[2]))
@@ -161,59 +168,40 @@ def test_every_surface_names_the_host_host_id():
             ))
         }
     assert buckets["vm-slice-1"] == ("kvm1", {"gpu_model": "H200"})
-    bm_host, bm_attributes = buckets["bm-node-1"]
-    assert bm_host == "bm1"
-    # Cross-mode fields have one location: the top level the ledger reads.
-    assert bm_attributes == {
+    assert buckets["bm-node-1"] == ("bm1", {
         "physical_host_id": "physical-1",
         "allocation_mode": "exclusive",
         "bare_metal_publication": {"enabled": True, "access_methods": ["ssh"]},
+    })
+    assert _json(engine, "SELECT executor_ref FROM capacity_reservations") == {
+        "host_id": "kvm1"
     }
-
-    assert _json(
-        engine,
-        "SELECT executor_ref FROM capacity_reservations WHERE capacity_reservation_id='reservation-1'",
-    ) == {"host_id": "kvm1"}
-    assert _json(
-        engine,
-        "SELECT claim_attributes FROM capacity_reservations WHERE capacity_reservation_id='reservation-1'",
-    ) == {"host_id": "kvm1", "region": "eu"}
-
-    prepared = _json(
-        engine,
-        "SELECT prepared_create_operation FROM settlement_records",
-    )
+    assert _json(engine, "SELECT claim_attributes FROM capacity_reservations") == {
+        "host_id": "kvm1", "region": "eu",
+    }
+    prepared = _json(engine, "SELECT prepared_create_operation FROM settlement_records")
     assert prepared["schema_version"] == 2
-    assert prepared["payload"]["parameters"] == {"host_id": "kvm1", "vm_target": "t1"}
-    assert _json(engine, "SELECT provider_metadata FROM settlement_records")["host_id"] == "kvm1"
+    assert prepared["payload"]["parameters"] == {
+        "host_id": "kvm1",
+        "vm_target": "t1",
+        "provider_extra_vars": {"machine_id": "operator-value"},
+    }
+    assert _json(engine, "SELECT provider_metadata FROM settlement_records") == {
+        "host_id": "kvm1", "vm_target": "t1",
+    }
     with engine.begin() as connection:
-        record = connection.execute(text(
+        assert connection.execute(text(
             "SELECT resource_host_id, resource_attributes FROM settlement_records"
-        )).one()
-    assert record[0] == "kvm1"
-    assert json.loads(record[1]) == {}
+        )).one() == ("kvm1", "{}")
     assert _json(engine, "SELECT params FROM ansible_jobs") == {"host_id": "kvm1"}
     assert _json(engine, "SELECT result FROM ansible_jobs") == {"host_ip": "203.0.113.9"}
 
 
-def test_rerunning_changes_nothing():
-    engine = _engine()
-    _populate_retired_shapes(engine)
-    _migrate_host_identity(engine)
-    with engine.begin() as connection:
-        before = connection.execute(text(
-            "SELECT backing_resource_id, host_id, attributes FROM capacity_buckets "
-            "ORDER BY backing_resource_id"
-        )).all()
-
-    _migrate_host_identity(engine)
-
-    with engine.begin() as connection:
-        after = connection.execute(text(
-            "SELECT backing_resource_id, host_id, attributes FROM capacity_buckets "
-            "ORDER BY backing_resource_id"
-        )).all()
-    assert after == before
+def test_the_retired_key_count_sees_every_unmigrated_row():
+    engine = _previous_engine()
+    _populate(engine)
+    # Two declarations, one reservation, one settlement record, one job.
+    assert count_rows_carrying_retired_host_keys(engine) == 5
 
 
 @pytest.mark.parametrize(
@@ -235,50 +223,38 @@ def test_rerunning_changes_nothing():
         },
     ],
 )
-def test_an_inconsistent_row_aborts_with_nothing_written(attributes):
-    engine = _engine()
-    _bucket(engine, "clean", {"vm_host": "kvm9"})
-    _bucket(engine, "conflicted", attributes)
+def test_an_inconsistent_row_leaves_the_database_exactly_as_it_was(attributes):
+    engine = _previous_engine()
+    _populate(engine)
+    _bucket(engine, "b9", "conflicted", attributes)
+    before = _snapshot(engine)
 
     with pytest.raises(HostIdentityMigrationError, match="conflicted"):
-        _migrate_host_identity(engine)
+        apply_schema_migrations(engine)
 
-    # The clean row is not half-migrated: the whole migration rolled back.
-    assert _json(
-        engine,
-        "SELECT attributes FROM capacity_buckets WHERE backing_resource_id='clean'",
-    ) == {"vm_host": "kvm9"}
+    # Schema and rows alike: no column added, none renamed, nothing rewritten,
+    # and the migration is not recorded, so the next attempt runs it again.
+    assert _snapshot(engine) == before
 
 
-def test_two_declarations_naming_one_host_abort():
-    engine = _engine()
-    _bucket(engine, "first", {"vm_host": "kvm1"})
-    _bucket(engine, "second", {"vm_host": "kvm1"})
+def test_two_declarations_naming_one_host_leave_the_database_unchanged():
+    engine = _previous_engine()
+    _populate(engine)
+    _bucket(engine, "b9", "second", {"vm_host": "kvm1"})
+    before = _snapshot(engine)
 
     with pytest.raises(HostIdentityMigrationError, match="both name host 'kvm1'"):
-        _migrate_host_identity(engine)
+        apply_schema_migrations(engine)
+
+    assert _snapshot(engine) == before
 
 
-def test_the_host_registry_columns_are_renamed_on_an_old_table():
-    engine = create_engine(
-        "sqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    with engine.begin() as connection:
-        connection.execute(text(
-            "CREATE TABLE hosts (name VARCHAR PRIMARY KEY, kvm_host VARCHAR NOT NULL)"
-        ))
-        connection.execute(text(
-            "INSERT INTO hosts (name, kvm_host) VALUES ('kvm1', '10.0.0.1')"
-        ))
+def test_rerunning_the_migration_chain_changes_nothing():
+    engine = _previous_engine()
+    _populate(engine)
+    apply_schema_migrations(engine)
+    before = _snapshot(engine)
 
-    _migrate_host_identity(engine)
+    apply_schema_migrations(engine)
 
-    columns = {c["name"] for c in inspect(engine).get_columns("hosts")}
-    assert {"host_id", "ssh_host"} <= columns
-    assert not {"name", "kvm_host"} & columns
-    with engine.begin() as connection:
-        assert connection.execute(text(
-            "SELECT host_id, ssh_host FROM hosts"
-        )).one() == ("kvm1", "10.0.0.1")
+    assert _snapshot(engine) == before

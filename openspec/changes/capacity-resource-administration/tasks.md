@@ -16,6 +16,26 @@ Section 5's in-session reconciliation path.
 host registry from `unify-host-identity`, which lands first. Every decision gate in
 this file was resolved on 2026-09-21.
 
+**Progress at pause (2026-09-21).** Implemented and tested on the shared branch:
+task 1.3 and Sections 4b and 4c (4b.1–4b.5, 4b.7–4b.13; 4c.1–4c.3). Not started:
+Sections 1.2, 1.5, 2, 3, 4, 5, 6, 7, 8. Notes for resuming:
+
+- Mirror dimension: `CapacityLedgerService(mirror_dimension=...)`, default
+  `"units"`; the provisioning container and the VM storefront's claim matcher
+  pass `"gpu_count"`. Payload aliases are `allocated_<mirror>` /
+  `available_<mirror>`, byte-identical for VM. Record in `design.md`.
+- `register_resource_in_session` exists for Section 5's importer.
+- Migration `20260921_002_capacity_declaration_contract` (pool backfill,
+  nullable `total_units`) rebuilds `capacity_buckets` from the model inside
+  `_schema_transaction`; tests start from the previous-schema fixture.
+- Distribution versions were already bumped by `unify-host-identity` on this
+  branch and cover this work; bump again only for later contract changes.
+- Known leftover, deliberately not fixed: the feasibility view still adds a
+  `"gpu_count": units` match fact for every domain. It writes nothing into
+  declarations; decide in the resumed session whether it belongs here.
+- 4b.6 (legacy compute rows read correctly) and 4c.4 (no fixture or e2e setup
+  reassigns under a live obligation) remain to verify.
+
 **Planning pass (2026-09-21).** Names below follow `unify-host-identity`: the host
 registry's key is `host_id` (was `name`), a declaration's host link is its `host_id`
 field (was the `vm_host` attribute), and `ssh_host` is the host's address (was
@@ -39,7 +59,7 @@ mapping; notes are amended rather than rewritten, per `AGENTS.md`.
       together, not first-failure exceptions. New module
       `kit/site/src/market_site/capacity_definitions.py`, parallel to
       `kit/resource-pools/src/market_resource_pools/service.py`'s document handling.
-- [ ] 1.3 Promote `PUT /api/v1/capacity/resources/{resource_id}` from a compatibility
+- [x] 1.3 Promote `PUT /api/v1/capacity/resources/{resource_id}` from a compatibility
       endpoint to a documented operator administration surface: correct the route
       docstring in `kit/site/src/market_site/router.py`, which currently describes it
       as a compatibility path for domains registering logical capacity, and state the
@@ -161,7 +181,7 @@ invent the semantics while coding. Retiring the scalar mirror entirely remains
 deferred — this is the smaller half that the domain-neutral declaration contract
 depends on.
 
-- [ ] 4b.1 Make the dimension the legacy scalar mirror tracks composition-supplied,
+- [x] 4b.1 Make the dimension the legacy scalar mirror tracks composition-supplied,
       the way `unit_claim_keys` already is, rather than the module-level
       `PRIMARY_DIMENSION = "gpu_count"` in `kit/site/ledger.py`. **Amended
       2026-09-21:** every site listed under `design.md`'s "What changed since the
@@ -170,11 +190,11 @@ depends on.
       `dict_resource_satisfies_claim`, `resource_feasibility_view`), which take it as
       a parameter. Update their callers in `kit/fulfillment/src/market_fulfillment/`
       and any storefront caller found by search.
-- [ ] 4b.2 Stop writing a mirror dimension into a caller's explicit capacity map.
+- [x] 4b.2 Stop writing a mirror dimension into a caller's explicit capacity map.
       `register_resource` currently injects it when absent and then reads it back for
       `mirrored_units`; both sites need the supplied name and the explicit-declaration
       case.
-- [ ] 4b.3 Make `total_units` optional and absent where the declaration names no
+- [x] 4b.3 Make `total_units` optional and absent where the declaration names no
       mirror dimension. Files: `kit/site/src/market_site/http_models.py`,
       `kit/site/src/market_site/db.py` (`CapacityBucket.total_units` nullable),
       `kit/site-client/src/market_site_client/models.py` and `client.py`. A request
@@ -183,9 +203,9 @@ depends on.
       when both are present, so absence keeps that check meaningful while a
       substituted zero would make it assert a false equality. Retiring the scalar
       entirely remains deferred.
-- [ ] 4b.4 Wire the VM composition to its existing mirror dimension so no behaviour
+- [x] 4b.4 Wire the VM composition to its existing mirror dimension so no behaviour
       changes there.
-- [ ] 4b.5 Wire the API-credit composition to its own dimension, matching how it
+- [x] 4b.5 Wire the API-credit composition to its own dimension, matching how it
       already overrides `unit_claim_keys` to `("units",)`.
       **Amended 2026-09-21:** the dimension is `units`, in
       `domains/apicredits/service/src/container.py`. No migration and no
@@ -196,28 +216,28 @@ depends on.
       still read correctly, and record how a row written before this change is
       interpreted after it. **Amended 2026-09-21:** scoped to the compute domain,
       whose mirror name does not change; API-credit rows are out of scope per 4b.5.
-- [ ] 4b.7 **Unit.** An explicit multidimensional declaration with no compute
+- [x] 4b.7 **Unit.** An explicit multidimensional declaration with no compute
       dimension is stored as declared, with no manufactured GPU dimension, and its
       scalar unit total is absent rather than zero.
-- [ ] 4b.8 **Unit.** The VM composition's legacy scalar fallback maps to its
+- [x] 4b.8 **Unit.** The VM composition's legacy scalar fallback maps to its
       configured mirror dimension; the API-credit composition's does not become
       `gpu_count`.
-- [ ] 4b.9 **Integration.** One typed-client case registering a resource whose
+- [x] 4b.9 **Integration.** One typed-client case registering a resource whose
       declaration names no compute dimension.
-- [ ] 4b.10 Require `pool_id` on registration: required field on
+- [x] 4b.10 Require `pool_id` on registration: required field on
       `ResourceRegisterRequest` and `ResourceRegistration`, required argument on
       `register_resource`. Update every caller —
       `domains/apicredits/storefront/src/apicredits_storefront/startup.py` passes the
       default pool explicitly, and the test fixtures in `kit/site`, `kit/fulfillment`,
       provisioning, VM storefront, and API-credits suites that register without one.
-- [ ] 4b.11 Add `CapacityLedgerService.register_resource_in_session(db, ...)`, neither
+- [x] 4b.11 Add `CapacityLedgerService.register_resource_in_session(db, ...)`, neither
       opening a session nor committing, with `register_resource` delegating to it
       under the ledger lock.
-- [ ] 4b.12 Compute migration, ordered before Section 3's: make
+- [x] 4b.12 Compute migration, ordered before Section 3's: make
       `capacity_buckets.total_units` nullable (SQLite table rebuild through the
       existing helper) and backfill `NULL` `pool_id` to `DEFAULT_POOL_ID`. Cover fresh
       bootstrap, idempotent rerun, and a populated database.
-- [ ] 4b.13 **Rejection-path integration.** A `PUT` without `pool_id` returns 422;
+- [x] 4b.13 **Rejection-path integration.** A `PUT` without `pool_id` returns 422;
       status-code-only assertion, commented as a rejection-path test per
       `TESTING.md`.
 - [ ] 4b.14 Bump distribution versions and lower bounds: `arkhai-kit-site`,
@@ -229,18 +249,18 @@ depends on.
 
 ## 4c. Pool reassignment drain rule
 
-- [ ] 4c.1 Refuse reassignment of a capacity resource that holds a live capacity
+- [x] 4c.1 Refuse reassignment of a capacity resource that holds a live capacity
       obligation — hold, reservation, assignment, or workload — resolved through its
       pool. `register_resource` currently writes `bucket.pool_id = effective_pool_id`
       unconditionally on update, and `backing_pool_id_in_session` resolves a
       reservation's pool through the resource's *current* `pool_id`, so reassignment
       rewrites the authority under an existing reservation.
-- [ ] 4c.2 Leave the resource in its current pool when a reassignment is refused. A
+- [x] 4c.2 Leave the resource in its current pool when a reassignment is refused. A
       partial move is worse than a refused one. **Amended 2026-09-21:** "live
       obligation" is a held-state reservation debited against the resource or whose
       `settlement_resource_id` names it; compare pools after reading `NULL` as the
       default pool. The route maps the refusal to 409.
-- [ ] 4c.3 **Integration, real DB transaction.** A resource holding a live reservation
+- [x] 4c.3 **Integration, real DB transaction.** A resource holding a live reservation
       cannot cross a pool boundary; the same resource can once its obligations are
       drained. Cover both in one test so the refusal is not mistaken for a resource
       that could never move. Keep the coverage generic: this change does not depend on

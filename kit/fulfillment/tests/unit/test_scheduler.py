@@ -67,7 +67,7 @@ def services():
     # This test suite's claims are VM-flavored ("gpu_count"); opt into
     # that alias explicitly the same way the VM composition root does
     # (kit/site's own default is domain-neutral -- see ledger.py).
-    ledger = CapacityLedgerService(factory, unit_claim_keys=("units", "gpu_count"))
+    ledger = CapacityLedgerService(factory, unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count")
     scheduler = PhysicalSettlementScheduler(
         pools, ledger, session_factory=factory, default_resource_kind="compute.gpu"
     )
@@ -213,7 +213,13 @@ def test_explicit_resource_bypasses_policy_not_eligibility(services):
 def test_resource_without_pool_is_not_schedulable(services):
     pools, ledger, scheduler = services
     _pool(pools, DEFAULT_POOL_ID)
-    ledger.register_resource(resource_id="orphan", total_units=4, attributes={})
+    ledger.register_resource(resource_id="orphan", total_units=4, attributes={}, pool_id="default")
+    # A legacy row stored with no pool; registration can no longer write one.
+    from market_site.db import CapacityBucket
+
+    with ledger._session_factory() as db:
+        db.query(CapacityBucket).filter_by(backing_resource_id="orphan").one().pool_id = None
+        db.commit()
     capacity_reservation_id = _reserve(ledger)
     with pytest.raises(NoEligibleSettlementResourceError):
         scheduler.schedule_resource(_request(capacity_reservation_id))
@@ -653,7 +659,7 @@ def test_independent_sessions_serialize_cursor_updates_deterministically(tmp_pat
     FulfillmentBase.metadata.create_all(bind=engine)
     factory = sessionmaker(bind=engine)
     pools = ResourcePoolService(factory, {"ansible": _Handler()})
-    ledger = CapacityLedgerService(factory, unit_claim_keys=("units", "gpu_count"))
+    ledger = CapacityLedgerService(factory, unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count")
     _pool(pools, "pool-a")
     _pool(pools, "pool-b")
     _resource(ledger, "a1", "pool-a", units=10)
@@ -743,7 +749,7 @@ def test_independent_sessions_rollback_leaves_no_partial_state_for_next_writer(t
     FulfillmentBase.metadata.create_all(bind=engine)
     factory = sessionmaker(bind=engine)
     pools = ResourcePoolService(factory, {"ansible": _Handler()})
-    ledger = CapacityLedgerService(factory, unit_claim_keys=("units", "gpu_count"))
+    ledger = CapacityLedgerService(factory, unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count")
     _pool(pools, "pool-a")
     _pool(pools, "pool-b")
     _resource(ledger, "a1", "pool-a", units=10)
@@ -831,7 +837,7 @@ def test_interleaved_independent_sessions_do_not_perturb_other_resource_kind_cur
     FulfillmentBase.metadata.create_all(bind=engine)
     factory = sessionmaker(bind=engine)
     pools = ResourcePoolService(factory, {"ansible": _Handler()})
-    ledger = CapacityLedgerService(factory, unit_claim_keys=("units", "gpu_count"))
+    ledger = CapacityLedgerService(factory, unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count")
     _pool(pools, "pool-a")
     _pool(pools, "pool-b")
     _resource(ledger, "gpu-a", "pool-a", units=10)

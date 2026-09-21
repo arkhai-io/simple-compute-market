@@ -89,7 +89,9 @@ class CapacityBucket(Base):
     host_id = Column(String, nullable=True, unique=True)
     resource_type = Column(String, nullable=False, default="compute.gpu")
     resource_subtype = Column(String, nullable=True)
-    total_units = Column(Integer, nullable=False, default=0)
+    # Mirror of the composition's mirror dimension; null when the
+    # declaration does not name that dimension.
+    total_units = Column(Integer, nullable=True)
     capacity = Column(JSON, nullable=False, default=dict)
     attributes = Column(JSON, nullable=False, default=dict)
     enabled = Column(Boolean, nullable=False, default=True)
@@ -122,8 +124,9 @@ class CapacityReservation(Base):
     # capacity-accounting choice is private to CapacityReservationDebit.
     settlement_resource_id = Column(String, nullable=True, index=True)
     units = Column(Integer, nullable=False, default=1)
-    # units mirrors dimensions["gpu_count"] for payload/caller compatibility.
-    # May be null when the multidimensional map is absent, in which case dimensions is {"gpu_count": units}.
+    # units mirrors the composition's mirror dimension in ``dimensions`` for
+    # payload/caller compatibility; when ``dimensions`` is null the held
+    # quantity is ``{<mirror>: units}``.
     dimensions = Column(JSON, nullable=True)
     # The categorical half of the claim this reservation was admitted
     # against, as matched at reserve time. Ledger-owned, never

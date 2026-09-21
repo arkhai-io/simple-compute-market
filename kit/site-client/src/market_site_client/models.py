@@ -24,12 +24,9 @@ class ResourceRegistration(BaseModel):
     server-side model for ``PUT /api/v1/capacity/resources/{resource_id}``).
     """
 
-    total_units: int = Field(
-        ge=0,
-        description="Unit count this resource contributes (e.g. GPUs).",
-    )
+    total_units: Optional[int] = Field(default=None, ge=0)
     resource_type: str = Field(default="compute.gpu")
-    pool_id: Optional[str] = Field(default=None)
+    pool_id: str = Field(min_length=1)
     host_id: Optional[str] = Field(default=None)
     resource_subtype: Optional[str] = Field(default=None)
     attributes: dict[str, Any] = Field(default_factory=dict)
