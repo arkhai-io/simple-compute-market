@@ -281,10 +281,30 @@ valid declaration, so it exposes one domain-neutral resolver in
 `resource-pool-management` requires any reader of projected declarations to resolve
 them through this function, so the write side and every read side agree on what a
 valid declaration is without the site's validation and the storefront's diverging.
-The write-side validation and the resolver share one implementation. Which change
-wires the resolver into the storefront's projection ingestion is bookkeeping rather
-than design — the roadmap lands these changes without a deployment in between —
-and is settled during planning.
+The write-side validation and the resolver share one implementation.
+
+`unbacked-listing-publication` wires the resolver into the storefront's projection
+ingestion. It owns the producer-version rule the resolver deliberately leaves to its
+caller, and it is the first change whose behaviour reads the resolved values; wiring
+the call here would ship a storefront read whose result nothing uses. The split is
+bookkeeping rather than a design seam — the roadmap lands these changes without a
+deployment between them — so this change proves the resolver at the kit level and
+proves the producer side of the projection, and the consumer change proves
+ingestion.
+
+### Declaration validation lives in the pool models
+
+The shared declaration validation runs as a model validator on `PoolCreate`,
+`PoolReplace`, and `PoolUpdate` (when it supplies `policy_tags`), and in document
+validation. A typed client therefore cannot construct an invalid pool write, and the
+API refuses one with the framework's 422 before the service runs. The service still
+applies the same validation to what it persists, so a model built without
+validation cannot bypass it. Backing immutability needs stored state, so it stays a
+service check and refuses with 400 like the service's other validation failures.
+
+Document-import failures name each problem's path — the pool entry and tag — in the
+raised error, so a service refusing to start on a seeded document says which pool
+to fix.
 
 ### Not a publication-only provider kind
 

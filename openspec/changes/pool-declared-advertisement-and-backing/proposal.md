@@ -79,9 +79,8 @@ None.
   and every execution recheck stays exactly as it is.
 - Do not change listing behaviour. Storefront-side derivation, listing binding,
   registry publication, and the version-skew rules for reading these tags belong
-  to `unbacked-listing-publication`. This change supplies the shared resolver
-  those readers use; which change wires it into storefront projection ingestion is
-  settled during planning.
+  to `unbacked-listing-publication`, which also wires this change's shared
+  resolver into storefront projection ingestion.
 - Do not add a pool read to the site authority. An unbacked pool is kept out of
   admission by its empty deliverable set.
 - Do not introduce a publication-only provider kind. That would put a pool in the
