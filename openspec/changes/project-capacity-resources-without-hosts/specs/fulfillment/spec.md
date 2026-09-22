@@ -37,9 +37,11 @@ advancement, or assignment. An explicit resource constraint naming such a
 candidate SHALL be rejected as having no eligible resource, without invoking
 policy or advancing cursors.
 
-An existing assignment SHALL NOT be re-evaluated against the host requirement.
-Its host was fixed when it was scheduled, and dispatch is the final check that
-the host is registered.
+An existing assignment SHALL keep the host it was placed on and SHALL NOT be
+re-placed. An existing assignment that records no host, in a pool whose provider
+needs one, SHALL be refused as having no eligible resource rather than returned;
+it remains assigned until its reservation is released or expires, which abandons
+it. Dispatch remains the final check that an assignment's host is registered.
 
 #### Scenario: Automatic selection encounters a candidate naming no host
 
@@ -56,3 +58,12 @@ the host is registered.
   declaration names no host, in a pool whose provider needs one
 - **THEN** scheduling rejects the request as having no eligible resource and no
   provider is invoked
+
+#### Scenario: An existing assignment records no host
+
+- **GIVEN** an assignment, placed before placement refused declarations naming
+  no host, that records no host in a pool whose provider needs one
+- **WHEN** an equivalent scheduling request is retried
+- **THEN** scheduling reports no eligible resource instead of returning the
+  assignment
+- **AND** the assignment remains assigned until its reservation ends

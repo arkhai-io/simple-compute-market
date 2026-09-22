@@ -174,7 +174,9 @@ real app there).
 - [x] 4.7 **Unit.**
       - The tenant address prefers `public_host`, falls back to `ssh_host`, and
         never reads a file.
-      - A job for an unregistered host fails before `start_playbook`.
+      - Constructing the job service without a host registry fails. That
+        a job for an unregistered host fails before `start_playbook` is
+        orchestration, so it is proven at integration by 4.8, not here.
       - Bare-metal validation refuses an unregistered host with no optional
         path.
 - [x] 4.8 **Integration.** Through the real app with the Ansible boundary mocked:
@@ -252,9 +254,8 @@ Sections 1–5 are implemented. Deviations from the plan text, each deliberate:
   `hints.py`. `hints.py` is the policy-tag vocabulary, and the host
   requirement is a provider property, not a tag.
 - **1.2 enforcement point.** `FulfillmentProvider` annotates `needs_host` with
-  no default. `provider_needs_host` enforces it, and composition calls it.
-  Enforcing it in `ProviderRegistry` would have broken every test that builds a
-  registry from `MagicMock` providers, and a mock never reaches composition.
+  no default, and `provider_needs_host` enforces it. It was first enforced only
+  at composition; review moved it into `ProviderRegistry` (A6, task 5R.2).
 - **1.5/1.7 import route.** Each adapter's `runtime` module re-exports
   `HOST_REQUIREMENT`, and the container imports it from there.
   `tests/unit/test_import_boundaries.py` allows the service to import adapters
@@ -307,19 +308,85 @@ Validation so far (baseline → now):
 The provisioning unit count fell because the tombstoned
 `test_provisioning_service.py` held 44 test functions for the deleted service.
 
-**Unrun:** the full VM storefront suite (`make -C domains/vms/storefront test`).
-Its environment cannot resolve in the sandbox used here, because the `rl` extra
-needs `torch` from an unreachable index. Every VM storefront test module that
-reads the resource-pool projection was run instead, in an environment without
-that extra, against this branch's wheels:
-- `test_reconciler.py`;
-- `services/test_site_projection_cache.py`;
-- `test_remote_capacity_client.py`;
-- `test_cli_publish_helpers.py`;
-- `test_publish_round_with_templates.py`.
+**VM storefront (5.6).** Root `make test` runs `test-storefront`, which runs
+`cd vms/storefront && make reinit && make test` from `domains/Makefile`, so the
+full suite ran in the reviewer-environment `make test` that passed. It could not
+resolve in the sandbox used during implementation, because the `rl` extra needs
+`torch` from an unreachable index. There, the five modules that read the
+resource-pool projection were run in an environment without that extra: 179
+passed.
 
-Result: 179 passed. Typing is unrun; no touched package configures a type
-checker. End-to-end is owed at 6.8.
+Typing is unrun; no touched package configures a type checker. End-to-end is
+recorded at 6.8.
+
+## 5R. Review corrections
+
+- [x] 5R.1 Refuse, on the existing-assignment path, an assignment recording no
+      host in a pool whose provider needs one (A5), in
+      `kit/fulfillment/src/market_fulfillment/scheduler.py`.
+      - Unit: a row seeded as the earlier scheduler wrote it is refused and
+        stays `assigned`.
+      - Integration: the same row is refused through the typed client
+        (`provisioning/compute/service/tests/integration/test_host_requirement_api.py`).
+- [x] 5R.2 Enforce the host declaration in `ProviderRegistry` (A6).
+      - Reword the `needs_host` comment to name the base class, not every
+        concrete class.
+      - Replace bare `MagicMock` providers with declaring doubles in
+        `kit/fulfillment/tests/unit/test_fulfillment.py` and
+        `tests/unit/services/test_ledger_lease_lifecycle.py`.
+      - Declare on `_StubProvider` in `tests/unit/services/test_provider_registry.py`.
+- [x] 5R.3 Restate `market_resource_pools.host_requirement` at pool level, and
+      refuse a non-`bool` requirement value (A7).
+- [x] 5R.4 Move the scheduling-refusal integration test to
+      `test_host_requirement_api.py`. Setup goes through `ProvisioningClient`,
+      `SiteCapacityAdminClient`, and `SiteCapacityClient`; scheduling and
+      acceptance go through `ComputeProvisioningClient`, asserting
+      `ComputeProvisioningError.status_code`. The raw-HTTP version in
+      `test_fulfillment_api.py` is removed.
+- [x] 5R.5 Correct the 4.7 wording and the 5.6 validation record.
+- [x] 5R.6 **Decision gate.** Decide how DB-backed tests in kit `unit/`
+      directories are classified against `docs/development/TESTING.md`.
+      **Decided (A8):** for a library package, integration means its public
+      service API against a real embedded database, with no app.
+      - Such tests live in `tests/integration`, and the package's test target
+        runs both directories.
+      - Existing files migrate when next touched.
+      - This change moves its own two files:
+        `kit/site/tests/integration/test_ledger_host_requirement.py` and
+        `kit/fulfillment/tests/integration/test_scheduler_host_requirement.py`.
+        Tombstones are left at the `unit/` paths.
+      - `kit/fulfillment` gains a `tests/integration` package, both
+        directories in `testpaths`, and a Makefile target that honours them.
+      - The integration directory is a package so a module can share a
+        basename with one in `unit/`, as in `kit/site`.
+      - Tasks 2.3 and 3.3 name `unit/`; their tests now live in
+        `tests/integration`.
+- [x] 5R.7 **Decision gate.** Decide whether root `make test` must run the
+      suites it missed. **Decided: yes,** per `ARCHITECTURE.md`'s rule that
+      aggregate targets run every included subproject's default tests.
+      - `domains/Makefile` gains `test-bare-metal`, run by root `make test`.
+        It covers the domain, storefront, buyer, and provisioning adapter;
+        the storefront and buyer were missing too.
+      - The buyer and adapter gain Makefiles whose `reinit` reinstalls their
+        wheel-resolved internal dependencies.
+      - The adapter's editable sibling-path sources are left for
+        `remove-relative-uv-sources`, which owns them.
+      - `kit/site`'s test target now honours `testpaths`, so its 18
+        integration tests run.
+      - CI's matrix gains `bare-metal-buyer` and
+        `bare-metal-provisioning-adapter`.
+
+**Validation after review corrections:**
+
+| Suite | Result |
+|---|---|
+| `kit/resource-pools` | 107 passed |
+| `kit/fulfillment` | 176 passed, unit and integration |
+| `kit/site` | 254 passed, now including its 18 integration tests |
+| kit aggregate (`make -C kit test`) | 15 suites, all passed |
+| provisioning unit | 664 passed |
+| provisioning integration | 245 passed |
+| `make -C domains test-bare-metal` | domain 75, storefront 126, buyer 11, adapter 2, all passed |
 
 ## 6. Closeout
 
@@ -420,6 +487,7 @@ checker. End-to-end is owed at 6.8.
 | The host is joined at dispatch only, and why | `openspec/specs/site-capacity/architecture.md` — pending |
 | Host-requirement test matrix | `docs/development/TESTING.md` — pending |
 | Seed-only inventory and adding hosts after first boot (A4) | `docs/development/DEPLOYMENT_AND_CONFIG.md`, both quickstarts — pending |
+| Library integration tests: a library's public service API against a real embedded database, in `tests/integration` (A8) | `docs/development/TESTING.md` — pending |
 | Roadmap Goals 7 and 1 | `docs/development/ROADMAP.md` — pending |
 | Campaign index row and unowned bare-metal access address | `openspec/changes/README.md` — pending |
 | Disabled-host admission and placement | Handed to `pools-6-fair-scheduling-policy` (temporary; not promoted here) |

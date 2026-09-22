@@ -119,6 +119,22 @@ class PhysicalSettlementScheduler:
                         f"pool {existing.pool_id!r} does not declare offering mode "
                         f"{requirement.offering_mode!r}"
                     )
+                # An assignment carries the host it was placed on, and
+                # dispatching to it honours the agreement. One recorded with no
+                # host in a pool whose provider needs one can never be
+                # dispatched, so it is refused rather than returned: it can
+                # only have been placed before placement refused such
+                # candidates. It stays assigned until its reservation is
+                # released or expires, which abandons it.
+                if not existing.resource_host_id and pool_needs_host(
+                    pool.provider, self._host_requirement
+                ):
+                    raise NoEligibleSettlementResourceError(
+                        f"capacity reservation {request.capacity_reservation_id!r} "
+                        f"is assigned to {existing.settlement_resource_id!r}, which "
+                        f"names no host, and pool {existing.pool_id!r} delivers "
+                        "through one"
+                    )
                 record = tx.schedule_assignment(
                     capacity_reservation_id=request.capacity_reservation_id,
                     market=request.market, scheduling_requirements=requirement,
@@ -304,8 +320,8 @@ class PhysicalSettlementScheduler:
             # execute, and an equivalent retry would return it again. Excluding
             # it here, before policy, rebind, or cursor write, keeps both the
             # automatic and the explicitly constrained paths from reaching it.
-            # An existing assignment is not re-evaluated: its host was fixed
-            # when it was placed.
+            # An existing assignment is not re-placed; its recorded host is
+            # checked where it is returned, above.
             if not getattr(payload, "host_id", None) and pool_needs_host(
                 pool.provider, self._host_requirement
             ):

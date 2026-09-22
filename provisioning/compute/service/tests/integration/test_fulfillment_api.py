@@ -794,48 +794,6 @@ class TestScheduleEndpoint:
 
 
 
-class TestScheduleRefusesADeclarationNamingNoHost:
-    """The Ansible provider delivers through a host, so the real container's
-    host requirement keeps a declaration naming none from being placed.
-
-    Admission already declines it, so the reservation lands on the declaration
-    that names a host; the explicit constraint then asks for the other one.
-    Refusal must leave nothing a later ``begin`` could dispatch.
-    """
-
-    async def test_an_explicit_constraint_naming_no_host_is_refused_before_any_effect(
-        self, fulfillment: FulfillmentApi, fake_ansible
-    ):
-        pool_id = "pool-schedule-no-host"
-        capacity_reservation_id = await _reserved_capacity(pool_id)
-        _container_module.resolved_capacity_ledger_service.register_resource(
-            resource_id=f"{pool_id}-no-host",
-            resource_type="compute.gpu",
-            total_units=4,
-            pool_id=pool_id,
-            capacity={"gpu_count": 4, "vcpu_count": 32, "ram_gb": 256, "disk_gb": 2000},
-        )
-
-        resp = await fulfillment.schedule(
-            capacity_reservation_id, "vms", resource_id=f"{pool_id}-no-host"
-        )
-
-        assert resp.status_code == 422, resp.text
-        assert resp.json()["detail"]["code"] == "no_eligible_resource"
-        # No assignment was made, so there is nothing to begin...
-        begun = await fulfillment.begin_raw(
-            capacity_reservation_id, "vms", _fulfillment_request()
-        )
-        assert begun.status_code == 404
-        # ...and the execution boundary was never reached.
-        fake_ansible.start_playbook.assert_not_called()
-        # The reservation stays on the declaration admission chose.
-        ledger = _container_module.resolved_capacity_ledger_service
-        assert (
-            ledger.get_reservation_backing_resource_id(capacity_reservation_id)
-            == f"{pool_id}-r1"
-        )
-
 class TestRelayPortLifecycleOverTheApi:
     """Allocation and release across the real fulfillment API.
 

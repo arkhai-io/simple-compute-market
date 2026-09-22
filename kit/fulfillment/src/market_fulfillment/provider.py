@@ -47,12 +47,13 @@ class FulfillmentValidationResult:
         return not self.issues
 
 class FulfillmentProvider(ABC):
-    #: Whether this provider's delivery connects to a host. Every concrete
-    #: provider declares it on the class, with no inherited default: site
-    #: admission and settlement scheduling refuse a capacity declaration that
-    #: names no host in a pool whose provider needs one, and a defaulted answer
-    #: would make that refusal depend on a value nobody chose. Read it through
-    #: :func:`provider_needs_host`, which refuses an undeclared provider.
+    #: Whether this provider's delivery connects to a host, declared on the
+    #: provider's class. This base class supplies no default: site admission
+    #: and settlement scheduling refuse a capacity declaration that names no
+    #: host in a pool whose provider needs one, and a defaulted answer would
+    #: make that refusal depend on a value nobody chose. A subclass of a
+    #: provider that declares it inherits the declaration. Read it through
+    #: :func:`provider_needs_host`, which refuses a provider declaring none.
     needs_host: ClassVar[bool]
 
     @abstractmethod
@@ -176,7 +177,13 @@ def provider_needs_host(provider: Any) -> bool:
     return declared
 
 class ProviderRegistry:
-    def __init__(self, providers:dict[str,FulfillmentProvider]): self._providers=dict(providers)
+    def __init__(self, providers:dict[str,FulfillmentProvider]):
+        # Registration is where a provider joins the fleet, so a provider that
+        # does not declare whether it needs a host is refused here rather than
+        # wherever the answer is first needed.
+        for provider in providers.values():
+            provider_needs_host(provider)
+        self._providers=dict(providers)
     def require(self, provider:str)->FulfillmentProvider:
         try: return self._providers[provider]
         except KeyError: raise ProviderNotFoundError(f"No FulfillmentProvider registered for provider={provider!r}") from None

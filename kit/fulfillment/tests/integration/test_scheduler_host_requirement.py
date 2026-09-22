@@ -19,6 +19,9 @@ from market_fulfillment import (
     PhysicalSettlementScheduler,
     SchedulingCursor,
     SettlementRecord,
+    SettlementRepository,
+    SettlementRequirement,
+    SettlementResource,
 )
 from market_resource_pools import PoolCreate, ResourcePoolService
 from market_resource_pools.db import Base as PoolsBase
@@ -168,3 +171,39 @@ def test_an_existing_assignment_keeps_the_host_it_was_placed_on(services):
 
     assert again.settlement_resource_id == first.settlement_resource_id == "b-hosted"
     assert again.host_id == "kvm1"
+
+
+def test_an_assignment_recorded_with_no_host_is_refused_rather_than_returned(services):
+    """An assignment placed before placement refused declarations naming no
+    host. It is seeded directly, as that earlier scheduler wrote it, because
+    the scheduler under test can no longer create one."""
+    ledger, scheduler, factory = services
+    _declare(ledger, "a-no-host")
+    capacity_reservation_id = _reserve(ledger, "agreement-1")["capacity_reservation_id"]
+    with factory() as db, db.begin():
+        SettlementRepository().schedule(
+            db,
+            capacity_reservation_id=capacity_reservation_id,
+            market="vms",
+            scheduling_requirements=SettlementRequirement(
+                offering_mode="vm",
+                resource_kind="compute.gpu",
+                dimensions={"gpu_count": 1},
+                attributes={},
+            ),
+            resource=SettlementResource(
+                settlement_resource_id="a-no-host",
+                pool_id="pool-a",
+                offering_mode="vm",
+                resource_kind="compute.gpu",
+                provider="ansible",
+                attributes={},
+                host_id=None,
+            ),
+        )
+
+    with pytest.raises(NoEligibleSettlementResourceError, match="names no host"):
+        scheduler.schedule_resource(_request(capacity_reservation_id))
+
+    with factory() as db:
+        assert db.get(SettlementRecord, capacity_reservation_id).state == "assigned"

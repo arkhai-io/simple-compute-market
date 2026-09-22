@@ -36,3 +36,13 @@ def test_a_declared_host_need_is_read_from_the_class():
 def test_a_provider_that_does_not_declare_its_host_need_is_refused(provider):
     with pytest.raises(TypeError):
         provider_needs_host(provider)
+
+
+def test_registration_refuses_a_provider_that_does_not_declare_its_host_need():
+    with pytest.raises(TypeError):
+        ProviderRegistry({"ansible": _Undeclared()})
+
+
+def test_registration_accepts_a_declared_provider():
+    provider = _Declared()
+    assert ProviderRegistry({"ansible": provider}).require("ansible") is provider

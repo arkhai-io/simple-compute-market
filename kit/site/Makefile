@@ -13,4 +13,4 @@ reinit: ## Reinstall internal kit dependencies from the shared wheel directory
 		--reinstall-package arkhai-kit-identity
 
 test: reinit ## Run the test suite against current internal wheels
-	uv run --find-links $(DIST_DIR) pytest tests/unit -q
+	uv run --find-links $(DIST_DIR) pytest -q

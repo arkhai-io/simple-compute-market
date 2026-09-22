@@ -442,6 +442,103 @@ host registration).
 That is the intended fail-closed behaviour, but it changes how an operator adds a
 host. `DEPLOYMENT_AND_CONFIG.md` and both quickstarts say so.
 
+## Review amendments (2026-09-22)
+
+From code review of Sections 1–5. Each amends a decision above; none reopens
+one.
+
+### A5. An assignment recorded with no host is refused, not returned (amends D5)
+
+D5 said an existing assignment's host "was fixed when it was placed". That is
+true only for assignments placed after this change. Before it, the scheduler
+could place a reservation on a declaration naming no host, and an equivalent
+retry returned that assignment indefinitely.
+
+Such a row can only be `assigned`. The provider refuses a missing host in
+`prepare_create`, inside the acceptance transaction, so acceptance rolls back
+and nothing is ever dispatched.
+
+The existing-assignment path now refuses it: `NoEligibleSettlementResourceError`,
+the same 422 a fresh placement gets. The row stays `assigned` until its
+reservation is released or expires. The ledger's abandonment hook then moves it
+to `abandoned`, the lifecycle every unaccepted assignment already follows.
+
+**Alternatives.**
+- *Re-place the reservation in the same transaction.* Rejected: an assignment
+  row is keyed by its reservation and `abandoned` is terminal, so re-placing
+  would rewrite a scheduled resource that is meant to be immutable.
+- *An upgrade migration abandoning such rows.* Rejected: it would change durable
+  state at startup, and the reservation would still hold capacity until its own
+  end.
+
+Only operators who declared capacity without a host in an Ansible pool, with a
+deal placed on it, can have such rows.
+
+### A6. Providers are refused at registration, not only at composition (amends A1)
+
+`ProviderRegistry` refuses a provider that does not declare `needs_host`, so
+registration itself holds the invariant for every caller that builds a
+registry. Composition's exact-set comparison against the early requirement map
+remains; it guards a different thing, drift between that map and the providers
+actually registered.
+
+The implementation first enforced this only at composition, because many tests
+registered bare `MagicMock` providers. That weakened a production invariant for
+test convenience. Test doubles now declare their host need as real providers
+do: a `MagicMock` subclass with a class-level `needs_host` where a mock is
+wanted. Designing for testability means conforming fakes, not a weaker
+contract.
+
+The declaration is inherited. `FulfillmentProvider` supplies no default, but a
+subclass of a provider that declares one inherits it; a test subclass of a real
+provider is the ordinary case.
+
+### A7. The shared predicate uses pool-level vocabulary (amends A1)
+
+`kit/resource-pools` is an authority capability below `kit/fulfillment`, and
+fulfillment owns execution contracts. The predicate stays in
+`kit/resource-pools`: `kit/site` cannot import fulfillment, and no foundation
+package owns pool semantics. Its documentation now states the rule at pool
+level, as whether a declaration in a pool must name a host given the pool's
+provider identity, which resource-pools already owns as a pool field. It no
+longer describes fulfillment execution.
+
+A requirement value that is not a `bool` is refused rather than coerced,
+matching `provider_needs_host`.
+
+### A8. A library's database-backed tests are integration tests
+
+`TESTING.md` defines a unit test as one class with mocked collaborators, and an
+integration test as the real app with a real database and the DI container.
+Kit libraries test their persistence contracts against real embedded SQLite,
+and fit neither definition: the database is real, but there is no app. They
+have lived in `tests/unit`, including the concurrency tests `ARCHITECTURE.md`
+requires to use independent sessions against one real database.
+
+For a library package, integration means its public service API against a
+real embedded database, with no app. Such tests live in `tests/integration`,
+and the package's test target runs both directories. `TESTING.md` states this
+at promotion. Existing files migrate when next touched; this change moves only
+its own two.
+
+**Alternatives.**
+- *Keep them in `unit/` under a stated exception.* Rejected: "unit" would mean
+  two things.
+- *Move every such file now,* 13 files across four packages. Rejected: outside
+  this change's boundary.
+
+### Follow-up: one registration source per adapter package
+
+Adding a provider today touches its bundle and also the container's
+`_merge_host_requirements(...)` call. The container names each adapter package
+twice: once for its runtime builder, once for its host requirement.
+
+A per-package descriptor could carry both, and composition could derive the
+early requirement map and the provider registrations from it: provider
+identity, `needs_host`, and the runtime and bundle builders. That restructures
+container composition, so it is out of scope here. Drift between the two is
+already refused at startup. It has no owning change.
+
 ## Open questions
 
 None. The operator-visibility question is resolved by D7.
