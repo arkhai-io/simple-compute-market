@@ -20,13 +20,15 @@ site declares supply it intends to trade by private arrangement.
 ## Goals / Non-Goals
 
 **Goals.** Let a pool authorize advertising a mode without proving it can deliver
-it. Let a pool declare whether it can be admitted against. Keep every delivery
-proof and execution recheck exactly as it is. Change no existing deployment's
-behaviour on upgrade.
+it. Let a pool declare whether it can be admitted against, and make "nothing may be
+reserved against an unbacked pool" true rather than aspirational. Keep every
+delivery proof and execution recheck exactly as it is. Change no existing
+deployment's advertising surface or admission behaviour on upgrade.
 
-**Non-Goals.** No change to `deliverable_modes`. No consumption of either
-declaration — that is the storefront's, and belongs to the change that reads
-them. No new provider kind.
+**Non-Goals.** No change to the meaning, derivation, or execution rechecks of
+`deliverable_modes`. No listing, binding, or registry behaviour — that belongs to
+the change that consumes these declarations. No new provider kind. No new pool read
+inside the site authority.
 
 ## Decisions
 
@@ -42,21 +44,21 @@ and unbacked pools before either existed.
 
 The cause was splitting by feature when the seam is a service boundary. Both tags
 are declarations a site makes about a Resource Pool. They travel the same
-policy-tag channel with the same precedence, need the same derive-on-upgrade
-migration, and take the same fail-closed validation. Everything that *reads* them —
-candidate derivation, listing binding, registry publication, version-skew
-tolerance — is storefront-side and belongs to `unbacked-listing-publication`.
+policy-tag channel, need the same migration, and take the same fail-closed
+validation. Everything that *reads* them for listings — candidate derivation,
+listing binding, registry publication, version-skew tolerance — is storefront-side.
 
 Splitting declaration from consumption also gives the site-side migration a home.
-Someone has to persist an explicit backing value on every existing pool at
-upgrade; that is a provisioning-service migration against `resource-pool-management`,
-and putting it in a storefront change would blur a boundary this campaign has spent
-several rounds sharpening.
+Someone has to persist explicit values on every existing pool at upgrade; that is a
+provisioning-service migration against `resource-pool-management`, and putting it in
+a storefront change would blur a boundary this campaign has spent several rounds
+sharpening.
 
 The consequence, accepted deliberately: this change is observable to operators and
 to no one else. No listing behaviour changes until the storefront reads the tags.
-Its acceptance boundary is that the declarations exist, are validated, and every
-existing pool has one.
+Its acceptance boundary is that the declarations exist, are validated on every
+write path, every existing pool carries both, and one shared resolver exists for a
+consumer to read them through.
 
 ### A separate declaration, not a conditional reading of `deliverable_modes`
 
@@ -74,39 +76,90 @@ failure `deliverable_modes` exists to prevent, reintroduced through another door
 So `deliverable_modes` keeps its meaning, derivation, and rechecks, and
 `advertisable_modes` answers a question nobody was asking it.
 
-### Backed pools are constrained; unbacked pools are not
+### A backed pool advertises a subset of what it delivers, checked in both directions
 
 A backed pool's advertisable set must be a subset of its deliverable set. Without
 that, this change reopens the hole: a pool that can be reserved against could
-advertise a mode it cannot execute, and a buyer would reach admission for
-something the provider will refuse.
+advertise a mode it cannot execute, and a buyer would reach admission for something
+the provider will refuse.
 
-An unbacked pool carries no such risk because nothing reaches admission. Its
-advertisable set stands alone, and its deliverable set will ordinarily be empty
-and correct.
+The rule is a relation between two mutable declarations, so either side can break
+it. A write that widens `advertisable_modes` beyond the deliverable set is rejected,
+and so is a write that narrows `deliverable_modes` below the advertisable set. The
+second is **rejected, not repaired**: silently narrowing the advertisable set to
+make a deliverable edit succeed would change what a pool advertises as a side
+effect of an unrelated declaration. An operator withdrawing delivery narrows both
+in the same write.
 
-The asymmetry is the point rather than an exception: the subset rule protects a
-path unbacked pools never enter.
+### An unbacked pool delivers nothing
 
-### Derive both on upgrade, and emit both on every pool
+`unbacked` means no admission authority stands behind the pool, so nothing may be
+reserved, committed, or released against it. Nothing in the site authority reads
+backing, and this change deliberately adds no such read (see the open question on
+the site authority's pool dependency). Admission today refuses a pool only through
+`deliverable_modes`. An unbacked pool with a non-empty deliverable set would
+therefore be admissible, and the downstream argument that no capacity path is
+reachable for an unbacked listing would be false.
 
-An existing pool advertises exactly what it delivers, because that is the only
-declaration it has, and it can be admitted against, because every pool can. So the
-derived values are the proved deliverable set and `backed`. Upgrading changes
-nothing; any divergence afterwards is an explicit operator act.
+So an unbacked pool's deliverable set MUST be empty, enforced on every write and by
+the shared resolver. That makes the guarantee true through the existing
+reservation, scheduling, and dispatch rechecks, each of which already refuses a
+pool declaring no deliverable mode. An unbacked pool's advertisable set is then
+unconstrained by delivery — there is nothing for it to be a subset of — and that is
+precisely the execution-less seller's case.
 
-Defaulting absence to "advertise anything" is the failure `deliverable_modes` was
-built to fix, and repeating it in a neighbouring field would be indefensible.
-Absent authorizes nothing here too.
+The asymmetry with backed pools is the point rather than an exception: the subset
+rule protects a path unbacked pools never enter, and the empty-deliverable rule is
+what guarantees they never enter it.
 
-The emit-on-every-pool requirement is what makes the consuming side's version-skew
-rule possible, and it is worth stating here rather than assuming. Without it, an
-upgraded site holding ten legacy pools emits the tags nowhere and reads as an old
-producer indefinitely — and the moment an operator creates one explicitly unbacked
-pool, the other nine become partially-populated omissions and fail closed. A
-correct operator action would detonate nine working pools. Deriving on upgrade and
-requiring complete emission is what prevents that; the consumer's rule then only
-has to distinguish "no pool has it" from "some pool is missing it."
+An earlier draft left "an unbacked pool with a non-empty deliverable set" open as
+representable-but-undecided — a seller with real execution integration choosing to
+trade out of band. Refusing it costs that seller nothing today: they can declare a
+backed pool, or an unbacked pool beside it. **Revisit trigger:** a seller with
+working execution integration who needs a single pool to be both provisionable and
+out-of-band. Allowing it then requires a backing check at site admission, which is
+the site-authority dependency question below.
+
+### Both tags are required on every write; nothing is defaulted, preserved, or merged
+
+Every pool write — create, replace, patch when it supplies `policy_tags`, and every
+entry of an authoritative definition document — MUST carry both
+`advertisable_modes` and `capacity_backing` explicitly. A write omitting either is
+refused with a validation error. There is no create-time default, no
+preserve-on-omission exception to replacement semantics, and no merge of a request's
+tags with stored ones: the map a request supplies is the map stored, exactly as for
+every other policy tag.
+
+This is what makes "every pool carries both tags" true by construction. Migration
+establishes it for existing rows; required-on-write keeps it. The projection's
+emit-on-every-pool guarantee then needs no machinery of its own, because the
+projection copies stored tags verbatim.
+
+Two alternatives were considered and rejected.
+
+- **Default on create, preserve on omission.** Create records `backed` and `[]`
+  when omitted; replace, patch, and import copy a stored value forward when the
+  request omits it. That keeps existing callers working, but it needs a narrow merge
+  of request tags with stored tags on every write path, a reconciliation comparison
+  against the merged map rather than the document, and cross-tag checks that read
+  stored state during document validation. It also makes `capacity_backing` a
+  permanent exception to the replacement rule the spec states for optional tags.
+  All of that exists only to tolerate a client or document written before the tags
+  existed.
+- **Default on every omission.** Writing `[]` whenever `advertisable_modes` is
+  omitted keeps every pool populated, but silently stops a legacy pool advertising
+  after an unrelated edit.
+
+What makes rejection affordable is that there is little to be compatible with.
+Every existing pool is backed supply, migration writes both tags onto every row,
+and the callers and fixtures writing pools are few and in this repository. An
+old-format document or client is refused loudly, naming the missing tag, which is
+a better failure than any silent default: a default for `capacity_backing` asserts
+whether anything stands behind a listing, and a default for `advertisable_modes`
+either widens or silently narrows what a pool may sell.
+
+The general rule that a full replacement resets omitted *optional* policy tags is
+unchanged. These two tags are not optional, so it does not reach them.
 
 ### Backing is fixed at creation
 
@@ -115,6 +168,13 @@ would silently reinterpret listings already published — a buyer holding a list
 reference would find the claim behind it altered without the listing changing. The
 supported path is a second pool declaring the intended backing with capacity
 resources migrated across.
+
+With both tags required on every write, immutability is a single check: a replace,
+patch, or document entry for an existing pool whose `capacity_backing` differs from
+the stored value is refused and the pool is unchanged. There is no omission case to
+reason about. For document import the check compares against stored state, so it is
+evaluated while reconciliation is planned and reported as a structured problem on
+the validate-only path as well as refusing the import.
 
 This has a consequence downstream worth stating here, because it is the reason the
 rule is normative rather than advisory. `unbacked-listing-publication` makes a
@@ -130,48 +190,101 @@ why backing does not need to appear in the derivation source envelope.
 The same argument applies to a pool's provider, which
 `pools-9-retire-local-physical-authority` fixes at creation for the same reason.
 
-### Omission preserves an immutable value; it does not reset it
+### Validation is shared by the API models and document import
 
-`resource-pool-management` says a full PUT omitting optional policy tags resets them
-to the replacement default, and the service implements that literally —
-`PoolReplace.policy_tags` defaults to `{}` and replacement assigns the whole map.
-Applied to `capacity_backing` that would change an immutable field by omitting it,
-which is the same operation the immutability rule refuses when it is supplied
-explicitly. So omission preserves.
+Declaration shape, presence, the backed subset rule, and the unbacked
+empty-deliverable rule are one shared validation in `market_resource_pools`, applied
+identically by the typed pool models used by create, replace, and patch and by
+authoritative document validation and import. This follows the existing rule that
+declaration semantics do not depend on which administration surface an operator
+chooses, and it keeps document validation free of database reads for everything
+except backing immutability, which by definition compares against stored state.
 
-That derivation matters more than the conclusion. The spec already carries one
-exception to replacement semantics, for secret provider-configuration fields, and its
-reasoning is specific: a value a read never returns cannot be restated by a caller
-performing a full replacement. Backing is readable, so that argument does not
-transfer, and copying it would put a wrong rationale next to a right rule.
+### Seeding and stored state fail closed and loudly at service load
 
-The same applies to authoritative document import, and it matters most on upgrade: a
-deployment whose pool document predates this change, edited and re-imported after
-migration, would otherwise wipe the backing value migration recorded. Canonical export
-emitting the value explicitly closes the loop, so a document round-tripped through
-export carries it and re-import is a no-op.
+A service that seeds pools at startup — the provisioning service importing its pool
+definition document, and the API-credits service creating its own `default` pool —
+MUST refuse to start when a seeded pool does not carry valid declarations, naming
+the pool and the problem. A pool definition document is only re-applied when its
+digest changes, so an unchanged deployment still starts; an edited document that
+predates the tags stops startup rather than importing pools without them.
 
-Create with no value records `backed` explicitly rather than leaving it absent. The
-alternative — requiring an explicit value from every client — breaks every existing
-caller and fixture on the day it lands, for a field whose only correct value for
-existing supply is `backed` anyway. Recording it explicitly is what makes the
-preservation rule and the projection's emit-on-every-pool requirement true of every
-pool rather than only of migrated ones.
+Stored state is checked at load the same way. After migration every stored pool
+carries valid declarations, so the check never fires on a straight upgrade. It
+exists for the case migration cannot cover: a pool written by a rolled-back
+older version, which drops tags it does not know when it replaces a pool's
+`policy_tags`. Failing at load names the pool for an operator to repair instead of
+letting a pool without declarations reach a projection, where a consumer would have
+to distinguish it from an old producer.
 
-Note the asymmetry with `advertisable_modes`, where absence authorizes nothing. The
-two defaults point opposite ways and both are right: an empty advertisable set is the
-safe reading, while an unbacked default would stop every existing pool reserving.
-Stated here so the difference reads as deliberate rather than as an oversight.
+### Migration clobbers both tags on every existing pool
+
+Every existing pool is backed supply, and each one advertises exactly what it
+delivers because that is the only mode declaration it has. So migration writes, for
+every Resource Pool row, `advertisable_modes` equal to its proved deliverable set and
+`capacity_backing: backed`, and reports each derived value at INFO, matching how the
+deliverable sets were derived. Upgrading changes nothing observable; any divergence
+afterwards is an explicit operator act.
+
+Migration overwrites whatever the row held under those keys. Unknown policy tags
+were forward-compatible opaque metadata, so a row could hold either key with any
+value, but no consumer ever read one, so clobbering it changes no behaviour. The
+same applies to the API-credits service's own pool storage, which holds a
+`default` pool it creates itself outside pool administration: its existing rows are
+migrated and its seed writes both tags.
+
+Defaulting absence to "advertise anything" is the failure `deliverable_modes` was
+built to fix, and repeating it in a neighbouring field would be indefensible.
+Absent authorizes nothing here too; required-on-write means absence can only reach
+a reader from a producer predating the tags.
+
+### A producer that emits these tags emits them on every pool
+
+The emit-on-every-pool requirement is what makes the consuming side's version-skew
+rule possible, and it is worth stating here rather than assuming. The consumer's
+rule distinguishes "no pool carries the tag" (a producer predating it) from "some
+pool is missing it" (a producer defect, which fails that pool closed). Without
+completeness an upgraded site holding legacy pools would read as an old producer
+indefinitely, and the first explicitly unbacked pool an operator created would turn
+every other pool into a partial omission and fail working pools closed on a correct
+operator action.
+
+Here completeness is structural: migration writes both tags on every row,
+required-on-write keeps them there, load-time checks catch rows that escaped both,
+and the projection copies stored tags verbatim. The requirement is still stated
+normatively, because it is a property a consumer depends on and cannot verify from
+its own side.
 
 ### A malformed backing value fails closed
 
 `capacity_backing` is a discriminator, so an unrecognized value is refused rather
-than resolved to either side. Administration rejects it on write, and ingestion
-fails that pool closed rather than letting a malformed declaration reach candidate
-derivation. This differs deliberately from the cardinality hint, where an
-unrecognized value falls back to a domain's structural default: a cardinality
-default is a reasonable guess about how many candidates to publish, while a
-backing default is a claim about whether anything stands behind a listing.
+than resolved to either side. This differs deliberately from the cardinality hint,
+where an unrecognized value falls back to a domain's structural default: a
+cardinality default is a reasonable guess about how many candidates to publish,
+while a backing default is a claim about whether anything stands behind a listing.
+
+### One shared resolver; the storefront is the consumer
+
+The only reader of projected pool tags is the storefront, and storefront listing
+behaviour is outside this change. What this change owns is the definition of a
+valid declaration, so it exposes one domain-neutral resolver in
+`market_resource_pools` that turns a pool's `policy_tags` into typed
+`(advertisable_modes, capacity_backing)` or fails:
+
+- a malformed value of either tag, a backed pool whose advertisable set exceeds its
+  deliverable set, and an unbacked pool with a non-empty deliverable set each raise
+  rather than resolving to a default;
+- an absent tag is reported distinctly from a malformed one, so a consumer can apply
+  its producer-version rule to "no pool carries it" while failing a single omitting
+  pool closed.
+
+`resource-pool-management` requires any reader of projected declarations to resolve
+them through this function, so the write side and every read side agree on what a
+valid declaration is without the site's validation and the storefront's diverging.
+The write-side validation and the resolver share one implementation. Which change
+wires the resolver into the storefront's projection ingestion is bookkeeping rather
+than design — the roadmap lands these changes without a deployment in between —
+and is settled during planning.
 
 ### Not a publication-only provider kind
 
@@ -180,15 +293,15 @@ an execution-less pool satisfy the existing schema honestly. Rejected: it puts a
 pool into the fleet whose provider exists to be never called, and every dispatch
 path then depends on a handler doing nothing rather than on a declaration saying
 nothing. A missing declaration is a safer thing to get wrong than a no-op
-executor.
+executor. An execution-less seller's pool names an existing configuration-free
+provider, which `unbacked-listing-publication` records as an accepted decision.
 
 ### Both tags are projected
 
 Every other pool policy tag travels the projection, and the storefront needs both
 values as inputs rather than as checks — it derives candidates from the projection
-and has no other route to a pool's record. An earlier draft left this open while
-simultaneously prescribing projection in the task list and the delta, which is the
-shape of a decision made somewhere a reviewer would not look. It is decided here.
+and has no other route to a pool's record. They travel inside `policy_tags`, which
+the projection already copies verbatim, so no projection code changes.
 
 ### Nothing to split
 
@@ -201,12 +314,22 @@ specification directly, which is the ordinary path.
 
 - **[Two mode declarations drift]** → An operator can widen advertisable while
   deliverable narrows, which for a backed pool is exactly what the subset rule
-  refuses. Enforced on write *and* on ingestion, because the two sides upgrade
-  independently and a write-side-only check would accept from a projection what it
-  refuses from an operator.
+  refuses. Enforced in both directions on every write, and again by the shared
+  resolver, because the two sides upgrade independently and a write-side-only check
+  would let a reader accept what an operator could not write.
 - **[The subset rule is read as universal]** → It applies to backed pools.
   Stating the scope in the requirement rather than leaving it inferred is what
   keeps an unbacked pool from being forced back into an execution proof.
+- **[Required tags break existing writers]** → Every client, fixture, and
+  definition document that writes pools must carry both tags from this change on.
+  Accepted: the writers are in this repository and are updated with it, and a
+  refused write names the missing tag. An operator's own edited definition document
+  that predates the tags stops the service at load rather than importing silently.
+- **[Rollback then roll forward]** → An older version replacing a pool's
+  `policy_tags` drops both tags, and the one-shot migration will not rewrite them
+  on the next upgrade. The load-time check names each such pool and refuses to
+  start; the operator restores the declarations through the API or the definition
+  document.
 - **[A change with no observable behaviour ships and is forgotten]** → Its value is
   entirely in what depends on it. Mitigated by it being a declared prerequisite
   with a named consumer rather than speculative groundwork.
@@ -217,34 +340,36 @@ specification directly, which is the ordinary path.
 
 ## Open questions
 
-- **Does an unbacked pool with a non-empty deliverable set mean anything?** It is
-  representable — a seller with real execution integration who chooses to trade out
-  of band — and nothing here forbids it. Whether that combination should be
-  allowed, warned about, or refused is deferred; no task decides it.
 - **How should the site authority read pool declarations?** `ARCHITECTURE.md`'s
   kit layers let an authority capability (`kit/site`, `kit/resource-pools`) depend
   on foundation capabilities only, yet `kit/site` declares `kit-resource-pools` and
   its ledger reads `ResourcePool` directly: a pool's deliverable modes at admission,
   and whether a declaration's pool exists at registration (added by
   `capacity-resource-administration`, which recorded the conflict rather than widen
-  its scope). A site that consumes this change's backing declaration would add a
-  third such read. The alternative the review of that change proposed is a small
+  its scope). The alternative the review of that change proposed is a small
   pool-authority port the ledger receives from its composition root, covering
   existence and every pool fact admission reads, with `DEFAULT_POOL_ID` moved to a
   foundation home; the cost is a change to how every composition constructs the
-  ledger. Whether to introduce the port, and in which change, is undecided; no task
-  decides it. If the dependency is instead intended, `ARCHITECTURE.md`'s layer
-  diagram is what changes.
+  ledger. This change adds no site-side read — an unbacked pool is kept out of
+  admission by its empty deliverable set — so it neither needs nor decides the
+  port. The question becomes pressing when admission must read backing, which is
+  the revisit trigger for the unbacked-pool decision above. If the dependency is
+  instead intended, `ARCHITECTURE.md`'s layer diagram is what changes. No task
+  decides it.
 
 ## Migration Plan
 
-1. Add both tags with validation and typed resolution alongside
-   `deliverable_modes`.
-2. Derive every existing pool's advertisable set from its proved deliverable set
-   and its backing as `backed`, reporting each derived value.
-3. Enforce the subset rule for backed pools on write and on ingestion, and reject
-   malformed backing values on write.
+1. Add both tags with shared validation and the typed resolver alongside
+   `deliverable_modes`, and require them on every pool write path.
+2. Migrate every existing Resource Pool — provisioning and API-credits storage —
+   overwriting `advertisable_modes` with its proved deliverable set and
+   `capacity_backing` with `backed`, reporting each derived value at INFO.
+3. Update every in-repository pool writer — seeds, fixtures, chart values, and
+   definition documents — to carry both tags.
+4. Fail service load on a seeded or stored pool lacking valid declarations.
 
-No deployment behaviour changes at any step: every pool advertises exactly what it
-advertised before and remains admissible, until an operator changes it. Rollback is
-a code rollback; the derived tags remain and are ignored by a restored reader.
+No deployment's advertising surface or admission behaviour changes at any step:
+every pool advertises exactly what it delivered before and remains admissible,
+until an operator changes it. Rollback is a code rollback; the tags remain and are
+ignored by a restored reader as opaque metadata. Rolling forward again after the
+older version has rewritten a pool is covered under Risks.

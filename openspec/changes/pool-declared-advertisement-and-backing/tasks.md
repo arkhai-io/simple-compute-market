@@ -4,7 +4,10 @@ No blocking dependency. Prerequisite for `unbacked-listing-publication`.
 
 This change is observable to operators and to nothing else: no listing behaviour
 changes until the storefront reads these tags. Its acceptance boundary is that both
-declarations exist, are validated, and every existing pool carries one.
+declarations exist, are required and validated on every write path, every existing
+pool carries both, and one shared resolver exists for consumers to read them
+through. Which change wires that resolver into storefront projection ingestion is
+decided during planning, and no task below prescribes it.
 
 Validation levels below are named deliberately. Per `docs/development/TESTING.md`,
 integration means the real app, a real database, a wired DI container, and the
@@ -15,93 +18,105 @@ service's canonical typed client over `ASGITransport`.
 - [ ] 1.1 Add `advertisable_modes` to the shared resource-pool capability's
       policy-tag validation and typed resolution, matching how `deliverable_modes`
       is validated: a JSON-compatible set of unique, non-empty strings.
-- [ ] 1.2 Make an absent or empty advertisable declaration authorize no mode, never
-      widened by a default.
+- [ ] 1.2 Make an empty advertisable declaration authorize no mode, never widened
+      by a default.
 - [ ] 1.3 Add `capacity_backing` with values `backed` and `unbacked`. Reject any
-      other value on write; fail the pool closed on ingestion. Do not resolve a
-      malformed or absent discriminator to a default — that is the one behaviour
-      that would let a listing claim an admission authority it does not have.
-- [ ] 1.3a Fix `capacity_backing` at creation: replace and patch reject a differing
-      value and leave the pool unchanged. A rejected request must not clear the
-      existing value on its way out.
-- [ ] 1.3b Preserve a stored backing value on omission, in replace, patch, and
-      authoritative import. The general rule resets an omitted optional policy tag to
-      the replacement default — `PoolReplace.policy_tags` defaults to `{}` and the
-      service assigns `pool.policy_tags = data.policy_tags` wholesale — and applying
-      that to an immutable field would change it by omission. Do not reuse the
-      secret-provider-field rationale; that exception exists because a caller cannot
-      restate an unreadable value, which is not true here.
-- [ ] 1.3c Record `backed` explicitly when a create request omits the value. The
-      compatibility rule is retained indefinitely rather than given a release count —
-      sellers self-host and may lag without bound, so a date would be a number with
-      nothing behind it. Do not leave the value absent:
-      the preservation rule and the projection's emit-on-every-pool requirement both
-      assume every pool carries a value.
-- [ ] 1.3d Emit `capacity_backing` explicitly in canonical export, so a round-tripped
-      document carries it and re-import is a no-op rather than a reset.
+      other value. Do not resolve a malformed or absent discriminator to a default —
+      that is the one behaviour that would let a listing claim an admission
+      authority it does not have.
+- [ ] 1.3a Fix `capacity_backing` at creation: a replace, patch, or document entry
+      for an existing pool supplying a differing value is rejected and the pool is
+      unchanged. For document import the check compares against stored state, so it
+      is evaluated while reconciliation is planned and reported as a structured
+      problem on the validate-only path too.
+- [ ] 1.3b Require both tags explicitly on every pool write: create, replace, patch
+      whenever it supplies `policy_tags`, and every definition-document entry. An
+      omission is a validation problem naming the missing tag. Do not default,
+      preserve, or merge either tag from stored state — the map a write supplies is
+      the map stored.
+- [ ] 1.3c Put shape, presence, the backed subset rule, and the unbacked
+      empty-deliverable rule in one shared validation used identically by the typed
+      administration models and by document validation and import.
+- [ ] 1.3d Emit both tags for every pool in canonical export, so an unedited
+      exported document imports as unchanged.
 - [ ] 1.4 Carry both tags through create, replace, patch, bulk import, projection,
-      and canonical export on the existing policy-tag channel and precedence.
+      and canonical export on the existing policy-tag channel.
 - [ ] 1.5 Leave `deliverable_modes` untouched — meaning, derivation, migration, and
       every execution recheck at reservation, scheduling, and provider dispatch. A
       diff touching those paths means this change has exceeded its boundary.
 
-## 2. Subset rule
+## 2. Cross-tag rules and shared resolution
 
 - [ ] 2.1 Enforce on write that a pool declaring `capacity_backing: backed` has an
-      advertisable set that is a subset of its deliverable set.
-- [ ] 2.2 Enforce the same on projection ingestion. The two sides upgrade
-      independently, so a write-side-only check would accept from a projection what
-      it refuses from an operator.
+      advertisable set that is a subset of its deliverable set, rejecting a write
+      that breaks the relation from either side — widening advertisable or narrowing
+      deliverable — without rewriting the other declaration.
+- [ ] 2.2 Expose one domain-neutral resolver from policy tags to typed advertisable
+      modes and backing, sharing its implementation with 1.3c. It fails on malformed
+      values, the backed subset violation, and an unbacked pool with a non-empty
+      deliverable set, and reports an absent tag distinctly from a malformed one.
+      Do not apply a producer-version rule inside it; that is the consumer's.
 - [ ] 2.3 Leave an `unbacked` pool's advertisable set independent of its deliverable
       set. Do not require a deliverable proof anywhere in that path — removing that
       requirement is what this change exists to do.
+- [ ] 2.4 Enforce on write, and in the resolver, that a pool declaring
+      `capacity_backing: unbacked` has an empty deliverable set. Add no site-side
+      pool read: the existing execution rechecks already refuse a pool delivering
+      nothing.
 
-## 3. Migration and complete emission
+## 3. Migration, seeding, and complete emission
 
-- [ ] 3.1 Derive each existing pool's advertisable set from its proved deliverable
-      set and its backing as `backed`, reporting each derived value at INFO,
-      matching how the deliverable sets were themselves derived.
-- [ ] 3.2 Make a producer that emits either tag emit it for every Resource Pool it
-      projects. This is what lets a consumer distinguish a producer predating the
-      tag from a producer that omitted it for one pool; without it, an upgraded site
-      holding legacy pools reads as an old producer indefinitely, and the first
-      explicitly unbacked pool an operator creates turns every other pool into a
-      partially-populated omission.
+- [ ] 3.1 Migrate every existing provisioning Resource Pool: overwrite
+      `advertisable_modes` with its proved deliverable set and `capacity_backing`
+      with `backed`, clobbering any value previously stored under either key, and
+      report each derived value at INFO.
+- [ ] 3.1a Do the same for the API-credits service's own pool storage, and make its
+      `default` pool seed write both tags.
+- [ ] 3.1b Update every in-repository pool writer to carry both tags: test
+      fixtures, seeds, chart values, and definition documents.
+- [ ] 3.2 Refuse service start, naming the pool and problem, when a seeded pool —
+      from a changed definition document or a bootstrap seed — or a stored pool does
+      not carry valid declarations.
 - [ ] 3.3 Confirm no existing deployment's advertising surface or admission
       behaviour changes on upgrade. Verify by comparing resolved values before and
       after migration across a fixture covering the system-owned `default` pool, a
-      proved single-mode pool, and a pool proving nothing.
+      proved single-mode pool, a pool proving nothing, and a pool holding opaque
+      values under the new keys.
 
 ## 4. Validation
 
-- [ ] 4.1 **Unit.** Exhaustive declaration cases for both tags: valid, absent,
-      empty, malformed, duplicate entries, and subset-rule violations in both
-      directions.
-- [ ] 4.2 **Integration.** An operator creates a pool declaring an advertisable mode
-      with no provider configuration proving it, through the real pool
-      administration API and its canonical client. The claim is not that a model
-      accepts the value — it is that the real administration path does not demand
-      fake execution configuration.
-- [ ] 4.3 **Integration.** Through the canonical pool client: create, replace, and
-      bulk import each round-trip an explicit backing value; and — the case that
-      matters more — replace, patch, and import each **omitting** the value preserve
-      it rather than resetting. The explicit-value happy path would pass against an
-      implementation that resets on omission.
-- [ ] 4.3a **Integration.** An old-format authoritative document imported for a
-      migrated pool preserves the migrated backing, and canonical export of that pool
-      emits it explicitly.
-- [ ] 4.4 **Integration.** A backed pool's widened advertisable declaration is
-      rejected on write, and the same declaration arriving through an ingested
-      projection is rejected there too.
-- [ ] 4.5 **Integration.** A malformed backing value is rejected on write, and a
-      projection carrying one fails that pool closed.
-- [ ] 4.5a **Integration.** A replace or patch changing an existing pool's backing is
-      rejected and the pool's backing survives.
+- [ ] 4.1 **Unit.** Exhaustive declaration and resolver cases for both tags: valid,
+      absent, empty, malformed, duplicate entries, the backed subset rule broken
+      from each side, and an unbacked pool with a non-empty deliverable set — each
+      asserted identically for the typed models and for document validation.
+- [ ] 4.2 **Integration.** An operator creates an unbacked pool declaring an
+      advertisable mode, an empty deliverable set, and a configuration-free provider,
+      through the real pool administration API and its canonical client. The claim is
+      not that a model accepts the value — it is that the real administration path
+      does not demand fake execution configuration.
+- [ ] 4.3 **Integration.** Through the canonical pool client: create, replace, patch,
+      and bulk import each round-trip explicit declarations; and each **omitting**
+      either tag is refused with a problem naming it and leaves the pool unchanged.
+- [ ] 4.3a **Integration.** A document predating the declarations fails validation
+      per entry and imports nothing; canonical export emits both tags for every pool
+      and re-imports as unchanged.
+- [ ] 4.4 **Integration.** A backed pool's widened advertisable declaration, and a
+      narrowing of its deliverable set below it, are each rejected on write.
+- [ ] 4.5 **Integration.** A malformed backing value is rejected on write, and an
+      unbacked pool with a non-empty deliverable set is rejected on write.
+- [ ] 4.5a **Integration.** A replace, patch, or imported entry changing an existing
+      pool's backing is rejected, the pool's backing survives, and validate-only
+      reports the problem.
 - [ ] 4.6 **Integration.** Migration derives both values on a database written by
-      the previous version, and the resolved values are unchanged from before.
+      the previous version, including the API-credits service's, and the resolved
+      values are unchanged from before.
+- [ ] 4.6a **Integration.** Startup refuses a changed definition document and a
+      stored pool without declarations, naming the pool; an unchanged document
+      still starts.
 - [ ] 4.7 **Integration.** A projection from the migrated producer carries both tags
-      on every pool it projects — the property `unbacked-listing-publication`'s
-      skew rule depends on and cannot verify from its own side.
+      on every pool it projects, and each resolves through the shared resolver — the
+      property `unbacked-listing-publication`'s skew rule depends on and cannot
+      verify from its own side.
 - [ ] 4.8 Run the pool administration, projection, and offering-mode enforcement
       suites, including `docs/development/TESTING.md`'s pool offering-mode
       enforcement coverage, and confirm no execution-path assertion changes.
@@ -121,8 +136,8 @@ service's canonical typed client over `ASGITransport`.
       permanent map or is subsystem detail. Record the disposition either way
       rather than leaving the box unchecked.
 - [ ] 5.4 **Narrative compression.** Shorten completed-task notes to final
-      behaviour, the derivation results from 3.1, and the deferred question about
-      an unbacked pool with a non-empty deliverable set.
+      behaviour, the derivation results from 3.1 and 3.1a, and the revisit trigger
+      for refusing an unbacked pool with a non-empty deliverable set.
 - [ ] 5.5 **Roadmap currency.** Remove this change's row from Goal 7's gap table in
       `docs/development/ROADMAP.md` and absorb the result into that goal's
       current-state prose.
@@ -158,6 +173,10 @@ service's canonical typed client over `ASGITransport`.
 | Advertisement authorization and delivery authorization are separate declarations | `openspec/specs/resource-pool-management/spec.md` |
 | A backed pool's advertisable set is a subset of its deliverable set; an unbacked pool's is independent | `openspec/specs/resource-pool-management/spec.md` |
 | A malformed backing value fails closed and never resolves to a default | `openspec/specs/resource-pool-management/spec.md` |
+| An unbacked pool's deliverable set is empty, keeping it out of every capacity path without a site-side backing read | `openspec/specs/resource-pool-management/spec.md` |
+| Both declarations are required on every write; nothing is defaulted, preserved, or merged | `openspec/specs/resource-pool-management/spec.md` |
+| Seeded or stored pools lacking valid declarations stop service load | `openspec/specs/resource-pool-management/spec.md` |
+| Readers of projected declarations resolve them through one shared resolver | `openspec/specs/resource-pool-management/spec.md` |
 | Backing is fixed at pool creation; moving between backed and unbacked supply is a second pool with migrated resources | `openspec/specs/resource-pool-management/spec.md` |
 | A producer emitting these tags emits them on every pool it projects | `openspec/specs/resource-pool-management/spec.md` |
-| Existing pools derive an advertisable set from their proved deliverable set and `backed` backing on upgrade | `openspec/specs/resource-pool-management/spec.md` |
+| Existing pools are migrated to an advertisable set equal to their proved deliverable set and `backed` backing, overwriting any prior value | `openspec/specs/resource-pool-management/spec.md` |
