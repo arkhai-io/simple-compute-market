@@ -307,6 +307,12 @@ touching libvirt. To create real VMs:
 
    Without `public_host`, the connection details fall back to `ansible_host`.
 
+   This file seeds the host registry when the provisioning service starts with
+   no hosts registered. Work then runs only against registered hosts, never
+   against the file. To add a host to a running deployment, import the file
+   again (`POST /api/v1/hosts/import`) or register the host (`POST
+   /api/v1/hosts`). A host that is only in the file is refused at dispatch.
+
    An inventory line's `gpus=` and `gpu_model=` declare capacity **once**: when
    the inventory is applied, a host with GPUs that no capacity declaration names
    gets one (`resource_id` and `host_id` both the host's name, `capacity`

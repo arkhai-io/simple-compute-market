@@ -21,7 +21,7 @@ from arkhai_bare_metal import (
     NODE_RECLAIM_ACCESS_ACTION,
 )
 from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
-from vm_provisioning_adapter.services.ansible_service import AnsibleService
+from vm_provisioning_adapter.services.ansible_service import AnsibleResult, AnsibleService
 
 
 # ---------------------------------------------------------------------------
@@ -475,8 +475,6 @@ class TestPublicHostInventory:
 
 class TestTenantAddress:
     def test_host_ip_and_ssh_command_use_the_supplied_tenant_address(self):
-        from vm_provisioning_adapter.services.ansible_service import AnsibleResult
-
         svc = _make_service()
         result = AnsibleResult(
             stdout='"external_ssh_port": "9000"\n"tenant_user": "tenantx"',
@@ -492,8 +490,6 @@ class TestTenantAddress:
     def test_no_address_is_read_from_an_inventory_file(self, tmp_path):
         """A configured inventory naming the host supplies nothing: the
         address comes only from the host record the caller resolved."""
-        from vm_provisioning_adapter.services.ansible_service import AnsibleResult
-
         inventory = tmp_path / "hosts"
         inventory.write_text("[kvm_hosts]\nkvm1  ansible_host=198.51.100.7\n")
         svc = _make_service()

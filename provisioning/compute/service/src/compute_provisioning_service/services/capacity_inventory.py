@@ -7,8 +7,8 @@ whether or not that host is registered. Host records are connection identity,
 used where a connection is made: at dispatch, which refuses a host with no
 record. Joining them here would add nothing a consumer reads, would leak the
 provisioner's connection address to storefronts, and would let a host record
-hide a declaration. See openspec/specs/site-capacity/spec.md and
-openspec/specs/physical-provisioning/spec.md.
+hide a declaration. See
+openspec/specs/site-capacity/spec.md#requirement-the-resource-pool-projection-is-built-from-capacity-declarations.
 """
 
 from __future__ import annotations

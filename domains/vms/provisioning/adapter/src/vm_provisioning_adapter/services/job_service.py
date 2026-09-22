@@ -483,7 +483,7 @@ class AnsibleJobService:
             # variable reaches a file and before any playbook starts; there is
             # no fallback inventory, because one would run against whatever a
             # file happens to say rather than what the registry holds. See
-            # openspec/specs/physical-provisioning/spec.md.
+            # openspec/specs/physical-provisioning/spec.md#requirement-execution-inventory-comes-only-from-the-registered-host-record.
             host = self._host_service.get_host(params.host_id)
             if host is None:
                 error_message = (

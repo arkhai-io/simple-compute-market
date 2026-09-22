@@ -72,8 +72,14 @@ pools:
 
 The bare-metal provider rejects pool-local playbook paths, inventory groups,
 credentials, and executor targets. The service-owned
-`bare_metal_playbook_path`, mounted inventory, and selected Physical Resource
-determine execution.
+`bare_metal_playbook_path`, the selected Physical Resource, and the registered
+host record it names determine execution.
+
+The mounted inventory seeds the host registry when the provisioning service
+starts with no hosts registered; it is not read at execution. A host added to it
+later must be imported (`POST /api/v1/hosts/import`) before work can be
+dispatched to it. A host's `public_host` is passed to the access playbook as a
+host variable.
 
 The pool declaration is authoritative. Do not add `vm` merely to make a
 request pass; add it only if the same pool and executor can actually deliver

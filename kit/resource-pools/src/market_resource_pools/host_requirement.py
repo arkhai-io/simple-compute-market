@@ -8,7 +8,8 @@ modes, so none relies on another having refused first.
 
 The requirement is plain data keyed by provider identity and supplied by the
 composition that knows its providers, so a layer applying it imports no
-provider. See openspec/specs/site-capacity/spec.md.
+provider. See
+openspec/specs/site-capacity/spec.md#requirement-admission-applies-the-pool-providers-host-requirement.
 """
 
 from __future__ import annotations

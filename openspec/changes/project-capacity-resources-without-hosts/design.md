@@ -442,6 +442,12 @@ host registration).
 That is the intended fail-closed behaviour, but it changes how an operator adds a
 host. `DEPLOYMENT_AND_CONFIG.md` and both quickstarts say so.
 
+Implementation confirmed that callers really did depend on the fallback. Removing
+it failed eight provisioning integration tests that dispatched to `kvm1` or
+`kvm-fulfillment-1`, hosts that were never registered. One registered `kvm-sel`
+while its reservation targeted `kvm1`, so its registration never mattered. Each
+now registers the host it dispatches to.
+
 ## Review amendments (2026-09-22)
 
 From code review of Sections 1–5. Each amends a decision above; none reopens
