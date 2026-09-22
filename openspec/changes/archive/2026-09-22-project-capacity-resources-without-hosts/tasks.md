@@ -272,8 +272,7 @@ order: refusal landed before visibility.
 | Provisioning integration | 245 passed |
 | `test-bare-metal` | domain 75, storefront 126, buyer 11, adapter 2 |
 
-Root `make test` passed before the 5R.6–5R.9 target changes. **Archival gate:**
-record here the result of a root `make test` on the final tree. That run
+Root `make test` passed on the final tree, the archival gate. That run
 includes `test-bare-metal`, `test-compute-provisioning`, and `test-vms-domain`,
 along with the `reinit` targets added in 5R.8 and 5R.9. Typing is unrun: no
 touched package configures a type checker.
