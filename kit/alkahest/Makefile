@@ -8,7 +8,8 @@ build: ## Build the wheel into the shared .dist/
 reinit: ## Refresh changed internal settlement dependencies.
 	uv sync --dev --find-links $(DIST_DIR) \
 		--upgrade-package arkhai-core --reinstall-package arkhai-core \
-		--upgrade-package arkhai-kit-settlement-runtime --reinstall-package arkhai-kit-settlement-runtime
+		--upgrade-package arkhai-kit-settlement-runtime --reinstall-package arkhai-kit-settlement-runtime \
+		--upgrade-package arkhai-kit-identity --reinstall-package arkhai-kit-identity
 
 test: test-unit ## Run the default test suite
 

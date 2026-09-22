@@ -14,7 +14,9 @@ init:
 # Reinstall the shared settlement contracts while iterating locally.
 reinit:
 	uv sync --dev --python 3.12 --find-links $(DIST_DIR) \
-		--upgrade-package arkhai-kit-settlement-runtime --reinstall-package arkhai-kit-settlement-runtime
+		--upgrade-package arkhai-kit-settlement-runtime --reinstall-package arkhai-kit-settlement-runtime \
+		--upgrade-package arkhai-core --reinstall-package arkhai-core \
+		--upgrade-package arkhai-kit-identity --reinstall-package arkhai-kit-identity
 
 test: reinit
 	uv run --find-links $(DIST_DIR) pytest tests/unit -q

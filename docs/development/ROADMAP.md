@@ -44,6 +44,7 @@ Host records are used only where a connection is made. The resource-pool project
 |---|---|
 | The VM storefront retains local physical tables, the local-table derivation path, CSV import and its deployment contract, the dead execution ledger, the orphaned physical admin surface, and dead physical-identity plumbing | [`pools-9-retire-local-physical-authority`](../../openspec/changes/pools-9-retire-local-physical-authority/) |
 | Buyer VM tunnels coordinated through a relay's management dashboard, with relay location and credential held in storefront configuration | [`relay-vm-access-without-a-dashboard`](../../openspec/changes/relay-vm-access-without-a-dashboard/) |
+| Host inventory seeds the host registry only when it is empty and is never reconciled against its file, so editing a running deployment's inventory changes nothing | [`bring-host-inventory-under-definition-documents`](../../openspec/changes/bring-host-inventory-under-definition-documents/) |
 | One SSH key reaches every host in an environment, so a host prepared by another party cannot be registered with its own credential | [`contain-embedded-host-key-material`](../../openspec/changes/contain-embedded-host-key-material/) |
 | The provisioning service serves one storefront: its storefront principal and site binding are single values, so a second commercial front-end over the same hardware is not a configuration | [`repair-multi-storefront-scenario`](../../openspec/changes/repair-multi-storefront-scenario/) |
 

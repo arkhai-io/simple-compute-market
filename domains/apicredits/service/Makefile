@@ -22,7 +22,11 @@ reinit: ## Force-reinstall internal wheels without bumping versions. Run make di
 		--upgrade-package arkhai-kit-resource-pools --reinstall-package arkhai-kit-resource-pools \
 		--upgrade-package arkhai-apicredits-middleware --reinstall-package arkhai-apicredits-middleware \
 		--upgrade-package arkhai-apicredits-domain --reinstall-package arkhai-apicredits-domain \
-		--upgrade-package arkhai-kit-site-client --reinstall-package arkhai-kit-site-client
+		--upgrade-package arkhai-kit-site-client --reinstall-package arkhai-kit-site-client \
+		--upgrade-package arkhai-core --reinstall-package arkhai-core \
+		--upgrade-package arkhai-kit-alkahest --reinstall-package arkhai-kit-alkahest \
+		--upgrade-package arkhai-kit-policy --reinstall-package arkhai-kit-policy \
+		--upgrade-package arkhai-kit-settlement-runtime --reinstall-package arkhai-kit-settlement-runtime
 
 test: reinit ## Run the test suite
 	PYTHONPATH=src uv run --find-links $(DIST_DIR) pytest tests -q

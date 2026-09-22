@@ -125,6 +125,21 @@ order: refusal landed before visibility.
       - The adapter's editable sibling sources are left for
         `remove-relative-uv-sources`.
 
+- [x] 5R.8 Close every `reinit` gap. A `reinit` must reinstall each internal
+      package its lock resolves from `.dist`. Otherwise a same-version rebuilt
+      wheel is shadowed by the cached one.
+      - **Symptom.** `domains/bare_metal/storefront` reinstalled neither
+        `arkhai-kit-resource-pools`, `arkhai-kit-fulfillment`, nor
+        `arkhai-kit-site`. Its environment kept the pre-change
+        `market_resource_pools` and failed collection on `HostRequirement`.
+      - **Audit.** Every Makefile's `reinit` recipe, including in-file
+        prerequisites, was compared against its `uv.lock`. It found 15
+        environments with gaps; all are closed, and the audit now reports none.
+      - **Verified.** The pre-change `market_resource_pools` wheel was installed
+        into the bare-metal storefront environment; its `make test` reinstalled
+        the new one and passed (126). All 15 recipes parse under `make -n`, and
+        no lockfile changed.
+
 ## 6. Closeout
 
 - [x] 6.1 **Comment hygiene.** `make check-comment-hygiene` passes. Touched
@@ -157,6 +172,12 @@ order: refusal landed before visibility.
         it owns.
       - Goal 1 gains a table of the two unowned findings: the bare-metal access
         address, and the single registration source.
+      - Goal 1 gains a row for the new change
+        `bring-host-inventory-under-definition-documents`, in design phase.
+        Host inventory is the one mounted input that seeds only an empty
+        registry and is never reconciled against its file; this change
+        documented that rule, and that change owns replacing it. The roadmap's
+        Goal 1 gap table maps to it.
       - The dependency graphs are unchanged until archival. No change
         directory was created, renamed, or removed.
 - [x] 6.7 **Documentation citations.**

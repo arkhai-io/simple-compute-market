@@ -12,7 +12,13 @@ reinit:
 		--upgrade-package arkhai-vms --reinstall-package arkhai-vms \
 		--upgrade-package arkhai-bare-metal --reinstall-package arkhai-bare-metal \
 		--upgrade-package arkhai-kit-resource-pools --reinstall-package arkhai-kit-resource-pools \
-		--upgrade-package arkhai-kit-fulfillment --reinstall-package arkhai-kit-fulfillment
+		--upgrade-package arkhai-kit-fulfillment --reinstall-package arkhai-kit-fulfillment \
+		--upgrade-package arkhai-core --reinstall-package arkhai-core \
+		--upgrade-package arkhai-core-storefront-client --reinstall-package arkhai-core-storefront-client \
+		--upgrade-package arkhai-kit-config --reinstall-package arkhai-kit-config \
+		--upgrade-package arkhai-kit-identity --reinstall-package arkhai-kit-identity \
+		--upgrade-package arkhai-kit-settlement-runtime --reinstall-package arkhai-kit-settlement-runtime \
+		--upgrade-package arkhai-kit-site --reinstall-package arkhai-kit-site
 
 test: reinit
 	uv run --find-links $(DIST_DIR) pytest ../../../../provisioning/compute/service/tests/unit/services/test_ansible_fulfillment_provider.py -q

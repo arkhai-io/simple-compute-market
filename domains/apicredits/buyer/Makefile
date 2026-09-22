@@ -20,7 +20,8 @@ reinit:
 		--upgrade-package arkhai-kit-identity      --reinstall-package arkhai-kit-identity \
 		--upgrade-package arkhai-kit-policy        --reinstall-package arkhai-kit-policy \
 		--upgrade-package arkhai-kit-settlement-runtime --reinstall-package arkhai-kit-settlement-runtime \
-		--upgrade-package arkhai-kit-hosted-settlement --reinstall-package arkhai-kit-hosted-settlement
+		--upgrade-package arkhai-kit-hosted-settlement --reinstall-package arkhai-kit-hosted-settlement \
+		--upgrade-package arkhai-kit-delivery --reinstall-package arkhai-kit-delivery
 
 test: reinit
 	uv run --find-links $(DIST_DIR) pytest tests -q

@@ -10,7 +10,8 @@ reinit: ## Reinstall internal kit dependencies from the shared wheel directory
 		--upgrade-package arkhai-kit-resource-pools \
 		--upgrade-package arkhai-kit-identity \
 		--reinstall-package arkhai-kit-resource-pools \
-		--reinstall-package arkhai-kit-identity
+		--reinstall-package arkhai-kit-identity \
+		--upgrade-package arkhai-kit-site-client --reinstall-package arkhai-kit-site-client
 
 test: reinit ## Run the test suite against current internal wheels
 	uv run --find-links $(DIST_DIR) pytest -q

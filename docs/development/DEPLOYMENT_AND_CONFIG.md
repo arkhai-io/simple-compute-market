@@ -244,10 +244,11 @@ relay), then host inventory, then capacity (whose declarations name a pool and
 may name a host). A capacity document naming a pool other than `default` needs
 that pool supplied beside it on a first boot.
 
-Host inventory is read differently. The inventory (`inventory_ini`, or the file
-at `inventory_path`) seeds the host registry only when no host is registered
-yet. Execution renders its inventory from the registered host record the work
-names, never from the file. A host added to the file after first boot is
+Host inventory is not a definition document, and the digest reconciliation
+described below does not apply to it. The inventory (`inventory_ini`, or the file
+at `inventory_path`) seeds the host registry only when no host is registered yet,
+and is not read again. Execution renders its inventory from the registered host
+record the work names, never from the file. A host added to the file after first boot is
 therefore not registered, and dispatch to it is refused until it is imported
 through `POST /api/v1/hosts/import` or registered through `POST /api/v1/hosts`.
 
