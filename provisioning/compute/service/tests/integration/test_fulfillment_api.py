@@ -57,6 +57,7 @@ from market_fulfillment import (
 )
 from market_resource_pools import PoolCreate, PoolUpdate
 from market_site.router import make_capacity_router
+from vm_provisioning_operator.models import HostCreate
 
 _PLAYBOOK_PATH = "playbooks/vm-operations.yaml"
 _PROVIDER_CONFIG = {"playbook_path": _PLAYBOOK_PATH, "extra_vars": {"region": "eu"}}
@@ -660,8 +661,17 @@ class TestStatusAndResultQueries:
         assert resp.json()["detail"]["code"] == "fulfillment_not_found"
 
     async def test_result_on_an_active_fulfillment_includes_live_credentials(
-        self, fulfillment: FulfillmentApi
+        self, fulfillment: FulfillmentApi, client_and_queue
     ):
+        # The create job runs to completion here, and it runs only against a
+        # registered host record.
+        await client_and_queue[0].register_host(HostCreate(
+            host_id="kvm-fulfillment-1",
+            ssh_host="10.0.0.1",
+            ssh_user="root",
+            ssh_key_type="path",
+            ssh_key_value="/tmp/test-key",
+        ))
         capacity_reservation_id = await _scheduled_reservation(
             pool_id="pool-fulfillment-result-active"
         )
@@ -781,6 +791,7 @@ class TestScheduleEndpoint:
         )
         assert resp.status_code == 404
         assert resp.json()["detail"]["code"] == "fulfillment_not_found"
+
 
 
 class TestRelayPortLifecycleOverTheApi:

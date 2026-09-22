@@ -5,9 +5,9 @@
 The compute provisioner MUST import configured Resource Pool definitions before
 seeding inventory. A bare-metal inventory host MAY name its exact pool through
 `pool_id`; the seed MUST reject an unknown pool and MUST preserve that binding
-on create and update. The host's explicit `bare_metal_publication` view MUST
-carry that exact pool binding. The `bare_metal.ansible` provider accepts no
-pool-local playbook, inventory-group, credential, or executor-target
+on create and update. A capacity declaration's explicit `bare_metal_publication`
+view MUST carry the declaration's own pool. The `bare_metal.ansible` provider
+accepts no pool-local playbook, inventory-group, credential, or executor-target
 configuration: execution uses service-owned configuration and the
 scheduler-selected Physical Resource. The operator MUST register that Physical
 Resource and its explicit `bare_metal_publication` view through the
@@ -21,8 +21,15 @@ authenticated capacity administration surface before the host is publishable.
 #### Scenario: Publication retains the inventory pool binding
 
 - **GIVEN** a bare-metal inventory host is bound to a configured provider pool
+- **AND** the capacity declaration naming that host is in the same pool
 - **WHEN** the compute service projects its explicit `bare_metal_publication` view
-- **THEN** the view's `pool_id` is that exact inventory binding
+- **THEN** the view's `pool_id` is that pool, taken from the declaration
+
+#### Scenario: Publication carries the declaration's pool
+
+- **GIVEN** a capacity declaration with an enabled `bare_metal_publication` in a configured provider pool
+- **WHEN** the compute service projects its explicit `bare_metal_publication` view
+- **THEN** the view's `pool_id` is the declaration's pool
 
 #### Scenario: Pool-local executor configuration is supplied
 

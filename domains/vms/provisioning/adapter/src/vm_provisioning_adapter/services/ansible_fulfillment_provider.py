@@ -58,6 +58,10 @@ _JOB_STATUS_TO_OPERATION_STATE = {
 
 
 class AnsibleFulfillmentProvider(FulfillmentProvider):
+    # A VM is created on a KVM host the playbook connects to, so a declaration
+    # naming no host has nothing to create it on.
+    needs_host = True
+
     def __init__(
         self,
         *,

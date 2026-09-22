@@ -130,8 +130,14 @@ class FakeUnitOfWork:
             self.read_transaction_open = False
 
 
+class _ProviderMock(MagicMock):
+    """A mock provider that, like every real one, declares its host need."""
+
+    needs_host = True
+
+
 def _provider():
-    provider = MagicMock()
+    provider = _ProviderMock()
     # Explicit, because a bare MagicMock returns a truthy Mock for any
     # attribute: the orchestrator would then try to attach that object as a
     # job id. Providers without an addressable job handle return None, and

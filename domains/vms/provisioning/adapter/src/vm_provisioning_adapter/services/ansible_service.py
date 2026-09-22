@@ -7,8 +7,10 @@ Responsibilities
 * Build the extra-vars YAML file consumed by the VM-operations playbook
   (``build_vars_file``).
 * Parse structured JSON output from playbook stdout (``parse_playbook_result``).
-* Parse the Ansible INI inventory (``parse_inventory``, ``lookup_host_ip``).
-* Run ``ansible -m ping`` connectivity checks (``check_connectivity``).
+* Render a one-host inventory from registered host records
+  (``write_inventory``); no inventory file is ever read as an execution source.
+* Run ``ansible -m ping`` connectivity checks against a rendered inventory
+  (``check_connectivity_with_inventory``).
 
 This is the only class in the codebase that spawns ansible / ansible-playbook
 subprocesses.  All other services depend on this class and work with
@@ -38,11 +40,7 @@ from arkhai_bare_metal import (
     NODE_RECLAIM_ACCESS_ACTION,
 )
 from compute_provisioning_service.config import Settings
-from vm_provisioning_adapter.models.ansible import (
-    ConnectivityResult,
-    InventoryHost,
-    InventoryResponse,
-)
+from vm_provisioning_adapter.models.ansible import ConnectivityResult
 from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams, AnsibleRunResult
 from market_config import decrypt_secret
 
@@ -570,25 +568,18 @@ class AnsibleService:
         self,
         result: AnsibleResult,
         params: AnsibleJobParams,
-        public_host: str | None = None,
+        tenant_address: str | None = None,
     ) -> AnsibleRunResult:
         """Parse raw ``AnsibleResult`` output into a structured ``AnsibleRunResult``.
 
-        ``host_ip`` (the tenant-facing address in the returned connection
-        info) prefers the host's advertised ``public_host`` — passed in by the
-        caller from the host record, or read from the inventory ``public_host``
-        var — and only falls back to the management ``ansible_host`` when no
-        public address is configured. The provisioner may reach the KVM host on
-        a different network than buyers do, so the management address is not
-        necessarily reachable by the tenant.
+        ``tenant_address`` is the address buyers use to reach the host, which
+        the caller resolves from the registered host record. It becomes
+        ``host_ip`` in the returned connection info; nothing here reads an
+        inventory file for it.
         """
         ssh_port = self._extract_ssh_port(result.stdout, params.host_id)
         tenant_user = self._extract_tenant_user(result.stdout, params.host_id)
-        host_ip = (
-            public_host
-            or self.lookup_public_host(params.host_id)
-            or self.lookup_host_ip(params.host_id)
-        )
+        host_ip = tenant_address
         ssh_command = None
         if ssh_port and tenant_user and host_ip:
             ssh_command = (
@@ -705,104 +696,8 @@ class AnsibleService:
         return last_result
 
     # ------------------------------------------------------------------
-    # Inventory
-    # ------------------------------------------------------------------
-
-    def parse_inventory(self, search: str | None = None) -> list[InventoryHost]:
-        """Parse the Ansible INI inventory and return a list of hosts.
-
-        Skips group headers (``[group_name]``) and comment lines.
-        If *search* is provided, only hosts whose name contains the
-        string (case-insensitive) are returned.
-
-        Raises ``FileNotFoundError`` if the inventory file does not exist.
-        """
-        inventory_path = self._settings.resolved_inventory_path
-        if not inventory_path.exists():
-            raise FileNotFoundError(f"Inventory not found at {inventory_path}")
-
-        hosts: list[InventoryHost] = []
-        for line in inventory_path.read_text(encoding="utf-8").splitlines():
-            stripped = line.strip()
-            if not stripped or stripped.startswith("#") or stripped.startswith("["):
-                continue
-
-            parts = stripped.split()
-            name = parts[0]
-
-            if search and search.lower() not in name.lower():
-                continue
-
-            host_vars: dict[str, str] = {}
-            for part in parts[1:]:
-                if "=" in part:
-                    k, _, v = part.partition("=")
-                    host_vars[k] = v
-
-            hosts.append(
-                InventoryHost(
-                    host_id=name,
-                    ansible_host=host_vars.pop("ansible_host", None),
-                    vars=host_vars,
-                )
-            )
-
-        return hosts
-
-    def get_inventory(self, search: str | None = None) -> InventoryResponse:
-        """Return an ``InventoryResponse`` for the current inventory file."""
-        hosts = self.parse_inventory(search=search)
-        return InventoryResponse(
-            inventory_path=str(self._settings.resolved_inventory_path),
-            hosts=hosts,
-        )
-
-    def lookup_host_ip(self, host_id: str) -> Optional[str]:
-        """Return the ``ansible_host`` value for *host_id* from the inventory.
-
-        Returns ``None`` if the host is not found or the inventory is unreadable.
-        """
-        try:
-            for host in self.parse_inventory():
-                if host.host_id == host_id:
-                    return host.ansible_host
-        except Exception as exc:
-            logger.warning("Failed to read inventory: %s", exc)
-        logger.warning("No ansible_host found for %s in inventory", host_id)
-        return None
-
-    def lookup_public_host(self, host_id: str) -> Optional[str]:
-        """Return the ``public_host`` inventory var for *host_id*, if set.
-
-        This is the tenant-facing address; returns ``None`` when the host
-        doesn't declare one (callers then fall back to ``lookup_host_ip``).
-        """
-        try:
-            for host in self.parse_inventory():
-                if host.host_id == host_id:
-                    return host.vars.get("public_host") or None
-        except Exception as exc:
-            logger.warning("Failed to read inventory: %s", exc)
-        return None
-
-    # ------------------------------------------------------------------
     # Connectivity check
     # ------------------------------------------------------------------
-
-    async def check_connectivity(self, host: str) -> ConnectivityResult:
-        """Run ``ansible -m ping`` against a single named inventory host.
-
-        Uses the inventory path from settings (legacy path).
-        Prefer ``check_connectivity_with_inventory`` when a DB-rendered
-        inventory path is available.
-
-        Returns a ``ConnectivityResult`` with ``reachable=False`` if the
-        host is unreachable — not a 404.  The caller should verify the
-        host exists in the inventory before calling this.
-        """
-        return await self.check_connectivity_with_inventory(
-            host, self._settings.resolved_inventory_path
-        )
 
     async def check_connectivity_with_inventory(
         self, host: str, inventory_path: Path

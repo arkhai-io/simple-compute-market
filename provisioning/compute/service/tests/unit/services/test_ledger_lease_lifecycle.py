@@ -112,10 +112,16 @@ def ledger(session_factory) -> CapacityLedgerService:
     return svc
 
 
+class _ProviderMock(MagicMock):
+    """A mock provider that, like every real one, declares its host need."""
+
+    needs_host = True
+
+
 def _fulfillment_service(session_factory, *, provider=None) -> FulfillmentOrchestrator:
     resource_pool_service = ResourcePoolService(session_factory=session_factory, handlers={})
     return FulfillmentOrchestrator(
-        provider_registry=ProviderRegistry({"ansible": provider or MagicMock()}),
+        provider_registry=ProviderRegistry({"ansible": provider or _ProviderMock()}),
         unit_of_work=SqlAlchemyFulfillmentUnitOfWork(
             session_factory=session_factory,
             pool_service=resource_pool_service,

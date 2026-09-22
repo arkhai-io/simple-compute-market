@@ -54,7 +54,13 @@ reinit: init-venv
 	--upgrade-package arkhai-bare-metal                      --reinstall-package arkhai-bare-metal \
 	--upgrade-package arkhai-compute-provisioning            --reinstall-package arkhai-compute-provisioning \
 	--upgrade-package arkhai-vms-provisioning-operator-client --reinstall-package arkhai-vms-provisioning-operator-client \
-	--upgrade-package arkhai-apicredits-buyer                --reinstall-package arkhai-apicredits-buyer
+	--upgrade-package arkhai-apicredits-buyer                --reinstall-package arkhai-apicredits-buyer \
+	--upgrade-package arkhai-apicredits-domain --reinstall-package arkhai-apicredits-domain \
+	--upgrade-package arkhai-bare-metal-storefront --reinstall-package arkhai-bare-metal-storefront \
+	--upgrade-package arkhai-kit-capacity-publication --reinstall-package arkhai-kit-capacity-publication \
+	--upgrade-package arkhai-kit-contact-exchange --reinstall-package arkhai-kit-contact-exchange \
+	--upgrade-package arkhai-kit-delivery --reinstall-package arkhai-kit-delivery \
+	--upgrade-package arkhai-kit-negotiation-runtime --reinstall-package arkhai-kit-negotiation-runtime
 
 # -----------------------------------------------------------------------
 # Build

@@ -44,6 +44,8 @@ def _service(session_factory) -> AnsibleJobService:
         settings=MagicMock(),
         session_factory=session_factory,
         ansible_service=MagicMock(),
+        # Requeueing never resolves a host; the registry is only required.
+        host_service=MagicMock(),
     )
 
 

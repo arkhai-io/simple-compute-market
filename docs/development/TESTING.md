@@ -71,6 +71,17 @@ boundary — a subprocess invocation, a call to a service this codebase
 doesn't own, a blockchain RPC call. Mock at the point this codebase's
 own code wraps that boundary, not deeper.
 
+**Library packages:** A kit library has no app. For a library, integration
+means its public service API against a real embedded database, the
+persistence boundary the library owns, with collaborators it does not own
+injected. Such tests live in the library's `tests/integration`. They prove
+durable behavior a unit test with mocked collaborators cannot: transaction
+boundaries, locking, and independent-session concurrency. They do not
+replace the in-process-app integration tests of a service that composes the
+library, which remain the tests of that service's wire contract. A library
+test that exercises a real database but still sits in `unit/` moves to
+`integration/` when it is next touched.
+
 **Test setup pattern:** Use `httpx.AsyncClient` with `ASGITransport`
 against the real application instance, injected via the service's
 canonical typed-client constructor (`FooClient(transport=...)`).
@@ -294,7 +305,10 @@ it once the producer gains coverage.
 ## Test File Layout
 
 A service's tests split into `unit/` and `integration/` subdirectories
-under its own `tests/` root, matching the four-level hierarchy above.
+under its own `tests/` root, matching the four-level hierarchy above. A kit
+library splits the same way, and its test target runs both directories.
+Its `integration/` directory is a package, so a module there may share a
+basename with one in `unit/`.
 System-level tests live in the separate `e2e-tests` package, itself
 split into `unit/` (its own helper logic), `smoke/`, and `e2e/`. A Helm
 chart's render tests live in its own `tests/` directory (see "Chart Render
@@ -330,6 +344,37 @@ Search production compute contracts, persistence, dispatch, result, release,
 site, storefront, and domain adapters for default arguments, `or` fallbacks,
 and attribute-based inference; a passing focused suite alone cannot prove their
 absence.
+
+## Host Requirement Enforcement
+
+The rule that a declaration naming no host cannot be admitted or placed where
+the pool's provider needs one is rechecked at each layer, and each layer
+proves its own check:
+
+- `kit/resource-pools` unit tests own the predicate:
+  - no requirement supplied;
+  - a declared need;
+  - a provider the requirement does not name;
+  - a value that is not a `bool`.
+- `kit/fulfillment` unit tests own the provider declaration, including a
+  registry that refuses a provider declaring none.
+- `kit/site` library integration tests own admission:
+  - refusal with fall-through to a declaration naming a host;
+  - no refusal without a requirement;
+  - resize;
+  - the assignment write.
+- `kit/fulfillment` library integration tests own placement:
+  - exclusion before policy, rebind, cursor, or assignment, on both the
+    automatic and the constrained path;
+  - refusal of an existing assignment that records no host.
+- Provisioning unit tests own composition's refusal of a requirement that
+  disagrees with the registered providers.
+- Provisioning integration tests prove the deployed surface through the typed
+  clients:
+  - admission and scheduling refusals with the executor boundary asserted
+    never reached;
+  - dispatch to an unregistered host failing before any playbook, even with a
+    configured inventory file naming the host.
 
 ## Multi-Domain Storefront Composition
 

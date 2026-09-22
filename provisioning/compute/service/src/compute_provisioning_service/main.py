@@ -164,10 +164,7 @@ def _capacity_resource_inventory() -> list[dict[str, object]]:
     ledger = _container_module.resolved_capacity_ledger_service
     if ledger is None:
         raise RuntimeError("capacity ledger is not initialized")
-    return load_capacity_resource_inventory(
-        container.session_factory(),
-        capacity_resources=ledger.list_resources(),
-    )
+    return load_capacity_resource_inventory(ledger.list_resources())
 
 
 def _capacity_pool_directory() -> dict[str, dict[str, object]]:

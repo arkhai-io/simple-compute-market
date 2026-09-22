@@ -27,7 +27,7 @@ from vm_provisioning_adapter.services.job_service import AnsibleJobService
 # ---------------------------------------------------------------------------
 
 
-def _make_service(**settings_overrides) -> AnsibleJobService:
+def _make_service(*, host_service=None, **settings_overrides) -> AnsibleJobService:
     settings = MagicMock()
     settings.default_host_id = "kvm1"
     settings.default_max_retries = 3
@@ -51,6 +51,7 @@ def _make_service(**settings_overrides) -> AnsibleJobService:
         settings=settings,
         session_factory=MagicMock(),
         ansible_service=MagicMock(),
+        host_service=host_service if host_service is not None else MagicMock(),
     )
 
 
@@ -543,3 +544,13 @@ class TestBuildResultPayload:
         ar = {"action": "create", "vm_name": "test-vm"}
         payload = svc._build_result_payload(_base_run_result(ansible_result=ar))
         assert payload["ansible_result"] is ar
+
+
+def test_the_host_registry_is_required():
+    """The registry is a job's only inventory source, so it cannot be omitted."""
+    with pytest.raises(TypeError):
+        AnsibleJobService(
+            settings=MagicMock(),
+            session_factory=MagicMock(),
+            ansible_service=MagicMock(),
+        )

@@ -54,6 +54,8 @@ class FakeReleaseExecutor:
 
 
 class FakeProvider(FulfillmentProvider):
+    needs_host = True
+
     def prepare_create(self, *, capacity_reservation_id, request, resource, pool_config):
         return VersionedEnvelope(kind="fake.create", schema_version=1, payload={})
 
@@ -102,6 +104,10 @@ class FakePoolConfigHandler:
         return None
 
 
+#: The host requirement matching one registered ``FakeProvider`` as ``ansible``.
+ANSIBLE_NEEDS_HOST = {"ansible": True}
+
+
 def contribution(kind: str, *actions: str) -> ExecutorAdapterContribution:
     return ExecutorAdapterContribution(
         adapter=FakeAdapter(kind),
@@ -124,7 +130,7 @@ def test_composes_executor_and_provider_namespaces_independently():
             name="bare-metal",
             executors=(contribution("bare_metal", "grant_access"),),
         ),
-    ])
+    ], host_requirement=ANSIBLE_NEEDS_HOST)
 
     assert composed.executor_registry.get("vm").offering_mode == "vm"
     assert composed.executor_registry.get("bare_metal").offering_mode == "bare_metal"
@@ -146,7 +152,8 @@ def test_duplicate_executor_identifies_both_bundles():
                     name="second",
                     executors=(contribution("vm", "delete"),),
                 ),
-            ]
+            ],
+            host_requirement=ANSIBLE_NEEDS_HOST,
         )
 
 
@@ -171,7 +178,8 @@ def test_duplicate_provider_identifies_both_bundles_independently_of_executors()
                     fulfillment_providers={"ansible": provider},
                     pool_config_handlers={"ansible": handler},
                 ),
-            ]
+            ],
+            host_requirement=ANSIBLE_NEEDS_HOST,
         )
 
 
@@ -187,7 +195,8 @@ def test_provider_without_pool_config_handler_is_rejected_before_startup():
                     executors=(contribution("vm", "create"),),
                     fulfillment_providers={"ansible": FakeProvider()},
                 )
-            ]
+            ],
+            host_requirement=ANSIBLE_NEEDS_HOST,
         )
 
 
@@ -206,7 +215,8 @@ def test_handler_identity_must_match_provider_identity():
                         "ansible": FakePoolConfigHandler("other"),
                     },
                 )
-            ]
+            ],
+            host_requirement=ANSIBLE_NEEDS_HOST,
         )
 
 
@@ -218,7 +228,8 @@ def test_incomplete_executor_contribution_is_rejected_before_startup():
                     name="vm",
                     executors=(contribution("vm"),),
                 )
-            ]
+            ],
+            host_requirement=ANSIBLE_NEEDS_HOST,
         )
 
 
@@ -236,5 +247,50 @@ def test_duplicate_readiness_check_is_rejected():
                     executors=(contribution("bare_metal", "grant_access"),),
                     readiness_checks={"controller": lambda: True},
                 ),
-            ]
+            ],
+            host_requirement=ANSIBLE_NEEDS_HOST,
+        )
+
+
+class UndeclaredProvider(FakeProvider):
+    """A provider whose host need is not a bool, so it declares nothing usable."""
+
+    needs_host = None
+
+
+def _one_provider_bundle(provider) -> ExecutorAdapterBundle:
+    return ExecutorAdapterBundle(
+        name="vm",
+        executors=(contribution("vm", "create"),),
+        fulfillment_providers={"ansible": provider},
+        pool_config_handlers={"ansible": FakePoolConfigHandler("ansible")},
+    )
+
+
+@pytest.mark.parametrize(
+    ("host_requirement", "problem"),
+    [
+        ({}, "omits registered provider.*'ansible'"),
+        (
+            {"ansible": True, "k8s": False},
+            "names unregistered provider.*'k8s'",
+        ),
+        ({"ansible": False}, "disagrees with the declaration.*'ansible'"),
+    ],
+)
+def test_a_host_requirement_disagreeing_with_registered_providers_is_refused(
+    host_requirement, problem
+):
+    with pytest.raises(ValueError, match=problem):
+        compose_adapter_bundles(
+            [_one_provider_bundle(FakeProvider())],
+            host_requirement=host_requirement,
+        )
+
+
+def test_a_provider_that_declares_no_host_need_is_refused():
+    with pytest.raises(ValueError, match="does not declare needs_host"):
+        compose_adapter_bundles(
+            [_one_provider_bundle(UndeclaredProvider())],
+            host_requirement=ANSIBLE_NEEDS_HOST,
         )

@@ -373,25 +373,13 @@ def session_factory(db_engine):
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture
-def fake_inventory_path(tmp_path) -> Path:
-    """Write a minimal Ansible INI inventory to a temp file."""
-    hosts = tmp_path / "hosts"
-    hosts.write_text(
-        "[kvm_hosts]\n"
-        "kvm1  ansible_host=10.0.0.1  ansible_user=root  "
-        "ansible_ssh_private_key_file=~/.ssh/id_ed25519\n"
-    )
-    return hosts
-
-
 # ---------------------------------------------------------------------------
 # Mock AnsibleService — synchronous happy-path by default
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture
-def fake_ansible(fake_inventory_path) -> MagicMock:
+def fake_ansible() -> MagicMock:
     """AnsibleService mock with a successful create playbook response."""
     mock = MagicMock(spec=AnsibleService)
 
@@ -409,13 +397,9 @@ def fake_ansible(fake_inventory_path) -> MagicMock:
     mock.build_vars_file.return_value = Path("/tmp/fake_vars.yml")
     mock.start_playbook.return_value = fake_run
     mock.wait_for_playbook = AsyncMock(return_value=fake_result)
-    mock.lookup_host_ip.return_value = "10.0.0.1"
 
-    # parse_playbook_result uses real logic — delegate to a real instance
-    # configured with a mock settings so lookup_host_ip works correctly.
-    real_settings = MagicMock()
-    real_settings.resolved_inventory_path = fake_inventory_path
-    real_ansible_impl = AnsibleService(real_settings)
+    # parse_playbook_result uses real logic — delegate to a real instance.
+    real_ansible_impl = AnsibleService(MagicMock())
     mock.parse_playbook_result.side_effect = real_ansible_impl.parse_playbook_result
 
     # write_inventory — return a temp path (content irrelevant; Ansible never runs)
@@ -487,9 +471,13 @@ async def client_and_queue(
     replay_store = SqlAlchemyProvisioningReplayStore(session_factory)
 
     from market_site.ledger import CapacityLedgerService
+    # The providers' host requirement exactly as the production container
+    # builds it, so admission and scheduling here refuse what they refuse there.
+    host_requirement = _container_module.Container.host_requirement()
     capacity_ledger_service = CapacityLedgerService(
         session_factory=session_factory,
         unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count",
+        host_requirement=host_requirement,
     )
 
     host_service = HostService(
@@ -518,6 +506,7 @@ async def client_and_queue(
         capacity_ledger=capacity_ledger_service,
         session_factory=session_factory,
         default_resource_kind="compute.gpu",
+        host_requirement=host_requirement,
     )
 
     from compute_provisioning_service.services.capacity_reservation_watchdog import CapacityReservationWatchdog

@@ -22,8 +22,18 @@ What a site sells is declared by capacity declarations: a Physical Resource's sh
 and quantity across every dimension it names, its pool, the categorical attributes
 claims match, and, where it is delivered through a host, that host's `host_id`. A
 host record is connection identity — how the provisioner reaches a machine — and
-supplies no capacity. The resource-pool projection is built from declarations; a
-host that no declaration names is not projected.
+supplies no capacity. The resource-pool projection is built from declarations alone:
+every declaration projects, whether or not it names a host and whether or not that
+host is registered, and no entry carries host connection identity. A host record is
+joined to a declaration only where its connection is used, at dispatch, which refuses
+a host with no record. Joining earlier would add nothing a projection consumer reads,
+would carry the provisioner's connection address to storefronts, and would let a
+missing host record hide a declaration.
+
+Whether a declaration may omit its host depends on its pool. Where the pool's provider
+delivers through a host, admission and placement both refuse a declaration naming
+none. So the projection can show supply that cannot be admitted against, and
+admission is where that is decided.
 
 The alternatives each left capacity with more than one authority. Adding vCPU, RAM,
 and disk columns to hosts would have folded sellable capacity into records whose

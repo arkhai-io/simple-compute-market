@@ -31,7 +31,8 @@ reinit: ## Refresh local internal packages and adapters
 		--upgrade-package arkhai-kit-identity --reinstall-package arkhai-kit-identity \
 		--upgrade-package arkhai-kit-config --reinstall-package arkhai-kit-config \
 		--upgrade-package arkhai-core --reinstall-package arkhai-core \
-		--upgrade-package arkhai-core-storefront-client --reinstall-package arkhai-core-storefront-client
+		--upgrade-package arkhai-core-storefront-client --reinstall-package arkhai-core-storefront-client \
+		--upgrade-package arkhai-kit-settlement-runtime --reinstall-package arkhai-kit-settlement-runtime
 
 serve: ## Start the compute provisioning API and in-process workers
 	PROVISIONING_INVENTORY_PATH="$(IAC_DIR)/ansible/inventory/hosts" \

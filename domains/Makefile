@@ -3,7 +3,7 @@
 	dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront \
 	dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer \
 	dist-buyer test-provisioning-iac test-provisioning-adapter test-storefront \
-	test-vms-buyer test-apicredits test-apicredits-middleware
+	test-bare-metal test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware
 
 DIST_DIR ?= $(abspath ../.dist)
 
@@ -117,6 +117,18 @@ test-provisioning-iac: ## Ansible IaC shell-logic/contract tests (uv-managed, se
 
 test-storefront: ## Full storefront reinit + test
 	cd vms/storefront && $(MAKE) reinit && $(MAKE) test
+
+# Each subproject resolves the wheel directory from its own relative default:
+# `uv sync` records the path it is given in the lockfile, so an absolute one
+# would rewrite committed locks with the caller's filesystem layout.
+test-bare-metal: ## Bare-metal domain, storefront, buyer, and provisioning adapter tests
+	cd bare_metal && $(MAKE) test
+	cd bare_metal/storefront && $(MAKE) test
+	cd bare_metal/buyer && $(MAKE) test
+	cd bare_metal/provisioning/adapter && $(MAKE) test
+
+test-vms-domain: ## VM market-domain package tests
+	cd vms/domain && $(MAKE) test
 
 test-vms-buyer: ## Buyer CLI tests
 	cd vms/buyer && $(MAKE) test

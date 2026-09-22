@@ -93,6 +93,8 @@ def _accepted_row(repo, session_factory, cr_id="cr-1"):
 
 
 class _StubProvider(FulfillmentProvider):
+    needs_host = True
+
     def __init__(self, *, dispatch_create_result=None, dispatch_create_error=None,
                  dispatch_teardown_result=None, dispatch_teardown_error=None,
                  status=None, resolve_result=(), resolve_error=None):

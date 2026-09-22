@@ -7,6 +7,7 @@ from .hints import (
     pool_delivers_offering_mode,
     validate_deliverable_modes,
 )
+from .host_requirement import HostRequirement, pool_needs_host
 from .pool_config_handler import PoolConfigHandler, PoolConfigValidationProblem
 from .pools import (
     PoolCreate,
@@ -35,7 +36,9 @@ __all__ = [
     "DELIVERABLE_MODES_POLICY_TAG",
     "declared_deliverable_modes",
     "pool_delivers_offering_mode",
+    "pool_needs_host",
     "DocumentValidationResult",
+    "HostRequirement",
     "PoolAlreadyExistsError",
     "PoolConfigHandler",
     "PoolConfigValidationProblem",

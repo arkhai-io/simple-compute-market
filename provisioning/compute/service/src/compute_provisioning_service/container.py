@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
+from types import MappingProxyType
 from typing import Any
 
 from dependency_injector import containers, providers
@@ -10,8 +12,14 @@ from market_resource_pools import ResourcePoolService
 from market_site.authority import LedgerSiteAuthority
 from market_site.ledger import CapacityLedgerService
 
-from bare_metal_provisioning_adapter.runtime import build_bare_metal_runtime
-from vm_provisioning_adapter.runtime import build_vm_runtime
+from bare_metal_provisioning_adapter.runtime import (
+    HOST_REQUIREMENT as BARE_METAL_HOST_REQUIREMENT,
+    build_bare_metal_runtime,
+)
+from vm_provisioning_adapter.runtime import (
+    HOST_REQUIREMENT as VM_HOST_REQUIREMENT,
+    build_vm_runtime,
+)
 from compute_provisioning_service.services.capacity_derivation import (
     LegacyHostCapacityDerivation,
 )
@@ -105,8 +113,29 @@ def _system_service(runtime, lease_lifecycle_service, fulfillment_convergence_wa
     )
 
 
-def _compose_adapters(vm_bundle, bare_metal_bundle):
-    return compose_adapter_bundles([vm_bundle, bare_metal_bundle])
+def _merge_host_requirements(*requirements: Mapping[str, bool]) -> Mapping[str, bool]:
+    """One provider -> needs-host map for the ledger, scheduler, and composition.
+
+    Built from each adapter package's static declaration, because the ledger
+    exists before any provider instance does. Composition then refuses to start
+    if the result disagrees with the providers it registers.
+    """
+    merged: dict[str, bool] = {}
+    for requirement in requirements:
+        for provider, needs_host in requirement.items():
+            if provider in merged:
+                raise ValueError(
+                    f"provider {provider!r} declares its host requirement twice"
+                )
+            merged[provider] = needs_host
+    return MappingProxyType(merged)
+
+
+def _compose_adapters(vm_bundle, bare_metal_bundle, host_requirement):
+    return compose_adapter_bundles(
+        [vm_bundle, bare_metal_bundle],
+        host_requirement=host_requirement,
+    )
 
 
 def _provider_registry(composed_adapters):
@@ -222,9 +251,14 @@ class Container(containers.DeclarativeContainer):
 
     fulfillment_teardown_port = providers.Singleton(DeferredFulfillmentTeardownPort)
 
+    host_requirement = providers.Object(
+        _merge_host_requirements(VM_HOST_REQUIREMENT, BARE_METAL_HOST_REQUIREMENT)
+    )
+
     capacity_ledger_service = providers.Singleton(
         CapacityLedgerService,
         session_factory=session_factory,
+        host_requirement=host_requirement,
         # "gpu_count" is this domain's alias for the generic "units" claim
         # key and the dimension its legacy scalar mirrors — kept explicit here
         # rather than hardcoded in kit/site so the ledger stays domain-neutral.
@@ -325,6 +359,7 @@ class Container(containers.DeclarativeContainer):
         _compose_adapters,
         vm_bundle=vm_adapter_bundle,
         bare_metal_bundle=bare_metal_adapter_bundle,
+        host_requirement=host_requirement,
     )
 
     composed_pool_config_handlers = providers.Singleton(
@@ -357,6 +392,7 @@ class Container(containers.DeclarativeContainer):
         default_resource_kind="compute.gpu",
         repository=settlement_repository,
         unit_of_work=scheduling_unit_of_work,
+        host_requirement=host_requirement,
     )
 
     # ------------------------------------------------------------------

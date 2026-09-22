@@ -43,6 +43,8 @@ _INVENTORY_GROUP = "legacy_hosts"
 class _StubAnsibleProvider(FulfillmentProvider):
     """Reports every in-flight operation as immediately successful."""
 
+    needs_host = True
+
     def prepare_create(self, *, capacity_reservation_id, request, resource, pool_config):
         raise NotImplementedError
 

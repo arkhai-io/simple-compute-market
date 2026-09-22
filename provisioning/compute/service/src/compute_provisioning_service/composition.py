@@ -9,7 +9,7 @@ from typing import Any
 from compute_provisioning import ExecutorAdapter, ExecutorAdapterRegistry
 from compute_provisioning.app import ComputeProvisioningRouterMount
 from compute_provisioning.release import ExecutorReleaseDispatcher, ExecutorReleasePort
-from market_fulfillment import FulfillmentProvider, ProviderRegistry
+from market_fulfillment import FulfillmentProvider, ProviderRegistry, provider_needs_host
 
 
 @dataclass(frozen=True)
@@ -133,10 +133,56 @@ def _validate_pool_config_handler(
     return name
 
 
+def _validate_host_requirement(
+    providers: Mapping[str, FulfillmentProvider],
+    host_requirement: Mapping[str, bool],
+) -> None:
+    """Refuse a host requirement that disagrees with the registered providers.
+
+    The site ledger and the settlement scheduler are built before any provider
+    instance exists, so they receive this requirement as data rather than
+    reading it from the providers. Checking it against the providers actually
+    registered here is what keeps that data from drifting: a provider absent
+    from it would be treated as needing a host, and an entry for an
+    unregistered provider would govern pools nothing can execute.
+    """
+    declared: dict[str, bool] = {}
+    for name, provider in providers.items():
+        try:
+            declared[name] = provider_needs_host(provider)
+        except TypeError as exc:
+            raise ValueError(str(exc)) from exc
+    missing = sorted(set(declared) - set(host_requirement))
+    unregistered = sorted(set(host_requirement) - set(declared))
+    disagreeing = sorted(
+        name
+        for name in set(declared) & set(host_requirement)
+        if host_requirement[name] is not declared[name]
+    )
+    problems = []
+    if missing:
+        problems.append("omits registered provider(s) " + ", ".join(map(repr, missing)))
+    if unregistered:
+        problems.append("names unregistered provider(s) " + ", ".join(map(repr, unregistered)))
+    if disagreeing:
+        problems.append(
+            "disagrees with the declaration of provider(s) "
+            + ", ".join(map(repr, disagreeing))
+        )
+    if problems:
+        raise ValueError("host requirement " + "; ".join(problems))
+
+
 def compose_adapter_bundles(
     bundles: tuple[ExecutorAdapterBundle, ...] | list[ExecutorAdapterBundle],
+    *,
+    host_requirement: Mapping[str, bool],
 ) -> ComposedComputeAdapters:
-    """Compose bundles and reject ambiguous registrations before startup."""
+    """Compose bundles and reject ambiguous registrations before startup.
+
+    ``host_requirement`` is the per-provider host need already handed to the
+    site ledger and scheduler; it must match the registered providers exactly.
+    """
 
     executor_owners: dict[str, str] = {}
     action_owners: dict[tuple[str, str], str] = {}
@@ -232,6 +278,8 @@ def compose_adapter_bundles(
             readiness_checks[check_name] = check
 
         routers.extend(bundle.router_mounts)
+
+    _validate_host_requirement(providers, host_requirement)
 
     return ComposedComputeAdapters(
         executor_registry=ExecutorAdapterRegistry(adapters),

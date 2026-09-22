@@ -123,6 +123,7 @@ async def test_reclaim_access_without_machine_id_returns_none():
     service = BareMetalOperationsService(
         job_service=job_service,
         job_queue_provider=lambda: object(),
+        host_service=MagicMock(),
     )
 
     assert await service.reclaim_access_for_reservation({}) is None
@@ -196,3 +197,12 @@ async def test_reclaim_access_for_unknown_machine_returns_none_without_submittin
 
     assert result is None
     job_service.submit.assert_not_awaited()
+
+
+def test_the_host_registry_is_required():
+    """Host validation has no path that skips it for want of a registry."""
+    with pytest.raises(TypeError):
+        BareMetalOperationsService(
+            job_service=MagicMock(),
+            job_queue_provider=lambda: object(),
+        )

@@ -32,9 +32,10 @@ by a request or a capacity declaration.
 
 ### Requirement: The tenant-facing host address falls back to the connection address
 
-The address a tenant receives for a host SHALL be that host record's configured
-tenant-facing address when one is set, and otherwise the record's connection
-address. It SHALL NOT be read from a configured inventory file.
+Where an execution path derives a tenant-facing address for a host, it SHALL use
+that host record's configured tenant-facing address when one is set, and otherwise
+the record's connection address. It SHALL NOT read the address from a configured
+inventory file.
 
 #### Scenario: A host has no tenant-facing address
 

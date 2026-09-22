@@ -20,8 +20,10 @@ from datetime import datetime, timezone
 from typing import Any
 
 from market_resource_pools import (
+    HostRequirement,
     ResourcePoolService,
     pool_delivers_offering_mode,
+    pool_needs_host,
 )
 from market_site import resource_satisfies_requirement
 from market_site.ledger import CapacityLedgerService
@@ -77,8 +79,15 @@ class PhysicalSettlementScheduler:
         default_resource_kind: str | None = None,
         repository: SettlementRepository | None = None,
         unit_of_work: SchedulingUnitOfWork | None = None,
+        host_requirement: HostRequirement | None = None,
     ) -> None:
+        """``host_requirement`` maps each provider identity to whether its
+        delivery needs a host; see ``market_resource_pools.pool_needs_host``.
+        When supplied, a candidate whose declaration names no host is never
+        placed in a pool whose provider needs one.
+        """
         self._pool_service = pool_service
+        self._host_requirement = host_requirement
         self._capacity_ledger = capacity_ledger
         self._policy = policy or DeterministicRoundRobinPolicy()
         self._default_resource_kind = default_resource_kind
@@ -109,6 +118,22 @@ class PhysicalSettlementScheduler:
                     raise NoEligibleSettlementResourceError(
                         f"pool {existing.pool_id!r} does not declare offering mode "
                         f"{requirement.offering_mode!r}"
+                    )
+                # An assignment carries the host it was placed on, and
+                # dispatching to it honours the agreement. One recorded with no
+                # host in a pool whose provider needs one can never be
+                # dispatched, so it is refused rather than returned: it can
+                # only have been placed before placement refused such
+                # candidates. It stays assigned until its reservation is
+                # released or expires, which abandons it.
+                if not existing.resource_host_id and pool_needs_host(
+                    pool.provider, self._host_requirement
+                ):
+                    raise NoEligibleSettlementResourceError(
+                        f"capacity reservation {request.capacity_reservation_id!r} "
+                        f"is assigned to {existing.settlement_resource_id!r}, which "
+                        f"names no host, and pool {existing.pool_id!r} delivers "
+                        "through one"
                     )
                 record = tx.schedule_assignment(
                     capacity_reservation_id=request.capacity_reservation_id,
@@ -288,6 +313,17 @@ class PhysicalSettlementScheduler:
                 continue
             if not pool_delivers_offering_mode(
                 pool.policy_tags, requirement.offering_mode
+            ):
+                continue
+            # Placing a declaration that names no host in a pool whose provider
+            # delivers through one would commit an assignment no provider can
+            # execute, and an equivalent retry would return it again. Excluding
+            # it here, before policy, rebind, or cursor write, keeps both the
+            # automatic and the explicitly constrained paths from reaching it.
+            # An existing assignment is not re-placed; its recorded host is
+            # checked where it is returned, above.
+            if not getattr(payload, "host_id", None) and pool_needs_host(
+                pool.provider, self._host_requirement
             ):
                 continue
             if not resource_satisfies_requirement(

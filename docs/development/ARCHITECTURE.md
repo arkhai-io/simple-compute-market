@@ -409,6 +409,15 @@ does not replace physical accounting: a pool may authorize both VM slices and
 whole-host delivery while the exclusive/shareable conflict rule still prevents
 them from overlapping on one physical host.
 
+A pool's provider also decides whether declarations in the pool must name a host.
+Each provider declares it, and the provisioning composition supplies the
+per-provider requirement as plain data. Site admission and settlement scheduling
+each refuse a declaration naming no host where the pool's provider needs one: the
+same layer-by-layer recheck, so no layer relies on another having refused.
+Dispatch is the last check. It renders execution inventory only from the
+registered host record and refuses a host with none. A composition that delivers
+nothing through hosts supplies no requirement, and its admission is host-agnostic.
+
 ## Shared vocabulary and identities
 
 ### Marketplace principals

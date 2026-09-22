@@ -248,7 +248,7 @@ async def test_no_capacity_is_a_null_answer_not_an_error(capacity: CapacityApi):
 @pytest.mark.asyncio
 async def test_vm_and_bare_metal_claims_use_domain_attributes(capacity: CapacityApi):
     await capacity.register(
-        "bare-metal-node-1", pool_id="default",
+        "bare-metal-node-1", pool_id="default", host_id="bm-node-1",
         total_units=1,
         attributes={
             "physical_host_id": "host-physical-1",
@@ -353,10 +353,6 @@ async def test_site_resource_pools_projection_surfaces_pool_metadata(
     route by hand.
     """
     from compute_provisioning import PoolCreate
-    from market_site_client import SiteCapacityClient
-    from compute_provisioning_service.db.models import Host
-    from compute_provisioning_service.container import container
-
     provisioning_client, _ = client_and_queue
     await provisioning_client.create_pool(
         PoolCreate(
@@ -371,20 +367,6 @@ async def test_site_resource_pools_projection_surfaces_pool_metadata(
             },
         )
     )
-
-    # The resource-pool projection is built from Host rows (see
-    # capacity_inventory.load_capacity_resource_inventory), not directly
-    # from the ledger's registered resources -- a Host row is required
-    # for anything to appear here at all. No typed client covers Host
-    # creation against an arbitrary pool in this fixture set, so this
-    # part still goes through the DB directly.
-    with container.session_factory()() as db:
-        db.add(Host(
-            host_id="kvm1", ssh_host="10.0.0.1", ssh_user="root",
-            ssh_key_value="/dev/null", gpu_count=8, gpu_model="H200",
-            pool_id="hetzner-eu",
-        ))
-        db.commit()
 
     await capacity.register(
         "compute-kvm1-001",
@@ -410,11 +392,8 @@ async def test_site_resource_pools_projection_surfaces_pool_metadata(
             "default_vm_disk_size": "500G",
         },
     }
-    # Host.gpu_model -> capacity_inventory._project_host -> resource-pool
-    # projection's per-resource attributes -> the real SiteCapacityClient
-    # response. Distinct from the ledger resource's own attributes dict
-    # (registered above) -- proves the Host column specifically survives
-    # the full producer -> client path, not just the ledger-side value.
+    # The declaration's own attribute -> resource-pool projection -> the real
+    # SiteCapacityClient response.
     resource_row = next(
         r for r in pool_row["resources"] if r["physical_resource_id"] == "compute-kvm1-001"
     )
@@ -720,18 +699,77 @@ async def test_a_held_resource_moves_pools_only_once_released(
     """Both halves in one test, so the refusal cannot be mistaken for a
     resource that could never move."""
     await _create_pool(client_and_queue[0], "pool-b")
-    await capacity.register("held", pool_id="default", total_units=4)
+    await capacity.register("held", pool_id="default", host_id="kvm-held", total_units=4)
     reserved = await capacity.reserve(
         {"offering_mode": "vm", "gpu_count": 1, "resource_id": "held"}, {}
     )
     assert reserved is not None
 
     with pytest.raises(SiteCapacityAdminClientError) as refused:
-        await capacity.register("held", pool_id="pool-b", total_units=4)
+        await capacity.register("held", pool_id="pool-b", host_id="kvm-held", total_units=4)
     assert refused.value.status_code == 409
     assert (await capacity.admin.list_resources())[0]["pool_id"] == "default"
 
     await capacity.release(capacity_reservation_id=reserved["capacity_reservation_id"])
-    moved = await capacity.register("held", pool_id="pool-b", total_units=4)
+    moved = await capacity.register("held", pool_id="pool-b", host_id="kvm-held", total_units=4)
 
     assert moved["pool_id"] == "pool-b"
+
+
+async def test_a_declaration_naming_no_host_is_not_admitted_in_a_host_requiring_pool(
+    capacity: CapacityApi,
+):
+    """The default pool's Ansible provider delivers through a host, so a
+    declaration naming none is refused the ordinary way, while one naming a
+    host is admitted. Registered and reserved through the canonical clients."""
+    await capacity.register("no-host", pool_id="default", total_units=4)
+
+    assert await capacity.probe({"offering_mode": "vm", "gpu_count": 1}) is None
+    assert await capacity.reserve({"offering_mode": "vm", "gpu_count": 1}, {}) is None
+
+    await capacity.register("hosted", pool_id="default", host_id="kvm1", total_units=4)
+    reserved = await capacity.reserve({"offering_mode": "vm", "gpu_count": 1}, {})
+
+    assert reserved is not None
+    snapshot = {row["resource_id"]: row for row in await capacity.snapshot()}
+    assert snapshot["no-host"]["available_units"] == 4
+    assert snapshot["hosted"]["available_units"] == 3
+
+
+
+async def test_a_declaration_naming_no_host_reaches_the_resource_pool_projection(
+    capacity: CapacityApi, client_and_queue,
+):
+    """The projection is built from declarations, so one naming no host is
+    visible to storefronts with its declared shape, and no entry carries host
+    connection identity. Registered and read through the canonical clients."""
+    provisioning_client, _ = client_and_queue
+    # The host record carries a GPU model; the declaration naming it does not.
+    await provisioning_client.register_host(HostCreate(
+        host_id="kvm1", ssh_host="10.0.0.1", public_host="203.0.113.10",
+        ssh_user="ubuntu", ssh_key_value="/keys/id", gpu_model="H100",
+    ))
+    await capacity.register(
+        "no-host", pool_id="default",
+        capacity={"gpu_count": 2, "ram_gb": 64},
+        attributes={"gpu_model": "H200"},
+    )
+    await capacity.register(
+        "hosted", pool_id="default", host_id="kvm1", total_units=4,
+    )
+
+    projection = await capacity.site.resource_pool_projection()
+
+    resources = {
+        row["physical_resource_id"]: row
+        for pool in projection["resource_pools"]
+        for row in pool["resources"]
+    }
+    assert set(resources) == {"no-host", "hosted"}
+    assert resources["no-host"]["capacity"] == {"gpu_count": 2, "ram_gb": 64}
+    assert resources["no-host"]["attributes"] == {"gpu_model": "H200"}
+    # A value only the host record holds never fills an undeclared attribute.
+    assert resources["hosted"]["attributes"] == {}
+    for row in resources.values():
+        assert "host_id" not in row["attributes"]
+        assert "public_host" not in row["attributes"]

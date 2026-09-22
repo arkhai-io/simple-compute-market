@@ -55,8 +55,8 @@ class BareMetalOperationsService:
         *,
         job_service: "AnsibleJobService",
         job_queue_provider: Callable[[], AsyncJobQueue],
+        host_service: "HostService",
         settings: Any | None = None,
-        host_service: "HostService | None" = None,
     ) -> None:
         self._job_service = job_service
         self._job_queue_provider = job_queue_provider
@@ -178,8 +178,8 @@ class BareMetalOperationsService:
             return DEFAULT_BARE_METAL_RECLAIM_POLICY
 
     def _validate_host(self, host_id: str) -> None:
-        if self._host_service is None:
-            return
+        # Access jobs run only against a registered, enabled host record; there
+        # is no path that skips this check.
         host = self._host_service.get_host(host_id)
         if host is None:
             raise BareMetalHostValidationError(

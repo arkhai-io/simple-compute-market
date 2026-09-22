@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, TYPE_CHECKING
+from typing import Any, ClassVar, TYPE_CHECKING
 from .envelopes import VersionedEnvelope
 if TYPE_CHECKING:
     from .settlement_types import SettlementResource
@@ -47,6 +47,15 @@ class FulfillmentValidationResult:
         return not self.issues
 
 class FulfillmentProvider(ABC):
+    #: Whether this provider's delivery connects to a host, declared on the
+    #: provider's class. This base class supplies no default: site admission
+    #: and settlement scheduling refuse a capacity declaration that names no
+    #: host in a pool whose provider needs one, and a defaulted answer would
+    #: make that refusal depend on a value nobody chose. A subclass of a
+    #: provider that declares it inherits the declaration. Read it through
+    #: :func:`provider_needs_host`, which refuses a provider declaring none.
+    needs_host: ClassVar[bool]
+
     @abstractmethod
     def prepare_create(
         self,
@@ -153,8 +162,28 @@ class FulfillmentTeardownFailedError(FulfillmentError): pass
 class FulfillmentRequestInvalidError(FulfillmentError): pass
 class CredentialFetchFailedError(FulfillmentError): pass
 
+def provider_needs_host(provider: Any) -> bool:
+    """The provider's declared host need, refusing a provider that declares none.
+
+    Raises ``TypeError`` when ``needs_host`` is absent or not a ``bool``, so a
+    composition cannot register a provider whose need it would have to guess.
+    """
+    declared = getattr(type(provider), "needs_host", None)
+    if not isinstance(declared, bool):
+        raise TypeError(
+            f"fulfillment provider {type(provider).__name__} does not declare "
+            "needs_host as a bool"
+        )
+    return declared
+
 class ProviderRegistry:
-    def __init__(self, providers:dict[str,FulfillmentProvider]): self._providers=dict(providers)
+    def __init__(self, providers:dict[str,FulfillmentProvider]):
+        # Registration is where a provider joins the fleet, so a provider that
+        # does not declare whether it needs a host is refused here rather than
+        # wherever the answer is first needed.
+        for provider in providers.values():
+            provider_needs_host(provider)
+        self._providers=dict(providers)
     def require(self, provider:str)->FulfillmentProvider:
         try: return self._providers[provider]
         except KeyError: raise ProviderNotFoundError(f"No FulfillmentProvider registered for provider={provider!r}") from None

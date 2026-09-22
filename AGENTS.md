@@ -32,7 +32,8 @@ Implementation is not complete when code merely passes tests. It is complete whe
 - permanent documentation describes the current system rather than announcing completion;
 - temporary migration and changelog commentary has been removed from production code;
 - the active change records where each material decision was promoted;
-- the relevant focused, integration, packaging, and typing checks have been run or any unrun checks are disclosed.
+- the relevant focused, integration, packaging, and typing checks have been run or any unrun checks are disclosed;
+- `make check-reinit` passes.
 
 ## Documentation ownership
 
@@ -98,7 +99,7 @@ A bare documentation pointer is not a substitute for a useful local explanation.
 - Follow the dependency layers defined in `ARCHITECTURE.md` and the relevant subsystem specification.
 - `TYPE_CHECKING` imports count as architectural dependencies.
 - Internal Python dependencies are built into `.dist` and installed from wheels. Do not add editable sibling paths merely to make local development work.
-- Reinit targets must explicitly upgrade/reinstall changed internal packages from `.dist`.
+- Reinit targets must explicitly upgrade/reinstall changed internal packages from `.dist`. `make check-reinit` verifies every project's `reinit` against the internal wheels its `uv.lock` installs; a gap means a test run can silently exercise a stale copy of a package whose version did not change.
 
 ## Tests and diagnostics
 
@@ -107,6 +108,7 @@ A bare documentation pointer is not a substitute for a useful local explanation.
 - When a failure cannot be reproduced locally, report useful diagnostic steps and identify any design decision needed before changing behavior.
 - A difficult-to-test failure is evidence to consider a testability refactor, not permission to bypass the boundary.
 - Run `make check-comment-hygiene` before implementation is considered complete; see `openspec/README.md#plan-closeout-requirements`.
+- Once the tests covering a change pass, run `make check-reinit` and resolve every gap it reports before returning a fileset. Passing tests do not prove it: they may have run against wheels a missing `reinit` line left stale, and the next environment to rebuild will fail instead.
 
 ## Generated implementation artifacts
 
