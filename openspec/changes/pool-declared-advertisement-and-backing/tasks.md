@@ -134,7 +134,8 @@ Package abbreviations used below:
       existing `deliverable_modes`. Update the applied-ID expectation.
       Files: `AC/db/migrations.py`, `AC/db/database.py`,
       `AC/tests/unit/test_migrations.py`.
-- [x] 3.1b Update every in-repository pool writer to carry both tags:
+- [x] 3.1b Update every administration, seed, and definition-document pool writer,
+      and every test that writes pools through those paths, to carry both tags:
       - `kit/fulfillment/tests/integration/test_scheduler_host_requirement.py`,
         `kit/fulfillment/tests/unit/test_fulfillment.py`,
         `kit/fulfillment/tests/unit/test_fulfillment_persistence.py`,
@@ -158,6 +159,12 @@ Package abbreviations used below:
       - `docs/bare-metal-seller-quickstart.md`: the pool document example declares
         `advertisable_modes: [bare_metal]` and `capacity_backing: backed`, with one
         sentence that both are required.
+      Deliberately exempt: test fixtures that construct `ResourcePool` rows
+      directly to exercise admission, scheduling, or fulfillment — chiefly under
+      `kit/site/tests/`, plus several provisioning and domain unit tests. They
+      bypass pool administration and exercise paths that read only
+      `deliverable_modes`, so they neither need the declarations nor can they
+      reach the startup check.
       `helm/charts/provisioning/values.yaml` ships `pools: {}` and needs no change;
       its schema types `pools` as an object and does not validate entries.
 - [x] 3.2 Refuse service start on invalid declarations:
@@ -231,17 +238,17 @@ Package abbreviations used below:
       by the previous version, including the API-credits service's, and the
       resolved values are unchanged from before; covers the 3.3 fixture, clobbering
       of opaque prior values, INFO evidence, and a malformed deliverable set
-      raising `SchemaDriftError`. Placed with the services' existing migration
-      suites, which run migrations against a real database from `unit/`.
-      Files: new `PT/unit/test_pool_advertisement_backing_migration.py`,
-      `AC/tests/unit/test_migrations.py`.
+      raising `SchemaDriftError`. They run migrations against a real database, so
+      they sit under `tests/integration/` (moved there in the review round below).
+      Files: new `PT/integration/test_pool_advertisement_backing_migration.py`,
+      `domains/apicredits/service/tests/integration/test_pool_declarations_migration.py`.
 - [x] 4.6a **Startup.** The `verify-pool-declarations` step refuses a stored pool
       without declarations and names it; a changed definition document omitting them
       is refused with the pool named and no digest recorded; an unchanged document
       over valid state still starts. The API-credits bootstrap refuses a stored pool
       without declarations. Files: new
-      `PT/unit/services/test_pool_declaration_startup.py`, beside the existing
-      definition-document startup suites; `AC/tests/unit/test_migrations.py`.
+      `PT/integration/test_pool_declaration_startup.py` (moved in the review round
+      below); `domains/apicredits/service/tests/integration/test_pool_declarations_migration.py`.
 - [x] 4.7 **Integration.** A projection from the migrated producer carries both tags
       on every pool it projects, and each resolves through the shared resolver — the
       property `unbacked-listing-publication`'s skew rule depends on and cannot
@@ -268,7 +275,9 @@ Package abbreviations used below:
   path-named import errors, and `stored_declaration_problems` /
   `require_valid_stored_declarations`. `make test` now runs unit and
   integration: 192 passed, including the document-import repair path for a
-  pool an older version rewrote.
+  pool an older version rewrote. `tests/unit` and `tests/integration` carry
+  `__init__.py`, so the two directories import as distinct packages and a
+  same-named module in each cannot collide at collection.
 - **Provisioning**: migration `20260922_001_pool_advertisement_and_backing`,
   startup step `verify-pool-declarations`. `tests/unit` and
   `tests/integration`: 931 passed.
@@ -280,7 +289,7 @@ Package abbreviations used below:
   unrelated to this change (see findings).
 - **Gates**: `make check-comment-hygiene` and `make check-reinit` pass.
 - **Placement correction to 4.6/4.6a**: the API-credits migration and load
-  tests live in `domains/apicredits/service/tests/unit/test_pool_declarations_migration.py`,
+  tests live in `domains/apicredits/service/tests/integration/test_pool_declarations_migration.py`,
   not `src/tests/unit/test_migrations.py`, because no Make target runs
   `src/tests` (finding below). The migration-ID expectations in the existing file
   are updated so it stays correct when run by hand.
@@ -290,12 +299,59 @@ Package abbreviations used below:
   migrations write `backed` as a derivation, not a fallback. No default argument,
   `or` fallback, or defaulted `.get` resolves an absent declaration.
 
+### Review round
+
+A code review of the implemented change was discussed finding by finding; these
+changes followed.
+
+- **Required `policy_tags`**: `PoolCreate` and `PoolReplace` declare `policy_tags`
+  as a required field instead of defaulting it to `{}` that validation then
+  refused, so the generated schema matches the rule. PATCH keeps it optional.
+- **One owner of the declaration invariant**: `pool_declaration_problems` now
+  reports a malformed `deliverable_modes` too, so the models, the service,
+  document validation, stored-state checks, and the resolver all use the same
+  function. Previously a typed client could build a write with a malformed
+  deliverable set that only the service refused. The service no longer calls the
+  deliverable validator separately. Hold and SLA validation stay service-only.
+- **Membership only through the resolver**: `declared_advertisable_modes` is
+  private and `pool_advertises_offering_mode` is removed, because both read an
+  absent declaration as empty. `PoolDeclarations.advertises(mode)` replaces
+  them, and `capacity_backing` is typed `CapacityBacking =
+  Literal["backed", "unbacked"]`. No consumer existed outside the kit's tests.
+- **Missing-backing repair**: kept on every write path and documented in the
+  delta spec (with a scenario) and design, because no running service can hold a
+  pool without backing; restricting it to import was rejected.
+- **Rejection-path tests**: the provisioning tests that send bodies the models
+  refuse to build now assert exact status (422) and unchanged state only, with the
+  comment `TESTING.md` requires. Import omission is covered by the
+  structured-problem test on the validate endpoint and a 400. The
+  backing-immutability tests also dropped their message-text assertions.
+- **Test placement**: the three new real-database files moved from `unit/` to
+  `tests/integration/`: provisioning's migration and startup tests and the
+  API-credits migration test.
+- **Permanent Evidence citation**: `openspec/specs/resource-pool-management/spec.md`
+  cited the moved `tests/unit/test_resource_pool_service.py`; both citations now
+  name `tests/integration/`. A path correction only; promotion is still 5.7.
+- **Task wording**: 3.1b names its exempt fixtures, 5.6 matches the campaign
+  index, and 5.9 records what the run did and did not exercise.
+- **Validation after the round**: `kit/resource-pools` 196 passed, provisioning
+  931 passed, API credits `make test` 34 passed; strict OpenSpec validation and
+  the change-scoped citation check pass.
+
 ### Findings outside this change's boundary
 
 - No Make target runs `domains/apicredits/service/src/tests/` — `pytest tests` in
   that service covers only `service/tests/`, so `test_migrations.py`,
   `test_keys_service.py`, and `test_api.py` are unrun by `make test` and by the
   aggregate `test-apicredits`. Pre-existing; needs an owning change.
+- No CI workflow selects the `e2e_pool_declared_modes` marker, so the deployed
+  check that an undeclared offering mode is refused before reservation never runs
+  in the pipeline. Pre-existing; needs an owning change.
+- Existing real-database migration and startup tests in provisioning
+  (`test_pool_offering_mode_migration.py`, `test_database.py`, and similar) sit
+  under `tests/unit/` although `TESTING.md` places a test that reaches a real
+  database at integration. This change moved only its own files. Pre-existing;
+  needs an owning change.
 - `e2e-tests/tests/unit/test_hosted_public_boundary.py::test_buyer_deployment_mounts_separate_profile_state_and_credential`
   fails asserting `XDG_DATA_HOME` in `docker-compose.yml`, a file this change does
   not touch. Pre-existing.
@@ -341,12 +397,12 @@ Package abbreviations used below:
 - [ ] 5.5 **Roadmap currency.** Remove this change's row from Goal 7's gap table in
       `docs/development/ROADMAP.md` and absorb the result into that goal's
       current-state prose.
-- [x] 5.6 **Campaign index currency.** Row updated to implemented-in-review,
-      and `unbacked-listing-publication`'s row records the resolver handoff; the
-      dependency graph is unchanged. Revisit at archival. Update this change's row and Goal 7's
-      dependency graph in `openspec/changes/README.md`, including that
-      `unbacked-listing-publication` is no longer blocked on this change and now
-      owns wiring the shared resolver into storefront ingestion.
+- [x] 5.6 **Campaign index currency.** In `openspec/changes/README.md` this
+      change's row reads implemented-in-review, and `unbacked-listing-publication`'s
+      row records that it wires the shared resolver into storefront ingestion. That
+      row still reads blocked on this change, which stays true until this change
+      is complete; the dependency graph is unchanged. Revisit both rows at
+      completion.
 - [ ] 5.7 **Promotion.** Promote `capacity-backed` and `unbacked` to
       `docs/development/ARCHITECTURE.md`'s Terms table now that a pool can declare
       backing and the concept is true, and complete the design-promotion record
@@ -359,7 +415,18 @@ Package abbreviations used below:
       target is a *tombstone*: a tombstoned file still exists on disk while
       its content is gone, so a plain existence test cannot fail on a
       rename-to-tombstone.
-- [ ] 5.9 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and
+- [x] 5.9 **End-to-end pipeline.** GitHub Actions `e2e` run `96787131769`,
+      commit `5d140d6` on `feat/pool-declared-advertisement-and-backing`: 113
+      passed, 3 skipped, 264 deselected. The compose logs show provisioning
+      applying `20260922_001_pool_advertisement_and_backing` and logging
+      "Resource-pool declaration check passed", API credits applying
+      `20260922_004_pool_advertisement_and_backing`, and six pools created through
+      `register_e2e_pool` (`POST /api/v1/pools/` → 201) with no pool write
+      refused. The run selects scenarios by marker, and `e2e_pool_declared_modes`
+      is not among them, so `test_pool_declared_offering_modes.py` did not run
+      (finding below). This run predates the review round below; its changes are
+      covered by the in-process suites and should be carried by the next pipeline
+      run before completion. Confirm the end-to-end pipeline passes and
       record the evidence: the run, its result, and the scenarios that
       exercise this change's behaviour. Green unit and integration suites do
       not substitute -- this is the tier that catches a wire contract whose
@@ -381,6 +448,9 @@ Package abbreviations used below:
 | Both declarations are required on every write; nothing is defaulted, preserved, or merged | `openspec/specs/resource-pool-management/spec.md` |
 | Seeded or stored pools lacking valid declarations stop service load | `openspec/specs/resource-pool-management/spec.md` |
 | Readers of projected declarations resolve them through one shared resolver | `openspec/specs/resource-pool-management/spec.md` |
+| Advertisement membership is offered only on resolved declarations, never on raw tags | `openspec/specs/resource-pool-management/spec.md` |
+| Create and replace require `policy_tags` in their schema; one validation owns delivery shape and both declarations | `openspec/specs/resource-pool-management/spec.md` |
+| A pool with no stored backing may be given one; it arises only in startup repair | `openspec/specs/resource-pool-management/spec.md` |
 | Backing is fixed at pool creation; moving between backed and unbacked supply is a second pool with migrated resources | `openspec/specs/resource-pool-management/spec.md` |
 | A producer emitting these tags emits them on every pool it projects | `openspec/specs/resource-pool-management/spec.md` |
 | Existing pools are migrated to an advertisable set equal to their proved deliverable set and `backed` backing, overwriting any prior value | `openspec/specs/resource-pool-management/spec.md` |

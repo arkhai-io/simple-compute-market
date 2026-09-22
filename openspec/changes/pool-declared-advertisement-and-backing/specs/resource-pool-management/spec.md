@@ -5,10 +5,11 @@
 Each Resource Pool MUST declare the set of offering modes its listings may
 advertise under the domain-neutral `advertisable_modes` policy tag. The shared
 resource-pool capability MUST validate this declaration as a JSON-compatible set
-of unique, non-empty strings and expose typed resolution and membership behavior
-without defining which names are meaningful to a domain. An empty declaration
-authorizes no mode, and neither an empty nor an absent declaration MAY be widened
-by a default.
+of unique, non-empty strings without defining which names are meaningful to a
+domain. An empty declaration authorizes no mode, and neither an empty nor an
+absent declaration MAY be widened by a default. Membership MUST be offered only on
+declarations resolved through the shared resolver, never on raw policy tags,
+because a raw read would treat an absent declaration as an empty one.
 
 Advertisement authorization is a separate claim from delivery authorization. A
 pool MUST NOT be required to prove it can deliver a mode in order to advertise
@@ -27,7 +28,7 @@ deliverable set.
 
 - **GIVEN** a Resource Pool declaring `capacity_backing: unbacked` and an empty deliverable set
 - **WHEN** an operator declares `advertisable_modes: [vm]`
-- **THEN** typed resolution returns exactly that mode
+- **THEN** typed resolution returns exactly that mode and the resolved declaration advertises `vm`
 - **AND** the declaration is not narrowed by the absence of a deliverable proof
 
 #### Scenario: A backed pool advertises beyond what it delivers
@@ -75,11 +76,23 @@ intended backing with its capacity resources migrated across, because backing is
 property every listing derived from the pool inherits, and changing it in place
 would silently reinterpret listings already published.
 
+A stored pool carrying no backing value MAY be given one; supplying a value
+where none is stored is not a change to it. That state arises only from a version
+predating the declaration rewriting a pool's tags, and a service refuses to start
+while any stored pool lacks valid declarations, so in practice the value is
+supplied by a changed definition document imported before that check.
+
 #### Scenario: Backing is changed on an existing pool
 
 - **WHEN** a replace, patch, or imported document entry supplies a `capacity_backing` value differing from the pool's own
 - **THEN** the request is rejected and the pool is unchanged
 - **AND** the supported path is a second pool declaring the intended backing with capacity resources migrated across
+
+#### Scenario: A pool without stored backing is repaired
+
+- **GIVEN** a stored pool whose policy tags carry no `capacity_backing`, written by a version predating the declaration
+- **WHEN** a changed definition document declaring its backing is imported at startup
+- **THEN** the pool records that backing and the startup declaration check passes
 
 #### Scenario: An unbacked pool declares a deliverable mode
 
@@ -95,17 +108,22 @@ would silently reinterpret listings already published.
 
 Every pool write MUST carry both `advertisable_modes` and `capacity_backing`
 explicitly: create, replace, patch whenever it supplies policy tags, and every
-entry of an authoritative definition document, validated or imported. A write
+entry of an authoritative definition document, validated or imported. The create
+and replace models MUST declare policy tags as a required field rather than
+defaulting it to an empty map that validation then refuses, so the published
+schema states that it cannot be omitted. A write
 omitting either MUST be rejected with a validation problem naming the missing tag.
 The service MUST NOT default, preserve, or merge either tag from any other source;
 the policy tags a write supplies are the policy tags stored. The replacement rule
 that resets omitted optional policy tags does not reach these two tags, because
 they are not optional.
 
-Declaration shape, presence, the backed subset rule, and the unbacked
-empty-deliverable rule MUST be applied by one shared validation, identically for
-the typed administration models and for authoritative document validation and
-import. Backing immutability is evaluated against stored state and MUST be reported
+The shape of `deliverable_modes`, the presence and shape of both new
+declarations, the backed subset rule, and the unbacked empty-deliverable rule
+MUST be applied by one shared validation, identically for the typed
+administration models, the service, and authoritative document validation and
+import, so a typed client cannot construct a write the service would refuse for
+its declarations. Backing immutability is evaluated against stored state and MUST be reported
 as a structured problem on the validate-only path as well as refusing an import.
 
 A service that seeds Resource Pools at startup, whether from a definition document

@@ -11,7 +11,7 @@ from .hints import validate_pool_declarations
 
 
 def _require_pool_declarations(policy_tags: dict[str, Any]) -> None:
-    """Refuse a pool write whose advertisement or backing declarations are invalid.
+    """Refuse a pool write whose mode or backing declarations are invalid.
 
     Both declarations are required rather than defaulted: a default backing
     would assert whether anything stands behind a listing, and a default
@@ -31,8 +31,10 @@ class PoolCreate(BaseModel):
     provider: str = Field(description="Fulfillment provider kind, e.g. 'ansible'.")
     enabled: bool = True
     policy_tags: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Free-form tags for policy-driven pool lookup.",
+        description=(
+            "Pool policy tags. Must declare advertisable_modes and "
+            "capacity_backing; other tags are free-form."
+        ),
     )
     provider_config: dict[str, Any] = Field(
         default_factory=dict,
@@ -51,7 +53,7 @@ class PoolReplace(BaseModel):
     label: str
     provider: str
     enabled: bool
-    policy_tags: dict[str, Any] = Field(default_factory=dict)
+    policy_tags: dict[str, Any]
     provider_config: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")

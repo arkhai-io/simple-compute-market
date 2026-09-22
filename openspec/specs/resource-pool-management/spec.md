@@ -251,9 +251,9 @@ A Resource Pool management surface that accepts `max_reservation_hold_seconds` M
 
 ## Evidence
 
-- Domain-neutral hint keys, typed deliverable-mode resolution and membership, and write-side policy validation on bulk and individual administration paths: `kit/resource-pools/tests/unit/test_hints.py`, `kit/resource-pools/tests/unit/test_resource_pool_service.py`.
+- Domain-neutral hint keys, typed deliverable-mode resolution and membership, and write-side policy validation on bulk and individual administration paths: `kit/resource-pools/tests/unit/test_hints.py`, `kit/resource-pools/tests/integration/test_resource_pool_service.py`.
 - Existing-pool derivation, default-pool inclusion, idempotency, narrowing, drift rejection, and INFO evidence: `provisioning/compute/service/tests/unit/test_pool_offering_mode_migration.py`.
-- Pool persistence, registered requirement-delegate validation, strict import, dry-run, idempotency, lifecycle, and provider replacement: `kit/resource-pools/tests/unit/test_resource_pool_service.py`.
+- Pool persistence, registered requirement-delegate validation, strict import, dry-run, idempotency, lifecycle, and provider replacement: `kit/resource-pools/tests/integration/test_resource_pool_service.py`.
 - Typed administrative API, default-pool invariant, canonical round trip, and host assignment: `provisioning/compute/service/tests/integration/test_pools_api.py`.
 - Migration ordering, legacy host backfill, and schema-drift rejection: `provisioning/compute/service/tests/unit/test_database.py`.
 

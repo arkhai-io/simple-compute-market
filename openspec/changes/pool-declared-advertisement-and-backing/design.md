@@ -172,7 +172,14 @@ resources migrated across.
 With both tags required on every write, immutability is a single check: a replace,
 patch, or document entry for an existing pool whose `capacity_backing` differs from
 the stored value is refused and the pool is unchanged. There is no omission case to
-reason about. For document import the check compares against stored state, so it is
+reason about.
+
+A stored pool with no backing value may be given one, on every write path. That
+state is reachable only through a rolled-back older version rewriting a pool's
+tags, and the service then refuses to start, so the API is unavailable and the
+repair arrives through a changed definition document. Restricting the exception to
+the import path was considered and rejected: it would thread a mode through the
+service to guard a state no running service can hold. For document import the check compares against stored state, so it is
 evaluated while reconciliation is planned and reported as a structured problem on
 the validate-only path as well as refusing the import.
 
@@ -192,10 +199,14 @@ The same argument applies to a pool's provider, which
 
 ### Validation is shared by the API models and document import
 
-Declaration shape, presence, the backed subset rule, and the unbacked
-empty-deliverable rule are one shared validation in `market_resource_pools`, applied
-identically by the typed pool models used by create, replace, and patch and by
-authoritative document validation and import. This follows the existing rule that
+The shape of `deliverable_modes`, the presence and shape of both new
+declarations, the backed subset rule, and the unbacked empty-deliverable rule are
+one shared validation in `market_resource_pools` (`pool_declaration_problems`),
+applied identically by the typed pool models used by create, replace, and patch,
+by the service, and by authoritative document validation and import. Create and
+replace declare `policy_tags` as a required field rather than defaulting it to an
+empty map that validation then refuses, so the published schema matches the
+rule. This follows the existing rule that
 declaration semantics do not depend on which administration surface an operator
 chooses, and it keeps document validation free of database reads for everything
 except backing immutability, which by definition compares against stored state.
@@ -277,6 +288,13 @@ valid declaration, so it exposes one domain-neutral resolver in
 - an absent tag is reported distinctly from a malformed one, so a consumer can apply
   its producer-version rule to "no pool carries it" while failing a single omitting
   pool closed.
+
+Advertisement membership is a method on the resolved `PoolDeclarations`, and
+backing is typed as `Literal["backed", "unbacked"]` there. No public function reads
+`advertisable_modes` from raw tags: such a reader would treat an absent
+declaration as empty, which is precisely the distinction a consumer of projected
+declarations must keep, and the easiest-looking API should not be the one that
+erases it.
 
 `resource-pool-management` requires any reader of projected declarations to resolve
 them through this function, so the write side and every read side agree on what a

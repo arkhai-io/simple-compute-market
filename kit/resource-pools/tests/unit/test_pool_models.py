@@ -35,6 +35,11 @@ _INVALID = [
         "deliverable_modes",
         id="unbacked-delivers",
     ),
+    pytest.param(
+        {**_VALID, "deliverable_modes": "vm"},
+        "deliverable_modes",
+        id="malformed-delivery",
+    ),
 ]
 
 
@@ -62,14 +67,19 @@ def test_invalid_declarations_refuse_construction(build, tags, named):
         build(tags)
 
 
-def test_create_omitting_policy_tags_is_not_defaulted_into_validity():
-    with pytest.raises(ValidationError, match="capacity_backing"):
+def test_create_and_replace_require_policy_tags_in_their_schema():
+    # Required in the model, not defaulted and then refused, so the generated
+    # schema tells a client the field cannot be omitted.
+    assert "policy_tags" in PoolCreate.model_json_schema()["required"]
+    assert "policy_tags" in PoolReplace.model_json_schema()["required"]
+    with pytest.raises(ValidationError, match="policy_tags"):
         PoolCreate(id="p", label="P", provider="x")
-
-
-def test_replace_omitting_policy_tags_is_not_defaulted_into_validity():
-    with pytest.raises(ValidationError, match="capacity_backing"):
+    with pytest.raises(ValidationError, match="policy_tags"):
         PoolReplace(label="P", provider="x", enabled=True)
+
+
+def test_patch_keeps_policy_tags_optional():
+    assert "policy_tags" not in PoolUpdate.model_json_schema().get("required", [])
 
 
 def test_patch_leaving_policy_tags_alone_needs_no_declarations():

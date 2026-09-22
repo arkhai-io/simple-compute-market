@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+import market_resource_pools
 from market_resource_pools.hints import (
     ADVERTISABLE_EXCEEDS_DELIVERABLE,
     ADVERTISABLE_MODES_POLICY_TAG,
@@ -24,11 +25,9 @@ from market_resource_pools.hints import (
     PoolDeclarationError,
     PoolDeclarations,
     capped_hold_seconds,
-    declared_advertisable_modes,
     declared_deliverable_modes,
     listing_cardinality_mode_source,
     max_reservation_hold_seconds,
-    pool_advertises_offering_mode,
     pool_declaration_problems,
     pool_delivers_offering_mode,
     raw_listing_cardinality_mode,
@@ -339,23 +338,33 @@ def _codes(tags):
 
 
 class TestAdvertisableModes:
-    def test_declared_set_resolves_without_interpreting_names(self):
-        tags = {ADVERTISABLE_MODES_POLICY_TAG: ["vm", "future.domain.v2"]}
+    def test_membership_is_offered_on_resolved_declarations_only(self):
+        declarations = resolve_pool_declarations(_tags(**{
+            DELIVERABLE_MODES_POLICY_TAG: ["vm", "future.domain.v2"],
+            ADVERTISABLE_MODES_POLICY_TAG: ["vm", "future.domain.v2"],
+        }))
 
-        assert declared_advertisable_modes(tags) == frozenset({"vm", "future.domain.v2"})
-        assert pool_advertises_offering_mode(tags, "vm") is True
-        assert pool_advertises_offering_mode(tags, "bare_metal") is False
+        assert declarations.advertisable_modes == frozenset({"vm", "future.domain.v2"})
+        assert declarations.advertises("vm") is True
+        assert declarations.advertises("bare_metal") is False
 
-    def test_empty_and_absent_advertise_nothing(self):
-        assert declared_advertisable_modes({}) == frozenset()
-        assert declared_advertisable_modes({ADVERTISABLE_MODES_POLICY_TAG: []}) == frozenset()
-        assert pool_advertises_offering_mode({}, "vm") is False
+    def test_explicit_empty_advertises_nothing(self):
+        declarations = resolve_pool_declarations(
+            _tags(**{ADVERTISABLE_MODES_POLICY_TAG: []}),
+        )
+
+        assert declarations.advertisable_modes == frozenset()
+        assert declarations.advertises("vm") is False
 
     @pytest.mark.parametrize("mode", ["", "  ", None, 3])
     def test_blank_or_non_string_mode_is_never_advertised(self, mode):
-        assert pool_advertises_offering_mode(
-            {ADVERTISABLE_MODES_POLICY_TAG: ["vm"]}, mode,
-        ) is False
+        assert resolve_pool_declarations(_tags()).advertises(mode) is False
+
+    def test_raw_membership_is_not_public(self):
+        # Reading raw tags would treat an absent declaration as empty, the
+        # distinction a reader of projected declarations must keep.
+        assert not hasattr(market_resource_pools, "declared_advertisable_modes")
+        assert not hasattr(market_resource_pools, "pool_advertises_offering_mode")
 
     @pytest.mark.parametrize(
         "raw",
@@ -364,9 +373,9 @@ class TestAdvertisableModes:
     def test_malformed_declaration_is_rejected(self, raw):
         tags = _tags(**{ADVERTISABLE_MODES_POLICY_TAG: raw})
 
-        with pytest.raises(ValueError, match=ADVERTISABLE_MODES_POLICY_TAG):
-            declared_advertisable_modes(tags)
         assert (ADVERTISABLE_MODES_POLICY_TAG, INVALID_ADVERTISABLE_MODES) in _codes(tags)
+        with pytest.raises(PoolDeclarationError, match=ADVERTISABLE_MODES_POLICY_TAG):
+            resolve_pool_declarations(tags)
 
     def test_advertisement_is_independent_of_deliverable_shape_rule(self):
         # The shared shape rule is one helper; a malformed advertisable set
@@ -469,11 +478,13 @@ class TestCrossTagRules:
 
         assert _codes(tags) == {(DELIVERABLE_MODES_POLICY_TAG, UNBACKED_POOL_DELIVERS)}
 
-    def test_malformed_delivery_suppresses_cross_tag_rules(self):
-        # Reported once by the deliverable validator, not again here.
+    def test_malformed_delivery_is_reported_instead_of_cross_tag_rules(self):
+        # One owner of the whole invariant: the parse failure is the problem,
+        # and the cross-tag rules are not judged against a set that did not
+        # parse.
         tags = _tags(**{DELIVERABLE_MODES_POLICY_TAG: "vm"})
 
-        assert pool_declaration_problems(tags) == ()
+        assert _codes(tags) == {(DELIVERABLE_MODES_POLICY_TAG, INVALID_DELIVERABLE_MODES)}
         assert validate_deliverable_modes(tags)
 
     def test_malformed_backing_suppresses_cross_tag_rules(self):

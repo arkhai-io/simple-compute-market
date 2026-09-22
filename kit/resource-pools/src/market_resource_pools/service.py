@@ -10,13 +10,10 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .hints import (
     CAPACITY_BACKING_POLICY_TAG,
-    DELIVERABLE_MODES_POLICY_TAG,
-    INVALID_DELIVERABLE_MODES,
     MAX_RESERVATION_HOLD_SECONDS_POLICY_TAG,
     SLA_POLICY_TAG,
     PoolDeclarationProblem,
     pool_declaration_problems,
-    validate_deliverable_modes,
     validate_hold_preference,
     validate_pool_declarations,
     validate_sla_preference,
@@ -130,8 +127,7 @@ class ResourcePoolService:
         administration surface an operator chooses.
         """
         problems = (
-            validate_deliverable_modes(policy_tags)
-            + validate_pool_declarations(policy_tags)
+            validate_pool_declarations(policy_tags)
             + validate_hold_preference(policy_tags)
             + validate_sla_preference(policy_tags)
         )
@@ -171,15 +167,10 @@ class ResourcePoolService:
         """
         found: list[tuple[str, PoolDeclarationProblem]] = []
         for pool in db.query(ResourcePool).order_by(ResourcePool.id).all():
-            tags = pool.policy_tags or {}
-            for message in validate_deliverable_modes(tags):
-                found.append((
-                    pool.id,
-                    PoolDeclarationProblem(
-                        DELIVERABLE_MODES_POLICY_TAG, INVALID_DELIVERABLE_MODES, message
-                    ),
-                ))
-            found.extend((pool.id, problem) for problem in pool_declaration_problems(tags))
+            found.extend(
+                (pool.id, problem)
+                for problem in pool_declaration_problems(pool.policy_tags or {})
+            )
         return found
 
     def require_valid_stored_declarations(self) -> None:
@@ -494,15 +485,6 @@ class ResourcePoolService:
                 )
                 entry_valid = False
             else:
-                for mode_problem in validate_deliverable_modes(tags):
-                    problems.append(
-                        PoolValidationProblem(
-                            path=f"{base}.policy_tags.{DELIVERABLE_MODES_POLICY_TAG}",
-                            code="invalid_deliverable_modes",
-                            message=mode_problem,
-                        )
-                    )
-                    entry_valid = False
                 for declaration_problem in pool_declaration_problems(tags):
                     problems.append(
                         PoolValidationProblem(
