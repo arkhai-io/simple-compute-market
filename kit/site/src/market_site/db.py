@@ -64,10 +64,11 @@ HELD_RESERVATION_STATES = (
 
 
 class CapacityBucket(Base):
-    """Provisioning-private host-level capacity accounting boundary.
+    """Provisioning-private per-declaration capacity accounting boundary.
 
     A bucket carries the currently reservable multidimensional balance for one
-    backing domain resource.  Its opaque identity and debit mappings never
+    capacity declaration, keyed by its backing resource, whether or not that
+    declaration names a host.  Its opaque identity and debit mappings never
     cross the storefront reservation contract.
     """
 

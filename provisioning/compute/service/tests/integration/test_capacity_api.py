@@ -744,9 +744,10 @@ async def test_a_declaration_naming_no_host_reaches_the_resource_pool_projection
     visible to storefronts with its declared shape, and no entry carries host
     connection identity. Registered and read through the canonical clients."""
     provisioning_client, _ = client_and_queue
+    # The host record carries a GPU model; the declaration naming it does not.
     await provisioning_client.register_host(HostCreate(
         host_id="kvm1", ssh_host="10.0.0.1", public_host="203.0.113.10",
-        ssh_user="ubuntu", ssh_key_value="/keys/id",
+        ssh_user="ubuntu", ssh_key_value="/keys/id", gpu_model="H100",
     ))
     await capacity.register(
         "no-host", pool_id="default",
@@ -767,6 +768,8 @@ async def test_a_declaration_naming_no_host_reaches_the_resource_pool_projection
     assert set(resources) == {"no-host", "hosted"}
     assert resources["no-host"]["capacity"] == {"gpu_count": 2, "ram_gb": 64}
     assert resources["no-host"]["attributes"] == {"gpu_model": "H200"}
+    # A value only the host record holds never fills an undeclared attribute.
+    assert resources["hosted"]["attributes"] == {}
     for row in resources.values():
         assert "host_id" not in row["attributes"]
         assert "public_host" not in row["attributes"]

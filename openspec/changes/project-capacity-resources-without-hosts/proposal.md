@@ -79,6 +79,9 @@ listings that goal serves have no host behind them by construction.
   composition-supplied host requirement.
 - `fulfillment`: providers declare whether delivery needs a host; scheduling
   rechecks it before any placement effect.
+- `storefront-publication`: reservation admission is described as
+  resource-granular, applying each pool provider's host requirement, rather
+  than host-granular.
 - `physical-provisioning`: execution inventory comes only from the registered
   host record; the tenant address falls back to the record's connection
   address; the bare-metal publication view is built from its declaration.

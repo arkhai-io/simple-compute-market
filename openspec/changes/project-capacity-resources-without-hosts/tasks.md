@@ -204,8 +204,10 @@ order: refusal landed before visibility.
         registry and is never reconciled against its file; this change
         documented that rule, and that change owns replacing it. The roadmap's
         Goal 1 gap table maps to it.
-      - The dependency graphs are unchanged until archival. No change
-        directory was created, renamed, or removed.
+      - The dependency graphs are unchanged until archival. One change
+        directory was created, `bring-host-inventory-under-definition-documents`,
+        and it is linked from the index and the roadmap. None was renamed or
+        removed.
 - [x] 6.7 **Documentation citations.**
       `make check-doc-citations CHANGE=project-capacity-resources-without-hosts`
       passes.
@@ -231,6 +233,32 @@ order: refusal landed before visibility.
       `openspec/specs/{site-capacity,fulfillment,physical-provisioning}/spec.md`
       verbatim, each requirement exactly once. All three specs validate
       strictly. The record below lists every destination.
+      - Promotion review found three passages the change had made stale:
+        - `site-capacity`'s projection-metadata evidence still credited host
+          records with attributes;
+        - its site-identity boundary still called a `CapacityBucket` host-level;
+        - `storefront-publication` still called admission host-granular.
+      - Each was corrected in the permanent spec and mirrored verbatim into this
+        change's delta as a MODIFIED requirement. `site-capacity` gains
+        "Separate capacity and deal event semantics" and "Site identity
+        ownership boundary"; `storefront-publication` gains "Storefronts cache
+        independent site projections".
+      - The `CapacityBucket` docstring in `kit/site/src/market_site/db.py` is
+        corrected to match.
+      - `test_capacity_api.py` now asserts that a GPU model held only on the
+        host record never fills an undeclared attribute, which is the evidence
+        the corrected sentence cites.
+      - **Cross-change rebase.** `remove-relative-uv-sources` carried a MODIFIED
+        block for "Bare-metal inventory binds an existing provider pool",
+        written against the pre-promotion text. It differed only in line
+        wrapping. It is rebased onto the promoted requirement, same words and
+        its wrapping, so it no longer drops the new scenario, and it
+        validates again.
+      - **`openspec validate --all --strict`:** 73 passed, 19 failed of 92.
+        - 18 of the failures fail identically on the tree before this change.
+        - The 19th is `bring-host-inventory-under-definition-documents`, which
+          has no deltas yet, like the other design-phase changes.
+        - This change and all five specs it touches validate.
 
 **Validation:**
 
@@ -244,8 +272,10 @@ order: refusal landed before visibility.
 | Provisioning integration | 245 passed |
 | `test-bare-metal` | domain 75, storefront 126, buyer 11, adapter 2 |
 
-Root `make test` passed before the 5R.6 and 5R.7 target changes. A rerun
-including `test-bare-metal` was in progress at closeout. Typing is unrun: no
+Root `make test` passed before the 5R.6–5R.9 target changes. **Archival gate:**
+record here the result of a root `make test` on the final tree. That run
+includes `test-bare-metal`, `test-compute-provisioning`, and `test-vms-domain`,
+along with the `reinit` targets added in 5R.8 and 5R.9. Typing is unrun: no
 touched package configures a type checker.
 
 ## Design promotion record
