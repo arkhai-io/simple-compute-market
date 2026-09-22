@@ -57,6 +57,7 @@ jobs:
           - { name: kit-resource-pools,     dir: kit/resource-pools }
           - { name: kit-fulfillment,        dir: kit/fulfillment, predist: true }
           - { name: compute-provisioning,   dir: provisioning/compute, predist: true }
+          - { name: vms-domain,             dir: domains/vms/domain, predist: true }
           - { name: bare-metal,            dir: domains/bare_metal, predist: true }
           - { name: bare-metal-storefront, dir: domains/bare_metal/storefront, predist: true, requires_hosted: true }
           - { name: bare-metal-buyer,      dir: domains/bare_metal/buyer, predist: true, requires_hosted: true }

@@ -3,7 +3,7 @@
 	dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront \
 	dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer \
 	dist-buyer test-provisioning-iac test-provisioning-adapter test-storefront \
-	test-bare-metal test-vms-buyer test-apicredits test-apicredits-middleware
+	test-bare-metal test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware
 
 DIST_DIR ?= $(abspath ../.dist)
 
@@ -126,6 +126,9 @@ test-bare-metal: ## Bare-metal domain, storefront, buyer, and provisioning adapt
 	cd bare_metal/storefront && $(MAKE) test
 	cd bare_metal/buyer && $(MAKE) test
 	cd bare_metal/provisioning/adapter && $(MAKE) test
+
+test-vms-domain: ## VM market-domain package tests
+	cd vms/domain && $(MAKE) test
 
 test-vms-buyer: ## Buyer CLI tests
 	cd vms/buyer && $(MAKE) test

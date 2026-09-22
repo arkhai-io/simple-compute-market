@@ -140,6 +140,32 @@ order: refusal landed before visibility.
         the new one and passed (126). All 15 recipes parse under `make -n`, and
         no lockfile changed.
 
+- [x] 5R.9 Make the 5R.8 audit a standing check.
+      - **The check.** `scripts/check_reinit.py`, run by `make check-reinit`.
+        For every project with a `tests` directory and a `uv.lock`, it requires
+        `reinit`, or a recipe `reinit` depends on, to reinstall each internal
+        package the lock resolves from a local wheel directory. It also
+        requires a `reinit` target wherever such packages are installed.
+        `scripts/tests/test_check_reinit.py` covers its rules and asserts the
+        repository has no gaps.
+      - **Newly covered.**
+        - `domains/bare_metal`, `kit/capacity-publication`, and `kit/policy`
+          gained `reinit` targets that `test` runs first.
+        - `provisioning/compute` gained a Makefile, is in root `make test` as
+          `test-compute-provisioning`, and passes (131).
+        - `domains/vms/domain`'s tests ran nowhere. It gained a Makefile, is in
+          root `make test` via `test-vms-domain`, is in CI, and passes (12).
+      - **A pre-existing defect.** In `provisioning/compute`,
+        `test_every_bound_mutation_contract_is_reachable[provisioning_relay_create]`
+        derived its sample path without stripping the pattern's `$` anchor. It
+        is fixed.
+      - **Guidance.** `AGENTS.md` and `docs/prompts/implementation.md` require
+        `make check-reinit` once tests pass, before a fileset is returned.
+      - **Unrun here.** `kit/policy`'s `reinit` could not run in the
+        implementation sandbox: `--upgrade-package` re-resolves its lock, and
+        its `training` extra needs `torch` from an unreachable index, as with
+        the VM storefront. Its lock is unchanged.
+
 ## 6. Closeout
 
 - [x] 6.1 **Comment hygiene.** `make check-comment-hygiene` passes. Touched
