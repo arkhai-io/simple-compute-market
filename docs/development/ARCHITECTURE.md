@@ -115,7 +115,7 @@ kit/storefront
 
 Dependencies never point upward. Imports guarded by `TYPE_CHECKING` still count as architectural dependencies. Kit packages never import deployed services or domain adapters.
 
-One edge does not yet match this hierarchy: the site ledger in `kit/site` reads Resource Pool rows through `kit/resource-pools` for admission, registration, and the host requirement. Its removal, through a pool-facts port injected by composition roots and a boundary test enforcing the rule, is tracked in the [change index](../../openspec/changes/README.md). No new site read of pool state should be added until then.
+One edge does not match this hierarchy: the site ledger in `kit/site` reads Resource Pool rows through `kit/resource-pools` for admission, registration, and the host requirement. The exception is tracked in the [change index](../../openspec/changes/README.md). No new site read of pool state should be added while it stands.
 
 The settlement-runtime distribution is
 `arkhai-kit-settlement-runtime`, imported as

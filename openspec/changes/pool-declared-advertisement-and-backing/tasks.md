@@ -158,10 +158,13 @@ since no running service can hold such a pool. Migrations stay service-local.
       - `unbacked-listing-publication` is unblocked and records that it wires the
         shared resolver.
       - The POOLS campaign gains a row for `inject-site-pool-authority`, in design
-        phase. One change directory was created and linked from the index and
-        `ARCHITECTURE.md`'s kit layers; none was renamed or removed.
-      - The dependency graphs are unchanged until archival.
-- [x] 5.7 **Promotion.** The delta's four requirements were synced verbatim into
+        phase. One change directory was created and linked from the index; none
+        was renamed or removed.
+      - Goal 7's dependency graph marks this change `(complete)`; its edge into
+        `unbacked-listing-publication` becomes an archived predecessor at
+        archival. The POOLS graph covers only POOLS-7 and POOLS-8 and is
+        unchanged.
+- [x] 5.7 **Promotion.** The delta's five requirements were synced verbatim into
       `openspec/specs/resource-pool-management/spec.md`, each once, and its Evidence
       section lists the new and moved suites. `capacity-backed` and `unbacked` are
       in `ARCHITECTURE.md`'s Terms table at pool level; listing-level statements
@@ -176,7 +179,7 @@ since no running service can hold such a pool. Migrations stay service-local.
       change and for `inject-site-pool-authority`. The unscoped check reports the
       same 17 pre-existing failures as the original tree, none in files this change
       touches.
-- [x] 5.9 **End-to-end pipeline.**
+- [ ] 5.9 **End-to-end pipeline.**
       - **Implementation run.** GitHub Actions `e2e` run `96787131769`, commit
         `5d140d6`: 113 passed, 3 skipped, 264 deselected. Provisioning applied
         `20260922_001_pool_advertisement_and_backing` and passed the
@@ -184,7 +187,8 @@ since no running service can hold such a pool. Migrations stay service-local.
         `20260922_004_pool_advertisement_and_backing`; six pools were created
         through `register_e2e_pool` with no pool write refused.
       - **Post-review run.** The maintainer reports the pipeline passing on the
-        tree carrying the review round.
+        tree carrying the review round. Its run ID, commit, and result counts are
+        still to be recorded here before archival.
       - **Not exercised.** `test_pool_declared_offering_modes.py` is deselected by
         marker in both runs; that refusal is proven in-process.
 
@@ -221,5 +225,6 @@ configures a type checker.
 | Existing pools are migrated to advertisable = proved deliverable set and `backed`, overwriting prior values | `openspec/specs/resource-pool-management/spec.md#requirement-complete-emission-and-upgrade-derivation` |
 | Suite ownership for declarations, resolver, migration, and startup refusal | `docs/development/TESTING.md#pool-offering-mode-enforcement` |
 | Migrations stay service-local, using kit vocabulary | Recorded in `design.md` (temporary; implementation guidance only) |
-| The site ledger's direct pool reads | Handed to `inject-site-pool-authority` (temporary; not promoted) |
+| The site ledger's direct pool reads violate the kit layers (the current exception) | `docs/development/ARCHITECTURE.md#kit-layers` |
+| Removing that edge through an injected pool-facts port and a boundary test | Handed to `inject-site-pool-authority` (temporary; not promoted) |
 | Storefront ingestion wires the resolver | Handed to `unbacked-listing-publication` task 4.1b (temporary; not promoted) |

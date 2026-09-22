@@ -168,7 +168,7 @@ held is now owned by `repair-storefront-alkahest-configuration` above.
 ```text
 unify-host-identity (archived) ──► capacity-resource-administration (archived) ──► project-capacity-resources-without-hosts (archived) ──┐
 settle-listing-vocabulary (archived) ─────────────────────────────────────┤
-pool-declared-advertisement-and-backing ────────────────────────────────────────┴──► unbacked-listing-publication ──► publish-indicative-listing-rates
+pool-declared-advertisement-and-backing (complete) ─────────────────────────────┴──► unbacked-listing-publication ──► publish-indicative-listing-rates
 ```
 
 `capacity-resource-administration`, a Goal 7 prerequisite archived 2026-09-21,
