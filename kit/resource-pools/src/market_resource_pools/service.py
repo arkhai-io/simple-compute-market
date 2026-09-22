@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping, Optional
 
 import yaml
 from sqlalchemy.orm import Session, sessionmaker
 
 from .hints import (
-    DELIVERABLE_MODES_POLICY_TAG,
+    CAPACITY_BACKING_POLICY_TAG,
     MAX_RESERVATION_HOLD_SECONDS_POLICY_TAG,
     SLA_POLICY_TAG,
-    validate_deliverable_modes,
+    PoolDeclarationProblem,
+    pool_declaration_problems,
     validate_hold_preference,
+    validate_pool_declarations,
     validate_sla_preference,
 )
 from .pool_config_handler import PoolConfigHandler
@@ -48,6 +50,9 @@ class PoolDefinition:
     enabled: bool
     policy_tags: dict[str, Any]
     provider_config: dict[str, Any]
+    # Position of the entry in the submitted document, so a problem found
+    # against stored state can name the entry the operator must edit.
+    source_index: int | None = field(default=None, compare=False)
 
 
 @dataclass(frozen=True)
@@ -122,12 +127,69 @@ class ResourcePoolService:
         administration surface an operator chooses.
         """
         problems = (
-            validate_deliverable_modes(policy_tags)
+            validate_pool_declarations(policy_tags)
             + validate_hold_preference(policy_tags)
             + validate_sla_preference(policy_tags)
         )
         if problems:
             raise PoolValidationError("; ".join(problems))
+
+    @staticmethod
+    def _require_backing_unchanged(
+        pool: ResourcePool, policy_tags: Mapping[str, Any]
+    ) -> None:
+        """Refuse a write changing a pool's backing.
+
+        Every listing derived from a pool inherits its backing, so changing it
+        in place would reinterpret listings already published. Moving supply
+        between backed and unbacked is a second pool with its capacity
+        resources migrated across. A stored pool carrying no value yet may be
+        given one; the service refuses to start while any pool lacks one, so
+        that case is a repair, not a change.
+        """
+        stored = (pool.policy_tags or {}).get(CAPACITY_BACKING_POLICY_TAG)
+        supplied = policy_tags.get(CAPACITY_BACKING_POLICY_TAG)
+        if stored is not None and supplied != stored:
+            raise PoolValidationError(
+                f"{CAPACITY_BACKING_POLICY_TAG} of pool '{pool.id}' is fixed at "
+                f"creation as '{stored}' and cannot become '{supplied}'; "
+                "declare a second pool with the intended backing instead"
+            )
+
+    def stored_declaration_problems(
+        self, db: Session
+    ) -> list[tuple[str, PoolDeclarationProblem]]:
+        """Every stored pool whose declarations would be refused on write.
+
+        Every write path validates declarations, so a problem here means a row
+        was written by something that did not -- most plausibly an older
+        version replacing a pool's tags without knowing these ones.
+        """
+        found: list[tuple[str, PoolDeclarationProblem]] = []
+        for pool in db.query(ResourcePool).order_by(ResourcePool.id).all():
+            found.extend(
+                (pool.id, problem)
+                for problem in pool_declaration_problems(pool.policy_tags or {})
+            )
+        return found
+
+    def require_valid_stored_declarations(self) -> None:
+        """Raise naming every stored pool whose declarations are invalid.
+
+        Run at service start so a pool without declarations never reaches a
+        projection, where a consumer could not tell it from a producer that
+        predates the tags.
+        """
+        with self._session_factory() as db:
+            problems = self.stored_declaration_problems(db)
+        if problems:
+            raise PoolValidationError(
+                "stored resource pools carry invalid declarations: "
+                + "; ".join(
+                    f"pool '{pool_id}' {problem.tag}: {problem.message}"
+                    for pool_id, problem in problems
+                )
+            )
 
     def list_pools(
         self, tag_filter: Optional[dict[str, str]] = None, enabled_only: bool = False
@@ -230,6 +292,7 @@ class ResourcePoolService:
         config = self._normalize_config(data.provider, data.provider_config)
         with self._session_factory() as db, db.begin():
             pool = self._require_pool(db, pool_id)
+            self._require_backing_unchanged(pool, data.policy_tags)
             old_provider = pool.provider
             if old_provider != data.provider:
                 self._handler(old_provider).delete_config(db, pool_id)
@@ -245,6 +308,8 @@ class ResourcePoolService:
             self._require_valid_policy_tag_hints(data.policy_tags)
         with self._session_factory() as db, db.begin():
             pool = self._require_pool(db, pool_id)
+            if data.policy_tags is not None:
+                self._require_backing_unchanged(pool, data.policy_tags)
             provider = data.provider or pool.provider
             current_config = self._handler(pool.provider).read_config(db, pool_id)
             config = (
@@ -420,12 +485,12 @@ class ResourcePoolService:
                 )
                 entry_valid = False
             else:
-                for mode_problem in validate_deliverable_modes(tags):
+                for declaration_problem in pool_declaration_problems(tags):
                     problems.append(
                         PoolValidationProblem(
-                            path=f"{base}.policy_tags.{DELIVERABLE_MODES_POLICY_TAG}",
-                            code="invalid_deliverable_modes",
-                            message=mode_problem,
+                            path=f"{base}.policy_tags.{declaration_problem.tag}",
+                            code=declaration_problem.code,
+                            message=declaration_problem.message,
                         )
                     )
                     entry_valid = False
@@ -501,6 +566,7 @@ class ResourcePoolService:
                         enabled,
                         dict(tags),
                         normalized,
+                        source_index=index,
                     )
                 )
 
@@ -513,6 +579,45 @@ class ResourcePoolService:
                 )
             )
         return DocumentValidationResult(tuple(definitions), tuple(problems))
+
+    @staticmethod
+    def _backing_change_problems(
+        db: Session, desired: tuple[PoolDefinition, ...]
+    ) -> list[PoolValidationProblem]:
+        """Document entries that would change an existing pool's backing."""
+        existing = {p.id: p for p in db.query(ResourcePool).all()}
+        problems: list[PoolValidationProblem] = []
+        for definition in desired:
+            pool = existing.get(definition.id)
+            if pool is None:
+                continue
+            stored = (pool.policy_tags or {}).get(CAPACITY_BACKING_POLICY_TAG)
+            supplied = definition.policy_tags.get(CAPACITY_BACKING_POLICY_TAG)
+            if stored is not None and supplied != stored:
+                problems.append(
+                    PoolValidationProblem(
+                        path=(
+                            f"pools[{definition.source_index}].policy_tags."
+                            f"{CAPACITY_BACKING_POLICY_TAG}"
+                        ),
+                        code="capacity_backing_immutable",
+                        message=(
+                            f"{CAPACITY_BACKING_POLICY_TAG} of pool '{definition.id}' "
+                            f"is fixed at creation as '{stored}' and cannot become "
+                            f"'{supplied}'; declare a second pool with the intended "
+                            "backing instead"
+                        ),
+                    )
+                )
+        return problems
+
+    @staticmethod
+    def _problems_error(problems: Any) -> PoolValidationError:
+        # The path names the entry and tag, which is what an operator reading
+        # a refused startup import needs in order to find the line to fix.
+        return PoolValidationError(
+            "; ".join(f"{problem.path}: {problem.message}" for problem in problems)
+        )
 
     def _calculate_reconciliation(
         self, db: Session, desired: tuple[PoolDefinition, ...]
@@ -602,6 +707,11 @@ class ResourcePoolService:
                 valid=False, problems=list(validation.problems), diff=None
             )
         with self._session_factory() as db:
+            stored_problems = self._backing_change_problems(db, validation.definitions)
+            if stored_problems:
+                return PoolValidateResponse(
+                    valid=False, problems=stored_problems, diff=None
+                )
             diff = self._diff(
                 self._calculate_reconciliation(db, validation.definitions)
             )
@@ -612,10 +722,11 @@ class ResourcePoolService:
     ) -> PoolImportDiff:
         validation = self._validate_document(yaml_text)
         if not validation.valid:
-            message = "; ".join(problem.message for problem in validation.problems)
-            raise PoolValidationError(message)
+            raise self._problems_error(validation.problems)
         if validate_only:
             response = self.validate_pools(yaml_text)
+            if not response.valid:
+                raise self._problems_error(response.problems)
             assert response.diff is not None
             return response.diff
         with self._session_factory() as db, db.begin():
@@ -635,8 +746,10 @@ class ResourcePoolService:
         """
         validation = self._validate_document(yaml_text)
         if not validation.valid:
-            message = "; ".join(problem.message for problem in validation.problems)
-            raise PoolValidationError(message)
+            raise self._problems_error(validation.problems)
+        stored_problems = self._backing_change_problems(db, validation.definitions)
+        if stored_problems:
+            raise self._problems_error(stored_problems)
         plan = self._calculate_reconciliation(db, validation.definitions)
         diff = self._diff(plan)
         self._apply_reconciliation(db, plan)

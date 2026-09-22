@@ -2,25 +2,42 @@ from __future__ import annotations
 
 import pytest
 
+import market_resource_pools
 from market_resource_pools.hints import (
+    ADVERTISABLE_EXCEEDS_DELIVERABLE,
+    ADVERTISABLE_MODES_POLICY_TAG,
+    CAPACITY_BACKED,
+    CAPACITY_BACKING_POLICY_TAG,
+    CAPACITY_UNBACKED,
     DELIVERABLE_MODES_POLICY_TAG,
     DEPRECATED_LISTING_MODE_POLICY_TAG,
+    INVALID_ADVERTISABLE_MODES,
+    INVALID_CAPACITY_BACKING,
+    INVALID_DELIVERABLE_MODES,
     LISTING_CARDINALITY_MODE_POLICY_TAG,
     MAX_RESERVATION_HOLD_SECONDS_POLICY_TAG,
+    MISSING_DECLARATION,
     PRICING_POLICY_TAG,
     REGION_POLICY_TAG,
     SLA_POLICY_TAG,
+    UNBACKED_POOL_DELIVERS,
+    MissingPoolDeclarationError,
+    PoolDeclarationError,
+    PoolDeclarations,
     capped_hold_seconds,
     declared_deliverable_modes,
-    max_reservation_hold_seconds,
-    pool_delivers_offering_mode,
     listing_cardinality_mode_source,
+    max_reservation_hold_seconds,
+    pool_declaration_problems,
+    pool_delivers_offering_mode,
     raw_listing_cardinality_mode,
     raw_pricing,
     raw_region,
+    resolve_pool_declarations,
     sla_value,
     validate_deliverable_modes,
     validate_hold_preference,
+    validate_pool_declarations,
     validate_sla_preference,
 )
 
@@ -292,3 +309,245 @@ class TestValidateSlaPreference:
         assert validate_sla_preference(
             {LISTING_CARDINALITY_MODE_POLICY_TAG: "whatever-a-domain-wants"},
         ) == []
+
+
+# ---------------------------------------------------------------------------
+# Advertisement and backing declarations
+# ---------------------------------------------------------------------------
+
+
+def _tags(**overrides):
+    tags = {
+        DELIVERABLE_MODES_POLICY_TAG: ["vm"],
+        ADVERTISABLE_MODES_POLICY_TAG: ["vm"],
+        CAPACITY_BACKING_POLICY_TAG: CAPACITY_BACKED,
+    }
+    for key, value in overrides.items():
+        if value is _ABSENT:
+            tags.pop(key, None)
+        else:
+            tags[key] = value
+    return tags
+
+
+_ABSENT = object()
+
+
+def _codes(tags):
+    return {(problem.tag, problem.code) for problem in pool_declaration_problems(tags)}
+
+
+class TestAdvertisableModes:
+    def test_membership_is_offered_on_resolved_declarations_only(self):
+        declarations = resolve_pool_declarations(_tags(**{
+            DELIVERABLE_MODES_POLICY_TAG: ["vm", "future.domain.v2"],
+            ADVERTISABLE_MODES_POLICY_TAG: ["vm", "future.domain.v2"],
+        }))
+
+        assert declarations.advertisable_modes == frozenset({"vm", "future.domain.v2"})
+        assert declarations.advertises("vm") is True
+        assert declarations.advertises("bare_metal") is False
+
+    def test_explicit_empty_advertises_nothing(self):
+        declarations = resolve_pool_declarations(
+            _tags(**{ADVERTISABLE_MODES_POLICY_TAG: []}),
+        )
+
+        assert declarations.advertisable_modes == frozenset()
+        assert declarations.advertises("vm") is False
+
+    @pytest.mark.parametrize("mode", ["", "  ", None, 3])
+    def test_blank_or_non_string_mode_is_never_advertised(self, mode):
+        assert resolve_pool_declarations(_tags()).advertises(mode) is False
+
+    def test_raw_membership_is_not_public(self):
+        # Reading raw tags would treat an absent declaration as empty, the
+        # distinction a reader of projected declarations must keep.
+        assert not hasattr(market_resource_pools, "declared_advertisable_modes")
+        assert not hasattr(market_resource_pools, "pool_advertises_offering_mode")
+
+    @pytest.mark.parametrize(
+        "raw",
+        ["vm", {"vm": True}, ["vm", "vm"], ["vm", ""], [" vm"], ["vm", 1], None],
+    )
+    def test_malformed_declaration_is_rejected(self, raw):
+        tags = _tags(**{ADVERTISABLE_MODES_POLICY_TAG: raw})
+
+        assert (ADVERTISABLE_MODES_POLICY_TAG, INVALID_ADVERTISABLE_MODES) in _codes(tags)
+        with pytest.raises(PoolDeclarationError, match=ADVERTISABLE_MODES_POLICY_TAG):
+            resolve_pool_declarations(tags)
+
+    def test_advertisement_is_independent_of_deliverable_shape_rule(self):
+        # The shared shape rule is one helper; a malformed advertisable set
+        # must not change how deliverable_modes reads.
+        tags = _tags(**{ADVERTISABLE_MODES_POLICY_TAG: "vm"})
+
+        assert declared_deliverable_modes(tags) == frozenset({"vm"})
+
+
+class TestCapacityBacking:
+    @pytest.mark.parametrize("value", [CAPACITY_BACKED, CAPACITY_UNBACKED])
+    def test_recognized_values_are_valid(self, value):
+        tags = _tags(**{CAPACITY_BACKING_POLICY_TAG: value})
+        if value == CAPACITY_UNBACKED:
+            tags[DELIVERABLE_MODES_POLICY_TAG] = []
+
+        assert pool_declaration_problems(tags) == ()
+
+    @pytest.mark.parametrize("value", ["Backed", "yes", "", None, True, 1, ["backed"]])
+    def test_unrecognized_value_is_refused_not_defaulted(self, value):
+        tags = _tags(**{CAPACITY_BACKING_POLICY_TAG: value})
+
+        assert _codes(tags) == {(CAPACITY_BACKING_POLICY_TAG, INVALID_CAPACITY_BACKING)}
+
+
+class TestRequiredDeclarations:
+    @pytest.mark.parametrize(
+        "tag", [ADVERTISABLE_MODES_POLICY_TAG, CAPACITY_BACKING_POLICY_TAG],
+    )
+    def test_each_absent_tag_is_a_named_problem(self, tag):
+        tags = _tags(**{tag: _ABSENT})
+
+        assert _codes(tags) == {(tag, MISSING_DECLARATION)}
+        assert any(tag in message for message in validate_pool_declarations(tags))
+
+    def test_both_absent_reports_both(self):
+        assert _codes({}) == {
+            (ADVERTISABLE_MODES_POLICY_TAG, MISSING_DECLARATION),
+            (CAPACITY_BACKING_POLICY_TAG, MISSING_DECLARATION),
+        }
+
+    def test_explicit_empty_advertisement_is_a_declaration(self):
+        tags = _tags(**{ADVERTISABLE_MODES_POLICY_TAG: []})
+
+        assert pool_declaration_problems(tags) == ()
+
+
+class TestCrossTagRules:
+    def test_backed_pool_may_advertise_a_subset_of_what_it_delivers(self):
+        tags = _tags(**{
+            DELIVERABLE_MODES_POLICY_TAG: ["bare_metal", "vm"],
+            ADVERTISABLE_MODES_POLICY_TAG: ["vm"],
+        })
+
+        assert pool_declaration_problems(tags) == ()
+
+    def test_backed_pool_widening_advertisement_is_refused(self):
+        tags = _tags(**{
+            DELIVERABLE_MODES_POLICY_TAG: ["bare_metal"],
+            ADVERTISABLE_MODES_POLICY_TAG: ["bare_metal", "vm"],
+        })
+
+        problems = pool_declaration_problems(tags)
+        assert {(p.tag, p.code) for p in problems} == {
+            (ADVERTISABLE_MODES_POLICY_TAG, ADVERTISABLE_EXCEEDS_DELIVERABLE),
+        }
+        assert "vm" in problems[0].message
+
+    def test_backed_pool_narrowing_delivery_below_advertisement_is_refused(self):
+        tags = _tags(**{DELIVERABLE_MODES_POLICY_TAG: []})
+
+        assert _codes(tags) == {
+            (ADVERTISABLE_MODES_POLICY_TAG, ADVERTISABLE_EXCEEDS_DELIVERABLE),
+        }
+
+    def test_backed_pool_with_absent_delivery_is_judged_as_empty(self):
+        tags = _tags(**{DELIVERABLE_MODES_POLICY_TAG: _ABSENT})
+
+        assert _codes(tags) == {
+            (ADVERTISABLE_MODES_POLICY_TAG, ADVERTISABLE_EXCEEDS_DELIVERABLE),
+        }
+
+    def test_unbacked_pool_advertises_without_any_delivery_proof(self):
+        tags = {
+            ADVERTISABLE_MODES_POLICY_TAG: ["vm", "bare_metal"],
+            CAPACITY_BACKING_POLICY_TAG: CAPACITY_UNBACKED,
+        }
+
+        assert pool_declaration_problems(tags) == ()
+        assert resolve_pool_declarations(tags) == PoolDeclarations(
+            frozenset({"vm", "bare_metal"}), CAPACITY_UNBACKED,
+        )
+
+    def test_unbacked_pool_that_delivers_is_refused(self):
+        tags = {
+            DELIVERABLE_MODES_POLICY_TAG: ["vm"],
+            ADVERTISABLE_MODES_POLICY_TAG: ["vm"],
+            CAPACITY_BACKING_POLICY_TAG: CAPACITY_UNBACKED,
+        }
+
+        assert _codes(tags) == {(DELIVERABLE_MODES_POLICY_TAG, UNBACKED_POOL_DELIVERS)}
+
+    def test_malformed_delivery_is_reported_instead_of_cross_tag_rules(self):
+        # One owner of the whole invariant: the parse failure is the problem,
+        # and the cross-tag rules are not judged against a set that did not
+        # parse.
+        tags = _tags(**{DELIVERABLE_MODES_POLICY_TAG: "vm"})
+
+        assert _codes(tags) == {(DELIVERABLE_MODES_POLICY_TAG, INVALID_DELIVERABLE_MODES)}
+        assert validate_deliverable_modes(tags)
+
+    def test_malformed_backing_suppresses_cross_tag_rules(self):
+        tags = _tags(**{
+            CAPACITY_BACKING_POLICY_TAG: "maybe",
+            DELIVERABLE_MODES_POLICY_TAG: [],
+        })
+
+        assert _codes(tags) == {(CAPACITY_BACKING_POLICY_TAG, INVALID_CAPACITY_BACKING)}
+
+
+class TestResolvePoolDeclarations:
+    def test_valid_declarations_resolve(self):
+        resolved = resolve_pool_declarations(_tags())
+
+        assert resolved == PoolDeclarations(frozenset({"vm"}), CAPACITY_BACKED)
+        assert resolved.backed is True
+
+    def test_absence_is_reported_distinctly_and_never_defaulted(self):
+        with pytest.raises(MissingPoolDeclarationError) as exc_info:
+            resolve_pool_declarations({DELIVERABLE_MODES_POLICY_TAG: ["vm"]})
+
+        assert {p.code for p in exc_info.value.problems} == {MISSING_DECLARATION}
+
+    def test_one_absent_tag_is_still_absence(self):
+        with pytest.raises(MissingPoolDeclarationError):
+            resolve_pool_declarations(_tags(**{ADVERTISABLE_MODES_POLICY_TAG: _ABSENT}))
+
+    @pytest.mark.parametrize(
+        "overrides",
+        [
+            {CAPACITY_BACKING_POLICY_TAG: "yes"},
+            {ADVERTISABLE_MODES_POLICY_TAG: ["vm", "vm"]},
+            {ADVERTISABLE_MODES_POLICY_TAG: ["vm", "bare_metal"]},
+            {DELIVERABLE_MODES_POLICY_TAG: "vm"},
+            {
+                CAPACITY_BACKING_POLICY_TAG: CAPACITY_UNBACKED,
+                DELIVERABLE_MODES_POLICY_TAG: ["vm"],
+            },
+        ],
+    )
+    def test_malformed_or_inconsistent_declarations_fail_closed(self, overrides):
+        with pytest.raises(PoolDeclarationError) as exc_info:
+            resolve_pool_declarations(_tags(**overrides))
+
+        assert not isinstance(exc_info.value, MissingPoolDeclarationError)
+
+    def test_absent_plus_malformed_is_malformed(self):
+        tags = {
+            DELIVERABLE_MODES_POLICY_TAG: ["vm"],
+            CAPACITY_BACKING_POLICY_TAG: "maybe",
+        }
+
+        with pytest.raises(PoolDeclarationError) as exc_info:
+            resolve_pool_declarations(tags)
+
+        assert not isinstance(exc_info.value, MissingPoolDeclarationError)
+        assert {p.code for p in exc_info.value.problems} == {
+            MISSING_DECLARATION, INVALID_CAPACITY_BACKING,
+        }
+
+    def test_malformed_delivery_is_reported_by_the_resolver(self):
+        with pytest.raises(PoolDeclarationError) as exc_info:
+            resolve_pool_declarations(_tags(**{DELIVERABLE_MODES_POLICY_TAG: "vm"}))
+
+        assert {p.code for p in exc_info.value.problems} == {INVALID_DELIVERABLE_MODES}

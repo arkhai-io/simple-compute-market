@@ -21,6 +21,7 @@ from market_site_client import (
     SiteCapacityClientError,
 )
 from compute_provisioning import PoolCreate
+from market_resource_pools import resolve_pool_declarations
 from vm_provisioning_operator.models import HostCreate
 
 from .conftest import SERVICE_AUTHORITIES, STOREFRONT_SIGNER
@@ -103,6 +104,7 @@ async def _create_pool(provisioning_client, pool_id: str) -> None:
     """A declaration's pool must exist; create it through the operator client."""
     await provisioning_client.create_pool(PoolCreate(
         id=pool_id, label=pool_id, provider="ansible",
+        policy_tags={"advertisable_modes": [], "capacity_backing": "backed"},
         provider_config={"playbook_path": "playbooks/vm-operations.yaml"},
     ))
 
@@ -359,6 +361,7 @@ async def test_site_resource_pools_projection_surfaces_pool_metadata(
             id="hetzner-eu",
             label="Hetzner EU",
             provider="ansible",
+            policy_tags={"advertisable_modes": [], "capacity_backing": "backed"},
             provider_config={
                 "playbook_path": "playbooks/vm-operations.yaml",
                 "default_vm_ram": 65536,
@@ -425,6 +428,8 @@ async def test_site_resource_pools_projection_surfaces_region_sla_pricing_policy
             label="Hetzner EU",
             provider="ansible",
             policy_tags={
+                "advertisable_modes": [],
+                "capacity_backing": "backed",
                 "region": "California, US",
                 "sla": 99.9,
                 "pricing": {"gpu": {"H200": {"min_price": "5.00"}}},
@@ -456,10 +461,55 @@ async def test_site_resource_pools_projection_surfaces_region_sla_pricing_policy
     pool_row = next(row for row in rows if row["resource_pool_id"] == "hetzner-eu")
 
     assert pool_row["pool_metadata"]["policy_tags"] == {
+        "advertisable_modes": [],
+        "capacity_backing": "backed",
         "region": "California, US",
         "sla": 99.9,
         "pricing": {"gpu": {"H200": {"min_price": "5.00"}}},
     }
+
+
+@pytest.mark.asyncio
+async def test_site_resource_pools_projection_declares_every_pool(
+    capacity: CapacityApi, client_and_queue,
+):
+    """Every projected pool carries both advertisement and backing
+    declarations, and each resolves through the shared resolver.
+
+    A consumer distinguishes a site predating these declarations (no pool
+    carries them) from a defective one (some pool lacks them) only because
+    the producer emits them on every pool; that is a property of this side
+    of the projection, which the consumer cannot verify on its own.
+    """
+    provisioning_client, _ = client_and_queue
+    await provisioning_client.create_pool(PoolCreate(
+        id="bare-metal-west",
+        label="Bare metal west",
+        provider="ansible",
+        policy_tags={
+            "deliverable_modes": ["bare_metal", "vm"],
+            "advertisable_modes": ["bare_metal"],
+            "capacity_backing": "backed",
+        },
+        provider_config={"playbook_path": "playbooks/vm-operations.yaml"},
+    ))
+    await capacity.register("default-001", pool_id="default", total_units=4, host_id="kvm1")
+    await capacity.register(
+        "west-001", pool_id="bare-metal-west", total_units=4, host_id="kvm2",
+    )
+
+    remote = _site_capacity_client("http://test", transport=ASGITransport(app=app))
+    rows = (await remote.resource_pool_projection())["resource_pools"]
+
+    resolved = {
+        row["resource_pool_id"]: resolve_pool_declarations(
+            row["pool_metadata"]["policy_tags"]
+        )
+        for row in rows
+    }
+    assert set(resolved) == {"default", "bare-metal-west"}
+    assert resolved["bare-metal-west"].advertisable_modes == frozenset({"bare_metal"})
+    assert all(declarations.backed for declarations in resolved.values())
 
 
 @pytest.mark.asyncio

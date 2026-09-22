@@ -57,6 +57,7 @@ class TestRunMigrationsFreshBootstrap:
             ("20260731_001_apicredits_schema_baseline",),
             ("20260811_002_canonical_owner_principals",),
             ("20260815_003_fulfillment_grants",),
+            ("20260922_004_pool_advertisement_and_backing",),
         ]
 
 
@@ -70,7 +71,7 @@ class TestRunMigrationsIsIdempotent:
             count = connection.execute(
                 text("SELECT COUNT(*) FROM schema_migrations")
             ).scalar()
-        assert count == 3
+        assert count == 4
 
 
 class TestAdoptingAPreCreateAllOnlyDatabase:
@@ -360,3 +361,5 @@ def test_failed_migration_is_not_recorded_and_prior_success_is_preserved(monkeyp
     with pytest.raises(SchemaDriftError):
         migrations_module.check_schema_version(engine)
     assert calls == ["first", "fail"]
+
+

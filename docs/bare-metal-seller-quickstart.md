@@ -66,9 +66,16 @@ pools:
     enabled: true
     policy_tags:
       deliverable_modes: [bare_metal]
+      advertisable_modes: [bare_metal]
+      capacity_backing: backed
       region: California, US
     provider_config: {}
 ```
+
+Every pool must declare `advertisable_modes` — the offering modes its listings
+may name — and `capacity_backing`. A `backed` pool may advertise only modes it
+also delivers. The service refuses a pool document, and refuses to start, when
+an entry omits either declaration; nothing is defaulted.
 
 The bare-metal provider rejects pool-local playbook paths, inventory groups,
 credentials, and executor targets. The service-owned

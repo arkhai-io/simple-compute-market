@@ -2,10 +2,23 @@
 
 from .db import DEFAULT_POOL_ID, ResourcePool
 from .hints import (
+    ADVERTISABLE_MODES_POLICY_TAG,
+    CAPACITY_BACKED,
+    CAPACITY_BACKING_POLICY_TAG,
+    CAPACITY_BACKING_VALUES,
+    CAPACITY_UNBACKED,
     DELIVERABLE_MODES_POLICY_TAG,
+    CapacityBacking,
+    MissingPoolDeclarationError,
+    PoolDeclarationError,
+    PoolDeclarationProblem,
+    PoolDeclarations,
     declared_deliverable_modes,
+    pool_declaration_problems,
     pool_delivers_offering_mode,
+    resolve_pool_declarations,
     validate_deliverable_modes,
+    validate_pool_declarations,
 )
 from .host_requirement import HostRequirement, pool_needs_host
 from .pool_config_handler import PoolConfigHandler, PoolConfigValidationProblem
@@ -32,10 +45,23 @@ from .service import (
 )
 
 __all__ = [
+    "ADVERTISABLE_MODES_POLICY_TAG",
+    "CAPACITY_BACKED",
+    "CAPACITY_BACKING_POLICY_TAG",
+    "CAPACITY_BACKING_VALUES",
+    "CAPACITY_UNBACKED",
     "DEFAULT_POOL_ID",
     "DELIVERABLE_MODES_POLICY_TAG",
+    "CapacityBacking",
+    "MissingPoolDeclarationError",
+    "PoolDeclarationError",
+    "PoolDeclarationProblem",
+    "PoolDeclarations",
     "declared_deliverable_modes",
+    "pool_declaration_problems",
     "pool_delivers_offering_mode",
+    "resolve_pool_declarations",
+    "validate_pool_declarations",
     "pool_needs_host",
     "DocumentValidationResult",
     "HostRequirement",

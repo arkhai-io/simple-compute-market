@@ -139,7 +139,11 @@ than re-deciding them.
       is a producer defect and that pool fails closed. Do not collapse these into
       one default — the second case is the never-infer rule.
 - [ ] 4.1b Fail a pool closed when its `capacity_backing` value is outside `backed`
-      and `unbacked`. A discriminator is not somewhere to apply the tolerant reading
+      and `unbacked`. Resolve both projected tags through
+      `market_resource_pools`' shared declaration resolver, which
+      `pool-declared-advertisement-and-backing` provides without wiring it into the
+      storefront; apply the producer-version rule of 4.1a to the absent-tag outcome
+      it reports. A discriminator is not somewhere to apply the tolerant reading
       the cardinality hint gets.
 - [ ] 4.3a Refuse a source declaration carrying no quantity where derivation needs
       one, rather than substituting the existing `int(... or 1)` default — a

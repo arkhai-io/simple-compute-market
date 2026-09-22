@@ -80,7 +80,7 @@ def _pool(pools, pool_id: str, enabled: bool = True):
         label=pool_id,
         provider="ansible",
         enabled=enabled,
-        policy_tags={"deliverable_modes": ["vm"]},
+        policy_tags={"advertisable_modes": ["vm"], "capacity_backing": "backed", "deliverable_modes": ["vm"]},
         provider_config={},
     ))
 
@@ -134,7 +134,7 @@ def test_withdrawn_pool_mode_blocks_scheduling_after_reservation(services):
 
     pools.update_pool(
         "pool-a",
-        PoolUpdate(policy_tags={"deliverable_modes": []}),
+        PoolUpdate(policy_tags={"advertisable_modes": [], "capacity_backing": "backed", "deliverable_modes": []}),
     )
 
     with pytest.raises(NoEligibleSettlementResourceError, match="no eligible"):

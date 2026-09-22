@@ -2,6 +2,12 @@ from sqlalchemy import create_engine, Engine
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import StaticPool
 
+from market_resource_pools import (
+    PoolDeclarationError,
+    ResourcePool,
+    resolve_pool_declarations,
+)
+
 from db.migrations import apply_schema_migrations
 from db.models import Base
 
@@ -59,7 +65,11 @@ def run_migrations(engine: Engine) -> None:
                     label="Default Pool",
                     provider="api_credits",
                     enabled=True,
-                    policy_tags={"deliverable_modes": ["api_credits"]},
+                    policy_tags={
+                        "deliverable_modes": ["api_credits"],
+                        "advertisable_modes": ["api_credits"],
+                        "capacity_backing": "backed",
+                    },
                 )
             )
     # Site-authority quota ledger tables ride market_site's own metadata.
@@ -67,3 +77,24 @@ def run_migrations(engine: Engine) -> None:
     SiteBase.metadata.create_all(bind=engine)
 
     apply_schema_migrations(engine)
+    _require_valid_pool_declarations(engine)
+
+
+def _require_valid_pool_declarations(engine: Engine) -> None:
+    """Refuse to start while any stored pool lacks valid declarations.
+
+    Every pool must declare what it advertises and whether it can be admitted
+    against; one that does not must never be served, because a reader could
+    not tell it from a producer that predates those declarations.
+    """
+    failures: list[str] = []
+    with Session(engine) as session:
+        for pool in session.query(ResourcePool).order_by(ResourcePool.id):
+            try:
+                resolve_pool_declarations(pool.policy_tags or {})
+            except PoolDeclarationError as exc:
+                failures.append(f"pool '{pool.id}': {exc}")
+    if failures:
+        raise RuntimeError(
+            "stored resource pools carry invalid declarations: " + "; ".join(failures)
+        )

@@ -5,11 +5,34 @@ channel for pool policy. This module owns the stable key names plus the
 domain-neutral validation that can be applied without knowing a consumer's
 market vocabulary.
 
-``deliverable_modes`` is an authoritative set of opaque offering-mode names.
-This package validates only that the declaration is a JSON-compatible set of
+``deliverable_modes`` is an authoritative set of opaque offering-mode names
+the pool's provider can deliver; every execution layer rechecks it. This
+package validates only that the declaration is a JSON-compatible set of
 unique, non-empty strings. Domains decide which names are meaningful. Absence
 and an explicit empty list both mean that the pool declares no deliverable
 mode; neither is a permissive default.
+
+``advertisable_modes`` and ``capacity_backing`` are the pool's advertisement
+and admission declarations, and every pool must carry both:
+
+- ``advertisable_modes`` names the modes the pool's listings may advertise.
+  It has the same shape as ``deliverable_modes`` and is a separate claim:
+  advertising a mode never requires proving delivery of it, because a seller
+  trading by private arrangement can prove nothing and must still be able to
+  list.
+- ``capacity_backing`` is ``backed`` when an admission authority stands behind
+  the pool and ``unbacked`` when none does. It is a discriminator, so an
+  unrecognized value is refused rather than resolved to either side.
+- A backed pool may advertise only what it delivers, otherwise a buyer could
+  reach admission for a mode the provider will refuse. An unbacked pool must
+  deliver nothing: no layer reads backing at admission, so an empty
+  deliverable set is what keeps every capacity path unreachable for it.
+
+An absent declaration is reported as absent, never defaulted, so a consumer
+reading projected tags can tell a producer that predates these tags from one
+that omitted them for a single pool. For the same reason advertisement
+membership is offered only on a resolved `PoolDeclarations`, never on raw
+tags where absence would read as empty.
 
 ``max_reservation_hold_seconds`` and ``sla`` have universally interpretable
 numeric values and are validated here. ``listing_cardinality_mode``, ``region``,
@@ -24,10 +47,26 @@ concession is on the read path only.
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from dataclasses import dataclass
+from typing import Any, Literal, Mapping, cast
 
 
 DELIVERABLE_MODES_POLICY_TAG = "deliverable_modes"
+ADVERTISABLE_MODES_POLICY_TAG = "advertisable_modes"
+CAPACITY_BACKING_POLICY_TAG = "capacity_backing"
+CAPACITY_BACKED = "backed"
+CAPACITY_UNBACKED = "unbacked"
+CAPACITY_BACKING_VALUES = frozenset({CAPACITY_BACKED, CAPACITY_UNBACKED})
+CapacityBacking = Literal["backed", "unbacked"]
+
+# Structured problem codes shared by the pool models, document validation,
+# stored-state checks, and the projection resolver.
+MISSING_DECLARATION = "missing_declaration"
+INVALID_DELIVERABLE_MODES = "invalid_deliverable_modes"
+INVALID_ADVERTISABLE_MODES = "invalid_advertisable_modes"
+INVALID_CAPACITY_BACKING = "invalid_capacity_backing"
+ADVERTISABLE_EXCEEDS_DELIVERABLE = "advertisable_exceeds_deliverable"
+UNBACKED_POOL_DELIVERS = "unbacked_pool_delivers"
 LISTING_CARDINALITY_MODE_POLICY_TAG = "listing_cardinality_mode"
 # Producers emit LISTING_CARDINALITY_MODE_POLICY_TAG. This spelling is accepted
 # on read so a pool written by an older producer resolves to the cardinality it
@@ -41,33 +80,40 @@ SLA_POLICY_TAG = "sla"
 PRICING_POLICY_TAG = "pricing"
 
 
-def declared_deliverable_modes(policy_tags: Mapping[str, Any]) -> frozenset[str]:
-    """Return the pool's authoritative deliverable-mode declaration.
+def _declared_mode_set(policy_tags: Mapping[str, Any], tag: str) -> frozenset[str]:
+    """Read one mode-set declaration, absent meaning empty.
 
-    The declaration is stored as a JSON list so order is stable in exported
-    pool documents, but its semantics are a set. Unknown mode names remain
-    valid and opaque. Malformed declarations raise rather than widening or
-    silently becoming empty.
+    Stored as a JSON list so order is stable in exported pool documents, but
+    its semantics are a set. Unknown mode names remain valid and opaque.
+    Malformed declarations raise rather than widening or silently becoming
+    empty.
     """
-    if DELIVERABLE_MODES_POLICY_TAG not in policy_tags:
+    if tag not in policy_tags:
         return frozenset()
-    raw = policy_tags[DELIVERABLE_MODES_POLICY_TAG]
+    raw = policy_tags[tag]
+    message = f"{tag} must be a list of unique non-empty strings"
     if not isinstance(raw, list):
-        raise ValueError(
-            f"{DELIVERABLE_MODES_POLICY_TAG} must be a list of unique non-empty strings"
-        )
+        raise ValueError(message)
     modes: list[str] = []
     for value in raw:
         if not isinstance(value, str) or not value.strip() or value != value.strip():
-            raise ValueError(
-                f"{DELIVERABLE_MODES_POLICY_TAG} must be a list of unique non-empty strings"
-            )
+            raise ValueError(message)
         modes.append(value)
     if len(modes) != len(set(modes)):
-        raise ValueError(
-            f"{DELIVERABLE_MODES_POLICY_TAG} must be a list of unique non-empty strings"
-        )
+        raise ValueError(message)
     return frozenset(modes)
+
+
+def declared_deliverable_modes(policy_tags: Mapping[str, Any]) -> frozenset[str]:
+    """Return the pool's authoritative deliverable-mode declaration."""
+    return _declared_mode_set(policy_tags, DELIVERABLE_MODES_POLICY_TAG)
+
+
+def _declared_advertisable_modes(policy_tags: Mapping[str, Any]) -> frozenset[str]:
+    # Private on purpose: it reads absence as empty, which erases the
+    # distinction a reader of projected declarations must keep. Readers go
+    # through `resolve_pool_declarations` and `PoolDeclarations.advertises`.
+    return _declared_mode_set(policy_tags, ADVERTISABLE_MODES_POLICY_TAG)
 
 
 def pool_delivers_offering_mode(
@@ -88,6 +134,157 @@ def validate_deliverable_modes(policy_tags: Mapping[str, Any]) -> list[str]:
         return [str(exc)]
     return []
 
+
+@dataclass(frozen=True)
+class PoolDeclarationProblem:
+    """One reason a pool's advertisement or backing declaration is invalid."""
+
+    tag: str
+    code: str
+    message: str
+
+
+@dataclass(frozen=True)
+class PoolDeclarations:
+    """A pool's resolved advertisement and admission declarations."""
+
+    advertisable_modes: frozenset[str]
+    capacity_backing: CapacityBacking
+
+    @property
+    def backed(self) -> bool:
+        return self.capacity_backing == CAPACITY_BACKED
+
+    def advertises(self, requested_mode: str) -> bool:
+        """Whether the pool's listings may advertise `requested_mode`.
+
+        Advertisement only: whether the pool can deliver the mode is decided
+        by every execution layer from `deliverable_modes`. Offered only on a
+        resolved declaration, so no reader can test membership against a pool
+        whose declaration was absent.
+        """
+        if not isinstance(requested_mode, str) or not requested_mode.strip():
+            return False
+        return requested_mode in self.advertisable_modes
+
+
+class PoolDeclarationError(ValueError):
+    """A pool's declarations cannot be resolved; carries every problem found."""
+
+    def __init__(self, problems: tuple[PoolDeclarationProblem, ...]) -> None:
+        self.problems = problems
+        super().__init__("; ".join(problem.message for problem in problems))
+
+
+class MissingPoolDeclarationError(PoolDeclarationError):
+    """Every problem is an absent tag, none a malformed one.
+
+    Kept distinct so a consumer can apply a producer-version rule to a
+    producer that emits these tags for no pool, while a pool whose tags are
+    present but wrong still fails closed.
+    """
+
+
+def pool_declaration_problems(
+    policy_tags: Mapping[str, Any],
+) -> tuple[PoolDeclarationProblem, ...]:
+    """Every problem with a pool's mode and backing declarations.
+
+    The one owner of the declaration invariant: deliverable shape, the
+    presence and shape of both advertisement and backing, and the two
+    cross-tag rules. The pool models, the service, document validation, and
+    the resolver all use it, so they cannot disagree about what a valid
+    declaration is. A cross-tag rule is not judged against a set or value
+    that did not parse; the parse failure is reported instead.
+    """
+    problems: list[PoolDeclarationProblem] = []
+
+    try:
+        deliverable: frozenset[str] | None = declared_deliverable_modes(policy_tags)
+    except ValueError as exc:
+        deliverable = None
+        problems.append(PoolDeclarationProblem(
+            DELIVERABLE_MODES_POLICY_TAG, INVALID_DELIVERABLE_MODES, str(exc),
+        ))
+
+    advertisable: frozenset[str] | None = None
+    if ADVERTISABLE_MODES_POLICY_TAG not in policy_tags:
+        problems.append(PoolDeclarationProblem(
+            ADVERTISABLE_MODES_POLICY_TAG,
+            MISSING_DECLARATION,
+            f"{ADVERTISABLE_MODES_POLICY_TAG} is required",
+        ))
+    else:
+        try:
+            advertisable = _declared_advertisable_modes(policy_tags)
+        except ValueError as exc:
+            problems.append(PoolDeclarationProblem(
+                ADVERTISABLE_MODES_POLICY_TAG, INVALID_ADVERTISABLE_MODES, str(exc),
+            ))
+
+    backing: str | None = None
+    if CAPACITY_BACKING_POLICY_TAG not in policy_tags:
+        problems.append(PoolDeclarationProblem(
+            CAPACITY_BACKING_POLICY_TAG,
+            MISSING_DECLARATION,
+            f"{CAPACITY_BACKING_POLICY_TAG} is required",
+        ))
+    else:
+        raw = policy_tags[CAPACITY_BACKING_POLICY_TAG]
+        if isinstance(raw, str) and raw in CAPACITY_BACKING_VALUES:
+            backing = raw
+        else:
+            problems.append(PoolDeclarationProblem(
+                CAPACITY_BACKING_POLICY_TAG,
+                INVALID_CAPACITY_BACKING,
+                f"{CAPACITY_BACKING_POLICY_TAG} must be "
+                f"'{CAPACITY_BACKED}' or '{CAPACITY_UNBACKED}'",
+            ))
+
+    if backing == CAPACITY_BACKED and advertisable is not None and deliverable is not None:
+        excess = advertisable - deliverable
+        if excess:
+            problems.append(PoolDeclarationProblem(
+                ADVERTISABLE_MODES_POLICY_TAG,
+                ADVERTISABLE_EXCEEDS_DELIVERABLE,
+                f"a backed pool may advertise only modes it delivers; "
+                f"{ADVERTISABLE_MODES_POLICY_TAG} names undelivered "
+                f"{', '.join(sorted(excess))}",
+            ))
+    if backing == CAPACITY_UNBACKED and deliverable:
+        problems.append(PoolDeclarationProblem(
+            DELIVERABLE_MODES_POLICY_TAG,
+            UNBACKED_POOL_DELIVERS,
+            f"an unbacked pool must deliver nothing; "
+            f"{DELIVERABLE_MODES_POLICY_TAG} names {', '.join(sorted(deliverable))}",
+        ))
+    return tuple(problems)
+
+
+def validate_pool_declarations(policy_tags: Mapping[str, Any]) -> list[str]:
+    """Return write-side problems with the pool's mode and backing declarations."""
+    return [problem.message for problem in pool_declaration_problems(policy_tags)]
+
+
+def resolve_pool_declarations(policy_tags: Mapping[str, Any]) -> PoolDeclarations:
+    """Resolve a pool's advertisement and backing declarations, or fail.
+
+    The one reader of these tags for any consumer, including a storefront
+    reading the resource-pool projection, so the site that writes a
+    declaration and every reader agree on what a valid one is. Nothing is
+    defaulted: absence raises `MissingPoolDeclarationError`, and anything
+    malformed or inconsistent raises `PoolDeclarationError`. How to treat a
+    producer that emits these tags for no pool is the caller's decision.
+    """
+    problems = pool_declaration_problems(policy_tags)
+    if problems:
+        if all(problem.code == MISSING_DECLARATION for problem in problems):
+            raise MissingPoolDeclarationError(tuple(problems))
+        raise PoolDeclarationError(tuple(problems))
+    return PoolDeclarations(
+        advertisable_modes=_declared_advertisable_modes(policy_tags),
+        capacity_backing=cast(CapacityBacking, policy_tags[CAPACITY_BACKING_POLICY_TAG]),
+    )
 
 
 def raw_listing_cardinality_mode(policy_tags: Mapping[str, Any]) -> Any:

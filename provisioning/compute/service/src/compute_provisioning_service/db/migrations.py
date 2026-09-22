@@ -20,6 +20,12 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session
 from sqlalchemy.schema import CreateTable
 
+from market_resource_pools.hints import (
+    ADVERTISABLE_MODES_POLICY_TAG,
+    CAPACITY_BACKED,
+    CAPACITY_BACKING_POLICY_TAG,
+    declared_deliverable_modes,
+)
 from market_site.db import CapacityBucket
 
 from compute_provisioning_service.db.models import (
@@ -2476,6 +2482,51 @@ def _migrate_legacy_host_capacity_declarations(engine: Engine) -> None:
             )
 
 
+def _migrate_pool_advertisement_and_backing(engine: Engine) -> None:
+    """Declare advertisement and backing on every existing Resource Pool.
+
+    Every pool written before these declarations existed is backed supply
+    whose only mode declaration was its deliverable set, so it advertises
+    exactly what it delivers and remains admissible: nothing observable
+    changes. Any value already stored under either key is overwritten. Unknown
+    policy tags were opaque metadata no consumer read, so a prior value carries
+    no behaviour worth keeping, and keeping it could leave a pool whose
+    declarations every write path would refuse.
+    """
+    with engine.begin() as connection:
+        if not _table_exists(connection, "resource_pools"):
+            return
+        pools = connection.execute(
+            text("SELECT id, policy_tags FROM resource_pools ORDER BY id")
+        ).mappings().all()
+        for pool in pools:
+            label = f"pool {pool['id']!r} policy_tags"
+            policy_tags = _json_mapping(pool["policy_tags"], label=label)
+            try:
+                deliverable = declared_deliverable_modes(policy_tags)
+            except ValueError as exc:
+                raise SchemaDriftError(f"{label}: {exc}") from exc
+            policy_tags[ADVERTISABLE_MODES_POLICY_TAG] = sorted(deliverable)
+            policy_tags[CAPACITY_BACKING_POLICY_TAG] = CAPACITY_BACKED
+            connection.execute(
+                text(
+                    "UPDATE resource_pools SET policy_tags=:policy_tags "
+                    "WHERE id=:pool_id"
+                ),
+                {
+                    "pool_id": pool["id"],
+                    "policy_tags": json.dumps(policy_tags, sort_keys=True),
+                },
+            )
+            logger.info(
+                "[MIGRATION] Derived advertisement and backing for pool %s: "
+                "advertisable=%s backing=%s",
+                pool["id"],
+                ", ".join(sorted(deliverable)) or "none",
+                CAPACITY_BACKED,
+            )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration("20260603_001_ansible_jobs_escrow_uid", _migrate_ansible_jobs_escrow_uid),
     Migration("20260603_002_hosts_public_host", _migrate_hosts_public_host),
@@ -2548,5 +2599,9 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260921_004_legacy_host_capacity_declarations",
         _migrate_legacy_host_capacity_declarations,
+    ),
+    Migration(
+        "20260922_001_pool_advertisement_and_backing",
+        _migrate_pool_advertisement_and_backing,
     ),
 )

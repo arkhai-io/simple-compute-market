@@ -159,6 +159,18 @@ def import_pool_definitions_if_configured() -> None:
     _definition_importer().import_pool_definitions()
 
 
+def verify_pool_declarations() -> None:
+    """Refuse to start while any stored pool lacks valid declarations.
+
+    Runs after the pool document import, so a changed document can repair
+    pools before they are checked. A pool without advertisement and backing
+    declarations must not reach the resource-pool projection, where a
+    consumer could not tell it from a site that predates those declarations.
+    """
+    _container_module.resolved_resource_pool_service.require_valid_stored_declarations()
+    logger.info("Resource-pool declaration check passed")
+
+
 def import_capacity_definitions_if_configured() -> None:
     _definition_importer().import_capacity_definitions()
 
@@ -199,6 +211,9 @@ def startup_steps() -> tuple[ComputeProvisioningStartupStep, ...]:
         ),
         ComputeProvisioningStartupStep(
             "import-pool-definitions", import_pool_definitions_if_configured
+        ),
+        ComputeProvisioningStartupStep(
+            "verify-pool-declarations", verify_pool_declarations
         ),
         ComputeProvisioningStartupStep("seed-inventory", seed_inventory_if_empty),
         ComputeProvisioningStartupStep(

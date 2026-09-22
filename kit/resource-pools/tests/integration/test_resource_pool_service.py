@@ -1,7 +1,8 @@
 """
-Unit tests for ResourcePoolService.
+Library integration tests for ResourcePoolService.
 
-Scope (per ARCHITECTURE.md — Unit Tests jurisdiction):
+Scope (per TESTING.md — a library's public service API against a real
+embedded database):
   - CRUD: create/get/list/replace/patch/enable/disable
   - Tag-filtered lookup
   - Provider config validation (required fields; unknown providers rejected)
@@ -22,6 +23,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+import yaml
 from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
 
@@ -34,7 +36,8 @@ from market_resource_pools import (
     PoolValidationError,
     ResourcePoolService,
 )
-from market_resource_pools.db import Base
+from market_resource_pools.db import Base, ResourcePool
+from pydantic import ValidationError
 from sqlalchemy.orm import sessionmaker
 
 
@@ -151,6 +154,19 @@ def svc(session_factory):
     )
 
 
+def _declared(tags: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Policy tags carrying the declarations every pool write requires.
+
+    A backed pool advertising nothing is valid for any deliverable set, so it
+    is the neutral choice for tests about something else.
+    """
+    return {
+        "advertisable_modes": [],
+        "capacity_backing": "backed",
+        **(tags or {}),
+    }
+
+
 _ANSIBLE_CONFIG = {
     "playbook_path": "playbooks/vm-operations.yaml",
     "inventory_group": "kvm_hosts",
@@ -169,6 +185,7 @@ class TestCreatePool:
                 id="hetzner-eu",
                 label="Hetzner EU",
                 provider="ansible",
+                policy_tags=_declared(),
                 provider_config=_ANSIBLE_CONFIG,
             )
         )
@@ -183,6 +200,7 @@ class TestCreatePool:
                 id="hetzner-eu",
                 label="Hetzner EU",
                 provider="ansible",
+                policy_tags=_declared(),
                 provider_config=_ANSIBLE_CONFIG,
             )
         )
@@ -192,6 +210,7 @@ class TestCreatePool:
                     id="hetzner-eu",
                     label="Hetzner EU (again)",
                     provider="ansible",
+                    policy_tags=_declared(),
                     provider_config=_ANSIBLE_CONFIG,
                 )
             )
@@ -203,6 +222,7 @@ class TestCreatePool:
                     id="k8s-1",
                     label="K8s Cluster 1",
                     provider="kubernetes",
+                    policy_tags=_declared(),
                     provider_config={"namespace": "default"},
                 )
             )
@@ -214,6 +234,7 @@ class TestCreatePool:
                     id="hetzner-eu",
                     label="Hetzner EU",
                     provider="ansible",
+                    policy_tags=_declared(),
                     provider_config={"inventory_group": "kvm_hosts"},
                 )
             )
@@ -225,6 +246,7 @@ class TestCreatePool:
                     id="hetzner-eu",
                     label="Hetzner EU",
                     provider="ansible",
+                    policy_tags=_declared(),
                     provider_config={"playbook_path": "playbooks/vm-operations.yaml"},
                 )
             )
@@ -240,6 +262,7 @@ class TestGetAndListPools:
                 id="hetzner-eu",
                 label="Hetzner EU",
                 provider="ansible",
+                policy_tags=_declared(),
                 provider_config=_ANSIBLE_CONFIG,
             )
         )
@@ -253,6 +276,7 @@ class TestGetAndListPools:
                 id="session-pool",
                 label="Session Pool",
                 provider="ansible",
+                policy_tags=_declared(),
                 provider_config=_ANSIBLE_CONFIG,
             )
         )
@@ -271,6 +295,7 @@ class TestGetAndListPools:
                 id="pool-a",
                 label="A",
                 provider="ansible",
+                policy_tags=_declared(),
                 provider_config=_ANSIBLE_CONFIG,
             )
         )
@@ -279,6 +304,7 @@ class TestGetAndListPools:
                 id="pool-b",
                 label="B",
                 provider="ansible",
+                policy_tags=_declared(),
                 provider_config=_ANSIBLE_CONFIG,
             )
         )
@@ -293,7 +319,7 @@ class TestGetAndListPools:
                 id="pool-eu",
                 label="EU",
                 provider="ansible",
-                policy_tags={"region": "eu"},
+                policy_tags=_declared({"region": "eu"}),
                 provider_config=_ANSIBLE_CONFIG,
             )
         )
@@ -302,7 +328,7 @@ class TestGetAndListPools:
                 id="pool-us",
                 label="US",
                 provider="ansible",
-                policy_tags={"region": "us"},
+                policy_tags=_declared({"region": "us"}),
                 provider_config=_ANSIBLE_CONFIG,
             )
         )
@@ -317,6 +343,7 @@ class TestUpdatePool:
                 id="hetzner-eu",
                 label="Hetzner EU",
                 provider="ansible",
+                policy_tags=_declared(),
                 provider_config=_ANSIBLE_CONFIG,
             )
         )
@@ -330,6 +357,7 @@ class TestUpdatePool:
                 id="hetzner-eu",
                 label="Hetzner EU",
                 provider="ansible",
+                policy_tags=_declared(),
                 provider_config=_ANSIBLE_CONFIG,
             )
         )
@@ -339,7 +367,7 @@ class TestUpdatePool:
                 label="Replacement",
                 provider="ansible",
                 enabled=False,
-                policy_tags={},
+                policy_tags=_declared(),
                 provider_config=_ANSIBLE_CONFIG,
             ),
         )
@@ -355,6 +383,7 @@ class TestUpdatePool:
                 id="hetzner-eu",
                 label="Hetzner EU",
                 provider="ansible",
+                policy_tags=_declared(),
                 provider_config=_ANSIBLE_CONFIG,
             )
         )
@@ -369,6 +398,7 @@ class TestUpdatePool:
                 id="hetzner-eu",
                 label="Hetzner EU",
                 provider="ansible",
+                policy_tags=_declared(),
                 provider_config=_ANSIBLE_CONFIG,
             )
         )
@@ -391,6 +421,7 @@ class TestEnableDisablePool:
                 id="hetzner-eu",
                 label="Hetzner EU",
                 provider="ansible",
+                policy_tags=_declared(),
                 provider_config=_ANSIBLE_CONFIG,
             )
         )
@@ -413,6 +444,7 @@ class TestEnableDisablePool:
                 id="default",
                 label="Default Pool",
                 provider="ansible",
+                policy_tags=_declared(),
                 provider_config=_ANSIBLE_CONFIG,
             )
         )
@@ -428,6 +460,7 @@ class TestEnableDisablePool:
                 id="draining-pool",
                 label="Draining",
                 provider="ansible",
+                policy_tags=_declared(),
                 provider_config=_ANSIBLE_CONFIG,
             )
         )
@@ -444,6 +477,9 @@ pools:
     label: Default Pool
     provider: ansible
     enabled: true
+    policy_tags:
+      advertisable_modes: []
+      capacity_backing: backed
     provider_config:
       playbook_path: playbooks/vm-operations.yaml
       inventory_group: kvm_hosts
@@ -451,6 +487,8 @@ pools:
     label: Hetzner EU Central
     provider: ansible
     policy_tags:
+      advertisable_modes: []
+      capacity_backing: backed
       region: eu
     provider_config:
       playbook_path: playbooks/vm-operations-frp.yaml
@@ -461,6 +499,8 @@ pools:
     label: Equinix US West
     provider: ansible
     policy_tags:
+      advertisable_modes: []
+      capacity_backing: backed
       region: us-west
     provider_config:
       playbook_path: playbooks/vm-operations-direct.yaml
@@ -500,12 +540,18 @@ pools:
   - id: default
     label: Default Pool
     provider: ansible
+    policy_tags:
+      advertisable_modes: []
+      capacity_backing: backed
     provider_config:
       playbook_path: playbooks/vm-operations.yaml
       inventory_group: kvm_hosts
   - id: hetzner-eu-central
     label: Hetzner EU Central
     provider: ansible
+    policy_tags:
+      advertisable_modes: []
+      capacity_backing: backed
     provider_config:
       playbook_path: playbooks/vm-operations-frp.yaml
       inventory_group: kvm_hosts_eu
@@ -524,6 +570,9 @@ pools:
   - id: default
     label: Default Pool
     provider: ansible
+    policy_tags:
+      advertisable_modes: []
+      capacity_backing: backed
     provider_config:
       playbook_path: playbooks/vm-operations.yaml
       inventory_group: kvm_hosts
@@ -538,18 +587,27 @@ pools:
   - id: default
     label: Default Pool
     provider: ansible
+    policy_tags:
+      advertisable_modes: []
+      capacity_backing: backed
     provider_config:
       playbook_path: playbooks/vm-operations.yaml
       inventory_group: kvm_hosts
   - id: good-pool
     label: Good Pool
     provider: ansible
+    policy_tags:
+      advertisable_modes: []
+      capacity_backing: backed
     provider_config:
       playbook_path: playbooks/vm-operations.yaml
       inventory_group: kvm_hosts
   - id: bad-pool
     label: Bad Pool
     provider: kubernetes
+    policy_tags:
+      advertisable_modes: []
+      capacity_backing: backed
     provider_config: {}
 """
         with pytest.raises(PoolValidationError):
@@ -562,12 +620,18 @@ pools:
   - id: default
     label: Default Pool
     provider: ansible
+    policy_tags:
+      advertisable_modes: []
+      capacity_backing: backed
     provider_config:
       playbook_path: a.yaml
       inventory_group: all
   - id: default
     label: Duplicate
     provider: ansible
+    policy_tags:
+      advertisable_modes: []
+      capacity_backing: backed
     provider_config:
       playbook_path: b.yaml
       inventory_group: all
@@ -604,6 +668,9 @@ pools:
   - id: hetzner-eu-central
     label: Hetzner EU Central
     provider: ansible
+    policy_tags:
+      advertisable_modes: []
+      capacity_backing: backed
     provider_config:
       playbook_path: playbooks/vm-operations-frp.yaml
       inventory_group: kvm_hosts_eu
@@ -620,6 +687,9 @@ pools:
     label: ""
     provider: ansible
     enabld: true
+    policy_tags:
+      advertisable_modes: []
+      capacity_backing: backed
     provider_config:
       unexpected: value
   - id: default
@@ -660,6 +730,8 @@ pools:
     label: Default Pool
     provider: ansible
     policy_tags:
+      advertisable_modes: []
+      capacity_backing: backed
       max_reservation_hold_seconds: -5
     provider_config:
       playbook_path: playbooks/vm-operations.yaml
@@ -676,6 +748,8 @@ pools:
     label: Default Pool
     provider: ansible
     policy_tags:
+      advertisable_modes: []
+      capacity_backing: backed
       max_reservation_hold_seconds: 120
     provider_config:
       playbook_path: playbooks/vm-operations.yaml
@@ -691,6 +765,8 @@ pools:
     label: Default Pool
     provider: ansible
     policy_tags:
+      advertisable_modes: []
+      capacity_backing: backed
       deliverable_modes: [vm, bare_metal]
     provider_config:
       playbook_path: playbooks/vm-operations.yaml
@@ -705,6 +781,8 @@ pools:
     label: Default Pool
     provider: ansible
     policy_tags:
+      advertisable_modes: []
+      capacity_backing: backed
       deliverable_modes: [vm, bare_metal]
     provider_config:
       playbook_path: playbooks/vm-operations.yaml
@@ -722,6 +800,8 @@ pools:
     label: Default Pool
     provider: ansible
     policy_tags:
+      advertisable_modes: []
+      capacity_backing: backed
       deliverable_modes: vm
     provider_config:
       playbook_path: playbooks/vm-operations.yaml
@@ -739,6 +819,8 @@ pools:
     label: Default Pool
     provider: ansible
     policy_tags:
+      advertisable_modes: []
+      capacity_backing: backed
       sla: -1
     provider_config:
       playbook_path: playbooks/vm-operations.yaml
@@ -755,6 +837,8 @@ pools:
     label: Default Pool
     provider: ansible
     policy_tags:
+      advertisable_modes: []
+      capacity_backing: backed
       sla: 99.9
     provider_config:
       playbook_path: playbooks/vm-operations.yaml
@@ -776,7 +860,7 @@ class TestHoldPreferenceValidationOnIndividualPoolWrites:
                     id="hetzner-eu",
                     label="Hetzner EU",
                     provider="ansible",
-                    policy_tags={"max_reservation_hold_seconds": -1},
+                    policy_tags=_declared({"max_reservation_hold_seconds": -1}),
                     provider_config=_ANSIBLE_CONFIG,
                 )
             )
@@ -788,11 +872,11 @@ class TestHoldPreferenceValidationOnIndividualPoolWrites:
                 id="hetzner-eu",
                 label="Hetzner EU",
                 provider="ansible",
-                policy_tags={"max_reservation_hold_seconds": 60},
+                policy_tags=_declared({"max_reservation_hold_seconds": 60}),
                 provider_config=_ANSIBLE_CONFIG,
             )
         )
-        assert pool.policy_tags == {"max_reservation_hold_seconds": 60}
+        assert pool.policy_tags == _declared({"max_reservation_hold_seconds": 60})
 
     def test_replace_pool_with_invalid_hold_raises_and_does_not_change_stored_metadata(
         self, svc,
@@ -802,7 +886,7 @@ class TestHoldPreferenceValidationOnIndividualPoolWrites:
                 id="hetzner-eu",
                 label="Hetzner EU",
                 provider="ansible",
-                policy_tags={"max_reservation_hold_seconds": 60},
+                policy_tags=_declared({"max_reservation_hold_seconds": 60}),
                 provider_config=_ANSIBLE_CONFIG,
             )
         )
@@ -813,13 +897,13 @@ class TestHoldPreferenceValidationOnIndividualPoolWrites:
                     label="Hetzner EU",
                     provider="ansible",
                     enabled=True,
-                    policy_tags={"max_reservation_hold_seconds": "soon"},
+                    policy_tags=_declared({"max_reservation_hold_seconds": "soon"}),
                     provider_config=_ANSIBLE_CONFIG,
                 ),
             )
-        assert svc.get_pool("hetzner-eu").policy_tags == {
+        assert svc.get_pool("hetzner-eu").policy_tags == _declared({
             "max_reservation_hold_seconds": 60,
-        }
+        })
 
     def test_update_pool_with_invalid_hold_raises(self, svc):
         svc.create_pool(
@@ -827,13 +911,14 @@ class TestHoldPreferenceValidationOnIndividualPoolWrites:
                 id="hetzner-eu",
                 label="Hetzner EU",
                 provider="ansible",
+                policy_tags=_declared(),
                 provider_config=_ANSIBLE_CONFIG,
             )
         )
         with pytest.raises(PoolValidationError):
             svc.update_pool(
                 "hetzner-eu",
-                PoolUpdate(policy_tags={"max_reservation_hold_seconds": -30}),
+                PoolUpdate(policy_tags=_declared({"max_reservation_hold_seconds": -30})),
             )
 
     def test_update_pool_omitting_policy_tags_skips_hold_validation(self, svc):
@@ -844,6 +929,7 @@ class TestHoldPreferenceValidationOnIndividualPoolWrites:
                 id="hetzner-eu",
                 label="Hetzner EU",
                 provider="ansible",
+                policy_tags=_declared(),
                 provider_config=_ANSIBLE_CONFIG,
             )
         )
@@ -857,7 +943,7 @@ class TestHoldPreferenceValidationOnIndividualPoolWrites:
                     id="hetzner-eu",
                     label="Hetzner EU",
                     provider="ansible",
-                    policy_tags={"sla": -1},
+                    policy_tags=_declared({"sla": -1}),
                     provider_config=_ANSIBLE_CONFIG,
                 )
             )
@@ -869,11 +955,11 @@ class TestHoldPreferenceValidationOnIndividualPoolWrites:
                 id="hetzner-eu",
                 label="Hetzner EU",
                 provider="ansible",
-                policy_tags={"sla": 99.9},
+                policy_tags=_declared({"sla": 99.9}),
                 provider_config=_ANSIBLE_CONFIG,
             )
         )
-        assert pool.policy_tags == {"sla": 99.9}
+        assert pool.policy_tags == _declared({"sla": 99.9})
 
     def test_create_pool_rejects_invalid_hold_and_sla_together(self, svc):
         """Both problems surface, not just the first one found."""
@@ -883,7 +969,7 @@ class TestHoldPreferenceValidationOnIndividualPoolWrites:
                     id="hetzner-eu",
                     label="Hetzner EU",
                     provider="ansible",
-                    policy_tags={"max_reservation_hold_seconds": -1, "sla": -1},
+                    policy_tags=_declared({"max_reservation_hold_seconds": -1, "sla": -1}),
                     provider_config=_ANSIBLE_CONFIG,
                 )
             )
@@ -934,6 +1020,7 @@ def test_replace_provider_cleans_up_old_provider_config(session_factory):
             id="switchable",
             label="Switchable",
             provider="old",
+            policy_tags=_declared(),
             provider_config={"old_setting": True},
         )
     )
@@ -944,7 +1031,7 @@ def test_replace_provider_cleans_up_old_provider_config(session_factory):
             label="Switched",
             provider="new",
             enabled=True,
-            policy_tags={},
+            policy_tags=_declared(),
             provider_config={"new_setting": True},
         ),
     )
@@ -954,3 +1041,312 @@ def test_replace_provider_cleans_up_old_provider_config(session_factory):
     assert "switchable" not in old_handler.configs
     assert new_handler.replaced == ["switchable"]
     assert new_handler.configs["switchable"] == {"new_setting": True}
+
+
+# ---------------------------------------------------------------------------
+# Advertisement and backing declarations
+# ---------------------------------------------------------------------------
+
+_BACKED_VM = {
+    "deliverable_modes": ["vm"],
+    "advertisable_modes": ["vm"],
+    "capacity_backing": "backed",
+}
+
+
+def _document(tags_block: str, *, pool_id: str = "default") -> str:
+    """A one-pool authoritative document with the given policy_tags block."""
+    return f"""
+pools:
+  - id: {pool_id}
+    label: Pool
+    provider: ansible
+{tags_block}
+    provider_config:
+      playbook_path: playbooks/vm-operations.yaml
+      inventory_group: kvm_hosts
+"""
+
+
+_DOC_BACKED_VM = _document(
+    "    policy_tags:\n"
+    "      deliverable_modes: [vm]\n"
+    "      advertisable_modes: [vm]\n"
+    "      capacity_backing: backed"
+)
+
+
+def _create_backed_vm(svc, pool_id: str = "default") -> None:
+    svc.create_pool(
+        PoolCreate(
+            id=pool_id,
+            label="Pool",
+            provider="ansible",
+            policy_tags=dict(_BACKED_VM),
+            provider_config=_ANSIBLE_CONFIG,
+        )
+    )
+
+
+def _replace_with(tags):
+    return PoolReplace(
+        label="Pool",
+        provider="ansible",
+        enabled=True,
+        policy_tags=tags,
+        provider_config=_ANSIBLE_CONFIG,
+    )
+
+
+class TestDeclarationsOnEveryWritePath:
+    """The model refuses what a typed client builds; the service refuses what
+    reaches it without that validation. Both paths must agree."""
+
+    @pytest.mark.parametrize(
+        ("tags", "named"),
+        [
+            pytest.param({"deliverable_modes": ["vm"]}, "advertisable_modes", id="absent"),
+            pytest.param({**_BACKED_VM, "capacity_backing": "maybe"}, "capacity_backing", id="malformed"),
+            pytest.param(
+                {**_BACKED_VM, "advertisable_modes": ["vm", "bare_metal"]},
+                "bare_metal",
+                id="backed-widened",
+            ),
+            pytest.param(
+                {**_BACKED_VM, "deliverable_modes": []},
+                "advertisable_modes",
+                id="backed-narrowed",
+            ),
+            pytest.param(
+                {**_BACKED_VM, "capacity_backing": "unbacked"},
+                "unbacked",
+                id="unbacked-delivers",
+            ),
+        ],
+    )
+    def test_create_replace_patch_and_document_refuse_alike(self, svc, tags, named):
+        _create_backed_vm(svc, "existing")
+
+        # Built without validation, as a caller bypassing the model would.
+        with pytest.raises(PoolValidationError, match=named):
+            svc.create_pool(
+                PoolCreate.model_construct(
+                    id="fresh", label="F", provider="ansible", enabled=True,
+                    policy_tags=tags, provider_config=_ANSIBLE_CONFIG,
+                )
+            )
+        with pytest.raises(PoolValidationError, match=named):
+            svc.replace_pool(
+                "existing",
+                PoolReplace.model_construct(
+                    label="Pool", provider="ansible", enabled=True,
+                    policy_tags=tags, provider_config=_ANSIBLE_CONFIG,
+                ),
+            )
+        with pytest.raises(PoolValidationError, match=named):
+            svc.update_pool(
+                "existing",
+                PoolUpdate.model_construct(
+                    label=None, provider=None, enabled=None,
+                    policy_tags=tags, provider_config=None,
+                ),
+            )
+        with pytest.raises(ValidationError):
+            PoolReplace(
+                label="Pool", provider="ansible", enabled=True, policy_tags=tags,
+            )
+
+        assert svc.get_pool("fresh") is None
+        assert svc.get_pool("existing").policy_tags == _BACKED_VM
+
+        document = yaml.safe_load(_DOC_BACKED_VM)
+        document["pools"][0]["policy_tags"] = tags
+        response = svc.validate_pools(yaml.safe_dump(document))
+        assert response.valid is False
+        assert response.diff is None
+        assert any(named in problem.message for problem in response.problems)
+
+    def test_unbacked_pool_advertises_with_nothing_delivered(self, svc):
+        tags = {
+            "deliverable_modes": [],
+            "advertisable_modes": ["vm"],
+            "capacity_backing": "unbacked",
+        }
+        pool = svc.create_pool(
+            PoolCreate(
+                id="out-of-band",
+                label="Out of band",
+                provider="ansible",
+                policy_tags=tags,
+                provider_config=_ANSIBLE_CONFIG,
+            )
+        )
+
+        assert pool.policy_tags == tags
+
+    def test_document_reports_each_missing_declaration_per_entry(self, svc):
+        response = svc.validate_pools(
+            _document("    policy_tags:\n      deliverable_modes: [vm]")
+        )
+
+        assert response.valid is False
+        missing = {
+            p.path for p in response.problems if p.code == "missing_declaration"
+        }
+        assert missing == {
+            "pools[0].policy_tags.advertisable_modes",
+            "pools[0].policy_tags.capacity_backing",
+        }
+
+    def test_document_predating_declarations_imports_nothing(self, svc):
+        with pytest.raises(PoolValidationError):
+            svc.import_pools(_document(""))
+
+        assert svc.list_pools() == []
+
+    def test_import_error_names_entry_and_tag(self, svc):
+        with pytest.raises(PoolValidationError) as exc_info:
+            svc.import_pools(_document(""))
+
+        assert "pools[0].policy_tags.capacity_backing" in str(exc_info.value)
+
+    def test_export_carries_both_declarations_and_reimports_unchanged(self, svc):
+        svc.import_pools(_DOC_BACKED_VM)
+
+        exported = svc.export_pools_yaml()
+        diff = svc.import_pools(exported)
+
+        for entry in yaml.safe_load(exported)["pools"]:
+            assert entry["policy_tags"]["advertisable_modes"] == ["vm"]
+            assert entry["policy_tags"]["capacity_backing"] == "backed"
+        assert diff.unchanged == ["default"]
+        assert diff.updated == []
+
+
+class TestBackingIsFixedAtCreation:
+    def test_replace_changing_backing_is_refused_and_pool_survives(self, svc):
+        _create_backed_vm(svc)
+
+        with pytest.raises(PoolValidationError, match="fixed at creation"):
+            svc.replace_pool(
+                "default",
+                _replace_with({
+                    "deliverable_modes": [],
+                    "advertisable_modes": [],
+                    "capacity_backing": "unbacked",
+                }),
+            )
+
+        assert svc.get_pool("default").policy_tags == _BACKED_VM
+
+    def test_patch_changing_backing_is_refused_and_pool_survives(self, svc):
+        _create_backed_vm(svc)
+
+        with pytest.raises(PoolValidationError, match="fixed at creation"):
+            svc.update_pool(
+                "default",
+                PoolUpdate(policy_tags={
+                    "deliverable_modes": [],
+                    "advertisable_modes": [],
+                    "capacity_backing": "unbacked",
+                }),
+            )
+
+        assert svc.get_pool("default").policy_tags == _BACKED_VM
+
+    def test_restating_the_same_backing_is_accepted(self, svc):
+        _create_backed_vm(svc)
+
+        replaced = svc.replace_pool(
+            "default", _replace_with({**_BACKED_VM, "advertisable_modes": []}),
+        )
+
+        assert replaced.policy_tags["advertisable_modes"] == []
+
+    def test_import_changing_backing_is_refused_and_validate_only_reports_it(self, svc):
+        svc.import_pools(_DOC_BACKED_VM)
+        unbacked = _document(
+            "    policy_tags:\n"
+            "      deliverable_modes: []\n"
+            "      advertisable_modes: [vm]\n"
+            "      capacity_backing: unbacked"
+        )
+
+        response = svc.validate_pools(unbacked)
+        assert response.valid is False
+        assert response.diff is None
+        assert [(p.path, p.code) for p in response.problems] == [
+            ("pools[0].policy_tags.capacity_backing", "capacity_backing_immutable"),
+        ]
+        with pytest.raises(PoolValidationError, match="pools\\[0\\]"):
+            svc.import_pools(unbacked)
+        with pytest.raises(PoolValidationError, match="fixed at creation"):
+            svc.import_pools(unbacked, validate_only=True)
+
+        assert svc.get_pool("default").policy_tags == _BACKED_VM
+
+
+class TestStoredDeclarations:
+    def test_valid_stored_pools_pass(self, svc):
+        _create_backed_vm(svc)
+
+        svc.require_valid_stored_declarations()
+
+    def test_rows_written_without_declarations_are_named(self, svc, session_factory):
+        _create_backed_vm(svc, "declared")
+        with session_factory() as db, db.begin():
+            db.add(ResourcePool(
+                id="legacy",
+                label="Legacy",
+                provider="ansible",
+                policy_tags={"deliverable_modes": ["vm"]},
+            ))
+
+        with session_factory() as db:
+            problems = svc.stored_declaration_problems(db)
+        assert {(pool_id, p.code) for pool_id, p in problems} == {
+            ("legacy", "missing_declaration"),
+        }
+        with pytest.raises(PoolValidationError, match="pool 'legacy'"):
+            svc.require_valid_stored_declarations()
+
+    def test_malformed_stored_delivery_is_named(self, svc, session_factory):
+        with session_factory() as db, db.begin():
+            db.add(ResourcePool(
+                id="drifted",
+                label="Drifted",
+                provider="ansible",
+                policy_tags={**_BACKED_VM, "deliverable_modes": "vm"},
+            ))
+
+        with pytest.raises(PoolValidationError, match="pool 'drifted' deliverable_modes"):
+            svc.require_valid_stored_declarations()
+
+    def test_a_pool_without_backing_may_be_given_one(self, svc, session_factory):
+        # The repair path for a row an older version rewrote: supplying the
+        # value is not a change to it.
+        with session_factory() as db, db.begin():
+            db.add(ResourcePool(
+                id="legacy", label="Legacy", provider="ansible",
+                policy_tags={"deliverable_modes": ["vm"]},
+            ))
+
+        repaired = svc.replace_pool("legacy", _replace_with(dict(_BACKED_VM)))
+
+        assert repaired.policy_tags == _BACKED_VM
+
+    def test_a_document_may_give_a_pool_without_backing_its_declarations(
+        self, svc, session_factory,
+    ):
+        # The rollback repair: the service refuses to start, so the API is
+        # unavailable, and a changed definition document is imported first.
+        with session_factory() as db, db.begin():
+            db.add(ResourcePool(
+                id="default", label="Pool", provider="ansible",
+                policy_tags={"deliverable_modes": ["vm"]},
+            ))
+
+        svc.import_pools(_DOC_BACKED_VM)
+
+        assert svc.get_pool("default").policy_tags == _BACKED_VM
+        svc.require_valid_stored_declarations()
