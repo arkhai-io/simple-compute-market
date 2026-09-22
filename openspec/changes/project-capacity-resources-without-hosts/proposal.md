@@ -1,60 +1,84 @@
 ## Why
 
-The resource-pool projection is driven by host rows. `capacity_inventory` builds
-a map of capacity resources keyed by host identity, then iterates `Host` rows and
-projects one entry per host. A capacity resource with no matching host row
-contributes nothing to the projection and is therefore invisible to every
-storefront consuming it.
+The resource-pool projection is driven by host rows. `capacity_inventory` maps
+capacity declarations by the host each one names, then iterates `Host` rows and
+projects one entry per host a declaration names. A declaration that names no
+host, or names a host that is not registered, contributes nothing to the
+projection and is invisible to every storefront consuming it. The declaration
+succeeds and nothing happens.
 
-That is a defect against the projection's own stated design.
-`capacity_inventory`'s docstring already says "Capacity resources are
-authoritative for availability and Physical Resource identity. Host rows supply
-only host inventory needed to correlate the configured machine alias."
-`capacity-resource-administration` completes the same direction: it makes `Host`
-"connection identity only — addressing, SSH credentials, Ansible alias, pool
-membership, enabled state," retires GPU columns as capacity sources, and retires
-the host-derived capacity fallback. After that change, capacity resources are the
-single authoritative declaration of sellable capacity — and the projection loop
-still refuses to see one unless a host exists to carry it.
+That contradicts the projection's own authority model.
+`capacity-resource-administration` made the capacity declaration the single
+authority for a Physical Resource's shape and quantity and made `Host`
+connection identity only. The projection still refuses to show a declaration
+unless a connection record exists for it.
 
-The gap has no owner. `capacity-resource-administration` redirects what
-`_project_host` *reads*; it does not change what the projection *iterates*, and
-its own task list reasons in terms of "hosts that previously projected no
-`available`". Nothing in `openspec/` describes a hostless capacity resource or a
-resource-driven loop.
+Tracing what the projection actually reads from the host row showed the
+correlation is not merely a precondition to relax but almost entirely
+unneeded there:
 
-Closing it matters beyond tidiness. A seller who declares sellable capacity with
-no host behind it — because delivery is arranged out of band, because
-the operator has not configured a connection yet, or because inventory is being
-staged ahead of provisioning — currently declares into a void with no error and
-no projection entry. The declaration succeeds and nothing happens.
+- `attributes.host_id` and `attributes.public_host` have no projection
+  consumer, and `public_host` falls back to the provisioner's management
+  address, which a storefront-facing projection should not carry.
+- `enabled` is folded with `Host.enabled`, which no admission, scheduling, or
+  dispatch path consults, so the projection reports a state the site does not
+  enforce.
+- The `host.pool_id` fallback is dead: every declaration names its pool.
+- The bare-metal publication view reads the host row only for `enabled`.
+
+The one place a declaration must resolve to a registered host is dispatch,
+where the host record supplies the connection. That is also where it currently
+fails *open*: an unregistered host falls back to a static inventory file.
+
+And scheduling does not fail closed at all. The scheduler will select a
+Physical Resource whose declaration names no host, rebind capacity to it, and
+commit an assignment the provider can never execute; an equivalent retry
+returns the same unusable assignment. This exists today, independent of the
+projection.
+
+The campaign needs all of this closed. `unbacked-listing-publication` needs a
+seller with no host inventory to project at all, and the contact-exchange
+listings that goal serves have no host behind them by construction.
 
 ## What Changes
 
-- Invert the projection loop: iterate declared capacity resources and correlate
-  host rows in, rather than iterating hosts and looking up resources. A capacity
-  resource with no correlated host projects with its declared capacity,
-  attributes, and Physical Resource identity, and without host correlation.
-- Keep host-correlated projection behavior identical for every resource that does
-  have a host. This change adds entries; it must not alter existing ones.
-- Scope the capacity-resource requirement's authority to shape and quantity,
-  separating it from whether the declaration can be admitted against. The current
-  wording — "a Physical Resource's sellable capacity" — does not survive a
-  resource with no correlated host.
-- State normatively in `openspec/specs/site-capacity/spec.md` that the capacity
-  resource is the unit of projection and that host correlation is optional
-  metadata on a projected entry rather than a precondition for projecting it.
-- Define what a hostless entry omits. Executor-correlated fields have no value
-  rather than an empty one, matching the existing rule that an absent projection
-  and a loaded empty one are distinguishable — a storefront reconciler already
-  treats ignorance as different from zero.
+- **Build the resource-pool projection from capacity declarations alone.**
+  Every declaration projects. No host inventory record is read. Each entry's
+  identity, pool, type, capacity, reported availability, attributes, and
+  `enabled` come from its declaration. Generic entries carry no host connection
+  identity. This is not additive: existing entries lose
+  `attributes.host_id` and `attributes.public_host`, and an entry whose host is
+  disabled but whose declaration is enabled now projects enabled.
+- **Build the bare-metal publication view from its declaration alone.** The view
+  requires the declaration to name a host, not a registered host record. A
+  declaration with an enabled publication and no host projects without the view
+  rather than failing the site's whole projection generation.
+- **Declare, per fulfillment provider, whether delivery needs a host**, collect
+  those declarations at provisioning composition, and inject the result as plain
+  data into site admission and settlement scheduling.
+- **Refuse admission and placement** of a Physical Resource whose declaration
+  names no host when its pool's provider needs one. It is an ineligible
+  candidate — the ordinary capacity-refusal class — not a new error.
+- **Make dispatch fail closed on an unregistered host.** Execution inventory is
+  rendered only from the registered host record the settlement resource names.
+  Remove the static-inventory fallback from every execution path; the configured
+  inventory file remains a startup seed input only.
+- **Resolve the tenant-facing address from the host record**: its
+  `public_host`, else its `ssh_host`. Document the fallback in the operator
+  quickstarts.
 
 ## Capabilities
 
 ### Modified Capabilities
 
-- `site-capacity`: the capacity resource is the projection unit; host-correlated
-  correlation is optional per-entry metadata rather than the iteration key.
+- `site-capacity`: the resource-pool projection is built from declarations
+  alone; naming a host is optional for a declaration; admission applies a
+  composition-supplied host requirement.
+- `fulfillment`: providers declare whether delivery needs a host; scheduling
+  rechecks it before any placement effect.
+- `physical-provisioning`: execution inventory comes only from the registered
+  host record; the tenant address falls back to the record's connection
+  address; the bare-metal publication view is built from its declaration.
 
 ### New Capabilities
 
@@ -62,59 +86,103 @@ None.
 
 ## Non-Goals
 
-- Do not change what a capacity resource declares, how it is administered, or how
-  it is imported. `capacity-resource-administration` owns all three.
-- Do not retire the host-derived capacity fallback; that is
-  `capacity-resource-administration`'s task, and this change depends on it having
-  landed rather than duplicating it.
-- Do not add a backing property to the projection.
-  `unbacked-listing-publication` owns it. This change makes hostless declarations
-  visible; it takes no position on what they mean commercially.
-- Do not allow a hostless resource into any execution path. Scheduling, provider
-  dispatch, and inventory rendering must continue to require host
-  correlation, and the absence of it must fail closed there rather than
-  defaulting.
+- Do not change what a capacity declaration contains, how it is administered, or
+  how it is imported. `capacity-resource-administration` owns all three.
+- Do not add a backing property to the projection or filter by backing.
+  `pool-declared-advertisement-and-backing` declares backing and
+  `unbacked-listing-publication` consumes it, including the registry filter that
+  lets buyers separate unbacked listings. Unbacked listings never reach
+  admission, scheduling, or dispatch, so the host requirement never applies to
+  them.
+- Do not change what disabling a host means. No new admission or placement
+  against a disabled host, while dispatch still honours existing assignments and
+  teardown still works, is owned by `pools-6-fair-scheduling-policy`.
+- Do not reconcile the bare-metal storefront's second copy of host identity in
+  its publication configuration. `pools-8-capacity-projection-and-listing-hints`
+  owns retiring independently authored host fields from publication.
+- Do not introduce a provider whose delivery needs no host. None exists or is
+  planned in this campaign; the declaration seam exists so the kit does not
+  assume one.
+- Do not catch a declaration in a host-requiring pool that names no host at
+  registration or document validation. The failure occurs at reservation.
 
 ## Impact
 
-- Affected code: the resource-pool projection in the provisioning service's
-  capacity inventory service, and the storefront-side projection ingestion that
-  consumes per-entry host-correlated fields.
-- Affected specification: `openspec/specs/site-capacity/spec.md`.
-- Affected behavior: additive. Deployments with a host for every capacity
-  resource see an identical projection.
-- Not affected: capacity admission, reservation, scheduling, fairness policy, or
-  provider execution.
+- **Provisioning service:** `capacity_inventory` (projection), `composition`
+  (host-requirement collection), container wiring.
+- **`kit/site`:** admission candidate eligibility.
+- **`kit/fulfillment`:** provider protocol declaration and scheduler candidate
+  eligibility.
+- **VM provisioning adapter:** job inventory resolution, tenant-address
+  resolution, static-inventory readers, a possibly unused legacy
+  `ProvisioningService`.
+- **Bare-metal provisioning adapter:** provider declaration, required host
+  validation.
+- **Wire:** the resource-pool projection's generic per-entry `attributes` lose
+  `host_id` and `public_host`. No projection consumer reads either. The
+  projection's revision and digest advance once on upgrade.
+- **Behaviour:** a declaration naming no host becomes visible to storefronts; in
+  a host-requiring pool it is refused at reservation rather than stranded after
+  scheduling.
+- **Unchanged:** capacity declaration administration, pool declarations,
+  unbacked-listing handling, fairness policy, and the capacity-bucket projection,
+  which already enumerates declarations.
 
 ## Dependencies and Related Changes
 
-- **Depends on `capacity-resource-administration`.** Until capacity resources are
-  authoritative for shape across every dimension, inverting the loop would
-  project entries whose capacity still had to be derived from the host that, by
-  construction, is absent. That change is the one that makes a hostless
-  declaration meaningful; this one makes it visible.
-- **Prerequisite for `unbacked-listing-publication`**, which needs a seller with
-  no host inventory to be able to project at all.
-- Coordinate with `pools-9-retire-local-physical-authority`, which touches
-  adjacent projection-consumer surfaces. No ordering dependency either direction.
+- **Depends on `capacity-resource-administration`** — archived 2026-09-21. Its
+  shape-versus-admission wording in
+  `openspec/specs/site-capacity/spec.md#requirement-operator-administered-capacity-declarations`
+  is the definition this change relies on.
+- **Prerequisite for `unbacked-listing-publication`**, whose design names this
+  change as what keeps placement and dispatch fail-closed for a declaration
+  with no host.
+- **Hands off to `pools-6-fair-scheduling-policy`** the disabled-host admission
+  and placement rule, both halves.
+- **Hands off to `pools-8-capacity-projection-and-listing-hints`** the
+  bare-metal storefront's duplicated host identity.
+- **Coordinates with `contain-embedded-host-key-material`**, which changes
+  `write_inventory` and `render_inventory_ini` in the same adapter files this
+  change edits for inventory resolution. There is no ordering dependency; each
+  change edits different functions.
+- **Coordinates with `pools-9-retire-local-physical-authority`**, which retires
+  adjacent storefront-local physical tables. This change reads none of them.
 - `publish-multidimensional-listing-shape` consumes projected dimensions and is
-  unaffected by where the loop starts.
+  unaffected.
 
 ## Permanent documentation impact
 
-- [ ] `docs/development/ARCHITECTURE.md` — likely no change; the "Site authority"
-      section describes what a site owns rather than how its projection iterates.
-      Re-confirm at implementation time rather than assuming.
-- [x] Existing subsystem specification — `openspec/specs/site-capacity/spec.md`.
+- [x] `docs/development/ARCHITECTURE.md` — the host requirement is a
+      layer-rechecked authorization like pool offering modes, and "Resource
+      pools" states that repository-wide rule.
+- [x] Existing subsystem specification — `site-capacity`, `fulfillment`,
+      `physical-provisioning`, and the `site-capacity` companion
+      `architecture.md`.
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 
+Operator documentation: `docs/seller-quickstart.md` and
+`docs/bare-metal-seller-quickstart.md` state the tenant-address fallback and
+that the mounted inventory file is a seed input.
+
 ### Knowledge to promote
 
-- The capacity resource is the unit of projection; host correlation is
-  optional per-entry metadata — `openspec/specs/site-capacity/spec.md`.
-- A hostless entry omits host-correlated fields rather than emptying them, so
-  absence stays distinguishable from zero downstream —
+- The resource-pool projection is built from capacity declarations alone and
+  carries no host connection identity —
   `openspec/specs/site-capacity/spec.md`.
-- Execution paths continue to require host correlation and fail closed
-  without it — `openspec/specs/site-capacity/spec.md`.
+- Naming a host is optional for a declaration —
+  `openspec/specs/site-capacity/spec.md`.
+- Admission refuses a Physical Resource whose declaration names no host when its
+  pool's provider needs one — `openspec/specs/site-capacity/spec.md`.
+- Providers declare whether delivery needs a host; scheduling rechecks it —
+  `openspec/specs/fulfillment/spec.md`.
+- Each execution layer rechecks the host requirement, as it does pool offering
+  modes — `docs/development/ARCHITECTURE.md#resource-pools`.
+- Execution inventory comes only from the registered host record; the static
+  file is a seed input — `openspec/specs/physical-provisioning/spec.md`.
+- The tenant address falls back to the host record's connection address —
+  `openspec/specs/physical-provisioning/spec.md`, plus the operator quickstarts.
+- The bare-metal publication view is built from its declaration —
+  `openspec/specs/physical-provisioning/spec.md`.
+- The host is joined at dispatch only, and why —
+  `openspec/specs/site-capacity/architecture.md`.

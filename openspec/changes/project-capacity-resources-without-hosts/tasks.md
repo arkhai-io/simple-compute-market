@@ -1,5 +1,10 @@
 # Tasks — project capacity resources that have no host
 
+> **Superseded pending planning (2026-09-22).** None of the tasks below is complete.
+> They predate the design decisions D1–D9 in `design.md` and describe the rejected
+> additive inversion (omitting host-correlated fields). Do not implement from them. The
+> planning phase replaces this list and keeps its closeout structure.
+
 Depends on `capacity-resource-administration` having landed. Do not begin
 Section 2 before it has.
 

@@ -341,8 +341,9 @@ authorize a mode its provider *proved* it could deliver, so an execution-less se
 authorized nothing; `pool-declared-advertisement-and-backing` removes that. What
 remains is a named provider that is never reached, and three things make that safe:
 the pool declares no admission authority, so no capacity path is reachable;
-`project-capacity-resources-without-hosts` requires placement and dispatch to fail
-closed for a resource with no executor correlation; and a configuration-free
+`project-capacity-resources-without-hosts` makes admission and placement refuse a
+capacity declaration that names no host when its pool's provider needs one, and makes
+dispatch fail closed for a host with no registered record; and a configuration-free
 provider already exists, so naming one requires no fabricated configuration.
 
 The alternative — a publication-only provider kind — is rejected in that change for

@@ -707,6 +707,32 @@ The original resolution here framed the follow-up change as "gated on a real dep
 
 **Corrected: this change does not attempt to define the follow-up's trigger condition at all.** The split from the previous resolution stands (this change flips the default and builds new capability only; deletion is out of scope here) -- what's corrected is dropping any language implying POOLS-8 can observe or gate when the follow-up becomes appropriate. The follow-up is recorded as its own future, separately-proposed `openspec/changes/` entry (not created by this change, no name assigned, no assumed timeline) -- whoever picks up that work opens a new change with its own discuss→plan→implement cycle when the team decides it's the right time, informed by whatever this product's actual deployment/versioning strategy turns out to require, which is out of this document's scope to specify.
 
+## Finding: bare-metal publication authors its own host identity (recorded 2026-09-22)
+
+Found by `project-capacity-resources-without-hosts` and handed here, because this change
+owns making publication consume mapped authoritative projection identity rather than
+independently authored physical host fields.
+
+The bare-metal storefront publishes from the site snapshot
+(`arkhai_bare_metal_storefront/publication_cli.py`) and takes `host_id` and
+`physical_host_id` from inside the declaration's `bare_metal_publication` attribute, not
+from the declaration's own `host_id` field or top-level `physical_host_id` attribute. An
+operator therefore states the host twice.
+
+- Fulfillment checks the attribute copy against the accepted terms
+  (`fulfillment_service.py`).
+- The provider checks the materialization against the declaration's field
+  (`bare_metal_fulfillment_provider.py`).
+- When the two copies disagree, the deal fails after acceptance and scheduling.
+- A declaration naming no host but carrying a host inside its publication configuration
+  is publishable today, and fails the same way.
+
+`project-capacity-resources-without-hosts` builds the resource-pool projection's
+`bare_metal.v2` view from the declaration alone, so that view carries one authoritative
+host. The view's consumer, `arkhai_bare_metal.publication.trusted_bare_metal_projection`,
+has no production caller. The expected resolution here is to publish from that view and
+retire the attribute copy, but this finding does not prescribe it.
+
 ## Design promotion record
 
 Renamed to match `openspec/README.md`'s "Design promotion record" template exactly (was "Permanent Documentation Promotion" through Section 6 of this document's own drafting -- corrected here in Section 7 rather than silently, per this document's own amend-don't-replace convention). Rebuilt as a full audit against every accepted decision above, not just the four rows carried forward from earlier sections; several material decisions from Sections 3, 4, and 6 had never been added.

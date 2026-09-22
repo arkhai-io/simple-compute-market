@@ -54,6 +54,29 @@ Evaluation compares maintained external libraries and internal scoring approache
 
 If historical state affects selection, it must be committed transactionally with capacity claims and assignments. Stable pool/resource identifiers are the final tie-breakers. Each decision records an operator-safe explanation containing candidate counts, rejection reasons, policy identity/version, fairness subject/scope, normalized score inputs, applied weights or quotas, tie-breaker, and outcome. Provider secrets are excluded.
 
+### Disabled hosts stop new admission and placement, not existing work
+
+Recorded 2026-09-22 from `project-capacity-resources-without-hosts`, which found and
+deliberately did not change this. `Host.enabled` is consulted today only by host list queries.
+Admission (`kit/site` `reserve`) and scheduling candidates filter on the capacity declaration's
+own `enabled`, and VM job execution resolves a host record without checking it. Disabling a
+host therefore stops nothing: new reservations and placements against it still succeed. Bare
+metal is the one exception, refusing a disabled host at access-job validation
+(`bare_metal_operations_service._validate_host`).
+
+The intended rule has three parts, all owned by this change:
+
+- **Admission.** No new admission against a declaration whose host is disabled. `kit/site`
+  has no host table, so this needs a seam comparable to the composition-supplied host
+  requirement `project-capacity-resources-without-hosts` adds.
+- **Placement.** No new placement against such a candidate, applied as hard eligibility
+  before any fairness scoring.
+- **Existing work.** Dispatch still honours an assignment made while the host was enabled,
+  and teardown still works, so disabling a host drains it rather than stranding workloads.
+
+It is hard fit, not policy: it belongs beside "Hard fit precedes policy scoring" rather
+than inside any scoring function, and it does not wait on the fairness-subject decisions.
+
 ## Risks / Trade-offs
 
 - **A fairness objective may reduce utilization or increase starvation elsewhere.** Mitigation: approve objective ordering and test long workload traces and adversarial shapes.

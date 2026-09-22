@@ -1,165 +1,359 @@
-# Design — project capacity resources that have no host
+# Design — project capacity declarations that name no host
+
+## Vocabulary used here
+
+- **Capacity declaration** — the site-ledger record declaring a Physical
+  Resource's shape, quantity, pool, attributes, `enabled`, and optionally the
+  host it is delivered through. The ledger stores it as a `CapacityBucket`; the
+  registration API and definition documents call its identity `resource_id`.
+- **Physical Resource** — the supply a declaration describes, identified in
+  projections by `physical_resource_id` (the declaration's `resource_id`).
+  Scheduling selects one; an explicit placement constraint names one.
+- **Host** — a registered connection record (`Host` row): address, port, user,
+  key, pool membership, `enabled`. A declaration *names* a host through its
+  `host_id` field; a named host may or may not be *registered*.
+- **Provider** — the fulfillment implementation a pool names
+  (`ansible`, `bare_metal.ansible`). A provider **needs a host** when its
+  delivery connects to one. Both current providers do.
+- **Backing** — a pool-level declaration of whether the pool can be admitted
+  against (`pool-declared-advertisement-and-backing`). Unbacked pools hold
+  declarations that name no host and are never admitted, scheduled, or
+  dispatched.
+
+The change directory keeps its original name. "Capacity resources" there means
+capacity declarations.
 
 ## Context
 
-`Host` is a connection record. Its `kvm_host`, `ssh_user`, `ssh_key_type`, and
-`ssh_key_value` columns are all `NOT NULL`, and the model's own docstring says
-why: "The registry is the authority for how a host is reached — address, user,
-key, and port — and every execution path derives its connection from a rendered
-inventory rather than constructing one."
+What the code does today, which differs in places from this change's first
+draft.
 
-GPU columns were added to that record, which is how a host-seeded deployment came
-to publish and sell. `capacity-resource-administration` is undoing that: it moves
-compute shape to the site-ledger capacity resource, makes `Host` connection
-identity only, and retires the host-derived capacity fallback. Its stated
-reasoning — "Splitting capacity across two authorities inside one service — GPUs
-on `Host`, everything else on capacity resources — would relocate the duplication
-this consolidation exists to remove" — is the same separation this change
-depends on.
+**The projection.**
+`provisioning/compute/service/src/compute_provisioning_service/services/capacity_inventory.py`
+keys declarations on their own `host_id` (`:38-66`), then iterates `Host` rows
+(`:67-73`). It drops, silently:
 
-What that change does not touch is the iteration. `capacity_inventory` maps
-resources by host identity, then runs over `Host` rows and projects one entry
-each. Task 4.1 redirects `_project_host` to read capacity and attributes from the
-declared resource; task 4.4 reasons about "hosts that previously projected no
-`available`". Both are per-host. So after the consolidation lands, compute shape
-lives on the capacity resource, the projection claims resources are
-authoritative, and a resource still cannot appear unless a connection record
-exists for it.
+- a declaration naming no host;
+- a declaration naming an unregistered host.
+
+It raises `ValueError`, failing the whole site generation, for a declaration
+with an enabled bare-metal publication and no host (`:46-58`).
+
+From the host row `_project_host` (`:76-122`) reads:
+
+| Field | Consumer |
+|---|---|
+| `attributes.host_id` | None |
+| `attributes.public_host`, falling back to `ssh_host` | None |
+| `pool_id` fallback to `host.pool_id` | Dead: a declaration's pool is mandatory |
+| `enabled = host.enabled AND declaration.enabled` | Storefront listing reconciliation |
+| `host.enabled` inside the bare-metal view's `available` | The view's only consumer, `trusted_bare_metal_projection`, has no production caller |
+
+The VM reconciler reads only `physical_resource_id`, `capacity`, `available`,
+and `attributes.gpu_model` (`domains/vms/listings/reconciler.py:461-497`). The
+capacity-bucket projection and the snapshot already enumerate declarations
+directly (`kit/site/src/market_site/projections.py:141-164`,
+`kit/site/src/market_site/ledger.py:953-967`).
+
+**Enablement.** Three flags exist and only two are enforced:
+
+| Flag | Enforced by |
+|---|---|
+| `ResourcePool.enabled` | Scheduling (`list_enabled_pools`) |
+| Declaration `enabled` (`CapacityBucket.enabled`) | Admission (`ledger.py:2163`), scheduling candidates (`ledger.py:1304-1312`) |
+| `Host.enabled` | Host list queries only (`host_service.py:87-101`); job execution ignores it (`host_service.py:109-115`) |
+
+Bare metal refuses a disabled host only at access-job validation
+(`bare_metal_operations_service.py:180-192`); VM refuses it nowhere.
+
+**Admission and scheduling.** Neither consults hosts.
+
+- `reserve` matches any enabled declaration, host or not, which is correct for
+  API credits, whose declarations never name a host.
+- `iter_scheduling_candidates_in_session` filters on `enabled` and
+  `resource_type` only, so `PhysicalSettlementScheduler` can select a Physical
+  Resource whose declaration names no host. It then rebinds capacity, advances
+  the cursor, and commits the assignment.
+- The providers refuse a missing host only at prepare time (VM
+  `ansible_fulfillment_provider.py:167-173`, bare metal
+  `bare_metal_fulfillment_provider.py:133-180`), after the assignment is
+  durable. An equivalent retry returns that same assignment.
+
+**Dispatch.** `vm_provisioning_adapter/services/job_service.py:486-512` renders a
+one-host inventory from the registered host record. When there is none, it
+falls back to the configured static file (`settings.resolved_inventory_path`)
+and still runs the playbook with `--limit <host_id>`.
+
+The tenant address (`ansible_service.py:585-590`) is resolved in this order:
+
+1. the record's `public_host`;
+2. the static file's `public_host`;
+3. the static file's `ansible_host`.
+
+It never uses the record's `ssh_host`. On deployments without a static file,
+the documented fallback in `docs/seller-quickstart.md` therefore yields no
+address.
+
+Production composition always wires `HostService`
+(`vm_provisioning_adapter/runtime.py:139-148`,
+`compute_provisioning_service/container.py:285-299`), so each "no host
+service" branch is unreachable in production.
+
+**Bare metal end to end.**
+
+1. The storefront publishes from the snapshot, not the view
+   (`arkhai_bare_metal_storefront/publication_cli.py:93-127`). It takes `host_id`
+   and `physical_host_id` from inside the `bare_metal_publication` attribute
+   (`:119-120`), so an operator duplicates them there.
+2. Fulfillment checks that copy against the accepted terms
+   (`fulfillment_service.py:190-217`).
+3. The provider then checks the materialization against the declaration's own
+   `host_id` (`bare_metal_fulfillment_provider.py:133-180`).
+
+The two copies must agree or the deal fails after acceptance.
 
 ## Goals / Non-Goals
 
-**Goals.** Make the projection's iteration match its stated authority model.
-Allow a capacity declaration with no host to reach storefronts. Keep
-every currently projected entry byte-identical.
+**Goals.**
+- Every capacity declaration reaches storefronts through the resource-pool
+  projection.
+- Host connection identity is joined only where it is consumed: at dispatch.
+- No admission, placement, or dispatch path can proceed toward a host that a
+  provider needs and the declaration does not name, or that is not registered.
 
-**Non-Goals.** No change to what a capacity resource declares or how it is
-administered. No commercial interpretation of hostless declarations. No relaxation
-of host requirements anywhere an execution path runs.
+**Non-Goals.**
+- No change to declaration administration.
+- No commercial interpretation of declarations that name no host.
+- No change to disabled-host semantics.
+- No hostless provider.
 
 ## Decisions
 
-### Invert the loop rather than union two loops
+### D1. The resource-pool projection is built from declarations alone
 
-The alternative was to keep the host loop and append hostless resources
-afterwards. Rejected: it leaves two code paths producing entries that must stay
-structurally identical, which is the shape of a divergence rather than a fix.
-`capacity-resource-administration` is already fixing one divergence of exactly
-this kind — `attributes` derived from the host unconditionally while `capacity`
-preferred the resource, so a declaration disagreeing with a host row projected
-contradictory values in one row — and reintroducing a second producer immediately
-after would be a poor trade.
+Every declaration projects, whether or not it names a host and whether or not
+that host is registered. No host record is read. Identity, pool, type, capacity,
+reported availability, attributes (except domain view configuration published
+as a view), and `enabled` all come from the declaration.
 
-Iterating resources and correlating hosts in gives one producer, and it makes the
-correlation explicitly optional at the only place that needs to know.
+**Alternatives.**
+- *A — invert the loop and correlate hosts in.* Keep host-correlated entries
+  byte-identical; omit host fields on uncorrelated ones. Rejected. It would
+  preserve fields with no consumer, a management-address leak, and an
+  `enabled` value that disagrees with admission. It would also leave two entry
+  shapes that every consumer must tell apart.
+- *Union a host loop with a second loop for the rest.* Rejected in this change's
+  first draft for producing two structurally identical producers. B has one
+  producer and no correlation.
 
-### Omit host-correlated fields rather than emptying them
+**Consequences.**
+- The change is not additive. Every generic entry loses `attributes.host_id`
+  and `attributes.public_host`, and the projection revision advances once.
+- An entry whose host is disabled but whose declaration is enabled now projects
+  enabled. That matches what admission does, so the projection stops claiming
+  something the site does not enforce. Whether disabling a host should stop new
+  admission is `pools-6-fair-scheduling-policy`'s decision; see D8.
+- The earlier "omit host-correlated fields rather than emptying them" decision
+  is superseded. No generic entry carries host fields, so there is no
+  omit-versus-empty distinction to preserve.
+- The projection's duplicate-host guard is removed rather than kept. The
+  projection no longer keys on hosts. At most one declaration may name a host,
+  enforced at registration (`ledger.py:805-815`) and by the ledger's unique
+  index. That is the rule's owner.
 
-A hostless entry has no connection identity. It must omit those fields, not carry
-empty strings.
+The one intentional host exposure is a domain publication view for a domain that
+sells a specific host (D4). Pinning a specific Physical Resource for placement
+uses `physical_resource_id`, which the projection keeps, not a host.
 
-The precedent is load-bearing and already documented: a storefront reconciler
-distinguishes an absent projection from a loaded empty one under an "ignorance is
-not zero" rule, and `capacity-resource-administration` flags the `available`-key
-semantics change as the highest-risk item in its own change for the same reason.
-An empty connection identifier would be indistinguishable from a correlated host
-whose identifier failed to populate, which is a real failure worth surfacing.
+### D2. The host is joined at dispatch, and dispatch fails closed
 
-### Execution paths keep requiring host correlation
+Invariant:
 
-Making a resource projectable without a host must not make it schedulable without
-one. Placement, provider dispatch, and inventory rendering continue to require
-host correlation and fail closed without it.
+> The inventory an execution path hands to Ansible is rendered from the
+> registered host record named by the selected settlement resource. A host name
+> with no registered record fails closed before any playbook runs. A static
+> inventory file is a seed input, never an execution source.
 
-This is the boundary that keeps the change honest. The risk in relaxing a
-precondition is that the relaxation propagates to consumers who were relying on
-it implicitly; the mitigation is to state the requirement normatively at the
-paths that still need it rather than to rely on those paths happening to check.
+The alternative that exists today is the static-file fallback, not rendering
+from capacity. It is removed in this change because without that the invariant
+this change states is false: a declaration naming an unregistered host would
+dispatch against whatever the static file says.
 
-### Shape authority and admission authority are different claims
+Scope of the removal:
+- the job path's fallback;
+- the tenant-address lookups that read the static file;
+- the optional-host-service branches in the VM job service and in bare-metal
+  host validation;
+- any static-file reader left without a caller, including the legacy
+  `ProvisioningService` if planning confirms it has no production caller.
 
-`capacity-resource-administration` makes the capacity resource "the authoritative
-declaration of a Physical Resource's sellable capacity". Read as one claim, that
-sentence conflates two things: being authoritative for what is declared sellable,
-and implying that something can be sold against it.
+`inventory_path` remains as the startup seed input
+(`app_runtime.py:122-135`).
 
-A hostless resource still has a Physical Resource — that term means the real supply
-resource, "host, pod allocation, storage, power, or bandwidth", and this change's
-own delta has a hostless resource projecting its Physical Resource identity. What a
-missing `Host` removes is the host connection record, not the supply the
-declaration describes. So the problem is not that there is nothing for the capacity
-to be *of*; it is that "sellable" carries an admission implication the declaration
-should not be making on its own, and downstream work needs a declaration
-authoritative for shape without it.
+### D3. The tenant address falls back to the record's connection address
 
-The alternative considered was a second site-owned declaration object carrying
-shape for resources that are not admissible. Rejected, because it reintroduces
-what the prerequisite exists to remove: that change's own reasoning is that
-"splitting capacity across two authorities inside one service ... would relocate
-the duplication this consolidation exists to remove", and a second object
-carrying compute shape is a second shape authority that can disagree with the
-first.
+The tenant-facing address is the host record's `public_host`, else its
+`ssh_host`, never a static file. `public_host` should be set wherever the
+provisioner and tenants reach the host on different networks. Falling back to
+`ssh_host` is the reasonable default, and it is what the quickstart already
+promises. Both operator quickstarts state it so the fallback is not a surprise.
 
-So the requirement is scoped rather than duplicated. The capacity resource stays
-the single authoritative declaration of *shape and quantity*; whether that shape
-can be admitted against is a property resolved elsewhere. Nothing is weakened — no
-consumer that could previously admit against a resource loses that ability — and
-the sentence becomes true for hostless resources, which it has to be for this
-change alone.
+### D4. The bare-metal publication view is built from its declaration
 
-**Where that scoping lives.** In `capacity-resource-administration`, not here. A
-first draft carried it as a `MODIFIED` delta in this change against a requirement
-that only exists once the prerequisite lands, which strict validation correctly
-refused: a delta that cannot validate on the branch reviewing it is not reviewable,
-and two active changes would have described a capacity resource differently in the
-window before either archived. Amending the prerequisite gives the campaign one
-definition. This change depends on that wording and asserts it rather than
-restating it.
+The `bare_metal.v2` view's identity, pool, capacity, and availability all come
+from the declaration. Its `host_id` is the declaration's `host_id`.
+Availability is the declaration's `enabled` and whole-resource availability,
+with no `Host.enabled` term.
 
-### This change takes no position on why a resource has no host
+A declaration with an enabled publication that names no host projects without
+the view. It does not fail the generation: one declaration must not make every
+storefront's projection of the site unavailable, and a view without a host is
+not a sellable specific-host listing.
 
-A hostless capacity resource is a declaration of sellable capacity with no
-configured connection. That covers a seller who arranges delivery out of band, an
-operator staging inventory before configuring connections, and an operator whose
-connection configuration is temporarily absent. The projection does not
-distinguish them and should not: it reports what was declared and what was
-correlated.
+A registered host record is not required. The view is a publication artifact,
+and registration is dispatch's check (D2).
 
-Keeping the change agnostic is what makes it a defect fix with independent value
-rather than a piece of the unbacked-listing feature. If that feature were
-abandoned, the projection would still be wrong today in the same way.
+**Alternatives.**
+- *Raise for every enabled publication without a host.* Rejected: one bad
+  declaration takes the whole site's projection offline.
+- *Require a registered host.* Rejected: it reintroduces host correlation into
+  the projection.
+
+### D5. Providers declare whether delivery needs a host; admission and scheduling recheck it
+
+- **Declaration.** Each registered fulfillment provider declares whether its
+  delivery needs a host. Provisioning composition already registers providers
+  and pool-config handlers by identity and requires the two key sets to match
+  (`compute_provisioning_service/composition.py:75-110`, `:184-207`). It
+  collects those declarations into a plain map from provider identity to the
+  requirement.
+- **Admission.** The map is injected into the site ledger. `kit/site` already
+  reads `ResourcePool`, so this adds no upward dependency. A declaration naming
+  no host, in a pool whose provider needs one, is an ineligible admission
+  candidate.
+- **Scheduling.** The same map is injected into the scheduler, which treats
+  such a Physical Resource as an ineligible candidate. Exclusion happens before
+  policy selection, capacity rebind, or cursor write, on both the automatic and
+  the explicit-constraint paths.
+- **Existing assignments** are not rechecked. The assignment froze the host at
+  scheduling, and dispatching to it honours the agreement. Dispatch is the
+  final check (D2).
+- **Unknown provider.** In a composition that supplies a map, a provider
+  identity absent from it needs a host (fail closed).
+- **No map.** A composition that supplies no map enforces no host requirement.
+  That keeps API-credit admission, which never names hosts and never schedules,
+  unchanged.
+
+Why admission and not only scheduling: D1 makes a declaration naming no host
+visible to storefronts. In a backed pool whose provider needs a host, it would
+otherwise be listed, admitted, and refused only at placement, after acceptance.
+Refusing at admission puts it in the ordinary capacity-refusal class, where any
+other unservable claim already fails. The listing can still be published,
+because the projection deliberately carries no host presence. That residual is
+accepted.
+
+Unbacked pools never reach admission (`unbacked-listing-publication` refuses
+them at the capacity type boundary), so this needs no backing awareness and has
+no ordering dependency on `pool-declared-advertisement-and-backing`.
+
+This is the same layer-by-layer recheck pool offering modes already follow.
+It is repository-wide, so `ARCHITECTURE.md` states it.
+
+**Alternatives.**
+- *Require a host universally in the scheduler.* Rejected: it would encode an
+  assumption about every provider into a provider-neutral kit.
+- *Refuse such declarations at registration.* Rejected: it would refuse the
+  unbacked contact-exchange declarations this campaign needs, unless
+  registration learned backing.
+- *A registration-time warning.* Declined; the reservation-time refusal is
+  sufficient.
+
+No provider whose delivery needs no host exists or is planned in this campaign.
+The seam has production consumers without one: both current providers declare
+a need, and admission and scheduling enforce it for backed pools.
+
+### D6. Naming a host is optional for a declaration
+
+The permanent requirement that a declaration "MUST name the host its capacity is
+delivered through as a `host_id` field" is about *where* the host is named. It
+is restated so that a declaration delivered through no host names none, while
+one delivered through a host still names it in that field and uniquely.
+
+### D7. Operator and buyer visibility
+
+The question was whether a declaration naming no host should appear in
+operator-facing listings as well as the projection. It is resolved with no new
+filtering.
+
+- The provisioning API already lists every declaration
+  (`GET /api/v1/capacity/resources`), and the host listing stays machines-only.
+- The projection carries every declaration (D1). The campaign's contact-exchange
+  listings need that.
+- Buyers separate listings by **backing**, a listing property, through the
+  exact registry filter `unbacked-listing-publication` adds. Host presence is
+  private and never reaches a listing, so it is not something anyone filters
+  on.
+
+### D8. Out of this change's scope
+
+- **Disabled hosts.** No new admission or placement against a disabled host,
+  while dispatch honours existing assignments and teardown works. Both the
+  admission half (`kit/site`) and the placement half (`kit/fulfillment`) go to
+  `pools-6-fair-scheduling-policy`, recorded there.
+- **The bare-metal storefront's duplicated host identity** goes to
+  `pools-8-capacity-projection-and-listing-hints`, recorded there.
+
+### D9. This change takes no position on why a declaration names no host
+
+The declaration may belong to an unbacked seller, to inventory staged before its
+connection exists, or to a host that has been deregistered. The projection
+reports what was declared. Admission, scheduling, and dispatch decide what may
+execute.
 
 ## Risks / Trade-offs
 
-- **[A hostless entry reaches a path that assumes a host]** → The failure would be
-  a `None` dereference or a rendered inventory with a blank address, both
-  discovered late. Mitigated by omitting rather than emptying the fields, so the
-  failure is a missing key at the boundary rather than a plausible-looking empty
-  value carried deeper, and by covering the fail-closed behavior at scheduling
-  and inventory rendering directly rather than reasoning about it.
-- **[Existing projections change shape]** → The change is additive by
-  construction, but "by construction" has been wrong before in this campaign.
-  Verify by diffing a full projection for a host-complete deployment before and
-  after, not by reading the loop.
-- **[Ordering against `capacity-resource-administration`]** → Landing this first
-  would project hostless entries whose capacity could not be resolved, since the
-  fallback it retires is host-derived. The dependency is a hard one, not a
-  coordination note.
+- **[A consumer relied on projected host fields]** → None found by the consumer
+  trace. Planning re-traces every reader of `site_resource_pools`, e2e helpers
+  included, before the fields are removed.
+- **[Disabled hosts start appearing enabled in listings]** → True where the
+  declaration is enabled. Admission already admits against them, so the listing
+  becomes truthful rather than newly wrong. `pools-6-fair-scheduling-policy` owns
+  making a disabled host stop new admission.
+- **[A listing is published that reservation refuses]** → Accepted. It fails in
+  the ordinary capacity-refusal class, and only for an operator
+  misconfiguration: a backed, host-requiring pool whose declaration names no
+  host.
+- **[Static-inventory removal breaks a deployment that relied on it]** → Every
+  production composition wires the host registry, and the static file seeds it
+  at startup. Planning confirms no compose, Helm, or e2e path executes against a
+  host that exists only in the static file.
+- **[The host-requirement map drifts from registered providers]** → The map is
+  collected from the same bundle registry whose key sets composition already
+  requires to match; an absent identity fails closed.
 
-## Open questions
+## Coordination
 
-- **Should a hostless capacity resource be visible to operator-facing inventory
-  listings, or only to the projection?** The two audiences differ: a storefront
-  needs the entry to publish, while an operator listing inventory may reasonably
-  expect to see only machines. Deferred rather than prescribed; no task instructs
-  an implementer either way.
+- **`contain-embedded-host-key-material`** edits `write_inventory` and
+  `render_inventory_ini` in the files this change edits for inventory resolution
+  and tenant address. The functions differ. Whichever lands second rebases.
+- **`unbacked-listing-publication`**'s design cites this change for fail-closed
+  placement and dispatch. Its wording is aligned with D2 and D5 in this change's
+  design update.
 
 ## Migration Plan
 
-1. Land `capacity-resource-administration`.
-2. Invert the loop, correlating hosts by their existing identity keys.
-3. Confirm a host-complete deployment projects identically, by diff.
-4. Add hostless coverage and the fail-closed execution-path coverage together.
+1. Land the provider declaration and host-requirement map, then the admission
+   and scheduling rechecks. This closes the stranded-assignment defect
+   independently of projection visibility.
+2. Land dispatch fail-closed and static-inventory removal, with the tenant
+   address fallback.
+3. Switch the projection to declarations alone. The projection revision and
+   digest advance once.
+4. Update permanent specifications, `ARCHITECTURE.md`, and the quickstarts.
 
-No schema change, no data migration, no deployment-contract change. Rollback is a
-code rollback; declared resources remain and are ignored by the restored reader,
-exactly as they are ignored today.
+There is no schema change and no data migration. Rollback is a code rollback.
+Declarations are unchanged by every step.
+
+## Open questions
+
+None. The operator-visibility question is resolved by D7.
