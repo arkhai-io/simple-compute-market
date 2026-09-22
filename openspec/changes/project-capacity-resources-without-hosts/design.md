@@ -192,6 +192,9 @@ Scope of the removal:
 
 ### D3. The tenant address falls back to the record's connection address
 
+*Amended by A2: the fallback reaches VM connection details; bare-metal access
+coordinates come from the access playbook.*
+
 The tenant-facing address is the host record's `public_host`, else its
 `ssh_host`, never a static file. `public_host` should be set wherever the
 provisioner and tenants reach the host on different networks. Falling back to
@@ -220,6 +223,8 @@ and registration is dispatch's check (D2).
   the projection.
 
 ### D5. Providers declare whether delivery needs a host; admission and scheduling recheck it
+
+*Mechanism amended by A1.*
 
 - **Declaration.** Each registered fulfillment provider declares whether its
   delivery needs a host. Provisioning composition already registers providers
@@ -353,6 +358,89 @@ execute.
 
 There is no schema change and no data migration. Rollback is a code rollback.
 Declarations are unchanged by every step.
+
+## Planning amendments (2026-09-22)
+
+Findings from the planning-time checks the decisions above deferred. Each one
+amends a decision; none reopens one.
+
+### A1. How providers declare the host requirement (amends D5)
+
+Provisioning composition cannot hand the site ledger a map derived from composed
+adapters. The container builds the ledger before the site authority, the site
+authority before the VM and bare-metal runtimes, and those runtimes before the
+bundles composition assembles (`compute_provisioning_service/container.py:225-330`).
+Deriving the map from composed adapters would be a construction cycle.
+
+The declaration is therefore static data that can be read without constructing a
+provider:
+
+- **On the provider class.** Each concrete provider declares a class-level
+  `needs_host`. `FulfillmentProvider` requires it, so a provider cannot be
+  registered without stating it.
+- **In the adapter package.** Each package exports its providers' declarations
+  keyed by provider identity, derived from those class attributes.
+- **In the container.** The container merges the package exports once. It passes
+  the result to `CapacityLedgerService` and to `PhysicalSettlementScheduler`, and
+  also to composition as the expected requirement.
+- **In composition.** Composition refuses to start if the expected requirement
+  does not name exactly the registered provider identities, or if any registered
+  provider instance declares otherwise. A package export that drifts from its
+  providers therefore fails at startup, not at reservation.
+
+The fail-closed predicate has one implementation, in `kit/resource-pools` beside
+`pool_delivers_offering_mode`: given a pool's provider identity and a supplied
+requirement, does the pool need a host? Both `kit/site` and `kit/fulfillment`
+already import that package, so neither imports a provider or the other.
+
+### A2. The bare-metal access address is not covered by the fallback (amends D3)
+
+The tenant-address fallback reaches VM connection details: the job path passes
+the record's address into result parsing (`job_service.py:548-550`).
+
+Bare-metal access coordinates come instead from the `host` the access playbook
+reports (`bare_metal_fulfillment_provider.py:432-452`). The shipped access
+playbook (`domains/vms/provisioning/iac/ansible/playbooks/bare-metal/node-access.yaml`)
+is a 21-line stub that reports none. The execution inventory does hand the
+playbook `public_host` as a host variable, as it does for VM.
+
+So the bare-metal quickstart documents only what is true: the mounted inventory
+is a seed input, and `public_host` is supplied to the access playbook. It does
+not promise a fallback the stub cannot deliver. Completing the access playbook is
+outside this change and has no owner; the closeout records it in the campaign
+index's unowned-work table.
+
+### A3. The static-inventory removal is contained
+
+- **Registry always wired.** Every production composition wires the host
+  registry (`vm_provisioning_adapter/runtime.py:139-148`, `container.py:285-299`),
+  so each optional-host-service branch is dead in production.
+- **Dead legacy service.** `ProvisioningService`
+  (`vm_provisioning_adapter/services/provisioning_service.py`) has no production
+  caller; only its own unit test constructs it. It is deleted.
+- **Unused readers.** Once the job path and the tenant address read the registry,
+  these static-file readers have no caller:
+  - `parse_inventory`, `get_inventory`, `lookup_host_ip`, `lookup_public_host`,
+    and the static `check_connectivity` in `ansible_service.py`, plus their mock
+    mirrors;
+  - the `InventoryHost` and `InventoryResponse` models.
+
+  The connectivity route already renders from the registry through
+  `host_operations_service`.
+- **Readiness is unaffected.** Its no-registry branch reports an unavailable
+  database inventory; it never reads the static file.
+- **The seed input remains.** It is `inventory_ini` or `inventory_path`, read
+  only when the host table is empty (`app_runtime.py:95-150`).
+
+### A4. An operator-visible consequence of D2
+
+Startup seeding is skipped once any host is registered. Today, a host added only
+to the static file on a running deployment still dispatches, through the
+fallback. After D2 it is refused until imported (`POST /api/v1/hosts/import` or
+host registration).
+
+That is the intended fail-closed behaviour, but it changes how an operator adds a
+host. `DEPLOYMENT_AND_CONFIG.md` and both quickstarts say so.
 
 ## Open questions
 

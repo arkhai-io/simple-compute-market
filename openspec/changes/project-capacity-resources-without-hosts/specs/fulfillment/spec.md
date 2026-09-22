@@ -6,13 +6,21 @@ Every registered fulfillment provider SHALL declare whether its delivery needs a
 host. A provisioning composition SHALL collect those declarations, keyed by
 provider identity, into one host requirement and SHALL supply that same
 requirement to site admission and to settlement scheduling as plain data. A lower
-layer receiving it SHALL NOT import a provider to obtain it.
+layer receiving it SHALL NOT import a provider to obtain it. Composition SHALL refuse
+to start when the supplied requirement does not name exactly its registered provider
+identities, or when a registered provider declares differently from it.
 
 #### Scenario: Composition collects every registered provider's declaration
 
 - **WHEN** a provisioning composition registers its fulfillment providers
 - **THEN** the host requirement it supplies names every registered provider
   identity with that provider's declaration
+
+#### Scenario: The supplied requirement disagrees with a registered provider
+
+- **WHEN** the requirement supplied to composition omits a registered provider, names
+  an unregistered one, or states a different need than a registered provider declares
+- **THEN** composition refuses to start
 
 #### Scenario: A provider needs a host
 

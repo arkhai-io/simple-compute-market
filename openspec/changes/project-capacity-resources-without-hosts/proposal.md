@@ -63,9 +63,12 @@ listings that goal serves have no host behind them by construction.
   rendered only from the registered host record the settlement resource names.
   Remove the static-inventory fallback from every execution path; the configured
   inventory file remains a startup seed input only.
-- **Resolve the tenant-facing address from the host record**: its
-  `public_host`, else its `ssh_host`. Document the fallback in the operator
-  quickstarts.
+- **Resolve the VM tenant-facing address from the host record**: its
+  `public_host`, else its `ssh_host`. Document the fallback in the VM quickstart,
+  and document the inventory file as a seed input in both quickstarts and in
+  `DEPLOYMENT_AND_CONFIG.md`.
+- **Delete the unused legacy `ProvisioningService` and the static-inventory
+  readers** left without a caller.
 
 ## Capabilities
 
@@ -110,6 +113,7 @@ None.
 
 - **Provisioning service:** `capacity_inventory` (projection), `composition`
   (host-requirement collection), container wiring.
+- **`kit/resource-pools`:** the fail-closed host-requirement predicate.
 - **`kit/site`:** admission candidate eligibility.
 - **`kit/fulfillment`:** provider protocol declaration and scheduler candidate
   eligibility.
@@ -161,9 +165,14 @@ None.
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 
-Operator documentation: `docs/seller-quickstart.md` and
-`docs/bare-metal-seller-quickstart.md` state the tenant-address fallback and
-that the mounted inventory file is a seed input.
+Operator documentation:
+- `docs/seller-quickstart.md` states the VM tenant-address fallback.
+- `docs/seller-quickstart.md` and `docs/bare-metal-seller-quickstart.md` state
+  that the mounted inventory file is a seed input.
+- `docs/development/DEPLOYMENT_AND_CONFIG.md` says a host added after first boot
+  must be imported rather than edited into the file.
+- `docs/development/TESTING.md` records the host-requirement enforcement matrix
+  beside the offering-mode one.
 
 ### Knowledge to promote
 
@@ -181,7 +190,7 @@ that the mounted inventory file is a seed input.
 - Execution inventory comes only from the registered host record; the static
   file is a seed input — `openspec/specs/physical-provisioning/spec.md`.
 - The tenant address falls back to the host record's connection address —
-  `openspec/specs/physical-provisioning/spec.md`, plus the operator quickstarts.
+  `openspec/specs/physical-provisioning/spec.md`, plus the VM quickstart.
 - The bare-metal publication view is built from its declaration —
   `openspec/specs/physical-provisioning/spec.md`.
 - The host is joined at dispatch only, and why —
