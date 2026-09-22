@@ -16,7 +16,7 @@ from typing import Any, Optional
 
 
 # ---------------------------------------------------------------------------
-# Internal DTO — replaces ProvisionRequest + ProvisioningParams
+# Internal DTO — the parameters of one Ansible job
 # ---------------------------------------------------------------------------
 
 

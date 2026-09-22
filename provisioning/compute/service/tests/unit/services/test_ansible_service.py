@@ -473,8 +473,8 @@ class TestPublicHostInventory:
         assert "public_host=" not in content
 
 
-class TestPublicHostConnection:
-    def test_vm_host_ip_and_ssh_command_prefer_public_host(self):
+class TestTenantAddress:
+    def test_host_ip_and_ssh_command_use_the_supplied_tenant_address(self):
         from vm_provisioning_adapter.services.ansible_service import AnsibleResult
 
         svc = _make_service()
@@ -484,10 +484,30 @@ class TestPublicHostConnection:
             process_id=123,
         )
         parsed = svc.parse_playbook_result(
-            result, _base_params(host_id="kvm1"), public_host="203.0.113.9"
+            result, _base_params(host_id="kvm1"), tenant_address="203.0.113.9"
         )
         assert parsed.host_ip == "203.0.113.9"
         assert parsed.ssh_command == "ssh -i <your_private_key> -p 9000 tenantx@203.0.113.9"
+
+    def test_no_address_is_read_from_an_inventory_file(self, tmp_path):
+        """A configured inventory naming the host supplies nothing: the
+        address comes only from the host record the caller resolved."""
+        from vm_provisioning_adapter.services.ansible_service import AnsibleResult
+
+        inventory = tmp_path / "hosts"
+        inventory.write_text("[kvm_hosts]\nkvm1  ansible_host=198.51.100.7\n")
+        svc = _make_service()
+        svc._settings.resolved_inventory_path = inventory
+        result = AnsibleResult(
+            stdout='"external_ssh_port": "9000"\n"tenant_user": "tenantx"',
+            stderr="",
+            process_id=123,
+        )
+
+        parsed = svc.parse_playbook_result(result, _base_params(host_id="kvm1"))
+
+        assert parsed.host_ip is None
+        assert parsed.ssh_command is None
 
 
 # ---------------------------------------------------------------------------

@@ -53,8 +53,10 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session, sessionmaker
 from market_resource_pools import (
     DEFAULT_POOL_ID,
+    HostRequirement,
     ResourcePool,
     pool_delivers_offering_mode,
+    pool_needs_host,
 )
 
 from .declarations import CapacityDeclaration
@@ -585,6 +587,7 @@ class CapacityLedgerService:
         unit_claim_keys: Sequence[str] = _DEFAULT_UNIT_CLAIM_KEYS,
         mirror_dimension: str = _DEFAULT_MIRROR_DIMENSION,
         settlement_abandonment_hook: SettlementAbandonmentHook | None = None,
+        host_requirement: HostRequirement | None = None,
     ) -> None:
         """``required_attributes`` is an optional coarse local eligibility
         invariant: a resource matches only when its attributes give each
@@ -612,8 +615,17 @@ class CapacityLedgerService:
         negotiation-driven resize's supersede step (``resize_reservation``).
         Whether there is anything to react to is entirely the hook's
         decision, not this service's.
+
+        ``host_requirement`` maps each fulfillment provider identity to whether
+        its delivery needs a host. When supplied, a declaration that names no
+        host is not an admission candidate in a pool whose provider needs one,
+        or whose provider the requirement does not name; see
+        ``market_resource_pools.pool_needs_host``. A composition that executes
+        nothing against hosts supplies none, and admission is then
+        host-agnostic.
         """
         self._session_factory = session_factory
+        self._host_requirement = host_requirement
         self._required_attributes = tuple(required_attributes)
         self._unit_claim_keys = tuple(unit_claim_keys)
         self._mirror_dimension = mirror_dimension
@@ -1167,6 +1179,14 @@ class CapacityLedgerService:
             raise UndeclaredOfferingModeError(
                 f"offering mode {requested_mode!r} is not declared by pool "
                 f"{destination.pool_id or DEFAULT_POOL_ID!r}"
+            )
+        if not destination.host_id and self._pool_needs_host(
+            db, destination.pool_id or DEFAULT_POOL_ID
+        ):
+            raise CapacityConflictError(
+                f"settlement resource {settlement_resource_id!r} names no host, "
+                f"and pool {destination.pool_id or DEFAULT_POOL_ID!r} delivers "
+                "through one"
             )
         if (
             self._backing_resource_id(db, reservation.capacity_reservation_id)
@@ -2150,6 +2170,13 @@ class CapacityLedgerService:
         )
 
 
+    def _pool_needs_host(self, db: Session, pool_id: str) -> bool:
+        pool = db.get(ResourcePool, pool_id)
+        return pool_needs_host(
+            pool.provider if pool is not None else None,
+            self._host_requirement,
+        )
+
     def _find_candidate(
         self,
         db: Session,
@@ -2170,6 +2197,7 @@ class CapacityLedgerService:
         requested_mode = _requested_offering_mode(claim, required=False)
         undeclared_pools: set[str] = set()
         pool_mode_decisions: dict[str, bool] = {}
+        pool_host_decisions: dict[str, bool] = {}
         for resource in rows:
             attrs = resource.attributes or {}
             if any(
@@ -2197,6 +2225,17 @@ class CapacityLedgerService:
                     )
                 if not pool_mode_decisions[pool_id]:
                     undeclared_pools.add(pool_id)
+                    continue
+            # A declaration naming no host can be neither placed nor executed
+            # in a pool whose provider delivers through one, so it is not a
+            # candidate at all: the claim falls through to another declaration
+            # or to the ordinary no-capacity answer, never to a hold that
+            # scheduling would then have to refuse. Whether the named host is
+            # registered is checked at dispatch, where the connection is used.
+            if not resource.host_id:
+                if pool_id not in pool_host_decisions:
+                    pool_host_decisions[pool_id] = self._pool_needs_host(db, pool_id)
+                if pool_host_decisions[pool_id]:
                     continue
             held = self._held_dimensions(
                 db, resource.backing_resource_id, lease_start, lease_end

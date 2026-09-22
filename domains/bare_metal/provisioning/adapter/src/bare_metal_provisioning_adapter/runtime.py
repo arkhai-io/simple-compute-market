@@ -7,7 +7,10 @@ from typing import Any, Callable, Mapping
 
 from arkhai_bare_metal import BareMetalResourceProjection
 
-from bare_metal_provisioning_adapter.bundle import build_bare_metal_adapter_bundle
+from bare_metal_provisioning_adapter.bundle import (
+    HOST_REQUIREMENT,
+    build_bare_metal_adapter_bundle,
+)
 from bare_metal_provisioning_adapter.compute_adapter import BareMetalComputeAdapter
 from bare_metal_provisioning_adapter.release import BareMetalReleaseExecutor
 from bare_metal_provisioning_adapter.services.bare_metal_lease_service import (

@@ -21,8 +21,9 @@ import asyncio
 
 import pytest
 
-from vm_provisioning_operator import ProvisioningError
-from vm_provisioning_operator.models import CreateVmRequest
+from vm_provisioning_operator import ProvisioningError, ProvisioningJobError
+from vm_provisioning_operator.models import CreateVmRequest, HostCreate
+from compute_provisioning_service import container as _container_module
 from compute_provisioning_service.services.async_job_queue import AsyncJobQueue
 
 
@@ -90,6 +91,19 @@ class TestCreateVmViaClient:
     appear in test code.  The ``on_job_started`` seam synchronises tests
     against the background job loop without any sleeps.
     """
+
+    @pytest.fixture(autouse=True)
+    async def _registered_host(self, client_and_queue):
+        # A job runs only against a registered host record, which is also
+        # where the tenant-facing address in its result comes from.
+        client, _ = client_and_queue
+        await client.register_host(HostCreate(
+            host_id=HOST,
+            ssh_host="10.0.0.1",
+            ssh_user="root",
+            ssh_key_type="path",
+            ssh_key_value="/tmp/test-key",
+        ))
 
     async def test_create_vm_returns_queued_job(self, client_and_queue):
         client, job_queue = client_and_queue
@@ -233,3 +247,68 @@ class TestCreateVmViaClient:
 
         assert submit.status == "queued"
         await asyncio.wait_for(dispatched.wait(), timeout=5.0)
+
+
+
+class TestDispatchRequiresARegisteredHost:
+    async def test_a_job_for_an_unregistered_host_fails_before_any_playbook(
+        self, client_and_queue, fake_ansible, tmp_path, monkeypatch
+    ):
+        """Dispatch renders only from the host registry. A configured inventory
+        file naming the host changes nothing: it is a seed input, not an
+        execution source."""
+        inventory = tmp_path / "hosts"
+        inventory.write_text(
+            "[kvm_hosts]\n"
+            "unregistered-kvm  ansible_host=198.51.100.7  ansible_user=root\n"
+        )
+        # Service-internal state setup: no API configures the inventory path.
+        monkeypatch.setattr(
+            _container_module.resolved_job_service._settings,
+            "resolved_inventory_path",
+            inventory,
+        )
+        client, job_queue = client_and_queue
+        dispatched = _make_event_seam(job_queue)
+
+        submit = await client.create_vm(
+            "unregistered-kvm", CreateVmRequest(vm_target=VM_NAME)
+        )
+        await asyncio.wait_for(dispatched.wait(), timeout=5.0)
+
+        with pytest.raises(ProvisioningJobError, match="'unregistered-kvm' is not registered"):
+            await client.poll_until_complete(
+                submit.job_id, timeout=5.0, poll_interval=0.05
+            )
+        fake_ansible.start_playbook.assert_not_called()
+        fake_ansible.write_inventory.assert_not_called()
+        fake_ansible.build_vars_file.assert_not_called()
+
+    async def test_a_registered_host_job_renders_its_inventory_from_the_record(
+        self, client_and_queue, fake_ansible
+    ):
+        client, job_queue = client_and_queue
+        await client.register_host(HostCreate(
+            host_id="registered-kvm",
+            ssh_host="192.0.2.10",
+            ssh_user="root",
+            ssh_key_type="path",
+            ssh_key_value="/tmp/test-key",
+        ))
+        dispatched = _make_event_seam(job_queue)
+
+        submit = await client.create_vm(
+            "registered-kvm", CreateVmRequest(vm_target=VM_NAME)
+        )
+        await asyncio.wait_for(dispatched.wait(), timeout=5.0)
+        final = await client.poll_until_complete(
+            submit.job_id, timeout=5.0, poll_interval=0.05
+        )
+
+        assert final.status == "succeeded"
+        (rendered_hosts,), _ = fake_ansible.write_inventory.call_args
+        assert [host.host_id for host in rendered_hosts] == ["registered-kvm"]
+        start = fake_ansible.start_playbook.call_args.kwargs
+        assert start["inventory_path"] == fake_ansible.write_inventory.return_value
+        # No public address is configured, so tenants get the connection address.
+        assert final.result["host_ip"] == "192.0.2.10"

@@ -82,9 +82,8 @@ def db_engine(tmp_path):
 
 from .conftest import AsyncProvisioningTestClient, AsyncProvisioningTestClientError
 @pytest.fixture
-def programmable_mock(fake_inventory_path) -> ProgrammableMockAnsibleService:
-    mock_settings = MagicMock(resolved_inventory_path=fake_inventory_path)
-    svc = ProgrammableMockAnsibleService(mock_settings)
+def programmable_mock() -> ProgrammableMockAnsibleService:
+    svc = ProgrammableMockAnsibleService(MagicMock())
     import tempfile
     fake_inv = Path(tempfile.gettempdir()) / "test_inv.ini"
     fake_inv.write_text("[kvm_hosts]\nkvm1  ansible_host=10.0.0.1  ansible_user=root\n")

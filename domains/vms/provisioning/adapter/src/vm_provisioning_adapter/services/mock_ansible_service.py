@@ -15,7 +15,6 @@ Control hooks (constructor parameters)
 ``provision_result`` — dict returned as the parsed result for any create job.
 ``should_fail``      — if True, ``wait_for_playbook`` raises AnsibleError.
 ``fail_message``     — error string used when should_fail is True.
-``host_ip``          — value returned by ``lookup_host_ip`` for any host.
 
 These are set once at construction.  For docker-compose e2e tests that need
 to toggle failure mode, run two separate provisioning-service containers
@@ -32,11 +31,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 from unittest.mock import MagicMock
 
-from vm_provisioning_adapter.models.ansible import (
-    ConnectivityResult,
-    InventoryHost,
-    InventoryResponse,
-)
+from vm_provisioning_adapter.models.ansible import ConnectivityResult
 from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams, AnsibleRunResult
 from vm_provisioning_adapter.services.ansible_service import (
     AnsibleError,
@@ -97,13 +92,11 @@ class MockAnsibleService:
         provision_result: Optional[str] = None,
         should_fail: bool = False,
         fail_message: str = "mock failure",
-        host_ip: str = "127.0.0.1",
     ) -> None:
         self._settings = settings
         self._stdout = provision_result or _FAKE_STDOUT
         self._should_fail = should_fail
         self._fail_message = fail_message
-        self._host_ip = host_ip
 
     # ------------------------------------------------------------------
     # Playbook interface — mirrors AnsibleService exactly
@@ -167,55 +160,18 @@ class MockAnsibleService:
         self,
         result: AnsibleResult,
         params: AnsibleJobParams,
-        public_host: str | None = None,
+        tenant_address: str | None = None,
     ) -> AnsibleRunResult:
         """Delegate to real parsing logic — only subprocess boundary is mocked."""
         from vm_provisioning_adapter.services.ansible_service import AnsibleService
 
         real = AnsibleService.__new__(AnsibleService)
         real._settings = self._settings
-        return real.parse_playbook_result(result, params, public_host=public_host)
-
-    # ------------------------------------------------------------------
-    # Inventory interface
-    # ------------------------------------------------------------------
-
-    def parse_inventory(self, search: str | None = None) -> list[InventoryHost]:
-        """Return a single fake host entry."""
-        hosts = [
-            InventoryHost(
-                host_id="kvm1",
-                ansible_host=self._host_ip,
-                vars={"ansible_ssh_private_key_file": "~/.ssh/id_ed25519"},
-            )
-        ]
-        if search:
-            hosts = [h for h in hosts if search.lower() in h.host_id.lower()]
-        return hosts
-
-    def get_inventory(self, search: str | None = None) -> InventoryResponse:
-        return InventoryResponse(
-            inventory_path=str(
-                getattr(self._settings, "resolved_inventory_path", "/mock/hosts")
-            ),
-            hosts=self.parse_inventory(search=search),
-        )
-
-    def lookup_host_ip(self, host_id: str) -> Optional[str]:
-        return self._host_ip
+        return real.parse_playbook_result(result, params, tenant_address=tenant_address)
 
     # ------------------------------------------------------------------
     # Connectivity check
     # ------------------------------------------------------------------
-
-    async def check_connectivity(self, host: str) -> ConnectivityResult:
-        """Always reports reachable in mock mode."""
-        await asyncio.sleep(0)
-        return ConnectivityResult(
-            host=host,
-            reachable=True,
-            detail="mock: connectivity check always succeeds",
-        )
 
     async def check_connectivity_with_inventory(
         self, host: str, inventory_path

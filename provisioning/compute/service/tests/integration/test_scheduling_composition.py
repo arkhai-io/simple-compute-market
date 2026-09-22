@@ -71,9 +71,11 @@ def test_real_container_resolves_scheduling_dependencies_to_one_boundary():
             provider_config={"playbook_path": "p.yaml"},
         )
     )
+    # The real container supplies the providers' host requirement, and the
+    # Ansible provider delivers through a host, so the declaration names one.
     ledger.register_resource(
         resource_id="r1", resource_type="compute.gpu",
-        total_units=10, enabled=True, pool_id="pool-a",
+        total_units=10, enabled=True, pool_id="pool-a", host_id="kvm1",
     )
     reservation = ledger.reserve(
         claim={"offering_mode": "vm", "gpu_count": 1},
@@ -126,11 +128,11 @@ def test_real_container_composed_schedule_rolls_back_all_participating_tables():
     )
     ledger.register_resource(
         resource_id="r1", resource_type="compute.gpu",
-        total_units=10, enabled=True, pool_id="pool-a",
+        total_units=10, enabled=True, pool_id="pool-a", host_id="kvm1",
     )
     ledger.register_resource(
         resource_id="r2", resource_type="compute.gpu",
-        total_units=10, enabled=True, pool_id="pool-b",
+        total_units=10, enabled=True, pool_id="pool-b", host_id="kvm2",
     )
 
     # Schedule a first reservation for real (no injected failure) so the

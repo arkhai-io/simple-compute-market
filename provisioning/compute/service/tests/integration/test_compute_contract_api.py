@@ -213,8 +213,10 @@ async def test_adapter_is_selected_by_the_offering_mode(client_and_queue):
     selector rename reaches composition rather than only the envelope.
     """
     legacy_client, _ = client_and_queue
+    # The reservation below binds kvm1, and dispatch runs only against a
+    # registered host record, so that is the host registered here.
     await legacy_client.register_host(HostCreate(
-        host_id="kvm-sel",
+        host_id="kvm1",
         ssh_host="127.0.0.1",
         ssh_user="ubuntu",
         ssh_key_type="path",

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import MappingProxyType
+
 from compute_provisioning_service import (
     ExecutorAdapterBundle,
     ExecutorAdapterContribution,
@@ -15,6 +17,18 @@ from vm_provisioning_adapter.services.ansible_fulfillment_provider import (
 )
 from vm_provisioning_adapter.services.ansible_pool_config_handler import (
     AnsiblePoolConfigHandler,
+)
+
+
+#: The provider identity this bundle registers.
+ANSIBLE_PROVIDER = "ansible"
+
+#: What this bundle's providers declare about needing a host, keyed by
+#: provider identity. Read from the provider classes so composition can hand it
+#: to the site ledger, which is built before any provider instance exists;
+#: composition refuses to start if it disagrees with the registered instances.
+HOST_REQUIREMENT = MappingProxyType(
+    {ANSIBLE_PROVIDER: AnsibleFulfillmentProvider.needs_host}
 )
 
 
@@ -36,8 +50,8 @@ def build_vm_adapter_bundle(
                 release_executor=release_executor,
             ),
         ),
-        fulfillment_providers={"ansible": fulfillment_provider},
-        pool_config_handlers={"ansible": pool_config_handler},
+        fulfillment_providers={ANSIBLE_PROVIDER: fulfillment_provider},
+        pool_config_handlers={ANSIBLE_PROVIDER: pool_config_handler},
         router_mounts=vm_router_mounts(),
         readiness_checks=checks,
     )

@@ -20,8 +20,10 @@ from datetime import datetime, timezone
 from typing import Any
 
 from market_resource_pools import (
+    HostRequirement,
     ResourcePoolService,
     pool_delivers_offering_mode,
+    pool_needs_host,
 )
 from market_site import resource_satisfies_requirement
 from market_site.ledger import CapacityLedgerService
@@ -77,8 +79,15 @@ class PhysicalSettlementScheduler:
         default_resource_kind: str | None = None,
         repository: SettlementRepository | None = None,
         unit_of_work: SchedulingUnitOfWork | None = None,
+        host_requirement: HostRequirement | None = None,
     ) -> None:
+        """``host_requirement`` maps each provider identity to whether its
+        delivery needs a host; see ``market_resource_pools.pool_needs_host``.
+        When supplied, a candidate whose declaration names no host is never
+        placed in a pool whose provider needs one.
+        """
         self._pool_service = pool_service
+        self._host_requirement = host_requirement
         self._capacity_ledger = capacity_ledger
         self._policy = policy or DeterministicRoundRobinPolicy()
         self._default_resource_kind = default_resource_kind
@@ -288,6 +297,17 @@ class PhysicalSettlementScheduler:
                 continue
             if not pool_delivers_offering_mode(
                 pool.policy_tags, requirement.offering_mode
+            ):
+                continue
+            # Placing a declaration that names no host in a pool whose provider
+            # delivers through one would commit an assignment no provider can
+            # execute, and an equivalent retry would return it again. Excluding
+            # it here, before policy, rebind, or cursor write, keeps both the
+            # automatic and the explicitly constrained paths from reaching it.
+            # An existing assignment is not re-evaluated: its host was fixed
+            # when it was placed.
+            if not getattr(payload, "host_id", None) and pool_needs_host(
+                pool.provider, self._host_requirement
             ):
                 continue
             if not resource_satisfies_requirement(

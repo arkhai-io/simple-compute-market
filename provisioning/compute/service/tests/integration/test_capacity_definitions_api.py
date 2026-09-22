@@ -98,7 +98,7 @@ async def test_a_refused_import_reports_every_problem_and_applies_nothing(
         id="pool-b", label="Pool B", provider="ansible",
         provider_config={"playbook_path": "playbooks/vm-operations.yaml"},
     ))
-    await capacity.register("held", pool_id="default", total_units=4)
+    await capacity.register("held", pool_id="default", total_units=4, host_id="kvm-held")
     reserved = await capacity.reserve(
         {"offering_mode": "vm", "gpu_count": 1, "resource_id": "held"}, {}
     )

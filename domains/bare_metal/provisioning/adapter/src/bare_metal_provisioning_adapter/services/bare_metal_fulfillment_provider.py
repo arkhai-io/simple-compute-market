@@ -95,6 +95,8 @@ class BareMetalFulfillmentProvider(FulfillmentProvider):
     """Schedule access only for the immutable selected bare-metal resource."""
 
     provider = _PROVIDER
+    # The sold unit is one whole host, reached over its registered connection.
+    needs_host = True
 
     def __init__(
         self,

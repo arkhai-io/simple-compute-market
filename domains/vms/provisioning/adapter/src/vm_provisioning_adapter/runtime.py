@@ -6,7 +6,7 @@ import os
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
-from vm_provisioning_adapter.bundle import build_vm_adapter_bundle
+from vm_provisioning_adapter.bundle import HOST_REQUIREMENT, build_vm_adapter_bundle
 from vm_provisioning_adapter.compute_adapter import VmComputeAdapter
 from vm_provisioning_adapter.release import VmFulfillmentReleaseJobPort, VmReleaseExecutor
 from compute_provisioning_service.services.relay_port_allocator import (

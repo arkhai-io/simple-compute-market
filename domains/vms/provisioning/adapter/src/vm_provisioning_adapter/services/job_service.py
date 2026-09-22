@@ -75,9 +75,11 @@ class AnsibleJobService:
         settings: Settings,
         session_factory: sessionmaker[Session],
         ansible_service: AnsibleService,
-        host_service=None,  # services.host_service.HostService | None
+        host_service,  # services.host_service.HostService
         relay_resolver=None,  # services.relay_execution.RelayExecutionResolver | None
     ) -> None:
+        # The host registry is required: it is the only source of the
+        # inventory a job runs against. See _process_job.
         self._settings = settings
         self._session_factory = session_factory
         self._ansible = ansible_service
@@ -475,6 +477,24 @@ class AnsibleJobService:
 
             self._update_job(db, job, status=JobStatus.running.value)
             params = self._build_params(job.params)
+            # The job runs only against the registered host record it names: the
+            # record is its whole inventory and its tenant-facing address. A
+            # host with no record fails here, before any credential or
+            # variable reaches a file and before any playbook starts; there is
+            # no fallback inventory, because one would run against whatever a
+            # file happens to say rather than what the registry holds. See
+            # openspec/specs/physical-provisioning/spec.md.
+            host = self._host_service.get_host(params.host_id)
+            if host is None:
+                error_message = (
+                    f"host {params.host_id!r} is not registered; register or "
+                    "import it before dispatching work to it"
+                )
+                self._update_job(
+                    db, job, status=JobStatus.failed.value, error=error_message
+                )
+                logger.error("Job %s refused: %s", job_id, error_message)
+                return
             # Last point before the token reaches a file. Resolved here rather
             # than at acceptance so a rotation takes effect on a retry, and so
             # the credential never enters job.params, which this service
@@ -483,31 +503,17 @@ class AnsibleJobService:
                 params = self._relay_resolver.resolve_into(params)
             vars_path = self._ansible.build_vars_file(params)
 
-            # Resolve inventory: prefer DB-backed rendering when HostService
-            # is wired and has a row for this host. rendered_inv_path is
-            # initialised before the try block so the outer finally block can
-            # always clean it up, including early returns.
-            host_public_host = None
-            if self._host_service is not None:
-                host = self._host_service.get_host(params.host_id)
-                if host is not None:
-                    host_public_host = host.public_host
-                    rendered_inv_path = self._ansible.write_inventory([host])
-                    logger.debug(
-                        "Job %s: using DB-rendered inventory at %s",
-                        job_id,
-                        rendered_inv_path,
-                    )
-
-            inventory_path = (
-                rendered_inv_path
-                if rendered_inv_path is not None
-                else self._settings.resolved_inventory_path
-            )
+            # rendered_inv_path is initialised before the try block so the
+            # outer finally block can always clean it up.
+            rendered_inv_path = self._ansible.write_inventory([host])
+            # Buyers may reach the host on a different network than the
+            # provisioner does; with no public address configured, the
+            # connection address is the one there is.
+            tenant_address = host.public_host or host.ssh_host
 
             run = self._ansible.start_playbook(
                 playbook_path=self._playbook_path_for_params(params),
-                inventory_path=inventory_path,
+                inventory_path=rendered_inv_path,
                 extra_vars_path=vars_path,
                 limit=params.host_id,
             )
@@ -546,7 +552,7 @@ class AnsibleJobService:
                     log_callback=log_callback,
                 )
                 run_result: AnsibleRunResult = self._ansible.parse_playbook_result(
-                    ansible_result, params, public_host=host_public_host
+                    ansible_result, params, tenant_address=tenant_address
                 )
                 logs = run_result.stdout + (
                     "\n\nSTDERR:\n" + run_result.stderr if run_result.stderr else ""

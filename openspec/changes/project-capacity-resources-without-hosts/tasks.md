@@ -25,40 +25,40 @@ packaging rules.
 
 ## 1. Providers declare whether delivery needs a host
 
-- [ ] 1.1 Add the fail-closed predicate beside `pool_delivers_offering_mode` in
+- [x] 1.1 Add the fail-closed predicate beside `pool_delivers_offering_mode` in
       `kit/resource-pools/src/market_resource_pools/hints.py`, and export it
       from `kit/resource-pools/src/market_resource_pools/__init__.py`.
       - With no supplied requirement, no pool needs a host.
       - With a supplied requirement, a provider identity it does not name needs
         a host.
-- [ ] 1.2 Require a class-level `needs_host` declaration on
+- [x] 1.2 Require a class-level `needs_host` declaration on
       `FulfillmentProvider` in `kit/fulfillment/src/market_fulfillment/provider.py`.
       A subclass that does not declare it cannot be registered.
-- [ ] 1.3 Declare `needs_host = True` on both concrete providers:
+- [x] 1.3 Declare `needs_host = True` on both concrete providers:
       - `AnsibleFulfillmentProvider`
         (`domains/vms/provisioning/adapter/src/vm_provisioning_adapter/services/ansible_fulfillment_provider.py`);
       - `BareMetalFulfillmentProvider`
         (`domains/bare_metal/provisioning/adapter/src/bare_metal_provisioning_adapter/services/bare_metal_fulfillment_provider.py`).
-- [ ] 1.4 Declare it on every test double subclassing `FulfillmentProvider`:
+- [x] 1.4 Declare it on every test double subclassing `FulfillmentProvider`:
       - `provisioning/compute/service/tests/unit/test_composition.py`;
       - `provisioning/compute/service/tests/unit/services/test_fulfillment_convergence.py`;
       - `provisioning/compute/service/tests/unit/services/test_fulfillment_convergence_after_legacy_backfill.py`.
 
       Re-run the subclass search at implementation time rather than trusting
       this list.
-- [ ] 1.5 Export each adapter package's host requirement, keyed by provider
+- [x] 1.5 Export each adapter package's host requirement, keyed by provider
       identity and derived from its provider class attributes (A1), from:
       - `domains/vms/provisioning/adapter/src/vm_provisioning_adapter/bundle.py`;
       - `domains/bare_metal/provisioning/adapter/src/bare_metal_provisioning_adapter/bundle.py`.
-- [ ] 1.6 In `provisioning/compute/service/src/compute_provisioning_service/composition.py`,
+- [x] 1.6 In `provisioning/compute/service/src/compute_provisioning_service/composition.py`,
       accept the expected host requirement and refuse to start when it does not
       name exactly the registered provider identities, or when a registered
       provider instance declares differently. Validate before any other state is
       built, beside `_validate_provider_pairing`.
-- [ ] 1.7 In `provisioning/compute/service/src/compute_provisioning_service/container.py`,
+- [x] 1.7 In `provisioning/compute/service/src/compute_provisioning_service/container.py`,
       merge the two package exports once and pass the result to
       `CapacityLedgerService`, `PhysicalSettlementScheduler`, and composition.
-- [ ] 1.8 **Unit.**
+- [x] 1.8 **Unit.**
       - The predicate: known needs host, known needs none, unknown with a
         supplied requirement, no requirement.
       - Composition refusal for a missing identity, an extra identity, and a
@@ -70,10 +70,10 @@ packaging rules.
 
 ## 2. Admission applies the host requirement
 
-- [ ] 2.1 Accept an optional host requirement in `CapacityLedgerService.__init__`
+- [x] 2.1 Accept an optional host requirement in `CapacityLedgerService.__init__`
       in `kit/site/src/market_site/ledger.py`. No requirement means none is
       enforced, which keeps API-credit composition unchanged.
-- [ ] 2.2 In `_find_candidate`, skip a declaration that names no host when its
+- [x] 2.2 In `_find_candidate`, skip a declaration that names no host when its
       pool's provider needs one, using the 1.1 predicate against the pool's
       `provider`. Load pools the way the offering-mode check already does,
       beside it and before hold accounting.
@@ -81,7 +81,7 @@ packaging rules.
         `_find_candidate`, so they share the rule.
       - The skip is not an undeclared-mode refusal: an unmatched claim gets the
         ordinary no-capacity answer.
-- [ ] 2.3 **Unit** (`kit/site/tests/unit`):
+- [x] 2.3 **Unit** (`kit/site/tests/unit`):
       - a host-requiring pool's declaration naming no host neither probes nor
         reserves, and creates no hold;
       - another eligible declaration is chosen instead;
@@ -96,23 +96,23 @@ real app there).
 
 ## 3. Scheduling applies the host requirement
 
-- [ ] 3.1 Accept the host requirement in `PhysicalSettlementScheduler.__init__`
+- [x] 3.1 Accept the host requirement in `PhysicalSettlementScheduler.__init__`
       in `kit/fulfillment/src/market_fulfillment/scheduler.py`.
-- [ ] 3.2 In `_eligible_candidates_in_transaction`, exclude a candidate whose
+- [x] 3.2 In `_eligible_candidates_in_transaction`, exclude a candidate whose
       declaration names no host when its pool's provider needs one.
       - The explicit-constraint path selects from the same list, so it rejects
         such a candidate as `NoEligibleSettlementResourceError` before policy,
         rebind, or cursor write.
       - Leave the existing-assignment branch unchanged (D5): its host is frozen
         on the record.
-- [ ] 3.3 **Unit** (`kit/fulfillment/tests/unit`):
+- [x] 3.3 **Unit** (`kit/fulfillment/tests/unit`):
       - automatic selection never picks the excluded candidate;
       - with no other candidate, no rebind, cursor save, or assignment occurs,
         asserted on the scheduling unit of work;
       - an explicit constraint naming it is rejected without cursor access;
       - an existing assignment whose declaration was later re-registered without
         a host is still returned.
-- [ ] 3.4 **Integration**
+- [x] 3.4 **Integration**
       (`provisioning/compute/service/tests/integration/`).
       - Setup:
         - register a pool with provider `ansible` through `ProvisioningClient`;
@@ -132,18 +132,18 @@ real app there).
 
 ## 4. Dispatch fails closed; the static inventory is seed-only
 
-- [ ] 4.1 In `domains/vms/provisioning/adapter/src/vm_provisioning_adapter/services/job_service.py`:
+- [x] 4.1 In `domains/vms/provisioning/adapter/src/vm_provisioning_adapter/services/job_service.py`:
       - make `host_service` a required constructor argument;
       - resolve the host record before any playbook starts;
       - fail the job with a message naming the unregistered host when there is
         no record;
       - delete the `resolved_inventory_path` fallback (currently `:486-512`).
-- [ ] 4.2 Pass the tenant address as the record's `public_host`, else its
+- [x] 4.2 Pass the tenant address as the record's `public_host`, else its
       `ssh_host`, into `parse_playbook_result`. In
       `domains/vms/provisioning/adapter/src/vm_provisioning_adapter/services/ansible_service.py`,
       use that address alone and delete the static-file lookups (currently
       `:585-590`).
-- [ ] 4.3 Delete the static-inventory readers left without a caller (A3):
+- [x] 4.3 Delete the static-inventory readers left without a caller (A3):
       - `parse_inventory`, `get_inventory`, `lookup_host_ip`,
         `lookup_public_host`, and the static `check_connectivity` in
         `ansible_service.py`;
@@ -152,15 +152,15 @@ real app there).
         `ConnectivityResult`.
 
       Confirm each has no caller before deleting it.
-- [ ] 4.4 Tombstone the unused legacy service and its only test:
+- [x] 4.4 Tombstone the unused legacy service and its only test:
       - `domains/vms/provisioning/adapter/src/vm_provisioning_adapter/services/provisioning_service.py`;
       - `provisioning/compute/service/tests/unit/services/test_provisioning_service.py`.
 
       Re-confirm no production import first.
-- [ ] 4.5 In `domains/bare_metal/provisioning/adapter/src/bare_metal_provisioning_adapter/services/bare_metal_operations_service.py`,
+- [x] 4.5 In `domains/bare_metal/provisioning/adapter/src/bare_metal_provisioning_adapter/services/bare_metal_operations_service.py`,
       make `host_service` required and remove the branch that skips host
       validation without it.
-- [ ] 4.6 Update constructors and fixtures that omit `host_service` or stub the
+- [x] 4.6 Update constructors and fixtures that omit `host_service` or stub the
       deleted readers:
       - `provisioning/compute/service/tests/integration/conftest.py`
         (`fake_ansible`'s `lookup_host_ip`);
@@ -171,13 +171,13 @@ real app there).
 
       Leave `inventory_path`, `inventory_ini`, and `app_runtime.py`'s seeding
       unchanged; they are the seed input.
-- [ ] 4.7 **Unit.**
+- [x] 4.7 **Unit.**
       - The tenant address prefers `public_host`, falls back to `ssh_host`, and
         never reads a file.
       - A job for an unregistered host fails before `start_playbook`.
       - Bare-metal validation refuses an unregistered host with no optional
         path.
-- [ ] 4.8 **Integration.** Through the real app with the Ansible boundary mocked:
+- [x] 4.8 **Integration.** Through the real app with the Ansible boundary mocked:
       - a VM job whose `host_id` names no registered host fails with the
         playbook never started, while a static inventory file naming that host
         is present in settings;
@@ -187,7 +187,7 @@ real app there).
 
 ## 5. The projection is built from declarations alone
 
-- [ ] 5.1 Rewrite `load_capacity_resource_inventory` in
+- [x] 5.1 Rewrite `load_capacity_resource_inventory` in
       `provisioning/compute/service/src/compute_provisioning_service/services/capacity_inventory.py`
       as a function of declarations alone (D1).
       - No session or `Host` query, one entry per declaration.
@@ -195,15 +195,15 @@ real app there).
         `bare_metal_publication`), and `enabled` all come from the declaration.
       - No `host_id` or `public_host` attribute is added.
       - Remove the duplicate-host guard; registration owns uniqueness.
-- [ ] 5.2 Build the `bare_metal.v2` view from the declaration (D4).
+- [x] 5.2 Build the `bare_metal.v2` view from the declaration (D4).
       - Its `host_id` is the declaration's field.
       - `available` is the declaration's `enabled` and whole-resource
         availability.
       - An enabled publication naming no host yields no view instead of raising.
-- [ ] 5.3 Update `_capacity_resource_inventory` in
+- [x] 5.3 Update `_capacity_resource_inventory` in
       `provisioning/compute/service/src/compute_provisioning_service/main.py`
       to the new signature.
-- [ ] 5.4 **Unit.** Rewrite
+- [x] 5.4 **Unit.** Rewrite
       `provisioning/compute/service/tests/unit/services/test_capacity_inventory.py`
       against frozen declaration fixtures covering fungible and specific-resource
       pools. Cover:
@@ -219,7 +219,7 @@ real app there).
 
       Assert exact equality with the fixtures. These are the contractual
       regression evidence; a deployment diff is supplementary only.
-- [ ] 5.5 **Integration** (`provisioning/compute/service/tests/integration/test_capacity_api.py`).
+- [x] 5.5 **Integration** (`provisioning/compute/service/tests/integration/test_capacity_api.py`).
       - A declaration naming no host, registered through
         `SiteCapacityAdminClient`, appears through
         `SiteCapacityClient.resource_pool_projection()` with its capacity and
@@ -229,7 +229,7 @@ real app there).
         host row is required.
       - Keep `test_the_resource_pool_projection_publishes_declarations_not_hosts`'s
         assertion that a host no declaration names is not projected.
-- [ ] 5.6 Re-run the storefront consumers of the projection. Confirm that no
+- [x] 5.6 Re-run the storefront consumers of the projection. Confirm that no
       reader of the removed attributes was missed; the design trace found none.
       - `make -C domains/vms/storefront test`, covering the reconciler and the
         projection cache.
@@ -237,6 +237,89 @@ real app there).
         `trusted_bare_metal_projection`.
 
 **Validation:** `provisioning`, the two storefront suites in 5.6.
+
+## Implementation notes (pending narrative compression in 6.4)
+
+Sections 1–5 are implemented. Deviations from the plan text, each deliberate:
+
+- **2.2 extended to the assignment write.** `assign_settlement_resource_in_session`
+  already rechecked the pool's offering mode at the boundary where scheduling
+  rebinds capacity. It now rechecks the host requirement too, raising
+  `CapacityConflictError`, so direct assignment callers are covered as well as
+  the scheduler.
+- **1.1 module placement.** The predicate lives in
+  `kit/resource-pools/src/market_resource_pools/host_requirement.py`, not
+  `hints.py`. `hints.py` is the policy-tag vocabulary, and the host
+  requirement is a provider property, not a tag.
+- **1.2 enforcement point.** `FulfillmentProvider` annotates `needs_host` with
+  no default. `provider_needs_host` enforces it, and composition calls it.
+  Enforcing it in `ProviderRegistry` would have broken every test that builds a
+  registry from `MagicMock` providers, and a mock never reaches composition.
+- **1.5/1.7 import route.** Each adapter's `runtime` module re-exports
+  `HOST_REQUIREMENT`, and the container imports it from there.
+  `tests/unit/test_import_boundaries.py` allows the service to import adapters
+  only through `runtime`, `routers`, and `legacy_backfill`.
+- **`kit/site/Makefile` gained `reinit`.** Its `test` target never reinstalled
+  internal wheels, so it kept testing against a stale `market_resource_pools`.
+  That breaks `AGENTS.md`'s reinit rule.
+- **Integration harness.** `tests/integration/conftest.py` built its own ledger
+  and scheduler without the host requirement, so it did not test what
+  production runs. It now takes `Container.host_requirement()`. Three fixtures
+  had been reserving against declarations naming no host in the default Ansible
+  pool; they now name hosts:
+  - `test_capacity_api.py`: two tests;
+  - `test_capacity_definitions_api.py`: one test.
+
+  `test_scheduling_composition.py` needed the same fix.
+- **4.2 parameter rename.** `parse_playbook_result(public_host=…)` became
+  `tenant_address=…`, because the value is the record's `ssh_host` when no
+  public address is set.
+- **4.3 extent.** The mock's `host_ip` constructor argument fed only the removed
+  readers, so it was removed. `jobs_model.py`'s section comment named the
+  tombstoned `ProvisioningParams` as a predecessor; it now describes the class.
+- **Fallback dependents (A4 evidence).** Removing the static fallback failed
+  eight integration tests. They had been dispatching to `kvm1` and
+  `kvm-fulfillment-1`, hosts never registered, and worked only through the
+  static file.
+  - `test_compute_contract_api.py` registered `kvm-sel` while its reservation
+    targeted `kvm1`.
+  - Each test now registers the host it dispatches to.
+  - The VM tests' tenant address `10.0.0.1` now comes from the record rather
+    than a mocked file lookup.
+  - The `fake_inventory_path` fixture had no remaining reader and was removed.
+- **5.1 default pool.** A declaration stored before pools were recorded carries
+  no pool, and the projection reports it in `default`, per
+  `site-capacity`'s declaration requirement. The previous code fell back to the
+  host row's pool.
+
+Validation so far (baseline → now):
+
+| Suite | Baseline | Now |
+|---|---|---|
+| `resource-pools` | 101 | 106 passed |
+| `site` | 228 | 236 passed |
+| `fulfillment` | 166 | 173 passed |
+| `provisioning` unit | 697 | 663 passed |
+| `provisioning` integration | 239 | 244 passed |
+| `bare-metal-adapter` | 2 | 2 passed |
+| `domains/bare_metal` | — | 75 passed |
+
+The provisioning unit count fell because the tombstoned
+`test_provisioning_service.py` held 44 test functions for the deleted service.
+
+**Unrun:** the full VM storefront suite (`make -C domains/vms/storefront test`).
+Its environment cannot resolve in the sandbox used here, because the `rl` extra
+needs `torch` from an unreachable index. Every VM storefront test module that
+reads the resource-pool projection was run instead, in an environment without
+that extra, against this branch's wheels:
+- `test_reconciler.py`;
+- `services/test_site_projection_cache.py`;
+- `test_remote_capacity_client.py`;
+- `test_cli_publish_helpers.py`;
+- `test_publish_round_with_templates.py`.
+
+Result: 179 passed. Typing is unrun; no touched package configures a type
+checker. End-to-end is owed at 6.8.
 
 ## 6. Closeout
 
