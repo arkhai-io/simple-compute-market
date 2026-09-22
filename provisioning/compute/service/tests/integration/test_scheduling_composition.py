@@ -67,7 +67,7 @@ def test_real_container_resolves_scheduling_dependencies_to_one_boundary():
     pool_service.create_pool(
         PoolCreate(
             id="pool-a", label="Pool A", provider="ansible",
-            policy_tags={"deliverable_modes": ["vm"]},
+            policy_tags={"advertisable_modes": ["vm"], "capacity_backing": "backed", "deliverable_modes": ["vm"]},
             provider_config={"playbook_path": "p.yaml"},
         )
     )
@@ -115,14 +115,14 @@ def test_real_container_composed_schedule_rolls_back_all_participating_tables():
     pool_service.create_pool(
         PoolCreate(
             id="pool-a", label="Pool A", provider="ansible",
-            policy_tags={"deliverable_modes": ["vm"]},
+            policy_tags={"advertisable_modes": ["vm"], "capacity_backing": "backed", "deliverable_modes": ["vm"]},
             provider_config={"playbook_path": "p.yaml"},
         )
     )
     pool_service.create_pool(
         PoolCreate(
             id="pool-b", label="Pool B", provider="ansible",
-            policy_tags={"deliverable_modes": ["vm"]},
+            policy_tags={"advertisable_modes": ["vm"], "capacity_backing": "backed", "deliverable_modes": ["vm"]},
             provider_config={"playbook_path": "p.yaml"},
         )
     )

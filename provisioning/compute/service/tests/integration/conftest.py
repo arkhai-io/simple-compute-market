@@ -55,6 +55,9 @@ from compute_provisioning_service.services.relay_port_allocator import (
 )
 from compute_provisioning_service.services.relay_service import RelayService
 from vm_provisioning_operator import ProvisioningClient
+from bare_metal_provisioning_adapter.services.bare_metal_pool_config_handler import (
+    BareMetalPoolConfigHandler,
+)
 from compute_provisioning_service.db.database import create_session_factory
 
 from compute_provisioning_service.db.models import Base
@@ -347,7 +350,11 @@ def _initialize_test_database(engine):
             id=DEFAULT_POOL_ID,
             label="Default Pool",
             provider="ansible",
-            policy_tags={"deliverable_modes": ["bare_metal", "vm"]},
+            policy_tags={
+                "deliverable_modes": ["bare_metal", "vm"],
+                "advertisable_modes": ["bare_metal", "vm"],
+                "capacity_backing": "backed",
+            },
         ))
         session.commit()
 
@@ -490,7 +497,14 @@ async def client_and_queue(
     from vm_provisioning_adapter.services.ansible_pool_config_handler import AnsiblePoolConfigHandler
     resource_pool_service = ResourcePoolService(
         session_factory=session_factory,
-        handlers={"ansible": AnsiblePoolConfigHandler(settings=mock_settings)},
+        # Both adapter bundles' handlers, as a composition carrying both
+        # registers them: the bare-metal provider takes no pool-local
+        # configuration, which is what lets a pool name a provider without
+        # fabricating execution settings.
+        handlers={
+            "ansible": AnsiblePoolConfigHandler(settings=mock_settings),
+            "bare_metal.ansible": BareMetalPoolConfigHandler(),
+        },
     )
 
     job_service = AnsibleJobService(

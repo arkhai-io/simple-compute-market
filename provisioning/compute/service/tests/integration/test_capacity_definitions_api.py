@@ -96,6 +96,7 @@ async def test_a_refused_import_reports_every_problem_and_applies_nothing(
     client, _ = client_and_queue
     await client.create_pool(PoolCreate(
         id="pool-b", label="Pool B", provider="ansible",
+        policy_tags={"advertisable_modes": [], "capacity_backing": "backed"},
         provider_config={"playbook_path": "playbooks/vm-operations.yaml"},
     ))
     await capacity.register("held", pool_id="default", total_units=4, host_id="kvm-held")

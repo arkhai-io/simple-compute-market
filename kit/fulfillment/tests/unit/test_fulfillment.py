@@ -59,7 +59,7 @@ class FakeTransaction:
         self.db.get.return_value = record
         self.pool = SimpleNamespace(
             provider_config={"playbook_path": "playbook.yml"},
-            policy_tags={"deliverable_modes": ["vm"]},
+            policy_tags={"advertisable_modes": ["vm"], "capacity_backing": "backed", "deliverable_modes": ["vm"]},
         )
         self.dispatch_required = dispatch_required
         self.persisted = []
@@ -824,7 +824,7 @@ def test_independent_sessions_serialize_fulfillment_acceptance_deterministically
             id="pool-a",
             label="pool-a",
             provider="ansible",
-            policy_tags={"deliverable_modes": ["vm"]},
+            policy_tags={"advertisable_modes": ["vm"], "capacity_backing": "backed", "deliverable_modes": ["vm"]},
             provider_config={},
         )
     )

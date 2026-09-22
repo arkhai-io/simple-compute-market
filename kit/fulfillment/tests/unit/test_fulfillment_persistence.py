@@ -235,7 +235,7 @@ def ledger_services(tmp_path):
         label="pool-a",
         provider="ansible",
         enabled=True,
-        policy_tags={"deliverable_modes": ["vm"]},
+        policy_tags={"advertisable_modes": ["vm"], "capacity_backing": "backed", "deliverable_modes": ["vm"]},
         provider_config={},
     ))
     return ledger, factory
@@ -390,7 +390,7 @@ def contended_ledger_services(tmp_path):
         label="pool-a",
         provider="ansible",
         enabled=True,
-        policy_tags={"deliverable_modes": ["vm"]},
+        policy_tags={"advertisable_modes": ["vm"], "capacity_backing": "backed", "deliverable_modes": ["vm"]},
         provider_config={},
     ))
     return ledger, factory

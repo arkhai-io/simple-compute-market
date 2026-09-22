@@ -203,7 +203,7 @@ async def _reserved_capacity(pool_id: str, *, claim: dict[str, Any] | None = Non
             id=pool_id,
             label=pool_id,
             provider="ansible",
-            policy_tags={"deliverable_modes": ["vm"]},
+            policy_tags={"advertisable_modes": ["vm"], "capacity_backing": "backed", "deliverable_modes": ["vm"]},
             provider_config=_PROVIDER_CONFIG,
         )
     )

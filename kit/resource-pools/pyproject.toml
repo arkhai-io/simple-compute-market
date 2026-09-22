@@ -19,7 +19,7 @@ packages = ["src/market_resource_pools"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
-testpaths = ["tests/unit"]
+testpaths = ["tests/unit", "tests/integration"]
 
 [dependency-groups]
 dev = [

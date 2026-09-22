@@ -14,11 +14,18 @@ nothing in this service's own startup path calls it today.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 from dataclasses import dataclass
 from typing import Callable
 
 from market_identity import Identity, IdentityScheme
+from market_resource_pools.hints import (
+    ADVERTISABLE_MODES_POLICY_TAG,
+    CAPACITY_BACKED,
+    CAPACITY_BACKING_POLICY_TAG,
+    declared_deliverable_modes,
+)
 from models.keys_model import (
     LEGACY_ISSUANCE_RESOURCE_ID,
     LEGACY_ISSUANCE_SERVICE,
@@ -331,6 +338,47 @@ def _migrate_fulfillment_grants(engine: Engine) -> None:
         )
 
 
+def _migrate_pool_advertisement_and_backing(engine: Engine) -> None:
+    """Declare advertisement and backing on every existing Resource Pool.
+
+    Every pool this service holds is backed quota supply whose only mode
+    declaration was its deliverable set, so it advertises exactly what it
+    delivers and stays admissible. Any value already stored under either key
+    is overwritten: no consumer read one, and keeping it could leave a pool
+    the service refuses at load.
+    """
+    if not _table_exists(engine, "resource_pools"):
+        return
+    with engine.begin() as connection:
+        pools = connection.execute(
+            text("SELECT id, policy_tags FROM resource_pools ORDER BY id")
+        ).mappings().all()
+        for pool in pools:
+            raw = pool["policy_tags"]
+            policy_tags = json.loads(raw) if isinstance(raw, str) else dict(raw or {})
+            if not isinstance(policy_tags, dict):
+                raise SchemaDriftError(
+                    f"pool {pool['id']!r} policy_tags must be a JSON object"
+                )
+            try:
+                deliverable = declared_deliverable_modes(policy_tags)
+            except ValueError as exc:
+                raise SchemaDriftError(f"pool {pool['id']!r} policy_tags: {exc}") from exc
+            policy_tags[ADVERTISABLE_MODES_POLICY_TAG] = sorted(deliverable)
+            policy_tags[CAPACITY_BACKING_POLICY_TAG] = CAPACITY_BACKED
+            connection.execute(
+                text("UPDATE resource_pools SET policy_tags=:policy_tags WHERE id=:pool_id"),
+                {"pool_id": pool["id"], "policy_tags": json.dumps(policy_tags, sort_keys=True)},
+            )
+            logger.info(
+                "[MIGRATION] Derived advertisement and backing for pool %s: "
+                "advertisable=%s backing=%s",
+                pool["id"],
+                ", ".join(sorted(deliverable)) or "none",
+                CAPACITY_BACKED,
+            )
+
+
 _MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260731_001_apicredits_schema_baseline",
@@ -343,5 +391,9 @@ _MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260815_003_fulfillment_grants",
         _migrate_fulfillment_grants,
+    ),
+    Migration(
+        "20260922_004_pool_advertisement_and_backing",
+        _migrate_pool_advertisement_and_backing,
     ),
 )

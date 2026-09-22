@@ -55,7 +55,7 @@ async def clients(client_and_queue):
     ) as compute:
         await provisioning_client.create_pool(PoolCreate(
             id=POOL, label=POOL, provider="ansible",
-            policy_tags={"deliverable_modes": ["vm"]},
+            policy_tags={"advertisable_modes": ["vm"], "capacity_backing": "backed", "deliverable_modes": ["vm"]},
             provider_config={"playbook_path": "playbooks/vm-operations.yaml"},
         ))
         await admin.register_resource(

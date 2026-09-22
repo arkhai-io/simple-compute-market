@@ -43,7 +43,12 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from market_resource_pools.hints import DELIVERABLE_MODES_POLICY_TAG
+from market_resource_pools.hints import (
+    ADVERTISABLE_MODES_POLICY_TAG,
+    CAPACITY_BACKED,
+    CAPACITY_BACKING_POLICY_TAG,
+    DELIVERABLE_MODES_POLICY_TAG,
+)
 from vm_provisioning_operator import PoolCreate, PoolUpdate
 from vm_provisioning_operator.client import ProvisioningError
 from vm_provisioning_operator.models import HostCreate, HostUpdate
@@ -122,6 +127,7 @@ def register_e2e_pool(
         wanted = {
             "listing_mode": listing_mode,
             DELIVERABLE_MODES_POLICY_TAG: list(deliverable_modes),
+            **_backed_declarations(deliverable_modes),
         }
         if any(tags.get(k) != v for k, v in wanted.items()):
             provisioning_client.patch_pool(pool_id, PoolUpdate(
@@ -141,10 +147,23 @@ def register_e2e_pool(
             # list for stable ordering in exported pool documents, though its
             # semantics are a set.
             DELIVERABLE_MODES_POLICY_TAG: list(deliverable_modes),
+            **_backed_declarations(deliverable_modes),
         },
         provider_config=_default_pool_provider_config(provisioning_client),
     ))
     return provisioning_client.get_pool(pool_id)
+
+
+def _backed_declarations(deliverable_modes: tuple[str, ...]) -> dict[str, Any]:
+    """The advertisement and backing declarations every pool write requires.
+
+    A scenario pool is ordinary backed supply, so it advertises exactly what it
+    delivers: the widest set the backed subset rule accepts.
+    """
+    return {
+        ADVERTISABLE_MODES_POLICY_TAG: list(deliverable_modes),
+        CAPACITY_BACKING_POLICY_TAG: CAPACITY_BACKED,
+    }
 
 
 def _default_pool_provider_config(provisioning_client: Any) -> dict[str, Any]:

@@ -348,8 +348,10 @@ specification directly, which is the ordinary path.
 - **[Rollback then roll forward]** → An older version replacing a pool's
   `policy_tags` drops both tags, and the one-shot migration will not rewrite them
   on the next upgrade. The load-time check names each such pool and refuses to
-  start; the operator restores the declarations through the API or the definition
-  document.
+  start, so the API is unavailable for the repair; the operator restores the
+  declarations through a changed pool definition document, which is imported
+  before the check runs. A pool with no stored backing may be given one, so that
+  import is a repair rather than a refused backing change.
 - **[A change with no observable behaviour ships and is forgotten]** → Its value is
   entirely in what depends on it. Mitigated by it being a declared prerequisite
   with a named consumer rather than speculative groundwork.

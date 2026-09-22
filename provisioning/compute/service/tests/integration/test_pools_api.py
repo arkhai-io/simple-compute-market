@@ -40,6 +40,7 @@ async def _create_pool(client: ProvisioningClient, pool_id: str = "hetzner-eu"):
             id=pool_id,
             label="Hetzner EU",
             provider="ansible",
+            policy_tags={"advertisable_modes": [], "capacity_backing": "backed"},
             provider_config=_ANSIBLE_CONFIG,
         )
     )
@@ -81,6 +82,7 @@ class TestCreatePool:
                     id="k8s-1",
                     label="K8s",
                     provider="kubernetes",
+                    policy_tags={"advertisable_modes": [], "capacity_backing": "backed"},
                     provider_config={},
                 )
             )
@@ -102,7 +104,7 @@ class TestHoldPreferenceValidationThroughAdminApi:
                     id="hetzner-eu",
                     label="Hetzner EU",
                     provider="ansible",
-                    policy_tags={"max_reservation_hold_seconds": -1},
+                    policy_tags={"advertisable_modes": [], "capacity_backing": "backed", "max_reservation_hold_seconds": -1},
                     provider_config=_ANSIBLE_CONFIG,
                 )
             )
@@ -120,14 +122,22 @@ class TestHoldPreferenceValidationThroughAdminApi:
                 id="hetzner-eu",
                 label="Hetzner EU",
                 provider="ansible",
-                policy_tags={"max_reservation_hold_seconds": 120},
+                policy_tags={"advertisable_modes": [], "capacity_backing": "backed", "max_reservation_hold_seconds": 120},
                 provider_config=_ANSIBLE_CONFIG,
             )
         )
-        assert pool.policy_tags == {"max_reservation_hold_seconds": 120}
+        assert pool.policy_tags == {
+            "advertisable_modes": [],
+            "capacity_backing": "backed",
+            "max_reservation_hold_seconds": 120,
+        }
 
         fetched = await client.get_pool("hetzner-eu")
-        assert fetched.policy_tags == {"max_reservation_hold_seconds": 120}
+        assert fetched.policy_tags == {
+            "advertisable_modes": [],
+            "capacity_backing": "backed",
+            "max_reservation_hold_seconds": 120,
+        }
 
     async def test_replace_pool_with_invalid_hold_returns_400_and_does_not_change_stored_metadata(
         self, client_and_queue,
@@ -138,7 +148,7 @@ class TestHoldPreferenceValidationThroughAdminApi:
                 id="hetzner-eu",
                 label="Hetzner EU",
                 provider="ansible",
-                policy_tags={"max_reservation_hold_seconds": 60},
+                policy_tags={"advertisable_modes": [], "capacity_backing": "backed", "max_reservation_hold_seconds": 60},
                 provider_config=_ANSIBLE_CONFIG,
             )
         )
@@ -149,14 +159,18 @@ class TestHoldPreferenceValidationThroughAdminApi:
                     label="Hetzner EU",
                     provider="ansible",
                     enabled=True,
-                    policy_tags={"max_reservation_hold_seconds": "soon"},
+                    policy_tags={"advertisable_modes": [], "capacity_backing": "backed", "max_reservation_hold_seconds": "soon"},
                     provider_config=_ANSIBLE_CONFIG,
                 ),
             )
         assert exc_info.value.status_code == 400
 
         fetched = await client.get_pool("hetzner-eu")
-        assert fetched.policy_tags == {"max_reservation_hold_seconds": 60}
+        assert fetched.policy_tags == {
+            "advertisable_modes": [],
+            "capacity_backing": "backed",
+            "max_reservation_hold_seconds": 60,
+        }
 
 
 class TestSlaValidationThroughAdminApi:
@@ -174,7 +188,7 @@ class TestSlaValidationThroughAdminApi:
                     id="hetzner-eu",
                     label="Hetzner EU",
                     provider="ansible",
-                    policy_tags={"sla": -1},
+                    policy_tags={"advertisable_modes": [], "capacity_backing": "backed", "sla": -1},
                     provider_config=_ANSIBLE_CONFIG,
                 )
             )
@@ -190,14 +204,22 @@ class TestSlaValidationThroughAdminApi:
                 id="hetzner-eu",
                 label="Hetzner EU",
                 provider="ansible",
-                policy_tags={"sla": 99.9},
+                policy_tags={"advertisable_modes": [], "capacity_backing": "backed", "sla": 99.9},
                 provider_config=_ANSIBLE_CONFIG,
             )
         )
-        assert pool.policy_tags == {"sla": 99.9}
+        assert pool.policy_tags == {
+            "advertisable_modes": [],
+            "capacity_backing": "backed",
+            "sla": 99.9,
+        }
 
         fetched = await client.get_pool("hetzner-eu")
-        assert fetched.policy_tags == {"sla": 99.9}
+        assert fetched.policy_tags == {
+            "advertisable_modes": [],
+            "capacity_backing": "backed",
+            "sla": 99.9,
+        }
 
     async def test_replace_pool_with_invalid_sla_returns_400_and_does_not_change_stored_metadata(
         self, client_and_queue,
@@ -208,7 +230,7 @@ class TestSlaValidationThroughAdminApi:
                 id="hetzner-eu",
                 label="Hetzner EU",
                 provider="ansible",
-                policy_tags={"sla": 95.0},
+                policy_tags={"advertisable_modes": [], "capacity_backing": "backed", "sla": 95.0},
                 provider_config=_ANSIBLE_CONFIG,
             )
         )
@@ -219,14 +241,18 @@ class TestSlaValidationThroughAdminApi:
                     label="Hetzner EU",
                     provider="ansible",
                     enabled=True,
-                    policy_tags={"sla": "high"},
+                    policy_tags={"advertisable_modes": [], "capacity_backing": "backed", "sla": "high"},
                     provider_config=_ANSIBLE_CONFIG,
                 ),
             )
         assert exc_info.value.status_code == 400
 
         fetched = await client.get_pool("hetzner-eu")
-        assert fetched.policy_tags == {"sla": 95.0}
+        assert fetched.policy_tags == {
+            "advertisable_modes": [],
+            "capacity_backing": "backed",
+            "sla": 95.0,
+        }
 
 
 class TestVmSizeDefaultsThroughAdminApi:
@@ -244,6 +270,7 @@ class TestVmSizeDefaultsThroughAdminApi:
                 id="hetzner-eu",
                 label="Hetzner EU",
                 provider="ansible",
+                policy_tags={"advertisable_modes": [], "capacity_backing": "backed"},
                 provider_config={
                     **_ANSIBLE_CONFIG,
                     "default_vm_ram": 65536,
@@ -277,6 +304,7 @@ class TestVmSizeDefaultsThroughAdminApi:
                 id="hetzner-eu",
                 label="Hetzner EU",
                 provider="ansible",
+                policy_tags={"advertisable_modes": [], "capacity_backing": "backed"},
                 provider_config={**_ANSIBLE_CONFIG, "default_vm_ram": 65536},
             )
         )
@@ -287,6 +315,7 @@ class TestVmSizeDefaultsThroughAdminApi:
                 label="Hetzner EU",
                 enabled=True,
                 provider="ansible",
+                policy_tags={"advertisable_modes": [], "capacity_backing": "backed"},
                 provider_config=_ANSIBLE_CONFIG,
             ),
         )
@@ -305,6 +334,7 @@ class TestVmSizeDefaultsThroughAdminApi:
                     id="hetzner-eu",
                     label="Hetzner EU",
                     provider="ansible",
+                    policy_tags={"advertisable_modes": [], "capacity_backing": "backed"},
                     provider_config={**_ANSIBLE_CONFIG, "default_vm_ram": bad_value},
                 )
             )
@@ -342,7 +372,7 @@ class TestUpdatePool:
                 label="Replacement",
                 provider="ansible",
                 enabled=False,
-                policy_tags={"region": "eu"},
+                policy_tags={"advertisable_modes": [], "capacity_backing": "backed", "region": "eu"},
                 provider_config=_ANSIBLE_CONFIG,
             ),
         )
@@ -393,7 +423,7 @@ class TestDeletePool:
                 label="Default Pool",
                 provider="ansible",
                 enabled=True,
-                policy_tags={},
+                policy_tags={"advertisable_modes": [], "capacity_backing": "backed"},
                 provider_config=_ANSIBLE_CONFIG,
             ),
         )
@@ -424,11 +454,17 @@ pools:
   - id: default
     label: Default Pool
     provider: ansible
+    policy_tags:
+      advertisable_modes: []
+      capacity_backing: backed
     provider_config:
       playbook_path: playbooks/vm-operations.yaml
   - id: hetzner-eu-central
     label: Hetzner EU Central
     provider: ansible
+    policy_tags:
+      advertisable_modes: []
+      capacity_backing: backed
     provider_config:
       playbook_path: playbooks/vm-operations-frp.yaml
 """
@@ -546,3 +582,299 @@ class TestHostPoolIntegration:
         )
         updated = await client.update_host("kvm1", HostUpdate(pool_id="hetzner-eu"))
         assert updated.pool_id == "hetzner-eu"
+
+
+# ---------------------------------------------------------------------------
+# Advertisement and backing declarations
+# ---------------------------------------------------------------------------
+
+_BACKED_VM = {
+    "deliverable_modes": ["vm"],
+    "advertisable_modes": ["vm"],
+    "capacity_backing": "backed",
+}
+
+
+def _declared_document(policy_tags_block: str) -> str:
+    """The fixture's `default` pool plus one Ansible pool with the given tags."""
+    return f"""
+pools:
+  - id: default
+    label: Default Pool
+    provider: ansible
+    policy_tags:
+      deliverable_modes: [bare_metal, vm]
+      advertisable_modes: [bare_metal, vm]
+      capacity_backing: backed
+    provider_config:
+      playbook_path: playbooks/vm-operations.yaml
+  - id: hetzner-eu
+    label: Hetzner EU
+    provider: ansible
+{policy_tags_block}
+    provider_config:
+      playbook_path: playbooks/vm-operations.yaml
+"""
+
+
+async def _create_backed_vm_pool(client: ProvisioningClient) -> None:
+    await client.create_pool(
+        PoolCreate(
+            id="hetzner-eu",
+            label="Hetzner EU",
+            provider="ansible",
+            policy_tags=dict(_BACKED_VM),
+            provider_config=_ANSIBLE_CONFIG,
+        )
+    )
+
+
+def _unvalidated_replace(policy_tags: dict) -> PoolReplace:
+    # Built without the model's own validation so the request reaches the
+    # service: the assertion is on what the API refuses, not on what a typed
+    # client refuses to build.
+    return PoolReplace.model_construct(
+        label="Hetzner EU",
+        provider="ansible",
+        enabled=True,
+        policy_tags=policy_tags,
+        provider_config=_ANSIBLE_CONFIG,
+    )
+
+
+class TestExecutionLessPoolAdvertises:
+    async def test_unbacked_pool_needs_no_execution_configuration(self, client_and_queue):
+        """An execution-less seller's pool names the configuration-free
+        provider, declares nothing deliverable, and still authorizes a mode
+        for advertisement through the real administration path."""
+        client, _ = client_and_queue
+        tags = {
+            "deliverable_modes": [],
+            "advertisable_modes": ["vm"],
+            "capacity_backing": "unbacked",
+        }
+
+        created = await client.create_pool(
+            PoolCreate(
+                id="out-of-band",
+                label="Out of band",
+                provider="bare_metal.ansible",
+                policy_tags=tags,
+                provider_config={},
+            )
+        )
+
+        assert created.provider_config == {}
+        assert (await client.get_pool("out-of-band")).policy_tags == tags
+
+
+class TestDeclarationsRequiredOnEveryWrite:
+    async def test_explicit_declarations_round_trip_through_every_write(
+        self, client_and_queue,
+    ):
+        client, _ = client_and_queue
+        await _create_backed_vm_pool(client)
+        assert (await client.get_pool("hetzner-eu")).policy_tags == _BACKED_VM
+
+        narrowed = {**_BACKED_VM, "advertisable_modes": []}
+        replaced = await client.replace_pool(
+            "hetzner-eu",
+            PoolReplace(
+                label="Hetzner EU", provider="ansible", enabled=True,
+                policy_tags=narrowed, provider_config=_ANSIBLE_CONFIG,
+            ),
+        )
+        assert replaced.policy_tags == narrowed
+
+        patched = await client.patch_pool(
+            "hetzner-eu", PoolUpdate(policy_tags=dict(_BACKED_VM)),
+        )
+        assert patched.policy_tags == _BACKED_VM
+
+        imported = await client.import_pools(_declared_document(
+            "    policy_tags:\n"
+            "      deliverable_modes: [vm]\n"
+            "      advertisable_modes: []\n"
+            "      capacity_backing: backed"
+        ))
+        assert "hetzner-eu" in imported.diff.updated
+        assert (await client.get_pool("hetzner-eu")).policy_tags == narrowed
+
+    @pytest.mark.parametrize("omitted", ["advertisable_modes", "capacity_backing"])
+    async def test_every_write_omitting_a_declaration_is_refused(
+        self, client_and_queue, omitted,
+    ):
+        client, _ = client_and_queue
+        await _create_backed_vm_pool(client)
+        partial = {k: v for k, v in _BACKED_VM.items() if k != omitted}
+
+        with pytest.raises(ProvisioningError) as created:
+            await client.create_pool(PoolCreate.model_construct(
+                id="fresh", label="Fresh", provider="ansible", enabled=True,
+                policy_tags=partial, provider_config=_ANSIBLE_CONFIG,
+            ))
+        with pytest.raises(ProvisioningError) as replaced:
+            await client.replace_pool("hetzner-eu", _unvalidated_replace(partial))
+        with pytest.raises(ProvisioningError) as patched:
+            await client.patch_pool("hetzner-eu", PoolUpdate.model_construct(
+                policy_tags=partial,
+            ))
+        with pytest.raises(ProvisioningError) as imported:
+            await client.import_pools(_declared_document(
+                "    policy_tags:\n"
+                + "".join(
+                    f"      {key}: {value}\n".replace("'", "")
+                    for key, value in partial.items()
+                ).rstrip("\n")
+            ))
+
+        for refused in (created, replaced, patched, imported):
+            assert refused.value.status_code in (400, 422)
+            assert omitted in str(refused.value)
+        with pytest.raises(ProvisioningError):
+            await client.get_pool("fresh")
+        assert (await client.get_pool("hetzner-eu")).policy_tags == _BACKED_VM
+
+    async def test_document_predating_declarations_imports_nothing(self, client_and_queue):
+        client, _ = client_and_queue
+        old_format = _declared_document("")
+
+        result = await client.validate_pools(old_format)
+
+        assert result.valid is False
+        assert {(p.path, p.code) for p in result.problems} == {
+            ("pools[1].policy_tags.advertisable_modes", "missing_declaration"),
+            ("pools[1].policy_tags.capacity_backing", "missing_declaration"),
+        }
+        with pytest.raises(ProvisioningError) as exc_info:
+            await client.import_pools(old_format)
+        assert exc_info.value.status_code == 400
+        with pytest.raises(ProvisioningError):
+            await client.get_pool("hetzner-eu")
+
+    async def test_export_carries_declarations_and_reimports_unchanged(
+        self, client_and_queue,
+    ):
+        client, _ = client_and_queue
+        # Imported rather than created, so the fixture's directly seeded
+        # `default` pool gains the provider configuration an export must carry.
+        await client.import_pools(_declared_document(
+            "    policy_tags:\n"
+            "      deliverable_modes: [vm]\n"
+            "      advertisable_modes: [vm]\n"
+            "      capacity_backing: backed"
+        ))
+
+        exported = await client.export_pools_yaml()
+        result = await client.import_pools(exported)
+
+        assert "advertisable_modes" in exported and "capacity_backing" in exported
+        assert result.diff.updated == []
+        assert set(result.diff.unchanged) == {"default", "hetzner-eu"}
+
+
+class TestCrossTagRulesThroughAdminApi:
+    @pytest.mark.parametrize(
+        "tags",
+        [
+            pytest.param(
+                {**_BACKED_VM, "advertisable_modes": ["vm", "bare_metal"]},
+                id="advertisement-widened",
+            ),
+            pytest.param({**_BACKED_VM, "deliverable_modes": []}, id="delivery-narrowed"),
+        ],
+    )
+    async def test_backed_subset_rule_is_enforced_from_both_sides(
+        self, client_and_queue, tags,
+    ):
+        client, _ = client_and_queue
+        await _create_backed_vm_pool(client)
+
+        with pytest.raises(ProvisioningError) as exc_info:
+            await client.replace_pool("hetzner-eu", _unvalidated_replace(tags))
+
+        assert exc_info.value.status_code == 422
+        assert "advertisable_modes" in str(exc_info.value)
+        assert (await client.get_pool("hetzner-eu")).policy_tags == _BACKED_VM
+
+    async def test_malformed_backing_is_refused(self, client_and_queue):
+        client, _ = client_and_queue
+        await _create_backed_vm_pool(client)
+
+        with pytest.raises(ProvisioningError) as exc_info:
+            await client.patch_pool("hetzner-eu", PoolUpdate.model_construct(
+                policy_tags={**_BACKED_VM, "capacity_backing": "sometimes"},
+            ))
+
+        assert exc_info.value.status_code == 422
+        assert (await client.get_pool("hetzner-eu")).policy_tags == _BACKED_VM
+
+    async def test_unbacked_pool_that_delivers_is_refused(self, client_and_queue):
+        client, _ = client_and_queue
+
+        with pytest.raises(ProvisioningError) as exc_info:
+            await client.create_pool(PoolCreate.model_construct(
+                id="out-of-band", label="Out of band", provider="bare_metal.ansible",
+                enabled=True,
+                policy_tags={**_BACKED_VM, "capacity_backing": "unbacked"},
+                provider_config={},
+            ))
+
+        assert exc_info.value.status_code == 422
+        assert "unbacked" in str(exc_info.value)
+        with pytest.raises(ProvisioningError):
+            await client.get_pool("out-of-band")
+
+
+class TestBackingFixedAtCreationThroughAdminApi:
+    _UNBACKED = {
+        "deliverable_modes": [],
+        "advertisable_modes": ["vm"],
+        "capacity_backing": "unbacked",
+    }
+
+    async def test_replace_and_patch_changing_backing_are_refused(self, client_and_queue):
+        client, _ = client_and_queue
+        await _create_backed_vm_pool(client)
+
+        with pytest.raises(ProvisioningError) as replaced:
+            await client.replace_pool(
+                "hetzner-eu",
+                PoolReplace(
+                    label="Hetzner EU", provider="ansible", enabled=True,
+                    policy_tags=dict(self._UNBACKED), provider_config=_ANSIBLE_CONFIG,
+                ),
+            )
+        with pytest.raises(ProvisioningError) as patched:
+            await client.patch_pool(
+                "hetzner-eu", PoolUpdate(policy_tags=dict(self._UNBACKED)),
+            )
+
+        for refused in (replaced, patched):
+            assert refused.value.status_code == 400
+            assert "fixed at creation" in str(refused.value)
+        assert (await client.get_pool("hetzner-eu")).policy_tags == _BACKED_VM
+
+    async def test_import_changing_backing_is_refused_and_validate_reports_it(
+        self, client_and_queue,
+    ):
+        client, _ = client_and_queue
+        await _create_backed_vm_pool(client)
+        document = _declared_document(
+            "    policy_tags:\n"
+            "      deliverable_modes: []\n"
+            "      advertisable_modes: [vm]\n"
+            "      capacity_backing: unbacked"
+        )
+
+        result = await client.validate_pools(document)
+        assert result.valid is False
+        assert result.diff is None
+        assert [(p.path, p.code) for p in result.problems] == [
+            ("pools[1].policy_tags.capacity_backing", "capacity_backing_immutable"),
+        ]
+        with pytest.raises(ProvisioningError) as exc_info:
+            await client.import_pools(document)
+
+        assert exc_info.value.status_code == 400
+        assert (await client.get_pool("hetzner-eu")).policy_tags == _BACKED_VM
