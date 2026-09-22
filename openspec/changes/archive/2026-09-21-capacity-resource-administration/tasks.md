@@ -933,7 +933,7 @@ unpublished minor bumps on this branch and cover these changes.
       way, since "the dependency already exists" does not answer the layering rule.
       **Disposition 2026-09-21:** not resolved here; the owner declined to add
       scope this late. Recorded as an open question in
-      `openspec/changes/pool-declared-advertisement-and-backing/design.md`,
+      `openspec/changes/archive/2026-09-22-pool-declared-advertisement-and-backing/design.md`,
       whose pool declarations are what the site authority reads. `design.md`'s
       "The ledger refuses an unknown pool" no longer justifies the dependency.
 - [x] 7c.4 **Image publication tag.** `Makefile`'s `push-images` retags the local
@@ -1087,6 +1087,6 @@ Per `openspec/README.md#plan-closeout-requirements`.
 | Legacy single-quantity claims translate to the composition's mirror dimension; a bucket's host link is its `host_id` | `openspec/specs/site-capacity/spec.md` — "Multidimensional capacity accounting" and "Site identity ownership boundary" (modified) |
 | The upgrade migration's derivation is frozen SQL, held equal to the runtime derivation by a parity test until it ships | Temporary; change history only (the migration's docstring states what it does) |
 | Test levels are stated as `TESTING.md` defines them | Temporary; change history only |
-| `kit/site`'s dependency on `kit/resource-pools` contradicts the kit layers | Open question in `openspec/changes/pool-declared-advertisement-and-backing/design.md` — not resolved by this change |
+| `kit/site`'s dependency on `kit/resource-pools` contradicts the kit layers | Open question in `openspec/changes/archive/2026-09-22-pool-declared-advertisement-and-backing/design.md` — not resolved by this change |
 | Stored reserved attribute keys are removed by migration, not promoted | Temporary; change history only (the migration's docstring states the rule it enforces) |
 | Capacity-definitions wire models live in `kit/site`, re-exported by `compute_provisioning` | Code: `kit/site/src/market_site/capacity_definitions.py` module docstring; `ARCHITECTURE.md`'s layers name no model ownership |

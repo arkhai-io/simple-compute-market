@@ -164,6 +164,11 @@ since no running service can hold such a pool. Migrations stay service-local.
         `unbacked-listing-publication` becomes an archived predecessor at
         archival. The POOLS graph covers only POOLS-7 and POOLS-8 and is
         unchanged.
+      - **Archival (2026-09-22).** Archived with `--skip-specs`, since 5.7 had
+        already synced the delta. Goal 7's graph and this change's row now read
+        archived, the row links the archive directory, and
+        `capacity-resource-administration`'s archived tasks cite this change's
+        archived `design.md`.
 - [x] 5.7 **Promotion.** The delta's five requirements were synced verbatim into
       `openspec/specs/resource-pool-management/spec.md`, each once, and its Evidence
       section lists the new and moved suites. `capacity-backed` and `unbacked` are
@@ -179,16 +184,23 @@ since no running service can hold such a pool. Migrations stay service-local.
       change and for `inject-site-pool-authority`. The unscoped check reports the
       same 17 pre-existing failures as the original tree, none in files this change
       touches.
-- [ ] 5.9 **End-to-end pipeline.**
+- [x] 5.9 **End-to-end pipeline.**
       - **Implementation run.** GitHub Actions `e2e` run `96787131769`, commit
         `5d140d6`: 113 passed, 3 skipped, 264 deselected. Provisioning applied
         `20260922_001_pool_advertisement_and_backing` and passed the
         `verify-pool-declarations` step; API credits applied
         `20260922_004_pool_advertisement_and_backing`; six pools were created
         through `register_e2e_pool` with no pool write refused.
-      - **Post-review run.** The maintainer reports the pipeline passing on the
-        tree carrying the review round. Its run ID, commit, and result counts are
-        still to be recorded here before archival.
+      - **Post-review run.** GitHub Actions `e2e` run `96806401235`, commit
+        `d7ad6e3` on `feat/pool-declared-advertisement-and-backing`, carrying the
+        review round: 113 passed, 3 skipped, 264 deselected, 0 failed. API
+        credits applied `20260922_004_pool_advertisement_and_backing`;
+        provisioning applied `20260922_001_pool_advertisement_and_backing` and
+        logged "Resource-pool declaration check passed"; six pools were created
+        through `register_e2e_pool` (`POST /api/v1/pools/` → 201), none refused.
+      - **Skips, all unrelated.** `test_bare_metal_complete_deal`, and two
+        `test_multi_registry.py` stages owned by `repair-multi-storefront-scenario`,
+        in both runs.
       - **Not exercised.** `test_pool_declared_offering_modes.py` is deselected by
         marker in both runs; that refusal is proven in-process.
 
