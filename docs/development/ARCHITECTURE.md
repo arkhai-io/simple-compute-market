@@ -115,6 +115,8 @@ kit/storefront
 
 Dependencies never point upward. Imports guarded by `TYPE_CHECKING` still count as architectural dependencies. Kit packages never import deployed services or domain adapters.
 
+One edge does not yet match this hierarchy: the site ledger in `kit/site` reads Resource Pool rows through `kit/resource-pools` for admission, registration, and the host requirement. Its removal, through a pool-facts port injected by composition roots and a boundary test enforcing the rule, is tracked in the [change index](../../openspec/changes/README.md). No new site read of pool state should be added until then.
+
 The settlement-runtime distribution is
 `arkhai-kit-settlement-runtime`, imported as
 `market_settlement_runtime`. It owns stable obligation identity, the operation
@@ -356,6 +358,7 @@ Within a service, controllers stay thin: HTTP routing, request/response schemas,
 | Sellable capacity: each Physical Resource's declared shape, quantity, pool, and match attributes | Site authority | Declared by registration, a capacity-definitions document, or derivation from legacy host inventory; host records are connection identity only |
 | Resource-pool metadata and provider configuration | Resource-pool service | Provisioning routing metadata; disabled pools remain resolvable |
 | Pool deliverable-mode authorization | Resource-pool operator and service | One explicit set per pool; absence authorizes no mode, and each execution layer rechecks it |
+| Pool advertisement authorization and capacity backing | Resource-pool operator and service | Both declared explicitly on every pool write, never defaulted; a backed pool advertises only what it delivers, an unbacked pool delivers nothing, and backing is fixed at creation |
 | Settlement-resource selection | Fulfillment scheduler | Placement occurs before provider execution |
 | Provider-specific create/status/teardown | Fulfillment provider | Executes against the selected resource and does not substitute placement |
 | Asynchronous infrastructure job state | Compute provisioner | Durable job identity with in-process execution queue |
@@ -401,6 +404,16 @@ nothing. Pool disablement prevents new assignment but does not erase existing
 host membership or lifecycle records. Pool administration is distinct from
 scheduling policy.
 
+A pool also declares which offering modes its listings may advertise and whether
+it is capacity-backed. Advertisement is separate from delivery so a seller with no
+execution integration can list without fabricating provider configuration; a
+backed pool may advertise only what it delivers, and an unbacked pool delivers
+nothing, which keeps it out of every capacity path through the deliverable
+recheck each execution layer already performs rather than through new backing
+checks. Readers of the resource-pool projection resolve both declarations through
+the pool kit's shared resolver. See the
+[resource-pool management architecture](../../openspec/specs/resource-pool-management/architecture.md).
+
 The site authority, fulfillment scheduler, and fulfillment orchestrator all use
 the shared pool-membership predicate at their own boundary. Rechecking before
 provider dispatch means narrowing a declaration blocks a held or assigned
@@ -439,6 +452,8 @@ Authenticated service-to-service calls use the scheme-neutral version 2 request 
 | **Physical Resource** | Real supply resource such as host, pod allocation, storage, power, or bandwidth | Site/provisioning |
 | **Capacity Declaration** | Authoritative statement of a Physical Resource's sellable shape and quantity, its pool, and the attributes claims match | Site authority |
 | **Resource Pool** | Provisioning-owned group and provider-routing context | Resource-pool service |
+| **Capacity-backed** | Said of a pool with an admission authority behind it: capacity can be reserved, committed, and released against it. Backing means an admission authority exists, not that hardware does | Resource-pool service |
+| **Unbacked** | Said of a pool with no admission authority behind it: nothing can be reserved against it, and its deliverable set is empty | Resource-pool service |
 | **Capacity Settlement Assignment** | Durable binding of a capacity reservation to one settlement resource | Site/fulfillment boundary |
 | **Settlement Resource** | Physical resource selected to satisfy a reservation | Fulfillment scheduler |
 | **Physical Settlement** | Provider-specific execution that makes the agreed resource available | Fulfillment provider |

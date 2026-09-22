@@ -244,6 +244,16 @@ relay), then host inventory, then capacity (whose declarations name a pool and
 may name a host). A capacity document naming a pool other than `default` needs
 that pool supplied beside it on a first boot.
 
+Every pool entry must declare `advertisable_modes` and `capacity_backing` in its
+`policy_tags`; nothing defaults either. A changed pool document with an entry
+lacking them is refused and nothing from it is applied. After the pool import,
+the service checks every stored pool and refuses to start, naming each pool, if
+any lacks valid declarations. An unchanged document is not re-applied, so it does
+not trip that refusal on its own; a pool rewritten by an older version is repaired
+by a changed document that declares it, which is imported before the check. The
+API-credits service seeds its own pool with both declarations and applies the same
+check at startup.
+
 Host inventory is not a definition document, and the digest reconciliation
 described below does not apply to it. The inventory (`inventory_ini`, or the file
 at `inventory_path`) seeds the host registry only when no host is registered yet,

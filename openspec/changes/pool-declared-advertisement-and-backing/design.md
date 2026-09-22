@@ -95,8 +95,8 @@ in the same write.
 
 `unbacked` means no admission authority stands behind the pool, so nothing may be
 reserved, committed, or released against it. Nothing in the site authority reads
-backing, and this change deliberately adds no such read (see the open question on
-the site authority's pool dependency). Admission today refuses a pool only through
+backing, and this change deliberately adds no such read (the site's pool
+dependency is owned by `inject-site-pool-authority`). Admission today refuses a pool only through
 `deliverable_modes`. An unbacked pool with a non-empty deliverable set would
 therefore be admissible, and the downstream argument that no capacity path is
 reachable for an unbacked listing would be false.
@@ -117,8 +117,8 @@ representable-but-undecided — a seller with real execution integration choosin
 trade out of band. Refusing it costs that seller nothing today: they can declare a
 backed pool, or an unbacked pool beside it. **Revisit trigger:** a seller with
 working execution integration who needs a single pool to be both provisionable and
-out-of-band. Allowing it then requires a backing check at site admission, which is
-the site-authority dependency question below.
+out-of-band. Allowing it then requires a backing check at site admission, which
+must go through the pool-facts port `inject-site-pool-authority` introduces.
 
 ### Both tags are required on every write; nothing is defaulted, preserved, or merged
 
@@ -380,22 +380,16 @@ specification directly, which is the ordinary path.
 
 ## Open questions
 
-- **How should the site authority read pool declarations?** `ARCHITECTURE.md`'s
-  kit layers let an authority capability (`kit/site`, `kit/resource-pools`) depend
-  on foundation capabilities only, yet `kit/site` declares `kit-resource-pools` and
-  its ledger reads `ResourcePool` directly: a pool's deliverable modes at admission,
-  and whether a declaration's pool exists at registration (added by
-  `capacity-resource-administration`, which recorded the conflict rather than widen
-  its scope). The alternative the review of that change proposed is a small
-  pool-authority port the ledger receives from its composition root, covering
-  existence and every pool fact admission reads, with `DEFAULT_POOL_ID` moved to a
-  foundation home; the cost is a change to how every composition constructs the
-  ledger. This change adds no site-side read — an unbacked pool is kept out of
-  admission by its empty deliverable set — so it neither needs nor decides the
-  port. The question becomes pressing when admission must read backing, which is
-  the revisit trigger for the unbacked-pool decision above. If the dependency is
-  instead intended, `ARCHITECTURE.md`'s layer diagram is what changes. No task
-  decides it.
+None remain in this change.
+
+The question of how the site authority should read pool declarations is owned by
+`inject-site-pool-authority`. `kit/site`'s ledger reads `ResourcePool` directly,
+contrary to `ARCHITECTURE.md`'s kit layers, and this change deliberately adds no
+read to it: an unbacked pool stays out of admission through its empty deliverable
+set. That change replaces the direct reads with an injected, session-scoped
+pool-facts port and a boundary test that enforces the layer rule. If the revisit
+trigger for refusing an unbacked pool that delivers fires, the backing read it
+needs goes through that port.
 
 ## Migration Plan
 
