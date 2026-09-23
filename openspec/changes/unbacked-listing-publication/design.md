@@ -853,7 +853,7 @@ enforced by a trigger:
    ('backed', 'unbacked'))`, nullable with no default; backfill every existing row as
    `backed` (every existing row is backed by construction, since no earlier version
    could publish an unbacked listing); then drop and recreate
-   `storefront_listing_bindings_immutable` with `capacity_backing` in its `UPDATE OF`
+   `storefront_listing_binding_immutable` with `capacity_backing` in its `UPDATE OF`
    list and `WHEN` clause. The backfill must precede the trigger's recreation or the
    new trigger would refuse it. The binding-schema migration that created the trigger
    stays frozen.
@@ -1218,9 +1218,10 @@ configuration edit and restart.
 **Finding answered:** a seller's close and a reconciliation close are indistinguishable.
 
 Every close records who closed the listing, `seller` or `reconciliation`, on the common
-`listings` row; reopening clears it. Every reopen path — the capacity-event reconciler,
-the publication loop, and the identity-gated reopen — reopens only listings that
-reconciliation closed. Because the derivation key stays bound to a seller-closed
+`listings` row; reopening clears it. No reopen path — the capacity-event reconciler,
+the publication loop, and the identity-gated reopen — reopens a listing its seller
+closed. Listings in the other non-open states the storefront already uses after a deal
+(`refunded`, `reclaimed`) record no closure reason and keep their existing handling. Because the derivation key stays bound to a seller-closed
 listing, the loop finds that binding and publishes no replacement for the slice.
 
 A seller re-lists with `resume`: on a seller-closed listing it reopens the listing,
@@ -1324,6 +1325,51 @@ there, and every API-credit listing is quota-backed. Only their types move.
 - **How the binding reaches the policy.** The VM default-hook factory gains a binding
   parameter and is built per round: in `evaluate` from `RoundRequest.binding`, and in
   round-zero evaluation from the binding it already resolved. Custom hooks are unchanged.
+
+## Findings during implementation
+
+Recorded as implementation found them. Each is either fixed here, because this change
+rewrites the code it sits in, or corrects a statement earlier in this document.
+
+- **Reopen did not reopen at the registries.** `PublicationRuntime.reopen` reopened a
+  listing locally and republished it, but a registry's publish updates a listing's
+  payload and leaves its status alone, so a listing a registry recorded as closed stayed
+  closed there. The retired CLI path had sent an explicit status update; the kit path
+  never did, and the e2e scenarios check only storefront-local status. Fixed:
+  `core_storefront.registry_publication` gains `reopen_listing_in_registries`, and the
+  kit's `reopen` sends it after a successful publish.
+- **Bare metal's reconciliation close named no reason.** `mark_derived_bare_metal_listings_closed`
+  set `listings.status = 'closed'` directly. The closure-reason trigger refused it the
+  first time a test exercised the path; it now records `reconciliation`, which is what
+  both of its callers are.
+- **The loop compared against unparsed JSON, and its failures were invisible.**
+  `load_listing` returns `listing_resource` as stored text for the domain model to
+  parse, so the loop's first comparison raised; the shared runner recorded that as a
+  failed candidate and nothing reached the cycle report. Both are fixed: the loop decodes
+  the stored shape, and a failure is reported as a `fail` action with its reason.
+- **The reopen gate lives in the shared predicate.** `closed_available_listing_ids` is
+  used by the capacity-event reconciler, the admin release handler, and failure
+  handling, so the identity and backing comparison sits there rather than in each
+  caller.
+- **The guard's inputs are computed by the storefront.** The policy-layer guard in
+  `domains/vms/negotiation` interprets a source check the storefront computes from the
+  round's durable binding (`services/listing_source_check.py`). The default hook takes
+  that check instead of a capacity client, so the policy module imports no storefront
+  code and no any-site snapshot path remains.
+- **One gated projection accessor.** Publication, capacity reconciliation, and the
+  guard read the projection through `listing_source_projection()`, which honours
+  `use_site_projection_for_listings`, so they never disagree about which source applies.
+- **The legacy migration tool writes backing.** `migrate-storefront-domains` creates
+  the binding table through the frozen schema function, so it now applies the two
+  backing migrations first and writes `backed` explicitly.
+- **An unloaded site projection is unknown, not empty.** The guard's first source
+  check read a site whose bucket projection had not loaded as a site with no
+  buckets, which made a fungible pool look fully taken. A site missing from a
+  projection is now unknown: its buckets fall back to member availability, and a
+  site whose pool projection has not loaded confirms no declaration rather than
+  falling back to the local tables, which are not that listing's source.
+- **The binding trigger's name** is `storefront_listing_binding_immutable`; the text
+  above is corrected.
 
 ## Findings recorded, not fixed here
 

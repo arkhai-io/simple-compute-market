@@ -25,7 +25,6 @@ from core_storefront.sqlite_client import (
 from core_storefront.domain_registry import StorefrontDomainRegistry
 from core_storefront.sqlite_migrations import MigrationLike
 from domains.vms.listings.host_csv_importer import upsert_hosts_from_csv
-from domains.vms.listings.reconciler import ensure_derived_compute_listings_table
 from domains.vms.listings.resource_csv_importer import (
     SettlementClauseCompiler,
     upsert_resources_from_csv,
@@ -256,7 +255,6 @@ class SQLiteClient(CoreSQLiteClient):
             END
             """
         )
-        ensure_derived_compute_listings_table(cur)
 
     def _ensure_domain_indexes(self, cur: sqlite3.Cursor) -> None:
         cur.execute(

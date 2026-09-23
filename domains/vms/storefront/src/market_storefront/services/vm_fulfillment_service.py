@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from domains.vms.settlement import submit_compute_fulfillment
+from market_capacity_publication import CapacityBinding
 
 from market_storefront.services.vm_fulfillment_planner import build_vm_fulfillment_plan
 
@@ -389,6 +390,13 @@ async def fulfill_vm_obligation(
         )
 
         binding = await capacity_binding_for_listing(get_sqlite_client(), listing_id)
+        if not isinstance(binding, CapacityBinding):
+            # Publication gives an unbacked listing no settlement option that
+            # reaches this path; refuse before any reservation if one does.
+            raise RuntimeError(
+                "VM fulfillment requires a capacity-backed listing; "
+                f"listing {listing_id!r} has no admission authority"
+            )
         if site_id is not None and site_id != binding.site_id:
             raise RuntimeError("requested fulfillment site differs from listing binding")
 

@@ -180,10 +180,13 @@ def _migrate_compute_inventory_pools(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_compute_allocations_member_state "
         "ON compute_allocations(member_id, state)"
     )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_derived_compute_listings_pool "
-        "ON derived_compute_listings(pool_id, gpu_count)"
-    )
+    # Only a database written before the common listing binding existed has
+    # this table; a fresh one never creates it.
+    if _table_exists(conn, "derived_compute_listings"):
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_derived_compute_listings_pool "
+            "ON derived_compute_listings(pool_id, gpu_count)"
+        )
     _backfill_compute_pools(conn)
 
 

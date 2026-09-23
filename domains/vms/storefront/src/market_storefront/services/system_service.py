@@ -47,6 +47,19 @@ def _default_projection_status_provider() -> dict[str, Any]:
     return projection_status_summary()
 
 
+def _default_publication_derivation_provider() -> dict[str, dict[str, Any]]:
+    """Per-site report of what the latest derivation could not publish.
+
+    For each site: whether it was read under the compatibility rule for a
+    producer predating the pool declarations, which pools and members are
+    unresolvable and held, which members declare no GPU count, and which
+    fungible pools mix kinds.
+    """
+    from domains.vms.listings.reconciler import derivation_reports
+
+    return derivation_reports()
+
+
 def _default_listing_cardinality_mode_explanation_provider() -> (
     dict[str, dict[str, str]]
 ):
@@ -80,6 +93,9 @@ class SystemService:
         listing_cardinality_mode_explanation_provider: (
             Callable[[], dict[str, dict[str, str]]] | None
         ) = None,
+        publication_derivation_provider: (
+            Callable[[], dict[str, dict[str, Any]]] | None
+        ) = None,
     ) -> None:
         self._db = sqlite_client
         self._marketplace_signer = marketplace_signer
@@ -90,6 +106,9 @@ class SystemService:
         self._listing_cardinality_mode_explanation_provider = (
             listing_cardinality_mode_explanation_provider
             or _default_listing_cardinality_mode_explanation_provider
+        )
+        self._publication_derivation_provider = (
+            publication_derivation_provider or _default_publication_derivation_provider
         )
 
     # ------------------------------------------------------------------
@@ -204,6 +223,12 @@ class SystemService:
                 )
             except Exception:
                 result["listing_cardinality_mode_explanations"] = None
+            try:
+                result["publication_derivation"] = (
+                    self._publication_derivation_provider()
+                )
+            except Exception:
+                result["publication_derivation"] = None
 
         return result
 

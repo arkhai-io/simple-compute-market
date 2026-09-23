@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, ClassVar, Literal, Protocol
 
 from core_storefront.aggregation import AggregateCapacityClient, PlacementPolicy
 from core_storefront.capacity import CapacityDelta
@@ -57,13 +57,15 @@ class CapacitySite:
 
 
 @dataclass(frozen=True, slots=True)
-class CapacityBinding:
-    """Exact publication/effect authority selected by domain composition.
+class _ListingIdentity:
+    """A listing's common identity: origin site, offering mode, and source.
 
-    ``source_id`` is domain-owned and opaque to this kit (pool ID, quota
+    ``site_id`` is the site the listing originates from, which every listing
+    has. ``source_id`` is domain-owned and opaque to this kit (pool ID, quota
     resource ID, Physical Resource ID, or another stable candidate identity).
-    ``offering_mode`` is the exact pool-declared mode advertised by the
-    candidate and later passed to reservation/fulfillment policy.
+    ``offering_mode`` is the exact mode the listing advertises. Whether the
+    origin site admits reservations is carried by the concrete class, never by
+    a field a reader could leave unset.
     """
 
     site_id: str
@@ -76,6 +78,60 @@ class CapacityBinding:
             if not isinstance(value, str) or not value.strip():
                 raise CapacityBindingError(f"{field_name} must be non-empty")
             object.__setattr__(self, field_name, value.strip())
+
+
+@dataclass(frozen=True, slots=True)
+class CapacityBinding(_ListingIdentity):
+    """A listing whose origin site is an admission authority.
+
+    Reservation, commit, release, scheduling, and dispatch accept only this
+    class. ``UnbackedBinding`` is a sibling rather than a subclass, so an
+    ``isinstance`` check against this class is exactly the backed-only check.
+    """
+
+    capacity_backing: ClassVar[Literal["backed"]] = "backed"
+
+
+@dataclass(frozen=True, slots=True)
+class UnbackedBinding(_ListingIdentity):
+    """A listing with no admission authority behind it.
+
+    It has an origin site and a source like any other listing, and nothing can
+    be reserved against it. Dataclass equality compares classes, so it never
+    equals a ``CapacityBinding`` over the same fields: a durable comparison
+    catches a changed backing without a separate check.
+    """
+
+    capacity_backing: ClassVar[Literal["unbacked"]] = "unbacked"
+
+
+PublicationBinding = CapacityBinding | UnbackedBinding
+
+_BINDING_BY_BACKING: Mapping[str, type[CapacityBinding] | type[UnbackedBinding]] = {
+    CapacityBinding.capacity_backing: CapacityBinding,
+    UnbackedBinding.capacity_backing: UnbackedBinding,
+}
+
+
+def publication_binding(
+    *,
+    capacity_backing: str,
+    site_id: str,
+    offering_mode: str,
+    source_id: str,
+) -> PublicationBinding:
+    """Load a binding from its durable backing value, refusing any other value.
+
+    There is no default: a value this kit does not recognize is a durable-state
+    error, not a listing to classify.
+    """
+    binding_type = _BINDING_BY_BACKING.get(capacity_backing)
+    if binding_type is None:
+        raise CapacityBindingError(
+            f"unknown capacity_backing {capacity_backing!r}; expected one of "
+            f"{sorted(_BINDING_BY_BACKING)}"
+        )
+    return binding_type(site_id, offering_mode, source_id)
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,6 +247,13 @@ class CapacityRuntime:
         return self.client().site(site_id)
 
     def require_binding(self, binding: CapacityBinding) -> CapacityBinding:
+        # Every capacity effect passes through here. An unbacked listing has no
+        # admission authority, so a reservation against it would be a record
+        # with nothing behind it; refuse before any site call.
+        if not isinstance(binding, CapacityBinding):
+            raise CapacityBindingError(
+                "capacity operations require a capacity-backed listing binding"
+            )
         if binding.site_id not in self._sites:
             raise CapacityBindingError(
                 f"capacity binding references unconfigured site {binding.site_id!r}"

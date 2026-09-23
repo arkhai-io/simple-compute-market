@@ -73,6 +73,11 @@ class RoundRequest:
     terms: NegotiationTerms
     buyer_principal: Identity
     strategy_label: str | None
+    # The same opaque binding the runtime resolved and validated for this
+    # negotiation. A policy that must judge the listing against its own source
+    # reads it here rather than resolving a second time, which could drift from
+    # what the runtime checked.
+    binding: Any = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -287,6 +292,7 @@ class NegotiationRuntime:
                     terms=decoded_terms,
                     buyer_principal=buyer,
                     strategy_label=None,
+                    binding=resolved.binding,
                 )
             )
         except ValueError as exc:
@@ -616,6 +622,7 @@ class NegotiationRuntime:
                     resolved.listing,
                     resolved.listing_record,
                 ),
+                binding=resolved.binding,
             )
         )
         self._validate_evaluation(evaluation)

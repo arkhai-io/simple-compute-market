@@ -80,6 +80,7 @@ async def make_vm_lifecycle_fixture(
             },
         },
         last_reconciled_at="2026-01-01T00:00:00Z",
+        capacity_backing="backed",
     )
     await db.upsert_listing_with_binding(
         binding=listing_binding,
