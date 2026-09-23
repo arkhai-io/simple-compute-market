@@ -90,7 +90,7 @@ def test_negotiate_with_seller_delivers_policy_params_to_the_chain():
     )
 
     from domains.vms.buyer.buyer_client import negotiate_with_seller
-    from domains.vms.buyer.tests.test_buyer_client import (
+    from test_buyer_client import (
         _MockResponse,
         _escrow_proposal,
         _provision,
@@ -198,7 +198,7 @@ def test_round_0_exit_never_contacts_the_seller():
     from market_policy.negotiation_middleware import NegotiationDecision
 
     from domains.vms.buyer.buyer_client import negotiate_with_seller
-    from domains.vms.buyer.tests.test_buyer_client import (
+    from test_buyer_client import (
         _escrow_proposal,
         _provision,
     )
@@ -240,7 +240,7 @@ def test_chain_exhaustion_errors_and_releases_the_seller():
     )
 
     from domains.vms.buyer.buyer_client import negotiate_with_seller
-    from domains.vms.buyer.tests.test_buyer_client import (
+    from test_buyer_client import (
         _MockResponse,
         _escrow_proposal,
         _provision,

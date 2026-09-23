@@ -1,0 +1,25 @@
+[project]
+name = "arkhai-vms-negotiation"
+version = "0.1.0"
+license = "MIT"
+description = "VM negotiation policies, the seller round, and the RL strategy, shared by the VM storefront and buyer."
+requires-python = ">=3.12,<3.14"
+# torch is not a dependency: only the RL strategy imports it, lazily, and each
+# consumer opts in through its own `rl` extra, which pins the CPU index.
+dependencies = [
+    "arkhai-vms-listings>=0.1.0",
+    "arkhai-kit-alkahest",
+    "arkhai-kit-policy",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# Mapped by directory, as arkhai-vms-listings is; the trained checkpoints ship
+# with the strategy that loads them.
+[tool.hatch.build.targets.wheel]
+include = ["*.py", "rl/*.py", "rl/models/*.pt"]
+
+[tool.hatch.build.targets.wheel.sources]
+"" = "domains/vms/negotiation/"

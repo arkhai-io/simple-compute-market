@@ -1,6 +1,9 @@
 REPO_ROOT := $(shell git rev-parse --show-toplevel)
 DIST_DIR ?= ../../../.dist
 
+# Tests import this package from its installed wheel; see `cache-keys` in pyproject.toml.
+export UV_NO_EDITABLE := 1
+
 .PHONY: build init reinit test smoke-test
 
 init:
@@ -21,6 +24,9 @@ reinit:
 	--upgrade-package arkhai-kit-policy   --reinstall-package arkhai-kit-policy \
 	--upgrade-package arkhai-kit-settlement-runtime --reinstall-package arkhai-kit-settlement-runtime \
 	--upgrade-package arkhai-vms          --reinstall-package arkhai-vms \
+	--upgrade-package arkhai-vms-listings --reinstall-package arkhai-vms-listings \
+	--upgrade-package arkhai-vms-negotiation --reinstall-package arkhai-vms-negotiation \
+	--upgrade-package arkhai-vms-settlement --reinstall-package arkhai-vms-settlement \
 	--upgrade-package arkhai-kit-delivery --reinstall-package arkhai-kit-delivery
 
 test: reinit

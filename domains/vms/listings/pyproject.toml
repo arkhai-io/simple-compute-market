@@ -1,0 +1,34 @@
+[project]
+name = "arkhai-vms-listings"
+version = "0.1.0"
+license = "MIT"
+description = "VM listing derivation, pricing resolution, and reconciliation, shared by the VM storefront and buyer."
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "pydantic>=2",
+    "arkhai-kit-alkahest",
+    "arkhai-kit-identity==0.3.0",
+    "arkhai-kit-settlement-runtime>=0.1.0",
+]
+
+[project.optional-dependencies]
+# Reading a site's projected pools — their declarations and hints — needs the
+# resource-pool kit. Only the storefront derives listings from projections; the
+# buyer uses the listing models and helpers alone, and imports none of it.
+pools = [
+    "arkhai-kit-resource-pools>=0.2.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# The sources sit at the import path's own directory, so the wheel maps this
+# directory onto `domains/vms/listings` rather than listing its modules. Every
+# module added here ships without a packaging edit. `domains` and
+# `domains.vms` are namespace packages that several wheels contribute to.
+[tool.hatch.build.targets.wheel]
+include = ["*.py"]
+
+[tool.hatch.build.targets.wheel.sources]
+"" = "domains/vms/listings/"

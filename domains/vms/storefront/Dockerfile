@@ -63,6 +63,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
             --refresh-package arkhai-kit-resource-pools \
             --refresh-package arkhai-kit-fulfillment \
             --refresh-package arkhai-vms \
+            --refresh-package arkhai-vms-listings \
+            --refresh-package arkhai-vms-negotiation \
+            --refresh-package arkhai-vms-settlement \
             --refresh-package arkhai-bare-metal \
             --refresh-package arkhai-bare-metal-storefront \
             --refresh-package arkhai-vms-storefront \
@@ -88,6 +91,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
             --refresh-package arkhai-kit-resource-pools \
             --refresh-package arkhai-kit-fulfillment \
             --refresh-package arkhai-vms \
+            --refresh-package arkhai-vms-listings \
+            --refresh-package arkhai-vms-negotiation \
+            --refresh-package arkhai-vms-settlement \
             --refresh-package arkhai-bare-metal \
             --refresh-package arkhai-bare-metal-storefront \
             --refresh-package arkhai-vms-storefront \
