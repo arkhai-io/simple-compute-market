@@ -1326,6 +1326,141 @@ there, and every API-credit listing is quota-backed. Only their types move.
   parameter and is built per round: in `evaluate` from `RoundRequest.binding`, and in
   round-zero evaluation from the binding it already resolved. Custom hooks are unchanged.
 
+## Decisions from the code review
+
+A review of the implementation found the defects below. Each was discussed and its
+resolution agreed before any change; Section 8 of `tasks.md` implements them. The
+test-level definitions cited are `docs/development/TESTING.md`'s: for a service,
+integration means the whole app, wired through its container, driven by its
+canonical typed client.
+
+### R1. Reconciliation must not reopen a seller's close, in every domain
+
+API-credit capacity reconciliation reopens a listing its seller closed:
+`reopenable_credit_listing_ids` (`domains/apicredits/listings/reconciler.py`) sees
+every closed listing, because `list_listings` does not return `closed_by`, and the
+kit's `reopen` then opens it. Bare metal's reopen helper
+(`domains/bare_metal/src/arkhai_bare_metal/storefront_publication.py`) sets
+`closed_by = NULL` unconditionally. VM honours the rule only because its own
+predicates remember to.
+
+**Decision:** enforce it in core, at the one write every reopen passes through.
+`update_listing(status="open")` on a listing its seller closed raises unless the
+caller states the reopen is the seller's own (`reopened_by="seller"`). The kit's
+`reopen` takes who is reopening: `reconcile()` passes reconciliation and skips a
+seller-closed candidate rather than failing the plan; the storefront's `resume` passes
+seller. Bare metal's raw-SQL reopen moves onto `update_listing` so it gets the same
+guard. A database trigger cannot do this, because it cannot know who is reopening.
+
+### R2. Closure provenance is ordinary listing state
+
+Task 1.8 claimed `load_listing` returns `closed_by`; it does not. A separate
+`load_listing_closed_by` point query was added instead, and that split is how API
+credits lost the invariant.
+
+**Decision:** `load_listing` and `list_listings` return `closed_by`, and
+`load_listing_closed_by` is removed.
+
+### R3. A close succeeds locally before any registry is told
+
+`PublicationRuntime.close` (`kit/capacity-publication`) catches every exception from
+the local update, logs it, and closes the registry copies anyway, so a refused local
+close (the closure-reason trigger included) leaves a registry saying closed and the
+storefront saying open.
+
+**Decision:** the local transition must succeed before any registry close; on failure
+`close` raises, which a seller's close surfaces as a retryable error. `reconcile`
+records a failed close per listing and continues. No registry-side journal: a registry
+close that fails after a successful local close is already retried by republication
+and reconciliation.
+
+### R4–R5. Publication tests run through the real app
+
+`tests/integration/test_publication_loop.py` constructs `VmPublicationCycle`
+directly, so it is neither a unit test nor an integration test by the repository's
+definitions, and task 6.2 ("publishes and then negotiates through the real app") was
+proved only as two separate halves.
+
+**Decision:** every publication-loop case moves to the real app: the loop is driven
+through the typed client's `admin_run_lifecycle_cycle("publication")` and
+`admin_dry_run_lifecycle_cycle("publication")` against the ASGI app with its container
+wired, and results are read back through the client where an API exists. One test
+publishes and then negotiates, which proves 6.2. Anything still worth testing
+directly becomes a unit test of that function with its collaborators mocked. The
+fixture configures a settlement composition the way the listings-API integration
+tests do, so the injected `request_builder` is removed if nothing else needs it. The
+core migration and trigger tests, which exercise a real database from `unit/`, move to
+`integration/` as `TESTING.md` requires of touched library tests.
+
+### R6. Site-generation declaration reading belongs in the resource-pool kit
+
+Nothing in `domains/vms/listings/pool_declarations.py` is VM-specific: the joint
+per-site generation rule, the older-producer compatibility reading, and enablement
+apply to any consumer of projected pools, and `market_resource_pools` already says
+`resolve_pool_declarations` is the one reader of those tags while leaving the
+older-producer rule to callers.
+
+**Decision:** the site-level reader moves into `market_resource_pools` beside
+`resolve_pool_declarations`; VM keeps only `advertises("vm")` and its derivation.
+After the move, confirm whether bare-metal publication reads advertisement at all: no
+read of `advertisable_modes` was found there, which would let it list a pool whose
+site does not advertise bare metal.
+
+### R7. No hidden state between reconciliation functions
+
+`_BINDING_BACKING` in `domains/vms/listings/reconciler.py` is a process-global dict
+that `_bound_vm_listings` fills as a side effect and `closed_available_listing_ids`
+reads. Its values cannot be wrong, since backing is immutable per binding, but it
+grows without bound and hides a data flow from the types.
+
+**Decision:** replace it with a small immutable row record carrying listing ID,
+listing resource, site, and binding backing.
+
+### R8. Capacity events touch only backed listings, structurally
+
+Availability-only deltas leave unbacked listings alone today only because unbacked
+slices range over declared quantity. The capacity-event path
+(`services/capacity_client.py`) runs the same helpers over both kinds.
+
+**Decision:** the capacity-event path filters to backed bindings at its entry, so
+availability reconciliation never sees an unbacked listing; source reconciliation
+(the publication loop) keeps handling both. A test seeds one backed and one unbacked
+listing, changes only availability, runs the real capacity-event path, and asserts
+only the backed listing changes.
+
+### Documentation and the remaining validation
+
+Promotion (task 7.7) and the rest of closeout land on this branch before merge; the
+review found the permanent documentation otherwise out of date (the storefront
+capacity boundary in `ARCHITECTURE.md`, the pause-and-step table in `TESTING.md`, the
+rollback posture in `DEPLOYMENT_AND_CONFIG.md`, and the retired `publish` options in
+`docs/seller-quickstart.md`). Tasks 6.9 and 6.17–6.19 are done together with the
+real-app fixture from R4–R5, which they share.
+
+### Packaging decided alongside the review
+
+The first end-to-end run failed at image build: two new modules were missing from the
+storefront wheel because the storefront and buyer copied `domains/vms/listings`,
+`negotiation`, and `settlement` into their wheels file by file. Resolved in its own
+commit, before the review edits:
+
+- The three directories are now the wheels `arkhai-vms-listings`,
+  `arkhai-vms-negotiation`, and `arkhai-vms-settlement`, each mapping its directory
+  onto its import path. Negotiation and settlement depend on listings; the storefront
+  and buyer depend on all three.
+- `arkhai-kit-resource-pools` is the `pools` extra of `arkhai-vms-listings`, which
+  only the storefront requests, so the buyer keeps no dependency on it.
+- `domains` and `domains.vms` are namespace packages.
+- The buyer and both API-credit projects map their own directories instead of listing
+  files. Hatch has no editable form for such a package, so their tests install it from
+  its wheel: `UV_NO_EDITABLE` is set in their Makefiles and CI matrix entries, and
+  `cache-keys` rebuild the wheel when a module changes. The buyer's `main.py` ships as
+  `domains.vms.buyer.main`.
+- VM tests no longer put the repository root on `sys.path`.
+- The three wheels publish to PyPI; each needs its one-time trusted-publisher setup.
+- Hand-maintained internal-package lists in `reinit` targets and Dockerfiles are left
+  to `derive-internal-package-lists-from-locks`.
+
 ## Findings during implementation
 
 Recorded as implementation found them. Each is either fixed here, because this change
