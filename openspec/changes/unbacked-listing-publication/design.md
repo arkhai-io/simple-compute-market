@@ -53,8 +53,8 @@ decision names the finding it answers.
   write to it. The reconciler still writes it after close and reopen, and the
   publication cycle's reopen still looks listings up in it. On a migrated database
   the close path's write and the cycle's reopen are expected to abort or collide on
-  the binding's `UNIQUE` derivation key — to be confirmed by test before it is
-  recorded as a defect.
+  the binding's `UNIQUE` derivation key. Planning confirmed the abort by test; see
+  "Findings verified during planning".
 - **A missing GPU count is silent, not fabricated.** `_projected_resource_usage`
   reads `int(capacity.get("gpu_count") or 0)`, so a declaration without it yields no
   slices and no explanation. The `or 1` defaults in `prepare_vm_listing_binding`, the
@@ -75,7 +75,79 @@ decision names the finding it answers.
 - **The binding schema's triggers are created with `IF NOT EXISTS`,** so extending
   the immutability trigger needs a new migration that drops and recreates it. The
   binding table has three writers: two inserts in `core_storefront.sqlite_client`
-  and the legacy migration tool's `INSERT OR IGNORE`.
+  and the legacy migration tool's `INSERT OR IGNORE`. (Planning found a fourth; see
+  below.)
+
+### Findings verified during planning, 2026-09-23
+
+The planning review re-read the design against the code and settled the "to verify"
+list. These findings shaped the decisions under "Decisions added in the planning
+review" below; each names the finding it answers.
+
+- **Nothing in a deployed stack runs the publication cycle.** `run_watch_loop`'s
+  docstring says `serve` uses it; `serve` does not. The storefront's startup starts the
+  negotiation watchdog, settlement servicing, fulfillment resume, the site-projection
+  poller, and the capacity-event poller, and nothing else. The only caller is
+  `publish --watch`, a separate process that reads the storefront database directly
+  and publishes by HTTP to its own storefront. No compose, Helm, or e2e configuration
+  runs it: every e2e scenario creates listings through the admin API. So pool-level
+  changes, the terms refresh this design adds, and republication of existing listings
+  would never run in a deployed stack.
+- **A seller's close and a reconciliation close are indistinguishable.** Both go through
+  `PublicationRuntime.close` and set `status = 'closed'`. `closed_available_listing_ids`
+  reopens any closed bound listing whose slice is available, so the next `released`
+  capacity event already undoes a seller's explicit close. `resume` only toggles
+  `paused` and republishes; it does not reopen a closed listing.
+- **The capacity-event reopen path bypasses the identity rule.** It keys on the
+  structural key, which does not capture `gpu_model` or `region`, and republishes the
+  stored row, so a listing closed for identity divergence would reopen on the next
+  release event and would not carry `capacity_backing`.
+- **A paid deal on an unbacked VM listing would reach fulfillment after funding.** The
+  VM storefront composes only `alkahest.v1` and `fiat.stripe.v1`, both delivering
+  through `fulfill_vm_settlement`; `[pricing].settlements` defaults apply to every
+  candidate; and `fulfill_vm_obligation` calls `capacity_binding_for_listing` then
+  reserves. The capacity type boundary would refuse only after escrow was funded.
+- **Field provenance is decided per listing, not per field.** `resolve_region` takes the
+  pool's `region` tag and falls back to the local `compute_capacity_pools.region`;
+  `gpu_model` takes the declaration attribute and falls back to the local value. The
+  permanent spec already says `region` has no storefront override.
+- **Round-zero evaluation runs the inventory guard.** `compute_round_zero_decision`
+  (the evaluate-negotiate dry run) runs the full default seller chain, so it is not an
+  identity-only consumer.
+- **The default seller hook is built through the domain contract.**
+  `_default_seller_round_hook` calls `domain.storefront.run_negotiation_policy`, an
+  untyped `DomainCallable` in `market_core`, so the VM factory can gain a parameter
+  without a core change.
+- **The migrated-database abort is confirmed by test.** With the retirement triggers
+  `migrate-storefront-domains` installs, `mark_derived_listings_closed`,
+  `mark_derived_listings_open`, and `record_derived_listing` each raise
+  `IntegrityError: derived_compute_listings is retired`. The event close path raises
+  after the listing has already closed at the registries. This change removes those
+  writers, so the defect is fixed here rather than recorded.
+- **Region at admission is confirmed by reading.** The site's feasibility view merges a
+  declaration's attributes with the resource's own facts and never pool tags, while the
+  VM claim carries `region` from the listing, which may come from the pool's `region`
+  tag. A backed pool that declares region only as a tag cannot admit. Recorded against
+  `pools-8-capacity-projection-and-listing-hints`, which owns the region hint.
+- **A disabled pool is still projected.** `resource_pool_projection` groups by resource
+  and carries the pool's `enabled` in `pool_metadata`; `_projected_pool_rows` never reads
+  it, so a disabled pool's listings still publish.
+- **Bare metal writes the binding table too.** `arkhai_bare_metal_storefront`'s
+  `sqlite_client` constructs `StorefrontListingBinding.from_source_envelope`, and its
+  `migrations.py` has a raw `INSERT OR IGNORE INTO storefront_listing_bindings`. That is
+  a fourth writer. Bare metal publishes no `capacity_backing` today and its listing model
+  has no such field; no other change owns adding it.
+- **API credits are unaffected beyond types.** Their registry schema admits extra
+  `listing_resource` fields, but they have their own schema identity and every listing is
+  quota-backed. With the binding types chosen below, `capacity_binding_from_listing_resource`
+  already returns a valid `PublicationBinding`.
+- **Mixed site and storefront versions are supported but not reproducible at system
+  level.** Sellers self-host sites, which is why the compatibility rule exists, but an
+  upgraded provisioning service refuses to start with a pool lacking valid declarations,
+  so no current image can emit an old producer's projection. The cardinality-alias
+  precedent could simulate skew through the current site; this rule cannot.
+- **`cli_logs.py` also reads the storefront database directly.** Out of scope; recorded
+  below.
 
 ## Goals / Non-Goals
 
@@ -236,21 +308,53 @@ all hold, because `CapacityBinding` *is* the common identity fields — `site_id
 would carry no identity, and `PublicationRuntime`'s durable comparison would lose
 the token it compares.
 
-The shape that works:
+The shape that works, as first drafted, was one type carrying the common identity
+fields plus an `admission: Backed | Unbacked` field. The planning review replaced
+that field with two sibling classes, because Python cannot make "a binding whose
+admission is `Backed`" a type, and because `admission` would have been a second name
+for what every other surface calls `capacity_backing`:
 
-```text
-PublicationBinding
-    site_id         # origin site — populated for every listing
-    offering_mode
-    source_id
-    admission: Backed | Unbacked
+```python
+@dataclass(frozen=True, slots=True)
+class _ListingIdentity:
+    site_id: str        # origin site — populated for every listing
+    offering_mode: str
+    source_id: str
+
+@dataclass(frozen=True, slots=True)
+class CapacityBinding(_ListingIdentity):
+    capacity_backing: ClassVar[Literal["backed"]] = "backed"
+
+@dataclass(frozen=True, slots=True)
+class UnbackedBinding(_ListingIdentity):
+    capacity_backing: ClassVar[Literal["unbacked"]] = "unbacked"
+
+PublicationBinding = CapacityBinding | UnbackedBinding
 ```
 
-`CapacityBinding` therefore does change: from "the binding" to "a binding whose
-admission is `Backed`". Capacity paths type against that narrowed form, so
-reserve, commit, release, schedule, and dispatch refuse an unbacked listing at the
-type boundary rather than at a runtime check — which was the point of the union
-and survives the correction.
+What this keeps:
+
+- **One name.** `capacity_backing` is the only spelling of the concept, on the pool
+  tag, the binding column, the published listing, and the binding class. Readers take
+  it from the binding (`listing_resource["capacity_backing"] =
+  binding.capacity_backing`) rather than branching on the class.
+- **The type boundary.** `CapacityBinding` keeps its name and every capacity-path
+  signature is unchanged. `UnbackedBinding` is a sibling, not a subclass, so the
+  existing `isinstance(binding, CapacityBinding)` guards become exactly the backed-only
+  check. Nothing type-checks `kit/capacity-publication` today, so the runtime
+  `isinstance` check is the enforcement either way; the signature is what documents it.
+- **The durable comparison.** Dataclass equality compares classes, so
+  `CapacityBinding("s", "vm", "p") != UnbackedBinding("s", "vm", "p")` and
+  `_require_persisted_binding` catches a backing mismatch with no change to its body.
+- **Fail-closed loading.** A durable row is loaded through an explicit table,
+  `{"backed": CapacityBinding, "unbacked": UnbackedBinding}[durable.capacity_backing]`,
+  so an unknown value raises rather than defaulting.
+
+A single class with a `capacity_backing` field was the alternative. It loses the
+signature-level statement that capacity operations take only backed bindings, needs a
+value check inside every capacity method, and renames or aliases every
+`CapacityBinding` call site across both domains and API credits. It gains nothing the
+sibling classes lack.
 
 `PublicationCandidate.binding` widens to `PublicationBinding`, and the runtime's
 comparison stays a comparison of the whole binding, unchanged in behaviour.
@@ -295,7 +399,8 @@ Naming note: `authority` was considered and rejected for the discriminator,
 because the word already carries a specific architectural meaning — which
 component is the source of truth for a piece of state — and a type named for it
 would read as "which authority admits this," which is what an unbacked listing
-does not have.
+does not have. `admission`, used in the first draft of the shape above, was
+dropped for the one-name rule.
 
 **Naming consequence, now load-bearing rather than cosmetic.** If the central type
 is `PublicationBinding` and capacity is one variant, `kit/capacity-publication`
@@ -306,10 +411,13 @@ is called.
 **What the trace missed.** Two consumers read listing state during negotiation
 without appearing in it. The seller's inventory guard reads live availability on every
 round for any listing; its decision is recorded below. Round-zero evaluation
-(`compute_round_zero_decision`) resolves the binding for identity only and widens with
-the other identity-only consumers. Neither needs both forms, so the test of the
-separation still holds. The guard needs the admission variant during a round, which is
-why `kit/negotiation-runtime` forwards the binding on `RoundRequest`.
+(`compute_round_zero_decision`) resolves the binding and compares site and mode only,
+so its own binding use widens with the other identity-only consumers — but the planning
+review found that it also runs the full default seller chain, inventory guard included,
+so it passes its resolved binding to the default policy exactly as `evaluate` does. The
+test of the separation still holds: neither needs both forms. The guard needs the
+binding's variant during a round, which is why `kit/negotiation-runtime` forwards the
+binding on `RoundRequest`.
 
 ### A listing's identity is the physical resource it offers
 
@@ -346,9 +454,13 @@ resource but of whether an admission authority stands behind the listing, and it
 fixed on the binding at creation; the backing decisions govern it.
 
 Provenance is not the rule. The pool's `pricing` tag is site-sourced and is a term;
-a storefront's region override is storefront-authored and is identity. Provenance
-decides a different question — what the seller's inventory guard rechecks against
-the site — and the two are recorded side by side per field in the VM domain.
+`region` is identity whether it came from the pool's tag or from the storefront's
+local fallback. Provenance decides a different question — what the seller's inventory
+guard rechecks against the site — and the planning review found it is decided per
+listing rather than per field: `region` and `gpu_model` each come from site data when
+the site supplies them and from a local fallback when it does not. The guard therefore
+compares against a fresh derivation of the listing rather than consulting a per-field
+table; see "The inventory guard compares against a fresh derivation" below.
 
 **A listing commits only to the fields it publishes.** A field a listing does not
 publish is no commitment: the seller has promised nothing about it, and a buyer
@@ -382,8 +494,11 @@ such a listing, since its published field no longer matches its source.
 A site database rebuilt from scratch is the one way a pool ID can return with the
 opposite backing. The storefront sees a live backing value that disagrees with the
 bound discriminator and applies the third row. A republish from the recreated pool
-computes the same derivation key and fails loudly on the binding's `UNIQUE`
-constraint. No envelope change is needed for a site reset.
+computes the same derivation key, so publication finds the existing closed listing by
+that key and refuses to reopen it, logging the refusal, rather than binding anything
+new. Tests assert that refusal: the listing stays closed, the refusal is logged, and no
+new binding is created. The binding's `UNIQUE` constraint remains only a storage
+backstop. No envelope change is needed for a site reset.
 
 **The eventual fix belongs to `publish-multidimensional-listing-shape`,** recorded
 there as an open question because that change is the first to publish a field that
@@ -572,18 +687,21 @@ already uses for pool modes and host requirements.
 
 **Mechanics.**
 
-- The guard needs the listing's source identity and admission variant, which only
+- The guard needs the listing's source identity and binding variant, which only
   the durable binding carries. `kit/negotiation-runtime` forwards
   `ResolvedNegotiation.binding` onto `RoundRequest`, symmetric with the other
   carriers and schema-opaque. Re-resolving the binding inside the VM round hook was
   rejected as a second resolution path that could drift from the one the runtime
   validated.
-- The declaration is read from the resource-pool projection the storefront already
-  polls, so an unbacked negotiation makes no site call. Availability for a backed
-  listing is still fetched as today.
-- `SellerRoundHook` in `kit/policy` is not widened; the VM round hook selects what to
-  pass the default policy. An operator-injected custom hook receives the same inputs
-  as today and owns its own availability decision.
+- The declared match and the availability check are both computed from a fresh
+  derivation of the listing's own source; see "The inventory guard compares against a
+  fresh derivation" under the planning-review decisions. An unbacked negotiation makes
+  no site call; a backed listing's availability comes from its pinned site only.
+- `SellerRoundHook` in `kit/policy` is not widened. The VM default-hook factory gains a
+  binding parameter and is built per round, in `evaluate` from `RoundRequest.binding`
+  and in round-zero evaluation from the binding it already resolved. An
+  operator-injected custom hook receives the same inputs as today and owns its own
+  availability decision.
 - A declared-match failure uses a new reason, distinct from `no_matching_inventory`,
   so that reason keeps meaning "nothing free". `add-harness-scenario-contract` treats
   `no_matching_inventory` as observable and is told of the new reason.
@@ -647,14 +765,17 @@ A difference in a published identity field the key does not capture follows the
 identity rule's third row. This fixes the payload staleness for backed listings as
 well; it was accepted as scope because this change rewrites the same functions, and
 fixing them once in a forwards-compatible way is cleaner than a separate change
-rewriting them again.
+rewriting them again. How the pass is realized, and the full table of outcomes it acts
+on, are in "Refresh and reopen flow through the existing publication-source seams" and
+"One comparison gates refresh and every reopen path".
 
 **Triggers.** Declaration changes reach the event feed. Pool-level changes (a tag
 edit, disablement, a narrowed `advertisable_modes`) emit no capacity event and are
-caught by the publication cycle. Planning confirms where `serve` runs the cycle — the
-only call site found is `publish --watch` — and whether the site omits a disabled
-pool from the projection, since `_projected_pool_rows` does not read the pool's
-`enabled`.
+caught by the publication loop, which the planning review moved into the storefront
+process; see "Publication runs as a storefront lifecycle loop". The site projects a
+disabled pool with `enabled: false` in its metadata rather than omitting it, so
+derivation reads that value: a pool declaring `enabled: false` yields no candidates,
+and its listings close through source reconciliation like any removed source.
 
 ### Publication stops reading and writing `derived_compute_listings`
 
@@ -744,11 +865,12 @@ enforced by a trigger:
 The effect equals `NOT NULL` with no default, without the full table rebuild (copy,
 rename, and recreating the indexes plus the five triggers across two tables that
 reference the table by name). `negotiation_threads` gains no column; negotiation reads
-the admission variant from the immutable listing binding.
+the binding variant from the immutable listing binding.
 
 Application writers name the column: `StorefrontListingBinding` gains a required field
-with no default; both inserts in `core_storefront.sqlite_client` and the legacy
-migration tool's `INSERT OR IGNORE` write it explicitly (`RAISE(ABORT)` is not
+with no default; both inserts in `core_storefront.sqlite_client`, the legacy
+migration tool's `INSERT OR IGNORE`, and the two bare-metal writers found in planning
+write it explicitly (`RAISE(ABORT)` is not
 suppressed by `OR IGNORE`); and the post-insert equality check includes it, so a second
 bind of the same listing with the opposite backing is refused rather than absorbed by
 `ON CONFLICT … DO UPDATE SET last_reconciled_at`.
@@ -955,14 +1077,262 @@ site declaring a pool with no capacity is a declaration, not a fabrication:
 nothing reserves against it, so nothing is deceived. The distinction is between
 lying in the admission path and declining to enter it.
 
+## Decisions added in the planning review
+
+The planning review of 2026-09-23 re-read this design against the code (see "Findings
+verified during planning") and settled the following with the user, one at a time.
+They are accepted decisions, not open questions. Where one supersedes text earlier in
+this document, that text has been amended to point here.
+
+### An unbacked listing publishes only settlement options its domain does not fulfil through capacity
+
+**Finding answered:** a paid deal on an unbacked VM listing would reach fulfillment
+after funding.
+
+A domain that can publish unbacked listings declares in its settlement composition,
+for every mechanism it composes, whether settling through that mechanism delivers
+through the domain's capacity-backed fulfillment. Bare metal and API credits publish
+only backed listings and owe no declaration. Each is set explicitly when the mechanism is composed; nothing defaults.
+In the VM storefront, `alkahest.v1` and `fiat.stripe.v1` both deliver through
+`fulfill_vm_settlement`. `contact-exchange.v1`, once
+`compose-contact-exchange-across-compute` composes it for VM, does not.
+
+For an unbacked candidate, publication drops every option whose mechanism the domain
+fulfils through capacity and reports an operator notice naming the pool and the dropped
+mechanisms. If no option remains, the candidate yields no listing, with the same notice.
+Backed candidates are unaffected. The rule is re-evaluated on every publication cycle,
+so a change in composition reaches open listings as an ordinary change to a term of
+sale. The capacity type boundary stays behind it as the backstop.
+
+**Why the domain rather than the mechanism.** Whether settling an option reaches
+capacity-backed fulfillment is a fact about how a domain composes a mechanism, not about
+the mechanism. The same mechanism can be composed differently in different domains, and
+the anticipated hosted-settled unbacked listing composes Stripe without VM provisioning.
+A declaration on `MechanismRegistration` would have meant changing `kit/alkahest` and
+`kit/hosted-settlement` to carry a domain fact. Neither those packages, the Alkahest
+contracts, nor the hosted settlement service change.
+
+**Consequences.** Until the VM storefront composes contact exchange, every unbacked VM
+candidate yields no listing and a notice: the feature is present but inert for VM. This
+change's system evidence (tasks 6.7 and 6.8) therefore waits on
+`compose-contact-exchange-across-compute` Sections 1–3 and 3b, which in turn wait on
+`contact-payload-retention`. That change's "composition is independent of backing"
+still holds: a backed listing may settle by introduction, and no pool-level or
+listing-level field names a mechanism.
+
+### Publication runs as a storefront lifecycle loop
+
+**Finding answered:** nothing in a deployed stack runs the publication cycle.
+
+The storefront process runs publication as a timer-driven loop. Each cycle derives
+candidates from the configured sites, publishes new ones, refreshes terms on open ones,
+closes stale ones, holds unresolvable ones, and reopens reconciliation-closed ones behind
+the identity comparison below. It calls the storefront's publication services in-process:
+no HTTP to itself, and no database access outside the storefront's repository.
+
+**Why autonomous.** Operator-invoked publication was the status quo, not a recorded
+decision, and this design depends on the opposite. "Unbacked listings are projected; the
+site is the control plane" has a seller declare supply at their own site and the
+projection carry it to the storefront. One storefront publishing for several seller
+sites, whose sellers hold no storefront credential, is what task 6.8 proves. Without an
+autonomous loop, a site's declaration never becomes a listing unless the storefront
+operator runs a command.
+
+**Controls,** following the storefront's existing lifecycle conventions:
+
+- The loop is registered and gated like the other storefront loops, under the route
+  name `publication` in `ADVANCE_LOOP_NAMES`. `POST /api/v1/admin/lifecycle/pause` and
+  `.../resume` hold and release it with every other loop, without affecting trading.
+- `POST /api/v1/admin/lifecycle/publication/run-cycle` runs exactly the cycle the timer
+  runs, and works while paused.
+- `POST /api/v1/admin/lifecycle/publication/dry-run` reports the planned publish,
+  refresh, close, reopen, and hold decisions with their reasons and applies none; two
+  consecutive dry runs report the same thing, as the capacity-event dry run does.
+- The typed storefront client already addresses both routes by loop name in its sync
+  and async variants; e2e scenarios hold the loops with `pause_storefront` and advance
+  explicitly.
+
+A change in a site's resource-pool projection generation wakes the loop; a held loop
+stays held.
+
+**The command becomes a client.** `market-storefront publish` calls the loop's controls
+through the typed client: a one-shot run is `run-cycle`, `--dry-run` is `dry-run`, and
+`--abort-all` is a seller close of every open listing through the API. `--watch`,
+`--poll-interval`, `--db`, `--settlement`, `--max-duration-seconds`, and `--inventory`
+are retired, and `run_watch_loop` with them. CSV import remains available through
+`POST /api/v1/admin/portfolio/resources/import` until
+`pools-9-retire-local-physical-authority` retires it.
+
+**Accepted consequences.** Every derivable slice of every advertisable pool publishes at
+the storefront's resolved terms. A hand-authored listing on a derivable slice is managed
+by the loop, which was already true on reopen, since reopening writes the freshly
+derived payload; an admin create for a slice the loop has published is refused with
+`ListingSourceAlreadyBound`. E2e scenarios that create listings through the admin API
+either hold the loop first or advance it and assert on what it derives, as
+`docs/development/TESTING.md` requires.
+
+**Bare metal stays operator-invoked.** Its image does not publish autonomously today and
+`docs/development/DEPLOYMENT_AND_CONFIG.md` records it as not release-qualified. That is
+recorded rather than extended here.
+
+**Alternatives rejected.** Starting `run_watch_loop` from `serve`: it has no pause gate,
+publishes by HTTP to its own storefront, reads the database directly, and carries the
+non-durable command tier below. A narrower `serve`-side reconciliation of existing
+listings only: it is a strict subset of this loop and would be rewritten when the loop
+landed.
+
+### Terms come only from durable sources
+
+**Finding answered:** the command-level term inputs cannot be reproduced by
+reconciliation.
+
+Settlement clauses resolve field by field through the pricing hint chain
+(`resolve_gpu_pricing`). `--settlement` was not a tier of its own; it replaced the bottom
+two tiers for the life of one process:
+
+| Precedence | Source | Durable |
+|---|---|---|
+| 1. Storefront per-pool override | `compute_capacity_pools.settlements`, home site only | Yes |
+| 2. Pool-declared hint | the pool's `pricing` policy tag at the site | Yes |
+| 3. Per-model default | `[pricing.defaults.gpu.<model>].settlements`, replaced by `--settlement` | Configuration |
+| 4. Flat default | `[pricing].settlements`, replaced by `--settlement` | Configuration |
+
+`--max-duration-seconds` sat the same way below `default_max_duration_seconds`.
+Reconciliation re-derives a listing from its sources, and an argument that lived only in
+one invocation cannot be re-derived, so the loop would have reverted command-sourced
+terms on its next pass.
+
+**Decision.** Both arguments are retired. The configuration keys stay: they are durable,
+survive restart, and are the default tier of the hints pattern. Per-pool clauses have
+two durable homes — the site's pool `pricing` tag, and the storefront per-pool override
+row whose write path `pools-9-retire-local-physical-authority` owns.
+
+**Why not a durable replacement.** The storefront has no settings API to attach one to:
+storefront-wide settings come from configuration files, and the only API-mutable runtime
+state is the in-memory negotiation and loop pause flags. A settings API built for this
+one value was rejected. What sellers lose is changing storefront-wide clauses without a
+configuration edit and restart.
+
+### A seller's close is durable
+
+**Finding answered:** a seller's close and a reconciliation close are indistinguishable.
+
+Every close records who closed the listing, `seller` or `reconciliation`, on the common
+`listings` row; reopening clears it. Every reopen path — the capacity-event reconciler,
+the publication loop, and the identity-gated reopen — reopens only listings that
+reconciliation closed. Because the derivation key stays bound to a seller-closed
+listing, the loop finds that binding and publishes no replacement for the slice.
+
+A seller re-lists with `resume`: on a seller-closed listing it reopens the listing,
+clears the reason, and publishes; the loop then reconciles it like any open listing.
+`resume` on a reconciliation-closed listing returns a conflict naming the reason, since
+its source does not currently support it and reconciliation owns it. `--abort-all`
+becomes a seller close of every open listing.
+
+**Enforcement.** A nullable `closed_by` column with a `CHECK` over the two values, and a
+trigger requiring it to be present exactly when the listing is closed, so no close path
+can omit it. The migration backfills existing closed rows as `reconciliation`. Under the
+previous code every closed listing was reopenable by the capacity-event path, so this
+reproduces existing behaviour for rows whose closer was never recorded; it is not an
+inference about any new row. `PublicationRuntime.close` takes the reason as a required
+argument, and a reconciliation plan's closes are reconciliation closes. The column is in
+the common table, so API-credit and bare-metal close paths name it too.
+
+**Alternative rejected.** Reusing the durable `paused` column, which would conflate a
+listing the seller withdrew with one held but still bound.
+
+### One comparison gates refresh and every reopen path
+
+**Findings answered:** the capacity-event reopen path bypasses the identity rule; open
+listings never refresh.
+
+The VM domain owns one comparison of a stored listing against a fresh derivation of its
+own source and against its binding. Its outcomes are: unchanged; a term of sale differs;
+a published identity field the key does not capture differs; the published backing is
+missing; the live pool's backing disagrees with the binding; the source is unresolvable;
+the source is absent. Each reconciliation path acts on it:
+
+| Stored listing | Outcome | Action |
+|---|---|---|
+| Open | Unchanged | Nothing |
+| Open | Term differs, or published backing missing | Update in place, locally and at every registry |
+| Open | Identity field differs, or live backing disagrees | Reconciliation close; reopen refused and logged while the difference persists |
+| Open or closed | Source unresolvable | Held: neither closed, refreshed, nor reopened |
+| Open | Source absent | Reconciliation close |
+| Closed by reconciliation | Unchanged or term differs | Reopen with the freshly derived payload (loop) |
+| Closed by reconciliation | Identity field differs, or live backing disagrees | Stays closed; refusal logged |
+| Closed by the seller | Any | Nothing |
+
+The capacity-event reconciler applies the same gate before it reopens. It republishes
+the stored terms rather than re-deriving them, because terms refresh is the loop's job,
+and the published `capacity_backing` is always stamped from the binding on every publish
+of a VM listing, on every path.
+
+### Refresh and reopen flow through the existing publication-source seams
+
+`publish_round` in `core_storefront.publication_runner` already hands a source's
+`reopen_existing` the fully re-derived candidate, including its settlement terms, before
+creating anything. The refresh is realized there, domain-side: a source stops treating an
+open listing as covering its slice, so the candidate reaches `reopen_existing`, which
+reconciles the existing listing under the candidate's derivation key according to the
+comparison above. Core never compares payloads and stays schema-opaque.
+
+Core gains one outcome: `reopen_existing` may report that the existing listing is
+unchanged, which the runner counts as skipped rather than failed.
+
+The additional reconciliation-plan lane in `kit/capacity-publication` considered earlier
+in the review is not needed, because the loop runs in-process through the same runner.
+
+### Bare metal publishes backing and applies the identity rule
+
+`BareMetalListing` gains a required `capacity_backing: Literal["backed"]`, set explicitly
+by the deriver. Bare metal reads no pool tags, and every listing it derives is backed by a
+selected-site Physical Resource. The bare-metal domain has never been public, so the
+field is required on read with no compatibility reading, and existing development
+listings are refreshed on the next operator-invoked publication cycle. Both of its
+binding writers name `capacity_backing = 'backed'`.
+
+The listing-identity and source-publication requirements are not scoped to VM, so bare
+metal applies them through its own `PublicationSource`. Its key is (site,
+`physical_resource_id`); `host_id`, `physical_host_id`, `capabilities`, and site labels
+are identity; durations, access methods, and settlement options are terms of sale.
+
+API-credit listings do not publish `capacity_backing`. Their registry schema would accept
+the field, but API credits have a separate schema identity, no backing filter is added
+there, and every API-credit listing is quota-backed. Only their types move.
+
+### The inventory guard compares against a fresh derivation
+
+**Findings answered:** provenance is per listing; round zero runs the guard.
+
+- **Declared match.** The guard derives the listing's own source now, through the same
+  derivation publication uses, ranged over declared quantity. Published categorical
+  identity fields must equal the derivation's and the published quantity must lie in its
+  range. Whether a field came from site data or a local fallback falls out per listing.
+  A failure reports `no_matching_declaration`, distinct from `no_matching_inventory`.
+- **Fungible pools.** A fungible listing matches if some enabled member has equal
+  categorical attributes and a declared count of at least the published `gpu_count`. An
+  unbacked fungible pool's slices run to the largest single member's declared count, not
+  the sum, because a reservation lands on one member.
+- **Malformed members.** One malformed member holds a whole fungible pool, because the
+  pool's range cannot be computed; in a specific-resource pool it holds only its own
+  listings.
+- **Availability,** for backed listings only, is the same derivation ranged over the
+  pinned site's availability. Only the pinned site's snapshot is fetched.
+- **Source selection** is the one publication uses, projection or local tables. Unbacked
+  listings exist only on the projection path, so this matters only for backed listings.
+- **How the binding reaches the policy.** The VM default-hook factory gains a binding
+  parameter and is built per round: in `evaluate` from `RoundRequest.binding`, and in
+  round-zero evaluation from the binding it already resolved. Custom hooks are unchanged.
+
 ## Findings recorded, not fixed here
 
-- **Region at admission.** The capacity claim carries the listing's `region`, which may
-  come from the pool's `region` tag, while `dict_resource_satisfies_claim` matches
-  claim attributes against declaration attributes and resource facts only. If the
-  site's candidate search does not merge pool tags in, backed admission fails for a
-  pool that declares region only as a tag. Planning confirms this; if confirmed it is a
-  pre-existing defect recorded against the owning capacity change, not fixed here.
+- **Region at admission.** Confirmed by reading during planning: the capacity claim
+  carries the listing's `region`, which may come from the pool's `region` tag, while the
+  site's feasibility view matches claim attributes against declaration attributes and
+  the resource's own facts only. A backed pool that declares region only as a tag cannot
+  admit. Pre-existing; recorded in `pools-8-capacity-projection-and-listing-hints`, which
+  owns the region hint, and not fixed here.
 - **Mixed-kind fungible pools** publish the first model encountered and sum availability
   across members. Owned by the listing-identity open question in
   `publish-multidimensional-listing-shape`; this change only logs a warning.
@@ -970,13 +1340,23 @@ lying in the admission path and declining to enter it.
   its `## Requirements` section, so OpenSpec reports that archiving this change's
   `registry-discovery` delta would be refused until they are moved. This is a closeout
   prerequisite for this change.
+- **`market-storefront logs` reads the storefront database directly.** `cli_logs.py`
+  opens the SQLite file rather than going through the storefront API, the same pattern
+  this change removes from `publish`. Out of scope here; no change owns it yet.
 
 ## Risks / Trade-offs
 
-- **[An unbacked listing reaches a capacity path]** → Mitigated by the tagged
-  union: a capacity path receiving an unbacked provenance is a type error rather
-  than a runtime surprise. Cover the refusal at reservation directly rather than
-  relying on it never being called.
+- **[An unbacked listing reaches a capacity path]** → Mitigated first by
+  publication: an unbacked listing carries no settlement option its domain fulfils
+  through capacity, so no ordinary deal on it reaches fulfillment. Behind that, the
+  binding types: a capacity path receiving an `UnbackedBinding` refuses at the
+  `CapacityBinding` boundary before any effect. Cover the refusal at reservation
+  directly rather than relying on it never being called.
+- **[Autonomous publication surprises a seller]** → Accepted. Every derivable slice of
+  every advertisable pool publishes without a command. The site's `advertisable_modes`
+  declaration is the seller's authorization to advertise, a seller's close is durable,
+  and the loop can be held and previewed. **Revisit trigger:** the first operator request
+  to curate which derivable slices publish.
 - **[Listings decay]** → Accepted for this version. Nothing keeps an unbacked
   listing current: no capacity event contradicts it, and a seller pays nothing to
   leave one standing after the supply behind it is gone. Source-publication
@@ -1030,10 +1410,10 @@ lying in the admission path and declining to enter it.
 
 ## Open questions
 
-- **Does `kit/capacity-publication` keep its name, and what is its principal type
-  called?** Now more than cosmetic: if the central type is `PublicationBinding`
-  with capacity as one admission variant, the package and the type both name a
-  variant rather than the concept. Deferred; no task renames either.
+- **Does `kit/capacity-publication` keep its name?** The principal type is settled by
+  the planning review: `PublicationBinding` is the union of `CapacityBinding` and
+  `UnbackedBinding`, so the module's central name is no longer a variant. The package
+  name still names one variant. Deferred; no task renames it.
 - **Does a rate arbitrageur with no hardware run a site service?** The model
   assumes site-shaped sellers deploy one, which is materially lighter with no
   hosts — no executor connections, no playbooks, no watchdog — but is still a
@@ -1051,21 +1431,22 @@ Goal 7 is complete for discovery but not for introductions across sellers until 
 lands. Recorded here rather than deleted because this change's system coverage
 publishes from two seller sites, which is what made the constraint visible.
 
-## To verify during planning
+## Verified during planning
 
-Not design questions; facts planning confirms before naming files and tasks.
+The pre-planning "to verify" list is settled; each result is in "Findings verified
+during planning" and, where it changed the design, in "Decisions added in the planning
+review".
 
-- The bare-metal publication path publishes `capacity_backing: backed` into the
-  compute registry, or needs to, since the exact filter excludes a listing without it.
-- Where `serve` runs the publication cycle, and whether the site omits a disabled
-  pool from the resource-pool projection.
-- The migrated-database behavior of the close and reopen paths described in Context.
-- The region-at-admission finding above.
-- API-credit call sites for the widened `PublicationDomainHooks` protocol, and whether
-  the API-credits registry schema is affected (the backing filter is added only to the
-  compute schema).
-- Whether mixed site and storefront versions are a supported deployment, which decides
-  the system-level coverage for the compatibility rule.
+- Bare metal did not publish `capacity_backing`; it now does.
+- `serve` never ran the publication cycle; publication now runs as a storefront loop.
+  The site projects a disabled pool with `enabled: false`, which derivation now reads.
+- The migrated-database abort is confirmed by test and fixed by the retirement.
+- Region at admission is confirmed and recorded against `pools-8`.
+- API credits need type changes only, and their registry schema is not touched.
+- Mixed versions are supported; system-level coverage of the compatibility rule is not
+  reproducible with current images, so it is covered at integration level through the
+  canonical site client against a recorded older-producer projection, and that decision
+  is recorded in the tasks rather than omitted.
 
 ## Migration Plan
 
@@ -1074,25 +1455,33 @@ Not design questions; facts planning confirms before naming files and tasks.
    `backed`, then recreate the immutability trigger to cover it. `site_id` is
    untouched and stays `NOT NULL`.
 2. **Contract the binding schema** (second migration): install the trigger refusing
-   an insert whose `capacity_backing` is `NULL`. Every writer names the column.
-3. Introduce `PublicationBinding` with its `admission` discriminator, narrowing
-   `CapacityBinding` to the backed form, and widen `PublicationCandidate.binding` to
-   it; forward the binding on `RoundRequest`.
-4. Resolve projected pool declarations jointly per site generation; gate publication
-   on advertisement; range unbacked slices over declared quantity; make the
-   publication cycle refresh terms and find closed listings by derivation key; stop
-   reading and writing `derived_compute_listings`.
-5. Publish backing. Open listings gain explicit `capacity_backing: backed` through the
-   refresh pass, and closed ones when they reopen. This is a disclosure of the value
+   an insert whose `capacity_backing` is `NULL`. Every writer names the column,
+   including both bare-metal writers.
+3. **Record who closed a listing** (third migration): add `closed_by` to `listings`,
+   backfill existing closed rows as `reconciliation`, and install the trigger requiring
+   it exactly when a listing is closed. Every close path names it.
+4. Introduce `CapacityBinding | UnbackedBinding` as `PublicationBinding` and widen
+   `PublicationCandidate.binding` to it; forward the binding on `RoundRequest`.
+5. Resolve projected pool declarations jointly per site generation and read pool
+   enablement; gate publication on advertisement; range unbacked slices over declared
+   quantity; drop settlement options the domain fulfils through capacity from unbacked
+   candidates; find closed listings by derivation key; stop reading and writing
+   `derived_compute_listings`.
+6. Start the publication loop in the storefront process with its controls, and reduce
+   `market-storefront publish` to a client of them.
+7. Publish backing. Open listings gain explicit `capacity_backing: backed` through the
+   loop's refresh, and closed ones when they reopen. This is a disclosure of the value
    their binding already records, not a new commitment: every listing was admissible
    under the old contract, so publishing `backed` changes nothing any buyer relied on.
-6. Add the exact registry filter, after republication. A filter added first would
+8. Add the exact registry filter, after republication. A filter added first would
    exclude every legacy listing from backed queries in the window before
    republication completes.
 
 Existing listings bind, negotiate, reconcile, and route as before, except where the
-refresh pass and the identity rule correct stale payloads. Rollback before step 2 is a
-code rollback; the discriminator column remains and is ignored by the restored reader.
-Rollback after step 2 additionally drops the required-insert trigger, and is safe only
-while no unbacked listing has been published. Rollback after step 6 leaves the
-published backing field in place, which a restored reader ignores.
+refresh and the identity rule correct stale payloads and where autonomous publication
+fills derivable slices. Rollback before step 2 is a code rollback; the discriminator
+column remains and is ignored by the restored reader. Rollback after step 2
+additionally drops the required-insert trigger, and is safe only while no unbacked
+listing has been published. Rollback after step 3 additionally drops the closure-reason
+trigger; the column remains and is ignored. Rollback after step 8 leaves the published
+backing field in place, which a restored reader ignores.

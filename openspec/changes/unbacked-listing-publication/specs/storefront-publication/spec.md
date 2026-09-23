@@ -16,7 +16,7 @@ than classified by a default.
 Publication provenance MUST separate common listing identity — origin site,
 offering mode, and source declaration identity — from admission provenance. Only
 operations that reserve, commit, release, schedule, or dispatch MUST require the
-capacity-backed admission variant; operations that compare, copy, or carry listing
+capacity-backed binding variant; operations that compare, copy, or carry listing
 identity MUST accept either.
 
 #### Scenario: An unbacked listing binds
@@ -168,16 +168,23 @@ the binding at creation and governed by the backing requirements.
 #### Scenario: A pool returns with the opposite backing
 
 - **WHEN** a site's pool is recreated under an existing pool ID with backing opposite to the discriminator on listings bound from it
-- **THEN** those listings close and are not reopened, and no replacement listing binds under their derivation identity
+- **THEN** those listings close and are not reopened, and the refusal is logged naming the pool
+- **AND** no replacement listing binds under their derivation identity
 
 ### Requirement: Source publication and capacity availability reconcile separately
 
 Source-publication reconciliation MUST apply to every listing regardless of backing:
 a removed or disabled source declaration MUST close the listings derived from it, and
 a changed source declaration MUST be reflected in what is published according to the
-listing identity requirement. Source-publication reconciliation MUST re-derive open
-listings and compare them with what is published, so that a change to a term of sale
-reaches an open listing.
+listing identity requirement. A projected pool that declares itself disabled is a
+disabled source. Source-publication reconciliation MUST re-derive open listings and
+compare them with what is published, so that a change to a term of sale reaches an open
+listing.
+
+Every path that reopens a listing MUST apply the same comparison first: a listing whose
+published identity differs from its source, or whose binding's backing disagrees with
+its source's, MUST NOT be reopened by any path, including one driven by a capacity
+event.
 
 Capacity-availability reconciliation and its close-before-reopen sequencing MUST
 apply only to capacity-backed listings. An unbacked listing's quantity is bounded by
@@ -205,6 +212,16 @@ from source-publication reconciliation.
 - **WHEN** a source declaration changes a field the derivation source envelope carries
 - **THEN** the existing listing closes and a newly derived listing is published with a different derivation key
 - **AND** the original binding row is unmodified
+
+#### Scenario: A pool is disabled at its site
+
+- **WHEN** a projected pool that open listings derive from declares itself disabled
+- **THEN** those listings close
+
+#### Scenario: A capacity release would reopen a diverged listing
+
+- **WHEN** a capacity event makes a closed listing's slice available again while a published identity field of that listing still differs from its source
+- **THEN** the listing is not reopened and the refusal is logged
 
 #### Scenario: Capacity deltas do not reach an unbacked listing
 
@@ -247,6 +264,16 @@ from capacity that is temporarily taken.
 - **WHEN** a capacity-backed listing matches its declaration but its published quantity is not available
 - **THEN** seller policy rejects with the availability reason
 
+#### Scenario: A fungible listing matches one member
+
+- **WHEN** a buyer negotiates against a listing derived from a fungible pool whose enabled members declare different counts
+- **THEN** the declared match passes only if some single enabled member has equal categorical attributes and declares at least the published quantity
+
+#### Scenario: A dry-run evaluation applies the same checks
+
+- **WHEN** a seller evaluates a proposal against a listing without opening a negotiation
+- **THEN** the evaluation applies the same declared match and, for a capacity-backed listing only, the same availability check as a negotiation round
+
 ### Requirement: A listing's published shape comes from its source declaration
 
 A listing's published compute shape is derived from the shape its source
@@ -259,11 +286,15 @@ declaration that omits the quantity a domain enumerates listings by MUST yield n
 listing, and the omission MUST be reported to the operator naming the declaration. A
 declaration that declares that quantity as zero MUST yield no listing without a
 report. A declaration whose quantity is malformed MUST be treated as unresolvable:
-it yields no new listing and its existing listings are held.
+it yields no new listing and its existing listings are held. In a fungible pool one
+unresolvable member holds every listing derived from the pool, because the pool's range
+cannot be computed without it; in a specific-resource pool it holds only its own.
 
 Where a listing is capacity-backed, the published quantity is additionally bounded
 by the availability its site projects, so it moves as capacity is reserved and
-released. An unbacked listing has no availability to bound it and no reservation
+released. An unbacked fungible pool's listings range up to the largest single
+member's declared quantity, never a sum across members, because a reservation would
+land on one member. An unbacked listing has no availability to bound it and no reservation
 consumes it; that difference is carried by the listing's published backing and MUST
 NOT be encoded a second time in a separate published field.
 
@@ -301,7 +332,194 @@ construction.
 - **THEN** the unbacked listing closes and a new listing binds with a distinct durable identity and a capacity-backed discriminator
 - **AND** the original binding row is unmodified
 
+### Requirement: An unbacked listing publishes only settlement options its domain does not fulfil through capacity
+
+A domain that can publish unbacked listings MUST declare in its settlement
+composition, for every settlement mechanism it composes, whether settling through that
+mechanism delivers through the domain's capacity-backed fulfillment. The declaration
+MUST be explicit for each composed mechanism and MUST NOT default. A domain whose
+listings are always capacity-backed owes no such declaration.
+
+Publication MUST NOT give an unbacked listing a settlement option whose mechanism its
+domain fulfils through capacity. Such options MUST be dropped from an unbacked
+candidate with an operator-visible notice naming the pool and the dropped mechanisms.
+An unbacked candidate left with no settlement option MUST yield no listing, with the
+same notice. Capacity-backed candidates are unaffected.
+
+This is decided by how the domain composes each mechanism, so no pool-level or
+listing-level field names a settlement mechanism.
+
+#### Scenario: Every composed mechanism fulfils through capacity
+
+- **WHEN** an unbacked candidate's resolved settlement clauses name only mechanisms its domain fulfils through capacity
+- **THEN** no listing is derived from it and an operator notice names the pool and the dropped mechanisms
+
+#### Scenario: One mechanism settles without fulfillment
+
+- **WHEN** an unbacked candidate's resolved clauses name one mechanism its domain fulfils through capacity and one it does not
+- **THEN** the listing publishes only the option whose mechanism does not reach capacity-backed fulfillment, and the notice names the dropped mechanism
+
+#### Scenario: A backed candidate names the same mechanisms
+
+- **WHEN** a capacity-backed candidate's resolved clauses name mechanisms its domain fulfils through capacity
+- **THEN** every ready option publishes as before
+
+### Requirement: Publication runs as a controllable storefront lifecycle loop
+
+A storefront MUST run publication in its own process as a timer-driven lifecycle
+loop. Each cycle derives candidates from its configured sources, publishes new
+listings, refreshes open listings, closes listings whose source no longer supports
+them, holds listings whose source is unresolvable, and reopens listings reconciliation
+closed, subject to the listing identity comparison. A change in a site's resource-pool
+projection generation MUST wake the loop.
+
+The loop MUST be held by the storefront's lifecycle pause like every other storefront
+loop, without affecting trading. While held, an operator MUST be able to run exactly one
+cycle — the cycle the timer runs, not an alternate transition — and to preview one: a
+preview MUST report every publish, refresh, close, reopen, and hold the cycle would
+perform with its reason, MUST apply none of them, and MUST report the same result when
+repeated.
+
+The loop MUST publish through the storefront's own services. A publication command
+MUST reach the loop only through the storefront's API and MUST NOT read or write the
+storefront's database directly.
+
+#### Scenario: A site declares new supply
+
+- **WHEN** a site's projection gains an advertisable pool with enabled declarations and the loop is not held
+- **THEN** the storefront publishes the derived listings without any operator command
+
+#### Scenario: The loop is held
+
+- **WHEN** the lifecycle loops are held and a site's projection changes
+- **THEN** no listing is published, refreshed, closed, or reopened until an operator runs a cycle or resumes the loops
+
+#### Scenario: An operator previews a cycle
+
+- **WHEN** an operator previews a publication cycle twice without an intervening change
+- **THEN** both previews report the same planned actions and reasons, and no listing, binding, or registry publication changed
+
+#### Scenario: An operator runs one cycle while held
+
+- **WHEN** an operator runs one publication cycle while the loops are held
+- **THEN** exactly the actions a preview reported are applied and the loops remain held
+
+### Requirement: A seller's close is durable
+
+Every close of a listing MUST record whether its seller or reconciliation closed it,
+and a closed listing MUST NOT be recorded without that reason. Reopening a listing
+MUST clear it.
+
+No reconciliation path — a capacity event, the publication loop, or any other — MUST
+reopen a listing its seller closed, and publication MUST NOT bind a replacement listing
+under that listing's derivation identity. A seller MUST be able to reopen a listing
+they closed, after which it is reconciled like any open listing. A seller request to
+reopen a listing reconciliation closed MUST be refused with a conflict naming the
+reason, because its source does not currently support it.
+
+#### Scenario: A seller closes a listing
+
+- **WHEN** a seller closes an open listing and a later capacity event or publication cycle finds its slice available
+- **THEN** the listing stays closed and no replacement listing is published for that slice
+
+#### Scenario: A seller reopens a listing they closed
+
+- **WHEN** a seller resumes a listing they closed
+- **THEN** it reopens, its closure reason is cleared, and it is published and reconciled like any open listing
+
+#### Scenario: A seller tries to reopen a reconciliation close
+
+- **WHEN** a seller resumes a listing that reconciliation closed
+- **THEN** the request is refused with a conflict naming the closure reason and the listing is unchanged
+
+#### Scenario: A close names no reason
+
+- **WHEN** a writer closes a listing without recording who closed it
+- **THEN** the write is refused
+
 ## MODIFIED Requirements
+
+### Requirement: Domain-owned publication and hold hints
+A storefront domain MAY interpret a projected pool's `listing_cardinality_mode`, `max_reservation_hold_seconds`, `region`, `sla`, and `pricing` policy tags. `listing_cardinality_mode`'s scope is cardinality: how many listing candidates a pool yields and how each is independently identified. A value describing what is offered, how a deal settles, or whether an admission authority backs the listing is out of scope for this hint and MUST NOT be added to it. Each domain MUST own its accepted `listing_cardinality_mode` values and structural default.
+
+A storefront MUST accept the former `listing_mode` key as a deprecated alias on projection ingestion, resolving it to the same cardinality it names and emitting an operator-visible deprecation notice. Accepting the alias is what prevents a projection produced by an unupgraded site from being silently reclassified to the structural default across version skew. The deprecated alias applies to the projected policy tag a site emits, which is the only spelling an unupgraded peer can send; every other surface naming this hint — the resolver, the durable reconciliation rows, and the operator-facing explanation field — MUST use the settled name alone, so an operator reading why a pool fell back to its structural default is not told about a key the projection no longer carries.
+
+A supplied value the selected domain does not recognize MUST fall back to that domain's structural default with an operator-visible explanation, rather than failing projection ingestion or blocking publication. An absent value MUST fall back to the same default; where a pool has no cardinality question to answer, absence is the encoding and the fallback MUST be silent. The operator-visible explanation is owed for supplied-but-unrecognized values, not for absence. A deprecation notice and a fallback explanation are distinct and MUST remain separately identifiable: the first says a declared value was honored under a key that is going away, the second says a declared value was not usable and a default was substituted, and a pool in both conditions is owed both.
+
+A cooperating storefront MUST treat a valid `max_reservation_hold_seconds` as an advisory upper bound on its own requested reservation-hold TTL — it MUST NOT change what the site ledger itself enforces, and an unresolvable or invalid preference MUST leave the caller's requested TTL unchanged rather than block hold placement.
+
+A `fungible` pool's publishable capacity range is bounded by what a single member can satisfy, never by a sum across members: for a capacity-backed pool, what a single member can currently satisfy, sourced from grouped `site_capacity_buckets` data when it is available; for an unbacked pool, what a single member declares. A `specific_resource` pool publishes one independently identified, independently reservable listing candidate per currently enabled member, regardless of member count. No listing/hold hint's projected value may be persisted into storefront-local storage — a consumer reads it live from the current projection each time it is needed.
+
+`region` has no storefront-side override — a storefront overriding where hardware physically sits would misrepresent a fact, not adjust a policy. `sla` and negotiation-floor pricing policy (per resource family and, within a family, per model) each resolve through a three-tier precedence, highest to lowest: a storefront-specific override on a specific pool; the pool's own declared hint; the storefront's own configured default. `sla`'s middle tier is additionally gated behind a storefront-wide trust setting — a storefront MAY decline to consult a pool's declared SLA at all, independent of whether any specific pool has an override. A resolved `min_price` is only a negotiation floor, and a resolved `default_token_address` is only demand-side policy input; neither constructs a settlement option. Settlement option assets, rates, units, and mechanism inputs come only from complete typed clause lists, with a pool's clauses — from a storefront override on that pool or the pool's own declared hint — replacing the storefront's configured defaults as whole lists. Every term of sale MUST come from a durable source: no command-line argument may supply or replace a settlement clause or a maximum duration, because reconciliation must be able to re-derive every term a listing publishes.
+
+#### Scenario: Listing cardinality mode is absent or invalid
+- **WHEN** a projected pool supplies a `listing_cardinality_mode` value unsupported by the selected domain
+- **THEN** publication uses the domain's structural default and exposes an operator-visible explanation without failing projection ingestion
+- **AND WHEN** a projected pool instead omits the value because no cardinality question applies to it
+- **THEN** publication uses the domain's structural default silently, with no operator-visible explanation for the absence
+
+#### Scenario: A projection carries only the deprecated key
+- **GIVEN** a site that has not been upgraded emits `listing_mode`
+- **WHEN** a storefront ingests that projection
+- **THEN** the pool resolves to the cardinality that key names
+- **AND** an operator-visible deprecation notice is emitted
+- **AND** the pool does not fall back to the structural default
+
+#### Scenario: A fungible pool's members have unequal availability
+- **WHEN** a capacity-backed fungible pool's members currently have different available capacity
+- **THEN** the storefront publishes candidate slice sizes no larger than the largest currently available single member, not a sum across members
+
+#### Scenario: An unbacked fungible pool's members declare unequal capacity
+- **WHEN** an unbacked fungible pool's members declare different quantities
+- **THEN** the storefront publishes candidate slice sizes no larger than the largest single member's declared quantity, not a sum across members
+
+#### Scenario: A specific-resource pool has more than one member
+- **WHEN** a pool resolves to `specific_resource` and has multiple currently enabled members
+- **THEN** the storefront derives one listing candidate per member rather than one pooled candidate
+
+#### Scenario: Hold preference is shorter than storefront policy
+- **WHEN** a valid positive `max_reservation_hold_seconds` is lower than the storefront's configured acceptance-hold TTL
+- **THEN** the storefront requests no more than the projected preference while live site admission remains authoritative
+
+#### Scenario: A storefront declines to trust a pool's declared SLA
+- **WHEN** a storefront has not enabled its SLA trust setting
+- **THEN** publication resolves SLA from a per-pool storefront override or the storefront's own default, never from the pool's own declared hint, regardless of whether that pool has one
+
+#### Scenario: A pool supplies negotiation pricing hints
+- **WHEN** pricing precedence resolves `min_price` or a token-address policy hint for a listing candidate
+- **THEN** the storefront may use those values only for negotiation-floor or demand policy and derives every settlement option exclusively from the effective complete typed clause list
+
+#### Scenario: Terms come only from durable sources
+- **WHEN** a publication cycle re-derives an open listing whose pool clauses and configured defaults are unchanged
+- **THEN** the listing's settlement options and maximum duration are unchanged, because no term of sale came from a source the cycle cannot re-read
+
+### Requirement: Storefront owns seller settlement UX
+
+Seller configuration, readiness, mechanism administration, and publication MUST be exposed through the storefront CLI and generated role config surface. Normal publication MUST derive options from mechanism-neutral settlement clauses and MUST NOT expose provider-, chain-, or escrow-specific flags. Mechanism administration MUST remain under `settlement <mechanism>`. The storefront CLI's publication command MUST run or preview a cycle of the storefront's publication loop through the storefront API rather than deriving or publishing listings itself. A hosted client MAY supply workflow primitives, but a separate provider-specific seller executable or top-level mechanism-specific publication flow MUST NOT be the normal marketplace entry point.
+
+#### Scenario: Seller inspects all settlement mechanisms
+
+- **WHEN** `market-storefront settlement status --json` runs
+- **THEN** it returns the common status schema for every installed mechanism in configured order without a listing or financial side effect
+
+#### Scenario: Seller publishes two mechanisms
+
+- **WHEN** normal publication resolves valid Stripe and Alkahest settlement clauses
+- **THEN** the storefront derives both through their ready registrations without invoking a mechanism-specific publication command
+
+#### Scenario: Seller runs the publication command
+
+- **WHEN** a seller runs the storefront CLI's publication command
+- **THEN** it runs or previews one cycle of the storefront's publication loop through the storefront API, and it reads no storefront database
+
+### Requirement: Per-resource settlement input uses the common clause contract
+
+Configured defaults, pool-declared hints, storefront pool overrides, imported resource records, and reconciliation inputs that describe settlement options MUST parse to the same typed settlement-clause model before option derivation. Unknown fields, conflicting duplicate values, role-inapplicable fields, and malformed rates MUST fail the affected candidate without creating a partially interpreted option.
+
+#### Scenario: Imported resource overrides settlement defaults
+
+- **WHEN** one resource record supplies its own complete settlement clauses
+- **THEN** those clauses replace the configured defaults for that resource and are validated through the same grammar and registrations
 
 ### Requirement: Commercial mapping identity
 A VM listing's commercial mapping between an authoritative capacity identity and the published listing MUST be its immutable common listing binding. VM publication, reconciliation, close, and reopen MUST NOT read or write `derived_compute_listings`; a closed listing is found again by its candidate's derivation key in the common binding. A domain that still keeps its own mapping table (`derived_bare_metal_listings`) MUST NOT duplicate it as a separate schema. Pricing, settlement terms, and seller policy MUST continue to live on the generic `listings` table, addressed by `listing_id` — no mapping carries commercial fields of its own. Each derivation key MUST include the owning `site_id`, since a pool or resource identifier is only unique within one site, never globally. A derivation key MUST be collision-resistant by construction against any values its constituent fields (`site_id`, `pool_id`, `resource_id`) may take — these are operator-chosen strings with no character restrictions, so a naive delimiter-joined encoding is not sufficient.

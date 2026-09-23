@@ -240,6 +240,24 @@ is the implicit VM executor fallback `market-platform-compute-40-multi-domain-pr
 requires removing. It sits near this change's surfaces; it belongs to that
 change.
 
+## Publication command changes made by `unbacked-listing-publication` (recorded 2026-09-23)
+
+`unbacked-listing-publication` moves VM publication into a storefront lifecycle loop and
+reduces `market-storefront publish` to a typed-client front end. Three consequences
+reach this change:
+
+- `publish --inventory` is removed. CSV import remains reachable only through
+  `POST /api/v1/admin/portfolio/resources/import`, which this change still retires.
+- `--settlement` and `--max-duration-seconds` are removed, because reconciliation cannot
+  re-derive a term supplied by one process's arguments. The storefront per-pool override
+  row (`compute_capacity_pools`' commercial columns) is now the only storefront-side way
+  to set settlement clauses for one pool without editing configuration, which makes the
+  override upsert endpoint this document scopes the operator's runtime path for that. Its
+  write path remains this change's.
+- The publication loop derives from the same source selection as before, including the
+  local-table path while `use_site_projection_for_listings` is false. Retiring that path
+  retires it for the loop too; no separate work is needed there.
+
 ## Cross-references this change should re-establish, since they currently only exist in `pools-8`'s own documents
 
 - The pricing-config family-grouped shape (`[pricing.defaults.gpu.<model>]`)

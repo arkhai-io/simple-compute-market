@@ -104,7 +104,12 @@ None.
   mechanism kit, so it does not need their seam. `kit/storefront` was rejected as
   a home because it declares hard Alkahest dependencies — see `design.md`.
 - Independent of `unbacked-listing-publication` for the composition work. Either can
-  land first; neither assumes the other. Per-origin contact resolution is what makes
+  land first; neither assumes the other's code. `unbacked-listing-publication`'s system
+  evidence does wait on this change: an unbacked VM listing publishes only settlement
+  options the VM composition does not fulfil through capacity, and contact exchange is
+  the first such option, so its tasks 6.7, 6.8, and 7.9 are gated on Sections 1–3 and
+  3b here. When task 3.1 registers the mechanism, the VM composition's per-mechanism
+  fulfillment declaration names it as not fulfilling through capacity. Per-origin contact resolution is what makes
   Goal 7's multi-seller value claim true, though, so Goal 7 is not complete for
   introductions until it lands — see `design.md`.
 - Discharges the remaining half of the recorded open gap for cross-domain

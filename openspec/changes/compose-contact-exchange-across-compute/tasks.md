@@ -48,7 +48,10 @@ before it has.
 
 - [ ] 3.1 Register the mechanism in the VM storefront's settlement composition,
       which currently registers Alkahest and Stripe only, supplying persistence and
-      configured values only.
+      configured values only. Declare it as not fulfilling through capacity in the
+      composition's per-mechanism fulfillment declaration, which
+      `unbacked-listing-publication` adds; that declaration is what lets an unbacked VM
+      listing carry the option.
 - [ ] 3.2 Add VM's introduction persistence as thin wrappers over the kit's
       `insert_introduction` and `load_introduction`, matching the shape the promoted
       contract expects. VM's SQLite client already exposes

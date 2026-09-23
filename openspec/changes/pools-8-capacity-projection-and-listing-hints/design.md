@@ -733,6 +733,32 @@ host. The view's consumer, `arkhai_bare_metal.publication.trusted_bare_metal_pro
 has no production caller. The expected resolution here is to publish from that view and
 retire the attribute copy, but this finding does not prescribe it.
 
+## Finding: a region declared only as a pool tag cannot be admitted (recorded 2026-09-23)
+
+Found by `unbacked-listing-publication` during planning and handed here, because this
+change owns the `region` pool hint.
+
+A VM listing's `region` resolves from the pool's `region` policy tag, falling back to
+the storefront's local `compute_capacity_pools.region`
+(`domains/vms/listings/pool_descriptors.py`, `resolve_region`).
+`compute_capacity_claim_from_order` copies that `region` into the capacity claim. The
+site's admission then matches every non-quantity claim key against the resource's
+feasibility view, which merges the declaration's own `attributes` with the resource's
+facts (`resource_id`, `pool_id`, and similar) and never the pool's tags
+(`kit/site/src/market_site/ledger.py`, `resource_feasibility_view` and
+`resource_satisfies_requirement`).
+
+So a backed pool that declares its region only as a tag publishes listings that no
+reservation can admit: the claim asks for `region: <tag value>` and no declaration
+carries it. The e2e fixtures declare `region` as a resource attribute as well, which is
+why nothing has failed. Confirmed by reading; no test reproduces it yet.
+
+`unbacked-listing-publication` does not fix this: its declared-match guard compares a
+listing against a fresh derivation of its own source, which reads the tag, and unbacked
+listings construct no claim. The resolution belongs with the hint: either the claim
+stops carrying a tag-sourced region, or admission can see it. This finding does not
+prescribe which.
+
 ## Design promotion record
 
 Renamed to match `openspec/README.md`'s "Design promotion record" template exactly (was "Permanent Documentation Promotion" through Section 6 of this document's own drafting -- corrected here in Section 7 rather than silently, per this document's own amend-don't-replace convention). Rebuilt as a full audit against every accepted decision above, not just the four rows carried forward from earlier sections; several material decisions from Sections 3, 4, and 6 had never been added.

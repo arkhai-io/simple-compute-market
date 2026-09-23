@@ -88,6 +88,24 @@ migration that unwinds a fabricated site.
   column, backfills every existing row as backed, and extends the immutability
   trigger, then a contract that refuses an insert naming no backing — so no writer
   can omit the category and none is classified by a column default.
+- Let an unbacked listing publish only settlement options its domain does not fulfil
+  through capacity. The domain's settlement composition declares this per composed
+  mechanism; an unbacked candidate drops the rest with an operator notice and yields no
+  listing if none remains, so no ordinary deal on an unbacked listing is funded and then
+  refused at fulfillment.
+- Run publication as a storefront lifecycle loop: derive, publish, refresh, close, hold,
+  and reopen in-process on a timer and on projection change, held by the storefront's
+  existing lifecycle pause and stepped by `run-cycle` and `dry-run` controls.
+  `market-storefront publish` becomes a typed-client front end for those controls and
+  stops reading the database or publishing to its own storefront by HTTP.
+- Take terms only from durable sources: retire the `--settlement` and
+  `--max-duration-seconds` command arguments, which replaced the configured default
+  tiers for one process and cannot be reproduced by reconciliation.
+- Record who closed a listing, seller or reconciliation, so no reconciliation path
+  reopens or replaces a listing its seller withdrew.
+- Read a projected pool's `enabled` declaration, so a disabled pool's listings close.
+- Publish `capacity_backing: backed` on bare-metal listings, and apply the listing
+  identity rule to bare metal through its own publication source.
 
 ## Capabilities
 
@@ -127,23 +145,40 @@ None. This is a posture within existing capabilities, not a new domain.
   owns as an open question; this change closes and holds such listings, and logs a
   warning for mixed-kind pools.
 - Do not add site-side validation refusing mixed-kind pools.
+- Do not publish backing on API-credit listings or add a backing filter to the
+  API-credits registry schema. They are a separate schema identity and always
+  quota-backed.
+- Do not make bare-metal publication autonomous. Its image does not publish on its own
+  today and is not release-qualified.
+- Do not add a storefront settings API. Storefront-wide terms stay in configuration.
+- Do not compose contact exchange for VM here. `compose-contact-exchange-across-compute`
+  owns that; this change's system evidence waits on it.
 
 ## Impact
 
-- Affected code: `core/storefront`'s binding schema, migrations, binding repository,
-  and publication runner; `kit/capacity-publication`'s provenance types, publication
-  runtime, and the `PublicationDomainHooks` protocol; `kit/negotiation-runtime`'s
-  `RoundRequest`; the storefront-side projection ingestion and system status; the VM
-  negotiation runtime's binding guards; the VM seller inventory guard in
-  `domains/vms/negotiation`; the VM reconciler and publication cycle in
-  `domains/vms/listings` and the VM storefront; the legacy storefront-domain
-  migration tool; and both the VM and API-credit domains' publication candidate
-  derivation and capacity clients. API-credit behaviour does not change — it is
-  capacity-backed by a quota resource — but its types move with the protocol.
+- Affected code: `core/storefront`'s binding schema, listings table, migrations,
+  binding repository, and publication runner; `core/storefront-client`'s lifecycle
+  client docstrings; `kit/capacity-publication`'s binding types, publication runtime,
+  and the `PublicationDomainHooks` protocol; `kit/negotiation-runtime`'s
+  `RoundRequest`; the storefront-side projection ingestion, system status, lifecycle
+  loops and admin controls; the VM negotiation runtime's binding guards; the VM seller
+  inventory guard in `domains/vms/negotiation`; the VM reconciler in
+  `domains/vms/listings`; the VM storefront's publication source, publication service,
+  settlement composition, listing service, and `publish` command; the legacy
+  storefront-domain migration tool; the bare-metal listing model, publication source,
+  and binding writers; and the API-credit domain's binding types and close path.
+  API-credit behaviour does not change — it is capacity-backed by a quota resource —
+  but its types move with the protocol.
 - Affected behaviour for existing backed listings: open listings begin reflecting
   term changes, a published identity field that diverges from its source closes its
-  listing, and the inventory guard checks each listing against its own source rather
-  than any matching row anywhere. Each is a correction of stale or unscoped behaviour.
+  listing, the inventory guard checks each listing against its own source rather than
+  any matching row anywhere, a seller's close is no longer undone by the next capacity
+  event, and a disabled pool's listings close. Each is a correction of stale or
+  unscoped behaviour.
+- Affected operator workflow: the storefront publishes every derivable slice of every
+  advertisable pool without a command; `market-storefront publish` triggers or previews
+  a cycle rather than running one; and storefront-wide settlement clauses change by
+  configuration rather than by command argument.
 - Affected specification: `openspec/specs/storefront-publication/spec.md`,
   `openspec/specs/registry-discovery/spec.md`, and
   `openspec/specs/site-capacity/spec.md`, whose claim-identity requirement asserts
@@ -157,7 +192,9 @@ None. This is a posture within existing capabilities, not a new domain.
   This is a registry concern and is separate from the site-side pool migration the
   prerequisite owns.
 - Not affected: capacity admission, reservation, scheduling, fulfillment, or any
-  provider path. An unbacked listing never reaches them.
+  provider path. An unbacked listing never reaches them: it publishes no settlement
+  option its domain fulfils through capacity, and the binding types refuse it at the
+  capacity boundary behind that.
 
 ## Dependencies and Related Changes
 
@@ -187,6 +224,15 @@ None. This is a posture within existing capabilities, not a new domain.
   `multi-domain-storefront-composition` receives a correction note on its
   binding-lookup task, whose remaining legacy-table reads and writes this change
   removes.
+- **System evidence depends on `compose-contact-exchange-across-compute`.** An unbacked
+  VM listing publishes only options its domain does not fulfil through capacity, and
+  until contact exchange is composed for VM no such option exists. Tasks 6.7 and 6.8 and
+  the end-to-end closeout therefore wait on that change's Sections 1–3 and 3b, which wait
+  on `contact-payload-retention`. Implementation does not.
+- **Related, not blocking:** `pools-8-capacity-projection-and-listing-hints` receives
+  the confirmed region-at-admission finding, and
+  `pools-9-retire-local-physical-authority` is told that `publish --inventory` is
+  retired here and that the per-pool override write path remains its own.
 - **Completion dependency on `pools-9-retire-local-physical-authority`.**
   Implementation may proceed before it; closeout cannot, because this change's
   promoted architecture text sits alongside the origination statement that change
@@ -207,8 +253,12 @@ None. This is a posture within existing capabilities, not a new domain.
       `openspec/specs/registry-discovery/spec.md`; companion
       `openspec/specs/storefront-publication/architecture.md` for the listing-identity
       rationale.
-- [x] `docs/development/DEPLOYMENT_AND_CONFIG.md` — the binding-schema rollback
-      posture.
+- [x] `docs/development/DEPLOYMENT_AND_CONFIG.md` — the binding-schema and
+      closure-reason rollback posture.
+- [x] `docs/development/TESTING.md` — the storefront's lifecycle loops, including
+      publication, in the pause-and-step table.
+- [x] `docs/seller-quickstart.md` — publication without `--settlement` or
+      `--inventory`, and the loop controls.
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 
@@ -237,6 +287,15 @@ None. This is a posture within existing capabilities, not a new domain.
   pools are held — `openspec/specs/storefront-publication/spec.md`.
 - The common listing binding is the only VM listing mapping —
   `openspec/specs/storefront-publication/spec.md`.
-- The binding discriminator is enforced by trigger, and rollback past this change
-  drops the required-insert trigger — `docs/development/DEPLOYMENT_AND_CONFIG.md`,
-  "Combined compute-family storefront".
+- The binding discriminator and the closure reason are enforced by trigger, and
+  rollback past this change drops those triggers —
+  `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Combined compute-family storefront".
+- An unbacked listing publishes only settlement options its domain does not fulfil
+  through capacity — `openspec/specs/storefront-publication/spec.md`.
+- Publication runs as a controllable storefront lifecycle loop —
+  `openspec/specs/storefront-publication/spec.md`; the loop's controls in
+  `docs/development/TESTING.md`.
+- Terms come only from durable sources — `openspec/specs/storefront-publication/spec.md`.
+- A seller's close is durable and no reconciliation path undoes it —
+  `openspec/specs/storefront-publication/spec.md`.
+- Bare-metal listings publish backing — `openspec/specs/registry-discovery/spec.md`.

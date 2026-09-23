@@ -22,6 +22,11 @@ Listings published before this field existed MUST be republished carrying an
 explicit capacity-backed value. They are semantically known to be backed and MUST
 NOT depend on an absent field to be classified.
 
+Every compute-family domain publishing into the compute listing shape MUST publish
+the value, including a domain whose listings are always capacity-backed. The value
+belongs to the compute listing shape; a registry profile with a different schema
+identity is not required to carry it.
+
 #### Scenario: A buyer queries for unbacked supply
 
 - **WHEN** a buyer filters for listings with no admission authority behind them
@@ -41,3 +46,8 @@ NOT depend on an absent field to be classified.
 
 - **WHEN** a buyer queries without filtering on backing
 - **THEN** both capacity-backed and unbacked listings are returned together, each carrying its published backing value
+
+#### Scenario: A bare-metal listing is published
+
+- **WHEN** a bare-metal storefront publishes a listing into the compute listing shape
+- **THEN** the listing carries an explicit capacity-backed value and is returned by an exact filter for backed supply

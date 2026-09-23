@@ -123,6 +123,17 @@ single special case, and it is why this change and `unbacked-listing-publication
 have no dependency in either direction. It is also why no pool-level or listing-level
 field may name a settlement mechanism.
 
+**Amended by `unbacked-listing-publication`'s planning review.** Composition stays
+independent of backing, but one consequence reaches this change. A domain that can
+publish unbacked listings declares, per mechanism it composes, whether settling through
+it delivers through the domain's capacity-backed fulfillment, and an unbacked listing
+publishes only options its domain does not fulfil that way. That is a fact about how
+the domain composes each mechanism, so no pool-level or listing-level field names a
+mechanism. When this change composes contact exchange for VM (task 3.1), the VM
+composition declares it as not fulfilling through capacity. Until then no unbacked VM
+listing has a settlement option, so `unbacked-listing-publication`'s system evidence
+waits on Sections 1–3 and 3b of this change. Nothing here waits on that change.
+
 ### One contact per origin
 
 `ContactSettlementConfig.contact_payload` is a single value bound from storefront
