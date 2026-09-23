@@ -1098,6 +1098,7 @@ class AdminController:
             home_site=home_site,
             configured_site_count=configured_site_count,
             member_availability=availability,
+            backed_only=True,
         )
         for listing_id in closed_listing_ids:
             await self._db.update_listing(
@@ -1122,7 +1123,9 @@ class AdminController:
             member_availability=availability,
         )
         for listing_id in reopened_listing_ids:
-            await self._db.update_listing(listing_id=listing_id, status="open")
+            await self._db.update_listing(
+                listing_id=listing_id, status="open", reopened_by="reconciliation"
+            )
         return reopened_listing_ids
 
     @router.post(

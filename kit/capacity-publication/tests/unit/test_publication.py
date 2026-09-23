@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from core_storefront.sqlite_client import SellerClosedListingError
 from market_capacity_publication import (
     BoundListing,
     CapacityBinding,
@@ -16,14 +17,30 @@ from market_capacity_publication import (
 
 
 class Repository:
-    def __init__(self):
+    """Records listing writes and applies the storefront's reopen rule."""
+
+    def __init__(self, *, fail_updates=()):
         self.statuses = {}
         self.closed_by = {}
+        self.reopened_by = {}
         self.publications = []
+        self.fail_updates = set(fail_updates)
 
-    async def update_listing(self, *, listing_id, status, closed_by=None):
+    async def update_listing(
+        self, *, listing_id, status, closed_by=None, reopened_by=None
+    ):
+        if listing_id in self.fail_updates:
+            raise RuntimeError("database is locked")
+        if (
+            status == "open"
+            and self.closed_by.get(listing_id) == "seller"
+            and reopened_by != "seller"
+        ):
+            raise SellerClosedListingError(listing_id)
         self.statuses[listing_id] = status
         self.closed_by[listing_id] = closed_by
+        if reopened_by is not None:
+            self.reopened_by[listing_id] = reopened_by
 
     async def load_publications(self, *, listing_id):
         return [row for row in self.publications if row["listing_id"] == listing_id]
@@ -119,7 +136,64 @@ async def test_reconciliation_owns_close_then_reopen_mechanics():
 
     assert repository.statuses == {"close-me": "closed", "reopen-me": "open"}
     assert repository.closed_by == {"close-me": "reconciliation", "reopen-me": None}
-    assert result == {"closed": ("close-me",), "reopened": ("reopen-me",)}
+    assert repository.reopened_by == {"reopen-me": "reconciliation"}
+    assert result == {
+        "closed": ("close-me",),
+        "failed_closes": (),
+        "reopened": ("reopen-me",),
+        "seller_closed": (),
+    }
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_leaves_a_seller_close_closed_and_continues():
+    repository = Repository()
+    binding = CapacityBinding("site-a", "vm", "pool-a")
+    hooks = Hooks({"withdrawn": binding, "restorable": binding})
+    repository.statuses = {"withdrawn": "closed", "restorable": "closed"}
+    repository.closed_by = {"withdrawn": "seller", "restorable": "reconciliation"}
+
+    result = await runtime(repository, hooks).reconcile(
+        ReconciliationPlan(
+            reopen=(candidate("withdrawn", binding), candidate("restorable", binding))
+        )
+    )
+
+    assert result["seller_closed"] == ("withdrawn",)
+    assert result["reopened"] == ("restorable",)
+    assert repository.statuses == {"withdrawn": "closed", "restorable": "open"}
+    assert repository.closed_by["withdrawn"] == "seller"
+
+
+@pytest.mark.asyncio
+async def test_seller_reopen_is_named_to_the_repository():
+    repository = Repository()
+    binding = CapacityBinding("site-a", "vm", "pool-a")
+    hooks = Hooks({"listing-1": binding})
+    repository.statuses = {"listing-1": "closed"}
+    repository.closed_by = {"listing-1": "seller"}
+
+    await runtime(repository, hooks).reopen(candidate(binding=binding), reopened_by="seller")
+
+    assert repository.statuses == {"listing-1": "open"}
+    assert repository.reopened_by == {"listing-1": "seller"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reopened_by", [None, "", "operator"])
+async def test_reopen_without_a_known_reopener_is_refused_before_any_write(
+    reopened_by,
+):
+    repository = Repository()
+    binding = CapacityBinding("site-a", "vm", "pool-a")
+    hooks = Hooks({"listing-1": binding})
+
+    with pytest.raises(ValueError, match="reopened_by"):
+        await runtime(repository, hooks).reopen(
+            candidate(binding=binding), reopened_by=reopened_by
+        )
+
+    assert repository.statuses == {}
 
 
 @pytest.mark.asyncio
@@ -235,8 +309,54 @@ async def test_reopen_marks_the_listing_open_at_every_registry():
     listing = candidate(binding=binding)
     listing.payload["storefront_url"] = "https://seller.example"
 
-    result = await publication.reopen(listing)
+    result = await publication.reopen(listing, reopened_by="reconciliation")
 
     assert result["status"] == "published"
     assert repository.statuses == {"listing-1": "open"}
     assert registry.updates == [("listing-1", {"updates": {"status": "open"}})]
+
+
+def _enabled_runtime(repository, hooks, registry):
+    return PublicationRuntime(
+        repository=repository,
+        hooks=hooks,
+        enabled=True,
+        registry_urls=registry.urls,
+        registry_client_factory=lambda: registry,
+        listing_request_factory=dict,
+        update_listing_request_factory=dict,
+        storefront_url="https://seller.example",
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_failed_local_close_is_raised_before_any_registry_is_told():
+    repository = Repository(fail_updates={"listing-1"})
+    binding = CapacityBinding("site-a", "vm", "pool-a")
+    registry = _RecordingRegistry()
+
+    with pytest.raises(RuntimeError, match="database is locked"):
+        await _enabled_runtime(repository, Hooks({"listing-1": binding}), registry).close(
+            BoundListing("listing-1", binding), closed_by="seller"
+        )
+
+    assert registry.updates == []
+    assert repository.publications == []
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_records_a_failed_close_and_continues():
+    repository = Repository(fail_updates={"stuck"})
+    binding = CapacityBinding("site-a", "vm", "pool-a")
+    registry = _RecordingRegistry()
+    hooks = Hooks({"stuck": binding, "stale": binding})
+
+    result = await _enabled_runtime(repository, hooks, registry).reconcile(
+        ReconciliationPlan(
+            close=(BoundListing("stuck", binding), BoundListing("stale", binding))
+        )
+    )
+
+    assert result["failed_closes"] == ("stuck",)
+    assert result["closed"] == ("stale",)
+    assert [listing_id for listing_id, _ in registry.updates] == ["stale"]

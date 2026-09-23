@@ -373,7 +373,7 @@ class TestResumeListing:
 
         assert result.paused is False
         assert (await db.load_listing(listing_id="withdrawn"))["status"] == "open"
-        assert await db.load_listing_closed_by(listing_id="withdrawn") is None
+        assert (await db.load_listing(listing_id="withdrawn"))["closed_by"] is None
 
     async def test_resume_refuses_a_listing_reconciliation_closed(self, client):
         c, db = client
@@ -389,7 +389,7 @@ class TestResumeListing:
         assert "listing_closed_by_reconciliation" in str(exc_info.value)
         assert (await db.load_listing(listing_id="no-source"))["status"] == "closed"
         assert (
-            await db.load_listing_closed_by(listing_id="no-source")
+            (await db.load_listing(listing_id="no-source"))["closed_by"]
             == "reconciliation"
         )
 

@@ -6,6 +6,7 @@ import json
 import logging
 import sqlite3
 from collections.abc import Iterable
+from datetime import datetime, timezone
 from typing import Any
 
 from .projections import TrustedBareMetalProjection
@@ -153,7 +154,8 @@ def load_derived_bare_metal_listing(
             """
             SELECT d.listing_id, d.site_id, d.physical_resource_id,
                    d.host_id, d.physical_host_id, d.status,
-                   d.derivation_key, l.status AS listing_status
+                   d.derivation_key, l.status AS listing_status,
+                   l.closed_by AS listing_closed_by
             FROM derived_bare_metal_listings d
             LEFT JOIN listings l ON l.listing_id = d.listing_id
             WHERE d.derivation_key = ?
@@ -174,6 +176,7 @@ def load_derived_bare_metal_listing(
         "status",
         "derivation_key",
         "listing_status",
+        "listing_closed_by",
     ]
     return dict(zip(keys, row))
 
@@ -219,15 +222,29 @@ def record_derived_bare_metal_listing(
         conn.close()
 
 
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
 def mark_derived_bare_metal_listings_closed(
     db_path: str,
     listing_ids: list[str],
 ) -> None:
-    """Record reconciliation closes; a seller's close is never made here."""
+    """Record reconciliation closes; a seller's close is never made here.
+
+    The listing rows go through the storefront's own listing write, which keeps
+    a seller's close as the seller's.
+    """
     if not listing_ids:
         return
+    # core_storefront is this package's storefront extra. The package root
+    # imports this module, and buyers and provisioning adapters install the
+    # package without that extra, so the storefront write is imported here.
+    from core_storefront.sqlite_client import write_listing_update
+
     conn = sqlite3.connect(db_path)
     try:
+        conn.execute("BEGIN IMMEDIATE")
         placeholders = ", ".join("?" for _ in listing_ids)
         conn.execute(
             f"""
@@ -238,17 +255,18 @@ def mark_derived_bare_metal_listings_closed(
             """,
             tuple(listing_ids),
         )
-        conn.execute(
-            f"""
-            UPDATE listings
-            SET status = 'closed',
-                closed_by = 'reconciliation',
-                updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')
-            WHERE listing_id IN ({placeholders})
-            """,
-            tuple(listing_ids),
-        )
+        for listing_id in listing_ids:
+            write_listing_update(
+                conn,
+                listing_id=listing_id,
+                status="closed",
+                closed_by="reconciliation",
+                updated_at=_now(),
+            )
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 
@@ -334,8 +352,8 @@ def reopen_derived_bare_metal_listing_if_present(
     An open listing whose terms changed is refreshed in place; one whose
     published identity no longer matches its Physical Resource is closed and
     not reopened while the difference persists; a closed one is reopened with
-    the fresh payload unless its identity diverged. ``None`` means no listing is
-    tracked under this key yet.
+    the fresh payload unless its identity diverged or its seller closed it.
+    ``None`` means no listing is tracked under this key yet.
     """
     derived = load_derived_bare_metal_listing(
         db_path,
@@ -344,6 +362,11 @@ def reopen_derived_bare_metal_listing_if_present(
     if not derived or not derived.get("listing_id"):
         return None
     listing_id = str(derived["listing_id"])
+    if derived.get("listing_closed_by") == "seller":
+        # The key stays bound to the seller's listing, so publication neither
+        # reopens it nor publishes a replacement for the resource.
+        logger.info("bare-metal listing %s was closed by its seller; leaving it", listing_id)
+        return {"status": "unchanged", "listing_id": listing_id}
     stored = _stored_listing(db_path, listing_id) or {}
     stored_resource = stored.get("listing_resource") or {}
     diverged = _identity_differences(stored_resource, listing_resource)
@@ -376,30 +399,33 @@ def reopen_derived_bare_metal_listing_if_present(
     ):
         return {"status": "unchanged", "listing_id": listing_id}
 
+    # See mark_derived_bare_metal_listings_closed for why this import is local.
+    from core_storefront.sqlite_client import write_listing_update
+
     conn = sqlite3.connect(db_path)
     try:
-        conn.execute(
-            """
-            UPDATE listings
-            SET status = 'open', closed_by = NULL, paused = 0,
-                updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'),
-                listing_resource = ?, accepted_escrows = ?,
-                settlement_options = ?, publication_clauses = ?, demands = ?,
-                max_duration_seconds = ?, storefront_url = ?
-            WHERE listing_id = ?
-            """,
-            (
-                json.dumps(listing_resource),
-                json.dumps(accepted_escrows),
-                json.dumps(settlement_options or []),
-                json.dumps(publication_clauses or []),
-                json.dumps(demands),
-                max_duration_seconds,
-                base_url,
-                listing_id,
-            ),
+        conn.execute("BEGIN IMMEDIATE")
+        # The storefront's listing write refuses a reconciliation reopen of a
+        # seller's close, so a stale read above cannot reopen one.
+        write_listing_update(
+            conn,
+            listing_id=listing_id,
+            status="open",
+            reopened_by="reconciliation",
+            updated_at=_now(),
+            listing_resource=listing_resource,
+            accepted_escrows=accepted_escrows,
+            settlement_options=settlement_options or [],
+            publication_clauses=publication_clauses or [],
+            demands=demands,
+            max_duration_seconds=max_duration_seconds,
+            storefront_url=base_url,
         )
+        conn.execute("UPDATE listings SET paused = 0 WHERE listing_id = ?", (listing_id,))
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 

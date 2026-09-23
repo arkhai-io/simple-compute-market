@@ -356,3 +356,75 @@ def test_a_changed_identity_closes_and_refuses_reopen(tmp_path):
     again, published, closed = _reconcile(path, candidate, diverged)
     assert again["status"] == "unchanged"
     assert (published, closed) == ([], [])
+
+
+def _run_publication(path, *, published_existing, published_new):
+    selection = build_bare_metal_publication_selection(
+        BARE_METAL_STOREFRONT_REGISTRY,
+        projection_snapshot=lambda: [_projection()],
+        close_listing=lambda *_args: {"status": "closed"},
+        publish_existing_listing=lambda **values: published_existing.append(values)
+        or {"status": "published"},
+    )
+    return run_bare_metal_publication(
+        selection,
+        config=StorefrontPublicationCommandConfig(
+            db_path=path,
+            base_url="https://seller.example",
+            close_stale=False,
+            skip_open=False,
+        ),
+        callbacks=StorefrontPublicationCommandCallbacks(
+            build_payload=lambda _source, _candidate, _offer: ([], [], 3600),
+            publish_listing=lambda *args, **kwargs: published_new.append(args)
+            or {"listing_id": "listing-new", "status": "published"},
+        ),
+    )
+
+
+def _listing_state(path):
+    import sqlite3
+
+    with sqlite3.connect(path) as conn:
+        return conn.execute(
+            "SELECT status, closed_by FROM listings WHERE listing_id='listing-1'"
+        ).fetchone()
+
+
+def test_publication_leaves_a_seller_closed_listing_closed(tmp_path):
+    import asyncio
+
+    path, _candidate = _tracked_listing(tmp_path)
+    asyncio.run(
+        SQLiteClient(path).update_listing(
+            listing_id="listing-1", status="closed", closed_by="seller"
+        )
+    )
+    published_existing, published_new = [], []
+
+    result = _run_publication(
+        path, published_existing=published_existing, published_new=published_new
+    )
+
+    assert result.failed == []
+    assert _listing_state(path) == ("closed", "seller")
+    assert (published_existing, published_new) == ([], [])
+
+
+def test_publication_reopens_a_reconciliation_closed_listing(tmp_path):
+    from arkhai_bare_metal.storefront_publication import (
+        mark_derived_bare_metal_listings_closed,
+    )
+
+    path, _candidate = _tracked_listing(tmp_path)
+    mark_derived_bare_metal_listings_closed(path, ["listing-1"])
+    assert _listing_state(path) == ("closed", "reconciliation")
+    published_existing, published_new = [], []
+
+    _run_publication(
+        path, published_existing=published_existing, published_new=published_new
+    )
+
+    assert _listing_state(path) == ("open", None)
+    assert [values["listing_id"] for values in published_existing] == ["listing-1"]
+    assert published_new == []

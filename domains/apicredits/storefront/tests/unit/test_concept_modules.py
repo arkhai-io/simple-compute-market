@@ -151,7 +151,8 @@ def test_reconciler_close_on_exhaustion_and_reopen():
     rows = [
         {**_listing("svc-a"), "listing_id": "L-a", "status": "open"},
         {**_listing("svc-b"), "listing_id": "L-b", "status": "open"},
-        {**_listing("svc-a"), "listing_id": "L-c", "status": "closed"},
+        {**_listing("svc-a"), "listing_id": "L-c", "status": "closed",
+         "closed_by": "reconciliation"},
     ]
     availability = {("tokens", "svc-a"): 0, ("tokens", "svc-b"): 12}
     assert stale_open_credit_listing_ids(rows, availability=availability) == ["L-a"]
@@ -160,6 +161,19 @@ def test_reconciler_close_on_exhaustion_and_reopen():
     availability = {("tokens", "svc-a"): 3, ("tokens", "svc-b"): 12}
     assert stale_open_credit_listing_ids(rows, availability=availability) == []
     assert reopenable_credit_listing_ids(rows, availability=availability) == ["L-c"]
+
+
+def test_reconciler_reopens_only_what_reconciliation_closed():
+    rows = [
+        {**_listing("svc-a"), "listing_id": "L-seller", "status": "closed",
+         "closed_by": "seller"},
+        {**_listing("svc-a"), "listing_id": "L-quota", "status": "closed",
+         "closed_by": "reconciliation"},
+    ]
+    availability = {("tokens", "svc-a"): 5}
+    assert reopenable_credit_listing_ids(rows, availability=availability) == [
+        "L-quota"
+    ]
 
 
 def test_reconciler_unknown_availability_is_conservative():

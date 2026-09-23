@@ -158,6 +158,23 @@ def _publication_row_to_dict(row: tuple) -> dict[str, Any]:
 LISTING_CLOSED_BY_VALUES = frozenset({"seller", "reconciliation"})
 
 
+class SellerClosedListingError(ValueError):
+    """A write would reopen a listing its seller closed, and the seller did not ask.
+
+    A seller's close is durable: capacity events, the publication loop, and
+    every other reconciliation path leave it closed, and only the seller's own
+    reopen clears it. The refusal is raised here, at the listing write every
+    reopen passes through, so no domain has to remember the rule.
+    """
+
+    def __init__(self, listing_id: str) -> None:
+        super().__init__(
+            f"listing {listing_id!r} was closed by its seller; only the seller "
+            "may reopen it"
+        )
+        self.listing_id = listing_id
+
+
 def _require_consistent_closure(status: str, closed_by: str | None) -> None:
     """Refuse a close without a reason and a reason without a close.
 
@@ -172,6 +189,104 @@ def _require_consistent_closure(status: str, closed_by: str | None) -> None:
             )
     elif closed_by is not None:
         raise ValueError(f"a listing with status {status!r} records no closed_by")
+
+
+def _stored_closed_by(conn: sqlite3.Connection, listing_id: str) -> str | None:
+    row = conn.execute(
+        "SELECT closed_by FROM listings WHERE listing_id = ?", (listing_id,)
+    ).fetchone()
+    return str(row[0]) if row and row[0] is not None else None
+
+
+def _serialize_json(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    try:
+        return json.dumps(value)
+    except Exception:
+        return str(value)
+
+
+def write_listing_update(
+    conn: sqlite3.Connection,
+    *,
+    listing_id: str,
+    status: str | None = None,
+    updated_at: str | None = None,
+    listing_resource: Any | None = None,
+    fulfillment_resource: Any | None = None,
+    max_duration_seconds: int | None = None,
+    storefront_url: str | None = None,
+    seller_principal: Identity | None = None,
+    oracle_address: str | None = None,
+    accepted_escrows: Any | None = None,
+    settlement_options: Any | None = None,
+    publication_clauses: Any | None = None,
+    demands: Any | None = None,
+    closed_by: str | None = None,
+    reopened_by: str | None = None,
+) -> None:
+    """Update the supplied listing columns inside the caller's transaction.
+
+    A change to ``closed`` must name who closed the listing; any other status
+    change clears the reason. A change to ``open`` on a listing its seller
+    closed is refused unless ``reopened_by`` is ``seller``, and a
+    reconciliation close of a seller-closed listing keeps the seller's reason,
+    so no reconciliation path can turn a seller's close into one it may undo.
+    The closure reason is read and written in the caller's transaction, which
+    should be ``BEGIN IMMEDIATE`` so no other writer interleaves.
+    """
+    if status is not None:
+        _require_consistent_closure(status, closed_by)
+    elif closed_by is not None:
+        raise ValueError("closed_by is recorded only together with a close")
+    if reopened_by is not None:
+        if status != "open":
+            raise ValueError("reopened_by is recorded only together with a reopen")
+        if reopened_by not in LISTING_CLOSED_BY_VALUES:
+            raise ValueError(
+                f"reopened_by must be one of {sorted(LISTING_CLOSED_BY_VALUES)}, "
+                f"not {reopened_by!r}"
+            )
+    if status in ("open", "closed") and _stored_closed_by(conn, listing_id) == "seller":
+        if status == "open" and reopened_by != "seller":
+            raise SellerClosedListingError(listing_id)
+        if status == "closed":
+            closed_by = "seller"
+
+    updates: list[str] = []
+    values: list[Any] = []
+
+    def add(field: str, value: Any, *, serialize: bool = False) -> None:
+        if value is None:
+            return
+        updates.append(f"{field}=?")
+        values.append(_serialize_json(value) if serialize else value)
+
+    add("status", status)
+    if status is not None:
+        updates.append("closed_by=?")
+        values.append(closed_by)
+    add("updated_at", updated_at or datetime.now().isoformat())
+    add("listing_resource", listing_resource, serialize=True)
+    add("fulfillment_resource", fulfillment_resource, serialize=True)
+    add("max_duration_seconds", max_duration_seconds)
+    add("storefront_url", storefront_url)
+    if seller_principal is not None:
+        seller_scheme, seller_identifier = _principal_columns(seller_principal)
+        add("seller_scheme", seller_scheme)
+        add("seller_identifier", seller_identifier)
+    add("oracle_address", oracle_address)
+    add("accepted_escrows", accepted_escrows, serialize=True)
+    add("settlement_options", settlement_options, serialize=True)
+    add("publication_clauses", publication_clauses, serialize=True)
+    add("demands", demands, serialize=True)
+    conn.execute(
+        f"UPDATE listings SET {', '.join(updates)} WHERE listing_id=?",
+        (*values, listing_id),
+    )
 
 
 class SQLiteClient:
@@ -989,14 +1104,7 @@ class SQLiteClient:
             conn.close()
 
     def _serialize_resource(self, value: Any) -> str | None:
-        if value is None:
-            return None
-        if isinstance(value, str):
-            return value
-        try:
-            return json.dumps(value)
-        except Exception:
-            return str(value)
+        return _serialize_json(value)
 
     def _deserialize_accepted_escrows(self, value: Any) -> list[dict[str, Any]] | None:
         """Return the ``accepted_escrows`` column as a Python list.
@@ -1174,6 +1282,10 @@ class SQLiteClient:
         closed_by: str | None = None,
     ) -> None:
         _require_consistent_closure(status, closed_by)
+        # An upsert names no reopener, so it may never overwrite a seller's
+        # close with another status; a seller re-lists through their reopen.
+        if status != "closed" and _stored_closed_by(conn, listing_id) == "seller":
+            raise SellerClosedListingError(listing_id)
         seller_scheme, seller_identifier = _principal_columns(seller_principal)
         conn.execute(
             """
@@ -1493,82 +1605,53 @@ class SQLiteClient:
         publication_clauses: Any | None = None,
         demands: Any | None = None,
         closed_by: str | None = None,
+        reopened_by: str | None = None,
     ) -> None:
         """Update the supplied listing columns.
 
         A change to ``closed`` must name who closed the listing; any other
-        status change clears the reason. Reconciliation reopens only what
-        reconciliation closed, so a close without a reason, or a reopen that
-        kept one, would let the next capacity event undo a seller's decision.
+        status change clears the reason. Reopening a listing its seller closed
+        raises :class:`SellerClosedListingError` unless ``reopened_by`` is
+        ``seller``. See :func:`write_listing_update`.
         """
-        if status is not None:
-            _require_consistent_closure(status, closed_by)
-        elif closed_by is not None:
-            raise ValueError("closed_by is recorded only together with a close")
 
         def _save() -> None:
-            updates: list[str] = []
-            values: list[Any] = []
-
-            def add(field: str, value: Any, *, serialize: bool = False) -> None:
-                if value is None:
-                    return
-                updates.append(f"{field}=?")
-                values.append(self._serialize_resource(value) if serialize else value)
-
-            add("status", status)
-            if status is not None:
-                updates.append("closed_by=?")
-                values.append(closed_by)
-            add("updated_at", updated_at or datetime.now().isoformat())
-            add("listing_resource", listing_resource, serialize=True)
-            add("fulfillment_resource", fulfillment_resource, serialize=True)
-            add("max_duration_seconds", max_duration_seconds)
-            add("storefront_url", storefront_url)
-            if seller_principal is not None:
-                seller_scheme, seller_identifier = _principal_columns(seller_principal)
-                add("seller_scheme", seller_scheme)
-                add("seller_identifier", seller_identifier)
-            add("oracle_address", oracle_address)
-            add("accepted_escrows", accepted_escrows, serialize=True)
-            add("settlement_options", settlement_options, serialize=True)
-            add("publication_clauses", publication_clauses, serialize=True)
-            add("demands", demands, serialize=True)
-
-            if not updates:
-                return
-
             conn = sqlite3.connect(self.db_path)
             try:
-                cur = conn.cursor()
-                cur.execute(
-                    f"UPDATE listings SET {', '.join(updates)} WHERE listing_id=?",
-                    (*values, listing_id),
+                conn.execute("BEGIN IMMEDIATE")
+                write_listing_update(
+                    conn,
+                    listing_id=listing_id,
+                    status=status,
+                    updated_at=updated_at,
+                    listing_resource=listing_resource,
+                    fulfillment_resource=fulfillment_resource,
+                    max_duration_seconds=max_duration_seconds,
+                    storefront_url=storefront_url,
+                    seller_principal=seller_principal,
+                    oracle_address=oracle_address,
+                    accepted_escrows=accepted_escrows,
+                    settlement_options=settlement_options,
+                    publication_clauses=publication_clauses,
+                    demands=demands,
+                    closed_by=closed_by,
+                    reopened_by=reopened_by,
                 )
                 conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
             finally:
                 conn.close()
 
         await asyncio.to_thread(_save)
 
-    async def load_listing_closed_by(self, *, listing_id: str) -> str | None:
-        """Return who closed a closed listing, or ``None`` for an open one."""
-
-        def _load() -> str | None:
-            conn = sqlite3.connect(self.db_path)
-            try:
-                row = conn.execute(
-                    "SELECT closed_by FROM listings WHERE listing_id = ?",
-                    (listing_id,),
-                ).fetchone()
-                return str(row[0]) if row and row[0] is not None else None
-            finally:
-                conn.close()
-
-        return await asyncio.to_thread(_load)
-
     async def load_listing(self, *, listing_id: str) -> dict[str, Any] | None:
-        """Return a single order by listing_id, or None if not found."""
+        """Return a single order by listing_id, or None if not found.
+
+        ``closed_by`` names who closed a closed listing and is ``None`` for
+        every other status.
+        """
 
         def _load() -> dict[str, Any] | None:
             conn = sqlite3.connect(self.db_path)
@@ -1584,7 +1667,8 @@ class SQLiteClient:
                            accepted_escrows,
                            settlement_options,
                            publication_clauses,
-                           demands
+                           demands,
+                           closed_by
                     FROM listings WHERE listing_id = ?
                     """,
                     (listing_id,),
@@ -1609,6 +1693,7 @@ class SQLiteClient:
                     "settlement_options",
                     "publication_clauses",
                     "demands",
+                    "closed_by",
                 ]
                 d = dict(zip(keys, row))
                 d["paused"] = bool(d["paused"])
@@ -4194,7 +4279,10 @@ class SQLiteClient:
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
-        """Return a paginated list of orders with optional filters."""
+        """Return a paginated list of orders with optional filters.
+
+        Each row carries ``closed_by`` as :meth:`load_listing` does.
+        """
 
         def _list() -> list[dict[str, Any]]:
             conn = sqlite3.connect(self.db_path)
@@ -4219,7 +4307,8 @@ class SQLiteClient:
                            accepted_escrows,
                            settlement_options,
                            publication_clauses,
-                           demands
+                           demands,
+                           closed_by
                     FROM listings {where}
                     ORDER BY created_at DESC
                     LIMIT ? OFFSET ?
@@ -4243,6 +4332,7 @@ class SQLiteClient:
                     "settlement_options",
                     "publication_clauses",
                     "demands",
+                    "closed_by",
                 ]
                 rows = cur.fetchall()
                 result = []

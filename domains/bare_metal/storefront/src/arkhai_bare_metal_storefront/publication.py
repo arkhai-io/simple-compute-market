@@ -40,6 +40,7 @@ def build_bare_metal_publication_selection(
     registration = registry.resolve_mode("bare_metal")
     selection = build_storefront_publication_selection(
         registry,
+        contributions=(registration.contribution_id,),
         source_kwargs_by_contribution={
             registration.contribution_id: {
                 "projection_snapshot": projection_snapshot,

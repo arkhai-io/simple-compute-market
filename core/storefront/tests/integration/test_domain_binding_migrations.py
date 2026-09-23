@@ -22,7 +22,8 @@ from core_storefront.sqlite_migrations import (
     _backfill_accepted_escrows,
 )
 
-from test_domain_registry import _registration
+# The unit suite owns the test contract; this suite reuses it rather than a copy.
+from unit.test_domain_registry import _registration
 
 
 def _principal(byte: int) -> Identity:
@@ -353,32 +354,6 @@ def test_second_bind_with_opposite_backing_is_refused(tmp_path):
     with pytest.raises(StorefrontDomainBindingError):
         _run(_persist_listing(client, opposite))
     assert _run(client.load_listing_binding(listing_id=binding.listing_id)) == binding
-
-
-def test_close_records_its_reason_and_reopen_clears_it(tmp_path):
-    client = SQLiteClient(str(tmp_path / "storefront.db"))
-    binding = _listing_binding()
-    _run(_persist_listing(client, binding))
-
-    with pytest.raises(ValueError, match="closed_by"):
-        _run(client.update_listing(listing_id=binding.listing_id, status="closed"))
-    with pytest.raises(ValueError, match="closed_by"):
-        _run(
-            client.update_listing(
-                listing_id=binding.listing_id, status="open", closed_by="seller"
-            )
-        )
-
-    _run(
-        client.update_listing(
-            listing_id=binding.listing_id, status="closed", closed_by="seller"
-        )
-    )
-    assert _run(client.load_listing_closed_by(listing_id=binding.listing_id)) == (
-        "seller"
-    )
-    _run(client.update_listing(listing_id=binding.listing_id, status="open"))
-    assert _run(client.load_listing_closed_by(listing_id=binding.listing_id)) is None
 
 
 def test_direct_sql_close_without_reason_is_refused(tmp_path):

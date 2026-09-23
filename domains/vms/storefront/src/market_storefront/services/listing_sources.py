@@ -11,10 +11,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from domains.vms.listings.pool_declarations import (
-    SiteDeclarations,
-    read_site_declarations,
-)
+from market_resource_pools import SiteDeclarations, read_site_declarations
 from market_storefront.services.site_projection_cache import projection_caches
 from market_storefront.utils.config import settings
 

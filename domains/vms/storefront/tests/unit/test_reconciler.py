@@ -97,10 +97,7 @@ def _projected_pool_rows(pool, **kwargs):
     per-site rule, so a test pool carrying no declarations reads under the
     compatibility rule exactly as a lone pool from an older producer would.
     """
-    from domains.vms.listings.pool_declarations import (
-        ResolvedPool,
-        read_site_declarations,
-    )
+    from market_resource_pools import ResolvedPool, read_site_declarations
 
     pool_id = str(pool.get("resource_pool_id") or "").strip()
     declaration = read_site_declarations([pool]).resolved.get(pool_id) or ResolvedPool(
@@ -760,7 +757,7 @@ class TestStaleOpenListingIds:
             gpu_count=2,
             site_id="site-a",
         )
-        stale = stale_open_listing_ids(db_path, home_site="site-a", configured_site_count=1)
+        stale = stale_open_listing_ids(db_path, home_site="site-a", configured_site_count=1, backed_only=False)
         assert stale == []
 
     def test_listing_whose_slice_no_longer_fits_is_stale(self, db_path):
@@ -772,7 +769,7 @@ class TestStaleOpenListingIds:
             gpu_count=2,
             site_id="site-a",
         )
-        stale = stale_open_listing_ids(db_path, home_site="site-a", configured_site_count=1)
+        stale = stale_open_listing_ids(db_path, home_site="site-a", configured_site_count=1, backed_only=False)
         assert stale == ["listing-1"]
 
     def test_unbound_listing_is_skipped_even_with_one_configured_site(
@@ -784,6 +781,7 @@ class TestStaleOpenListingIds:
             db_path,
             home_site="site-a",
             configured_site_count=1,
+            backed_only=False,
         )
         assert stale == []
 
@@ -791,7 +789,7 @@ class TestStaleOpenListingIds:
         """Configured topology never supplies a missing durable binding."""
         _seed_pool(db_path, gpu_count=1)
         _seed_listing(db_path, listing_id="listing-1", pool_id="gpu-pool", gpu_count=2)
-        stale = stale_open_listing_ids(db_path, home_site="site-a", configured_site_count=2)
+        stale = stale_open_listing_ids(db_path, home_site="site-a", configured_site_count=2, backed_only=False)
         assert stale == []
 
     def test_listing_bound_to_a_different_site_uses_that_site(self, db_path):
@@ -804,7 +802,7 @@ class TestStaleOpenListingIds:
             site_id="site-b",
         )
         # Only site-a has capacity data seeded.
-        stale = stale_open_listing_ids(db_path, home_site="site-a", configured_site_count=1)
+        stale = stale_open_listing_ids(db_path, home_site="site-a", configured_site_count=1, backed_only=False)
         # VM availability is scoped to site-a, so the site-b-bound listing
         # is stale rather than silently reassigned.
         assert stale == ["listing-1"]
@@ -821,7 +819,7 @@ class TestStaleOpenListingIds:
             gpu_count=2,
             site_id="site-a",
         )
-        stale = stale_open_listing_ids(db_path, home_site="site-a", configured_site_count=5)
+        stale = stale_open_listing_ids(db_path, home_site="site-a", configured_site_count=5, backed_only=False)
         assert stale == []
 
 
@@ -2152,6 +2150,7 @@ class TestHeldAndWithdrawnListings:
             db_path,
             home_site="site-a",
             configured_site_count=1,
+            backed_only=False,
             site_pool_projection={"site-a": [declared, undeclared]},
         )
 
@@ -2165,6 +2164,7 @@ class TestHeldAndWithdrawnListings:
             db_path,
             home_site="site-a",
             configured_site_count=1,
+            backed_only=False,
             site_pool_projection={"site-a": [pool]},
         )
 

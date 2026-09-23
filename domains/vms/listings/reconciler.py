@@ -18,7 +18,7 @@ from domains.vms.listings.pricing_resolution import (
 
 
 if TYPE_CHECKING:
-    from domains.vms.listings.pool_declarations import ResolvedPool
+    from market_resource_pools import ResolvedPool
 
 logger = logging.getLogger(__name__)
 
@@ -961,7 +961,7 @@ def _pool_rows_from_projection(
     """
     # Buyer-side listing helpers import this module without installing the
     # resource-pool authority package; only storefront projection needs it.
-    from domains.vms.listings.pool_declarations import read_site_declarations
+    from market_resource_pools import read_site_declarations
 
     local_pricing = _local_pool_pricing(conn)
     pool_rows: list[dict[str, Any]] = []
@@ -1281,27 +1281,37 @@ def _is_held(
     )
 
 
-# The binding's backing for each listing read by the latest `_bound_vm_listings`
-# call. Kept beside the listing rows rather than widening their tuple so every
-# existing caller keeps its shape.
-_BINDING_BACKING: dict[str, str] = {}
+@dataclass(frozen=True, slots=True)
+class BoundVmListing:
+    """One bound VM listing as reconciliation reads it."""
+
+    listing_id: str
+    listing_resource: dict[str, Any]
+    site_id: str
+    capacity_backing: str
 
 
 def _bound_vm_listings(
     db_path: str,
     *,
     open_listings: bool,
-) -> list[tuple[str, dict[str, Any], str]]:
-    """Bound VM listings as ``(listing_id, listing_resource, site_id)``.
+    backed_only: bool,
+) -> list[BoundVmListing]:
+    """Bound VM listings with their binding's site and backing.
 
     Closed listings exclude those their seller closed: no reconciliation path
-    reopens a listing its seller withdrew.
+    reopens a listing its seller withdrew. ``backed_only`` restricts the read to
+    listings bound as capacity-backed, which is all availability reconciliation
+    may act on.
     """
-    status_clause = (
+    clauses = [
         "l.status = 'open'"
         if open_listings
-        else "l.status != 'open' AND l.closed_by IS NOT 'seller'"
-    )
+        else "l.status != 'open' AND l.closed_by IS NOT 'seller'",
+        "b.offering_mode = 'vm'",
+    ]
+    if backed_only:
+        clauses.append("b.capacity_backing = 'backed'")
     conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
     try:
         rows = conn.execute(
@@ -1309,13 +1319,12 @@ def _bound_vm_listings(
             SELECT l.listing_id, l.listing_resource, b.site_id, b.capacity_backing
             FROM listings l
             JOIN storefront_listing_bindings b ON b.listing_id = l.listing_id
-            WHERE {status_clause}
-              AND b.offering_mode = 'vm'
+            WHERE {' AND '.join(clauses)}
             """
         ).fetchall()
     finally:
         conn.close()
-    out: list[tuple[str, dict[str, Any], str]] = []
+    out: list[BoundVmListing] = []
     for listing_id, raw, site_id, capacity_backing in rows:
         if not raw or not site_id:
             continue
@@ -1324,8 +1333,11 @@ def _bound_vm_listings(
         except (TypeError, json.JSONDecodeError):
             continue
         if isinstance(parsed, dict):
-            _BINDING_BACKING[str(listing_id)] = str(capacity_backing)
-            out.append((str(listing_id), parsed, str(site_id)))
+            out.append(
+                BoundVmListing(
+                    str(listing_id), parsed, str(site_id), str(capacity_backing)
+                )
+            )
     return out
 
 
@@ -1339,8 +1351,8 @@ def open_listing_resource_keys(
 
     del home_site, configured_site_count
     covered: set[str] = set()
-    for _, listing_resource, site_id in _bound_vm_listings(db_path, open_listings=True):
-        key = stored_listing_key(listing_resource, site_id)
+    for listing in _bound_vm_listings(db_path, open_listings=True, backed_only=False):
+        key = stored_listing_key(listing.listing_resource, listing.site_id)
         if key is not None:
             covered.add(key)
     return covered
@@ -1354,10 +1366,16 @@ def stale_open_listing_ids(
     member_availability: dict[tuple[str | None, str], int] | None = None,
     site_pool_projection: Mapping[str, list[dict[str, Any]]] | None = None,
     site_capacity_buckets: Mapping[str, list[dict[str, Any]]] | None = None,
+    backed_only: bool,
 ) -> list[str]:
     """Return bound VM listings whose exact site-scoped slice is gone.
 
     A listing whose source cannot currently be read is held, not stale.
+    ``backed_only`` has no default because the two reconciliations differ:
+    source reconciliation (the publication loop) closes any listing whose
+    source is gone, while availability reconciliation (capacity events, a
+    release, a failed deal) acts only on capacity-backed listings, since no
+    availability figure describes an unbacked one.
     """
 
     del configured_site_count
@@ -1371,14 +1389,14 @@ def stale_open_listing_ids(
         holds=holds,
     )
     stale: list[str] = []
-    for listing_id, listing_resource, site_id in _bound_vm_listings(
-        db_path, open_listings=True
+    for listing in _bound_vm_listings(
+        db_path, open_listings=True, backed_only=backed_only
     ):
-        if _is_held(listing_resource, site_id, holds):
+        if _is_held(listing.listing_resource, listing.site_id, holds):
             continue
-        key = stored_listing_key(listing_resource, site_id)
+        key = stored_listing_key(listing.listing_resource, listing.site_id)
         if key is not None and key not in available_keys:
-            stale.append(listing_id)
+            stale.append(listing.listing_id)
     return stale
 
 
@@ -1390,13 +1408,18 @@ def closed_available_listing_ids(
     site_pool_projection: Mapping[str, list[dict[str, Any]]] | None = None,
     site_capacity_buckets: Mapping[str, list[dict[str, Any]]] | None = None,
 ) -> list[str]:
-    """Return closed bound VM listings that may reopen now.
+    """Return closed capacity-backed VM listings that may reopen now.
+
+    This is availability reconciliation: its callers are capacity events, a
+    released reservation, and a failed deal, so it reads only listings bound as
+    capacity-backed. An unbacked listing is reopened by the publication loop,
+    which refreshes its terms from its source as it does.
 
     A listing may reopen when its exact slice is available again, its seller did
     not close it, its source is not held, and its published identity and its
-    binding's backing still match what its source derives. Every reopen path
-    shares this predicate, so a listing closed because its source changed is
-    not reopened by a capacity event that happens to free its slice.
+    binding's backing still match what its source derives. Every availability
+    reopen shares this predicate, so a listing closed because its source changed
+    is not reopened by a capacity event that happens to free its slice.
     """
     holds: set[tuple[str, str, str]] = set()
     slices: dict[str, dict[str, Any]] = {}
@@ -1414,9 +1437,10 @@ def closed_available_listing_ids(
     if not slices:
         return []
     available: list[tuple[int, str]] = []
-    for listing_id, listing_resource, site_id in _bound_vm_listings(
-        db_path, open_listings=False
-    ):
+    for listing in _bound_vm_listings(db_path, open_listings=False, backed_only=True):
+        listing_id = listing.listing_id
+        listing_resource = listing.listing_resource
+        site_id = listing.site_id
         if _is_held(listing_resource, site_id, holds):
             continue
         key = stored_listing_key(listing_resource, site_id)
@@ -1428,7 +1452,7 @@ def closed_available_listing_ids(
             stored_terms={},
             fresh_resource=slice_identity(fresh),
             fresh_terms={},
-            binding_backing=_BINDING_BACKING.get(listing_id, ""),
+            binding_backing=listing.capacity_backing,
             source_backing=str(fresh.get("capacity_backing")),
         )
         if comparison.outcome in REFUSE:

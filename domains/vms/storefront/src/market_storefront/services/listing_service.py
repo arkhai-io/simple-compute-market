@@ -721,11 +721,11 @@ class ListingService:
         return listing.model_dump(mode="json")
 
     async def close_listing(self, listing_id: str) -> CloseListingResponse:
-        """Mark the listing closed locally; if registry discovery is enabled,
-        send the same status update to every registry the listing was published to.
+        """Close the listing as its seller, locally and then at every registry.
 
-        Local close is best-effort: a registry-update failure logs but does not
-        roll back the SQLite write — the seller's local state is the source of
+        The local close must succeed before any registry is told, and a failure
+        there propagates. A registry-update failure after it logs and does not
+        roll back the local close: the seller's local state is the source of
         truth for what's available to negotiate against.
         """
         from market_storefront.services.publication_service import close_order

@@ -32,6 +32,7 @@ def test_selection_freezes_sources_built_from_the_supplied_registry(monkeypatch)
 
     selection = publication_composition.build_storefront_publication_selection(
         registry,
+        contributions=("vms",),
         source_kwargs_by_contribution={"vms": {"one": True}},
     )
 
@@ -39,6 +40,9 @@ def test_selection_freezes_sources_built_from_the_supplied_registry(monkeypatch)
     assert observed == [
         (
             registry,
-            {"source_kwargs_by_contribution": {"vms": {"one": True}}},
+            {
+                "contributions": ("vms",),
+                "source_kwargs_by_contribution": {"vms": {"one": True}},
+            },
         )
     ]

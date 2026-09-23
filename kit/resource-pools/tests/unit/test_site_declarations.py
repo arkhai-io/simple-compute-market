@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from domains.vms.listings.pool_declarations import (
+from market_resource_pools import (
     POOL_ENABLEMENT_UNDECLARED,
     read_site_declarations,
 )
@@ -107,3 +107,17 @@ def test_a_current_producer_that_omits_enablement_is_unresolvable():
     reading = read_site_declarations([_pool("p1", enabled=None, **_DECLARED)])
 
     assert reading.unresolvable["p1"] == (POOL_ENABLEMENT_UNDECLARED,)
+
+
+def test_a_generation_with_no_pools_is_not_read_as_an_older_producer():
+    reading = read_site_declarations([])
+
+    assert reading.compatibility_rule is False
+    assert (dict(reading.resolved), dict(reading.unresolvable)) == ({}, {})
+
+
+def test_a_generation_whose_only_pool_has_no_id_has_no_pools_to_read():
+    reading = read_site_declarations([_pool("")])
+
+    assert reading.compatibility_rule is False
+    assert dict(reading.resolved) == {}

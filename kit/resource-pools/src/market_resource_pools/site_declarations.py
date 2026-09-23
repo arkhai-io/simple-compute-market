@@ -1,22 +1,27 @@
 """Read the advertisement, backing, and enablement a site declares for its pools.
 
-The storefront reads these declarations live from each site's resource-pool
-projection and never caches them. One site's projection generation is judged as a
-whole, because whether an absent tag is a defect depends on whether its producer
-emits the tags at all:
+A consumer of a site's resource-pool projection reads these declarations live
+and never caches them. One site's projection generation is judged as a whole,
+because whether an absent tag is a defect depends on whether its producer emits
+the tags at all:
 
-- A generation in which no pool carries either the advertisement or the backing
-  declaration comes from a producer that predates them. Every pool in it reads as
-  capacity-backed, with its delivery declaration serving as advertisement
-  authorization. That reproduces the contract that applied before the declarations
-  existed; it is not a default applied to a pool that omitted something.
+- A generation containing pools, none of which carries either the advertisement
+  or the backing declaration, comes from a producer that predates them. Every
+  pool in it reads as capacity-backed, with its delivery declaration serving as
+  advertisement authorization. That reproduces the contract that applied before
+  the declarations existed; it is not a default applied to a pool that omitted
+  something.
+- A generation with no pools says nothing about its producer, so it is not read
+  under that rule: there is nothing to read.
 - In any other generation, a pool whose declarations are absent, malformed, or
-  violate a cross-declaration rule is unresolvable. It yields no new listing, and
-  the listings already derived from it are held — neither closed nor refreshed —
-  because an unknown declaration is not a withdrawn one.
+  violate a cross-declaration rule is unresolvable. A consumer derives nothing
+  new from it and holds what it already derived — neither withdrawing nor
+  refreshing it — because an unknown declaration is not a withdrawn one.
 
-See openspec/specs/storefront-publication/spec.md, "Backing is declared by the
-projected pool".
+Each pool resolves through :func:`resolve_pool_declarations`, the one reader of
+these tags, so the site that writes a declaration and every consumer that reads
+one agree on what a valid declaration is. Nothing here is specific to an
+offering mode; a consumer asks :meth:`ResolvedPool.advertises` for its own.
 """
 
 from __future__ import annotations
@@ -25,7 +30,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from market_resource_pools import (
+from .hints import (
     ADVERTISABLE_MODES_POLICY_TAG,
     CAPACITY_BACKED,
     CAPACITY_BACKING_POLICY_TAG,
@@ -34,7 +39,7 @@ from market_resource_pools import (
     resolve_pool_declarations,
 )
 
-# Problem codes this module adds to the resource-pool resolver's own.
+# Problem codes this module adds to the pool resolver's own.
 POOL_ENABLEMENT_UNDECLARED = "pool_enablement_undeclared"
 
 
@@ -61,6 +66,10 @@ class SiteDeclarations:
     compatibility_rule: bool
     resolved: Mapping[str, ResolvedPool] = field(default_factory=dict)
     unresolvable: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+
+
+def _pool_id(pool: Mapping[str, Any]) -> str:
+    return str(pool.get("resource_pool_id") or "").strip()
 
 
 def _policy_tags(pool: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -94,13 +103,12 @@ def _enablement(
 
 def read_site_declarations(pools: Sequence[Mapping[str, Any]]) -> SiteDeclarations:
     """Resolve every pool in one site's projection generation."""
-    compatibility_rule = not any(_declares_either(pool) for pool in pools)
+    named = [pool for pool in pools if _pool_id(pool)]
+    compatibility_rule = bool(named) and not any(_declares_either(p) for p in named)
     resolved: dict[str, ResolvedPool] = {}
     unresolvable: dict[str, tuple[str, ...]] = {}
-    for pool in pools:
-        pool_id = str(pool.get("resource_pool_id") or "").strip()
-        if not pool_id:
-            continue
+    for pool in named:
+        pool_id = _pool_id(pool)
         tags = _policy_tags(pool)
         enabled = _enablement(pool, compatibility_rule=compatibility_rule)
         if enabled is None:

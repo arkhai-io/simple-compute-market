@@ -93,6 +93,7 @@ def test_sources_are_built_from_frozen_registration_order_once():
 
     sources = build_registry_publication_sources(
         registry,
+        contributions=("bare_metal", "vms"),
         source_kwargs_by_contribution={
             "vms": {"price": "2"},
             "bare_metal": {"lease": True},
@@ -116,6 +117,7 @@ def test_unknown_source_kwargs_fail_before_any_factory_call():
     with pytest.raises(KeyError, match="unknown contributions"):
         build_registry_publication_sources(
             registry,
+            contributions=("vms",),
             source_kwargs_by_contribution={"missing": {}},
         )
     assert called is False
@@ -127,7 +129,7 @@ def test_publication_capability_must_return_source():
     )
 
     with pytest.raises(TypeError, match="expected PublicationSource"):
-        build_registry_publication_sources(registry)
+        build_registry_publication_sources(registry, contributions=("vms",))
 
 
 def test_duplicate_returned_source_names_are_rejected():
@@ -142,4 +144,69 @@ def test_duplicate_returned_source_names_are_rejected():
     )
 
     with pytest.raises(ValueError, match="duplicate publication source"):
-        build_registry_publication_sources(registry)
+        build_registry_publication_sources(
+            registry, contributions=("vms", "bare_metal")
+        )
+
+
+def test_only_the_named_contribution_is_built():
+    """A registry holding two domains builds only the publisher's own source.
+
+    The other registration's factory requires arguments this publisher does not
+    have; calling it is the failure a two-domain storefront would otherwise hit
+    on every cycle.
+    """
+    calls: list[str] = []
+
+    def vm_factory(**kwargs):
+        calls.append("vms")
+        return _source("vms")
+
+    def bare_metal_factory(*, projection_snapshot):
+        calls.append("bare_metal")
+        return _source("bare_metal")
+
+    registry = _registry(
+        ("vm", "vms", "compute.v1", vm_factory),
+        ("bare_metal", "bare_metal", "bare_metal.v1", bare_metal_factory),
+    )
+
+    sources = build_registry_publication_sources(
+        registry,
+        contributions=("vms",),
+        source_kwargs_by_contribution={"vms": {}},
+    )
+
+    assert [source.name for source in sources] == ["vms"]
+    assert calls == ["vms"]
+
+
+@pytest.mark.parametrize(
+    ("contributions", "kwargs", "error", "match"),
+    [
+        (("ghost",), {}, KeyError, "unknown contributions: ghost"),
+        (("vms",), {"bare_metal": {}}, KeyError, "not being built: bare_metal"),
+        ((), {}, ValueError, "at least one"),
+        ("vms", {}, TypeError, "collection"),
+    ],
+)
+def test_a_selection_naming_the_wrong_contributions_fails_before_any_factory(
+    contributions, kwargs, error, match
+):
+    called: list[str] = []
+
+    def factory(name):
+        return lambda **_kwargs: called.append(name) or _source(name)
+
+    registry = _registry(
+        ("vm", "vms", "compute.v1", factory("vms")),
+        ("bare_metal", "bare_metal", "bare_metal.v1", factory("bare_metal")),
+    )
+
+    with pytest.raises(error, match=match):
+        build_registry_publication_sources(
+            registry,
+            contributions=contributions,
+            source_kwargs_by_contribution=kwargs,
+        )
+    assert called == []

@@ -142,13 +142,8 @@ class VmPublicationCycle:
         storefront_url: str,
         wallet_address: str,
         dry_run: bool,
-        request_builder: Callable[..., VmCreateListingRequest] | None = None,
     ) -> None:
         self._db = sqlite_client
-        # How a candidate becomes a create request: its durable terms and the
-        # clauses they compile to. Injected so a cycle can be exercised without
-        # the operator's settlement configuration.
-        self._request_builder = request_builder or self._create_request
         self._listings = listing_service
         self._capacity = capacity_runtime
         self._registry = registry
@@ -253,14 +248,22 @@ class VmPublicationCycle:
             member_availability=self._availability,
             site_pool_projection=self._projection,
             site_capacity_buckets=self._buckets,
+            backed_only=False,
         )
         for listing_id in stale:
             self.report.record("close", listing_id=listing_id, reason="source_gone")
         if self.dry_run or not stale:
             return stale
-        return self._await(self._reconciliation_close(stale))
+        result = self._await(self._reconciliation_close(stale))
+        for listing_id in result["failed_closes"]:
+            self.report.record(
+                "fail", listing_id=listing_id, reason="local_close_failed"
+            )
+        return list(result["closed"])
 
-    async def _reconciliation_close(self, listing_ids: list[str]) -> list[str]:
+    async def _reconciliation_close(
+        self, listing_ids: list[str]
+    ) -> dict[str, tuple[str, ...]]:
         bound = tuple(
             [
                 BoundListing(
@@ -270,8 +273,7 @@ class VmPublicationCycle:
                 for listing_id in listing_ids
             ]
         )
-        result = await self._runtime().reconcile(ReconciliationPlan(close=bound))
-        return list(result["closed"])
+        return await self._runtime().reconcile(ReconciliationPlan(close=bound))
 
     def _build_payload(
         self,
@@ -280,7 +282,7 @@ class VmPublicationCycle:
         listing_resource: dict[str, Any],
     ) -> PublicationPayload | str:
         try:
-            request = self._request_builder(source, candidate, listing_resource)
+            request = self._create_request(source, candidate, listing_resource)
             derived = self._await(self._listings.derive_listing(request))
         except Exception as exc:
             self.report.record(
@@ -394,8 +396,7 @@ class VmPublicationCycle:
         stored = await self._db.load_listing(listing_id=listing_id)
         if stored is None:
             return None
-        closed_by = await self._db.load_listing_closed_by(listing_id=listing_id)
-        if closed_by == "seller":
+        if stored.get("closed_by") == "seller":
             self.report.record(
                 "skip", listing_id=listing_id, reason="closed_by_seller"
             )
@@ -461,7 +462,7 @@ class VmPublicationCycle:
         runtime = self._runtime()
         if is_open:
             return await runtime.publish(publication)
-        return await runtime.reopen(publication)
+        return await runtime.reopen(publication, reopened_by="reconciliation")
 
     def _runtime(self) -> Any:
         return build_publication_runtime(

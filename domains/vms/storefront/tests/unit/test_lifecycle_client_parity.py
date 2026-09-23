@@ -101,3 +101,36 @@ def test_every_public_operation_matches_between_the_clients() -> None:
 
     assert set(async_ops) == set(sync_ops)
     assert async_ops == sync_ops
+
+
+def test_both_clients_address_the_publication_loop_alike() -> None:
+    """The loop name reaches the same route and signed operation from either
+    variant, for the step and for its dry run."""
+    import asyncio
+
+    sent: dict[str, list[tuple]] = {"async": [], "sync": []}
+
+    def recorder(variant: str, *, awaitable: bool):
+        def record(path, body, **kwargs):
+            sent[variant].append((path, body, kwargs))
+            return {}
+
+        async def record_async(path, body, **kwargs):
+            return record(path, body, **kwargs)
+
+        return record_async if awaitable else record
+
+    async_client = object.__new__(StorefrontClient)
+    async_client._authenticated_post = recorder("async", awaitable=True)
+    sync_client = object.__new__(SyncStorefrontClient)
+    sync_client._authenticated_post = recorder("sync", awaitable=False)
+
+    for method in ("admin_run_lifecycle_cycle", "admin_dry_run_lifecycle_cycle"):
+        asyncio.run(getattr(async_client, method)("publication"))
+        getattr(sync_client, method)("publication")
+
+    assert sent["async"] == sent["sync"]
+    assert [path for path, _, _ in sent["async"]] == [
+        "/api/v1/admin/lifecycle/publication/run-cycle",
+        "/api/v1/admin/lifecycle/publication/dry-run",
+    ]

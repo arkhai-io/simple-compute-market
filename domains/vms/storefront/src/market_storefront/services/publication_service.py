@@ -116,11 +116,11 @@ async def reopen_order(
     *,
     sqlite_client: Any,
 ) -> dict[str, Any]:
-    """Reopen a listing locally and at every registry, clearing its closure."""
+    """Reopen a seller's own close locally and at every registry, clearing it."""
     return await build_publication_runtime(
         sqlite_client,
         registry_client_factory=_make_registry_client,
-    ).reopen(await _candidate(sqlite_client, order))
+    ).reopen(await _candidate(sqlite_client, order), reopened_by="seller")
 
 
 async def close_order(
@@ -149,7 +149,10 @@ async def close_stale_compute_listings_after_capacity_change(
     site_pool_projection: dict[str, list[dict]] | None = None,
     site_capacity_buckets: dict[str, list[dict]] | None = None,
 ) -> list[str]:
-    """Let VM semantics choose stale candidates; kit executes each close."""
+    """Let VM semantics choose stale candidates; kit executes each close.
+
+    Availability reconciliation: only capacity-backed listings are considered.
+    """
     ids = stale_open_listing_ids(
         db_path,
         home_site=home_site,
@@ -157,6 +160,7 @@ async def close_stale_compute_listings_after_capacity_change(
         member_availability=member_availability,
         site_pool_projection=site_pool_projection,
         site_capacity_buckets=site_capacity_buckets,
+        backed_only=True,
     )
     bound_items: list[BoundListing] = []
     for listing_id in ids:

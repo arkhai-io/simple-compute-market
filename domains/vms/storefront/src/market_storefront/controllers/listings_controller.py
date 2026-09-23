@@ -28,6 +28,7 @@ Admin evaluation (X-Admin-Key, no side effects):
 from __future__ import annotations
 
 import logging
+import sqlite3
 
 from market_storefront.services.listing_service import (
     ListingSourceAlreadyBound,
@@ -185,7 +186,7 @@ class ListingsController:
             # Only a listing its seller withdrew is the seller's to re-list. One
             # reconciliation closed has no source supporting it right now, and
             # the publication loop reopens it when its source does.
-            closed_by = await self._db.load_listing_closed_by(listing_id=listing_id)
+            closed_by = row.get("closed_by")
             if closed_by != "seller":
                 raise HTTPException(
                     status_code=409,
@@ -244,6 +245,17 @@ class ListingsController:
             result = await self._listing_svc.close_listing(listing_id)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
+        except sqlite3.OperationalError as exc:
+            # The close did not reach local state, so no registry was told
+            # either; the seller can simply retry.
+            logger.warning("[LISTINGS] close of %s did not complete: %s", listing_id, exc)
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "listing_close_incomplete",
+                    "hint": "The listing is unchanged; retry the close.",
+                },
+            ) from exc
         except Exception as exc:
             logger.error("[LISTINGS] close unexpected: %s", exc, exc_info=True)
             raise HTTPException(status_code=500, detail=str(exc))

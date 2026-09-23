@@ -37,21 +37,42 @@ def test_build_vm_publication_source_kwargs_maps_callbacks() -> None:
 
 
 
-def test_vm_selection_passes_exact_contribution_kwargs(monkeypatch) -> None:
-    import market_storefront.publication_wiring as wiring
+def _combined_registry():
+    """The registry a storefront selecting both compute domains freezes.
 
-    registry = object()
-    calls = []
+    Built by the same discovery over installed contributions that startup runs,
+    from the selections a combined storefront configures.
+    """
+    from core_storefront.domain_plugins import (
+        discover_storefront_domain_registry,
+        parse_storefront_contribution_selections,
+    )
 
-    def build(candidate, **kwargs):
-        calls.append((candidate, kwargs))
-        return SimpleNamespace(source_names=tuple(kwargs["source_kwargs_by_contribution"]))
+    return discover_storefront_domain_registry(
+        parse_storefront_contribution_selections(
+            [
+                {
+                    "contribution": "vms",
+                    "offering_mode": "vm",
+                    "domain_identity": "compute.v1",
+                    "contract_version": "1.0",
+                },
+                {
+                    "contribution": "bare_metal",
+                    "offering_mode": "bare_metal",
+                    "domain_identity": "bare_metal.v1",
+                    "contract_version": "1.0",
+                },
+            ]
+        )
+    )
 
-    monkeypatch.setattr(wiring, "_build_core_publication_selection", build)
 
-    assert build_vm_storefront_publication_selection(
-        registry, _vm_callbacks()
-    ).source_names == ("vms",)
-    assert calls[0][0] is registry
-    assert tuple(calls[0][1]["source_kwargs_by_contribution"]) == ("vms",)
-    assert all(candidate is registry for candidate, _ in calls)
+def test_vm_selection_builds_only_the_vm_source_beside_bare_metal() -> None:
+    """The bare-metal source needs arguments only its own command supplies."""
+    selection = build_vm_storefront_publication_selection(
+        _combined_registry(), _vm_callbacks()
+    )
+
+    assert selection.source_names == ("vms",)
+    assert [source.name for source in selection.build_sources()] == ["vms"]

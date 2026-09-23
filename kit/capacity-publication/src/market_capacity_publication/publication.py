@@ -13,6 +13,7 @@ from core_storefront.registry_publication import (
     publish_listing_to_registries,
     reopen_listing_in_registries,
 )
+from core_storefront.sqlite_client import SellerClosedListingError
 
 from .capacity import CapacityBindingError, PublicationBinding
 
@@ -65,7 +66,12 @@ class ReconciliationPlan(Generic[PayloadT]):
 
 class PublicationRepository(Protocol):
     async def update_listing(
-        self, *, listing_id: str, status: str, closed_by: str | None = None
+        self,
+        *,
+        listing_id: str,
+        status: str,
+        closed_by: str | None = None,
+        reopened_by: str | None = None,
     ) -> Any: ...
     async def load_publications(self, *, listing_id: str) -> list[dict[str, Any]]: ...
     async def upsert_publication(
@@ -144,13 +150,19 @@ class PublicationRuntime(Generic[PayloadT]):
     async def close(
         self, listing: BoundListing, *, closed_by: str
     ) -> dict[str, Any]:
-        """Close locally and at every registry that still records publication.
+        """Close locally, then at every registry that still records publication.
 
         ``closed_by`` names who closed the listing, ``seller`` or
         ``reconciliation``. Reconciliation reopens only what reconciliation
         closed, so there is no default: a close that did not say would either
         let a capacity event undo a seller's decision or stop reconciliation
         restoring a listing it withdrew.
+
+        The local close is the durable decision, so a failure there propagates
+        before any registry is told: a registry saying closed while the
+        storefront still says open is a state neither side can reconcile from.
+        A registry close that fails after the local close succeeded is retried
+        by the next publication and reconciliation pass.
         """
         if closed_by not in _CLOSED_BY_VALUES:
             raise ValueError(
@@ -158,18 +170,11 @@ class PublicationRuntime(Generic[PayloadT]):
                 f"not {closed_by!r}"
             )
         await self._require_persisted_binding(listing.listing_id, listing.binding)
-        try:
-            await self._repository.update_listing(
-                listing_id=listing.listing_id,
-                status="closed",
-                closed_by=closed_by,
-            )
-        except Exception as exc:
-            logger.warning(
-                "[LOCAL DB] Failed to close listing %s: %s",
-                listing.listing_id,
-                exc,
-            )
+        await self._repository.update_listing(
+            listing_id=listing.listing_id,
+            status="closed",
+            closed_by=closed_by,
+        )
         return await close_listing_in_registries(
             listing.listing_id,
             enabled=self._enabled,
@@ -180,14 +185,26 @@ class PublicationRuntime(Generic[PayloadT]):
         )
 
     async def reopen(
-        self, candidate: PublicationCandidate[PayloadT]
+        self, candidate: PublicationCandidate[PayloadT], *, reopened_by: str
     ) -> dict[str, Any]:
-        """Reopen the exact persisted candidate, then republish it."""
+        """Reopen the exact persisted candidate, then republish it.
+
+        ``reopened_by`` names who is reopening, ``seller`` or
+        ``reconciliation``. The repository refuses a reconciliation reopen of a
+        listing its seller closed with ``SellerClosedListingError``, before any
+        registry is told.
+        """
+        if reopened_by not in _CLOSED_BY_VALUES:
+            raise ValueError(
+                f"reopened_by must be one of {sorted(_CLOSED_BY_VALUES)}, "
+                f"not {reopened_by!r}"
+            )
         await self._require_persisted_binding(candidate.listing_id, candidate.binding)
         self._hooks.validate_candidate(candidate)
         await self._repository.update_listing(
             listing_id=candidate.listing_id,
             status="open",
+            reopened_by=reopened_by,
         )
         published = await self.publish(candidate)
         if published.get("status") != "published":
@@ -208,9 +225,18 @@ class PublicationRuntime(Generic[PayloadT]):
     async def reconcile(
         self, plan: ReconciliationPlan[PayloadT]
     ) -> dict[str, tuple[str, ...]]:
-        """Execute a domain-produced plan with deterministic close-before-reopen order."""
+        """Execute a domain-produced plan with deterministic close-before-reopen order.
+
+        Every close is a reconciliation close and every reopen a reconciliation
+        reopen. A listing whose local close fails is reported under
+        ``failed_closes`` and the rest of the plan continues; a candidate its
+        seller closed is reported under ``seller_closed`` and left closed, so a
+        plan built from a stale view cannot undo a seller's close.
+        """
         closed: list[str] = []
+        failed_closes: list[str] = []
         reopened: list[str] = []
+        seller_closed: list[str] = []
         seen: set[str] = set()
         for listing in plan.close:
             if listing.listing_id in seen:
@@ -218,7 +244,20 @@ class PublicationRuntime(Generic[PayloadT]):
                     f"duplicate listing {listing.listing_id!r} in reconciliation plan"
                 )
             seen.add(listing.listing_id)
-            result = await self.close(listing, closed_by="reconciliation")
+            try:
+                result = await self.close(listing, closed_by="reconciliation")
+            except CapacityBindingError:
+                # A binding that disagrees with durable state is a defect in
+                # the plan, not a close that failed; it stops the plan.
+                raise
+            except Exception as exc:
+                logger.warning(
+                    "[LOCAL DB] reconciliation could not close listing %s: %s",
+                    listing.listing_id,
+                    exc,
+                )
+                failed_closes.append(listing.listing_id)
+                continue
             if str(result.get("status", "?")) in {"closed", "skipped", "queued"}:
                 closed.append(listing.listing_id)
         for candidate in plan.reopen:
@@ -227,7 +266,15 @@ class PublicationRuntime(Generic[PayloadT]):
                     f"listing {candidate.listing_id!r} cannot close and reopen in one plan"
                 )
             seen.add(candidate.listing_id)
-            result = await self.reopen(candidate)
+            try:
+                result = await self.reopen(candidate, reopened_by="reconciliation")
+            except SellerClosedListingError:
+                logger.info(
+                    "[RECONCILE] listing %s was closed by its seller; not reopening it",
+                    candidate.listing_id,
+                )
+                seller_closed.append(candidate.listing_id)
+                continue
             if str(result.get("status", "?")) in {
                 "published",
                 "disabled",
@@ -235,7 +282,12 @@ class PublicationRuntime(Generic[PayloadT]):
                 "queued",
             }:
                 reopened.append(candidate.listing_id)
-        return {"closed": tuple(closed), "reopened": tuple(reopened)}
+        return {
+            "closed": tuple(closed),
+            "failed_closes": tuple(failed_closes),
+            "reopened": tuple(reopened),
+            "seller_closed": tuple(seller_closed),
+        }
 
     async def _require_persisted_binding(
         self, listing_id: str, supplied: PublicationBinding

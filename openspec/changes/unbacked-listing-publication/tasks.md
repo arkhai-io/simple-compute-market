@@ -123,7 +123,7 @@ trigger stays frozen.
         migration after the core expand migration;
       - the raw fixtures in `domains/vms/storefront/tests/unit/test_cli_publish_helpers.py`
         and `domains/vms/storefront/tests/unit/test_reconciler.py`.
-- [ ] 1.8 *(reopened by review: `load_listing` does not return it (8.5))* `sqlite_client.py`: `update_listing` takes `closed_by` for a close and
+- [x] 1.8 *(reopened by review: `load_listing` did not return it; true since 8.5)* `sqlite_client.py`: `update_listing` takes `closed_by` for a close and
       clears it on reopen; `load_listing` returns it.
 
 ## 2. Binding types and negotiation
@@ -347,13 +347,13 @@ named.
 
 ## 6. Validation
 
-- [x] 6.1 **Unit.** Both binding migrations and triggers, including refusal of a
+- [x] 6.1 **Unit and library integration** *(relabelled by 8.18)*. Both binding migrations and triggers, including refusal of a
       `NULL` insert and of an update to `capacity_backing`; the closure-reason
       migration, backfill, and triggers; the binding loader's refusal of an unknown
       value; `CapacityBinding != UnbackedBinding` over equal fields; exhaustive
       filter matching including a listing with no backing under both backed and
       unbacked queries (`core/registry` tests).
-- [ ] 6.2 *(reopened by review: publication and negotiation were proved separately (8.13))* **Integration.** An unbacked listing publishes and then negotiates through
+- [x] 6.2 *(reopened by review, closed by 8.12–8.13: publication and negotiation were proved separately (8.13))* **Integration.** An unbacked listing publishes and then negotiates through
       the real storefront app, exercising the thread binding and the completeness
       trigger.
 - [x] 6.3 **Integration.** An unbacked listing causes no reserve, site, or provider
@@ -361,12 +361,12 @@ named.
       never invoked, and no capacity hold is recorded.
 - [x] 6.4 **Integration.** Publish and query backing through the canonical
       `RegistryClient` against the real registry app.
-- [ ] 6.5 *(reopened by review: evidence is not app-level (8.12))* **Integration.** Removing or disabling a source declaration, and disabling
+- [x] 6.5 *(reopened by review, closed by 8.12–8.13: evidence is not app-level (8.12))* **Integration.** Removing or disabling a source declaration, and disabling
       its pool, closes the published unbacked listing.
-- [ ] 6.5a *(reopened by review: evidence is not app-level (8.12))* **Integration.** A declared shape change that alters the derivation
+- [x] 6.5a *(reopened by review, closed by 8.12–8.13: evidence is not app-level (8.12))* **Integration.** A declared shape change that alters the derivation
       envelope closes the old listing and publishes a new one under a different
       derivation key, leaving the original binding row unmodified.
-- [ ] 6.6 *(reopened by review: evidence is not app-level (8.12))* **Integration.** A backed listing's publication path is unchanged apart
+- [x] 6.6 *(reopened by review, closed by 8.12–8.13: evidence is not app-level (8.12))* **Integration.** A backed listing's publication path is unchanged apart
       from the disclosed backing and the corrections the design lists.
 - [ ] 6.7 **System.** Backed and unbacked listings from one storefront are returned
       by one buyer query across running services. Gated on
@@ -374,25 +374,28 @@ named.
 - [ ] 6.8 **System.** Two seller sites publishing unbacked supply to one storefront
       retain distinct origin and source identity. Gated on that change's Sections 1–3
       and 3b.
-- [ ] 6.9 **Integration.** The real provisioning app emits `capacity_backing` and
+- [x] 6.9 **Integration.** The real provisioning app emits `capacity_backing` and
       `advertisable_modes`, the canonical site client parses them, and the storefront
       consumes that exact response.
-- [ ] 6.10 *(reopened by review: evidence is not app-level (8.12))* **Integration.** Old-producer skew: a projection carrying neither tag on
+      Done by 8.17, split at the site client's contract fixture: the real
+      provisioning app's response is validated on one side and the storefront's
+      publication tests consume the same built shape on the other.
+- [x] 6.10 *(reopened by review, closed by 8.12–8.13: evidence is not app-level (8.12))* **Integration.** Old-producer skew: a projection carrying neither tag on
       any pool resolves every pool as backed with delivery serving as advertisement,
       so a previously valid backed listing still publishes, and system status reports
       the compatibility rule. A projection carrying the tags on some pools and neither
       on one holds that pool. The older-producer projection is a recorded site-client
       response, because no current provisioning image can emit one.
-- [ ] 6.10a *(reopened by review: evidence is not app-level (8.12))* **Integration.** A `capacity_backing` value outside the two holds that pool,
+- [x] 6.10a *(reopened by review, closed by 8.12–8.13: evidence is not app-level (8.12))* **Integration.** A `capacity_backing` value outside the two holds that pool,
       and system status names its problem codes.
 - [x] 6.11 **System — decided not to add.** Mixed site and storefront versions are
       supported, but an upgraded provisioning service refuses to start with a pool
       lacking valid declarations, so no deployed pipeline can host an old producer.
       6.10 is the coverage.
-- [ ] 6.12 *(reopened by review: evidence is not app-level (8.12))* **Integration.** A supply move from an unbacked pool to a backed one
+- [x] 6.12 *(reopened by review, closed by 8.12–8.13: evidence is not app-level (8.12))* **Integration.** A supply move from an unbacked pool to a backed one
       closes the old listing and binds a new one under a different identity and
       derivation key; the original binding row is unmodified.
-- [ ] 6.13 *(reopened by review: evidence is not app-level (8.12))* **Integration.** After republication, no listing in storefront-local state
+- [x] 6.13 *(reopened by review, closed by 8.12–8.13: evidence is not app-level (8.12))* **Integration.** After republication, no listing in storefront-local state
       lacks an explicit backing value. Count, do not sample. Registry copies across
       independently operated deployments are rollout evidence, not a test here.
 - [x] 6.14 **Integration.** An unbacked listing reaches acceptance and
@@ -400,39 +403,44 @@ named.
 - [x] 6.15 **Unit.** A declaration with no `gpu_count` yields no listing and a notice;
       zero yields none silently; a malformed count holds the member, and a whole
       fungible pool; no key builder substitutes a count.
-- [ ] 6.16 *(reopened by review: API credits violate it (8.1–8.4))* **Integration.** Durable seller close: a seller-closed listing stays closed
+- [x] 6.16 *(reopened by review: API credits violated it; closed by 8.1–8.4. The
+      publication-cycle half moves to the real app in 8.12)* **Integration.** Durable seller close: a seller-closed listing stays closed
       through a capacity release and a publication cycle, and no replacement binds;
       `resume` reopens it; `resume` on a reconciliation-closed listing returns 409
       and changes nothing; a close naming no reason is refused.
-- [ ] 6.17 **Integration.** Publication loop controls through the typed client: the
+- [x] 6.17 **Integration.** Publication loop controls through the typed client: the
       lifecycle pause holds the loop; two dry runs report the same plan and change
       nothing; a run-cycle while held applies exactly that plan and leaves the loop
       held; a projection generation change wakes an unheld loop. Add the
       sync/async parity check for the loop name in the storefront's unit suite.
-- [ ] 6.18 **Integration.** Refresh and reopen gating: a pool pricing change updates
+      Done by 8.14 (typed client, real app) with the unit coverage noted above.
+- [x] 6.18 **Integration.** Refresh and reopen gating: a pool pricing change updates
       an open listing in place at every registry; a changed `gpu_model` or pool
       `region` tag closes the listing and a later capacity release does not reopen it;
       a listing without published backing gains it in place; the site-reset case logs
       its refusal, leaves the listing closed, and binds nothing new.
-- [ ] 6.19 **Unit and integration.** The inventory guard: declared match without any
+      Done: storefront state as noted above, and the registry side by 8.15.
+- [x] 6.19 **Unit and integration.** The inventory guard: declared match without any
       availability read or site call for an unbacked listing; `no_matching_declaration`
       for a shrunk or disabled declaration; rejection when only another pool or site
       matches; a fungible match on one member; availability read from the pinned
       site only, with other sites receiving zero calls; the same checks in
       `evaluate-negotiate` round zero.
+      Done: unit coverage as noted above, and round zero through the admin route
+      by 8.16.
 - [x] 6.20 **Unit and integration.** Settlement options for unbacked listings: options
       whose mechanism fulfils through capacity are dropped with a notice; a candidate
       left with none yields no listing; backed candidates are unaffected. Integration
       injects a declaration marking one registered mechanism as not fulfilling through
       capacity, so 6.2, 6.3, 6.5, 6.5a, 6.12, 6.14, 6.16, and 6.18 can exercise
       unbacked listings before contact exchange is composed for VM.
-- [ ] 6.21 *(reopened by review: the integration half is not app-level (8.18))* **Unit and integration.** Bare metal: the listing model refuses a listing
+- [x] 6.21 *(reopened by review: the integration half is not app-level; relabelled by 8.18)* **Unit and library integration.** Bare metal: the listing model refuses a listing
       without `capacity_backing`; publication sets it; a term change refreshes in
       place and an identity change closes and refuses; both binding writers name
       backing.
 - [x] 6.22 **Unit.** `market-storefront publish` calls only the storefront API through
       the typed client and opens no database; each retired flag is rejected.
-- [ ] 6.23 *(reopened by review: evidence is not app-level (8.12))* **Integration.** Regression for the confirmed migrated-database defect: on a
+- [x] 6.23 *(reopened by review, closed by 8.12–8.13: evidence is not app-level (8.12))* **Integration.** Regression for the confirmed migrated-database defect: on a
       database carrying the retirement triggers, close and reopen complete with no
       write to `derived_compute_listings`.
 - [x] 6.24 **System.** Audit every VM scenario that creates listings —
@@ -470,12 +478,16 @@ named.
       any remaining rationale into `design.md` first.
 - [ ] 7.5 **Roadmap currency.** In `docs/development/ROADMAP.md`, remove this change's
       row from Goal 7's gap table and absorb the result into that goal's
-      current-state prose. Goal 7 keeps its rate-comparison gap, and its introduction
-      gap until `compose-contact-exchange-across-compute` lands.
+      current-state prose. Goal 7 keeps its rate-comparison gap, its introduction
+      gap until `compose-contact-exchange-across-compute` lands, and gains a
+      bare-metal advertisement gap owned by
+      `bare-metal-publication-reads-pool-declarations`.
 - [ ] 7.6 **Campaign index currency.** Update this change's row and Goal 7's
       dependency graph in `openspec/changes/README.md`, including the system-evidence
       gate on `compose-contact-exchange-across-compute` and the completion dependency
-      on `pools-9-retire-local-physical-authority`.
+      on `pools-9-retire-local-physical-authority`. The row and graph edge for
+      `bare-metal-publication-reads-pool-declarations` were added when it was
+      created; confirm them.
 - [ ] 7.7 **Promotion.** Promote, after code review:
       - `openspec/specs/storefront-publication/spec.md`,
         `openspec/specs/registry-discovery/spec.md`, and
@@ -502,98 +514,241 @@ named.
 - [ ] 7.9 **End-to-end pipeline.** Confirm the end-to-end pipeline (`make
       test-deployment`) passes and record the run, its result, and the scenarios that
       exercise this change: 6.7, 6.8, and the 6.24 scenarios. Gated like 6.7 and 6.8.
+      The system tier advances individual stages and does not run the publication
+      loop; record that the loop's evidence is the integration suite (E3), not a
+      scenario. Run 3 (114 passed, 3 skipped) predates E1 and is not this evidence.
       If the pipeline cannot run for an unrelated reason, record the blocker, its
       cause, and the change that owns it, and treat the gated validations as unrun.
 
 ## 8. Code review remediation
 
-Decisions and reasons: `design.md`, "Decisions from the code review". Order: R1–R3,
-then R7–R8, then R6, then R4–R5 together with 6.2, 6.9, and 6.17–6.19, then
-closeout (Section 7). Run every affected suite, `make check-reinit`, and `make dist`
+Decisions and reasons: `design.md`, "Decisions from the code review" and "Decisions
+from the third end-to-end run". Order: R1–R3, then R7–R8, then R6 with E1 and E2,
+then R4–R5 together with 6.2, 6.9, and 6.17–6.19, then closeout (Section 7). Run every affected suite, `make check-reinit`, and `make dist`
 after each group; each group can be its own fileset.
 
 **Correctness (R1–R3)**
 
-- [ ] 8.1 **Core reopen guard (R1).** `core/storefront/src/core_storefront/sqlite_client.py`:
+- [x] 8.1 **Core reopen guard (R1).** `core/storefront/src/core_storefront/sqlite_client.py`:
       `update_listing(status="open")` on a seller-closed listing raises unless called
       with `reopened_by="seller"`; state the refusal's reason in the exception. Unit
       tests: reconciliation reopen of a seller close refused; seller reopen allowed and
       clears `closed_by`; reconciliation reopen of a reconciliation close allowed.
-- [ ] 8.2 **Kit reopen names who reopens (R1).**
+      Done. The guard is `write_listing_update` in `core_storefront.sqlite_client`, a
+      connection-level write inside the caller's `BEGIN IMMEDIATE` transaction;
+      `update_listing` wraps it and raises `SellerClosedListingError`. It also keeps
+      `seller` when reconciliation closes an already seller-closed listing, and the
+      upsert conflict path refuses to overwrite a seller's close. Tests are real-DB
+      library integration, in the new `core/storefront/tests/integration/`
+      (`test_listing_closure.py`), which `make test` now runs; 4 of 8 fail without
+      the guard.
+- [x] 8.2 **Kit reopen names who reopens (R1).**
       `kit/capacity-publication/src/market_capacity_publication/publication.py`:
       `reopen` takes the reopener and passes it to the repository; `reconcile` passes
       reconciliation and skips a seller-closed candidate, reporting it, rather than
       failing the plan. The VM storefront's `reopen_order` (used by `resume`) passes
       seller.
-- [ ] 8.3 **API credits (R1).** `domains/apicredits/listings/reconciler.py`
+      Done. `reopen` requires `reopened_by`; `reconcile` reports a seller-closed
+      candidate under `seller_closed`. The VM `resume` reopens as the seller; the
+      loop, admin release, and failure-handling reopens name reconciliation.
+- [x] 8.3 **API credits (R1).** `domains/apicredits/listings/reconciler.py`
       (`reopenable_credit_listing_ids`) and the storefront's capacity reopen in
       `domains/apicredits/storefront/.../services/publication_service.py` exclude
       seller-closed listings. Regression test through the API-credits storefront: seller
       close, quota returns, capacity reconciliation does not reopen it.
-- [ ] 8.4 **Bare metal (R1).** `reopen_derived_bare_metal_listing_if_present` reopens
+      Done. `reopenable_credit_listing_ids` admits only reconciliation closes. The
+      regression enters the capacity-event reconciler (`_capacity_reconciler`) with a
+      `released` delta over a real database; the API-credits storefront exposes no
+      capacity-event control through its typed client, so it cannot be driven from
+      the app (recorded in `design.md`). It fails only with both this predicate and
+      the core guard removed; the predicate has its own unit test.
+- [x] 8.4 **Bare metal (R1).** `reopen_derived_bare_metal_listing_if_present` reopens
       through `update_listing` instead of raw SQL, and `load_derived_bare_metal_listing`
       or its caller sees `closed_by`. Regression test: a seller-closed bare-metal listing
       is not reopened by its publication command.
-- [ ] 8.5 **Closure provenance in the listing (R2).** `load_listing` and
+      Done. Bare metal's reopen and reconciliation close go through
+      `write_listing_update`, imported where used because the package root is
+      installed without the storefront extra by the buyer and provisioning adapters.
+      The reopen reads `closed_by` and leaves a seller close as a clean skip. Tests
+      drive the core publication runner: a seller close stays closed with no failure
+      and nothing published; a reconciliation close reopens in place.
+- [x] 8.5 **Closure provenance in the listing (R2).** `load_listing` and
       `list_listings` return `closed_by`; remove `load_listing_closed_by` and move its
       callers (VM publication loop, listings controller `resume`, reconciler predicates
       as needed) onto the listing's own field. Task 1.8 is then true as written.
-- [ ] 8.6 **Close is local first (R3).** `PublicationRuntime.close` lets a local
+      Done. Both return `closed_by`; `load_listing_closed_by` is gone and its
+      callers read the listing.
+- [x] 8.6 **Close is local first (R3).** `PublicationRuntime.close` lets a local
       failure propagate before any registry close; `reconcile` records a failed close
       per listing and continues. Failure-ordering test: the repository raises, the
       registry is never called, and the error reaches the caller.
+      Done. The kit's close lets a local failure propagate before any registry;
+      `reconcile` reports `failed_closes` and continues, and the VM loop records each
+      as a `fail` action. The VM close route answers a local database failure with
+      503 `listing_close_incomplete` (controller unit test).
 
 **Structure (R7, R8, R6)**
 
-- [ ] 8.7 **No hidden reconciler state (R7).** Replace `_BINDING_BACKING` in
+- [x] 8.7 **No hidden reconciler state (R7).** Replace `_BINDING_BACKING` in
       `domains/vms/listings/reconciler.py` with an immutable row record (listing ID,
       listing resource, site, binding backing) returned by `_bound_vm_listings`.
-- [ ] 8.8 **Capacity events are backed-only (R8).** The capacity-event path in
+      Done. `BoundVmListing` (listing ID, listing resource, site, binding backing)
+      replaces the process-global map; `closed_available_listing_ids` reads the
+      backing from the row.
+- [x] 8.8 **Capacity events are backed-only (R8).** The capacity-event path in
       `domains/vms/storefront/src/market_storefront/services/capacity_client.py` (and
       the admin release and failure-handling reopen paths that share its predicates)
       acts only on listings bound as backed. Test through the real capacity-event
       path: one backed and one unbacked listing, an availability-only delta, only the
       backed listing changes.
-- [ ] 8.9 **Declaration reader in the kit (R6).** Move the site-generation reader
+      Done. `stale_open_listing_ids` takes a required `backed_only`: the loop passes
+      `False`, the capacity-event close and the admin release handler `True`.
+      `closed_available_listing_ids`, whose callers are all availability paths,
+      reads backed listings only. The test publishes one listing of each kind
+      through the loop, then enters the capacity-event reconciler with
+      availability-only deltas: a drop closes only the backed listing and a release
+      reopens only the backed one. The reopen half fails without the filter; the
+      close half held already, because unbacked slices range over declared
+      quantity. It lives in `test_publication_loop.py` with the world it shares and
+      moves onto the real app with that file in 8.12.
+- [x] 8.9 **Declaration reader in the kit (R6).** Move the site-generation reader
       (`read_site_declarations`, `ResolvedPool`, `SiteDeclarations`, the enablement
       reason) from `domains/vms/listings/pool_declarations.py` into
       `kit/resource-pools/src/market_resource_pools/` beside `resolve_pool_declarations`,
       with its tests; VM imports it. Bump the kit's version if its public surface
-      changes, and add `reinit` lines where its consumers need them.
-- [ ] 8.10 **Bare-metal advertisement (R6 follow-up).** Confirm whether bare-metal
+      changes, and add `reinit` lines where its consumers need them. In the move, a
+      generation with no pools is not read under the compatibility rule (E2); unit
+      test that an empty generation reports no compatibility reading.
+      Done. `market_resource_pools.site_declarations`, exported from the package;
+      `domains/vms/listings/pool_declarations.py` and its VM test file are
+      tombstoned, and the tests live in
+      `kit/resource-pools/tests/unit/test_site_declarations.py`. E2: a generation
+      with no named pools is not read under the compatibility rule (two tests, both
+      failing under the old rule). The reconciler keeps its import local, since the
+      buyer installs `arkhai-vms-listings` without the `pools` extra; the buyer suite
+      passes with no resource-pools kit installed. The kit stays at 0.2.0: the
+      addition is additive and a bump would force every consumer's lock, so `reinit`
+      reinstalling it carries the change, as for the other packages this section
+      touches.
+- [x] 8.10 **Bare-metal advertisement (R6 follow-up).** Confirm whether bare-metal
       publication reads a pool's `advertisable_modes`. If it does not, report the
       finding before changing anything: fixing it may be out of this change's scope.
+      Done: it does not. Decided to record it rather than fix it here (`design.md`,
+      R6 follow-up): the new change `bare-metal-publication-reads-pool-declarations`
+      owns it, indexed under Goal 7, and the advertisement requirement is scoped to
+      listings derived from the resource-pool projection.
+- [x] 8.10a **Publishers name their contributions (E1).**
+      `core/storefront/src/core_storefront/publication_plugins.py` and
+      `publication_composition.py`: the builder takes the exact contributions to
+      build and refuses a name no registration carries before calling any factory.
+      `domains/vms/storefront/src/market_storefront/publication_wiring.py` names
+      `vms`; `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/publication.py`
+      names its resolved registration. Core unit tests: a two-contribution registry
+      builds only the named source and calls no other factory; an unknown name fails
+      first. Replace `test_publication_wiring.py`'s patched core builder with a real
+      two-contribution registry. The app-level proof is 8.11's fixture.
+      Done. Core requires `contributions` and refuses, before any factory runs, an
+      unregistered name, arguments for a contribution not being built, an empty
+      selection, or a bare string. The VM loop resolves its registration by
+      offering mode. `test_publication_wiring.py` builds the registry through
+      startup discovery from a two-domain selection instead of patching the core
+      builder; it and the core test fail with the builder building every
+      registration.
 
 **Test levels (R4–R5) and the open validation**
 
-- [ ] 8.11 **Real-app publication fixture.** An integration fixture running the VM
-      storefront app with its container wired, a patched site projection, a configured
-      settlement composition, and the canonical `StorefrontClient`. Reuse the
-      listings-API and negotiate-controller fixtures' patterns.
-- [ ] 8.12 **Convert every publication-loop case.** Every case in
+- [x] 8.11 **Real-app publication fixture.** An integration fixture running the VM
+      storefront app with its container wired, a patched site projection, real
+      `[Settlement]` and `[pricing].settlements` configuration compiled by the loop's
+      own request path, a settlement-composition double at the mechanism boundary
+      declaring per test which mechanisms fulfil through capacity (`design.md`,
+      R4–R5), and the canonical `StorefrontClient`. Reuse the admin-API and
+      negotiate-controller fixtures' app and chain patterns. Register both `vms`
+      and `bare_metal`, as the combined e2e storefront does, so every loop test runs
+      under the registry that exposed E1.
+      Done: `domains/vms/storefront/tests/publication_app.py`. Settings select both
+      `vms` and `bare_metal`; `storefront_domains`, `settlement`, and
+      `pricing.settlements` are replaced rather than overridden, since an override
+      merges into the test configuration's lists. The double carries an integral
+      clause rate into the escrow's base-unit rate. An opt-in `negotiation` flag adds
+      the negotiation route, its runtime, and a buyer client.
+- [x] 8.12 **Convert every publication-loop case.** Every case in
       `tests/integration/test_publication_loop.py` drives the loop through
       `admin_run_lifecycle_cycle("publication")` or
       `admin_dry_run_lifecycle_cycle("publication")` and asserts through the client
       where an API exists. Cases that only make sense directly become unit tests with
       mocked collaborators. Remove `VmPublicationCycle`'s injected `request_builder` if
       nothing then uses it.
-- [ ] 8.13 **6.2 in one flow.** One test publishes an unbacked listing through the loop
+      Done. All eighteen cases run through the client; none needed to become a unit
+      test. Bindings, which no API exposes, are read from storefront persistence, and
+      raw SQL is used only for state no API reaches. The R8 case now advances the
+      `capacity-events` loop through its route. Reverting E1's builder fails all
+      eighteen; reverting R8's filter fails only its own. `request_builder` is
+      removed.
+- [x] 8.13 **6.2 in one flow.** One test publishes an unbacked listing through the loop
       and negotiates it to acceptance through the same app.
-- [ ] 8.14 **6.17.** Through the typed client: pause holds the loop, dry-run twice
+      Done: `test_an_unbacked_listing_publishes_and_negotiates_to_acceptance`, with
+      no reservation or hold at any point.
+- [x] 8.14 **6.17.** Through the typed client: pause holds the loop, dry-run twice
       reports the same actions and changes nothing, run-cycle while held applies one
       cycle and leaves the loop held, and the sync and async clients accept the loop
       name alike. (A projection change waking an idle loop is covered in
       `tests/unit/test_loop_gate_wiring.py`.)
-- [ ] 8.15 **6.18.** The registry side of an in-place refresh and of a reopen, through
+      Done. `test_the_lifecycle_pause_holds_the_loop_while_its_controls_step_it`
+      starts the loop as startup does while held: the pause reports it `paused`,
+      two dry runs match and change nothing, `run-cycle` applies exactly that plan,
+      and the loop is still `paused` after. It fails with the loop's gate removed
+      (the loop reports `starting`). `test_both_clients_address_the_publication_loop_alike`
+      checks both variants send the same route and operation for the step and the
+      dry run; signature parity was already covered.
+- [x] 8.15 **6.18.** The registry side of an in-place refresh and of a reopen, through
       a registry reachable by the app, in addition to storefront state.
-- [ ] 8.16 **6.19.** Round zero of `evaluate-negotiate` runs the guard, through the admin
+      Done. The fixture's opt-in `registries` replaces `MultiRegistryClient`, where
+      this codebase wraps the independently operated registries, with a recorder
+      across two configured registries with development authority pins; the
+      registry's own side is 6.4's. A term refresh republishes in place to both with
+      no status change; a reconciliation close sends `closed` to both; a reopen
+      republishes and sends `open` to both. The reopen test fails when the kit's
+      `reopen` omits the explicit registry reopen.
+- [x] 8.16 **6.19.** Round zero of `evaluate-negotiate` runs the guard, through the admin
       route.
-- [ ] 8.17 **6.9.** One integration test: the provisioning app emits both declarations,
+      Done. `test_round_zero_evaluation_runs_the_inventory_guard` evaluates an opening
+      round against a loop-published unbacked listing: `accept` while its declaration
+      supports it, `reject` with `no_matching_declaration` once the declaration
+      shrinks and before any cycle closes the listing. This is new evidence for
+      behaviour already implemented; it was not re-verified by reverting round
+      zero's hook construction.
+- [x] 8.17 **6.9.** One integration test: the provisioning app emits both declarations,
       the canonical site client parses them, and the storefront consumes them.
-- [ ] 8.18 **Library tests out of `unit/`.** Move the core migration and trigger tests
+      Done through a contract fixture (`design.md`, R4–R5):
+      `kit/site-client/src/market_site_client/fixtures/resource_pools.py`, with its
+      own unit test that the validator refuses a missing declaration, enablement,
+      metadata, or capacity. Producer: the provisioning integration test
+      `test_the_projection_carries_both_declarations_as_storefronts_read_them`
+      creates a backed and an unbacked pool (its member naming no host) through the
+      pool API, reads the projection through `SiteCapacityClient`, validates it, and
+      resolves it through `read_site_declarations`. Consumer: the storefront
+      fixture's `pool()` builds every projection with the same builders.
+- [x] 8.18 **Library tests out of `unit/`.** Move the core migration and trigger tests
       that open a real database from `core/storefront/tests/unit/` to
       `core/storefront/tests/integration/`, and relabel any other claim in Section 6
       whose evidence is at a different level than it states.
+      Done. `test_domain_binding_migrations.py` moved to
+      `core/storefront/tests/integration/`, beside `test_listing_closure.py`; it
+      reuses the unit suite's test contract rather than copying it. The other
+      real-database files in `core/storefront/tests/unit/` predate this change and
+      move when next touched. Relabelled: 6.1 (its migration and trigger evidence is
+      library integration), and 6.21, whose integration half is bare metal's
+      operator-invoked publication command run through the core publication runner
+      against a real database, since bare-metal publication has no service route
+      to drive.
+- [ ] 8.19 **Version `kit/resource-pools` and `kit/site-client`.** Once every
+      Section 8 change is in place and `make test` passes, bump
+      `arkhai-kit-resource-pools` for the `site_declarations` addition and
+      `arkhai-kit-site-client` for its `fixtures` subpackage, raise `arkhai-vms-listings`' `pools` extra to
+      require it, and update every consumer's lock (the VM storefront's by hand, as
+      its torch index cannot be reached from the build container), then rerun
+      `make check-reinit` and the consumers' suites.
 
 ## Plan history
 
@@ -633,7 +788,7 @@ The pre-revision plan was replaced during planning. Its tasks map as follows:
 | Projected pool declarations are judged jointly per site generation; unresolvable pools are held | `openspec/specs/storefront-publication/spec.md` |
 | Claim construction describes what happens when capacity admission is requested | `openspec/specs/site-capacity/spec.md` |
 | A published shape comes from its source declaration; a declaration with no enumeration quantity yields no listing | `openspec/specs/storefront-publication/spec.md` |
-| A listing advertises only a mode its pool declares advertisable, backed or not | `openspec/specs/storefront-publication/spec.md` |
+| A listing derived from the resource-pool projection advertises only a mode its pool declares advertisable, backed or not; bare metal is outside it until `bare-metal-publication-reads-pool-declarations` | `openspec/specs/storefront-publication/spec.md` |
 | The seller's inventory guard rechecks a listing against a fresh derivation of its own source, and checks availability only for backed listings | `openspec/specs/storefront-publication/spec.md` |
 | The common listing binding is the only VM listing mapping | `openspec/specs/storefront-publication/spec.md` |
 | An unbacked listing publishes only settlement options its domain does not fulfil through capacity | `openspec/specs/storefront-publication/spec.md` |

@@ -103,11 +103,13 @@ reasons it could not be resolved.
 
 ### Requirement: A listing advertises only a mode its pool authorizes
 
-A listing derived from a Resource Pool MUST offer only an offering mode that pool
-declares advertisable, whether the listing is capacity-backed or unbacked. The
-listing's offering mode continues to resolve from the frozen contribution
-registration, and the public offer's mode MUST continue to equal the recorded
-offering mode.
+A listing a storefront derives from a site's resource-pool projection MUST offer only
+an offering mode its Resource Pool declares advertisable, whether the listing is
+capacity-backed or unbacked. The listing's offering mode continues to resolve from
+the frozen contribution registration, and the public offer's mode MUST continue to
+equal the recorded offering mode. Bare-metal publication derives its candidates from
+the site's capacity snapshot rather than that projection, and reads no pool
+declaration.
 
 The pool's delivery authorization MUST continue to be rechecked at reservation,
 scheduling, and provider dispatch, and those rechecks apply only to capacity-backed

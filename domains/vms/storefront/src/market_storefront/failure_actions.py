@@ -305,7 +305,9 @@ async def _release_capacity(
                 member_availability=await capacity_availability(runtime.client()),
             )
         for listing_id in reopened:
-            await db.update_listing(listing_id=listing_id, status="open")
+            await db.update_listing(
+                listing_id=listing_id, status="open", reopened_by="reconciliation"
+            )
         result.reopened_listing_ids = reopened
     return result
 
