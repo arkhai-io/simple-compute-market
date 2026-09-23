@@ -17,7 +17,12 @@ from core_storefront.domain_registry import (
     StorefrontListingBinding,
     build_storefront_derivation_key,
 )
-from core_storefront.sqlite_migrations import migrate_storefront_domain_bindings_schema
+from core_storefront.sqlite_migrations import (
+    migrate_listing_binding_capacity_backing,
+    migrate_listing_binding_capacity_backing_required,
+    migrate_listing_closed_by,
+    migrate_storefront_domain_bindings_schema,
+)
 from market_identity import Identity
 from market_site.projections import resource_pool_projection
 
@@ -28,21 +33,16 @@ from domains.vms.listings.reconciler import (
     _fungible_availability_from_buckets,
     _member_available_units,
     _project_legacy_resource_row,
-    _projected_pool_rows,
+    _projected_pool_rows as _projected_pool_rows_impl,
+    _SiteDerivationReport,
     _projected_resource_usage,
     available_compute_slices,
     closed_available_listing_ids,
     current_available_resource_keys,
-    ensure_derived_compute_listings_table,
     listing_pool_key,
     listing_resource_key,
-    load_derived_listing_for_slice,
-    mark_derived_listings_closed,
-    mark_derived_listings_open,
     open_listing_resource_keys,
     pool_id_for_listing,
-    record_derived_listing,
-    reopen_local_derived_listing,
     site_id_for_listing,
     stale_open_listing_ids,
 )
@@ -88,6 +88,29 @@ def _project_vm_pool_rows(pool: dict, **kwargs):
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
+
+def _projected_pool_rows(pool, **kwargs):
+    """Call the row builder the way a projection pass does for one pool.
+
+    The declaration is read from the pool's own projected tags under the same
+    per-site rule, so a test pool carrying no declarations reads under the
+    compatibility rule exactly as a lone pool from an older producer would.
+    """
+    from domains.vms.listings.pool_declarations import (
+        ResolvedPool,
+        read_site_declarations,
+    )
+
+    pool_id = str(pool.get("resource_pool_id") or "").strip()
+    declaration = read_site_declarations([pool]).resolved.get(pool_id) or ResolvedPool(
+        "backed", frozenset(), True
+    )
+    kwargs.setdefault("declaration", declaration)
+    kwargs.setdefault("holds", set())
+    kwargs.setdefault("report", _SiteDerivationReport())
+    return _projected_pool_rows_impl(pool, **kwargs)
+
 
 @pytest.fixture
 def db_path(tmp_path) -> str:
@@ -147,6 +170,9 @@ def db_path(tmp_path) -> str:
             """
         )
         migrate_storefront_domain_bindings_schema(conn)
+        migrate_listing_binding_capacity_backing(conn)
+        migrate_listing_binding_capacity_backing_required(conn)
+        migrate_listing_closed_by(conn)
         conn.commit()
     finally:
         conn.close()
@@ -254,6 +280,7 @@ def _seed_listing_binding(
         ),
         source_envelope=source,
         last_reconciled_at="2026-08-15T00:00:00Z",
+        capacity_backing="backed",
         pool_id=pool_id,
         physical_resource_id=resource_id,
     )
@@ -266,8 +293,9 @@ def _seed_listing_binding(
             INSERT INTO storefront_listing_bindings(
               listing_id, site_id, pool_id, physical_resource_id,
               offering_mode, domain_identity, contract_major, contract_minor,
-              derivation_key, source_envelope_json, last_reconciled_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              derivation_key, source_envelope_json, last_reconciled_at,
+              capacity_backing
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             tuple(values.values()),
         )
@@ -281,6 +309,7 @@ def _seed_listing(
     *,
     listing_id: str,
     status: str = "open",
+    closed_by: str | None = None,
     pool_id: str | None = "gpu-pool",
     resource_id: str | None = None,
     gpu_count: int = 2,
@@ -294,8 +323,16 @@ def _seed_listing(
     conn = sqlite3.connect(db_path)
     try:
         conn.execute(
-            "INSERT INTO listings(listing_id, status, listing_resource) VALUES (?, ?, ?)",
-            (listing_id, status, json.dumps(listing_resource)),
+            "INSERT INTO listings(listing_id, status, listing_resource, closed_by) "
+            "VALUES (?, ?, ?, ?)",
+            (
+                listing_id,
+                status,
+                json.dumps(listing_resource),
+                closed_by
+                if closed_by is not None or status != "closed"
+                else "reconciliation",
+            ),
         )
         conn.commit()
     finally:
@@ -591,13 +628,6 @@ class TestSiteIdForListing:
     def test_returns_none_when_listing_has_no_durable_binding(self, db_path):
         assert site_id_for_listing(db_path, "listing-1") is None
 
-    def test_derived_row_does_not_supply_durable_site_authority(self, db_path):
-        record_derived_listing(
-            db_path, listing_id="listing-other", site_id="site-a",
-            pool_id="gpu-pool", resource_id=None, gpu_count=2,
-        )
-        assert site_id_for_listing(db_path, "listing-other") is None
-
     def test_returns_the_registry_owned_binding_site(self, db_path):
         _seed_listing(
             db_path,
@@ -611,74 +641,6 @@ class TestSiteIdForListing:
 
 # ---------------------------------------------------------------------------
 # record_derived_listing / load_derived_listing_for_slice round trip
-# ---------------------------------------------------------------------------
-
-class TestRecordAndLoad:
-    def test_round_trips_site_id(self, db_path):
-        record_derived_listing(
-            db_path, listing_id="listing-1", site_id="site-a",
-            pool_id="gpu-pool", resource_id=None, gpu_count=2,
-        )
-        loaded = load_derived_listing_for_slice(
-            db_path, site_id="site-a", pool_id="gpu-pool", gpu_count=2,
-        )
-        assert loaded is not None
-        assert loaded["site_id"] == "site-a"
-        assert loaded["listing_id"] == "listing-1"
-
-    def test_same_pool_different_site_does_not_match(self, db_path):
-        record_derived_listing(
-            db_path, listing_id="listing-1", site_id="site-a",
-            pool_id="gpu-pool", resource_id=None, gpu_count=2,
-        )
-        loaded = load_derived_listing_for_slice(
-            db_path, site_id="site-b", pool_id="gpu-pool", gpu_count=2,
-        )
-        assert loaded is None
-
-    def test_two_specific_resource_listings_from_the_same_pool_coexist(
-        self, db_path,
-    ):
-        """Regression for the `use_pool_key` collision bug: two
-        specific_resource candidates from the same multi-member pool, at
-        the same gpu_count, must persist as two independent rows -- not
-        collapse onto one shared pool-keyed derivation_key and silently
-        overwrite each other."""
-        record_derived_listing(
-            db_path, listing_id="listing-1", site_id="site-a",
-            pool_id="gpu-pool", resource_id="res-1", gpu_count=4,
-        )
-        record_derived_listing(
-            db_path, listing_id="listing-2", site_id="site-a",
-            pool_id="gpu-pool", resource_id="res-2", gpu_count=4,
-        )
-        loaded_1 = load_derived_listing_for_slice(
-            db_path, site_id="site-a", resource_id="res-1", gpu_count=4,
-        )
-        loaded_2 = load_derived_listing_for_slice(
-            db_path, site_id="site-a", resource_id="res-2", gpu_count=4,
-        )
-        assert loaded_1 is not None
-        assert loaded_2 is not None
-        assert loaded_1["listing_id"] == "listing-1"
-        assert loaded_2["listing_id"] == "listing-2"
-
-    def test_fungible_listing_still_uses_the_pool_key(self, db_path):
-        """The fix must not disturb the fungible case: a candidate with
-        no resource_id still derives its key from pool_id."""
-        record_derived_listing(
-            db_path, listing_id="listing-1", site_id="site-a",
-            pool_id="gpu-pool", resource_id=None, gpu_count=4,
-        )
-        loaded = load_derived_listing_for_slice(
-            db_path, site_id="site-a", pool_id="gpu-pool", gpu_count=4,
-        )
-        assert loaded is not None
-        assert loaded["listing_id"] == "listing-1"
-
-
-# ---------------------------------------------------------------------------
-# pool_id_for_listing
 # ---------------------------------------------------------------------------
 
 class TestPoolIdForListing:
@@ -889,156 +851,7 @@ class TestClosedAvailableListingIds:
 # reopen_local_derived_listing
 # ---------------------------------------------------------------------------
 
-class TestReopenLocalDerivedListing:
-    def test_reopens_the_listing_and_the_mapping_row(self, db_path):
-        _seed_listing(
-            db_path,
-            listing_id="listing-1",
-            status="closed",
-            pool_id="gpu-pool",
-            gpu_count=2,
-            site_id="site-a",
-        )
-        record_derived_listing(
-            db_path, listing_id="listing-1", site_id="site-a",
-            pool_id="gpu-pool", resource_id=None, gpu_count=2, status="closed",
-        )
-        reopen_local_derived_listing(
-            db_path,
-            listing_id="listing-1",
-            site_id="site-a",
-            gpu_count=2,
-            listing_resource={"pool_id": "gpu-pool", "gpu_count": 2},
-            accepted_escrows=[],
-            demands=[],
-            max_duration_seconds=3600,
-            storefront_url="http://seller.test",
-            seller_principal=Identity(
-                scheme="eip191",
-                identifier="0x2222222222222222222222222222222222222222",
-            ),
-            resource_id=None,
-            pool_id="gpu-pool",
-        )
-        conn = sqlite3.connect(db_path)
-        try:
-            listing_status = conn.execute(
-                "SELECT status FROM listings WHERE listing_id = 'listing-1'"
-            ).fetchone()[0]
-        finally:
-            conn.close()
-        assert listing_status == "open"
-        loaded = load_derived_listing_for_slice(
-            db_path, site_id="site-a", pool_id="gpu-pool", gpu_count=2,
-        )
-        assert loaded["status"] == "open"
-
-
-# ---------------------------------------------------------------------------
-# mark_derived_listings_closed -- defensive backfill site resolution
-# ---------------------------------------------------------------------------
-
-class TestMarkDerivedListingsClosed:
-    def test_closes_a_mapped_listing(self, db_path):
-        _seed_listing(
-            db_path,
-            listing_id="listing-1",
-            pool_id="gpu-pool",
-            gpu_count=2,
-            site_id="site-a",
-        )
-        record_derived_listing(
-            db_path, listing_id="listing-1", site_id="site-a",
-            pool_id="gpu-pool", resource_id=None, gpu_count=2,
-        )
-        mark_derived_listings_closed(
-            db_path, ["listing-1"], home_site="site-a", configured_site_count=1,
-        )
-        loaded = load_derived_listing_for_slice(
-            db_path, site_id="site-a", pool_id="gpu-pool", gpu_count=2,
-        )
-        assert loaded["status"] == "closed"
-
-    def test_local_backfill_does_not_create_durable_registry_ownership(
-        self, db_path,
-    ):
-        _seed_listing(db_path, listing_id="listing-1", pool_id="gpu-pool", gpu_count=2)
-        mark_derived_listings_closed(
-            db_path, ["listing-1"], home_site="site-a", configured_site_count=1,
-        )
-        assert site_id_for_listing(db_path, "listing-1") is None
-        loaded = load_derived_listing_for_slice(
-            db_path, site_id="site-a", pool_id="gpu-pool", gpu_count=2,
-        )
-        assert loaded is not None
-        assert loaded["status"] == "closed"
-
-    def test_unmapped_listing_backfill_is_skipped_when_multiple_sites_configured(
-        self, db_path,
-    ):
-        """With more than one site configured, the backfill must not
-        guess which one an unmapped listing belongs to -- it leaves no
-        mapping row rather than writing a potentially wrong one. The
-        function must not raise."""
-        _seed_listing(db_path, listing_id="listing-1", pool_id="gpu-pool", gpu_count=2)
-        mark_derived_listings_closed(
-            db_path, ["listing-1"], home_site="site-a", configured_site_count=2,
-        )  # must not raise
-        assert site_id_for_listing(db_path, "listing-1") is None
-
-    def test_empty_listing_ids_is_a_noop(self, db_path):
-        mark_derived_listings_closed(
-            db_path, [], home_site="site-a", configured_site_count=1,
-        )  # must not raise
-
-
-# ---------------------------------------------------------------------------
-# mark_derived_listings_open -- unaffected by site scoping (status-only)
-# ---------------------------------------------------------------------------
-
-class TestMarkDerivedListingsOpen:
-    def test_reopens_by_listing_id_alone(self, db_path):
-        record_derived_listing(
-            db_path, listing_id="listing-1", site_id="site-a",
-            pool_id="gpu-pool", resource_id=None, gpu_count=2, status="closed",
-        )
-        mark_derived_listings_open(db_path, ["listing-1"])
-        loaded = load_derived_listing_for_slice(
-            db_path, site_id="site-a", pool_id="gpu-pool", gpu_count=2,
-        )
-        assert loaded["status"] == "open"
-
-
-# ---------------------------------------------------------------------------
-# ensure_derived_compute_listings_table -- schema/backward compatibility
-# ---------------------------------------------------------------------------
-
 class TestSchema:
-    def test_adds_site_id_column_to_a_pre_existing_table(self, db_path):
-        """Simulates an old DB whose derived_compute_listings table
-        predates site scoping -- the column must be added additively."""
-        conn = sqlite3.connect(db_path)
-        try:
-            conn.execute(
-                """
-                CREATE TABLE derived_compute_listings (
-                  listing_id TEXT PRIMARY KEY,
-                  pool_id TEXT,
-                  resource_id TEXT NOT NULL,
-                  gpu_count INTEGER NOT NULL,
-                  status TEXT NOT NULL,
-                  derivation_key TEXT NOT NULL UNIQUE,
-                  last_reconciled_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
-                )
-                """
-            )
-            conn.commit()
-            ensure_derived_compute_listings_table(conn)
-            cols = {row[1] for row in conn.execute("PRAGMA table_info(derived_compute_listings)")}
-            assert "site_id" in cols
-        finally:
-            conn.close()
-
     def test_domain_binding_schema_migration_is_idempotent(self, db_path):
         conn = sqlite3.connect(db_path)
         try:
@@ -1061,27 +874,13 @@ class TestSchema:
             "contract_minor",
         } <= columns
 
-    def test_works_against_a_cursor_not_only_a_connection(self, db_path):
-        """SQLiteClient._ensure_domain_tables calls this with a cursor,
-        not a connection -- both must work, since this is the single
-        source of truth for the table's schema for both callers."""
-        conn = sqlite3.connect(db_path)
-        try:
-            cur = conn.cursor()
-            ensure_derived_compute_listings_table(cur)
-            conn.commit()
-            cols = {row[1] for row in conn.execute("PRAGMA table_info(derived_compute_listings)")}
-            assert "site_id" in cols
-        finally:
-            conn.close()
+    def test_fresh_storefront_database_has_no_legacy_mapping_table(self, tmp_path):
+        """The common listing binding is the only VM listing mapping.
 
-    def test_sqlite_client_delegates_rather_than_duplicating_the_schema(
-        self, tmp_path,
-    ):
-        """Regression guard for the two-independent-copies bug: SQLiteClient
-        must produce a derived_compute_listings table with every column
-        this module's own schema defines, proving it delegates here
-        rather than maintaining a second, driftable copy."""
+        A fresh database never creates ``derived_compute_listings``; only a
+        database written before the binding existed still carries it, for the
+        storefront-domain migration tool to read.
+        """
         from market_storefront.utils.sqlite_client import SQLiteClient
 
         client = SQLiteClient(
@@ -1091,28 +890,12 @@ class TestSchema:
         assert client.domain_registry.resolve(_VM_BINDING) is _VM_DOMAIN
         conn = sqlite3.connect(client.db_path)
         try:
-            client_cols = {
-                row[1] for row in conn.execute("PRAGMA table_info(derived_compute_listings)")
-            }
+            assert conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE name='derived_compute_listings'"
+            ).fetchone() is None
         finally:
             conn.close()
 
-        reference_conn = sqlite3.connect(":memory:")
-        try:
-            ensure_derived_compute_listings_table(reference_conn)
-            reference_cols = {
-                row[1] for row in reference_conn.execute(
-                    "PRAGMA table_info(derived_compute_listings)"
-                )
-            }
-        finally:
-            reference_conn.close()
-
-        assert client_cols == reference_cols
-
-# ---------------------------------------------------------------------------
-# _member_available_units -- the shared cap-by-availability helper
-# ---------------------------------------------------------------------------
 
 class TestMemberAvailableUnits:
     def test_none_availability_means_fully_available(self):
@@ -2214,3 +1997,267 @@ class TestProjectedPoolRows:
         assert rows[0]["max_member_available_gpu_count"] == 0
         assert rows[0]["available_gpu_count"] == 0
 
+
+
+# ---------------------------------------------------------------------------
+# Unbacked supply, held sources, and withdrawn listings
+# ---------------------------------------------------------------------------
+
+_BACKED = {
+    "deliverable_modes": ["vm"],
+    "advertisable_modes": ["vm"],
+    "capacity_backing": "backed",
+}
+_UNBACKED = {
+    "deliverable_modes": [],
+    "advertisable_modes": ["vm"],
+    "capacity_backing": "unbacked",
+}
+
+
+def _declared_pool(
+    pool_id: str,
+    members: list[tuple[str, object, int]],
+    *,
+    tags: dict,
+    enabled: bool = True,
+    cardinality: str = "fungible",
+) -> dict:
+    """One projected pool; each member is (resource_id, gpu_count, available)."""
+    return {
+        "resource_pool_id": pool_id,
+        "pool_metadata": {
+            "enabled": enabled,
+            "policy_tags": {
+                **tags,
+                "listing_cardinality_mode": cardinality,
+                "region": "us-east",
+            },
+        },
+        "resources": [
+            {
+                "physical_resource_id": resource_id,
+                "enabled": True,
+                "capacity": {} if count is None else {"gpu_count": count},
+                "available": {"gpu_count": available},
+                "attributes": {"gpu_model": "H100"},
+            }
+            for resource_id, count, available in members
+        ],
+    }
+
+
+def _slices(db_path, pools, *, holds=None):
+    return available_compute_slices(
+        db_path,
+        home_site="site-a",
+        site_pool_projection={"site-a": pools},
+        holds=holds,
+    )
+
+
+class TestUnbackedDerivation:
+    def test_unbacked_pool_ranges_over_declared_not_available_quantity(self, db_path):
+        pool = _declared_pool("broker-a", [("res-1", 8, 0)], tags=_UNBACKED)
+
+        counts = sorted(s["gpu_count"] for s in _slices(db_path, [pool]))
+
+        assert counts == list(range(1, 9))
+        assert {s["capacity_backing"] for s in _slices(db_path, [pool])} == {
+            "unbacked"
+        }
+
+    def test_backed_pool_ranges_over_available_quantity(self, db_path):
+        pool = _declared_pool("pool-b", [("res-1", 8, 2)], tags=_BACKED)
+
+        assert sorted(s["gpu_count"] for s in _slices(db_path, [pool])) == [1, 2]
+
+    def test_unbacked_fungible_range_is_one_members_declared_count(self, db_path):
+        pool = _declared_pool(
+            "broker-a", [("res-1", 8, 0), ("res-2", 4, 0)], tags=_UNBACKED
+        )
+
+        assert max(s["gpu_count"] for s in _slices(db_path, [pool])) == 8
+
+    def test_a_pool_that_does_not_advertise_vm_yields_nothing(self, db_path):
+        pool = _declared_pool(
+            "broker-a",
+            [("res-1", 8, 8)],
+            tags={**_UNBACKED, "advertisable_modes": ["bare_metal"]},
+        )
+
+        assert _slices(db_path, [pool]) == []
+
+    def test_a_disabled_pool_yields_nothing(self, db_path):
+        pool = _declared_pool("broker-a", [("res-1", 8, 8)], tags=_UNBACKED, enabled=False)
+
+        assert _slices(db_path, [pool]) == []
+
+
+class TestEnumerationQuantity:
+    def test_absent_count_yields_nothing_and_is_reported(self, db_path):
+        from domains.vms.listings.reconciler import derivation_reports
+
+        pool = _declared_pool("broker-a", [("res-1", None, 0)], tags=_UNBACKED)
+
+        assert _slices(db_path, [pool]) == []
+        assert derivation_reports()["site-a"]["members_without_gpu_count"] == {
+            "res-1": "broker-a"
+        }
+
+    def test_declared_zero_yields_nothing_silently(self, db_path):
+        from domains.vms.listings.reconciler import derivation_reports
+
+        pool = _declared_pool("broker-a", [("res-1", 0, 0)], tags=_UNBACKED)
+
+        assert _slices(db_path, [pool]) == []
+        assert derivation_reports()["site-a"]["members_without_gpu_count"] == {}
+
+    def test_malformed_count_holds_a_whole_fungible_pool(self, db_path):
+        pool = _declared_pool(
+            "broker-a", [("res-1", 8, 8), ("res-2", "eight", 0)], tags=_UNBACKED
+        )
+        holds: set = set()
+
+        assert _slices(db_path, [pool], holds=holds) == []
+        assert ("pool", "site-a", "broker-a") in holds
+
+    def test_malformed_count_holds_only_its_member_in_a_specific_pool(self, db_path):
+        pool = _declared_pool(
+            "broker-a",
+            [("res-1", 2, 2), ("res-2", "two", 0)],
+            tags=_UNBACKED,
+            cardinality="specific_resource",
+        )
+        holds: set = set()
+
+        slices = _slices(db_path, [pool], holds=holds)
+
+        assert {s["resource_id"] for s in slices} == {"res-1"}
+        assert holds == {("resource", "site-a", "res-2")}
+
+    def test_key_builders_never_substitute_a_count(self):
+        for bad in (None, 0, "1", True):
+            with pytest.raises(ValueError):
+                listing_pool_key("site-a", "pool-a", bad)
+
+
+class TestHeldAndWithdrawnListings:
+    def test_listings_of_an_unresolvable_pool_are_held_not_closed(self, db_path):
+        _seed_listing(db_path, listing_id="held-1", pool_id="broker-a", site_id="site-a")
+        declared = _declared_pool("other", [("res-9", 8, 8)], tags=_UNBACKED)
+        undeclared = _declared_pool("broker-a", [("res-1", 8, 8)], tags={})
+
+        stale = stale_open_listing_ids(
+            db_path,
+            home_site="site-a",
+            configured_site_count=1,
+            site_pool_projection={"site-a": [declared, undeclared]},
+        )
+
+        assert "held-1" not in stale
+
+    def test_a_disabled_pools_listings_are_stale(self, db_path):
+        _seed_listing(db_path, listing_id="gone-1", pool_id="broker-a", site_id="site-a")
+        pool = _declared_pool("broker-a", [("res-1", 8, 8)], tags=_BACKED, enabled=False)
+
+        stale = stale_open_listing_ids(
+            db_path,
+            home_site="site-a",
+            configured_site_count=1,
+            site_pool_projection={"site-a": [pool]},
+        )
+
+        assert stale == ["gone-1"]
+
+    def test_a_seller_closed_listing_is_never_offered_for_reopen(self, db_path):
+        _seed_listing(
+            db_path,
+            listing_id="withdrawn",
+            status="closed",
+            closed_by="seller",
+            pool_id="pool-b",
+            site_id="site-a",
+        )
+        pool = _declared_pool("pool-b", [("res-1", 8, 8)], tags=_BACKED)
+
+        assert (
+            closed_available_listing_ids(
+                db_path,
+                home_site="site-a",
+                site_pool_projection={"site-a": [pool]},
+            )
+            == []
+        )
+
+    def test_a_reconciliation_closed_listing_reopens_when_its_slice_returns(
+        self, db_path
+    ):
+        _seed_listing(
+            db_path,
+            listing_id="returns",
+            status="closed",
+            pool_id="pool-b",
+            site_id="site-a",
+        )
+        pool = _declared_pool("pool-b", [("res-1", 8, 8)], tags=_BACKED)
+
+        assert closed_available_listing_ids(
+            db_path,
+            home_site="site-a",
+            site_pool_projection={"site-a": [pool]},
+        ) == ["returns"]
+
+    def test_a_listing_whose_published_model_diverged_is_not_reopened(self, db_path):
+        _seed_listing(
+            db_path,
+            listing_id="diverged",
+            status="closed",
+            pool_id="pool-b",
+            site_id="site-a",
+        )
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute(
+                "UPDATE listings SET listing_resource = ? WHERE listing_id = ?",
+                (
+                    json.dumps(
+                        {
+                            "offering_mode": "vm",
+                            "gpu_count": 2,
+                            "pool_id": "pool-b",
+                            "gpu_model": "A100",
+                        }
+                    ),
+                    "diverged",
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        pool = _declared_pool("pool-b", [("res-1", 8, 8)], tags=_BACKED)
+
+        assert (
+            closed_available_listing_ids(
+                db_path,
+                home_site="site-a",
+                site_pool_projection={"site-a": [pool]},
+            )
+            == []
+        )
+
+    def test_a_stored_listing_without_a_usable_count_is_not_keyed(self, db_path):
+        _seed_listing(db_path, listing_id="countless", pool_id="pool-b", site_id="site-a")
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute(
+                "UPDATE listings SET listing_resource = ? WHERE listing_id = ?",
+                (json.dumps({"offering_mode": "vm", "pool_id": "pool-b"}), "countless"),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        assert open_listing_resource_keys(
+            db_path, home_site="site-a", configured_site_count=1
+        ) == set()

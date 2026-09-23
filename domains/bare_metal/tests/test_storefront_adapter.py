@@ -80,6 +80,7 @@ def test_authoritative_empty_projection_closes_tracked_listing(tmp_path):
             CREATE TABLE listings (
               listing_id TEXT PRIMARY KEY,
               status TEXT NOT NULL,
+              closed_by TEXT,
               updated_at TEXT
             );
             CREATE TABLE derived_bare_metal_listings (

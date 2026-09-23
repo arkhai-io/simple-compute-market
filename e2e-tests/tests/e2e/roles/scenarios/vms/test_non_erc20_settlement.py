@@ -27,6 +27,7 @@ from tests.e2e.roles.scenarios.vms.conftest import (
     _signer,
     capacity_source_for,
     delete_mock_rules_if_present,
+    pause_storefront,
     wait_for_stage_event,
 )
 from tests.e2e.roles.scenarios.vms.escrow_helper import _ensure_ws_rpc_url
@@ -313,6 +314,9 @@ def test_scalar_non_erc20_settlement_reaches_ready(
     seller_wallet,
 ):
     """Native-token and ERC1155 escrows settle through provisioning."""
+    # The listing below is created explicitly; a running publication loop
+    # could bind the same slice first and the create would be refused.
+    pause_storefront(storefront_admin_client)
     _assert_services_ready(storefront_admin_client, provisioning_client)
 
     import_result = storefront_admin_client.admin_import_resources(

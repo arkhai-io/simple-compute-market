@@ -35,10 +35,6 @@ from market_storefront.middleware.service_peer_auth import (
 import market_storefront.server as _server
 from market_storefront.controllers.admin_controller import router as admin_router
 from market_storefront.controllers.system_controller import router as system_router
-from domains.vms.listings.reconciler import (
-    mark_derived_listings_closed,
-    record_derived_listing,
-)
 from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
 from market_storefront.publication_binding import prepare_vm_listing_binding
 from market_storefront.utils.sqlite_client import SQLiteClient
@@ -455,7 +451,6 @@ async def _seed_dynamic_listing_pool_rows(
     db: SQLiteClient,
     *,
     site_id: str = "default",
-    record_derived: bool = True,
 ) -> None:
     await db.upsert_resource(
         resource_id="pool-h200-1",
@@ -502,20 +497,13 @@ async def _seed_dynamic_listing_pool_rows(
             binding=prepare_vm_listing_binding(
                 listing_id=listing_id,
                 candidate={
+                    "capacity_backing": "backed",
                     "site_id": site_id,
                     "pool_id": "pool-h200-1",
                     "gpu_count": gpu_count,
                 },
             )
         )
-        if record_derived:
-            record_derived_listing(
-                db.db_path,
-                listing_id=listing_id,
-                site_id=site_id,
-                resource_id="pool-h200-1",
-                gpu_count=gpu_count,
-            )
 
 
 def _fake_pool_site():
@@ -703,15 +691,13 @@ class TestFulfillmentEvents:
                 conn = sqlite3.connect(db.db_path)
                 try:
                     conn.execute(
-                        "UPDATE listings SET status = 'closed' WHERE listing_id = ?",
+                        "UPDATE listings SET status = 'closed', "
+                        "closed_by = 'reconciliation' WHERE listing_id = ?",
                         ("listing-3x",),
                     )
                     conn.commit()
                 finally:
                     conn.close()
-                mark_derived_listings_closed(
-                    db.db_path, ["listing-3x"], home_site="default", configured_site_count=1,
-                )
             return response
 
         fake._handle = handle_with_delta_reconciliation
@@ -884,7 +870,7 @@ class TestFulfillmentEvents:
         self, db, service_client
     ):
         from tests.fake_site import site_capacity
-        await _seed_dynamic_listing_pool_rows(db, record_derived=False)
+        await _seed_dynamic_listing_pool_rows(db)
         fake = _fake_pool_site()
 
         with site_capacity(fake, project_pool_modes=True) as capacity:

@@ -32,6 +32,7 @@ def test_storefront_runtime_normalizes_bare_metal_schema_slots() -> None:
     lease_end = datetime.now(UTC) + timedelta(hours=1)
 
     listing = runtime.codecs.listing({
+        "capacity_backing": "backed",
         "host_id": "node-1",
         "physical_host_id": "host-1",
     })
@@ -92,6 +93,15 @@ def test_storefront_runtime_surfaces_bare_metal_validation_errors() -> None:
 
     with pytest.raises(ValidationError, match="host_id must be non-empty"):
         runtime.codecs.listing({
+            "capacity_backing": "backed",
             "host_id": "",
             "physical_host_id": "host-1",
         })
+
+
+def test_bare_metal_listing_without_backing_is_refused() -> None:
+    """A listing that does not say whether it is backed is not classified."""
+    runtime = market_domain()
+
+    with pytest.raises(ValidationError, match="capacity_backing"):
+        runtime.codecs.listing({"host_id": "node-1", "physical_host_id": "host-1"})

@@ -63,6 +63,7 @@ from market_storefront.models.capacity_admin_models import (
 from market_storefront.lifecycle import (
     CAPACITY_EVENTS_POLLER,
     FULFILLMENT_RESUME,
+    PUBLICATION,
     SETTLEMENT_SERVICING,
     SITE_PROJECTION_POLLER,
 )
@@ -142,6 +143,7 @@ ADVANCE_LOOP_NAMES = {
     "fulfillment-resume": FULFILLMENT_RESUME,
     "site-projections": SITE_PROJECTION_POLLER,
     "capacity-events": CAPACITY_EVENTS_POLLER,
+    "publication": PUBLICATION,
 }
 
 
@@ -517,6 +519,37 @@ class AdminController:
             "sites": sites,
             "applied_count": sum(int(site["applied_count"]) for site in sites),
         }
+
+    @router.post(
+        "/lifecycle/publication/dry-run",
+        summary="Report what one publication cycle would do (admin)",
+    )
+    async def dry_run_publication_cycle(self) -> dict:
+        """Derive the next cycle's actions and apply none of them.
+
+        Reports every publish, refresh, close, reopen, hold, and refusal the
+        cycle would perform, with its reason. It writes no listing, binding, or
+        registry state, so two consecutive dry runs report the same thing.
+        """
+        from market_storefront.services.publication_loop import (
+            run_publication_cycle_once,
+        )
+
+        return await run_publication_cycle_once(dry_run=True)
+
+    @router.post(
+        "/lifecycle/publication/run-cycle",
+        summary="Run one publication cycle now (admin)",
+    )
+    async def run_publication_cycle(self) -> dict:
+        """Run exactly the cycle the timer runs, whether or not loops are held."""
+        from market_storefront.services.publication_loop import (
+            run_publication_cycle_once,
+        )
+
+        result = await run_publication_cycle_once(dry_run=False)
+        logger.info("[ADMIN] Publication cycle advanced: %s", result["counts"])
+        return result
 
     @router.post(
         "/capacity/projections/refresh",
@@ -935,6 +968,11 @@ class AdminController:
         listing_id = deal_ref.get("listing_id")
         if isinstance(listing_id, str) and listing_id.strip():
             binding = await capacity_binding_for_listing(self._db, listing_id)
+            if not isinstance(binding, CapacityBinding):
+                raise CapacityBindingError(
+                    "a reservation cannot belong to a listing with no admission "
+                    "authority"
+                )
             if binding.site_id != site_id:
                 raise CapacityBindingError(
                     "reservation authority disagrees with the durable listing binding"
@@ -1047,10 +1085,7 @@ class AdminController:
             return None
 
     async def _close_oversized_compute_listings(self) -> list[str]:
-        from domains.vms.listings.reconciler import (
-            mark_derived_listings_closed,
-            stale_open_listing_ids,
-        )
+        from domains.vms.listings.reconciler import stale_open_listing_ids
 
         home_site, configured_site_count = self._site_topology()
         if home_site is None:
@@ -1065,20 +1100,15 @@ class AdminController:
             member_availability=availability,
         )
         for listing_id in closed_listing_ids:
-            await self._db.update_listing(listing_id=listing_id, status="closed")
-        mark_derived_listings_closed(
-            self._db.db_path,
-            closed_listing_ids,
-            home_site=home_site,
-            configured_site_count=configured_site_count,
-        )
+            await self._db.update_listing(
+                listing_id=listing_id,
+                status="closed",
+                closed_by="reconciliation",
+            )
         return closed_listing_ids
 
     async def _reopen_available_compute_listings(self) -> list[str]:
-        from domains.vms.listings.reconciler import (
-            closed_available_listing_ids,
-            mark_derived_listings_open,
-        )
+        from domains.vms.listings.reconciler import closed_available_listing_ids
 
         home_site, _ = self._site_topology()
         if home_site is None:
@@ -1093,7 +1123,6 @@ class AdminController:
         )
         for listing_id in reopened_listing_ids:
             await self._db.update_listing(listing_id=listing_id, status="open")
-        mark_derived_listings_open(self._db.db_path, reopened_listing_ids)
         return reopened_listing_ids
 
     @router.post(

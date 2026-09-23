@@ -127,6 +127,16 @@ listing_shape:
         offering_mode:
           type: string
           enum: [bare_metal, vm, container]
+        capacity_backing:
+          # Whether an admission authority stands behind the listing: a
+          # `backed` listing can be reserved against; an `unbacked` one cannot,
+          # and any number of buyers may settle against it. It describes what
+          # the marketplace does with the listing, not how far to trust it.
+          # Not required, so a storefront that predates the field can still
+          # publish; the exact filter below excludes such a listing from every
+          # backing query rather than classifying it.
+          type: string
+          enum: [backed, unbacked]
         static_ip: {type: boolean}
         datacenter_grade: {type: boolean}
         gpu_count: {type: integer, minimum: 0}
@@ -203,6 +213,7 @@ filters:
   - {name: motherboard,         path: $.listing_resource.motherboard,         op: in, value_type: string,  on_missing: fail}
   - {name: gpu_interconnect,    path: $.listing_resource.gpu_interconnect,    op: in, value_type: string,  on_missing: fail}
   - {name: offering_mode,       path: $.listing_resource.offering_mode,       op: in, value_type: string,  on_missing: fail}
+  - {name: capacity_backing,    path: $.listing_resource.capacity_backing,    op: in, value_type: string,  on_missing: fail}
   - {name: static_ip,           path: $.listing_resource.static_ip,           op: in, value_type: boolean, on_missing: fail}
   - {name: datacenter_grade,    path: $.listing_resource.datacenter_grade,    op: in, value_type: boolean, on_missing: fail}
 

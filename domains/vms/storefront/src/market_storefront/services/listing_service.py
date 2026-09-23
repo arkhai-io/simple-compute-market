@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from dataclasses import dataclass
 from collections.abc import Callable
 from datetime import datetime
 from typing import Any
@@ -43,6 +44,11 @@ from market_settlement_runtime import (
 from market_storefront.models.listing_models import VmCreateListingRequest
 from market_storefront.negotiation_runtime import compute_round_zero_decision
 from market_storefront.publication_binding import prepare_vm_listing_binding
+from market_storefront.services.listing_sources import resolve_source_backing
+from market_storefront.settlement_composition import (
+    admissible_settlement_clauses,
+    mechanism_fulfills_through_capacity,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +64,22 @@ class ListingSourceAlreadyBound(Exception):
     know which of its listings already holds the source.
     """
 
+
+@dataclass(frozen=True)
+class DerivedVmListing:
+    """A VM listing as a create request derives it, before anything is stored."""
+
+    listing: Any
+    clauses: tuple[SettlementPublicationClause, ...]
+    binding: Any
+
+    def publication_clauses(self) -> list[dict[str, Any]]:
+        return [
+            clause.model_dump(mode="json", exclude_defaults=True)
+            for clause in self.clauses
+        ]
+
+
 class ListingService:
     def __init__(
         self,
@@ -70,6 +92,7 @@ class ListingService:
         marketplace_signer: Signer,
         alkahest_clients: dict[str, Any],
         settlement_composition_provider: Callable[[], Any],
+        source_backing_resolver: Callable[..., str] = resolve_source_backing,
     ) -> None:
         from market_storefront.utils.config import (
             CHAINS,
@@ -98,6 +121,9 @@ class ListingService:
         self._marketplace_signer = marketplace_signer
         self._alkahest_clients = alkahest_clients
         self._settlement_composition_provider = settlement_composition_provider
+        # What a source's site currently declares about it; injected so the
+        # create path can be exercised without a loaded projection.
+        self._source_backing = source_backing_resolver
 
         self._token_transfers_available = bool(
             self._alkahest_clients and CHAINS and get_evm_wallet_private_key()
@@ -411,22 +437,72 @@ class ListingService:
             "publish a distinct resource or pool, or close the listing that "
             "holds this one."
         )
-    async def create_listing(
-        self, request: VmCreateListingRequest
-    ) -> CreateListingResponse:
-        """Validate the seller's create request, mint a listing_id, write the
-        local row, and (unless paused) publish to the registry.
+    @staticmethod
+    def _unbacked_settlement_terms(
+        *,
+        accepted_escrows: list[dict[str, Any]],
+        settlement_options: list[dict[str, Any]],
+        clauses: tuple[SettlementPublicationClause, ...],
+        demands: list[dict[str, Any]],
+        composition: Any,
+        source: str,
+    ) -> tuple[
+        list[dict[str, Any]],
+        list[dict[str, Any]],
+        tuple[SettlementPublicationClause, ...],
+        list[dict[str, Any]],
+    ]:
+        """Keep only settlement terms an unbacked listing may publish.
 
-        ``paused=True`` writes the local row with ``paused=1`` and skips the
-        registry publish; the operator unblocks via
-        ``POST /api/v1/listings/{id}/resume`` which clears the flag and runs
-        the same ``publish_order_to_registry`` path.
+        A mechanism VM fulfils through capacity would take a buyer's funds and
+        then reach a reservation this listing cannot make, so its options are
+        dropped, with a notice naming them; if nothing remains the listing is
+        refused.
+        """
+        declarations = composition.mechanism_fulfillment
+        kept_options, dropped = admissible_settlement_clauses(
+            settlement_options,
+            capacity_backing="unbacked",
+            declarations=declarations,
+        )
+        kept_clauses, _ = admissible_settlement_clauses(
+            clauses,
+            capacity_backing="unbacked",
+            declarations=declarations,
+        )
+        # Accepted escrows and their demands are the Alkahest publication form.
+        if accepted_escrows and mechanism_fulfills_through_capacity(
+            "alkahest.v1", declarations
+        ):
+            accepted_escrows, demands = [], []
+            if "alkahest.v1" not in dropped:
+                dropped.append("alkahest.v1")
+        if dropped:
+            logger.warning(
+                "[LISTINGS] unbacked source %s: dropped settlement mechanisms %s, "
+                "which VM fulfils through capacity",
+                source,
+                dropped,
+            )
+        if not kept_options and not accepted_escrows:
+            raise ValueError(
+                f"unbacked source {source} has no settlement option it may publish: "
+                f"every configured mechanism ({', '.join(dropped) or 'none'}) is "
+                "fulfilled through VM capacity"
+            )
+        return accepted_escrows, kept_options, tuple(kept_clauses), demands
+
+    async def derive_listing(
+        self, request: VmCreateListingRequest
+    ) -> DerivedVmListing:
+        """Derive everything a create request would persist, persisting nothing.
+
+        The publication loop uses the same derivation to compare an existing
+        listing's terms with what its source and configuration now yield, so a
+        refreshed listing and a newly created one cannot disagree about terms.
         """
         from domains.vms.listings.models import Listing
 
-        from market_storefront.services.publication_service import (
-            publish_order_to_registry,
-        )
         from market_storefront.utils.config import BASE_URL_OVERRIDE
 
         composition = self._settlement_composition_provider()
@@ -443,6 +519,49 @@ class ListingService:
             composition=composition,
         )
 
+        capacity_source = request.capacity_source.model_dump(mode="json")
+        if (
+            capacity_source["pool_id"] != listing_resource.pool_id
+            or capacity_source["resource_id"] != listing_resource.resource_id
+            or capacity_source["gpu_count"] != listing_resource.gpu_count
+        ):
+            raise ValueError(
+                "capacity source identity and gpu_count must match the listing_resource resource"
+            )
+        source_id = capacity_source["pool_id"] or capacity_source["resource_id"]
+        # Backing comes from what the source's site declares now, never from the
+        # request, so a caller cannot publish supply under the wrong category.
+        capacity_backing = self._source_backing(
+            site_id=capacity_source["site_id"],
+            pool_id=capacity_source["pool_id"],
+            resource_id=capacity_source["resource_id"],
+            offering_mode=self._binding.offering_mode,
+        )
+        capacity_source["capacity_backing"] = capacity_backing
+        if capacity_backing == "backed":
+            self._capacity_runtime.require_binding(
+                CapacityBinding(
+                    site_id=capacity_source["site_id"],
+                    offering_mode=self._binding.offering_mode,
+                    source_id=source_id,
+                )
+            )
+        else:
+            (
+                accepted_escrows,
+                settlement_options,
+                canonical_clauses,
+                demands,
+            ) = self._unbacked_settlement_terms(
+                accepted_escrows=accepted_escrows,
+                settlement_options=settlement_options,
+                clauses=canonical_clauses,
+                demands=demands,
+                composition=composition,
+                source=f"{capacity_source['site_id']}/{source_id}",
+            )
+        listing_resource.capacity_backing = capacity_backing
+
         listing = Listing(
             listing_id=str(uuid.uuid4()),
             storefront_url=BASE_URL_OVERRIDE,
@@ -454,34 +573,49 @@ class ListingService:
             max_duration_seconds=request.max_duration_seconds,
             oracle_address=None,
         )
-        listing_dict = listing.model_dump(mode="json")
-        listing_id = listing.listing_id
-
-        capacity_source = request.capacity_source.model_dump(mode="json")
-        if (
-            capacity_source["pool_id"] != listing_resource.pool_id
-            or capacity_source["resource_id"] != listing_resource.resource_id
-            or capacity_source["gpu_count"] != listing_resource.gpu_count
-        ):
-            raise ValueError(
-                "capacity source identity and gpu_count must match the listing_resource resource"
-            )
-        source_id = capacity_source["pool_id"] or capacity_source["resource_id"]
-        self._capacity_runtime.require_binding(
-            CapacityBinding(
-                site_id=capacity_source["site_id"],
-                offering_mode=self._binding.offering_mode,
-                source_id=source_id,
-            )
-        )
         binding = prepare_vm_listing_binding(
-            listing_id=listing_id,
+            listing_id=listing.listing_id,
             candidate=capacity_source,
         )
         if binding.binding != self._binding:
             raise RuntimeError(
                 "listing capacity source did not resolve to the startup-owned VM domain"
             )
+        return DerivedVmListing(
+            listing=listing,
+            clauses=tuple(canonical_clauses),
+            binding=binding,
+        )
+
+    async def create_listing(
+        self, request: VmCreateListingRequest
+    ) -> CreateListingResponse:
+        """Validate the seller's create request, mint a listing_id, write the
+        local row, and (unless paused) publish to the registry.
+
+        ``paused=True`` writes the local row with ``paused=1`` and skips the
+        registry publish; the operator unblocks via
+        ``POST /api/v1/listings/{id}/resume`` which clears the flag and runs
+        the same ``publish_order_to_registry`` path.
+        """
+        derived = await self.derive_listing(request)
+        return await self.persist_derived_listing(
+            derived, paused=bool(request.paused)
+        )
+
+    async def persist_derived_listing(
+        self, derived: DerivedVmListing, *, paused: bool = False
+    ) -> CreateListingResponse:
+        """Write a derived listing and its binding, then publish it unless paused."""
+        from market_storefront.services.publication_service import (
+            publish_order_to_registry,
+        )
+
+        listing = derived.listing
+        listing_dict = listing.model_dump(mode="json")
+        listing_id = listing.listing_id
+        binding = derived.binding
+        canonical_clauses = derived.clauses
 
         now_iso = datetime.now().isoformat()
         try:
@@ -503,7 +637,7 @@ class ListingService:
                 storefront_url=listing.storefront_url,
                 seller_principal=listing.seller_principal,
                 oracle_address=listing_dict.get("oracle_address"),
-                paused=bool(request.paused),
+                paused=paused,
             )
         except Exception as exc:
             conflict = await self._describe_source_conflict(binding, exc)
@@ -519,7 +653,7 @@ class ListingService:
             )
             raise
 
-        if request.paused:
+        if paused:
             logger.info(
                 "[LISTINGS] %s created locally with paused=True; skipping registry publish",
                 listing_id,
@@ -842,9 +976,13 @@ class ListingService:
                 "detail": str(exc),
                 "listing_id": listing_id,
             }
+        # A listing closed because its escrow was collected is withdrawn by the
+        # deal, not by its seller: capacity reconciliation reopens its slice when
+        # the capacity is released, as it always has.
         await self._db.update_listing(
             listing_id=listing_id,
             status="closed",
+            closed_by="reconciliation",
             updated_at=datetime.now().isoformat(),
         )
         stage_event(

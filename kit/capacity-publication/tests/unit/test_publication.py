@@ -8,6 +8,7 @@ from market_capacity_publication import (
     BoundListing,
     CapacityBinding,
     CapacityBindingError,
+    UnbackedBinding,
     PublicationCandidate,
     PublicationRuntime,
     ReconciliationPlan,
@@ -17,10 +18,12 @@ from market_capacity_publication import (
 class Repository:
     def __init__(self):
         self.statuses = {}
+        self.closed_by = {}
         self.publications = []
 
-    async def update_listing(self, *, listing_id, status):
+    async def update_listing(self, *, listing_id, status, closed_by=None):
         self.statuses[listing_id] = status
+        self.closed_by[listing_id] = closed_by
 
     async def load_publications(self, *, listing_id):
         return [row for row in self.publications if row["listing_id"] == listing_id]
@@ -115,6 +118,7 @@ async def test_reconciliation_owns_close_then_reopen_mechanics():
     )
 
     assert repository.statuses == {"close-me": "closed", "reopen-me": "open"}
+    assert repository.closed_by == {"close-me": "reconciliation", "reopen-me": None}
     assert result == {"closed": ("close-me",), "reopened": ("reopen-me",)}
 
 
@@ -131,3 +135,108 @@ async def test_reconciliation_rejects_conflicting_plan():
                 reopen=(candidate(binding=binding),),
             )
         )
+
+
+@pytest.mark.asyncio
+async def test_unbacked_listing_publishes_under_its_own_binding():
+    repository = Repository()
+    binding = UnbackedBinding("site-a", "vm", "pool-a")
+    hooks = Hooks({"listing-1": binding})
+
+    await runtime(repository, hooks).publish(candidate(binding=binding))
+
+    assert hooks.validated == ["listing-1"]
+
+
+@pytest.mark.asyncio
+async def test_backing_mismatch_with_durable_binding_is_refused():
+    repository = Repository()
+    hooks = Hooks({"listing-1": UnbackedBinding("site-a", "vm", "pool-a")})
+
+    with pytest.raises(CapacityBindingError, match="does not match"):
+        await runtime(repository, hooks).publish(
+            candidate(binding=CapacityBinding("site-a", "vm", "pool-a"))
+        )
+
+
+@pytest.mark.asyncio
+async def test_seller_close_records_its_reason():
+    repository = Repository()
+    binding = CapacityBinding("site-a", "vm", "pool-a")
+    hooks = Hooks({"listing-1": binding})
+
+    await runtime(repository, hooks).close(
+        BoundListing("listing-1", binding), closed_by="seller"
+    )
+
+    assert repository.closed_by == {"listing-1": "seller"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("closed_by", [None, "", "operator"])
+async def test_close_without_a_known_reason_is_refused_before_any_write(closed_by):
+    repository = Repository()
+    binding = CapacityBinding("site-a", "vm", "pool-a")
+    hooks = Hooks({"listing-1": binding})
+
+    with pytest.raises(ValueError, match="closed_by"):
+        await runtime(repository, hooks).close(
+            BoundListing("listing-1", binding), closed_by=closed_by
+        )
+
+    assert repository.statuses == {}
+
+
+class _RecordingRegistry:
+    urls = ("https://registry.example",)
+
+    def __init__(self):
+        self.published = []
+        self.updates = []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def publish_listing_per_registry(self, *, payloads):
+        self.published.extend(payloads.values())
+        return [
+            {"registry_url": url, "success": True, "response": {"ok": True}}
+            for url in payloads
+        ]
+
+    async def update_listing_per_registry(self, *, listing_id, payloads):
+        self.updates.extend((listing_id, request) for request in payloads.values())
+        return [
+            {"registry_url": url, "success": True, "response": {"ok": True}}
+            for url in payloads
+        ]
+
+
+@pytest.mark.asyncio
+async def test_reopen_marks_the_listing_open_at_every_registry():
+    """A registry keeps a republished listing's status, so reopen sets it."""
+    repository = Repository()
+    binding = CapacityBinding("site-a", "vm", "pool-a")
+    hooks = Hooks({"listing-1": binding})
+    registry = _RecordingRegistry()
+    publication = PublicationRuntime(
+        repository=repository,
+        hooks=hooks,
+        enabled=True,
+        registry_urls=registry.urls,
+        registry_client_factory=lambda: registry,
+        listing_request_factory=dict,
+        update_listing_request_factory=dict,
+        storefront_url="https://seller.example",
+    )
+    listing = candidate(binding=binding)
+    listing.payload["storefront_url"] = "https://seller.example"
+
+    result = await publication.reopen(listing)
+
+    assert result["status"] == "published"
+    assert repository.statuses == {"listing-1": "open"}
+    assert registry.updates == [("listing-1", {"updates": {"status": "open"}})]

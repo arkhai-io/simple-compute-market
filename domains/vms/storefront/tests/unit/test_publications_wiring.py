@@ -112,6 +112,7 @@ async def _persist_bound_listing(db: SQLiteClient, order: dict) -> None:
     binding = prepare_vm_listing_binding(
         listing_id=listing.listing_id,
         candidate={
+            "capacity_backing": "backed",
             "site_id": "site-a",
             "pool_id": "pool-vm",
             "resource_id": listing.listing_resource.resource_id,
@@ -492,7 +493,8 @@ class TestRegistryTargets:
                 order,
             )
             result = await runtime.close(
-                BoundListing(candidate.listing_id, candidate.binding)
+                BoundListing(candidate.listing_id, candidate.binding),
+                closed_by="seller",
             )
 
         assert result["status"] == "closed"
@@ -541,7 +543,8 @@ class TestRegistryTargets:
                 order,
             )
             result = await runtime.close(
-                BoundListing(candidate.listing_id, candidate.binding)
+                BoundListing(candidate.listing_id, candidate.binding),
+                closed_by="seller",
             )
 
         assert result["status"] == "closed"

@@ -68,6 +68,7 @@ def _artifacts():
 
 async def _seed_listing(client: SQLiteClient) -> BareMetalListing:
     listing = BareMetalListing(
+        capacity_backing="backed",
         host_id="machine-1",
         physical_host_id="host-1",
         min_duration_seconds=900,

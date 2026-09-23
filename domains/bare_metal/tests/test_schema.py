@@ -31,6 +31,7 @@ from arkhai_bare_metal import (
 
 def test_bare_metal_listing_is_domain_payload_not_registry_row():
     listing = BareMetalListing(
+        capacity_backing="backed",
         host_id="bm-node-1",
         physical_host_id="host-physical-1",
         min_duration_seconds=3600,
@@ -49,6 +50,7 @@ def test_bare_metal_listing_is_domain_payload_not_registry_row():
 
 def test_bare_metal_listing_keeps_machine_and_physical_ids_separate():
     listing = BareMetalListing(
+        capacity_backing="backed",
         host_id="executor-local-node",
         physical_host_id="site-physical-host",
     )
@@ -59,6 +61,7 @@ def test_bare_metal_listing_keeps_machine_and_physical_ids_separate():
 def test_bare_metal_listing_rejects_invalid_duration_bounds():
     with pytest.raises(ValidationError):
         BareMetalListing(
+            capacity_backing="backed",
             host_id="bm-node-1",
             physical_host_id="host-physical-1",
             min_duration_seconds=7200,

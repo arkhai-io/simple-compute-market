@@ -158,6 +158,7 @@ def test_core_runner_publishes_exact_opaque_bare_metal_payload(tmp_path):
     assert offers == [
         (
             {
+                "capacity_backing": "backed",
                 "kind": "bare_metal.v2",
                 "offering_mode": "bare_metal",
                 "host_id": "machine-1",
@@ -242,3 +243,116 @@ def test_one_shot_publication_builds_registry_from_runtime_domain(monkeypatch):
     json.dumps(output)
     assert captured == {"domain": domain}
     assert closed == [True]
+
+
+# ---------------------------------------------------------------------------
+# A tracked listing is reconciled against a fresh candidate: terms refresh in
+# place, and a changed identity closes the listing and refuses reopen.
+# ---------------------------------------------------------------------------
+
+
+def _tracked_listing(tmp_path, *, max_duration_seconds=7200):
+    import asyncio
+
+    from arkhai_bare_metal.storefront_publication import (
+        bare_metal_listing_candidates,
+        record_derived_bare_metal_listing,
+    )
+    from market_identity import create_signer
+
+    path = str(tmp_path / "storefront.db")
+    db = SQLiteClient(path)
+    (candidate,) = bare_metal_listing_candidates([_projection()])
+    listing = dict(candidate["listing_resource"])
+    listing.pop("offering_mode", None)
+    listing["max_duration_seconds"] = max_duration_seconds
+    asyncio.run(
+        db.upsert_bare_metal_listing(
+            listing_id="listing-1",
+            status="open",
+            created_at="2026-09-23T00:00:00Z",
+            updated_at="2026-09-23T00:00:00Z",
+            # A development signer; never used on any public network.
+            seller_principal=create_signer("ed25519", b"\x21" * 32).identity,
+            storefront_url="https://seller.example",
+            listing=listing,
+            accepted_escrows=[],
+            settlement_options=[],
+            demands=[],
+            site_id="site-a",
+            pool_id="pool-1",
+            physical_resource_id="resource-1",
+        )
+    )
+    record_derived_bare_metal_listing(path, listing_id="listing-1", candidate=candidate)
+    return path, candidate
+
+
+def _reconcile(path, candidate, listing_resource, *, max_duration_seconds=7200):
+    from arkhai_bare_metal.storefront_publication import (
+        reopen_derived_bare_metal_listing_if_present,
+    )
+
+    published, closed = [], []
+    result = reopen_derived_bare_metal_listing_if_present(
+        db_path=path,
+        base_url="https://seller.example",
+        candidate=candidate,
+        listing_resource=listing_resource,
+        accepted_escrows=[],
+        demands=[],
+        max_duration_seconds=max_duration_seconds,
+        publish_existing_listing=lambda **values: published.append(values)
+        or {"status": "published"},
+        close_listing=lambda base_url, listing_id: closed.append(listing_id)
+        or {"status": "closed"},
+        settlement_options=[],
+        publication_clauses=[],
+    )
+    return result, published, closed
+
+
+def _stored_resource(path):
+    import sqlite3
+
+    with sqlite3.connect(path) as conn:
+        (raw,) = conn.execute(
+            "SELECT listing_resource FROM listings WHERE listing_id='listing-1'"
+        ).fetchone()
+    return json.loads(raw)
+
+
+def test_an_unchanged_tracked_listing_is_left_alone(tmp_path):
+    path, candidate = _tracked_listing(tmp_path)
+
+    result, published, closed = _reconcile(path, candidate, _stored_resource(path))
+
+    assert result["status"] == "unchanged"
+    assert (published, closed) == ([], [])
+
+
+def test_a_changed_term_refreshes_the_listing_in_place(tmp_path):
+    path, candidate = _tracked_listing(tmp_path)
+
+    result, published, closed = _reconcile(
+        path, candidate, _stored_resource(path), max_duration_seconds=3600
+    )
+
+    assert result == {"status": "published"}
+    assert published[0]["listing_id"] == "listing-1"
+    assert published[0]["max_duration_seconds"] == 3600
+    assert closed == []
+
+
+def test_a_changed_identity_closes_and_refuses_reopen(tmp_path):
+    path, candidate = _tracked_listing(tmp_path)
+    diverged = {**_stored_resource(path), "host_id": "machine-2"}
+
+    result, published, closed = _reconcile(path, candidate, diverged)
+
+    assert result["status"] == "unchanged"
+    assert closed == ["listing-1"]
+    assert published == []
+    again, published, closed = _reconcile(path, candidate, diverged)
+    assert again["status"] == "unchanged"
+    assert (published, closed) == ([], [])

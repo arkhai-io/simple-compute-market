@@ -303,9 +303,9 @@ def _migrate_common_domain_bindings(conn: sqlite3.Connection) -> None:
               listing_id, site_id, pool_id, physical_resource_id,
               offering_mode, domain_identity, contract_major,
               contract_minor, derivation_key, source_envelope_json,
-              last_reconciled_at
+              last_reconciled_at, capacity_backing
             ) VALUES (?, ?, NULL, ?, 'bare_metal', 'bare_metal.v1',
-                      1, 0, ?, ?, ?)
+                      1, 0, ?, ?, ?, 'backed')
             """,
             (
                 row[0],

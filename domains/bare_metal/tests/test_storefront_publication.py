@@ -59,6 +59,7 @@ def db(tmp_path):
             CREATE TABLE listings (
               listing_id TEXT PRIMARY KEY,
               status TEXT NOT NULL,
+              closed_by TEXT,
               paused INTEGER NOT NULL DEFAULT 0,
               updated_at TEXT,
               listing_resource TEXT,

@@ -127,6 +127,7 @@ async def db(tmp_path) -> SQLiteClient:
             "payload": {"pool_id": "pool-order-001"},
         },
         last_reconciled_at=datetime.now().isoformat(),
+        capacity_backing="backed",
     )
     await client.upsert_listing_with_binding(
         binding=listing_binding,
@@ -367,12 +368,13 @@ class TestNegotiationRuntimePauseGuard:
     async def test_pre_negotiation_guard_rejection_raises_offer_unfulfillable(
         self, db, monkeypatch, marketplace_signer
     ):
-        """Round-0 guard veto (no matching inventory) raises OfferUnfulfillableError.
+        """Round-0 guard veto raises OfferUnfulfillableError.
 
-        The fixture's listing offers ``gpu_model=H200, region=California, US``;
-        the test DB has no portfolio resources at all, so the
+        The fixture's listing offers ``gpu_model=H200, region=California, US``,
+        and no site projection declares its source, so the
         ``has_matching_inventory_guard`` middleware vetoes with
-        ``no_matching_inventory``, which maps to 409.
+        ``no_matching_declaration``: the seller cannot confirm its source still
+        declares what the listing publishes. Every guard veto maps to 409.
         """
         import market_storefront.server as server_mod
         monkeypatch.setattr(server_mod, "_GLOBALLY_PAUSED", False)
@@ -392,5 +394,5 @@ class TestNegotiationRuntimePauseGuard:
             our_base_url="http://seller:8001",
             their_agent_url="0xBuyer",)
 
-        assert exc_info.value.reason == "no_matching_inventory"
+        assert exc_info.value.reason == "no_matching_declaration"
         assert exc_info.value.listing_id == "order-001"

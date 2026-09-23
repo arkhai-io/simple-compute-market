@@ -184,6 +184,7 @@ def test_restart_preserves_schema_and_all_persisted_identifiers(tmp_path) -> Non
         ),
         source_envelope=source,
         last_reconciled_at=now,
+        capacity_backing="backed",
         physical_resource_id="resource-stable",
     )
 

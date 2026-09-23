@@ -34,6 +34,7 @@ def _registered_names() -> set[str]:
         lifecycle.FULFILLMENT_RESUME,
         lifecycle.CAPACITY_EVENTS_POLLER,
         lifecycle.SITE_PROJECTION_POLLER,
+        lifecycle.PUBLICATION,
     }
 
 
@@ -164,3 +165,30 @@ class TestTheRouteAliasNamesTheLoop:
         assert not unknown, (
             f"ADVANCE_LOOP_NAMES maps to unregistered names: {sorted(unknown)}"
         )
+
+
+class TestPublicationRoutes:
+    @pytest.mark.parametrize("dry_run", [True, False])
+    async def test_each_route_runs_exactly_the_timers_cycle(self, monkeypatch, dry_run):
+        calls: list[bool] = []
+
+        async def _cycle(*, dry_run):
+            calls.append(dry_run)
+            return {"loop": "publication", "dry_run": dry_run, "actions": [], "counts": {}}
+
+        monkeypatch.setattr(
+            "market_storefront.services.publication_loop.run_publication_cycle_once",
+            _cycle,
+        )
+        controller = object.__new__(ac.AdminController)
+        route = (
+            ac.AdminController.dry_run_publication_cycle
+            if dry_run
+            else ac.AdminController.run_publication_cycle
+        )
+
+        result = await route(controller)
+
+        assert calls == [dry_run]
+        assert result["loop"] == "publication"
+        assert ac.ADVANCE_LOOP_NAMES["publication"] == lifecycle.PUBLICATION

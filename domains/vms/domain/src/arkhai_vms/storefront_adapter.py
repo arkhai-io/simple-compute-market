@@ -35,10 +35,16 @@ ReopenExistingCallback = Callable[
 
 def vm_listing_resource_key(
     resource_id: str | None,
-    gpu_count: int | str | None,
+    gpu_count: int,
 ) -> str:
-    """Fallback derivation key for one VM GPU slice."""
-    return f"{resource_id}:gpus:{int(gpu_count or 1)}"
+    """Fallback derivation key for one VM GPU slice.
+
+    The count is required: a candidate is always "N GPUs of this resource", and
+    substituting a count for a missing one would key it as a different slice.
+    """
+    if isinstance(gpu_count, bool) or not isinstance(gpu_count, int) or gpu_count <= 0:
+        raise ValueError(f"gpu_count must be a positive integer, not {gpu_count!r}")
+    return f"{resource_id}:gpus:{gpu_count}"
 
 
 def vm_candidate_skip_keys(candidate: dict[str, Any]) -> set[str]:
@@ -72,6 +78,7 @@ def vm_listing_resource_for_listing(
         "sla": candidate["sla"],
         "region": candidate["region"],
         "offering_mode": candidate["offering_mode"],
+        "capacity_backing": candidate["capacity_backing"],
     }
     if candidate.get("resource_id"):
         listing_resource["resource_id"] = candidate["resource_id"]

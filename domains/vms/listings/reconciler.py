@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
-from dataclasses import dataclass
-from typing import Any, Mapping
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Mapping
 
+from domains.vms.listings.listing_comparison import REFUSE, compare_listing
 from domains.vms.listings.listing_cardinality_mode import (
     resolve_vm_listing_cardinality_mode,
 )
@@ -13,8 +15,12 @@ from domains.vms.listings.pricing_resolution import (
     GpuPricingFields,
     resolve_gpu_pricing,
 )
-from market_identity import Identity
 
+
+if TYPE_CHECKING:
+    from domains.vms.listings.pool_declarations import ResolvedPool
+
+logger = logging.getLogger(__name__)
 
 HELD_ALLOCATION_STATES = {
     "reserved",
@@ -40,81 +46,48 @@ def _length_prefixed(value: str) -> str:
     return f"{len(value)}:{value}"
 
 
+def positive_gpu_count(value: Any) -> int | None:
+    """A usable enumeration quantity, or ``None``.
+
+    Exactly a positive integer. Nothing here substitutes a count: a listing is
+    "N GPUs of this resource", and a missing, zero, or malformed N is not a
+    1-GPU slice that happens to be unlabelled.
+    """
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return None
+    return value
+
+
+def _required_gpu_count(gpu_count: Any) -> int:
+    count = positive_gpu_count(gpu_count)
+    if count is None:
+        raise ValueError(f"gpu_count must be a positive integer, not {gpu_count!r}")
+    return count
+
+
 def listing_resource_key(
     site_id: str,
     resource_id: str,
-    gpu_count: int | str | None,
+    gpu_count: int,
 ) -> str:
     if not site_id or not site_id.strip():
         raise ValueError("site_id must be non-empty")
     return (
         f"{_length_prefixed(site_id)}:{_length_prefixed(resource_id)}"
-        f":gpus:{int(gpu_count or 1)}"
+        f":gpus:{_required_gpu_count(gpu_count)}"
     )
 
 
 def listing_pool_key(
     site_id: str,
     pool_id: str,
-    gpu_count: int | str | None,
+    gpu_count: int,
 ) -> str:
     if not site_id or not site_id.strip():
         raise ValueError("site_id must be non-empty")
     return (
         f"pool:{_length_prefixed(site_id)}:{_length_prefixed(pool_id)}"
-        f":gpus:{int(gpu_count or 1)}"
-    )
-
-
-def ensure_derived_compute_listings_table(
-    conn: sqlite3.Connection | sqlite3.Cursor,
-) -> None:
-    """Create/upgrade derived_compute_listings and its indexes.
-
-    The single source of truth for this table's schema -- called both
-    lazily by this module's own write functions (via a plain
-    sqlite3.Connection, for standalone/test use with no SQLiteClient
-    involved) and eagerly by SQLiteClient._ensure_domain_tables (via its
-    cursor, at every storefront startup) so the table and its current
-    columns exist before any request-handling code runs. Both callers
-    only need `.execute()`, which Connection and Cursor both provide.
-    """
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS derived_compute_listings (
-          listing_id TEXT PRIMARY KEY,
-          site_id TEXT,
-          pool_id TEXT,
-          resource_id TEXT NOT NULL,
-          gpu_count INTEGER NOT NULL,
-          status TEXT NOT NULL,
-          derivation_key TEXT NOT NULL UNIQUE,
-          last_reconciled_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
-        )
-        """
-    )
-    cols = {
-        row[1] for row in conn.execute("PRAGMA table_info(derived_compute_listings)")
-    }
-    if "pool_id" not in cols:
-        conn.execute("ALTER TABLE derived_compute_listings ADD COLUMN pool_id TEXT")
-    if "site_id" not in cols:
-        conn.execute("ALTER TABLE derived_compute_listings ADD COLUMN site_id TEXT")
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_derived_compute_listings_resource "
-        "ON derived_compute_listings(resource_id, gpu_count)"
-    )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_derived_compute_listings_pool "
-        "ON derived_compute_listings(pool_id, gpu_count)"
-    )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_derived_compute_listings_status "
-        "ON derived_compute_listings(status)"
-    )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_derived_compute_listings_site "
-        "ON derived_compute_listings(site_id)"
+        f":gpus:{_required_gpu_count(gpu_count)}"
     )
 
 
@@ -458,16 +431,26 @@ class _ProjectedResourceUsage:
     available: int
 
 
+# Why a member yields no usage. Each is handled differently: an absent count is
+# reported to the operator, a declared zero is silent, and a malformed count
+# makes the member unresolvable, because an unreadable count is not a zero.
+_GPU_COUNT_ABSENT = "absent"
+_GPU_COUNT_ZERO = "zero"
+_GPU_COUNT_MALFORMED = "malformed"
+
+
 def _projected_resource_usage(
     resource: Mapping[str, Any],
     *,
     site_id: str,
     member_availability: dict[tuple[str | None, str], int] | None,
-) -> "_ProjectedResourceUsage | None":
-    """Derive one projected resource's identity, GPU model, and usage --
-    or None if it has no physical_resource_id to key on. Pure and
-    independently testable: no dict mutation, no accumulation, just this
-    one resource's own facts.
+) -> "_ProjectedResourceUsage | str | None":
+    """Derive one projected resource's identity, GPU model, and usage.
+
+    Returns ``None`` if it has no physical_resource_id to key on, or one of the
+    ``_GPU_COUNT_*`` outcomes when its declared GPU count cannot be enumerated.
+    Pure and independently testable: no dict mutation, no accumulation, just
+    this one resource's own facts.
     """
     resource_id = str(resource.get("physical_resource_id") or "")
     if not resource_id:
@@ -475,7 +458,14 @@ def _projected_resource_usage(
     attrs = resource.get("attributes") or {}
     gpu_model = attrs.get("gpu_model") or None
     capacity = resource.get("capacity") or {}
-    total = int(capacity.get("gpu_count") or 0)
+    if "gpu_count" not in capacity or capacity.get("gpu_count") is None:
+        return _GPU_COUNT_ABSENT
+    raw_total = capacity["gpu_count"]
+    if isinstance(raw_total, bool) or not isinstance(raw_total, int) or raw_total < 0:
+        return _GPU_COUNT_MALFORMED
+    if raw_total == 0:
+        return _GPU_COUNT_ZERO
+    total = raw_total
     available_field = resource.get("available")
     if available_field is not None:
         # The projection already carries this resource's live
@@ -587,6 +577,92 @@ def _fungible_availability_from_buckets(
     return 0, 0, None
 
 
+@dataclass
+class _SiteDerivationReport:
+    """What one site's latest derivation could not publish, and why.
+
+    Surfaced in the storefront's system status so an operator sees why a pool
+    publishes nothing or why its listings are held.
+    """
+
+    compatibility_rule: bool = False
+    unresolvable_pools: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    unresolvable_members: dict[str, str] = field(default_factory=dict)
+    members_without_gpu_count: dict[str, str] = field(default_factory=dict)
+    mixed_kind_pools: dict[str, list[str]] = field(default_factory=dict)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "compatibility_rule": self.compatibility_rule,
+            "unresolvable_pools": {
+                pool_id: list(codes)
+                for pool_id, codes in sorted(self.unresolvable_pools.items())
+            },
+            "unresolvable_members": dict(sorted(self.unresolvable_members.items())),
+            "members_without_gpu_count": dict(
+                sorted(self.members_without_gpu_count.items())
+            ),
+            "mixed_kind_pools": dict(sorted(self.mixed_kind_pools.items())),
+        }
+
+
+_LATEST_DERIVATION_REPORTS: dict[str, dict[str, Any]] = {}
+
+
+def derivation_reports() -> dict[str, dict[str, Any]]:
+    """Per-site report from the latest projection-path derivation."""
+    return {site: dict(report) for site, report in _LATEST_DERIVATION_REPORTS.items()}
+
+
+def _record_site_report(site_id: str, report: _SiteDerivationReport) -> None:
+    # Logged when a site's report changes rather than on every reconcile, so a
+    # standing condition is visible once per projection generation instead of
+    # on every poll.
+    current = report.as_dict()
+    if _LATEST_DERIVATION_REPORTS.get(site_id) == current:
+        return
+    _LATEST_DERIVATION_REPORTS[site_id] = current
+    if current["compatibility_rule"]:
+        logger.warning(
+            "[PUBLICATION] site %s projects no advertisement or backing "
+            "declarations; every pool reads as capacity-backed with delivery "
+            "authorizing advertisement",
+            site_id,
+        )
+    for pool_id, codes in current["unresolvable_pools"].items():
+        logger.warning(
+            "[PUBLICATION] site %s pool %s is unresolvable (%s); its listings "
+            "are held",
+            site_id,
+            pool_id,
+            ", ".join(codes),
+        )
+    for resource_id, pool_id in current["unresolvable_members"].items():
+        logger.warning(
+            "[PUBLICATION] site %s pool %s member %s declares a malformed "
+            "gpu_count; its listings are held",
+            site_id,
+            pool_id,
+            resource_id,
+        )
+    for resource_id, pool_id in current["members_without_gpu_count"].items():
+        logger.warning(
+            "[PUBLICATION] site %s pool %s member %s declares no gpu_count; "
+            "no VM listing is derived from it",
+            site_id,
+            pool_id,
+            resource_id,
+        )
+    for pool_id, models in current["mixed_kind_pools"].items():
+        logger.warning(
+            "[PUBLICATION] site %s fungible pool %s has members declaring "
+            "different gpu_model values %s",
+            site_id,
+            pool_id,
+            models,
+        )
+
+
 @dataclass(frozen=True)
 class PoolHintResolutionSettings:
     """Storefront-wide policy for how much a projected pool's own
@@ -634,6 +710,9 @@ def _projected_pool_rows(
     local_pricing: Mapping[str, sqlite3.Row],
     member_availability: dict[tuple[str | None, str], int] | None,
     capacity_buckets: list[Mapping[str, Any]] | None,
+    declaration: "ResolvedPool",
+    holds: set[tuple[str, str, str]],
+    report: _SiteDerivationReport,
     hint_resolution: PoolHintResolutionSettings = _DEFAULT_POOL_HINT_RESOLUTION_SETTINGS,
 ) -> list[dict[str, Any]]:
     """Build zero or more pool_rows entries from one projected pool.
@@ -658,12 +737,13 @@ def _projected_pool_rows(
     (`member_count == 1` -> specific_resource) so an untagged pool's publication shape does not
     change out from under an existing derived-listing mapping.
     """
-    # Buyer-side listing helpers import this module without installing the
-    # resource-pool authority package; only storefront projection needs it.
-    from market_resource_pools import pool_delivers_offering_mode
-
     pool_id = str(pool.get("resource_pool_id") or "").strip()
     if not pool_id:
+        return []
+    # A listing may advertise only a mode its pool declares advertisable,
+    # backed or not; delivery is rechecked separately by every execution layer.
+    # A pool its site declares disabled is a withdrawn source.
+    if not declaration.advertises("vm") or not declaration.enabled:
         return []
     # `pricing` (this pool's row in the storefront's own local
     # `compute_capacity_pools` table) is the tier-3 storefront-override
@@ -684,6 +764,8 @@ def _projected_pool_rows(
     local_gpu_model = pricing["gpu_model"] if pricing is not None else None
 
     usages: list[_ProjectedResourceUsage] = []
+    malformed_members: list[str] = []
+    enabled_member_count = 0
     for resource in pool.get("resources") or []:
         if not resource.get("enabled", True):
             continue
@@ -692,20 +774,38 @@ def _projected_pool_rows(
             site_id=site_id,
             member_availability=member_availability,
         )
-        if usage is not None:
+        if usage is None:
+            continue
+        enabled_member_count += 1
+        resource_id = str(resource.get("physical_resource_id"))
+        if usage == _GPU_COUNT_ABSENT:
+            report.members_without_gpu_count[resource_id] = pool_id
+        elif usage == _GPU_COUNT_MALFORMED:
+            malformed_members.append(resource_id)
+            report.unresolvable_members[resource_id] = pool_id
+        elif isinstance(usage, _ProjectedResourceUsage):
             usages.append(usage)
 
     metadata = pool.get("pool_metadata") or {}
     policy_tags = metadata.get("policy_tags") or {}
-    if not pool_delivers_offering_mode(policy_tags, "vm"):
-        return []
 
-    structural_default = "specific_resource" if len(usages) == 1 else "fungible"
+    structural_default = (
+        "specific_resource" if enabled_member_count == 1 else "fungible"
+    )
     cardinality = resolve_vm_listing_cardinality_mode(
         policy_tags,
         structural_default=structural_default,
     )
     mode = cardinality.mode
+    if malformed_members:
+        # A fungible pool's range is its largest member's count, which cannot
+        # be known while one member's count is unreadable, so the whole pool is
+        # held. A specific-resource pool's other members are unaffected.
+        if mode != "specific_resource":
+            holds.add(("pool", site_id, pool_id))
+            return []
+        for resource_id in malformed_members:
+            holds.add(("resource", site_id, resource_id))
 
     region = resolve_region(policy_tags, fallback=local_region)
     sla = resolve_sla(
@@ -748,6 +848,7 @@ def _projected_pool_rows(
         "sla": sla,
         "listing_cardinality_mode": mode,
         "offering_mode": "vm",
+        "capacity_backing": declaration.capacity_backing,
         "listing_cardinality_mode_explanation": cardinality.fallback_explanation,
         "listing_cardinality_mode_deprecated_key_notice": (
             cardinality.deprecated_key_notice
@@ -771,6 +872,7 @@ def _projected_pool_rows(
                     "total_gpu_count": usage.total,
                     "available_gpu_count": usage.available,
                     "max_member_available_gpu_count": usage.available,
+                    "max_member_declared_gpu_count": usage.total,
                     "single_resource_id": usage.resource_id,
                     "member_count": 1,
                 }
@@ -778,6 +880,12 @@ def _projected_pool_rows(
         return rows
 
     # fungible: exactly one aggregated row.
+    kinds = sorted({usage.gpu_model for usage in usages if usage.gpu_model})
+    if len(kinds) > 1:
+        # Derivation is unchanged: the listing key does not capture the
+        # resource's kind yet, so a mixed-kind fungible pool is reported rather
+        # than split.
+        report.mixed_kind_pools[pool_id] = kinds
     total_gpu_count = sum(usage.total for usage in usages)
     resource_gpu_model = next((u.gpu_model for u in usages if u.gpu_model), None)
     from_buckets = _fungible_availability_from_buckets(pool_id, capacity_buckets)
@@ -809,6 +917,9 @@ def _projected_pool_rows(
             "total_gpu_count": total_gpu_count,
             "available_gpu_count": available_gpu_count,
             "max_member_available_gpu_count": max_member_available,
+            "max_member_declared_gpu_count": max(
+                (usage.total for usage in usages), default=0
+            ),
             "single_resource_id": None,
             "member_count": len(usages),
         }
@@ -823,6 +934,7 @@ def _pool_rows_from_projection(
     member_availability: dict[tuple[str | None, str], int] | None,
     site_capacity_buckets: Mapping[str, list[dict[str, Any]]] | None = None,
     hint_resolution: PoolHintResolutionSettings = _DEFAULT_POOL_HINT_RESOLUTION_SETTINGS,
+    holds: set[tuple[str, str, str]],
 ) -> list[dict[str, Any]]:
     """Build pool_rows from a site_resource_pools projection.
 
@@ -847,9 +959,20 @@ def _pool_rows_from_projection(
     falls back to the pre-existing resource-list computation for every
     fungible pool, not an error.
     """
+    # Buyer-side listing helpers import this module without installing the
+    # resource-pool authority package; only storefront projection needs it.
+    from domains.vms.listings.pool_declarations import read_site_declarations
+
     local_pricing = _local_pool_pricing(conn)
     pool_rows: list[dict[str, Any]] = []
     for site_id, pools in site_pool_projection.items():
+        declarations = read_site_declarations(pools or [])
+        report = _SiteDerivationReport(
+            compatibility_rule=declarations.compatibility_rule,
+            unresolvable_pools=dict(declarations.unresolvable),
+        )
+        for pool_id in declarations.unresolvable:
+            holds.add(("pool", site_id, pool_id))
         # None (this site's capacity-bucket family has never loaded, or
         # site_capacity_buckets wasn't supplied at all) must survive
         # distinctly from a loaded, genuinely empty list -- collapsing
@@ -864,6 +987,11 @@ def _pool_rows_from_projection(
             else None
         )
         for pool in pools:
+            declaration = declarations.resolved.get(
+                str(pool.get("resource_pool_id") or "").strip()
+            )
+            if declaration is None:
+                continue
             pool_rows.extend(
                 _projected_pool_rows(
                     pool,
@@ -872,9 +1000,13 @@ def _pool_rows_from_projection(
                     local_pricing=local_pricing,
                     member_availability=member_availability,
                     capacity_buckets=buckets_for_site,
+                    declaration=declaration,
+                    holds=holds,
+                    report=report,
                     hint_resolution=hint_resolution,
                 )
             )
+        _record_site_report(site_id, report)
     return pool_rows
 
 
@@ -886,6 +1018,8 @@ def available_compute_slices(
     site_pool_projection: Mapping[str, list[dict[str, Any]]] | None = None,
     site_capacity_buckets: Mapping[str, list[dict[str, Any]]] | None = None,
     hint_resolution: PoolHintResolutionSettings = _DEFAULT_POOL_HINT_RESOLUTION_SETTINGS,
+    holds: set[tuple[str, str, str]] | None = None,
+    declared_range: bool = False,
 ) -> list[dict[str, Any]]:
     """Return publishable compute listing slices from current storefront state.
 
@@ -934,6 +1068,19 @@ def available_compute_slices(
     path; the local-table fallback has no ``policy_tags``/bucket source
     and is unaffected by either parameter.
 
+    Each slice carries its pool's ``capacity_backing``. A capacity-backed
+    pool's slices range over the largest single member's *available* count, so
+    capacity changes move them; an unbacked pool's range over the largest single
+    member's *declared* count, so only a change to what the site declares moves
+    them. Both kinds disappear when their source is removed or disabled.
+    ``declared_range`` ranges every pool over declared quantity, which is what
+    a listing's source still declares regardless of what is currently free.
+
+    ``holds`` collects ``("pool", site, pool_id)`` and
+    ``("resource", site, resource_id)`` entries for sources whose declarations
+    cannot be read. Their listings must be neither closed nor refreshed, so
+    callers that reconcile keep them out of both.
+
     ``hint_resolution`` controls how much a pool's own
     projected ``region``/``sla`` hints are trusted relative to the
     storefront's local `compute_capacity_pools` fallback/override values
@@ -942,6 +1089,7 @@ def available_compute_slices(
     ``site_capacity_buckets`` above; the local-table fallback has no hint
     source to resolve against.
     """
+    held = holds if holds is not None else set()
     conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
     conn.row_factory = sqlite3.Row
     try:
@@ -953,11 +1101,19 @@ def available_compute_slices(
                 member_availability=member_availability,
                 site_capacity_buckets=site_capacity_buckets,
                 hint_resolution=hint_resolution,
+                holds=held,
             )
         else:
             pool_rows = _pool_rows_from_local_tables(
                 conn, member_availability, home_site=home_site
             )
+            # Local tables can express only capacity-backed supply: nothing
+            # in them declares a pool with no admission authority.
+            for row in pool_rows:
+                row["capacity_backing"] = "backed"
+                row["max_member_declared_gpu_count"] = row.get(
+                    "max_member_available_gpu_count"
+                )
     finally:
         conn.close()
 
@@ -991,7 +1147,13 @@ def available_compute_slices(
                 else dict(item)
                 for item in raw_settlements
             ]
-        max_slice = int(row.get("max_member_available_gpu_count") or 0)
+        backing = row["capacity_backing"]
+        range_field = (
+            "max_member_declared_gpu_count"
+            if backing == "unbacked" or declared_range
+            else "max_member_available_gpu_count"
+        )
+        max_slice = int(row.get(range_field) or 0)
         for gpu_count in range(1, max_slice + 1):
             pool_id = str(row["pool_id"])
             single_resource_id = row.get("single_resource_id")
@@ -999,6 +1161,7 @@ def available_compute_slices(
             out.append(
                 {
                     "offering_mode": "vm",
+                    "capacity_backing": backing,
                     "site_id": site_id,
                     "pool_id": pool_id,
                     "resource_id": single_resource_id,
@@ -1044,6 +1207,7 @@ def current_available_resource_keys(
     member_availability: dict[tuple[str | None, str], int] | None = None,
     site_pool_projection: Mapping[str, list[dict[str, Any]]] | None = None,
     site_capacity_buckets: Mapping[str, list[dict[str, Any]]] | None = None,
+    holds: set[tuple[str, str, str]] | None = None,
 ) -> set[str]:
     # Known, accepted cost, not an oversight: `available_compute_slices`
     # resolves each row's region/SLA/pricing (the full three-tier chain,
@@ -1071,6 +1235,7 @@ def current_available_resource_keys(
         member_availability=member_availability,
         site_pool_projection=site_pool_projection,
         site_capacity_buckets=site_capacity_buckets,
+        holds=holds,
     ):
         if row.get("resource_key"):
             keys.add(str(row["resource_key"]))
@@ -1079,6 +1244,89 @@ def current_available_resource_keys(
     return keys
 
 
+
+
+def stored_listing_key(
+    listing_resource: Mapping[str, Any],
+    site_id: str,
+) -> str | None:
+    """The structural key a stored VM listing occupies, or ``None``.
+
+    ``None`` when the stored listing names no source or carries no usable GPU
+    count. Such a listing is excluded from keyed reconciliation rather than
+    keyed as a 1-GPU slice, which could collide with a real one.
+    """
+    gpu_count = positive_gpu_count(listing_resource.get("gpu_count"))
+    if gpu_count is None:
+        return None
+    pool_id = listing_resource.get("pool_id")
+    resource_id = listing_resource.get("resource_id")
+    if pool_id and resource_id is None:
+        return listing_pool_key(str(site_id), str(pool_id), gpu_count)
+    if resource_id:
+        return listing_resource_key(str(site_id), str(resource_id), gpu_count)
+    return None
+
+
+def _is_held(
+    listing_resource: Mapping[str, Any],
+    site_id: str,
+    holds: set[tuple[str, str, str]],
+) -> bool:
+    pool_id = listing_resource.get("pool_id")
+    resource_id = listing_resource.get("resource_id")
+    return ("pool", str(site_id), str(pool_id)) in holds or (
+        resource_id is not None
+        and ("resource", str(site_id), str(resource_id)) in holds
+    )
+
+
+# The binding's backing for each listing read by the latest `_bound_vm_listings`
+# call. Kept beside the listing rows rather than widening their tuple so every
+# existing caller keeps its shape.
+_BINDING_BACKING: dict[str, str] = {}
+
+
+def _bound_vm_listings(
+    db_path: str,
+    *,
+    open_listings: bool,
+) -> list[tuple[str, dict[str, Any], str]]:
+    """Bound VM listings as ``(listing_id, listing_resource, site_id)``.
+
+    Closed listings exclude those their seller closed: no reconciliation path
+    reopens a listing its seller withdrew.
+    """
+    status_clause = (
+        "l.status = 'open'"
+        if open_listings
+        else "l.status != 'open' AND l.closed_by IS NOT 'seller'"
+    )
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
+    try:
+        rows = conn.execute(
+            f"""
+            SELECT l.listing_id, l.listing_resource, b.site_id, b.capacity_backing
+            FROM listings l
+            JOIN storefront_listing_bindings b ON b.listing_id = l.listing_id
+            WHERE {status_clause}
+              AND b.offering_mode = 'vm'
+            """
+        ).fetchall()
+    finally:
+        conn.close()
+    out: list[tuple[str, dict[str, Any], str]] = []
+    for listing_id, raw, site_id, capacity_backing in rows:
+        if not raw or not site_id:
+            continue
+        try:
+            parsed = json.loads(raw)
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if isinstance(parsed, dict):
+            _BINDING_BACKING[str(listing_id)] = str(capacity_backing)
+            out.append((str(listing_id), parsed, str(site_id)))
+    return out
 
 
 def open_listing_resource_keys(
@@ -1090,39 +1338,11 @@ def open_listing_resource_keys(
     """Return exact site-scoped keys covered by bound open VM listings."""
 
     del home_site, configured_site_count
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
-    try:
-        rows = conn.execute(
-            """
-            SELECT l.listing_resource, b.site_id
-            FROM listings l
-            JOIN storefront_listing_bindings b ON b.listing_id = l.listing_id
-            WHERE l.status = 'open'
-              AND b.offering_mode = 'vm'
-            """
-        ).fetchall()
-    finally:
-        conn.close()
-
     covered: set[str] = set()
-    for raw, site_id in rows:
-        if not raw or not site_id:
-            continue
-        try:
-            parsed = json.loads(raw)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(parsed, dict):
-            continue
-        pool_id = parsed.get("pool_id")
-        resource_id = parsed.get("resource_id")
-        gpu_count = parsed.get("gpu_count")
-        if pool_id and resource_id is None:
-            covered.add(listing_pool_key(str(site_id), str(pool_id), gpu_count))
-        elif resource_id:
-            covered.add(
-                listing_resource_key(str(site_id), str(resource_id), gpu_count)
-            )
+    for _, listing_resource, site_id in _bound_vm_listings(db_path, open_listings=True):
+        key = stored_listing_key(listing_resource, site_id)
+        if key is not None:
+            covered.add(key)
     return covered
 
 
@@ -1135,52 +1355,30 @@ def stale_open_listing_ids(
     site_pool_projection: Mapping[str, list[dict[str, Any]]] | None = None,
     site_capacity_buckets: Mapping[str, list[dict[str, Any]]] | None = None,
 ) -> list[str]:
-    """Return bound VM listings whose exact site-scoped slice is unavailable."""
+    """Return bound VM listings whose exact site-scoped slice is gone.
+
+    A listing whose source cannot currently be read is held, not stale.
+    """
 
     del configured_site_count
+    holds: set[tuple[str, str, str]] = set()
     available_keys = current_available_resource_keys(
         db_path,
         home_site=home_site,
         member_availability=member_availability,
         site_pool_projection=site_pool_projection,
         site_capacity_buckets=site_capacity_buckets,
+        holds=holds,
     )
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
-    try:
-        rows = conn.execute(
-            """
-            SELECT l.listing_id, l.listing_resource, b.site_id
-            FROM listings l
-            JOIN storefront_listing_bindings b ON b.listing_id = l.listing_id
-            WHERE l.status = 'open'
-              AND b.offering_mode = 'vm'
-            """
-        ).fetchall()
-    finally:
-        conn.close()
-
     stale: list[str] = []
-    for listing_id, raw, site_id in rows:
-        if not raw or not site_id:
+    for listing_id, listing_resource, site_id in _bound_vm_listings(
+        db_path, open_listings=True
+    ):
+        if _is_held(listing_resource, site_id, holds):
             continue
-        try:
-            parsed = json.loads(raw)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(parsed, dict):
-            continue
-        pool_id = parsed.get("pool_id")
-        resource_id = parsed.get("resource_id")
-        gpu_count = parsed.get("gpu_count")
-        key = (
-            listing_pool_key(str(site_id), str(pool_id), gpu_count)
-            if pool_id and resource_id is None
-            else listing_resource_key(str(site_id), str(resource_id), gpu_count)
-            if resource_id
-            else None
-        )
+        key = stored_listing_key(listing_resource, site_id)
         if key is not None and key not in available_keys:
-            stale.append(str(listing_id))
+            stale.append(listing_id)
     return stale
 
 
@@ -1192,370 +1390,69 @@ def closed_available_listing_ids(
     site_pool_projection: Mapping[str, list[dict[str, Any]]] | None = None,
     site_capacity_buckets: Mapping[str, list[dict[str, Any]]] | None = None,
 ) -> list[str]:
-    """Return closed bound VM listings whose exact slice is available again."""
+    """Return closed bound VM listings that may reopen now.
 
-    available_keys = current_available_resource_keys(
+    A listing may reopen when its exact slice is available again, its seller did
+    not close it, its source is not held, and its published identity and its
+    binding's backing still match what its source derives. Every reopen path
+    shares this predicate, so a listing closed because its source changed is
+    not reopened by a capacity event that happens to free its slice.
+    """
+    holds: set[tuple[str, str, str]] = set()
+    slices: dict[str, dict[str, Any]] = {}
+    for row in available_compute_slices(
         db_path,
         home_site=home_site,
         member_availability=member_availability,
         site_pool_projection=site_pool_projection,
         site_capacity_buckets=site_capacity_buckets,
-    )
-    if not available_keys:
+        holds=holds,
+    ):
+        for key_field in ("resource_key", "legacy_resource_key"):
+            if row.get(key_field):
+                slices[str(row[key_field])] = row
+    if not slices:
         return []
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
-    try:
-        rows = conn.execute(
-            """
-            SELECT l.listing_id, l.listing_resource, b.site_id
-            FROM listings l
-            JOIN storefront_listing_bindings b ON b.listing_id = l.listing_id
-            WHERE l.status != 'open'
-              AND b.offering_mode = 'vm'
-            """
-        ).fetchall()
-    finally:
-        conn.close()
     available: list[tuple[int, str]] = []
-    for listing_id, raw, site_id in rows:
-        try:
-            listing_resource = json.loads(raw)
-        except (TypeError, json.JSONDecodeError):
+    for listing_id, listing_resource, site_id in _bound_vm_listings(
+        db_path, open_listings=False
+    ):
+        if _is_held(listing_resource, site_id, holds):
             continue
-        if not isinstance(listing_resource, dict):
+        key = stored_listing_key(listing_resource, site_id)
+        fresh = slices.get(key) if key is not None else None
+        if fresh is None:
             continue
-        pool_id = listing_resource.get("pool_id")
-        resource_id = listing_resource.get("resource_id")
-        gpu_count = int(listing_resource.get("gpu_count") or 1)
-        key = (
-            listing_pool_key(str(site_id), str(pool_id), gpu_count)
-            if pool_id and resource_id is None
-            else listing_resource_key(str(site_id), str(resource_id), gpu_count)
-            if resource_id
-            else None
+        comparison = compare_listing(
+            stored_resource=listing_resource,
+            stored_terms={},
+            fresh_resource=slice_identity(fresh),
+            fresh_terms={},
+            binding_backing=_BINDING_BACKING.get(listing_id, ""),
+            source_backing=str(fresh.get("capacity_backing")),
         )
-        if key in available_keys:
-            available.append((gpu_count, str(listing_id)))
+        if comparison.outcome in REFUSE:
+            logger.warning(
+                "[PUBLICATION] not reopening listing %s: %s differs from its "
+                "source at site %s",
+                listing_id,
+                list(comparison.differing_fields),
+                site_id,
+            )
+            continue
+        available.append((int(listing_resource["gpu_count"]), listing_id))
     return [listing_id for _, listing_id in sorted(available)]
 
 
-def record_derived_listing(
-    db_path: str,
-    *,
-    listing_id: str,
-    site_id: str,
-    resource_id: str | None,
-    gpu_count: int,
-    pool_id: str | None = None,
-    status: str = "open",
-) -> None:
-    resolved_pool_id = pool_id or resource_id
-    if not resolved_pool_id:
-        raise ValueError("pool_id or resource_id is required")
-    # A resource-keyed candidate is any call that supplies a resource_id --
-    # pool_id's mere presence is not signal: pool_id and resource_id are
-    # always different id spaces (operator pool slug vs. physical resource
-    # id), so `pool_id != resource_id` is true whenever both are supplied,
-    # regardless of listing cardinality. This must key on `resource_id is None`,
-    # matching `available_compute_slices`' own `is_fungible_pool` meaning
-    # exactly, or multiple specific_resource listings from the same pool
-    # collide onto one derivation_key and silently overwrite each other.
-    use_pool_key = pool_id is not None and resource_id is None
-    derivation_key = (
-        listing_pool_key(site_id, resolved_pool_id, gpu_count)
-        if use_pool_key
-        else listing_resource_key(
-            site_id, str(resource_id or resolved_pool_id), gpu_count
-        )
-    )
-    conn = sqlite3.connect(db_path)
-    try:
-        ensure_derived_compute_listings_table(conn)
-        conn.execute(
-            """
-            INSERT INTO derived_compute_listings(
-              listing_id, site_id, pool_id, resource_id, gpu_count, status, derivation_key, last_reconciled_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
-            ON CONFLICT(derivation_key) DO UPDATE SET
-              listing_id=excluded.listing_id,
-              site_id=excluded.site_id,
-              pool_id=excluded.pool_id,
-              resource_id=excluded.resource_id,
-              gpu_count=excluded.gpu_count,
-              status=excluded.status,
-              last_reconciled_at=excluded.last_reconciled_at
-            """,
-            (
-                listing_id,
-                site_id,
-                resolved_pool_id,
-                resource_id or resolved_pool_id,
-                int(gpu_count),
-                status,
-                derivation_key,
-            ),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
-
-def load_derived_listing_for_slice(
-    db_path: str,
-    *,
-    site_id: str,
-    gpu_count: int,
-    resource_id: str | None = None,
-    pool_id: str | None = None,
-) -> dict[str, Any] | None:
-    derivation_keys: list[str] = []
-    if pool_id:
-        derivation_keys.append(listing_pool_key(site_id, pool_id, gpu_count))
-    if resource_id:
-        derivation_keys.append(listing_resource_key(site_id, resource_id, gpu_count))
-    if not derivation_keys:
-        raise ValueError("pool_id or resource_id is required")
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
-    try:
-        row_exists = conn.execute(
-            "SELECT 1 FROM sqlite_master "
-            "WHERE type='table' AND name='derived_compute_listings'"
-        ).fetchone()
-        if row_exists is None:
-            return None
-        cols = {
-            row[1]
-            for row in conn.execute("PRAGMA table_info(derived_compute_listings)")
-        }
-        pool_select = "d.pool_id" if "pool_id" in cols else "NULL AS pool_id"
-        site_select = "d.site_id" if "site_id" in cols else "NULL AS site_id"
-        placeholders = ", ".join("?" for _ in derivation_keys)
-        row = conn.execute(
-            f"""
-            SELECT d.listing_id, {site_select}, {pool_select}, d.resource_id, d.gpu_count, d.status,
-                   d.derivation_key, l.status AS listing_status
-            FROM derived_compute_listings d
-            LEFT JOIN listings l ON l.listing_id = d.listing_id
-            WHERE d.derivation_key IN ({placeholders})
-            ORDER BY CASE d.derivation_key
-              WHEN ? THEN 0
-              ELSE 1
-            END
-            LIMIT 1
-            """,
-            (*derivation_keys, derivation_keys[0]),
-        ).fetchone()
-    finally:
-        conn.close()
-    if row is None:
-        return None
-    keys = [
-        "listing_id",
-        "site_id",
-        "pool_id",
-        "resource_id",
-        "gpu_count",
-        "status",
-        "derivation_key",
-        "listing_status",
-    ]
-    return dict(zip(keys, row))
-
-
-def reopen_local_derived_listing(
-    db_path: str,
-    *,
-    listing_id: str,
-    site_id: str,
-    gpu_count: int,
-    listing_resource: dict[str, Any],
-    accepted_escrows: list[dict[str, Any]],
-    demands: list[dict[str, Any]],
-    max_duration_seconds: int | None,
-    storefront_url: str,
-    seller_principal: Identity,
-    resource_id: str | None,
-    pool_id: str | None = None,
-) -> None:
-    now = "STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')"
-    conn = sqlite3.connect(db_path)
-    try:
-        ensure_derived_compute_listings_table(conn)
-        listing_cols = {
-            row[1] for row in conn.execute("PRAGMA table_info(listings)").fetchall()
-        }
-        updates = ["status = 'open'"]
-        params: list[Any] = []
-        if "paused" in listing_cols:
-            updates.append("paused = 0")
-        if "updated_at" in listing_cols:
-            updates.append(f"updated_at = {now}")
-        column_values = {
-            "listing_resource": json.dumps(listing_resource),
-            "accepted_escrows": json.dumps(accepted_escrows),
-            "demands": json.dumps(demands),
-            "max_duration_seconds": max_duration_seconds,
-            "storefront_url": storefront_url,
-            "seller_scheme": seller_principal.scheme.value,
-            "seller_identifier": seller_principal.identifier,
-        }
-        for column, value in column_values.items():
-            if column in listing_cols:
-                updates.append(f"{column} = ?")
-                params.append(value)
-        params.append(listing_id)
-        conn.execute(
-            f"""
-            UPDATE listings
-            SET {", ".join(updates)}
-            WHERE listing_id = ?
-            """,
-            tuple(params),
-        )
-        conn.execute(
-            """
-            INSERT INTO derived_compute_listings(
-              listing_id, site_id, pool_id, resource_id, gpu_count, status, derivation_key, last_reconciled_at
-            )
-            VALUES (?, ?, ?, ?, ?, 'open', ?, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
-            ON CONFLICT(derivation_key) DO UPDATE SET
-              listing_id=excluded.listing_id,
-              site_id=excluded.site_id,
-              pool_id=excluded.pool_id,
-              status='open',
-              last_reconciled_at=excluded.last_reconciled_at
-            """,
-            (
-                listing_id,
-                site_id,
-                pool_id or resource_id,
-                resource_id or pool_id,
-                int(gpu_count),
-                listing_pool_key(site_id, pool_id, gpu_count)
-                if pool_id and (resource_id is None or pool_id != resource_id)
-                else listing_resource_key(
-                    site_id, str(resource_id or pool_id), gpu_count
-                ),
-            ),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
-
-def mark_derived_listings_closed(
-    db_path: str,
-    listing_ids: list[str],
-    *,
-    home_site: str,
-    configured_site_count: int,
-) -> None:
-    """Mark listings closed, defensively backfilling a missing mapping row.
-
-    The backfill INSERT below fires for a listing that reached this
-    function with no prior `derived_compute_listings` row at all -- the
-    normal case already has one from publish time. Such a listing's
-    site is resolved the same way as everywhere else in this module: its
-    own mapping if it has one; ``home_site`` only when exactly one site
-    is currently configured (``configured_site_count == 1``); otherwise
-    the backfill for that listing is skipped -- an ambiguous mapping is
-    not written. The final status UPDATE below still runs for every
-    listing_id regardless (it only touches rows that already exist).
-    """
-    if not listing_ids:
-        return
-    conn = sqlite3.connect(db_path)
-    try:
-        ensure_derived_compute_listings_table(conn)
-        placeholders = ", ".join("?" for _ in listing_ids)
-        rows = conn.execute(
-            f"""
-            SELECT l.listing_id, l.listing_resource, d.site_id
-            FROM listings l
-            LEFT JOIN derived_compute_listings d ON d.listing_id = l.listing_id
-            WHERE l.listing_id IN ({placeholders})
-            """,
-            tuple(listing_ids),
-        ).fetchall()
-        for listing_id, raw_listing_resource, mapped_site_id in rows:
-            if not raw_listing_resource:
-                continue
-            if mapped_site_id:
-                site_id = str(mapped_site_id)
-            elif configured_site_count == 1:
-                site_id = home_site
-            else:
-                continue
-            try:
-                listing_resource = json.loads(raw_listing_resource)
-            except json.JSONDecodeError:
-                continue
-            if not isinstance(listing_resource, dict):
-                continue
-            pool_id = listing_resource.get("pool_id")
-            resource_id = listing_resource.get("resource_id")
-            if not pool_id and not resource_id:
-                continue
-            gpu_count = int(listing_resource.get("gpu_count") or 1)
-            key = (
-                listing_pool_key(site_id, str(pool_id), gpu_count)
-                if pool_id and (resource_id is None or str(pool_id) != str(resource_id))
-                else listing_resource_key(site_id, str(resource_id), gpu_count)
-            )
-            conn.execute(
-                """
-                INSERT INTO derived_compute_listings(
-                  listing_id, site_id, pool_id, resource_id, gpu_count, status, derivation_key,
-                  last_reconciled_at
-                )
-                VALUES (?, ?, ?, ?, ?, 'closed', ?, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
-                ON CONFLICT(derivation_key) DO UPDATE SET
-                  listing_id=excluded.listing_id,
-                  site_id=excluded.site_id,
-                  pool_id=excluded.pool_id,
-                  resource_id=excluded.resource_id,
-                  gpu_count=excluded.gpu_count
-                """,
-                (
-                    str(listing_id),
-                    site_id,
-                    str(pool_id or resource_id),
-                    str(resource_id or pool_id),
-                    gpu_count,
-                    key,
-                ),
-            )
-        conn.execute(
-            f"""
-            UPDATE derived_compute_listings
-            SET status = 'closed',
-                last_reconciled_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')
-            WHERE listing_id IN ({placeholders})
-            """,
-            tuple(listing_ids),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
-
-def mark_derived_listings_open(db_path: str, listing_ids: list[str]) -> None:
-    if not listing_ids:
-        return
-    conn = sqlite3.connect(db_path)
-    try:
-        ensure_derived_compute_listings_table(conn)
-        placeholders = ", ".join("?" for _ in listing_ids)
-        conn.execute(
-            f"""
-            UPDATE derived_compute_listings
-            SET status = 'open',
-                last_reconciled_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')
-            WHERE listing_id IN ({placeholders})
-            """,
-            tuple(listing_ids),
-        )
-        conn.commit()
-    finally:
-        conn.close()
+def slice_identity(row: Mapping[str, Any]) -> dict[str, Any]:
+    """The identity fields a slice would publish, as the stored listing names them."""
+    identity = {
+        "offering_mode": row.get("offering_mode"),
+        "pool_id": row.get("pool_id"),
+        "gpu_model": row.get("gpu_model"),
+        "gpu_count": row.get("gpu_count"),
+        "region": row.get("region"),
+    }
+    if row.get("resource_id"):
+        identity["resource_id"] = row["resource_id"]
+    return identity

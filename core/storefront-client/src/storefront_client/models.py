@@ -170,6 +170,7 @@ class HealthResponse:
     resource_count: int | None = None  # registered compute resources; present on /api/v1/system/status
     site_projections: dict[str, Any] | None = None  # per-site/family projection load state; present on /api/v1/system/status
     listing_cardinality_mode_explanations: dict[str, Any] | None = None  # per-site/pool cardinality-hint notices; present on /api/v1/system/status
+    publication_derivation: dict[str, Any] | None = None  # per-site held pools and publication notices; present on /api/v1/system/status
     #: The storefront-to-provisioning contract major this storefront speaks,
     #: from its own installed wheel. Not the peer's, and not the same axis as
     #: a domain contribution's `contract_version`: this is the wire a cutover
@@ -183,6 +184,7 @@ class HealthResponse:
             "status", "checks", "paused", "agent_id", "chain_id",
             "resource_count", "site_projections",
             "listing_cardinality_mode_explanations",
+            "publication_derivation",
             "provisioning_contract_version",
         }
         raw_chain_id = d.get("chain_id")
@@ -198,6 +200,7 @@ class HealthResponse:
             listing_cardinality_mode_explanations=d.get(
                 "listing_cardinality_mode_explanations"
             ),
+            publication_derivation=d.get("publication_derivation"),
             provisioning_contract_version=d.get("provisioning_contract_version"),
             extra={k: v for k, v in d.items() if k not in known},
         )

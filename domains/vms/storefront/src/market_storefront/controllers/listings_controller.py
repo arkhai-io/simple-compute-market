@@ -176,15 +176,36 @@ class ListingsController:
                 },
             ) from exc
 
-        await self._db.set_listing_paused(listing_id=listing_id, paused=False)
         from market_storefront.services.publication_service import (
             publish_order_to_registry,
+            reopen_order,
         )
 
-        publish_result = await publish_order_to_registry(
-            listing,
-            sqlite_client=self._db,
-        )
+        if row.get("status") == "closed":
+            # Only a listing its seller withdrew is the seller's to re-list. One
+            # reconciliation closed has no source supporting it right now, and
+            # the publication loop reopens it when its source does.
+            closed_by = await self._db.load_listing_closed_by(listing_id=listing_id)
+            if closed_by != "seller":
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "error": "listing_closed_by_reconciliation",
+                        "closed_by": closed_by,
+                        "hint": (
+                            "Its source does not currently support this "
+                            "listing; it reopens when the source does."
+                        ),
+                    },
+                )
+            await self._db.set_listing_paused(listing_id=listing_id, paused=False)
+            publish_result = await reopen_order(listing, sqlite_client=self._db)
+        else:
+            await self._db.set_listing_paused(listing_id=listing_id, paused=False)
+            publish_result = await publish_order_to_registry(
+                listing,
+                sqlite_client=self._db,
+            )
         registry_status = publish_result.get("status", "unknown")
         return PauseListingResponse(
             listing_id=listing_id,

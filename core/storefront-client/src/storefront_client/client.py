@@ -863,7 +863,8 @@ class StorefrontClient(_StorefrontClientBase):
 
         Run one cycle of a paused loop and return what that cycle reports.
         `loop` is the loop's route name -- `settlement-servicing`,
-        `fulfillment-resume`, `site-projections`, `capacity-events`. The route
+        `fulfillment-resume`, `site-projections`, `capacity-events`,
+        `publication`. The route
         calls the operation the timer was already invoking, so a caller
         advances production behaviour rather than a test-only path.
 
@@ -891,7 +892,9 @@ class StorefrontClient(_StorefrontClientBase):
         Report what one cycle of a paused loop would do, without doing any of
         it. Supported by `capacity-events`, whose deltas close and reopen
         derived listings: the dry run names the pending events so a caller can
-        check the cause before advancing.
+        check the cause before advancing. Also supported by `publication`, whose
+        dry run reports every publish, refresh, close, reopen, and hold the
+        next cycle would perform, with its reason.
         """
         return await self._authenticated_post(
             f"/api/v1/admin/lifecycle/{loop}/dry-run",
@@ -2254,7 +2257,8 @@ class SyncStorefrontClient(_StorefrontClientBase):
 
         Run one cycle of a paused loop and return what that cycle reports.
         `loop` is the loop's route name -- `settlement-servicing`,
-        `fulfillment-resume`, `site-projections`, `capacity-events`. The route
+        `fulfillment-resume`, `site-projections`, `capacity-events`,
+        `publication`. The route
         calls the operation the timer was already invoking, so a caller
         advances production behaviour rather than a test-only path.
 
@@ -2282,7 +2286,9 @@ class SyncStorefrontClient(_StorefrontClientBase):
         Report what one cycle of a paused loop would do, without doing any of
         it. Supported by `capacity-events`, whose deltas close and reopen
         derived listings: the dry run names the pending events so a caller can
-        check the cause before advancing.
+        check the cause before advancing. Also supported by `publication`, whose
+        dry run reports every publish, refresh, close, reopen, and hold the
+        next cycle would perform, with its reason.
         """
         return self._authenticated_post(
             f"/api/v1/admin/lifecycle/{loop}/dry-run",

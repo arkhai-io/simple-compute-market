@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from collections.abc import Iterable
 from typing import Any
@@ -10,6 +11,8 @@ from typing import Any
 from .projections import TrustedBareMetalProjection
 from .publication import available_bare_metal_listings, bare_metal_listing_key
 from .schema import BareMetalListing
+
+logger = logging.getLogger(__name__)
 
 
 def bare_metal_listing_candidates(
@@ -220,6 +223,7 @@ def mark_derived_bare_metal_listings_closed(
     db_path: str,
     listing_ids: list[str],
 ) -> None:
+    """Record reconciliation closes; a seller's close is never made here."""
     if not listing_ids:
         return
     conn = sqlite3.connect(db_path)
@@ -238,6 +242,7 @@ def mark_derived_bare_metal_listings_closed(
             f"""
             UPDATE listings
             SET status = 'closed',
+                closed_by = 'reconciliation',
                 updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')
             WHERE listing_id IN ({placeholders})
             """,
@@ -246,6 +251,68 @@ def mark_derived_bare_metal_listings_closed(
         conn.commit()
     finally:
         conn.close()
+
+
+# A bare-metal listing's identity is the Physical Resource it offers. Every
+# other published field is a term of sale, refreshed in place.
+_IDENTITY_FIELDS = (
+    "kind",
+    "offering_mode",
+    "host_id",
+    "physical_host_id",
+    "capabilities",
+    "site",
+)
+_TERM_RESOURCE_FIELDS = ("access_methods", "min_duration_seconds", "max_duration_seconds")
+_TERM_LISTING_FIELDS = (
+    "accepted_escrows",
+    "settlement_options",
+    "demands",
+    "max_duration_seconds",
+)
+
+
+def _stored_listing(db_path: str, listing_id: str) -> dict[str, Any] | None:
+    conn = _read_connection(db_path)
+    try:
+        row = conn.execute(
+            """
+            SELECT listing_resource, accepted_escrows, settlement_options, demands,
+                   max_duration_seconds
+            FROM listings WHERE listing_id = ?
+            """,
+            (listing_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return None
+
+    def _json(value: Any, default: Any) -> Any:
+        try:
+            return json.loads(value) if value else default
+        except (TypeError, json.JSONDecodeError):
+            return default
+
+    return {
+        "listing_resource": _json(row[0], {}),
+        "accepted_escrows": _json(row[1], []),
+        "settlement_options": _json(row[2], []),
+        "demands": _json(row[3], []),
+        "max_duration_seconds": row[4],
+    }
+
+
+def _identity_differences(
+    stored_resource: dict[str, Any], fresh_resource: dict[str, Any]
+) -> list[str]:
+    # A field the stored listing does not publish is no commitment.
+    return [
+        name
+        for name in _IDENTITY_FIELDS
+        if stored_resource.get(name) is not None
+        and stored_resource.get(name) != fresh_resource.get(name)
+    ]
 
 
 def reopen_derived_bare_metal_listing_if_present(
@@ -258,10 +325,18 @@ def reopen_derived_bare_metal_listing_if_present(
     demands: list[dict[str, Any]],
     max_duration_seconds: int | None,
     publish_existing_listing: Any,
+    close_listing: Any,
     settlement_options: list[dict[str, Any]] | None = None,
     publication_clauses: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
-    """Reopen a tracked listing through caller-supplied publication."""
+    """Reconcile the listing already tracked under the candidate's key.
+
+    An open listing whose terms changed is refreshed in place; one whose
+    published identity no longer matches its Physical Resource is closed and
+    not reopened while the difference persists; a closed one is reopened with
+    the fresh payload unless its identity diverged. ``None`` means no listing is
+    tracked under this key yet.
+    """
     derived = load_derived_bare_metal_listing(
         db_path,
         derivation_key=str(candidate["derivation_key"]),
@@ -269,15 +344,44 @@ def reopen_derived_bare_metal_listing_if_present(
     if not derived or not derived.get("listing_id"):
         return None
     listing_id = str(derived["listing_id"])
-    if derived.get("listing_status") == "open":
-        return None
+    stored = _stored_listing(db_path, listing_id) or {}
+    stored_resource = stored.get("listing_resource") or {}
+    diverged = _identity_differences(stored_resource, listing_resource)
+    is_open = derived.get("listing_status") == "open"
+    if diverged:
+        logger.warning(
+            "bare-metal listing %s no longer matches its Physical Resource in %s; %s",
+            listing_id,
+            diverged,
+            "closing it" if is_open else "not reopening it",
+        )
+        if is_open:
+            close_listing(base_url, listing_id)
+            mark_derived_bare_metal_listings_closed(db_path, [listing_id])
+        return {"status": "unchanged", "listing_id": listing_id}
+
+    fresh_terms = {
+        "accepted_escrows": accepted_escrows,
+        "settlement_options": settlement_options or [],
+        "demands": demands,
+        "max_duration_seconds": max_duration_seconds,
+    }
+    if is_open and all(
+        stored_resource.get(name) == listing_resource.get(name)
+        for name in _TERM_RESOURCE_FIELDS
+    ) and all(
+        stored.get(name) == fresh_terms[name] for name in _TERM_LISTING_FIELDS
+    ) and stored_resource.get("capacity_backing") == listing_resource.get(
+        "capacity_backing"
+    ):
+        return {"status": "unchanged", "listing_id": listing_id}
 
     conn = sqlite3.connect(db_path)
     try:
         conn.execute(
             """
             UPDATE listings
-            SET status = 'open', paused = 0,
+            SET status = 'open', closed_by = NULL, paused = 0,
                 updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'),
                 listing_resource = ?, accepted_escrows = ?,
                 settlement_options = ?, publication_clauses = ?, demands = ?,

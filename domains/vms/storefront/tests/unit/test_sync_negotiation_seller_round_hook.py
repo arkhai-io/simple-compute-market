@@ -12,7 +12,12 @@ from core_storefront.domain_registry import (
     StorefrontListingBinding,
     build_storefront_derivation_key,
 )
-from market_capacity_publication import CapacityBinding, CapacityRuntime, CapacitySite
+from market_capacity_publication import (
+    CapacityBinding,
+    CapacityRuntime,
+    CapacitySite,
+    UnbackedBinding,
+)
 from market_core.schemas import EscrowProposal, ProvisionTerms
 from market_negotiation_runtime import OfferUnfulfillableError
 from market_identity import Ed25519Signer, TrustedIdentitySet
@@ -85,6 +90,7 @@ def _listing_binding(db, listing_id: str) -> StorefrontListingBinding:
             "payload": {"pool_id": pool_id},
         },
         last_reconciled_at=datetime.now().isoformat(),
+        capacity_backing="backed",
     )
 
 
@@ -329,9 +335,22 @@ def test_default_policy_is_resolved_from_the_injected_contract(
         ),
     )
     capacity_runtime = _capacity_runtime()
+    binding = UnbackedBinding("site-a", "vm", "pool-a")
 
-    assert _default_seller_round_hook(domain, capacity_runtime) is seller_hook
-    assert policy.call_args.args == (capacity_runtime.client(),)
+    assert (
+        _default_seller_round_hook(
+            domain,
+            capacity_runtime,
+            repository=Mock(),
+            listing_record={"listing_id": "listing-1"},
+            binding=binding,
+        )
+        is seller_hook
+    )
+    # The policy receives this round's own-source check, not a capacity
+    # client from which it could read availability anywhere.
+    assert policy.call_args.args == ()
+    assert callable(policy.call_args.kwargs["source_check"])
 
 
 @pytest.mark.asyncio

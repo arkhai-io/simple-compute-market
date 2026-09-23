@@ -89,6 +89,7 @@ async def _persist_accepted_negotiation(
             "payload": {"pool_id": pool_id},
         },
         last_reconciled_at=timestamp,
+        capacity_backing="backed",
     )
     await db.upsert_listing_with_binding(
         binding=listing_binding,

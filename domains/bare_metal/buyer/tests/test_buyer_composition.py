@@ -154,6 +154,7 @@ def test_json_output_serializes_nested_wire_models(capsys) -> None:
 
 def test_hosted_option_binding_compares_physical_host_identity() -> None:
     listing = BareMetalListing(
+        capacity_backing="backed",
         host_id="machine-1",
         physical_host_id="physical-host-1",
         access_methods=["ssh"],

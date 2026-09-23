@@ -154,6 +154,26 @@ def _publication_row_to_dict(row: tuple) -> dict[str, Any]:
     }
 
 
+
+LISTING_CLOSED_BY_VALUES = frozenset({"seller", "reconciliation"})
+
+
+def _require_consistent_closure(status: str, closed_by: str | None) -> None:
+    """Refuse a close without a reason and a reason without a close.
+
+    The database triggers enforce the same rule; checking here first reports
+    the offending caller instead of a constraint failure.
+    """
+    if status == "closed":
+        if closed_by not in LISTING_CLOSED_BY_VALUES:
+            raise ValueError(
+                "closing a listing requires closed_by in "
+                f"{sorted(LISTING_CLOSED_BY_VALUES)}, not {closed_by!r}"
+            )
+    elif closed_by is not None:
+        raise ValueError(f"a listing with status {status!r} records no closed_by")
+
+
 class SQLiteClient:
     def __init__(
         self,
@@ -1151,7 +1171,9 @@ class SQLiteClient:
         settlement_options: Any | None,
         publication_clauses: Any | None,
         demands: Any | None,
+        closed_by: str | None = None,
     ) -> None:
+        _require_consistent_closure(status, closed_by)
         seller_scheme, seller_identifier = _principal_columns(seller_principal)
         conn.execute(
             """
@@ -1171,11 +1193,13 @@ class SQLiteClient:
               accepted_escrows,
               settlement_options,
               publication_clauses,
-              demands
+              demands,
+              closed_by
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(listing_id) DO UPDATE SET
               status=excluded.status,
+              closed_by=excluded.closed_by,
               updated_at=excluded.updated_at,
               listing_resource=excluded.listing_resource,
               fulfillment_resource=excluded.fulfillment_resource,
@@ -1207,6 +1231,7 @@ class SQLiteClient:
                 self._serialize_resource(settlement_options),
                 self._serialize_resource(publication_clauses),
                 self._serialize_resource(demands),
+                closed_by,
             ),
         )
 
@@ -1228,6 +1253,7 @@ class SQLiteClient:
         settlement_options: Any | None = None,
         publication_clauses: Any | None = None,
         demands: Any | None = None,
+        closed_by: str | None = None,
     ) -> None:
         def _save() -> None:
             with sqlite3.connect(self.db_path) as conn:
@@ -1248,6 +1274,7 @@ class SQLiteClient:
                     settlement_options=settlement_options,
                     publication_clauses=publication_clauses,
                     demands=demands,
+                    closed_by=closed_by,
                 )
 
         await asyncio.to_thread(_save)
@@ -1270,6 +1297,7 @@ class SQLiteClient:
         settlement_options: Any | None = None,
         publication_clauses: Any | None = None,
         demands: Any | None = None,
+        closed_by: str | None = None,
     ) -> None:
         """Persist a mutable listing projection and immutable binding atomically."""
 
@@ -1304,6 +1332,7 @@ class SQLiteClient:
                     settlement_options=settlement_options,
                     publication_clauses=publication_clauses,
                     demands=demands,
+                    closed_by=closed_by,
                 )
                 conn.execute(
                     """
@@ -1311,9 +1340,9 @@ class SQLiteClient:
                       listing_id, site_id, pool_id, physical_resource_id,
                       offering_mode, domain_identity, contract_major,
                       contract_minor, derivation_key, source_envelope_json,
-                      last_reconciled_at
+                      last_reconciled_at, capacity_backing
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(listing_id) DO UPDATE SET
                       last_reconciled_at=excluded.last_reconciled_at
                     """,
@@ -1329,13 +1358,14 @@ class SQLiteClient:
                         binding.derivation_key,
                         binding.source_envelope_json,
                         binding.last_reconciled_at,
+                        binding.capacity_backing,
                     ),
                 )
                 stored = conn.execute(
                     """
                     SELECT site_id, pool_id, physical_resource_id, offering_mode,
                            domain_identity, contract_major, contract_minor,
-                           derivation_key, source_envelope_json
+                           derivation_key, source_envelope_json, capacity_backing
                     FROM storefront_listing_bindings
                     WHERE listing_id=?
                     """,
@@ -1351,6 +1381,7 @@ class SQLiteClient:
                     binding.binding.contract_minor,
                     binding.derivation_key,
                     binding.source_envelope_json,
+                    binding.capacity_backing,
                 )
                 if stored != expected:
                     raise StorefrontDomainBindingError(
@@ -1403,8 +1434,8 @@ class SQLiteClient:
                       listing_id, site_id, pool_id, physical_resource_id,
                       offering_mode, domain_identity, contract_major,
                       contract_minor, derivation_key, source_envelope_json,
-                      last_reconciled_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                      last_reconciled_at, capacity_backing
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(listing_id) DO UPDATE SET
                       last_reconciled_at=excluded.last_reconciled_at
                     """,
@@ -1414,7 +1445,7 @@ class SQLiteClient:
                     """
                     SELECT site_id, pool_id, physical_resource_id, offering_mode,
                            domain_identity, contract_major, contract_minor,
-                           derivation_key, source_envelope_json
+                           derivation_key, source_envelope_json, capacity_backing
                     FROM storefront_listing_bindings WHERE listing_id=?
                     """,
                     (binding.listing_id,),
@@ -1429,6 +1460,7 @@ class SQLiteClient:
                     binding.binding.contract_minor,
                     binding.derivation_key,
                     binding.source_envelope_json,
+                    binding.capacity_backing,
                 )
                 if stored != expected:
                     raise StorefrontDomainBindingError(
@@ -1459,7 +1491,21 @@ class SQLiteClient:
         accepted_escrows: Any | None = None,
         settlement_options: Any | None = None,
         publication_clauses: Any | None = None,
+        demands: Any | None = None,
+        closed_by: str | None = None,
     ) -> None:
+        """Update the supplied listing columns.
+
+        A change to ``closed`` must name who closed the listing; any other
+        status change clears the reason. Reconciliation reopens only what
+        reconciliation closed, so a close without a reason, or a reopen that
+        kept one, would let the next capacity event undo a seller's decision.
+        """
+        if status is not None:
+            _require_consistent_closure(status, closed_by)
+        elif closed_by is not None:
+            raise ValueError("closed_by is recorded only together with a close")
+
         def _save() -> None:
             updates: list[str] = []
             values: list[Any] = []
@@ -1471,6 +1517,9 @@ class SQLiteClient:
                 values.append(self._serialize_resource(value) if serialize else value)
 
             add("status", status)
+            if status is not None:
+                updates.append("closed_by=?")
+                values.append(closed_by)
             add("updated_at", updated_at or datetime.now().isoformat())
             add("listing_resource", listing_resource, serialize=True)
             add("fulfillment_resource", fulfillment_resource, serialize=True)
@@ -1484,6 +1533,7 @@ class SQLiteClient:
             add("accepted_escrows", accepted_escrows, serialize=True)
             add("settlement_options", settlement_options, serialize=True)
             add("publication_clauses", publication_clauses, serialize=True)
+            add("demands", demands, serialize=True)
 
             if not updates:
                 return
@@ -1500,6 +1550,22 @@ class SQLiteClient:
                 conn.close()
 
         await asyncio.to_thread(_save)
+
+    async def load_listing_closed_by(self, *, listing_id: str) -> str | None:
+        """Return who closed a closed listing, or ``None`` for an open one."""
+
+        def _load() -> str | None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                row = conn.execute(
+                    "SELECT closed_by FROM listings WHERE listing_id = ?",
+                    (listing_id,),
+                ).fetchone()
+                return str(row[0]) if row and row[0] is not None else None
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
 
     async def load_listing(self, *, listing_id: str) -> dict[str, Any] | None:
         """Return a single order by listing_id, or None if not found."""
@@ -1614,6 +1680,7 @@ class SQLiteClient:
             derivation_key=str(row[8]),
             source_envelope_json=str(row[9]),
             last_reconciled_at=str(row[10]),
+            capacity_backing=str(row[11]),
         )
 
     @staticmethod
@@ -1646,7 +1713,7 @@ class SQLiteClient:
                     SELECT listing_id, site_id, pool_id, physical_resource_id,
                            offering_mode, domain_identity, contract_major,
                            contract_minor, derivation_key, source_envelope_json,
-                           last_reconciled_at
+                           last_reconciled_at, capacity_backing
                     FROM storefront_listing_bindings
                     WHERE listing_id=?
                     """,
@@ -1668,7 +1735,7 @@ class SQLiteClient:
                     SELECT listing_id, site_id, pool_id, physical_resource_id,
                            offering_mode, domain_identity, contract_major,
                            contract_minor, derivation_key, source_envelope_json,
-                           last_reconciled_at
+                           last_reconciled_at, capacity_backing
                     FROM storefront_listing_bindings
                     WHERE derivation_key=?
                     """,

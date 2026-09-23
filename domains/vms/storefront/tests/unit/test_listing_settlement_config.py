@@ -132,6 +132,7 @@ async def test_clause_only_create_persists_canonical_clause_before_publication(
         marketplace_signer=TEST_MARKETPLACE_SIGNER,
         alkahest_clients={},
         settlement_composition_provider=lambda: composition,
+        source_backing_resolver=lambda **_source: "backed",
     )
     monkeypatch.setattr(
         service,

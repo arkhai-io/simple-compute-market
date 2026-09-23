@@ -73,6 +73,7 @@ async def _seed_listing(
         binding=prepare_vm_listing_binding(
             listing_id=listing_id,
             candidate={
+                "capacity_backing": "backed",
                 "site_id": "site-test",
                 "pool_id": resource_id,
                 "gpu_count": 1,

@@ -1,6 +1,6 @@
 from enum import Enum
 import re
-from typing import Any, Union
+from typing import Any, Literal, Union
 from pydantic import (
     BaseModel,
     Field,
@@ -376,6 +376,16 @@ class ComputeResource(ComputeDomainResource):
     offering_mode: OfferingMode | None = Field(
         default=None,
         description="How this slice is exposed: bare_metal | vm | container",
+    )
+
+    capacity_backing: Literal["backed", "unbacked"] | None = Field(
+        default=None,
+        description=(
+            "Whether an admission authority stands behind this listing. "
+            "Publication always sets it from the listing's durable binding; it "
+            "is optional here only so a stored listing written before the field "
+            "existed still loads until reconciliation discloses it."
+        ),
     )
 
     # ---- Host context (denormalized at publish; sourced from hosts table) ----

@@ -91,10 +91,11 @@ def reopen_bare_metal_listing_adapter(
     max_duration_seconds: int | None,
     *,
     publish_existing_listing: PublishExistingListing,
+    close_listing: CloseListing,
     settlement_options: list[dict[str, Any]] | None = None,
     publication_clauses: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
-    """Reopen a tracked listing through caller-supplied publication."""
+    """Reconcile a tracked listing through caller-supplied publication."""
     return reopen_derived_bare_metal_listing_if_present(
         db_path=db_path,
         base_url=base_url,
@@ -104,6 +105,7 @@ def reopen_bare_metal_listing_adapter(
         demands=demands,
         max_duration_seconds=max_duration_seconds,
         publish_existing_listing=publish_existing_listing,
+        close_listing=close_listing,
         settlement_options=settlement_options,
         publication_clauses=publication_clauses,
     )
@@ -138,6 +140,7 @@ def bare_metal_publication_adapter(
             demands,
             max_duration_seconds,
             publish_existing_listing=publish_existing_listing,
+            close_listing=close_listing,
             settlement_options=settlement_options,
             publication_clauses=publication_clauses,
         )

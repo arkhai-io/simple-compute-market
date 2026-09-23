@@ -198,3 +198,31 @@ def test_typed_payload_keeps_settlement_options_independent() -> None:
     assert captured["accepted_escrows"] == [{"escrow": "alkahest"}]
     assert captured["settlement_options"] == [{"option_id": "hosted"}]
     assert captured["publication_clauses"] == [{"mechanism": "fiat.stripe.v1"}]
+
+
+def test_an_unchanged_existing_listing_is_skipped_not_failed_or_duplicated() -> None:
+    candidate = {"resource_id": "r1", "price": "1"}
+    source = _source(candidate=candidate)
+    published_calls: list[Any] = []
+    source = PublicationSource(
+        name=source.name,
+        open_keys=source.open_keys,
+        close_stale=source.close_stale,
+        available_candidates=source.available_candidates,
+        skip_keys=source.skip_keys,
+        listing_resource=source.listing_resource,
+        record_published=source.record_published,
+        reopen_existing=lambda *_args, **_kwargs: {"status": "unchanged"},
+        reopen_error_label=source.reopen_error_label,
+    )
+
+    published, failed, skipped = publish_round(
+        (source,),
+        db_path="db.sqlite",
+        base_url="http://seller",
+        build_payload=_payload,
+        publish_listing=lambda *args, **kwargs: published_calls.append(args) or {},
+    )
+
+    assert (published, failed, skipped) == ([], [], [candidate])
+    assert published_calls == []

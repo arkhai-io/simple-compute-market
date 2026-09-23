@@ -26,6 +26,8 @@ from core_storefront.domain_registry import (
     canonical_source_envelope,
 )
 from core_storefront.sqlite_migrations import (
+    migrate_listing_binding_capacity_backing,
+    migrate_listing_binding_capacity_backing_required,
     migrate_storefront_domain_bindings_schema,
 )
 from market_core import ContractVersion, DomainIdentity
@@ -212,6 +214,9 @@ def _prepare_vm_bindings(
             ),
             source_envelope_json=source_json,
             last_reconciled_at=str(raw_row[6]),
+            # A legacy single-domain database could only publish listings a
+            # site admits against.
+            capacity_backing="backed",
             pool_id=pool,
             physical_resource_id=resource,
         )
@@ -237,7 +242,8 @@ def _prepare_vm_bindings(
             """
             SELECT listing_id, site_id, pool_id, physical_resource_id,
                    offering_mode, domain_identity, contract_major, contract_minor,
-                   derivation_key, source_envelope_json, last_reconciled_at
+                   derivation_key, source_envelope_json, last_reconciled_at,
+                   capacity_backing
             FROM storefront_listing_bindings WHERE listing_id=?
             """,
             (binding.listing_id,),
@@ -248,6 +254,7 @@ def _prepare_vm_bindings(
             values["domain_identity"], values["contract_major"],
             values["contract_minor"], values["derivation_key"],
             values["source_envelope_json"], values["last_reconciled_at"],
+            values["capacity_backing"],
         )
         if existing is not None and tuple(existing) != candidate:
             raise StorefrontDomainMigrationError(
@@ -258,8 +265,8 @@ def _prepare_vm_bindings(
             INSERT OR IGNORE INTO storefront_listing_bindings(
               listing_id, site_id, pool_id, physical_resource_id, offering_mode,
               domain_identity, contract_major, contract_minor, derivation_key,
-              source_envelope_json, last_reconciled_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              source_envelope_json, last_reconciled_at, capacity_backing
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             candidate,
         )
@@ -423,6 +430,10 @@ def migrate_storefront_domains(
         try:
             conn.execute("PRAGMA foreign_keys=ON")
             migrate_storefront_domain_bindings_schema(conn)
+            # The bindings this tool writes must name their backing, so the
+            # column and its required-insert rule exist before any is written.
+            migrate_listing_binding_capacity_backing(conn)
+            migrate_listing_binding_capacity_backing_required(conn)
             conn.execute("BEGIN IMMEDIATE")
             counts = _prepare_vm_bindings(conn, selection=selection)
             conn.commit()

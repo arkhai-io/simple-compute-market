@@ -72,6 +72,7 @@ async def _persist_terminal_negotiation(
     listing_binding = prepare_vm_listing_binding(
         listing_id=listing_id,
         candidate={
+            "capacity_backing": "backed",
             "site_id": "default",
             "pool_id": pool_id,
             "gpu_count": 1,
@@ -80,6 +81,7 @@ async def _persist_terminal_negotiation(
     await db.upsert_listing_with_binding(
         binding=listing_binding,
         status="closed",
+        closed_by="reconciliation",
         created_at=now,
         updated_at=now,
         listing_resource={

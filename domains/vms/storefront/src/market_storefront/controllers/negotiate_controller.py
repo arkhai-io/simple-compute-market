@@ -134,7 +134,8 @@ class NegotiateController:
                     "listing_id": exc.listing_id,
                     "hint": (
                         "Seller refused: listing is not in a state that can accept "
-                        "new negotiations, or no matching compute is currently "
+                        "new negotiations, its source no longer declares what it "
+                        "publishes, or no matching compute is currently "
                         "available. Try a different listing."
                     ),
                 },

@@ -292,6 +292,9 @@ def run_publication_once() -> dict[str, Any]:
             config=StorefrontPublicationCommandConfig(
                 db_path=runtime.db.db_path,
                 base_url=runtime.storefront_url,
+                # Every candidate reaches the tracked listing under its key,
+                # open or closed, so terms refresh and identity is rechecked.
+                skip_open=False,
             ),
             callbacks=StorefrontPublicationCommandCallbacks(
                 build_payload=build_payload,

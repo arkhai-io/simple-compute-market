@@ -14,6 +14,7 @@ from market_storefront.lifecycle import (
     FULFILLMENT_RESUME,
     NEGOTIATION_WATCHDOG,
     SETTLEMENT_SERVICING,
+    PUBLICATION,
     SITE_PROJECTION_POLLER,
     loop_gate,
     start_registered_loop,
@@ -273,6 +274,21 @@ def _start_capacity_events_poller(sqlite_client: Any) -> None:
     )
 
 
+def _start_publication_loop(sqlite_client: Any) -> None:
+    # Publication follows what sites declare without an operator command; the
+    # loop is held by the lifecycle pause like every other loop.
+    del sqlite_client
+    from market_storefront.services.publication_loop import publication_loop
+
+    start_registered_loop(
+        StorefrontBackgroundTask(
+            name=PUBLICATION,
+            task_factory=publication_loop,
+        ),
+        task_logger=logger,
+    )
+
+
 async def _load_site_projections(sqlite_client: Any) -> None:
     from market_storefront.services.site_projection_cache import load_site_projections
 
@@ -375,6 +391,10 @@ async def _startup_tasks(*, registry: Any, domain: MarketDomainContract) -> None
             StorefrontStartupStep(
                 "capacity_events_poller",
                 partial(_start_capacity_events_poller, sqlite_client),
+            ),
+            StorefrontStartupStep(
+                "publication_loop",
+                partial(_start_publication_loop, sqlite_client),
             ),
         ),
         logger=logger,

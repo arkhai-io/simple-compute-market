@@ -41,6 +41,7 @@ def _base(profile: str) -> SettlementOption:
 
 def _candidate(access_methods: list[str] | None = None) -> dict:
     listing = BareMetalListing(
+        capacity_backing="backed",
         host_id="machine-a",
         physical_host_id="host-a",
         access_methods=access_methods or ["ssh"],

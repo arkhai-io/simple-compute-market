@@ -30,7 +30,9 @@ def _principal(byte: int) -> Identity:
     return Identity(scheme=IdentityScheme.ED25519, identifier=identifier)
 
 
-def _listing_binding(listing_id="listing-a", mode="vm", site="site-a"):
+def _listing_binding(
+    listing_id="listing-a", mode="vm", site="site-a", backing="backed", slice_=1
+):
     domain = StorefrontDomainBinding(
         offering_mode=mode,
         domain_identity=DomainIdentity("compute.v1"),
@@ -46,14 +48,15 @@ def _listing_binding(listing_id="listing-a", mode="vm", site="site-a"):
             site_id=site,
             offering_mode=mode,
             binding=domain,
-            source_identity={"pool_id": "pool-a", "slice": 1},
+            source_identity={"pool_id": "pool-a", "slice": slice_},
         ),
         source_envelope={
             "kind": "vm.listing-source.v1",
             "schema_version": 1,
-            "payload": {"pool_id": "pool-a", "slice": 1},
+            "payload": {"pool_id": "pool-a", "slice": slice_},
         },
         last_reconciled_at=datetime.now(UTC).isoformat(),
+        capacity_backing=backing,
     )
 
 
@@ -99,9 +102,10 @@ async def test_listing_binding_identical_replay_is_idempotent_and_conflict_rolls
         ),
         source_envelope=json.loads(binding.source_envelope_json),
         last_reconciled_at=binding.last_reconciled_at,
-    )
+            capacity_backing=binding.capacity_backing,
+        )
     with pytest.raises(StorefrontDomainBindingError, match="different immutable"):
-        await _persist_listing(client, changed, status="closed")
+        await _persist_listing(client, changed, status="open")
     assert (await client.load_listing(listing_id=binding.listing_id))["status"] == "paused"
 
 
@@ -276,3 +280,182 @@ def test_legacy_synthesizers_are_explicit_per_database():
     assert json.loads(second.execute(
         "SELECT accepted_escrows FROM listings"
     ).fetchone()[0]) == [{"rail": "second"}]
+
+
+def _run(coro):
+    import asyncio
+
+    return asyncio.run(coro)
+
+
+def test_binding_backing_cannot_change_after_binding(tmp_path):
+    client = SQLiteClient(str(tmp_path / "storefront.db"))
+    binding = _listing_binding()
+    _run(_persist_listing(client, binding))
+    with sqlite3.connect(client.db_path) as conn, pytest.raises(
+        sqlite3.IntegrityError, match="immutable"
+    ):
+        conn.execute(
+            "UPDATE storefront_listing_bindings SET capacity_backing='unbacked' "
+            "WHERE listing_id=?",
+            (binding.listing_id,),
+        )
+
+
+def test_binding_insert_naming_no_backing_is_refused(tmp_path):
+    client = SQLiteClient(str(tmp_path / "storefront.db"))
+    binding = _listing_binding()
+    _run(_persist_listing(client, binding))
+    with sqlite3.connect(client.db_path) as conn:
+        conn.execute("DELETE FROM storefront_listing_bindings")
+        with pytest.raises(sqlite3.IntegrityError, match="capacity_backing"):
+            conn.execute(
+                """
+                INSERT INTO storefront_listing_bindings(
+                  listing_id, site_id, pool_id, physical_resource_id,
+                  offering_mode, domain_identity, contract_major,
+                  contract_minor, derivation_key, source_envelope_json,
+                  last_reconciled_at
+                ) VALUES (?, ?, ?, NULL, ?, ?, 1, 0, ?, ?, ?)
+                """,
+                (
+                    binding.listing_id,
+                    binding.site_id,
+                    binding.pool_id,
+                    "vm",
+                    "compute.v1",
+                    binding.derivation_key,
+                    binding.source_envelope_json,
+                    binding.last_reconciled_at,
+                ),
+            )
+
+
+def test_binding_model_refuses_an_unknown_backing():
+    with pytest.raises(Exception, match="capacity_backing"):
+        _listing_binding(backing="Backed")
+
+
+def test_second_bind_with_opposite_backing_is_refused(tmp_path):
+    client = SQLiteClient(str(tmp_path / "storefront.db"))
+    binding = _listing_binding()
+    _run(_persist_listing(client, binding))
+    opposite = StorefrontListingBinding.from_source_envelope(
+        listing_id=binding.listing_id,
+        site_id=binding.site_id,
+        pool_id=binding.pool_id,
+        binding=binding.binding,
+        derivation_key=binding.derivation_key,
+        source_envelope=json.loads(binding.source_envelope_json),
+        last_reconciled_at=binding.last_reconciled_at,
+        capacity_backing="unbacked",
+    )
+    with pytest.raises(StorefrontDomainBindingError):
+        _run(_persist_listing(client, opposite))
+    assert _run(client.load_listing_binding(listing_id=binding.listing_id)) == binding
+
+
+def test_close_records_its_reason_and_reopen_clears_it(tmp_path):
+    client = SQLiteClient(str(tmp_path / "storefront.db"))
+    binding = _listing_binding()
+    _run(_persist_listing(client, binding))
+
+    with pytest.raises(ValueError, match="closed_by"):
+        _run(client.update_listing(listing_id=binding.listing_id, status="closed"))
+    with pytest.raises(ValueError, match="closed_by"):
+        _run(
+            client.update_listing(
+                listing_id=binding.listing_id, status="open", closed_by="seller"
+            )
+        )
+
+    _run(
+        client.update_listing(
+            listing_id=binding.listing_id, status="closed", closed_by="seller"
+        )
+    )
+    assert _run(client.load_listing_closed_by(listing_id=binding.listing_id)) == (
+        "seller"
+    )
+    _run(client.update_listing(listing_id=binding.listing_id, status="open"))
+    assert _run(client.load_listing_closed_by(listing_id=binding.listing_id)) is None
+
+
+def test_direct_sql_close_without_reason_is_refused(tmp_path):
+    client = SQLiteClient(str(tmp_path / "storefront.db"))
+    binding = _listing_binding()
+    _run(_persist_listing(client, binding))
+    with sqlite3.connect(client.db_path) as conn:
+        with pytest.raises(sqlite3.IntegrityError, match="closed_by"):
+            conn.execute(
+                "UPDATE listings SET status='closed' WHERE listing_id=?",
+                (binding.listing_id,),
+            )
+        conn.execute(
+            "UPDATE listings SET status='closed', closed_by='reconciliation' "
+            "WHERE listing_id=?",
+            (binding.listing_id,),
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="closed_by"):
+            conn.execute(
+                "UPDATE listings SET status='open' WHERE listing_id=?",
+                (binding.listing_id,),
+            )
+
+
+def test_upgrade_backfills_backing_and_closure_reason_idempotently(tmp_path):
+    """A database whose rows predate both columns migrates to explicit values.
+
+    The rows are written with the current schema and then returned to their
+    pre-migration state — both values unset, the new triggers and migration
+    records removed — which is what a database written before this schema looks
+    like once its columns exist.
+    """
+    from core_storefront.sqlite_migrations import apply_schema_migrations
+
+    client = SQLiteClient(str(tmp_path / "storefront.db"))
+    open_binding = _listing_binding()
+    closed_binding = _listing_binding(listing_id="listing-b", slice_=2)
+    _run(_persist_listing(client, open_binding))
+    _run(_persist_listing(client, closed_binding))
+    new_ids = (
+        "20260923_001_listing_binding_capacity_backing",
+        "20260923_002_listing_binding_capacity_backing_required",
+        "20260923_003_listing_closed_by",
+    )
+    with sqlite3.connect(client.db_path) as conn:
+        for trigger in (
+            "storefront_listing_binding_immutable",
+            "storefront_listing_binding_backing_required",
+            "listing_closed_by_consistent_insert",
+            "listing_closed_by_consistent_update",
+        ):
+            conn.execute(f"DROP TRIGGER IF EXISTS {trigger}")
+        conn.execute("UPDATE storefront_listing_bindings SET capacity_backing=NULL")
+        conn.execute(
+            "UPDATE listings SET status='closed', closed_by=NULL WHERE listing_id=?",
+            (closed_binding.listing_id,),
+        )
+        conn.executemany(
+            "DELETE FROM schema_migrations WHERE id=?", [(i,) for i in new_ids]
+        )
+
+    for _ in range(2):
+        with sqlite3.connect(client.db_path) as conn:
+            apply_schema_migrations(conn)
+
+    with sqlite3.connect(client.db_path) as conn:
+        assert {
+            row[0]
+            for row in conn.execute(
+                "SELECT capacity_backing FROM storefront_listing_bindings"
+            )
+        } == {"backed"}
+        assert dict(conn.execute("SELECT listing_id, closed_by FROM listings")) == {
+            open_binding.listing_id: None,
+            closed_binding.listing_id: "reconciliation",
+        }
+        with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+            conn.execute(
+                "UPDATE storefront_listing_bindings SET capacity_backing='unbacked'"
+            )
