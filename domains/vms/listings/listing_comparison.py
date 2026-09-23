@@ -8,7 +8,10 @@ closes and stays closed while the difference persists.
 
 A listing commits only to the fields it publishes. An identity field the stored
 listing does not carry is no commitment, so it is neither a divergence nor added
-to the listing by a refresh.
+to the listing by a refresh. Symmetrically, a source confirms only the fields it
+resolves: an identity field the fresh derivation leaves unset — a region the
+pool does not tag and no local fallback supplies — is not the source's to
+contradict, so it is not a divergence either.
 
 Capacity backing sits outside that split. It is recorded on the durable binding
 at creation; the published value is always the binding's, so a listing that does
@@ -92,6 +95,7 @@ def compare_listing(
         name
         for name in IDENTITY_FIELDS
         if _published(stored_resource.get(name))
+        and _published(fresh_resource.get(name))
         and stored_resource.get(name) != fresh_resource.get(name)
     )
     if identity:

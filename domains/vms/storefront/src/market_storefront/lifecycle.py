@@ -272,6 +272,38 @@ def loop_gate(name: str) -> Callable[[], bool]:
     return partial(gate, name)
 
 
+# Set while a loop pause is requested. A loop idling between cycles waits on it
+# as well as on its interval, so a pause reaches every idle loop's gate at once
+# rather than at the end of whatever interval it is waiting out.
+_PAUSE_SIGNAL = asyncio.Event()
+
+
+def signal_pause_requested(paused: bool) -> None:
+    """Tell idle loops a pause was requested (or lifted)."""
+    if paused:
+        _PAUSE_SIGNAL.set()
+    else:
+        _PAUSE_SIGNAL.clear()
+
+
+async def idle(seconds: float, *, wake: asyncio.Event | None = None) -> None:
+    """Wait between cycles: until the interval ends, `wake` is set, or a pause.
+
+    A loop calls this instead of sleeping, then returns to its gate. A pause
+    therefore never waits on a loop's interval, however long it is configured.
+    """
+    waiters = [asyncio.ensure_future(_PAUSE_SIGNAL.wait())]
+    if wake is not None:
+        waiters.append(asyncio.ensure_future(wake.wait()))
+    try:
+        await asyncio.wait(
+            waiters, timeout=seconds, return_when=asyncio.FIRST_COMPLETED
+        )
+    finally:
+        for waiter in waiters:
+            waiter.cancel()
+
+
 def _pause_requested() -> bool:
     """Whether the operator has asked the timer loops to hold.
 
@@ -385,3 +417,4 @@ def reset_for_tests() -> None:
     _GATE_CALLS.clear()
     _UNREGISTERED_REPORTED.clear()
     _DECLARED.clear()
+    _PAUSE_SIGNAL.clear()

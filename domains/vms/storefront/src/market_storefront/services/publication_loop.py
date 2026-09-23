@@ -43,7 +43,7 @@ from domains.vms.listings.reconciler import (
 from market_capacity_publication import BoundListing, ReconciliationPlan
 
 import market_storefront.container as container
-from market_storefront.lifecycle import PUBLICATION, gate
+from market_storefront.lifecycle import PUBLICATION, gate, idle
 from market_storefront.models.listing_models import VmCreateListingRequest
 from market_storefront.publication_wiring import (
     VmPublicationSourceCallbacks,
@@ -505,10 +505,7 @@ async def publication_loop(
             await run_cycle(dry_run=False)
         except Exception:
             logger.exception("[PUBLICATION] publication cycle failed")
-        try:
-            await asyncio.wait_for(_WAKE.wait(), timeout=_interval_seconds())
-        except asyncio.TimeoutError:
-            pass
+        await idle(_interval_seconds(), wake=_WAKE)
 
 
 __all__ = [

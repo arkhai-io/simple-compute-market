@@ -85,3 +85,19 @@ def test_a_refresh_keeps_stored_identity_and_takes_fresh_terms():
     assert refreshed["capacity_backing"] == "unbacked"
     assert "ram_gb" not in refreshed
     assert refreshed["gpu_model"] == "H100"
+
+
+def test_a_field_the_source_does_not_resolve_is_not_a_divergence():
+    """A region the pool does not tag and no fallback supplies is not contradicted."""
+    fresh = {**_RESOURCE, "region": None}
+
+    assert _compare(fresh=fresh).outcome == UNCHANGED
+
+
+def test_a_field_the_source_resolves_differently_still_diverges():
+    fresh = {**_RESOURCE, "gpu_model": "A100"}
+
+    comparison = _compare(fresh=fresh)
+
+    assert comparison.outcome == IDENTITY_DIFFERS
+    assert comparison.differing_fields == ("gpu_model",)

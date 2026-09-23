@@ -15,6 +15,7 @@ checks a listing against its own source".
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Mapping
 from typing import Any
 
@@ -30,6 +31,8 @@ from market_storefront.services.capacity_client import (
     listing_source_projection,
     site_capacity_buckets,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def stored_listing_resource(listing_record: Mapping[str, Any]) -> dict[str, Any]:
@@ -91,8 +94,33 @@ async def check_listing_source(
     """Return ``declared_match``, the differing fields, and ``available``.
 
     ``available`` is ``None`` for an unbacked listing, which has no
-    availability to consult.
+    availability to consult. A declared mismatch is logged with the fields
+    that differ, because the buyer's refusal carries only its reason.
     """
+    result = await _check_listing_source(
+        repository=repository,
+        listing_record=listing_record,
+        binding=binding,
+        capacity_runtime=capacity_runtime,
+    )
+    if not result["declared_match"]:
+        logger.warning(
+            "[GUARD] listing %s does not match its source at site %s (%s): %s",
+            listing_record.get("listing_id"),
+            binding.site_id,
+            getattr(binding, "source_id", None),
+            result["differing_fields"],
+        )
+    return result
+
+
+async def _check_listing_source(
+    *,
+    repository: Any,
+    listing_record: Mapping[str, Any],
+    binding: Any,
+    capacity_runtime: Any,
+) -> dict[str, Any]:
     site_id = binding.site_id
     stored = stored_listing_resource(listing_record)
     key = stored_listing_key(stored, site_id)

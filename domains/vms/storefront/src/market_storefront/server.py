@@ -99,6 +99,7 @@ async def _set_loops_paused(value: bool) -> dict[str, str]:
     from market_storefront import lifecycle
 
     _LOOPS_PAUSED = bool(value)
+    lifecycle.signal_pause_requested(_LOOPS_PAUSED)
     if value:
         await lifecycle.await_quiescence()
     return lifecycle.loop_states()

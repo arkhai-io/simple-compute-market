@@ -45,9 +45,9 @@ reinit: ## Force-reinstall verified internal wheels.
 	--upgrade-package arkhai-kit-resource-pools       --reinstall-package arkhai-kit-resource-pools \
 	--upgrade-package arkhai-kit-fulfillment         --reinstall-package arkhai-kit-fulfillment \
 	--upgrade-package arkhai-vms              --reinstall-package arkhai-vms \
-	--upgrade-package arkhai-vms-listings --reinstall-package arkhai-vms-listings \
-	--upgrade-package arkhai-vms-negotiation --reinstall-package arkhai-vms-negotiation \
-	--upgrade-package arkhai-vms-settlement --reinstall-package arkhai-vms-settlement \
+	--upgrade-package arkhai-vms-listings     --reinstall-package arkhai-vms-listings \
+	--upgrade-package arkhai-vms-negotiation  --reinstall-package arkhai-vms-negotiation \
+	--upgrade-package arkhai-vms-settlement   --reinstall-package arkhai-vms-settlement \
 	--upgrade-package arkhai-compute-provisioning --reinstall-package arkhai-compute-provisioning \
 	--upgrade-package arkhai-core-storefront-client  --reinstall-package arkhai-core-storefront-client \
 	--upgrade-package arkhai-kit-site-client         --reinstall-package arkhai-kit-site-client \

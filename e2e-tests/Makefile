@@ -49,9 +49,9 @@ reinit: init-venv
 	--upgrade-package arkhai-kit-resource-pools              --reinstall-package arkhai-kit-resource-pools \
 	--upgrade-package arkhai-kit-fulfillment                 --reinstall-package arkhai-kit-fulfillment \
 	--upgrade-package arkhai-vms                             --reinstall-package arkhai-vms \
-	--upgrade-package arkhai-vms-listings --reinstall-package arkhai-vms-listings \
-	--upgrade-package arkhai-vms-negotiation --reinstall-package arkhai-vms-negotiation \
-	--upgrade-package arkhai-vms-settlement --reinstall-package arkhai-vms-settlement \
+	--upgrade-package arkhai-vms-listings                    --reinstall-package arkhai-vms-listings \
+	--upgrade-package arkhai-vms-negotiation                 --reinstall-package arkhai-vms-negotiation \
+	--upgrade-package arkhai-vms-settlement                  --reinstall-package arkhai-vms-settlement \
 	--upgrade-package arkhai-vms-buyer                       --reinstall-package arkhai-vms-buyer \
 	--upgrade-package arkhai-vms-storefront                  --reinstall-package arkhai-vms-storefront \
 	--upgrade-package arkhai-bare-metal                      --reinstall-package arkhai-bare-metal \

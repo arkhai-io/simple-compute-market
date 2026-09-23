@@ -282,6 +282,7 @@ remove-relative-uv-sources ──► type-core-packages ──► configure-pypi
 | 1 | [`remove-relative-uv-sources`](remove-relative-uv-sources/) | active | Remove remaining internal parent-path sources and enforce wheel-only resolution. Re-inventoried 2026-08-06: one confirmed project remains and one named target no longer exists at its recorded path |
 | 2 | [`type-core-packages`](type-core-packages/) | active after affected public surfaces stabilize | Restore advertised checks, ratchet package by package, verify `py.typed` in installed wheels. Its deferred `kit/site` question should wait for the kit-composition goal's extraction scope |
 | 3 | [`configure-pypi-trusted-publishing`](configure-pypi-trusted-publishing/) | externally blocked | Reconcile the consumable distribution graph and verify trusted publishers plus PyPI-only downstream installation. Should follow the kit extraction, which changes wheel contents |
+| — | [`derive-internal-package-lists-from-locks`](derive-internal-package-lists-from-locks/) | proposed; not planned; starts after `unbacked-listing-publication`, which edits the same files | `reinit` targets and Dockerfiles derive their internal-package flags from each project's lock; `check-reinit` checks the derivation instead of comparing hand-written lists |
 
 The two sequences are independent of each other and share this campaign because they share its completion test: nothing outside this repository can install what it publishes.
 

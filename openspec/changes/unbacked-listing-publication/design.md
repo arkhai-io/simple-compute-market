@@ -1368,6 +1368,28 @@ rewrites the code it sits in, or corrects a statement earlier in this document.
   projection is now unknown: its buckets fall back to member availability, and a
   site whose pool projection has not loaded confirms no declaration rather than
   falling back to the local tables, which are not that listing's source.
+- **A source confirms only the fields it resolves.** The first e2e run refused every
+  explicitly created listing with `no_matching_declaration`: those listings publish a
+  `region`, the e2e pools declare region only as a resource attribute, and derivation
+  reads region from the pool's `region` tag or the local table, so it resolved none.
+  The comparison now treats an identity field the fresh derivation leaves unset as
+  outside the source's authority, as the rule "fields whose authority is not the site
+  are not rechecked" already implies. Aligning derivation with admission, which reads
+  the resource attribute, stays with `pools-8-capacity-projection-and-listing-hints`,
+  which owns the `region` hint and holds the finding.
+- **An explicitly created listing's terms follow the loop.** Terms come only from
+  durable sources, so a running loop refreshes a listing created through the admin
+  API to the terms its source and configuration derive, replacing any terms its
+  creator chose. The e2e scenarios hold the loop and do not observe it. Recorded for
+  whoever next changes explicit creation; not changed here.
+- **A pause wakes an idle loop.** The publication loop idled on its wake event for its
+  whole interval, so a pause issued between cycles reported it `pausing`. A pause now
+  signals every idle wait (`lifecycle.idle`), and the interval is a declared setting,
+  `capacity.publication_interval_seconds`.
+- **A storefront no site trusts derives from local tables.** Creation resolves backing
+  from the source site's projection and refuses without one. The e2e second seller,
+  Alice, holds no site's trust, so her configuration selects the local-table path,
+  where every source is capacity-backed.
 - **The binding trigger's name** is `storefront_listing_binding_immutable`; the text
   above is corrected.
 
