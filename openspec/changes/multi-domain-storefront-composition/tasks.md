@@ -35,6 +35,12 @@
 - [x] 4.3 Publication requires each source's exact declared pool mode; absent/withdrawn mode suppresses only that mode while accepted/sibling records retain their bindings.
 - [x] 4.4 VM and bare-metal publication project canonical `listing_resource.offering_mode`; common persistence rejects public/binding disagreement and collision-safe derivation keeps same-pool modes distinct.
 - [x] 4.5 Shared binding lookup replaces domain mapping authority for selected site/pool/resource provenance; public bindings and source envelopes exclude URLs, credentials, provider configuration, SSH material, and buyer assertions.
+      *Correction recorded 2026-09-23:* the VM publication path still reads and writes
+      `derived_compute_listings` — the reconciler writes it after close and reopen, and
+      the publication cycle's reopen looks listings up in it — despite the retirement
+      triggers `migrate-storefront-domains` installs. `unbacked-listing-publication`
+      removes those reads and writes and finds closed listings by derivation key in
+      the common binding.
 - [x] 4.6 Added common runner/plugin/composition plus VM/bare-metal publication tests for frozen source selection, both modes, zero-source behavior, exact binding/public mode, collision isolation, and close/reopen behavior.
 - [x] 4.7 Confirmed the existing registry fixture already owns canonical `offering_mode`; observable generic carrier shapes were unchanged, so no alternate field or fixture fork was introduced.
 

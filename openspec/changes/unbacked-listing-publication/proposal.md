@@ -43,28 +43,51 @@ migration that unwinds a fabricated site.
   advertise only a mode that pool declares advertisable. `deliverable_modes` keeps
   its meaning and its execution rechecks untouched.
 - Define what an upgraded storefront does with a projection carrying neither new
-  pool tag. A producer emitting a tag for no pool predates it: `capacity_backing`
-  resolves to backed, and `deliverable_modes` serves as advertisement
-  authorization — each reproducing the old contract rather than defaulting
-  permissively, under an explicit, logged, time-limited rule. A producer emitting a
-  tag for some pools and omitting it for one is defective and that pool fails
-  closed. A malformed `capacity_backing` value fails that pool closed as well.
+  pool tag, judged jointly per site and per projection generation. A generation in
+  which no pool carries either tag comes from a producer that predates them: every
+  pool reads as backed and `deliverable_modes` serves as advertisement
+  authorization, reproducing the old contract under one logged compatibility rule
+  reported in the storefront's system status. In any other generation a pool whose
+  declarations are absent, malformed, or inconsistent is unresolvable: it yields no
+  new candidates and its existing listings are held — neither closed nor refreshed —
+  until it resolves.
 - Implement a backing transition as close-and-republish rather than an in-place
   update, since the durable discriminator is immutable.
-- Scope the site-pinned claim-routing requirement, the capacity reconciliation
-  loop, and close-before-reopen to capacity-backed listings.
-- Keep source-publication reconciliation for every listing. A removed, disabled,
-  or changed source declaration must close or update its published listing
-  whether or not the listing was backed.
+- Scope the site-pinned claim-routing requirements, capacity-availability
+  reconciliation, and close-before-reopen to capacity-backed listings. The scoping is
+  made in the slice builder: an unbacked pool's slices range over its declared
+  quantity, a backed pool's over its available quantity.
+- Keep source-publication reconciliation for every listing, and make it complete: the
+  publication cycle refreshes terms of sale on open listings in place, which no
+  listing receives today, and finds closed listings by derivation key in the common
+  binding.
+- Define listing identity: a listing's identity is the physical resource it offers,
+  and everything else is a term of sale. A listing commits only to the fields it
+  publishes. A term changes in place; a change to the resource is a different
+  listing. Where the current key does not capture a changed identity field, the
+  listing closes and reopening is refused while the difference persists; completing
+  the key is recorded as an open question in `publish-multidimensional-listing-shape`.
+- Make the seller's inventory guard check each listing against its own source: every
+  published field sourced from the declaration or pool is rechecked against that
+  source for every listing, and availability is checked for backed listings only.
+  `kit/negotiation-runtime` forwards the durable binding on its round carrier so the
+  guard can.
+- Finish retiring `derived_compute_listings` on the publication path: publication,
+  close, and reopen neither read nor write it.
 - Publish backing in `listing_resource` and add an exact, fail-on-missing registry
   filter for it, republishing existing listings as explicitly backed so no listing
   relies on an absent field to be classified.
-- Refuse a source declaration carrying no quantity where derivation needs one,
-  rather than substituting a default that would be indistinguishable in the
-  published listing from a declared shape. Publish no second field describing how
+- Make derivation strict about the enumeration quantity: a declaration without
+  `gpu_count` yields no listing and an operator notice, a declared zero yields no
+  listing silently, and a malformed count leaves the member unresolvable. No
+  derivation path substitutes a default. Publish no second field describing how
   strong a listing's shape claim is: every published field is a seller assertion on
   every listing, and the exhaustibility difference is already carried by the
   published backing value.
+- Add the binding discriminator in two migrations — an expand that adds a nullable
+  column, backfills every existing row as backed, and extends the immutability
+  trigger, then a contract that refuses an insert naming no backing — so no writer
+  can omit the category and none is classified by a column default.
 
 ## Capabilities
 
@@ -98,16 +121,29 @@ None. This is a posture within existing capabilities, not a new domain.
   the compute vocabulary and belong in the compute schema identity.
 - Do not implement finite unbacked listings or a backing transition on one
   durable listing. Unbacked to backed is close-and-republish; see `design.md`.
+- Do not migrate a listing automatically when a physical-resource field the current
+  key does not capture changes, and do not fix mixed-kind fungible pools. Both follow
+  from completing the listing key, which `publish-multidimensional-listing-shape`
+  owns as an open question; this change closes and holds such listings, and logs a
+  warning for mixed-kind pools.
+- Do not add site-side validation refusing mixed-kind pools.
 
 ## Impact
 
-- Affected code: `core/storefront`'s binding schema and migrations,
-  `kit/capacity-publication`'s provenance types, publication runtime, and the
-  `PublicationDomainHooks` protocol, the storefront-side projection ingestion, the
-  VM negotiation runtime's binding guards, and both the VM and API-credit domains'
-  publication candidate derivation and capacity clients. API-credit behaviour does
-  not change — it is capacity-backed by a quota resource — but its types move with
-  the protocol.
+- Affected code: `core/storefront`'s binding schema, migrations, binding repository,
+  and publication runner; `kit/capacity-publication`'s provenance types, publication
+  runtime, and the `PublicationDomainHooks` protocol; `kit/negotiation-runtime`'s
+  `RoundRequest`; the storefront-side projection ingestion and system status; the VM
+  negotiation runtime's binding guards; the VM seller inventory guard in
+  `domains/vms/negotiation`; the VM reconciler and publication cycle in
+  `domains/vms/listings` and the VM storefront; the legacy storefront-domain
+  migration tool; and both the VM and API-credit domains' publication candidate
+  derivation and capacity clients. API-credit behaviour does not change — it is
+  capacity-backed by a quota resource — but its types move with the protocol.
+- Affected behaviour for existing backed listings: open listings begin reflecting
+  term changes, a published identity field that diverges from its source closes its
+  listing, and the inventory guard checks each listing against its own source rather
+  than any matching row anywhere. Each is a correction of stale or unscoped behaviour.
 - Affected specification: `openspec/specs/storefront-publication/spec.md`,
   `openspec/specs/registry-discovery/spec.md`, and
   `openspec/specs/site-capacity/spec.md`, whose claim-identity requirement asserts
@@ -141,6 +177,16 @@ None. This is a posture within existing capabilities, not a new domain.
   projection change.
 - **Prerequisite for `publish-indicative-listing-rates`**, which adds the rate to
   listings this change makes publishable.
+- **Related, not blocking:** `publish-multidimensional-listing-shape` carries the
+  listing-identity open question this change's interim behaviour stands in for, and
+  its dimensions extend the inventory guard's coverage without a guard change.
+  `capacity-shape-pricing`'s guard task narrows to buyer-requested shapes.
+  `capacity-shape-envelope` and `negotiation-capacity-feasibility-probe` sit beside
+  the guard as admissibility and authoritative availability.
+  `add-harness-scenario-contract` learns the guard's new declared-match reason.
+  `multi-domain-storefront-composition` receives a correction note on its
+  binding-lookup task, whose remaining legacy-table reads and writes this change
+  removes.
 - **Completion dependency on `pools-9-retire-local-physical-authority`.**
   Implementation may proceed before it; closeout cannot, because this change's
   promoted architecture text sits alongside the origination statement that change
@@ -156,8 +202,13 @@ None. This is a posture within existing capabilities, not a new domain.
       `pool-declared-advertisement-and-backing`, since a pool declaring its backing
       is when the concept exists.
 - [x] Existing subsystem specification —
-      `openspec/specs/storefront-publication/spec.md` and
-      `openspec/specs/registry-discovery/spec.md`.
+      `openspec/specs/storefront-publication/spec.md`,
+      `openspec/specs/site-capacity/spec.md`, and
+      `openspec/specs/registry-discovery/spec.md`; companion
+      `openspec/specs/storefront-publication/architecture.md` for the listing-identity
+      rationale.
+- [x] `docs/development/DEPLOYMENT_AND_CONFIG.md` — the binding-schema rollback
+      posture.
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 
@@ -175,3 +226,17 @@ None. This is a posture within existing capabilities, not a new domain.
   `openspec/specs/storefront-publication/spec.md`.
 - Backing is filtered exactly and fail-on-missing —
   `openspec/specs/registry-discovery/spec.md`.
+- A listing's identity is the physical resource it offers; terms of sale change in
+  place; a listing commits only to the fields it publishes —
+  `openspec/specs/storefront-publication/spec.md`, with rationale in its companion
+  `architecture.md`.
+- The seller's inventory guard rechecks every published source-derived field against
+  the listing's own source, and checks availability only for backed listings —
+  `openspec/specs/storefront-publication/spec.md`.
+- Projected pool declarations are judged jointly per site generation; unresolvable
+  pools are held — `openspec/specs/storefront-publication/spec.md`.
+- The common listing binding is the only VM listing mapping —
+  `openspec/specs/storefront-publication/spec.md`.
+- The binding discriminator is enforced by trigger, and rollback past this change
+  drops the required-insert trigger — `docs/development/DEPLOYMENT_AND_CONFIG.md`,
+  "Combined compute-family storefront".

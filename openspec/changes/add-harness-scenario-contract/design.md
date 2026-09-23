@@ -35,6 +35,12 @@ Three consequences for the contract:
 3. A policy reject with no reason is indistinguishable from any other, because
    `rejected` carries no information.
 
+`unbacked-listing-publication` (design settled 2026-09-23) adds a second literal
+reason from the same guard: a declared-match failure — the listing's own source no
+longer supports its published shape — is reported distinctly from
+`no_matching_inventory`, which keeps meaning "nothing free". The contract should
+expect both once that change lands.
+
 The apicredits storefront raises from the same shape in its own
 `sync_negotiation.py`, so this is a repository-wide pattern rather than a VM
 quirk.

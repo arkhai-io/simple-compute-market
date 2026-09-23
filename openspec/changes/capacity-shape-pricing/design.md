@@ -13,7 +13,10 @@ Verified by inspection 2026-08-06; re-verify before implementing.
   today.
 - `domains/vms/listings/pricing_resolution.py` resolves one `min_price` per GPU model
   through storefront override → pool hint → config default.
-- `domains/vms/negotiation/policies.py`'s `has_matching_inventory_guard` compares
+- *Superseded by `unbacked-listing-publication` (2026-09-23), which rechecks every
+  published source-derived field against the listing's own source; see that change's
+  design. As originally recorded:* `domains/vms/negotiation/policies.py`'s
+  `has_matching_inventory_guard` compares
   `region` and `gpu_model` by equality. It does not check `gpu_count`.
 - `_place_capacity_hold`'s docstring states the current arrangement is intentional and
   names its precondition: do not thread a negotiated shape through "without first

@@ -1,5 +1,13 @@
 # Tasks — unbacked listing publication
 
+> **Design revised 2026-09-23; re-planning pending.** `design.md` and the delta specs
+> now carry decisions these tasks predate: listing identity and the commitment rule,
+> the source-scoped inventory guard, terms refresh in the publication cycle, retiring
+> `derived_compute_listings` from the publication path, joint per-site detection of
+> older producers with unresolvable pools held, the enumeration-quantity rule, and the
+> two-migration binding schema. Where a task below conflicts with them, `design.md`
+> and the delta specs govern until the planning phase amends this plan.
+
 Depends on `settle-listing-vocabulary`,
 `project-capacity-resources-without-hosts`, and
 `pool-declared-advertisement-and-backing`. Do not begin Section 2 before all three have

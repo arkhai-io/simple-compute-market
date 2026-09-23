@@ -32,6 +32,11 @@ NOT depend on an absent field to be classified.
 - **WHEN** a listing publishes no backing value and a buyer filters on backing
 - **THEN** that listing is excluded from the result rather than matching either value
 
+#### Scenario: A listing published before the field existed
+
+- **WHEN** a listing published before backing was part of the compute listing shape is republished
+- **THEN** it carries an explicit capacity-backed value under its existing listing identity
+
 #### Scenario: Backed and unbacked listings share one catalogue
 
 - **WHEN** a buyer queries without filtering on backing

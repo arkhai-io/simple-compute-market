@@ -9,7 +9,12 @@
 - `kit/resource-pools/hints.py` already carries domain-neutral pool policy through
   `policy_tags`, with typed readers per tag and validation limited to what has a
   universal meaning. Bounds fit this mechanism exactly.
-- `domains/vms/negotiation/policies.py`'s `has_matching_inventory_guard` is the only
+- *Superseded by `unbacked-listing-publication` (2026-09-23): the guard rechecks every
+  published source-derived field, categorical and quantitative, against the listing's
+  own source, and checks availability only for capacity-backed listings. It still
+  checks the listing's advertised shape rather than admissible ranges, so this
+  change's admissibility capability remains distinct. As originally recorded:*
+  `domains/vms/negotiation/policies.py`'s `has_matching_inventory_guard` is the only
   seller-side shape check today and is categorical-only.
 - The roadmap records that reservable capacity per dimension is expected to become a
   function of current occupancy rather than a constant.

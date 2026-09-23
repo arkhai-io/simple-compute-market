@@ -14,7 +14,10 @@ Verified by inspection 2026-08-06; re-verify before implementing.
 - `probe` takes the ledger's process-wide `threading.RLock`, the same lock as `reserve`,
   `commit`, and `release`.
 - `has_matching_inventory_guard` reads an advisory snapshot and compares two categorical
-  fields.
+  fields. *Amended 2026-09-23:* `unbacked-listing-publication` splits it into a declared
+  match against the listing's own source, for every listing, and an availability check
+  for capacity-backed listings only. This change's probe replaces the second half's
+  advisory snapshot; it never runs for an unbacked listing.
 
 ## Goals / Non-Goals
 

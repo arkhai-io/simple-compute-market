@@ -69,6 +69,11 @@ The deployment boundary. In-flight negotiations carry a multiplier after this se
 
 - [ ] 5.1 Extend `has_matching_inventory_guard` from `region`/`gpu_model` equality to a
       quantitative check across every dimension the seller constrains.
+      *Amended 2026-09-23:* `unbacked-listing-publication` makes the guard recheck
+      every published source-derived field — categorical and quantitative — against
+      the listing's own source. What remains here is checking a *buyer-requested*
+      shape, once shapes are negotiable, rather than the listing's advertised one.
+      Re-verify the guard's state before planning this task.
 - [ ] 5.2 Order the guard before pricing, so a shape the seller will not serve is never
       quoted.
 - [ ] 5.3 Focused tests: quantitative constraint exceeded declines without a quote;
