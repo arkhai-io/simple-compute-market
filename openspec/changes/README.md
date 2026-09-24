@@ -218,11 +218,12 @@ advertisement change's subset rule depend on a concept its own dependent owned.
 ## Roadmap goal — Sell metered inference as its own market domain
 
 ```text
-add-inference-domain-contract ──► compose-inference-domain-stack ──┬──► extract-access-issuance-kit ──┐
-                                                                    └──► meter-inference-usage ────────┼──► package-inference-seller ──► qualify-inference-market
-                                                                                                        │
-                                                                    (extract and meter are sequenced, not ordered; whichever lands second rebases)
+add-inference-domain-contract ──► compose-inference-domain-stack ──► extract-access-issuance-kit ──► meter-inference-usage ──► package-inference-seller ──► qualify-inference-market
 ```
+
+Extraction blocks metering rather than running beside it: metering is the
+change that mutates the authority, and it does so against the kit-composed
+authority once. Copied modules are frozen until extraction lands.
 
 The campaign's sequencing rule is stated once, in
 [`add-inference-domain-contract`](add-inference-domain-contract/)'s `design.md`:
@@ -246,10 +247,10 @@ already uses makes the hosted registry a small change when it is opened.
 
 | Change | Status | Acceptance boundary |
 |---|---|---|
-| [`add-inference-domain-contract`](add-inference-domain-contract/) | active; no blocking dependency; design-complete | The `inference.v1` domain identity, `inference` schema identity, and `inference` offering mode; one listing per served model carrying a model card and an integer rate card; provision intent as the API-credits purchase shape under the new kind; the usage record and its deterministic charge derivation; secret-free usage evidence; the three-identity separation; the registry filter specification, its load test, and the image `COPY`; the `arkhai-inference-domain` wheel. One decision gate: the `model_id` naming authority |
+| [`add-inference-domain-contract`](add-inference-domain-contract/) | active; no blocking dependency; design-complete | The `inference.v1` domain identity, `inference` schema identity, and `inference` offering mode; one listing per served model carrying a model card and an integer rate card; provision intent as the API-credits purchase shape under the new kind; the usage record and its deterministic charge derivation; secret-free usage evidence; the three-identity separation; the registry filter specification, its load test, and the image `COPY`; the `arkhai-inference-domain` wheel. Both decision gates closed on 2026-09-24: `model_id` is seller-asserted with a SHOULD derivation rule, and one credit is one base unit of the settlement asset |
 | [`compose-inference-domain-stack`](compose-inference-domain-stack/) | design phase; not yet planned; depends on `add-inference-domain-contract` | Storefront executable, authority service, OpenAI-compatible gateway, and buyer plugin composed by copying the API-credits roles; a local Compose stack with an inference registry and development identities; `e2e_inference_deal` through the shared helpers. Flat per-request consumption. The second consumer the extraction needs |
 | [`extract-access-issuance-kit`](extract-access-issuance-kit/) | design phase; not yet planned; depends on `compose-inference-domain-stack`'s green deal | Pins API-credits digest bytes first, then moves issuance models, fulfillment identity and request digest, the issuance client, fulfillment orchestration and rollback, evidence projection, and the gate's authority client and signing into kit under a domain label; deletes both domain-local copies; the authority composes the kit's digest so client and server cannot drift. Balances, quantities, quota, and consumption rules stay domain-owned |
-| [`meter-inference-usage`](meter-inference-usage/) | design phase; not yet planned; depends on `compose-inference-domain-stack`; sequenced with the extraction | Hold, settle, and release on the authority with server-side pricing against the pinned rate card; the gate estimates, holds before proxying, settles from `usage`, forces `stream_options.include_usage`, drains on disconnect, and disables batching; hold expiry, usage retention and rollup; metered conformance cases. One decision gate: pre-flight token estimation source |
+| [`meter-inference-usage`](meter-inference-usage/) | design phase; not yet planned; depends on `extract-access-issuance-kit` | Hold, settle, and release on the authority with server-side pricing against the pinned rate card; the gate estimates, holds before proxying, settles from `usage`, forces `stream_options.include_usage`, drains on disconnect, and disables batching; hold expiry, usage retention and rollup; metered conformance cases. One decision gate: pre-flight token estimation source |
 | [`package-inference-seller`](package-inference-seller/) | design phase; not yet planned; depends on `compose-inference-domain-stack` and `meter-inference-usage` | The thin seller path: a CLI that generates configuration and a Compose stack from the stack change's own files, generates signing material, checks reachability, and installs from published wheels. GPU detection, TLS automation, and price suggestion are deferred until three third-party sellers report where they got stuck |
 | [`qualify-inference-market`](qualify-inference-market/) | design phase; not yet planned; depends on `meter-inference-usage` and `package-inference-seller` | Multi-seller discovery, concurrency without overdraft, cancellation and disconnect charging, credential lifecycle, missing and late usage, retry safety, the buyer-profile matrix, and cross-language conformance for whichever non-Python gates are available; release-qualifies the per-domain deal path. Goal 8's completion test |
 

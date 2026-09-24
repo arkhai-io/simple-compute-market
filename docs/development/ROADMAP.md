@@ -299,9 +299,11 @@ GPU keeps the machine, serves a model, and sells API calls against it to many
 buyers at once; a buyer compares sellers per model on context length,
 quantization, and price per token, buys credits through any settlement
 mechanism the marketplace supports, and receives a bearer credential for an
-OpenAI-compatible endpoint. The domain fixes what a credit means — a number of
-tokens on a named model — which is exactly what API credits leaves open, and
-that difference is why it is a domain rather than a field.
+OpenAI-compatible endpoint. The domain supplies the shapes a buyer compares on
+— a model card, a rate card, a usage record — which the API-credits listing does
+not carry; what a storefront sells and charges stays the storefront's, and
+whether listings are comparable across sellers is the registry operator's to
+enforce. That vocabulary gap is why it is a domain rather than a field.
 
 **Current state.** Nothing supports it. There is no `inference` domain
 identity, registry schema identity, filter specification, or offering mode, and

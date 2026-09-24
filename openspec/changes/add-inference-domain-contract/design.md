@@ -69,21 +69,28 @@ named follow-on change.
 
 ### A domain, not an API-credits extension
 
-API credits leaves the meaning of a credit to the seller: one credit is whatever
-the gated service charges per admitted request, and the listing says nothing
-about it. That is right for a market that sells access to any API, and it has
-consumers beyond inference that depend on it staying generic.
+API credits sells prepaid access to a *named service*. Its listing carries a
+service name, an endpoint, and a quota; nothing on it says what is served, at
+what context length, in what quantization, or what a unit of usage costs. A
+buyer of inference compares exactly those things, so the domain's job is to
+give the listing the **shapes** a buyer compares on: a model card, a rate card,
+and a usage record.
 
-Inference needs the opposite. Two sellers' listings are only comparable if a
-credit means the same kind of thing on both — a fixed number of tokens on a
-named model. Fixing that meaning is what a domain does. It is not a field API
-credits could grow, because the moment API credits says "a credit is N tokens,"
-every weather-API seller has to have a tokenizer.
+What the domain does *not* do is decide what a storefront sells or what it
+charges. Converting money into a balance is the payment kit's job (Stripe for
+fiat, Alkahest for crypto) and is opaque to the domain. How a storefront prices
+its balance against tokens is the storefront's declaration, made in the rate
+card. And whether two storefronts' listings are comparable is whatever the
+operator of the registry they publish to chooses to enforce — a registry here is
+the analogue of an OpenRouter or a Featherless, and there is no promise of
+compatibility between registries, nor within one unless its operator imposes it.
 
-The alternative — a `pricing_model` discriminator on the API-credits listing —
-was rejected because it makes one listing schema carry two incompatible
-comparison surfaces and one buyer plugin interpret both.
-
+Inference is a domain rather than a field on API credits because the vocabulary
+is different, not because the meaning of a credit is. Adding a model card to the
+API-credits listing would make every weather-API seller carry a context length,
+and one buyer plugin interpret two comparison surfaces. That alternative — a
+`pricing_model` discriminator on the API-credits listing — was rejected on those
+grounds.
 ### One listing is one served model
 
 The registry compares listings, not sellers. A buyer asking "who serves this
@@ -97,80 +104,93 @@ listing if *any* catalogue entry matched, so a price bound on one model would
 surface a listing because a different model was cheap. Per-model listings make
 every filter mean what it says.
 
-### Model identity is domain-canonical
+### Model identity is seller-asserted and convergent
 
-`model_id` identifies the **logical model** — one weights lineage at one version
-— and nothing else. It is a domain-defined canonical string: lowercase,
-`<org>/<name>` with the version inside the name
-(`meta-llama/llama-3.1-8b-instruct`), validated by a pattern the domain owns and
-the filter specification enforces at publication. It is not a Hugging Face
-repository name, because a repository branch is mutable and a model need not be
-hosted there; and it is not minted by a registry, for the reason below.
+`model_id` is asserted by the seller. The domain does not maintain a list of
+models and must not: which models are sold is the storefront's business, and
+which of them a registry admits is its operator's. What the domain owns is a
+**derivation rule**, shipped as a pure function sellers and the seller path can
+call, so that two sellers of the same weights arrive at the same string without
+anyone minting it:
 
-The exact source rides beside it. `artifact_ref` names the weights the seller
-actually serves (`hf://meta-llama/Llama-3.1-8B-Instruct@<revision>`, or any
-other scheme), and `artifact_digest` optionally carries an immutable hash. Both
-are seller assertions, like every published field; nothing in the marketplace
-verifies them. `display_name` is a mutable label with no identity role. This is
-the identity-versus-provenance split the repository already draws between a
-listing's origin site and its admission authority, and between a host's
-connection identity and its capacity declaration.
+- weights with a public upstream: the upstream owner and repository name,
+  lowercased, with revision, branch, and quantization suffixes stripped
+  (`meta-llama/llama-3.1-8b-instruct`);
+- private weights: the model owner's namespace, not the seller's;
+- a fine-tune: the fine-tuner's namespace, because it is different weights.
+
+The spec says a listing **SHOULD** derive its identifier this way. A registry
+operator who wants convergence enforced makes it a MUST for their registry by
+narrowing the field in the filter specification — an `enum`, a pattern — which
+is curation in the right place: an operator policy, outside the registry
+service. The registry itself never mints, resolves, or aliases identifiers;
+`registry-discovery` keeps it opaque to domain payloads, and federated
+registries would otherwise let one string mean different things in two places.
 
 Quantization, runtime, and context limits are **not** in the identifier. They
-are properties of a deployment and are already explicit, filterable fields;
-encoding one of them in `model_id` as well would give one fact two names, which
-the one-name rule forbids, and would let an identifier say `fp8` while the field
-says `awq`. A fine-tune is different weights and therefore a different
-`model_id`. OpenRouter's request-facing `id` follows the same line — it names the
-model and leaves quantization to provider metadata — which is what a per-seller
-listing is here.
+are explicit fields, so "every listing of this model" and "this model at fp8"
+are both one query, and one fact has one name. `quantization` is an enumerated
+field — initially `none`, `fp16`, `bf16`, `fp8`, `int8`, `int4`, `awq`, `gptq`,
+extended additively. Aliases such as `latest` are not in the protocol; a listing
+carries exactly one identifier, and `model_family` is the coarse grouping.
 
-Aliases such as `latest` are not in the protocol in version 1. A listing carries
-exactly one canonical `model_id`; `model_family` is the coarse grouping filter;
-resolving an alias to a version is a buyer-side or webapp convenience.
+The exact source rides beside the identifier: `artifact_ref` names the weights
+served, under any scheme including private ones, and `artifact_digest`
+optionally carries an immutable hash. `display_name` is a mutable label with no
+identity role. All are seller assertions, like every published field.
 
-**Why the registry does not own this.** `registry-discovery` requires the
-registry to treat domain payloads as opaque except for the declarative
-validation and filter rules its filter specification supplies. A registry that
-minted or curated model identifiers would become an authority on a domain fact,
-and because registries are federated the same string could then mean different
-things on two of them, which defeats a canonical identifier. Curation still has
-a home: a registry *operator* may narrow the accepted vocabulary to an `enum` in
-its filter specification — the domain-authoring guide explicitly permits local
-vocabulary constraints — which is the posture Goal 7 records for rate honesty:
-curation sits outside the registry service boundary, as operator policy rather
-than service behaviour.
+**Provenance and resale.** A listing carries a required, filterable
+`provenance` of `self-hosted` or `resold`. Resale — fronting a model someone
+else hosts — is a legitimate listing, stated as such. Misrepresentation (a
+wrong derivation, `self-hosted` while proxying, model X while serving Y) is out
+of scope for version-1 detection: it is a curation matter under the posture
+Goal 7 records for rates, and later a reputation input. Buyer-side verification
+is anticipated and unowned; the attestation envelope below is where it attaches.
+
+**The three-party hook.** A listing MAY name a `model_owner` marketplace
+principal distinct from the seller, for the case where the party who owns the
+weights is not the party serving them. Nothing pays the owner in version 1 and
+there is no royalty field: the direction of money in that arrangement — does the
+host pay the owner a share, or does the owner pay the host to serve — is the
+subject of a separate hosting domain, and settlement already carries a list of
+obligations with their own payer and claimant, so paying a second party later is
+wiring rather than a schema change. `provenance` can gain a `hosted-for-owner`
+value under a version bump when that domain exists.
 
 Rejected: `deployment_id` as a further identifier. A seller's deployment is
 already identified by `storefront_url` plus the publisher-chosen, normatively
-stable `listing_id`, and `served_model_name` is what a request names; a fourth
-identifier would be one concept with two names.
+stable `listing_id`, and `served_model_name` is what a request names.
+### One pricing layer: a credit is one base unit of the settlement asset
 
-### Two pricing layers, and a credit is the joint
+In inference, **one credit is one base unit of the asset the listing settles
+in** — one micro-USDC, one cent, one wei. The settlement option therefore
+advertises `{field: amount, per: credit, value: 1}`, `quantity` at purchase is
+the number of base units the buyer puts on the key, and the rate card's integers
+are prices in that asset: base units per million prompt tokens, base units per
+million completion tokens, an optional flat charge per request, and optional
+cached-prompt and image rates. A request's charge is the ceiling of the sum of
+those products, in base units, and the key's balance is in the same unit.
 
-Purchase is priced per **credit**, exactly as API credits prices it:
-`settlement_options[*].rates` carries `{field: amount, per: credit, value: N}`
-in payment base units, and the negotiated scalar is `quantity × N`. Nothing in
-settlement, issuance, or the settlement runtime changes.
+This is what makes listings comparable. The number a buyer sees on the card is
+the number the meter charges and the number the balance is kept in; there is
+one authoritative figure, so nothing can drift, and a rate bound in a registry
+query means what it says within an asset. Every settlement mechanism, issuance
+path, and top-up flow applies unchanged, because the purchase is still "N
+credits at a per-credit rate" — the rate is simply always one.
 
-Consumption is priced per **token** through the model card's **rate card**:
-integer credits per million prompt tokens, integer credits per million
-completion tokens, an optional integer flat charge per request, and optional
-integer rates for cached prompt tokens and images. A request's charge is the
-ceiling of the sum of those products, in credits.
+The alternative — a credit as an abstract unit each seller denominates, with the
+rate card in credits per million tokens — was the design's first draft and was
+rejected because it breaks comparison. Seller A at one base unit per credit
+listing 500 credits per million and seller B at a hundred base units per credit
+listing 5 credits per million charge the same real price and show numbers a
+filter cannot relate. Two knobs per seller guarantee that denominations vary,
+and a filter over the credit figure looks like a price filter and is not.
 
-Keeping the credit as the unit that changes hands means every existing
-settlement mechanism, issuance path, and top-up flow applies unchanged, and a
-seller keeps its choice of asset. The cost is that a buyer computing price per
-million tokens in an asset has to multiply the two layers together; that is a
-buyer-side computation and is discussed under comparability below.
-
-Integers are required at both layers. `pricing.py` in API credits already
-refuses fractional base units and overflow; the rate card follows the same rule
-so that two independent implementations of the charge arithmetic cannot
-disagree by rounding. A seller who wants a price below one credit per million
-tokens chooses a finer credit by lowering the per-credit settlement rate.
-
+Costs, accepted: on an 18-decimal asset the integers are large (the existing
+uint256 overflow guards apply); on a fiat-cent asset the finest expressible rate
+is one cent per million tokens, which nobody undercuts. Integers remain required
+so two independent implementations of the charge arithmetic cannot disagree by
+rounding.
 ### The rate card is pinned at issuance
 
 A grant carries the rate card in force when it was issued. A seller who
@@ -185,31 +205,28 @@ card is stored and how the authority reads it on the consumption path — is
 
 ### Comparability without a derived price field
 
-An earlier sketch published a derived `discovery_pricing` block — credits per
-million multiplied through the settlement rate into asset base units — so the
-registry could range-filter a monetary price. Rejected. A derived field can
-drift from the two authoritative fields it is computed from, and a buyer who
-accepted a deal on the derived number while settlement charged the authoritative
-one would be charged a price they did not see. Guarding against that needs
-recompute-on-publish and buyer-side re-derivation before accept, which is a lot
-of machinery to protect a convenience.
+An earlier sketch published a derived monetary block computed from two
+authoritative fields so the registry could range-filter a price. Rejected: a
+derived field can drift from what it is computed from, and a buyer who accepted
+on the derived number while settlement charged the authoritative one would be
+charged a price they did not see. With one pricing layer the derivation is
+unnecessary — the rate card *is* the price — so the rejection stands and the
+problem it guarded against no longer exists.
 
-What the registry filters on instead is what is authoritative: the rate card's
-integer credit rates (ranges work on integers today) and the settlement asset
-(`settlement_options[*].asset`, already projected for API credits). A buyer
-comparing two sellers in the same asset divides one integer by another. A buyer
-comparing across assets needs an exchange rate, which the registry must not be
-an authority on — the same reasoning `publish-indicative-listing-rates` records
-for compute.
+What the registry filters on is therefore authoritative: `prompt_credits_max`
+and `completion_credits_max` are upper bounds on the rate card's integers, and
+`settlement_asset` selects the asset they are denominated in. A rate bound is
+meaningful only alongside an asset, and the generic registry cannot yet express
+"this filter requires that one" — `publish-indicative-listing-rates` is building
+that declarative co-requirement. Until it lands, the **buyer plugin** enforces
+the pairing: a rate bound without `--asset` is refused at query compilation, and
+the seller path documents the same rule. Cross-asset comparison needs an
+exchange rate the registry must not be an authority on, and stays client-side,
+consistent with Goal 7.
 
-That change — design-complete and unblocked now that the backing work it waited
-on has merged — is building the two generic primitives a monetary rate filter
-actually needs: an exact-decimal filter value type and declarative filter
-co-requirements. Inference must not duplicate them. **Revisit trigger:** when
-`publish-indicative-listing-rates` promotes them, decide whether an inference listing
-publishes an `asking_rate` per million tokens in the settlement asset, reusing
-its shape. Until then, comparability across assets is client-side.
-
+**Revisit trigger:** when `publish-indicative-listing-rates` promotes filter
+co-requirements, move the pairing rule from the buyer plugin into the inference
+filter specification so the registry refuses an unpaired bound itself.
 ### Quota-backed publication in version 1
 
 An inference seller's supply is, in truth, not finite in the way a GPU is: a
@@ -277,6 +294,24 @@ and the grant and fulfillment identities. It never carries the bearer secret,
 the prompt, the completion, or the response. This is the same rule the
 API-credits issuance evidence enforces with a canary test, applied to usage.
 
+### Attestation is reserved as an opaque, unverified envelope
+
+The model card and the usage evidence each carry an optional `attestation`
+field shaped as the repository's standard versioned envelope — `kind`,
+`schema_version`, and an opaque `payload`. In version 1 it is empty, nothing
+verifies it, and the registry does not expose it as a filter. Its purpose is to
+fix *where* a proof attaches — to the listing (what the seller claims to run)
+and to each usage record (what served this request) — while the two shapes are
+being designed together, and to give a future trusted-execution proof a place
+to land as a new `kind` rather than a schema change.
+
+The envelope is deliberately not a promise: a value in it is a seller assertion
+that nothing checks, which is why the spec states it is unverified and why it
+cannot be selected on. Defining the first `kind` is separate, later work whose
+input is the verification chain a comparable open-source market already ships —
+platform, measurement, and verifier on the listing; a check at purchase; a check
+per request — read before the field's shape is fixed.
+
 ### Three identities, restated for this domain
 
 The API-credits architecture companion already separates a marketplace principal
@@ -313,39 +348,45 @@ non-compute in the same way. Recorded here because the listing shape (no
 ### Copy first, extract after two consumers
 
 The campaign's sequencing rule, stated once: `compose-inference-domain-stack`
-copies the API-credits issuance client, fulfillment orchestration, and evidence
-projection into `domains/inference/` with the digest label changed to
-`inference`; `extract-access-issuance-kit` then moves what both copies share
-into kit and deletes both copies.
+copies the API-credits issuance client, fulfillment orchestration, evidence
+projection, and publication roles into `domains/inference/` with the issuance
+label changed to `inference`; `extract-access-issuance-kit` then moves what both
+copies share into kit and deletes both copies.
 
-Two reasons this order is right and the reverse is wrong. First, the boundary
-is not knowable from one consumer — the reverse order guesses it and discovers
-the guess when the second consumer arrives. Second, the extraction is delicate
-in a specific way: the schema strings are inside the digests and the service
-keeps a mirror copy of the digest function, so the extraction is a
-parameterization that must leave every existing API-credits digest byte-
-identical. That is far safer to do with a second working consumer and an
-API-credits regression suite pinned first than as the opening move.
+The reason is narrow. The issuance *label* is not the difficulty: it appears in
+three places per side, and a regression test that pins the digest bytes for a
+fixed input set proves a parameterization byte-identical with one consumer —
+that pin is the extraction change's first task. What is not knowable from one
+consumer is the boundary inside `fulfillment.py`, where issuance and the quota
+commit are tangled, and how the authority service should be packaged. Those two
+questions are answered by having a second, working consumer in view.
 
-The cost is a transient second copy of roughly a thousand lines. Accepted;
-the extraction change removes both copies, which is the Goal 4 rule that an
-extracted concern leaves no domain-local implementation.
+Two rules keep the copy cheap:
 
+- **Copies are frozen.** No feature work in a copied module until extraction
+  lands. A copy that diverges is no longer a copy, and extraction becomes a
+  reconciliation.
+- **Extraction blocks metering.** `meter-inference-usage` is the change that
+  mutates the authority; it does so against the kit-composed authority, once,
+  after `extract-access-issuance-kit` is accepted. "Sequenced, whichever lands
+  second rebases" was the earlier posture and is withdrawn: if metering landed
+  first, extraction would be separating one copy from one that had diverged in
+  exactly the module it needs to move.
 ### Schema identity and filter specification
 
 Schema identity is `inference`, version 1; filter-specification version 1. The
 buyer plugin declares `inference` and therefore queries only registries
-declaring it, which is what keeps inference discovery off the compute and
-API-credits registries — the same load-bearing schema identity API credits
-relies on.
+declaring it, which keeps inference discovery off the compute and API-credits
+registries — the same load-bearing schema identity API credits relies on.
 
-Filters: `model_id`, `model_family`, `quantization`, `modality`, and
-`supported_parameter` are exact `in` filters, fail-on-missing where the field is
-required. `context_length_min` is a lower-bound range. `prompt_credits_max` and
-`completion_credits_max` are upper-bound ranges over the rate card's integers.
-The token, mechanism, asset, and funding projections are copied from the
-API-credits specification. `offering_mode` is required and equals `inference`.
-
+Filters: `model_id`, `model_family`, `quantization`, `modality`,
+`supported_parameter`, and `provenance` are exact `in` filters, fail-on-missing
+where the field is required. `context_length_min` is a lower-bound range.
+`prompt_credits_max` and `completion_credits_max` are upper-bound ranges over the
+rate card's base-unit integers, paired with `settlement_asset` by the buyer
+plugin as described above. The token, mechanism, asset, and funding projections
+are copied from the API-credits specification. `offering_mode` is required and
+equals `inference`. The attestation envelope is **not** a filter.
 ### OpenAI-compatible surface, version 1
 
 `endpoint.api_style` is `openai.v1` and names chat completions and completions.
@@ -359,30 +400,34 @@ usage fields under a version bump, not a reinterpretation.
   issuance machinery. Mitigated by the extraction change's rule that no
   domain-local copy survives, and by the API-credits regression suite pinned
   before extraction.
-- **Integer granularity.** A seller cannot express less than one credit per
-  million tokens on the rate card. Mitigated by the seller choosing a finer
-  credit through the per-credit settlement rate.
+- **Integer granularity.** On a fiat-cent asset the finest rate is one cent
+  per million tokens; on an 18-decimal asset the integers are large. Neither
+  prices anyone out; the overflow guards already exist.
 - **Declared finite supply.** Quota-backed publication means a seller declares
   a sellable credit quantity that a model server does not physically enforce.
   This is API credits' posture today and inherits its limits; the quota is a
   sales cap, and admitting the unbacked backing value later is a
   filter-specification bump, not a migration.
+- **A rate bound without an asset is meaningless, and the registry cannot yet
+  refuse one.** Mitigated by the buyer plugin refusing to compile it, until
+  filter co-requirements land and the rule moves into the specification.
 - **Cross-asset comparison is client-side.** Accepted for the reasons
-  `publish-indicative-listing-rates` records; that change owns the primitives
-  for anything better.
-- **Model identity format.** The domain-defined format rejects identifiers
-  sellers may already use informally (mixed case, revision suffixes). Mitigated
-  by `artifact_ref` carrying the exact source and `display_name` the label; a
-  format change is a filter-specification version bump, not a migration.
+  `publish-indicative-listing-rates` records.
+- **Identifier convergence is a SHOULD.** Two sellers may still name the same
+  weights differently. Mitigated by the shipped derivation function, by
+  `model_family` grouping, and by a registry operator who can make the rule a
+  MUST for their registry; misrepresentation is a curation and reputation
+  matter, not detected in version 1.
 
 ## Open questions
 
 Each carries its revisit trigger. None is prescribed by a task in this change;
 where a task touches one it is an explicit decision gate.
 
-1. **`asking_rate` per million tokens.** Trigger:
-   `publish-indicative-listing-rates` — now unblocked — promotes the
-   exact-decimal value type and filter co-requirements.
+1. **Registry-side pairing of a rate bound with its asset.** Trigger:
+   `publish-indicative-listing-rates` promotes declarative filter
+   co-requirements; the rule then moves from the buyer plugin into the
+   inference filter specification.
 2. **Admitting the unbacked backing value for inference listings.** The
    property exists; the trigger is a seller who needs it. Cost: an inference
    filter-specification bump and close-and-republish.
