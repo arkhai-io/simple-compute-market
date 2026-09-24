@@ -21,30 +21,40 @@ a storefront cannot be the final authority over listings from any other site.
 
 ## What Changes
 
-- **Listing shapes.** A pool may be listed in chosen shapes: a list per offering mode, each
-  shape stating its GPU count and model and, optionally, vCPU, memory, and storage.
-  - A site declares them in a new domain-neutral `listing_shapes` pool hint.
-  - A storefront may replace the list per pool.
-  - A pool with a list publishes exactly those shapes. A pool without one keeps today's
-    GPU-count enumeration, byte-identical.
-- **What a shaped listing publishes and reserves.** It publishes every quantity its shape
-  declares, under the existing wire names. It reserves and provisions exactly that shape.
-  How many of a shape fit is derived from capacity declarations, never declared or
-  published.
-- **Consistency.** A shape is publishable only where a member of its source can admit the
-  listing's claim, judged by the site's own claim predicate. For a capacity-backed listing,
-  every dimension of the shape must also be currently available. A shape that fits nothing
-  yields no listing and is reported; it is never shrunk, and never replaced by another
-  source's shapes.
-- **Identity.** A shaped listing's derivation identity includes a canonical digest of its
-  shape, so editing a shape closes the old listing and publishes a new one. Existing
-  enumeration listings keep their identities.
+- **Every listing is a listing shape.** A shape is a family-grouped statement of what one
+  listing offers: GPU count and model, and optionally vCPU, memory, and storage. A pool's
+  shapes come from exactly one source, in this order:
+  1. the storefront's override for that site and pool;
+  2. the site's new domain-neutral `listing_shapes` pool hint, a list per offering mode;
+  3. otherwise the domain's default shape generator.
+  
+  The VM default is GPU-only, reproducing today's listings as shapes. It is generated per GPU
+  model, so a pool mixing models no longer publishes one model's name over every member. The
+  generator sits behind a domain interface, so pool-assigned generators such as proportional
+  shapes can be added later.
+- **Commitment.** A listing publishes and reserves exactly the quantities its shape declares.
+  For a dimension its shape omits it makes no commitment. The site provisions it from its
+  configured defaults, and keeping that capacity sufficient is the site administrator's
+  responsibility. How many of a shape fit is derived from capacity declarations, never
+  declared or published.
+- **Feasibility.** A shape is published only where some source member satisfies the
+  listing's claim under the site's resource-feasibility predicate, against declared capacity
+  and, when backed, current availability.
+  - The site's reservation remains the final admission boundary.
+  - A stated shape no member is feasible for yields no listing and is reported; it is never
+    shrunk or replaced by another source's shapes.
+- **Identity.** Every listing's derivation identity includes a canonical digest of its
+  shape, whatever produced it.
+  - Every existing VM listing therefore closes and republishes once at upgrade, deployed
+    fail-forward.
+  - A seller's close or pause carries across to the successor listing.
+  - Editing a shape closes the old listing and publishes a new one.
 - **Site-scoped storefront overrides.**
   - A durable store keyed by `(site_id, pool_id)` holds SLA, pricing, settlement clauses,
     and listing shapes.
   - It is administered through an authenticated API, typed clients, and a storefront CLI.
   - A write is checked against the site's live projection: a pool the site does not project
-    is refused, and a shape that fits no member is reported but accepted.
+    is refused, and a shape no member is feasible for is reported but accepted.
   - The existing home-site override rows remain a lower tier until `pools-9` retires them.
 - **Family-grouped shape vocabulary**, pulled forward from `structured-capacity-requirements`:
   - shapes are declared in the family-grouped form (`gpu: {count, model}`, `cpu`, `memory`,
@@ -60,9 +70,10 @@ None.
 
 ### Modified Capabilities
 
-- `storefront-publication`: listing shapes, shape consistency, shaped-listing identity,
-  site-scoped storefront pool overrides and their live-projection write check, and how a
-  shaped listing's published shape relates to its source declaration.
+- `storefront-publication`: every listing is a listing shape; shape feasibility; shape-bearing
+  listing identity and the upgrade carry-over of seller state; site-scoped storefront pool
+  overrides and their live-projection write check; and how a listing's published shape
+  relates to its source declaration.
 - `resource-pool-management`: the domain-neutral `listing_shapes` hint and its structural
   validation on every pool-write surface.
 - `market-composition`: family-grouped capability shapes flattened through one shared
@@ -73,33 +84,48 @@ None.
 - Do not negotiate on shape. A buyer naming a different shape is still refused at round
   zero. `capacity-shape-envelope`, `capacity-shape-pricing`, and
   `negotiation-driven-capacity-resize` own negotiable shapes.
+- Do not add pool-assignable shape generators beyond the GPU-only default, or a hint that
+  selects one.
+- Do not account in the capacity ledger for dimensions a listing omits. Their provisioning is
+  the site's, sized by its configured defaults.
+- Do not guarantee admission at publication. Feasibility is resource feasibility; the
+  reservation decides.
 - Do not add per-dimension pricing or publish how many of a shape remain.
 - Do not change the registry filter vocabulary or its `on_missing` semantics, and do not
   rename `ram_gb`, `disk_gb`, or `vcpu_count` on the wire. The rename is
   `structured-capacity-requirements`' to make.
 - Do not let a storefront override physical facts: region, offering mode, backing, or a GPU
   model no member carries.
-- Do not publish provisioning defaults, host totals, or any inferred value for a pool that
-  declares no shape.
+- Do not publish provisioning defaults, host totals, or any inferred value.
 - Do not add shapes to bare-metal or API-credit publication.
+- Do not support rollback. The change deploys fail-forward with the Goal 7 feature set.
 
 ## Impact
 
 - **Affected code:**
-  - `market_core` (new shared capability-shape utility);
+  - `market_core` (new shared capability-shape utility, and the length-prefixed identifier
+    encoding moved out of the VM reconciler);
   - `kit/resource-pools` (hint key and structural validation; new dependency on
     `arkhai-core`);
   - the VM domain package (family schema);
-  - `domains/vms/listings` (shaped candidates, fit through the injected site predicate, shape
-    keys, identity fields derived from `DIMENSION_KEYS`; new dependency on `arkhai-vms`);
-  - the VM storefront (binding envelope version 2, override store and migration, admin
-    routes and identity contract, publication loop and inventory guard wiring, system
-    status, CLI);
+  - `domains/vms/listings` (shape resolution and the default generator, feasibility through
+    the injected site predicate, shape keys, identity fields derived from `DIMENSION_KEYS`;
+    new dependency on `arkhai-vms`);
+  - the VM storefront:
+    - binding envelope version 2 for every listing, and the startup carry-over of seller
+      state;
+    - the override store and its migration;
+    - admin routes and the identity contract;
+    - publication loop and inventory guard wiring;
+    - system status and the CLI;
   - `core/storefront-client` (override methods on both variants).
 - **Behaviour:**
-  - Shaped listings reserve and provision their full shape instead of GPU count plus pool
-    defaults.
-  - Pools without shapes are unchanged.
+  - A listing with a stated shape reserves every quantity it declares. Its omitted
+    dimensions stay the site's.
+  - Pools without stated shapes publish the same fields as today, except that mixed-model
+    pools publish per model.
+  - Every VM listing closes and republishes once at upgrade, keeping seller closes and
+    pauses.
   - Override writes now require the site to be reachable.
 - **Wire:** additive. The published fields already exist in the listing model and the
   registry schema. The new pool hint is opaque to consumers that do not read it.
@@ -108,6 +134,8 @@ None.
   - integration tests for the override API through the typed client against the live-fetch
     fake site, and for shaped publication and reconciliation;
   - registry filter coverage;
+  - a provider-input test proving that declared quantities, not defaults, size the VM;
+  - upgrade tests for the identity change and the seller-state carry-over;
   - one end-to-end path in which a declared shape is discovered with a `ram_gb` query,
     negotiated, and provisioned at that shape.
 
@@ -116,34 +144,41 @@ None.
 - [x] `docs/development/ARCHITECTURE.md`:
   - shape ownership across site and storefront, and site-scoped storefront overrides in the
     storefront capacity boundary and authority table;
+  - the identifiers table's stale "globally unique" `pool_id` row, corrected to the
+    site-local slug the resource-pool contract defines;
   - the shared capability-shape utility in `market_core` in the package layers;
   - `listing_shapes` in the vocabulary.
 - [x] Existing subsystem specifications:
   - `openspec/specs/storefront-publication/spec.md` and its `architecture.md`;
   - `openspec/specs/resource-pool-management/spec.md`;
   - `openspec/specs/market-composition/spec.md`.
-- [x] `docs/development/DEPLOYMENT_AND_CONFIG.md`: a pool definition entry may declare
-  `listing_shapes`, and storefront pool overrides are administered through the API rather
-  than configuration.
+- [x] `docs/development/DEPLOYMENT_AND_CONFIG.md`:
+  - a pool definition entry may declare `listing_shapes`;
+  - storefront pool overrides are administered through the API rather than configuration;
+  - the site administrator sizes the pool VM defaults for dimensions listings omit;
+  - upgrade is fail-forward: every VM listing republishes once and seller state carries
+    across.
 - [x] `docs/development/ROADMAP.md`: Goal 2's statements that listings advertise a GPU-only
   shape and that dimension filters match nothing.
 - [ ] New subsystem specification: none.
 
 ### Knowledge to promote
 
-- A pool's listing shapes are chosen by its site and replaced per pool by its storefront. A
-  shaped listing publishes, reserves, and provisions its shape, and how many fit is derived
-  — `openspec/specs/storefront-publication/spec.md`.
-- A shape is publishable only where the site's own predicate admits it, against declared
-  capacity and, when backed, current availability. An unfit shape is reported and never
-  substituted — `openspec/specs/storefront-publication/spec.md`.
-- A shaped listing's identity includes its shape digest —
-  `openspec/specs/storefront-publication/spec.md`.
+- Every listing is a listing shape, from the storefront's override, the site's hint, or the
+  domain's default generator. A listing commits to and reserves exactly its declared
+  quantities, and how many fit is derived — `openspec/specs/storefront-publication/spec.md`.
+- A shape is published only where a source member is resource-feasible for it; reservation
+  remains the admission boundary — `openspec/specs/storefront-publication/spec.md`.
+- Every listing's identity includes its shape digest, and seller state carries across the
+  upgrade — `openspec/specs/storefront-publication/spec.md`.
 - Storefront pool overrides are site-scoped, durable, outlive their pool, and are written
   against the site's live projection — `openspec/specs/storefront-publication/spec.md`.
-- Why a published dimension is a commitment, why shapes are chosen rather than inferred, and
-  why the storefront is the final authority within physical bounds —
-  `openspec/specs/storefront-publication/architecture.md`.
+- Why a published dimension is a commitment, why shapes are stated or generated rather than
+  inferred, the generator seam, and why the storefront is the final authority within
+  declared capacity — `openspec/specs/storefront-publication/architecture.md`.
+- Omitted dimensions are the site administrator's to size through configured defaults —
+  `openspec/specs/storefront-publication/architecture.md` and
+  `docs/development/DEPLOYMENT_AND_CONFIG.md`.
 - `listing_shapes` hint and structural validation —
   `openspec/specs/resource-pool-management/spec.md`.
 - One shared, schema-driven flattening utility for family-grouped capability shapes —

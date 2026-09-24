@@ -1,35 +1,38 @@
 ## ADDED Requirements
 
-### Requirement: A pool's listing shapes are chosen by its site and its storefront
+### Requirement: Every listing is a listing shape
 
-A pool MAY be listed in chosen shapes. Each shape is a family-grouped capability shape in the
-domain's vocabulary. A pool's shapes MUST come from exactly one source: the storefront's
-override for that site and pool when it states shapes; otherwise the pool's own
-`listing_shapes` hint for the listing's offering mode. The storefront's list MUST replace the
-pool's list as a whole. A pool with a shape list MUST publish exactly its listed shapes and
-MUST NOT also enumerate listings by quantity. A pool with no shape list from either source
-MUST publish exactly as it would without shapes.
+Every listing a domain publishes MUST be a listing shape: a family-grouped capability shape in
+that domain's vocabulary. A pool's shapes MUST come from exactly one source, in this
+precedence:
 
-A shaped listing MUST publish every quantity and attribute its shape declares, flattened
-through the domain's schema. It MUST NOT publish a quantity its shape does not declare. A
-shape omitting an optional family makes no commitment about it. The capacity claim built
-from a shaped listing MUST request exactly the shape's quantities, so a shaped listing
-reserves and provisions its shape.
+1. The storefront's override for that site and pool, when it states shapes.
+2. Otherwise, the pool's own `listing_shapes` hint for the listing's offering mode.
+3. Otherwise, the domain's default shape generator.
 
-How many of a shape a pool can serve MUST be derived from its capacity declarations. It MUST
-NOT be declared, and MUST NOT be published.
+A stated list MUST replace the lower sources as a whole. How many of a shape a pool can serve
+MUST be derived from its capacity declarations, and MUST NOT be declared or published.
 
-For the VM domain every shape MUST name a GPU count and a GPU model. A fungible pool MUST
-publish one listing per shape. A specific-resource pool MUST publish one listing per member
-per shape that member can hold.
+**The VM default.** The VM domain's default generator MUST yield, for each GPU model among a
+pool's enabled members, one shape per GPU count from one to the largest declared GPU count
+among that model's members. Each such shape MUST declare the GPU family only. Every VM shape
+MUST name a GPU count and a GPU model. A fungible pool MUST publish one listing per feasible
+shape. A specific-resource pool MUST publish one listing per member per shape that member is
+feasible for.
+
+**Commitment.** A listing MUST publish every quantity and attribute its shape declares,
+flattened through the domain's schema, and MUST NOT publish a quantity its shape does not
+declare. The capacity claim built from a listing MUST request exactly its shape's quantities.
+A listing commits only to what its shape declares. For a dimension its shape omits it makes
+no commitment, and what is provisioned for that dimension is the site's to decide.
 
 #### Scenario: A site declares shapes for a pool
 
 - **WHEN** a pool's projected `listing_shapes` hint lists two VM shapes and the storefront
   has no override for that site and pool
-- **THEN** the storefront publishes one listing per shape, each carrying its shape's GPU
-  count, GPU model, and every other declared quantity, and publishes no GPU-count slices for
-  the pool
+- **THEN** the storefront publishes one listing per feasible shape, each carrying its shape's
+  GPU count, GPU model, and every other declared quantity, and publishes no default shapes
+  for the pool
 
 #### Scenario: The storefront replaces a pool's shapes
 
@@ -40,13 +43,22 @@ per shape that member can hold.
 #### Scenario: A pool states no shapes
 
 - **WHEN** neither the storefront's override nor the pool's hint states shapes for a pool
-- **THEN** the pool's listings are identical to those it published without shapes, and none
-  carries a dimension beyond GPU count
+  whose enabled members all declare one GPU model
+- **THEN** the pool publishes one listing per GPU count its members make feasible, each
+  carrying GPU count and model and no other dimension, as its listings did before shapes
+
+#### Scenario: A pool's members declare different GPU models
+
+- **WHEN** a fungible pool without stated shapes holds members declaring two different GPU
+  models
+- **THEN** the default generator yields each model's GPU counts as separate shapes, and each
+  listing names the model of the members that are feasible for it
 
 #### Scenario: A shape omits memory
 
 - **WHEN** a VM shape declares GPU count, GPU model, and vCPU count but no memory family
-- **THEN** its listing publishes no `ram_gb` and its capacity claim requests no memory
+- **THEN** its listing publishes no `ram_gb`, its capacity claim requests no memory, and any
+  memory provisioned for the resulting VM is the site's to decide
 
 #### Scenario: Eight single-GPU VMs from one host
 
@@ -55,42 +67,55 @@ per shape that member can hold.
   against it each reserve one GPU and the shape's other quantities until the member cannot
   admit another
 
-### Requirement: A listing shape is published only where its source can hold it
+### Requirement: A listing shape is published only where a source member is feasible for it
 
-A shape MUST be publishable only where a member of its source can admit the capacity claim
-its listing would produce:
+A shape MUST be publishable only where a member of its source satisfies the capacity claim
+its listing would produce under the site authority's exported resource-feasibility
+predicate:
 
 - for a fungible pool, some single enabled member;
 - for a specific-resource pool, that member.
 
-Fit MUST be judged by the site authority's own exported claim predicate, evaluated against
-the member's declared capacity. For a capacity-backed listing the shape MUST additionally be
-admissible against the member's currently available dimensions, for every dimension of the
-shape. A member whose projection reports no availability is unknown rather than empty, and
-MUST be treated as its declared capacity. An unbacked listing MUST be judged on declared
-capacity alone.
+**Declared and available capacity.**
+- Feasibility MUST be judged against the member's declared capacity.
+- For a capacity-backed listing the shape MUST additionally be feasible against current
+  availability. For a fungible pool that availability is sourced from grouped capacity data
+  when it has loaded for the site, and otherwise from the member's own projected
+  availability.
+- A member whose availability is not reported is unknown rather than empty and MUST be judged
+  on its declared capacity.
+- An unbacked listing MUST be judged on declared capacity alone.
 
-A shape that fits no member MUST yield no listing and MUST be reported in the storefront's
-system status, naming the site, the pool, the shape, and what did not fit. Publication MUST
-NOT shrink a shape to fit. It MUST NOT substitute the pool's own shapes for an override that
-does not fit, and MUST NOT substitute quantity enumeration. A pool whose shape hint the domain
-cannot read MUST yield no new shaped listing, MUST be reported, and its existing shaped
-listings MUST be held rather than closed.
+**Feasibility is not admission.** Publication does not establish that a reservation will be
+admitted; the site authority's reservation remains the final admission boundary. A published
+listing MAY be refused at reservation for a reason the resource-feasibility predicate does not
+evaluate, such as the pool provider's host requirement, holds over the requested lease
+window, or a physical-host conflict.
 
-The seller's inventory guard MUST apply the same fit to a shaped listing's declared match.
+**When no member is feasible.**
+- A stated shape that no member is feasible for MUST yield no listing and MUST be reported in
+  the storefront's system status, naming the site, the pool, the shape, and what was not
+  feasible.
+- Publication MUST NOT shrink a shape to make it feasible, and MUST NOT substitute another
+  source's shapes for a stated list with an infeasible shape.
+- A pool whose shape hint the domain cannot read MUST yield no new listing, MUST be reported,
+  and its existing listings MUST be held rather than closed.
+
+The seller's inventory guard MUST apply the same feasibility check to a listing's declared
+match.
 
 #### Scenario: An override names a model the pool does not have
 
 - **WHEN** a storefront override lists a shape whose GPU model no enabled member of the pool
   declares
 - **THEN** no listing is published for that shape and system status reports it, naming the
-  model as what did not fit
+  model as what was not feasible
 
 #### Scenario: A declaration shrinks beneath a published shape
 
 - **WHEN** a member's declared memory falls below the memory of a shape published from it
-  and no other member can hold the shape
-- **THEN** the shaped listing closes through source reconciliation and the unfit shape is
+  and no other member is feasible for the shape
+- **THEN** the listing closes through source reconciliation and the infeasible shape is
   reported
 
 #### Scenario: A backed shape's memory is taken
@@ -99,23 +124,42 @@ The seller's inventory guard MUST apply the same fit to a shaped listing's decla
   memory is below the shape's
 - **THEN** the shape is not publishable from that member
 
+#### Scenario: A published listing is refused at reservation
+
+- **WHEN** a listing is published because a member is feasible for its shape, and the site
+  refuses the reservation for a reason feasibility does not evaluate
+- **THEN** the refusal stands, and publication is not treated as having guaranteed admission
+
 #### Scenario: A pool's shape hint cannot be read
 
 - **WHEN** a pool's `listing_shapes` hint for the VM mode contains a family or field outside
   the VM vocabulary
-- **THEN** no new shaped listing is derived from the pool, its existing shaped listings are
-  held, the pool does not fall back to quantity enumeration, and system status reports the
-  problem
+- **THEN** no new listing is derived from the pool, its existing listings are held, the pool
+  does not fall back to the default generator, and system status reports the problem
 
-### Requirement: A shaped listing's derivation identity includes its shape
+### Requirement: A listing's derivation identity includes its shape
 
-A shaped listing's derivation identity MUST include a canonical digest of its shape, taken
-over the family-grouped form rather than the flattened field names. Its durable binding MUST
-record the shape in a source envelope version distinct from that of listings enumerated by
-quantity. A stored shaped listing's derivation identity MUST be read from its binding rather
-than recomputed from its published fields. A change to a pool's shape MUST therefore close
-listings under the old shape and publish listings under the new one. Listings enumerated by
-quantity MUST keep their existing derivation identities.
+**Identity.**
+- Every listing's derivation identity MUST include a canonical digest of its shape, taken
+  over the family-grouped form rather than the flattened field names, whichever source
+  produced the shape.
+- Its durable binding MUST record the shape in the current source envelope version.
+- A stored listing's derivation identity MUST be read from its binding rather than
+  recomputed from its published fields.
+- A change to a pool's shapes MUST therefore close listings under a withdrawn shape and
+  publish listings under a new one.
+
+**Listings bound before shapes.** A listing bound under the earlier envelope, which carries
+no shape, MUST NOT be reopened, and while open MUST close through source reconciliation.
+
+**Seller state carries across.** Before any lifecycle loop runs, the storefront MUST carry a
+seller's close and a seller's pause from each such listing to the listing bound for its
+equivalent default shape:
+- a listing its seller closed MUST have its successor bound closed by its seller and
+  unpublished;
+- a paused listing MUST have its successor bound paused.
+
+The carry-over MUST be idempotent.
 
 #### Scenario: A shape is edited
 
@@ -123,11 +167,30 @@ quantity MUST keep their existing derivation identities.
 - **THEN** the listing for the 64 GiB shape closes and a listing with a distinct derivation
   key is published for the 96 GiB shape, leaving the original binding row unmodified
 
-#### Scenario: A storefront adopts this behaviour
+#### Scenario: A site declares the shape its pool published by default
 
-- **WHEN** a storefront whose pools declare no shapes is upgraded
-- **THEN** every existing listing keeps its derivation key and binding, and none is closed or
-  republished
+- **WHEN** a pool publishing a default one-GPU shape gains a `listing_shapes` hint stating
+  exactly that shape
+- **THEN** the listing keeps its derivation key and is neither closed nor republished
+
+#### Scenario: A storefront upgrades
+
+- **WHEN** a storefront whose listings were bound before shapes starts for the first time
+  with shapes
+- **THEN** each open earlier listing closes once and a listing for its equivalent shape
+  publishes under a shape-bearing derivation key
+
+#### Scenario: A seller-closed listing crosses the upgrade
+
+- **WHEN** a listing its seller closed was bound before shapes
+- **THEN** after upgrade the listing for its equivalent default shape is closed by its
+  seller, is not published, and no reconciliation reopens it until the seller does
+
+#### Scenario: A paused listing crosses the upgrade
+
+- **WHEN** an open, paused listing was bound before shapes
+- **THEN** after upgrade the listing for its equivalent default shape is paused and withheld
+  from registries until the seller resumes it
 
 ### Requirement: Storefront pool overrides are site-scoped and durable
 
@@ -190,8 +253,8 @@ authenticated client, not from its cache:
 - a pool present in the live projection MUST be accepted even when its declarations are
   unresolvable.
 
-A shape that fits no member of the live projection MUST NOT cause refusal. The response MUST
-report fit per shape against that live projection and identify the projection generation it
+A shape no member of the live projection is feasible for MUST NOT cause refusal. The
+response MUST report feasibility per shape against that live projection and identify the projection generation it
 used. After accepting a write, the storefront MUST cause its cached projection to refresh
 and its publication loop to run, without writing the live result into the cache itself.
 
@@ -207,11 +270,11 @@ and its publication loop to run, without writing the live result into the cache 
 - **THEN** the write is refused as retryable, naming the site as unavailable rather than the
   pool as unknown
 
-#### Scenario: An override's shape fits nothing
+#### Scenario: An override's shape is feasible nowhere
 
-- **WHEN** an administrator writes an override whose only shape fits no member of the live
-  projection
-- **THEN** the override is stored, the response reports the shape as fitting no member, and
+- **WHEN** an administrator writes an override whose only shape no member of the live
+  projection is feasible for
+- **THEN** the override is stored, the response reports the shape as infeasible, and
   the next publication cycle publishes no listing for it
 
 #### Scenario: A shape outside the vocabulary
@@ -224,30 +287,29 @@ and its publication loop to run, without writing the live result into the cache 
 
 ### Requirement: A listing's published shape comes from its source declaration
 
-A listing's published compute shape is derived from its source declaration, for
-capacity-backed and unbacked listings alike. For a listing enumerated by quantity it is the
-shape its declaration carries. For a shaped listing it is the chosen shape, bounded by what
-its source declares. Nothing in publication verifies that shape against hardware, and this
-requirement makes no claim that it does.
+A listing's published compute shape is its listing shape, and whether that shape is published
+is decided against its source declaration, for capacity-backed and unbacked listings alike.
+Nothing in publication verifies that shape against hardware, and this requirement makes no
+claim that it does.
 
 Derivation MUST NOT substitute a value for a quantity a declaration does not carry. A
-declaration that omits the quantity a domain enumerates listings by MUST yield no
+declaration that omits the quantity a domain's default shapes are enumerated by MUST yield no
 listing, and the omission MUST be reported to the operator naming the declaration. A
 declaration that declares that quantity as zero MUST yield no listing without a
 report. A declaration whose quantity is malformed MUST be treated as unresolvable:
 it yields no new listing and its existing listings are held. In a fungible pool one
-unresolvable member holds every listing derived from the pool, because the pool's range
-cannot be computed without it; in a specific-resource pool it holds only its own.
+unresolvable member holds every listing derived from the pool, because which shapes its
+members are feasible for cannot be decided without it; in a specific-resource pool it holds
+only its own.
 
-Where a listing enumerated by quantity is capacity-backed, the published quantity is
-additionally bounded by the availability its site projects, so it moves as capacity is
-reserved and released. An unbacked fungible pool's enumerated listings range up to the
-largest single member's declared quantity, never a sum across members, because a
-reservation would land on one member. A shaped listing's quantities never move: whether it
-is publishable follows the shape-fit requirement instead. An unbacked listing has no
-availability to bound it and no reservation consumes it; that difference is carried by the
-listing's published backing and MUST NOT be encoded a second time in a separate published
-field.
+Where a listing is capacity-backed, whether its shape is published additionally follows the
+availability its site projects, so a pool's published set moves as capacity is reserved and
+released. An unbacked fungible pool's default shapes range up to the largest single
+member's declared quantity, never a sum across members, because a reservation would land on
+one member. A listing's own quantities never move: availability decides only whether it is
+published. An unbacked listing has no availability to bound it and no reservation consumes
+it; that difference is carried by the listing's published backing and MUST NOT be encoded a
+second time in a separate published field.
 
 #### Scenario: A declaration omits the enumerated quantity
 
@@ -264,8 +326,8 @@ field.
 - **WHEN** any number of buyers settle against an unbacked listing
 - **THEN** its published quantity is unchanged, because no reservation consumes it
 
-#### Scenario: A shaped listing's quantities do not follow availability
+#### Scenario: A listing's quantities do not follow availability
 
-- **WHEN** reservations consume part of a capacity-backed member from which a shaped listing
-  is published, and the member can still admit the shape
-- **THEN** the shaped listing stays open with its quantities unchanged
+- **WHEN** reservations consume part of a capacity-backed member from which a listing is
+  published, and the member is still feasible for its shape
+- **THEN** the listing stays open with its quantities unchanged

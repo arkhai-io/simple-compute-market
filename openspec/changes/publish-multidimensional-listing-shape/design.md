@@ -2,9 +2,9 @@
 
 ## Context
 
-Re-verified against the code on 2026-09-24. Several facts recorded when this change was
-first written had moved; the corrected picture is below, and the decisions that follow
-depend on it.
+Re-verified against the code on 2026-09-24, and again after design review the same day.
+Several facts recorded when this change was first written had moved; the corrected
+picture is below, and the decisions that follow depend on it.
 
 **Publication today.**
 
@@ -39,8 +39,28 @@ depend on it.
   `VmManagementV1RequirementDelegate` translates `ram_gb` to MiB by multiplying by 1024
   and `disk_gb` to `<n>G`; a dimension absent from the reservation falls back to the pool's
   provisioning defaults. `ram_gb` and `disk_gb` are therefore GiB in practice.
+- `AnsibleFulfillmentProvider` builds a VM from the translated committed dimensions and
+  falls back to the pool's `default_vm_ram`, `default_vm_vcpus`, and `default_vm_disk_size`
+  for any dimension the reservation omits. Nothing reports the defaults back, and the
+  capacity ledger does not debit them.
 - The VM buyer sends no `compute_resource` in its provision terms, so the round-0
   shape-mismatch guard does not fire for a buyer accepting a listing's own shape.
+
+**Site admission is more than resource feasibility.**
+
+- `dict_resource_satisfies_claim` reproduces the site's resource-requirement predicate:
+  resource kind, dimensions, and exact attributes.
+- `CapacityLedgerService._find_candidate` checks more before it admits:
+  - that the site's configured required attributes are present;
+  - that the pool declares the requested offering mode;
+  - the pool provider's host requirement;
+  - holds over the requested lease window;
+  - physical-host conflicts.
+- The resource-pool projection deliberately omits host connection data, so a storefront
+  cannot reproduce all of that.
+- `capacity_bucket_projection` groups resources by pool, resource type and subtype, their
+  complete per-dimension `available` map, and their grouping attributes, which include
+  `gpu_model`. Buckets therefore answer multidimensional availability per model.
 
 **Discovery.**
 
@@ -81,29 +101,41 @@ becomes `deleted` when the pool's local GPU count reaches zero.
 - The end-to-end VM scenarios declare `{"gpu_count": N}` only
   (`e2e-tests/tests/e2e/roles/scenarios/vms/host_registry.py`).
 
+**Seller-owned listing state.** A listing its seller closed stays closed against every
+reconciliation, and no replacement binds under its derivation identity. A paused open
+listing refuses new negotiations and is withheld from registries until resumed. Both states
+belong to a listing ID.
+
 ## Goals / Non-Goals
 
 **Goals:**
 
-- A site administrator and a storefront administrator can each state which shapes a pool is
-  listed in, and the storefront's choice wins.
-- A listing in a declared shape publishes, reserves, and provisions exactly that shape.
-- No listing publishes a shape its physical source cannot hold.
+- Every VM listing is a listing shape.
+- A site administrator and a storefront administrator can each state which shapes a pool
+  is listed in, and the storefront's choice wins. Otherwise the domain's default shape
+  generator reproduces today's listings.
+- A listing commits to, publishes, and reserves exactly the quantities its shape declares,
+  and nothing else.
+- No listing publishes a shape that none of its source's members is feasible for.
 - Storefront overrides are durable, scoped to a site and pool, and administered through an
   authenticated API.
 - Nothing this change stores or keys on needs rework when `structured-capacity-requirements`
-  lands.
-- A pool that declares no shape publishes exactly what it publishes today.
+  lands, or when pool-assigned shape generators arrive.
+- A seller's close or pause survives the one-time identity change at upgrade.
 
 **Non-Goals:**
 
 - Buyer-negotiated shapes. `capacity-shape-envelope`, `capacity-shape-pricing`, and
   `negotiation-driven-capacity-resize` own those.
+- Pool-assignable shape generators beyond the default, such as proportional shapes. This
+  change shapes the seam only (decision 2).
+- Ledger accounting for dimensions a listing omits (decision 3).
 - Per-dimension pricing; publishing how many of a shape remain.
 - Changing the registry filter vocabulary, its `on_missing` semantics, or renaming the
   published `ram_gb`/`disk_gb`/`vcpu_count` fields.
 - Storefront overrides of physical facts: `region`, `offering_mode`, capacity backing.
 - Shapes for bare-metal or API-credit listings.
+- Rollback. Deployment is fail-forward (see Migration Plan).
 
 ## Decisions
 
@@ -129,29 +161,53 @@ Rejected alternatives for what a GPU-count slice should publish for its other di
   not line up (`vcpu_count` has no `host_cpu_cores` counterpart) and it leaves the `ram_gb`
   filter matching nothing.
 
-So dimensions beyond GPU count are published only on a listing whose shape someone chose
-(decision 2).
+So a listing publishes a dimension only when its shape declares it. Every listing has a
+shape (decision 2). By default that shape declares GPU count and model only, as today's
+listings do, and every other dimension is left to the site (decision 3).
 
-### 2. Listing shapes are chosen, and how many fit is derived
+### 2. Every listing is a shape; shapes are chosen or generated, and how many fit is derived
 
-A pool may carry a list of **listing shapes** for each offering mode. The pool's site
-declares them in the domain-neutral `listing_shapes` pool hint; the storefront may replace
-the list for that pool through its override store (decision 6). A pool with a list publishes
-exactly its listed shapes and does not enumerate GPU counts. A pool with no list, from
-either source, keeps GPU-count enumeration unchanged and publishes no dimension beyond GPU
-count.
+Every VM listing is a **listing shape**. A pool's shapes come from exactly one source, in
+this order:
+
+1. The storefront's override for that site and pool (decision 6).
+2. The pool's `listing_shapes` hint, which its site declares, keyed by offering mode:
+   `listing_shapes: {vm: [<shape>, ...]}`.
+3. Otherwise, the domain's **default shape generator**.
+
+A list from either the storefront or the site replaces the default entirely.
+
+**The VM default is GPU-only.**
+- It reproduces today's listings as shapes: `{gpu: {count: n, model: M}}` for each GPU model
+  M among the pool's enabled members, and n from 1 to the largest declared GPU count among
+  that model's members.
+- Every other dimension is left to the site's configured defaults and provisioning playbook.
+- Which of those shapes publish is decided by feasibility (decision 4), which reproduces
+  today's range: a backed pool's is bounded by current availability, an unbacked pool's by
+  declaration.
+
+**Generating per model splits mixed pools.** A pool whose members have different models
+publishes each model's counts separately. That replaces the first-member-wins behaviour and
+its warning, which published one model's name over every member's GPUs.
+
+**The generator is a seam.** It sits behind a small domain-owned interface: a pool's
+projected members go in, shapes come out. GPU-count enumeration is its only implementation
+in this change. The longer-term design assigns pluggable kit generators to pools, such as
+proportional shapes. Those become further implementations selected by a future pool hint,
+without changing derivation. This change adds no selection hint.
+
+Further rules:
 
 - **A list per offering mode.** One pool may be sold as several form factors; a VM shape and
-  a future container shape are different declarations. The hint is keyed by offering mode:
-  `listing_shapes: {vm: [<shape>, ...]}`.
+  a future container shape are different declarations.
 - **A list, not a single shape.** Eight 1-GPU VMs and one 8-GPU VM can be offered from the
   same host at once; the site already arbitrates between them, because admission debits every
-  dimension.
+  dimension a claim requests.
 - **Count is derived, never declared or published.** A declared count would be a second
-  authority on quantity beside the capacity declarations and would drift from them. Whether a
-  shape is publishable follows from decision 4.
-- **Cardinality is unchanged.** A fungible pool publishes one listing per shape; a
-  specific-resource pool publishes one listing per member per shape that member can hold.
+  authority on quantity beside the capacity declarations and would drift from them.
+- **Cardinality is unchanged.** A fungible pool publishes one listing per feasible shape; a
+  specific-resource pool publishes one listing per member per shape that member is feasible
+  for.
 - **A pool hint rather than storefront-only configuration.** A seller whose site is served by
   a storefront they hold no credential for can only express intent at the site
   (`openspec/specs/storefront-publication/architecture.md`, "Autonomous publication"). This
@@ -164,7 +220,7 @@ count.
   fallback describing what a VM gets when nothing else says, and it carries no GPU count.
   Publishing it would advertise a default as a capability. It stays a provisioning default.
 
-The roadmap's Goal 2 frames fixed shapes as the problem it removes. Chosen shapes are
+The roadmap's Goal 2 frames fixed shapes as the problem it removes. Listing shapes are
 consistent with that goal as the listing's advertised starting point, which envelope,
 pricing, and resize later make negotiable. They are not its end state.
 
@@ -199,12 +255,18 @@ contained pieces of that change's accepted direction:
 
 Why each piece:
 
-- **`gpu.model` sits inside the shape.** A shape fits only members of its own model, so a
+- **`gpu.model` sits inside the shape.** A shape is feasible only on members of its own model, so a
   pool whose members have different models publishes one listing per shape, never a listing
   that mixes models. Pricing already resolves per GPU model, and it takes the model from the
   shape.
-- **An optional family the shape omits is no commitment.** The listing does not publish it
-  and the claim does not reserve it, as the commitment rule requires.
+- **A family the shape omits is no commitment.** The listing does not publish it and the
+  claim does not reserve it, as the commitment rule requires. What is provisioned for an
+  omitted dimension is the site's choice: today the pool's configured defaults and the
+  playbook. Nothing reports those defaults back, so the ledger cannot debit them. Keeping
+  such capacity sufficient is the site administrator's responsibility, through the
+  configurable pool defaults. This is an accepted division of responsibility, not a defect
+  this change or another owns. Families stay optional so a dimension added later can be
+  absent from some listings.
 - **The flat names are an explicit exception.** The flat names are today's wire names rather
   than the family-prefixed names the convention would produce (`memory_gib`, `storage_gib`).
   The exception is recorded; when `structured-capacity-requirements` renames the wire, the
@@ -221,61 +283,98 @@ Stays in `structured-capacity-requirements`: the buyer-facing `requirements` obj
 claim restructure and the `probe` signature, the `offering_mode`/`resource_type` split, the
 wire rename, and expressing the site's resource side in the family form.
 
-### 4. A shape is publishable only where its source can hold it
+### 4. A shape is published only where a source member is feasible for it
 
-A shape is consistent with its source when a member can admit the claim the listing would
-produce:
+**What is checked.** A shape is publishable when some source member satisfies the claim the
+listing would produce under the site's canonical **resource-feasibility** predicate,
+`dict_resource_satisfies_claim`:
 
 - **Fungible pool:** some single enabled member.
 - **Specific-resource pool:** that member.
-- **Unbacked listing:** declared fit only; a member's declared `capacity` must admit the claim.
-- **Capacity-backed listing:** declared fit, and additionally every dimension of the shape is
-  currently available on that member according to the projection's per-member `available`
-  map. A member that reports no `available` is unknown rather than empty and is treated as
-  its declared capacity, as today's unknown-availability rule does, with admission deciding.
-  Capacity buckets are not used for shaped pools, because their grouping may not carry every
-  dimension.
+- **Unbacked listing:** feasibility against declared capacity only.
+- **Capacity-backed listing:** additionally feasible against current availability.
+  - For a fungible pool, availability comes from the capacity-bucket projection when it has
+    loaded for the site, as the permanent spec already requires for fungible pools. Buckets
+    carry every dimension's availability and the GPU model.
+  - For a specific-resource pool, or when buckets have not loaded, it comes from the
+    member's projected `available` map.
+  - A member reporting no availability is unknown rather than empty and is judged on
+    declared capacity, as today's unknown-availability rule does.
 
-**Fit uses the site's own predicate.** The storefront evaluates fit with the site's exported
-claim predicate, `dict_resource_satisfies_claim`. It is injected through the storefront's
+**How the predicate reaches the storefront.** It is injected through the storefront's
 composition, as the placement matcher already is, so `domains/vms/listings` gains no
-`kit/site` dependency. Declared fit evaluates the predicate against declared capacity;
-availability evaluates it against `available`. So the storefront publishes a shape exactly
-when the site would admit it, apart from projection staleness. The same predicate answers
-the inventory guard's declared-match question. This settles the design's earlier question of
-where the shared predicate should live.
+`kit/site` dependency. The same predicate answers the inventory guard's declared-match
+question.
 
-**Consequence:** the claim requires the attributes it names, including `region`. A pool that
-states its region only through the pool hint, with members that do not declare it, has
-shapes that fit nothing. Admission would refuse their claims anyway; planning verifies the
-parity.
+**What it is not.** This is resource feasibility, not site admission; the site's reservation
+remains the final admission boundary.
+- *Checked by publication outside the predicate:* the pool's advertisement authorization and
+  backing, as today.
+- *Not checked:*
+  - the site's configured required-attribute presence;
+  - the delivery-mode check;
+  - the pool provider's host requirement, since the projection deliberately carries no host
+    connection data;
+  - holds over the requested lease window;
+  - physical-host conflicts.
+- A listing may therefore publish and still be refused at reservation, as today's listings
+  can be. Reproducing full admission would need a different site capability and state the
+  projection intentionally withholds.
 
-**When a shape does not fit:**
-
+**When no member is feasible for a shape:**
 - The shape yields no listing, and the storefront reports it in system status, naming the
-  site, pool, shape digest, and the field that failed.
-- It never shrinks the shape to fit, and never falls back to the pool hint's list or to
-  GPU-count enumeration: each would publish something nobody chose.
-- A listing whose shape stops fitting closes through ordinary source reconciliation, because
-  its key is no longer derived.
+  site, pool, shape digest, and what was not feasible.
+- It never shrinks the shape and never falls back to another source's shapes.
+- A listing whose shape becomes infeasible closes through ordinary source reconciliation,
+  because its key is no longer derived.
+- A default shape that is not currently feasible is not reported: that is ordinary
+  unavailability. Only declared shapes are reported.
 
 **Holds are unchanged.** A member with an unreadable GPU count holds the listings of its pool
 (fungible) or its own (specific resource), as today.
 
-### 5. A shaped listing's identity includes its shape
+### 5. Every listing's identity includes its shape
 
-- **Structural key.** A shaped candidate's reconciler key includes the site, the pool or
-  resource, and the shape digest.
-- **Binding envelope.** A shaped listing's binding envelope is `compute.listing_source`
-  schema version 2, carrying the site, pool, resource, and the canonical shape. Its
-  derivation key therefore never collides with a version 1 binding.
-- **Reading the key back.** The key a stored shaped listing occupies is read from its binding
-  envelope rather than recomputed from the published listing, because flattening is not
-  required to be invertible.
+- **Structural key.** Every candidate's reconciler key is built from the site, the pool or
+  resource, and the shape digest, whichever source produced the shape.
+- **Binding envelope.** Every new binding's envelope is `compute.listing_source` schema
+  version 2, carrying the site, pool, resource, and the canonical shape.
+- **Why one scheme.** Identity then depends only on what is offered:
+  - a site that later declares the same shape its pool was publishing by default keeps that
+    listing;
+  - a future generator yielding some of the same shapes keeps those listings.
+  
+  The alternative, keeping today's keys for default shapes, avoided churn at upgrade but
+  tied identity to where a shape came from.
+- **Reading the key back.** A stored listing's key is read from its binding envelope rather
+  than recomputed from its published fields, because flattening is not required to be
+  invertible.
+- **Version 1 bindings after upgrade.** Their keys are never derived again. Each open
+  version 1 listing therefore closes through source reconciliation, and its version 2
+  successor publishes, once, at upgrade. A closed version 1 listing is never reopened.
 - **Editing a shape.** The old key stops being derived, so the old listing closes and a
   listing under the new key publishes.
-- **Enumeration listings.** They keep version 1 envelopes and their current keys, so adopting
-  this change churns no existing listing. Churn would have been acceptable; it is not needed.
+
+**Seller state carries across the identity change.** A seller's close and a seller's pause
+belong to a listing ID, and the identity change would otherwise defeat them: the version 2
+successor is a different derivation identity, so neither state would reach it. A one-time,
+idempotent carry-over step runs at storefront startup, before the lifecycle loops start:
+
+- For each version 1 VM listing, it computes the equivalent default shape from the stored
+  listing and its binding: site, pool or resource, `gpu_count`, and `gpu_model`.
+- For a seller-closed listing, it binds the version 2 successor as a listing closed by its
+  seller, never published. Publication's existing rules then leave it closed and bind no
+  replacement under its identity, and the seller may reopen it as usual.
+- For a paused open listing, it binds the successor paused.
+- It records nothing for a listing reconciliation closed, or an open unpaused one.
+- It is runtime initialization rather than a schema migration, because the derivation key
+  depends on the configured domain registration.
+- It is idempotent: a successor already bound is left alone.
+- The number carried over is reported in system status, with each earlier listing mapped to
+  its successor.
+- A seller who reopens an earlier listing rather than its successor reopens it only until
+  the next cycle closes it again, because its key is never derived. The successor is the
+  listing to reopen, and the status mapping names it.
 
 ### 6. Storefront overrides live in a site-scoped durable store
 
@@ -299,7 +398,8 @@ parity.
 - **Precedence, highest first.**
   - Commercial fields: the new store; the legacy home-site `compute_capacity_pools` row; the
     pool's hint; the storefront's configured default.
-  - Shapes: the new store; the pool's `listing_shapes` hint; otherwise GPU-count enumeration.
+  - Shapes: the new store; the pool's `listing_shapes` hint; otherwise the domain's default
+    shape generator.
 - **The legacy tier stays until `pools-9`.** It remains live for as long as its writer, the
   resource import, exists; `pools-9` retires both together. A migration could not attribute
   legacy rows to a site without reading live configuration, which `pools-8` found unsafe.
@@ -321,8 +421,11 @@ parity.
   - `DELETE /pool-overrides` with `site_id` and `pool_id` removes one. It is idempotent.
 - **Addressing.** Site and pool IDs are operator-chosen strings with no character
   restriction, so they travel in the body or query rather than the path. Each route has its
-  own semantic operation in the administrator identity contract, and its signed resource
-  uses the same length-prefixed encoding as derivation keys. The routes inherit durable
+  own semantic operation in the administrator identity contract. Its signed resource uses
+  the same length-prefixed encoding as derivation keys. That encoding moves into a small
+  neutral `market_core` module, byte-identical, so both the reconciler and the
+  administrator identity contract depend on it rather than the middleware depending on
+  the reconciler. The routes inherit durable
   replay reservation from the administrator middleware.
 - **Before accepting a `PUT`:**
   - Refuse a site the storefront has not configured, and a structurally invalid record: an
@@ -334,10 +437,10 @@ parity.
     the site is unreachable or its response does not verify; the reason names which.
   - Accept a pool present in the live generation even if its declarations are currently
     unresolvable.
-- **The response.** It returns the stored record and a fit report per shape, computed from
-  the same live generation and labelled with its revision and digest. A shape that fits no
-  member is reported, and the override is accepted anyway; the resulting delisting is the
-  intended side effect. The live fetch does not write the cache. After a write the storefront
+- **The response.** It returns the stored record and a feasibility report per shape, computed
+  from the same live generation and labelled with its revision and digest. A shape no member is
+  feasible for is reported, and the override is accepted anyway; the resulting delisting is
+  the intended side effect. The live fetch does not write the cache. After a write the storefront
   triggers a projection refresh and wakes the publication loop, so the override takes effect
   promptly. For a full preview of the next cycle, the operator uses the existing publication
   dry run.
@@ -356,10 +459,10 @@ parity.
 - **At the storefront.** The VM domain validates its vocabulary during derivation. A pool
   whose `vm` list it cannot read yields no shaped listing and is reported. Its existing
   shaped listings are held rather than closed, because an unreadable declaration is not a
-  withdrawn one. The pool does not fall back to enumeration.
+  withdrawn one. The pool does not fall back to the default shape generator.
 - **At an override write.** A shape outside the vocabulary is refused (decision 7).
 
-### 9. What a shaped listing publishes
+### 9. What a listing publishes
 
 `listing_resource` carries:
 
@@ -376,8 +479,8 @@ rather than written as a literal, which adds a dependency from `arkhai-vms-listi
 
 ### Retained: omission beats inference
 
-A pool with no shape list publishes no dimension beyond GPU count. The original reasoning
-still applies to it:
+A pool with no declared shapes publishes the default shapes, which declare nothing beyond GPU
+count and model. The original reasoning still applies to it:
 
 - `on_missing: fail` treats an omission as honest ignorance and excludes the listing.
 - A wrong value is treated as a truthful claim and includes it.
@@ -388,35 +491,57 @@ Provisioning defaults are never published.
 
 ## Risks / Trade-offs
 
-- **[Shaped listings change what is reserved and provisioned]** → Intended: the buyer gets
-  the shape the listing states. The fit rule checks shapes only against declarations. A
-  declaration that overstates what the hypervisor can allocate now fails at fulfillment
-  rather than being hidden by pool defaults. Declaration accuracy stays the site operator's
+- **[Declared shapes change what is reserved and provisioned]** → Intended: the buyer gets
+  every quantity the listing states. A declaration that overstates what the hypervisor can
+  allocate now fails at fulfillment. Declaration accuracy stays the site operator's
   responsibility.
+- **[Omitted dimensions are provisioned but not reserved]** → Accepted division of
+  responsibility (decision 3). The site administrator sizes the configurable defaults. It is
+  documented at promotion so operators know it is theirs.
+- **[Feasibility is weaker than admission]** → A listing may publish and be refused at
+  reservation (decision 4), as today. Stated normatively so no caller treats publication as
+  an admission guarantee.
+- **[Every VM listing changes identity once at upgrade]** → Accepted, and deployed
+  fail-forward. Outstanding buyer references to open listings go stale once. Accepted deals
+  and leases keep their own bindings. Seller closes and pauses carry across (decision 5).
+- **[Mixed-model pools publish differently]** → A correction: each model's listings name
+  that model.
 - **[Shapes can be stated in two places]** → Whole-list replacement makes the effective list
-  exactly one source's. System status names the source of each pool's list.
+  exactly one source's. System status names each pool's source.
 - **[A deleted override reveals a legacy value]** → Reported in system status whenever a
   legacy value is in effect; ends when `pools-9` retires the tier.
 - **[A site outage blocks override writes]** → Intended: the write is refused as retryable
   rather than accepted unverified.
-- **[Scope]** → The store, API, and shared utility make this change larger than first
-  proposed. That was accepted deliberately to avoid a follow-up that `pools-9` would also
-  depend on.
+- **[Scope]** → The work lands as two reviewable slices within this change (see
+  `tasks.md`). Shared vocabulary, shape derivation, identity, and discovery come first; the
+  override store and its control plane second.
 - **[Naming exception]** → Recorded in decision 3 and in
   `structured-capacity-requirements`' design, where the rename is owned.
 
 ## Migration Plan
 
-Additive:
+**Fail-forward.** This change deploys with the Goal 7 feature set, which is fail-forward as a
+whole; there is no rollback procedure. A reverted storefront would not be safe:
 
-- one new storefront table, and no data migration;
-- the pool hint is optional, and a pool without it publishes exactly as before;
-- version 2 envelopes are written only for new shaped listings;
-- older storefronts ignore the unknown `listing_shapes` tag, as the hint contract requires,
-  and older pool kits store it without validation.
+- It rebuilds a shaped listing's key from its published GPU count and pool, so an open shaped
+  listing would not look stale.
+- It would publish a second, version 1 listing beside it.
+- It could reopen a closed shaped listing through capacity events.
 
-Rollback is a code revert. A reverted storefront derives no shaped candidate, so source
-reconciliation closes every shaped listing, and the override table is left unread.
+VM leases, reservations, and accepted deals are unaffected by this change: they keep their
+own bindings and records. The listing layer is derived state. If it were lost, the
+storefront rebuilds it from site projections.
+
+**Upgrade sequence:**
+
+1. The new storefront table is created by its migration. No data migration.
+2. At startup, before the loops run, the seller-state carry-over binds successors for
+   seller-closed and paused version 1 listings (decision 5).
+3. The first publication cycle closes every open version 1 VM listing, since its key is no
+   longer derived, and publishes the version 2 successors.
+
+Older storefronts ignore the unknown `listing_shapes` tag, as the hint contract requires, and
+older pool kits store it without validation.
 
 ## Coordination with other changes
 
@@ -429,21 +554,51 @@ Recorded in each change's own design where it changes that change's plan.
   over `compute_capacity_pools` is superseded by decision 7. It still retires the legacy
   override tier with its writer.
 - **`capacity-shape-envelope`.** Its bounds should use the same family-grouped vocabulary
-  through the shared utility. Once bounds exist, the fit check in decision 4 also asks
+  through the shared utility. Once bounds exist, the feasibility check in decision 4 also asks
   whether the pool admits the shape.
 - **`capacity-shape-pricing`.** It prices shaped listings; per-model pricing already resolves
   from the shape's `gpu.model`.
 - **`pools-8-capacity-projection-and-listing-hints`.** Its `vm.ansible_pool_defaults.v1` view
   remains a provisioning default and is not a listing shape (decision 2).
 
+## Design review (2026-09-24)
+
+A review of the design and plan raised three blockers. Each was confirmed against the code
+and resolved in the decisions above.
+
+- **Optional shape families against provisioning defaults.** "A listing provisions exactly
+  its shape" was false, because the provider provisions pool defaults for any dimension the
+  reservation omits.
+  - Considered: requiring every quantity family on a shape.
+  - Resolved instead by stating the commitment precisely (decisions 2 and 3): a listing
+    commits to and reserves only what its shape declares; for anything omitted the site
+    decides and the site administrator sizes the defaults. Every listing is a shape, and
+    the default shape is GPU-only, as today's listings are.
+  - Families remain optional, so later dimensions can be left out of some listings.
+- **Feasibility is not admission.** The claim that publication matches site admission was
+  false: `_find_candidate` checks mode, host requirement, lease-window holds, and physical
+  conflicts that the exported predicate does not. Decision 4 now states resource
+  feasibility, names what it does not check, and leaves admission to the reservation. The
+  same review corrected an earlier statement: capacity buckets carry every dimension's
+  availability and the GPU model, so they remain the fungible availability source.
+- **Rollback.** "Rollback is a code revert" was false: reverted code rebuilds shaped
+  listings' keys from their GPU counts, duplicates open ones, and can reopen closed ones.
+  Deployment is fail-forward instead (Migration Plan). Moving every listing to shape
+  identity (decision 5) made the one-time identity change at upgrade explicit. The
+  seller-state carry-over was added so that change does not undo a seller's close or pause.
+
+The review's other recommendations were adopted:
+- the length-prefixed encoding moves to a neutral `market_core` module (decision 7);
+- implementation lands as two reviewable slices (`tasks.md`);
+- a provider-input test is added;
+- the stale "globally unique `pool_id`" row in `docs/development/ARCHITECTURE.md`'s
+  identifiers table is corrected at promotion.
+
 ## Open Questions
 
-- **Does GPU-count enumeration still need a kind partition for fungible pools whose members
-  have different GPU models?** Enumerated pools keep today's behaviour: the first member's
-  model is published, and a warning names the pool and the differing models. Shapes remove
-  the problem for any pool that declares them, since each shape names its model. Deferrable
-  because enumeration publishes no dimension beyond GPU count, so first-member-wins cannot
-  publish a wrong RAM, vCPU, or disk quantity. Revisit if enumeration is kept for pools that
-  mix models in practice, or when a change proposes retiring enumeration.
 - **Should the override store become domain-neutral?** Deferred to Goal 4's kit extraction,
   where a second domain needs storefront pool overrides.
+- **How is a shape generator assigned to a pool?** The generator seam exists (decision 2) but
+  no pool hint selects an implementation; the default applies wherever no shape list is
+  stated. Deferred to the change that introduces the first pluggable generator. It must also
+  decide how a selected generator ranks against an explicit `listing_shapes` list.
