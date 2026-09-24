@@ -538,6 +538,18 @@ async def _ledger_hold(capacity, *, gpu_count: int = 2) -> str:
     return str(reserved["capacity_reservation_id"])
 
 
+@pytest.fixture
+def local_table_derivation():
+    """Listings derive from the storefront's local tables, as these tests seed them.
+
+    Reconciliation reads the same source publication does; a test that seeds
+    local-table listings therefore configures local-table derivation rather than
+    relying on a projection-configured storefront reading its local tables.
+    """
+    with settings_overrides(**{"capacity.use_site_projection_for_listings": False}):
+        yield
+
+
 class TestFulfillmentEvents:
     """Deal-scoped event endpoints over the site-authority ledger.
 
@@ -547,6 +559,7 @@ class TestFulfillmentEvents:
     through the capacity client.
     """
 
+    @pytest.mark.usefixtures("local_table_derivation")
     async def test_admin_reserve_capacity_closes_oversized_listings(self, client):
         from tests.fake_site import site_capacity
 
@@ -677,6 +690,7 @@ class TestFulfillmentEvents:
 
         assert "409" in str(exc_info.value)
 
+    @pytest.mark.usefixtures("local_table_derivation")
     async def test_admin_reserve_reports_listings_closed_by_delta_race(self, client):
         from tests.fake_site import site_capacity
 
@@ -799,6 +813,7 @@ class TestFulfillmentEvents:
 
         assert "502" in str(exc_info.value)
 
+    @pytest.mark.usefixtures("local_table_derivation")
     async def test_usage_started_closes_oversized_listings(
         self, db, service_client
     ):
@@ -828,6 +843,7 @@ class TestFulfillmentEvents:
         # provisioning service's to advance.
         assert fake.reservations[capacity_reservation_id]["state"] == "reserved"
 
+    @pytest.mark.usefixtures("local_table_derivation")
     async def test_capacity_released_releases_and_reopens(
         self, db, service_client
     ):
@@ -869,6 +885,7 @@ class TestFulfillmentEvents:
         assert fake.reservations[capacity_reservation_id]["state"] == "released"
         assert fake._available("pool-h200-1") == 4
 
+    @pytest.mark.usefixtures("local_table_derivation")
     async def test_manual_compute_listings_reopen_after_release(
         self, db, service_client
     ):

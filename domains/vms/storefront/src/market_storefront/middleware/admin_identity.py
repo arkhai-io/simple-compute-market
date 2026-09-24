@@ -28,6 +28,11 @@ from core_storefront.identity_lifecycle import (
 )
 from fastapi import Request
 from market_identity import EMPTY_BODY, Identity
+from market_pool_overrides import (
+    POOL_OVERRIDES_PATH,
+    PoolOverrideContractError,
+    pool_override_contract,
+)
 from starlette.responses import JSONResponse, Response
 
 import market_storefront.container as _container
@@ -182,65 +187,18 @@ def _negotiation_list_resource(request: Request, listing_id: str) -> str:
     )
 
 
-_POOL_OVERRIDES_PATH = "/api/v1/admin/pool-overrides"
-_POOL_OVERRIDE_QUERY = frozenset({"site_id", "pool_id"})
-
-
-def _pool_override_resource(site_id: Any, pool_id: Any) -> str:
-    """The signed resource for one override: both IDs percent-encoded.
-
-    Site and pool IDs are operator-chosen strings with no character
-    restriction. Percent-encoding every character outside the unreserved set,
-    ``/`` included, makes the joined resource injective, as the identity
-    lifecycle resources are.
-    """
-    if not (isinstance(site_id, str) and site_id and isinstance(pool_id, str) and pool_id):
-        raise AuthError(
-            "pool override requires a non-empty site_id and pool_id", status_code=400
-        )
-    return f"{quote(site_id, safe='')}/{quote(pool_id, safe='')}"
-
-
-def _pool_override_query(request: Request) -> dict[str, str]:
-    query = request.query_params
-    if not set(query.keys()).issubset(_POOL_OVERRIDE_QUERY) or any(
-        len(query.getlist(name)) != 1 for name in query.keys()
-    ):
-        raise AuthError(
-            "pool override query contains an unauthenticated alias", status_code=400
-        )
-    return {name: query[name] for name in query.keys()}
-
-
 def _pool_override_contract(
     request: Request, *, method: str, body: Any
 ) -> AdminRouteContract:
-    if method == "PUT":
-        if not isinstance(body, dict):
-            raise AuthError("pool override body must be an object", status_code=400)
-        return AdminRouteContract(
-            "admin_put_pool_override",
-            _pool_override_resource(body.get("site_id"), body.get("pool_id")),
-            body,
+    """Bind an override route through the pool-override kit's contract, which
+    the kit's client builds its resources with too."""
+    try:
+        contract = pool_override_contract(
+            method, request.query_params.multi_items(), body
         )
-    values = _pool_override_query(request)
-    if method == "DELETE":
-        return AdminRouteContract(
-            "admin_delete_pool_override",
-            _pool_override_resource(values.get("site_id"), values.get("pool_id")),
-            EMPTY_BODY,
-        )
-    if "pool_id" in values and "site_id" not in values:
-        raise AuthError("pool_id requires site_id", status_code=400)
-    operation = (
-        "admin_get_pool_override"
-        if _POOL_OVERRIDE_QUERY.issubset(values)
-        else "admin_list_pool_overrides"
-    )
-    resource = "pool-overrides?" + urlencode(
-        sorted(values.items()), quote_via=quote, safe=""
-    )
-    return AdminRouteContract(operation, resource, EMPTY_BODY)
+    except PoolOverrideContractError as exc:
+        raise AuthError(str(exc), status_code=400) from exc
+    return AdminRouteContract(contract.operation, contract.resource, contract.body)
 
 
 def _identity_contract(
@@ -317,7 +275,7 @@ def _contract(request: Request, body: Any) -> AdminRouteContract | None:
     if matched is not None:
         return AdminRouteContract(*matched, body)
 
-    if path == _POOL_OVERRIDES_PATH and method in {"PUT", "GET", "DELETE"}:
+    if path == POOL_OVERRIDES_PATH and method in {"PUT", "GET", "DELETE"}:
         return _pool_override_contract(request, method=method, body=body)
 
     if method == "GET" and path == "/api/v1/system/status":

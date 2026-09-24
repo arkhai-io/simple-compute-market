@@ -433,6 +433,8 @@ async def test_identity_status_route_binds_sorted_exact_query() -> None:
 
 
 # -- storefront pool overrides -------------------------------------------------
+# The encoding itself is the pool-override kit's and is tested there; these prove
+# the administrator middleware binds the override routes through it.
 
 _OVERRIDES = "/api/v1/admin/pool-overrides"
 
@@ -443,78 +445,52 @@ def _query(**values: str) -> bytes:
     return urlencode(values).encode()
 
 
-async def test_a_pool_override_write_binds_its_body_and_encoded_address() -> None:
-    body = {"site_id": "site/a", "pool_id": "gpu?x=1&y=%", "sla": 99.0}
+async def test_a_pool_override_write_binds_the_kits_contract() -> None:
+    from market_pool_overrides import pool_override_contract
+
+    body = {"site_id": "site/a", "pool_id": "gpu", "offering_mode": "vm", "terms": {}}
 
     contract = _admin_contract(_request(_OVERRIDES, {}, method="PUT"), body)
 
-    assert contract.operation == "admin_put_pool_override"
-    assert contract.resource == "site%2Fa/gpu%3Fx%3D1%26y%3D%25"
-    assert contract.body == body
-
-
-@pytest.mark.parametrize(
-    ("first", "second"),
-    [
-        # A naive "/" join would sign both of these identically.
-        (("a/b", "c"), ("a", "b/c")),
-        (("a", "b%2Fc"), ("a", "b/c")),
-    ],
-)
-async def test_pool_override_resources_are_unambiguous(first, second) -> None:
-    def resource(site, pool):
-        body = {"site_id": site, "pool_id": pool}
-        return _admin_contract(_request(_OVERRIDES, {}, method="PUT"), body).resource
-
-    assert resource(*first) != resource(*second)
-
-
-async def test_a_pool_override_delete_binds_its_query_and_signs_no_body() -> None:
-    request = _request(
-        _OVERRIDES, {}, method="DELETE", query_string=_query(site_id="site/a", pool_id="gpu")
+    expected = pool_override_contract("PUT", [], body)
+    assert (contract.operation, contract.resource, contract.body) == (
+        expected.operation, expected.resource, expected.body,
     )
 
-    contract = _admin_contract(request, EMPTY_BODY)
-
-    assert contract.operation == "admin_delete_pool_override"
-    assert contract.resource == "site%2Fa/gpu"
-    assert contract.body is EMPTY_BODY
-
 
 @pytest.mark.parametrize(
-    ("query", "operation", "resource"),
+    ("method", "query", "operation", "resource"),
     [
-        (
-            {"pool_id": "gpu", "site_id": "site/a"},
-            "admin_get_pool_override",
-            "pool-overrides?pool_id=gpu&site_id=site%2Fa",
-        ),
-        ({"site_id": "site-a"}, "admin_list_pool_overrides", "pool-overrides?site_id=site-a"),
-        ({}, "admin_list_pool_overrides", "pool-overrides?"),
+        ("GET", {"site_id": "a", "pool_id": "gpu", "offering_mode": "vm"},
+         "admin_get_pool_override", "pool-overrides?offering_mode=vm&pool_id=gpu&site_id=a"),
+        ("GET", {}, "admin_list_pool_overrides", "pool-overrides"),
+        ("DELETE", {"site_id": "a", "pool_id": "gpu", "offering_mode": "vm"},
+         "admin_delete_pool_override", "a/gpu/vm"),
     ],
 )
-async def test_a_pool_override_read_binds_its_sorted_query(query, operation, resource) -> None:
-    request = _request(_OVERRIDES, {}, method="GET", query_string=_query(**query))
+async def test_pool_override_reads_and_deletes_bind_their_query(
+    method, query, operation, resource
+) -> None:
+    request = _request(_OVERRIDES, {}, method=method, query_string=_query(**query))
 
     contract = _admin_contract(request, EMPTY_BODY)
 
     assert (contract.operation, contract.resource) == (operation, resource)
+    assert contract.body is EMPTY_BODY
 
 
 @pytest.mark.parametrize(
     ("method", "query_string", "body"),
     [
         ("GET", b"pool_id=gpu", EMPTY_BODY),
-        ("GET", b"site_id=a&site_id=b", EMPTY_BODY),
         ("GET", b"site_id=a&limit=5", EMPTY_BODY),
-        ("DELETE", b"site_id=a", EMPTY_BODY),
-        ("DELETE", b"site_id=a&pool_id=gpu&pool_id=cpu", EMPTY_BODY),
-        ("PUT", b"", ["not", "an", "object"]),
-        ("PUT", b"", {"site_id": "a"}),
-        ("PUT", b"", {"site_id": "", "pool_id": "gpu"}),
+        ("DELETE", b"site_id=a&pool_id=gpu", EMPTY_BODY),
+        ("PUT", b"", {"site_id": "a", "pool_id": "gpu"}),
     ],
 )
-async def test_an_unbindable_pool_override_request_is_refused(method, query_string, body) -> None:
+async def test_an_unbindable_pool_override_request_is_refused_as_bad(
+    method, query_string, body
+) -> None:
     request = _request(_OVERRIDES, {}, method=method, query_string=query_string)
 
     with pytest.raises(AuthError) as caught:

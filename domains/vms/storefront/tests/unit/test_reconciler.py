@@ -467,14 +467,27 @@ class TestAvailableComputeSlices:
         assert keys_a and keys_b
         assert keys_a.isdisjoint(keys_b)
 
-    def test_none_projection_preserves_local_table_behavior(self, db_path):
-        """The default (omitted/None/empty site_pool_projection) must be
-        byte-identical to today's local-table-only behavior."""
+    def test_none_projection_selects_the_local_tables(self, db_path):
+        """Only an omitted or ``None`` projection selects the local tables."""
         _seed_pool(db_path, gpu_count=2)
         without_arg = _available_vm_slices(db_path, home_site="site-a")
         with_none = _available_vm_slices(db_path, home_site="site-a", site_pool_projection=None,)
-        with_empty = _available_vm_slices(db_path, home_site="site-a", site_pool_projection={},)
-        assert without_arg == with_none == with_empty
+        assert without_arg == with_none
+        assert without_arg
+
+    def test_an_empty_projection_derives_nothing_and_holds_every_configured_site(
+        self, db_path,
+    ):
+        """No site's projection is known: nothing is read from the local tables,
+        which only configuration selects, and every configured site is held."""
+        _seed_pool(db_path, gpu_count=2)  # local data exists
+        holds: set = set()
+        slices = _available_vm_slices(
+            db_path, home_site="site-a", site_pool_projection={},
+            configured_sites=("site-a", "site-b"), holds=holds,
+        )
+        assert slices == []
+        assert holds == {("site", "site-a", ""), ("site", "site-b", "")}
 
     def test_a_site_mapped_to_an_authoritative_empty_projection_does_not_fall_back(
         self, db_path,
@@ -750,7 +763,7 @@ class TestOpenListingResourceKeys:
             site_id="site-a",
         )
         covered = open_listing_resource_keys(
-            db_path, home_site="site-a", configured_site_count=1,
+            db_path, home_site="site-a",
         )
         assert _gpu_key("site-a", gpu_count=2, model="H100", pool_id="gpu-pool") in covered
 
@@ -760,18 +773,18 @@ class TestOpenListingResourceKeys:
         """A single configured site never substitutes for durable ownership."""
         _seed_listing(db_path, listing_id="listing-1", pool_id="gpu-pool", gpu_count=2)
         covered = open_listing_resource_keys(
-            db_path, home_site="site-a", configured_site_count=1,
+            db_path, home_site="site-a",
         )
         assert covered == set()
 
     def test_unbound_listing_is_excluded_with_multiple_sites(self, db_path):
         _seed_listing(db_path, listing_id="listing-1", pool_id="gpu-pool", gpu_count=2)
         covered = open_listing_resource_keys(
-            db_path, home_site="site-a", configured_site_count=2,
+            db_path, home_site="site-a",
         )
         assert covered == set()
 
-    def test_bound_listing_is_covered_regardless_of_configured_site_count(
+    def test_a_bound_listing_is_covered_at_whichever_site_it_names(
         self, db_path,
     ):
         _seed_listing(
@@ -782,7 +795,7 @@ class TestOpenListingResourceKeys:
             site_id="site-b",
         )
         covered = open_listing_resource_keys(
-            db_path, home_site="site-a", configured_site_count=3,
+            db_path, home_site="site-a",
         )
         assert _gpu_key("site-b", gpu_count=2, model="H100", pool_id="gpu-pool") in covered
 
@@ -795,7 +808,7 @@ class TestOpenListingResourceKeys:
             site_id="site-a",
         )
         covered = open_listing_resource_keys(
-            db_path, home_site="site-a", configured_site_count=1,
+            db_path, home_site="site-a",
         )
         assert _gpu_key("site-a", gpu_count=2, model="H100", pool_id="gpu-pool") in covered
 
@@ -813,7 +826,7 @@ class TestStaleOpenListingIds:
             gpu_count=2,
             site_id="site-a",
         )
-        stale = stale_open_listing_ids(db_path, home_site="site-a", configured_site_count=1, backed_only=False)
+        stale = stale_open_listing_ids(db_path, home_site="site-a", configured_sites=("site-a",), backed_only=False)
         assert stale == []
 
     def test_listing_whose_slice_no_longer_fits_is_stale(self, db_path):
@@ -825,7 +838,7 @@ class TestStaleOpenListingIds:
             gpu_count=2,
             site_id="site-a",
         )
-        stale = stale_open_listing_ids(db_path, home_site="site-a", configured_site_count=1, backed_only=False)
+        stale = stale_open_listing_ids(db_path, home_site="site-a", configured_sites=("site-a",), backed_only=False)
         assert stale == ["listing-1"]
 
     def test_unbound_listing_is_skipped_even_with_one_configured_site(
@@ -836,7 +849,7 @@ class TestStaleOpenListingIds:
         stale = stale_open_listing_ids(
             db_path,
             home_site="site-a",
-            configured_site_count=1,
+            configured_sites=("site-a",),
             backed_only=False,
         )
         assert stale == []
@@ -845,7 +858,7 @@ class TestStaleOpenListingIds:
         """Configured topology never supplies a missing durable binding."""
         _seed_pool(db_path, gpu_count=1)
         _seed_listing(db_path, listing_id="listing-1", pool_id="gpu-pool", gpu_count=2)
-        stale = stale_open_listing_ids(db_path, home_site="site-a", configured_site_count=2, backed_only=False)
+        stale = stale_open_listing_ids(db_path, home_site="site-a", configured_sites=("site-a", "site-b"), backed_only=False)
         assert stale == []
 
     def test_listing_bound_to_a_different_site_uses_that_site(self, db_path):
@@ -858,7 +871,7 @@ class TestStaleOpenListingIds:
             site_id="site-b",
         )
         # Only site-a has capacity data seeded.
-        stale = stale_open_listing_ids(db_path, home_site="site-a", configured_site_count=1, backed_only=False)
+        stale = stale_open_listing_ids(db_path, home_site="site-a", configured_sites=("site-a",), backed_only=False)
         # VM availability is scoped to site-a, so the site-b-bound listing
         # is stale rather than silently reassigned.
         assert stale == ["listing-1"]
@@ -875,7 +888,7 @@ class TestStaleOpenListingIds:
             gpu_count=2,
             site_id="site-a",
         )
-        stale = stale_open_listing_ids(db_path, home_site="site-a", configured_site_count=5, backed_only=False)
+        stale = stale_open_listing_ids(db_path, home_site="site-a", configured_sites=("site-a", "site-b", "site-c", "site-d", "site-e"), backed_only=False)
         assert stale == []
 
 
@@ -2224,7 +2237,7 @@ class TestHeldAndWithdrawnListings:
         stale = stale_open_listing_ids(
             db_path,
             home_site="site-a",
-            configured_site_count=1,
+            configured_sites=("site-a",),
             backed_only=False,
             site_pool_projection={"site-a": [declared, undeclared]},
         )
@@ -2238,7 +2251,7 @@ class TestHeldAndWithdrawnListings:
         stale = stale_open_listing_ids(
             db_path,
             home_site="site-a",
-            configured_site_count=1,
+            configured_sites=("site-a",),
             backed_only=False,
             site_pool_projection={"site-a": [pool]},
         )
@@ -2336,7 +2349,7 @@ class TestHeldAndWithdrawnListings:
         # Flattening need not be invertible, so a key is never rebuilt from what
         # the listing publishes.
         assert open_listing_resource_keys(
-            db_path, home_site="site-a", configured_site_count=1
+            db_path, home_site="site-a"
         ) == {_gpu_key("site-a", gpu_count=2, model="H100", pool_id="pool-b")}
 
     def test_a_listing_bound_before_shapes_keeps_a_key_no_derivation_produces(
@@ -2347,7 +2360,7 @@ class TestHeldAndWithdrawnListings:
         )
 
         assert open_listing_resource_keys(
-            db_path, home_site="site-a", configured_site_count=1
+            db_path, home_site="site-a"
         ) == {listing_pool_key("site-a", "pool-b", 2)}
 
 

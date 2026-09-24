@@ -204,9 +204,11 @@ The carry-over MUST be idempotent.
 
 ### Requirement: Storefront pool overrides are site-scoped and durable
 
-A storefront's per-pool overrides MUST be stored durably, keyed by site and pool. An override
-MAY state SLA, pricing, settlement clauses, and listing shapes. An override MUST NOT state
-region, offering mode, or capacity backing. A field an override leaves unset MUST fall
+A storefront's per-pool overrides MUST be stored durably, keyed by site, pool, and offering
+mode. Each override belongs to exactly one offering mode and MUST be validated by the market
+that serves that mode; a write for a mode no market serves MUST be refused. An override MAY
+state its market's commercial terms, settlement clauses, and listing shapes. An override
+MUST NOT state region or capacity backing, and its offering mode MUST NOT be defaulted. A field an override leaves unset MUST fall
 through to the next precedence tier. Listing shapes and settlement clauses MUST each replace
 the lower tier's list as a whole, and an empty shape list or an empty settlement-clause list
 MUST be refused.
@@ -233,6 +235,17 @@ listings are derived from:
 A site with no projection held MUST NOT make an override `orphaned`, because the pool's
 absence is not known. An orphaned override has no effect. When its pool returns, the
 override MUST apply again.
+
+#### Scenario: One pool is overridden for two offering modes
+
+- **WHEN** overrides are stored for the same site and pool under two offering modes
+- **THEN** each applies only to that mode's listings and is validated by that mode's market
+
+#### Scenario: No market serves the override's mode
+
+- **WHEN** an administrator writes an override for an offering mode no installed market
+  serves
+- **THEN** the write is refused without contacting the site and nothing is stored
 
 #### Scenario: Two sites name a pool identically
 
@@ -280,9 +293,9 @@ override MUST apply again.
 ### Requirement: Storefront pool overrides are written against the site's live projection
 
 A storefront MUST expose authenticated administrator operations to replace, read, list, and
-delete a pool override. They MUST address the site and pool in the request body or query
-rather than the path, and MUST bind them into the signed resource with an unambiguous
-encoding. Replacement MUST replace the whole record. Deletion MUST be idempotent.
+delete a pool override. They MUST address the site, pool, and offering mode in the request
+body or query rather than the path, and MUST bind them into the signed resource with an
+unambiguous encoding. Replacement MUST replace the whole record. Deletion MUST be idempotent.
 
 Before accepting a replacement, the storefront MUST refuse:
 
@@ -328,6 +341,31 @@ itself. A failed refresh MUST NOT fail the accepted write.
 - **WHEN** an administrator writes an override whose shape names a family or field the
   domain does not define
 - **THEN** the write is refused without contacting the site
+
+### Requirement: A site whose projection is not held holds its listings
+
+A storefront that derives listings from site projections MUST treat a configured site whose
+resource-pool projection holds no value as unknown, not empty: every listing derived from
+that site MUST be held, neither closed nor refreshed, until the site's projection holds a
+value. Such a storefront MUST NOT derive listings from its local tables because no site's
+projection is held.
+
+#### Scenario: The storefront starts while a site is unreachable
+
+- **WHEN** a storefront with open listings from a site restarts while that site cannot be
+  reached, and a publication cycle runs
+- **THEN** those listings stay open, and none is closed as having lost its source
+
+#### Scenario: No site's projection is held
+
+- **WHEN** no configured site's projection holds a value and a publication cycle runs
+- **THEN** no listing is derived from the storefront's local tables and no listing is
+  closed
+
+#### Scenario: The site returns
+
+- **WHEN** the unknown site's projection loads
+- **THEN** its listings are reconciled against it as usual
 
 ## MODIFIED Requirements
 

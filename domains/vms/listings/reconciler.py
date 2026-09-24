@@ -4,6 +4,7 @@ import json
 import logging
 import sqlite3
 from dataclasses import dataclass, field
+from collections.abc import Collection
 from typing import TYPE_CHECKING, Any, Mapping, Protocol
 
 from arkhai_vms import (
@@ -416,22 +417,50 @@ def _local_pool_pricing(conn: sqlite3.Connection) -> dict[str, sqlite3.Row]:
     }
 
 
+#: The storefront pool override store, owned by the pool-override kit. Its table
+#: is a read contract (``site_id``, ``pool_id``, ``offering_mode``, and JSON
+#: ``listing_shapes``, ``settlements``, and ``terms``) because this package, which
+#: buyers install without storefront dependencies, cannot import the kit.
+POOL_OVERRIDES_TABLE = "pool_overrides"
+VM_OFFERING_MODE = "vm"
+
+#: The VM market's override terms, flattened beside shapes and clauses.
+VM_OVERRIDE_TERMS = ("sla", "min_price", "token", "max_duration_seconds")
+
+
+def vm_override_view(
+    *,
+    listing_shapes: Any = None,
+    settlements: Any = None,
+    terms: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """One VM override as derivation reads it: shapes, clauses, and each VM term
+    at the top level, ``None`` where the override states nothing."""
+    terms = terms if isinstance(terms, Mapping) else {}
+    return {
+        "listing_shapes": listing_shapes,
+        "settlements": settlements,
+        **{name: terms.get(name) for name in VM_OVERRIDE_TERMS},
+    }
+
+
 def _site_pool_overrides(
     conn: sqlite3.Connection,
 ) -> dict[tuple[str, str], dict[str, Any]]:
-    """The storefront's site-scoped pool overrides, keyed by ``(site_id, pool_id)``.
+    """The storefront's VM pool overrides, keyed by ``(site_id, pool_id)``.
 
     The first tier of shape and commercial-term resolution on the projection
     path. Read here, inside the derivation every structural-key caller runs,
     because an override's shapes change listing keys: publication and source
     reconciliation must see the same tier or reconciliation would close every
-    listing an override shaped. A database created before the store exists
-    has no overrides.
+    listing an override shaped. Only the VM offering mode's overrides are VM
+    derivation's; another mode's belong to its own market. A database without
+    the store has no overrides.
     """
     has_table = (
         conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' "
-            "AND name='storefront_pool_overrides'"
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            (POOL_OVERRIDES_TABLE,),
         ).fetchone()
         is not None
     )
@@ -439,24 +468,20 @@ def _site_pool_overrides(
         return {}
     overrides: dict[tuple[str, str], dict[str, Any]] = {}
     for row in conn.execute(
-        """
-        SELECT site_id, pool_id, sla, min_price, token, max_duration_seconds,
-               settlements, listing_shapes
-        FROM storefront_pool_overrides
-        """
+        f"SELECT site_id, pool_id, listing_shapes, settlements, terms "
+        f"FROM {POOL_OVERRIDES_TABLE} WHERE offering_mode = ?",
+        (VM_OFFERING_MODE,),
     ).fetchall():
-        override = dict(row)
-        for column in ("settlements", "listing_shapes"):
-            raw = override[column]
-            # A stored list the storefront wrote itself; a value that does not
-            # parse is kept as text so shape resolution reports it unreadable
-            # rather than treating it as absent.
-            if isinstance(raw, str):
-                try:
-                    override[column] = json.loads(raw)
-                except json.JSONDecodeError:
-                    pass
-        overrides[(str(row["site_id"]), str(row["pool_id"]))] = override
+        parsed: dict[str, Any] = {}
+        for column in ("listing_shapes", "settlements", "terms"):
+            raw = row[column]
+            # A value that does not parse is kept as text, so shape resolution
+            # reports it unreadable rather than treating it as absent.
+            try:
+                parsed[column] = json.loads(raw) if isinstance(raw, str) else raw
+            except json.JSONDecodeError:
+                parsed[column] = raw
+        overrides[(str(row["site_id"]), str(row["pool_id"]))] = vm_override_view(**parsed)
     return overrides
 
 
@@ -1367,6 +1392,7 @@ def available_compute_slices(
     holds: set[tuple[str, str, str]] | None = None,
     declared_range: bool = False,
     shape_feasible: ShapeFeasibility,
+    configured_sites: Collection[str] = (),
 ) -> list[dict[str, Any]]:
     """Return publishable compute listing slices from current storefront state.
 
@@ -1424,10 +1450,18 @@ def available_compute_slices(
     pool's ``capacity_backing``, its canonical shape and digest, and exactly the
     quantities its shape declares.
 
+    ``site_pool_projection`` of ``None`` selects the local-table path; any
+    mapping, even an empty one, selects the projection path. A storefront that
+    derives from projections never derives from its local tables for want of a
+    loaded projection: a site whose projection is not held is unknown, not
+    empty, so it yields nothing and is held.
+
     ``holds`` collects ``("pool", site, pool_id)`` and
     ``("resource", site, resource_id)`` entries for sources whose declarations
-    cannot be read. Their listings must be neither closed nor refreshed, so
-    callers that reconcile keep them out of both.
+    cannot be read, and a ``("site", site, "")`` entry for each of
+    ``configured_sites`` the projection holds no value for. Their listings must
+    be neither closed nor refreshed, so callers that reconcile keep them out of
+    both.
 
     ``hint_resolution`` controls how much a pool's own projected
     ``region``/``sla`` hints are trusted relative to the storefront's
@@ -1441,7 +1475,10 @@ def available_compute_slices(
     conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
     conn.row_factory = sqlite3.Row
     try:
-        if site_pool_projection:
+        if site_pool_projection is not None:
+            for site_id in configured_sites:
+                if site_id not in site_pool_projection:
+                    held.add(_site_hold(str(site_id)))
             pool_rows = _pool_rows_from_projection(
                 conn,
                 site_pool_projection,
@@ -1539,6 +1576,7 @@ def current_available_resource_keys(
     site_capacity_buckets: Mapping[str, list[dict[str, Any]]] | None = None,
     holds: set[tuple[str, str, str]] | None = None,
     shape_feasible: ShapeFeasibility,
+    configured_sites: Collection[str] = (),
 ) -> set[str]:
     # Keys come from the full derivation, not a structural shortcut, because a
     # listing's key depends on its shape and its shape can come from the
@@ -1560,6 +1598,7 @@ def current_available_resource_keys(
         site_capacity_buckets=site_capacity_buckets,
         holds=holds,
         shape_feasible=shape_feasible,
+        configured_sites=configured_sites,
     ):
         if row.get("resource_key"):
             keys.add(str(row["resource_key"]))
@@ -1632,6 +1671,11 @@ def stored_listing_key(
     return None
 
 
+def _site_hold(site_id: str) -> tuple[str, str, str]:
+    """The hold on every listing of a configured site whose projection is unknown."""
+    return ("site", site_id, "")
+
+
 def _is_held(
     listing_resource: Mapping[str, Any],
     site_id: str,
@@ -1639,6 +1683,8 @@ def _is_held(
 ) -> bool:
     pool_id = listing_resource.get("pool_id")
     resource_id = listing_resource.get("resource_id")
+    if _site_hold(str(site_id)) in holds:
+        return True
     return ("pool", str(site_id), str(pool_id)) in holds or (
         resource_id is not None
         and ("resource", str(site_id), str(resource_id)) in holds
@@ -1719,11 +1765,10 @@ def open_listing_resource_keys(
     db_path: str,
     *,
     home_site: str,
-    configured_site_count: int,
 ) -> set[str]:
     """Return exact site-scoped keys covered by bound open VM listings."""
 
-    del home_site, configured_site_count
+    del home_site
     covered: set[str] = set()
     for listing in _bound_vm_listings(db_path, open_listings=True, backed_only=False):
         key = listing.key
@@ -1736,7 +1781,7 @@ def stale_open_listing_ids(
     db_path: str,
     *,
     home_site: str,
-    configured_site_count: int,
+    configured_sites: Collection[str],
     member_availability: dict[tuple[str | None, str], int] | None = None,
     site_pool_projection: Mapping[str, list[dict[str, Any]]] | None = None,
     site_capacity_buckets: Mapping[str, list[dict[str, Any]]] | None = None,
@@ -1745,7 +1790,8 @@ def stale_open_listing_ids(
 ) -> list[str]:
     """Return bound VM listings whose exact site-scoped slice is gone.
 
-    A listing whose source cannot currently be read is held, not stale.
+    A listing whose source cannot currently be read is held, not stale, and so
+    is every listing of a configured site whose projection is unknown.
     ``backed_only`` has no default because the two reconciliations differ:
     source reconciliation (the publication loop) closes any listing whose
     source is gone, while availability reconciliation (capacity events, a
@@ -1753,7 +1799,6 @@ def stale_open_listing_ids(
     availability figure describes an unbacked one.
     """
 
-    del configured_site_count
     holds: set[tuple[str, str, str]] = set()
     available_keys = current_available_resource_keys(
         db_path,
@@ -1763,6 +1808,7 @@ def stale_open_listing_ids(
         site_capacity_buckets=site_capacity_buckets,
         holds=holds,
         shape_feasible=shape_feasible,
+        configured_sites=configured_sites,
     )
     stale: list[str] = []
     for listing in _bound_vm_listings(
@@ -1784,6 +1830,7 @@ def closed_available_listing_ids(
     site_pool_projection: Mapping[str, list[dict[str, Any]]] | None = None,
     site_capacity_buckets: Mapping[str, list[dict[str, Any]]] | None = None,
     shape_feasible: ShapeFeasibility,
+    configured_sites: Collection[str] = (),
 ) -> list[str]:
     """Return closed capacity-backed VM listings that may reopen now.
 
@@ -1808,6 +1855,7 @@ def closed_available_listing_ids(
         site_capacity_buckets=site_capacity_buckets,
         holds=holds,
         shape_feasible=shape_feasible,
+        configured_sites=configured_sites,
     ):
         if row.get("resource_key"):
             slices[str(row["resource_key"])] = row

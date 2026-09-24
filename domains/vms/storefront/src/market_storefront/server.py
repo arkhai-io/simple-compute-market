@@ -28,6 +28,7 @@ from core_storefront.domain_registry import (
 )
 from market_capacity_publication import CapacityRuntime
 from market_negotiation_runtime import NegotiationRuntime
+from market_pool_overrides import PoolOverrideService, SQLitePoolOverrideStore
 from market_storefront_kit import (
     AlkahestChain,
     AlkahestClientPolicy,
@@ -37,8 +38,6 @@ from market_storefront_kit import (
     build_alkahest_clients,
     build_composed_storefront_app,
 )
-
-from domains.vms.listings import declared_shape_feasibility
 
 import market_storefront.container as _container
 from market_storefront.domain_runtime import validate_vm_storefront_domain
@@ -64,7 +63,9 @@ from market_storefront.utils.sqlite_client import get_sqlite_client
 from market_storefront.negotiation_runtime import build_vm_negotiation_runtime
 
 from market_storefront.services.capacity_client import listing_source_projection
-from market_storefront.services.pool_override_service import PoolOverrideService
+from market_storefront.services.vm_pool_override_contribution import (
+    VmPoolOverrideContribution,
+)
 from market_storefront.services.publication_loop import wake_publication_loop
 from market_storefront.services.publication_terms import compile_publication_clauses
 from market_storefront.services.shape_feasibility import vm_shape_feasibility
@@ -211,31 +212,24 @@ def _build_system_service(**kwargs):
 
 
 def build_pool_override_service(*, sqlite_client: Any, capacity_runtime: Any) -> Any:
-    """Compose the storefront pool override service over its production effects.
+    """Compose the pool-override kit's service over this storefront's effects.
 
-    A write is judged by the derivation publication runs (declared capacity,
-    the site's whole live projection), refreshes only the written site's
-    resource-pool cache, and wakes the publication loop. Status is judged
-    against the source publication derives from. The lifespan and the
-    publication test harness compose it identically.
+    The VM market contributes the ``vm`` offering mode. A write is checked
+    against the named site through the capacity runtime's signed client,
+    refreshes only that site's resource-pool cache, and wakes the publication
+    loop; status is judged against the source publication derives from. The
+    lifespan and the publication test harness compose it identically.
     """
-    def judge_shapes(site_pools, site_id, pool_id, home_site, override):
-        return declared_shape_feasibility(
-            sqlite_client.db_path,
-            site_pools,
-            site_id=site_id,
-            pool_id=pool_id,
-            home_site=home_site,
-            override=override,
-            shape_feasible=vm_shape_feasibility(),
-        )
-
+    contribution = VmPoolOverrideContribution(
+        db_path=sqlite_client.db_path, shape_feasible=vm_shape_feasibility()
+    )
     return PoolOverrideService(
-        sqlite_client=sqlite_client,
-        capacity_runtime=capacity_runtime,
-        projection_source=listing_source_projection,
+        store=SQLitePoolOverrideStore(sqlite_client.db_path),
+        site_ids=lambda: capacity_runtime.site_ids if capacity_runtime is not None else (),
+        site_client=lambda site_id: capacity_runtime.site_client(site_id),
+        contributions={contribution.offering_mode: contribution},
         compile_clauses=compile_publication_clauses,
-        judge_shapes=judge_shapes,
+        projection_source=listing_source_projection,
         refresh_site=refresh_site_resource_pools,
         wake_publication=wake_publication_loop,
     )

@@ -4,15 +4,19 @@ Planned 2026-09-24 against `design.md`'s decisions 1–9, and revised the same d
 review (see `design.md`, "Design review"). No task had started when either plan was written.
 The first plan's disposition is recorded under "Superseded plan".
 
-The work lands as **two reviewable slices** within this one change:
+The work lands as **three reviewable slices** within this one change:
 
 - **Slice A** (sections 0–5): the shared vocabulary, the pool hint, shapes for every listing,
   feasibility, identity and the upgrade carry-over, and discovery. Shapes come from pool
   hints and the default generator.
 - **Slice B** (sections 6–7): the override store and its control plane, and the override tier
   in shape and term resolution.
+- **Slice C** (sections 10–15): the override capability extracted into `kit/pool-overrides`
+  with core keeping only universal transport, the Slice B review's corrections, and the
+  unknown-site hold. Section 15 closes out the whole change.
 
-Each slice passes its own validation before the next starts. Sections 8 and 9 cover both.
+Each slice passes its own validation before the next starts. Sections 8 and 9 cover slices A
+and B.
 
 Every task names the design decision it implements. Test placement follows
 `docs/development/TESTING.md`: the lowest level that can prove the behaviour, typed clients
@@ -285,13 +289,15 @@ B bumps the client (0.20.0), the VM storefront (0.6.0), and the provisioning ser
   that tests `_contract`, not `test_admin_auth.py`); `test_pool_override_client_parity.py`;
   the client's byte-equality and resource tests; `unit/cli/test_pool_overrides.py`.
 - [x] 7.8 `integration/test_pool_overrides_api.py` (14) covers every case planned except the
-  non-home-site override. The harness configures one site, so that case is covered in the
-  unit suite (`TestStorefrontOverrideTier`).
+  non-home-site override. The harness configures one site. `TestStorefrontOverrideTier`
+  proves only derivation's handling of a non-home site; the write's routing, refresh, and
+  publication for such a site are application orchestration, still unproven here, and owed
+  by 14.3.
 - [x] 7.9 `e2e_listing_shapes` stage 06: an override through the typed client, reported
   feasible; one cycle replaces the hint's listing; status `applied`; delete restores the
   hint's shape. It collects here; it runs only in the pipeline (9.8).
 
-# Both slices
+# Slices A and B
 
 ## 8. Validation
 
@@ -305,7 +311,7 @@ B bumps the client (0.20.0), the VM storefront (0.6.0), and the provisioning ser
   - `core`: 101.
   - `e2e-tests` unit: 237, plus the known pre-existing failure
     `test_buyer_deployment_mounts_separate_profile_state_and_credential`.
-  - **Open:** the maintainer's full `make test`.
+  - The maintainer's full `make test` passed on the Slice B fileset (2026-09-24).
 - [x] 8.2 Wheels rebuilt, and their contents checked: the encoding is in `arkhai-core`, which
   holds no capability-shape module; `market_capability_shape` is in its kit; the new
   storefront modules are in `arkhai-vms-storefront` 0.6.0 (Dockerfile and `e2e-tests`
@@ -352,15 +358,158 @@ B bumps the client (0.20.0), the VM storefront (0.6.0), and the provisioning ser
   superseded and that it retires the legacy tier. The Goal 2 dependency graph is unchanged:
   this change still precedes `capacity-shape-pricing`.
 - [x] 9.7 `make check-doc-citations CHANGE=publish-multidimensional-listing-shape` passes.
-- [ ] 9.8 **End-to-end pipeline** (maintainer). Record the run, its result, and the
-  scenarios: `e2e_listing_shapes` including stage 06, and the existing VM scenarios. If it
-  cannot run for an unrelated reason, record the blocker and treat the validations it gates
-  as unrun.
-- [ ] 9.9 **Promotion** (after code review). Promote to:
+- [x] 9.8 **End-to-end pipeline**, on the Slice B fileset (2026-09-24): 126 passed, 3 skipped,
+  264 deselected. The skips are the known ones: the bare-metal deal and two Alice
+  multi-registry stages.
+  - All twelve `e2e_listing_shapes` stages passed. Stage 06 covered three things: an
+    override written through the typed client and reported feasible against the live site;
+    one cycle replacing the hint's listing, with status `applied`; and delete restoring the
+    hint's shape.
+  - The compose logs show the storefront fetching `site-resource-pools` live during the
+    write.
+  - Slice C re-runs the pipeline (15.8).
+- 9.9 **Promotion** is carried into 15.9, which covers all three slices.
+
+# Slice C
+
+Planned 2026-09-24 against `design.md` decisions 10 and 11 and the Slice B code review's
+dispositions. Slices A and B are implemented; Slice C changes their override code in place.
+
+**Versions.** One bump per changed wheel per change, as in Slice B:
+- New: `arkhai-kit-pool-overrides` 0.1.0.
+- Already bumped by this change, so no further bump: `arkhai-core-storefront-client` 0.20.0,
+  `arkhai-vms-storefront` 0.6.0, `arkhai-vms-listings` 0.2.0, `arkhai-core` 0.3.0, and
+  `arkhai-compute-provisioning-service` 0.3.1.
+
+## 10. Core client: universal transport only (decision 10)
+
+- [x] 10.1–10.3 The core client offers one public `authenticated_request` on both variants
+  and carries no override method, model, or status field. Its tests exercise the generic
+  transport on a market-neutral example route. Client suite: 35 passed. The version stays
+  0.20.0, as it has not been released.
+
+## 11. The `kit/pool-overrides` kit (decision 10)
+
+- [x] 11.1–11.7 `arkhai-kit-pool-overrides` 0.1.0 holds:
+  - the records, the contribution protocol, and the store, keyed by site, pool, and
+    offering mode, with `pool_override_migrations()`;
+  - the service, which refuses a live projection row that is not a mapping (review D);
+  - the contract, which signs an empty read query as `pool-overrides`;
+  - the typed client over `authenticated_request`, with `pool_override_statuses`.
+  
+  It is registered in `kit/Makefile` and locked with a relative `--find-links`. Its
+  empty `py.typed` and `tests/integration/__init__.py` are deliberate.
+  - **Deviation:** the kit also declares `arkhai-kit-identity`, which its contract imports
+    directly.
+- [x] 11.8 Kit suite: 72 passed.
+  - Unit: records, the contract, status, and the client.
+  - Library integration on real SQLite: the migration, the store, and the service's check
+    order, retryable refusals, refresh failure, and per-mode separation.
+
+## 12. The VM storefront composes the kit (decision 10)
+
+- [x] 12.1 Dependencies:
+  - the VM storefront's `pyproject.toml`, `reinit`, and hand-edited `uv.lock` add the kit;
+  - `e2e-tests` adds it and is relocked, its storefront entry recording the kit.
+- [x] 12.2–12.5 Composition:
+  - `services/vm_pool_override_contribution.py` supplies the VM contribution, with
+    `models/pool_override_models.py` reduced to `VmPoolOverrideTerms`;
+  - `services/pool_override_service.py` is tombstoned, and Slice B's repository methods and
+    migration are removed; the kit's migration is composed;
+  - `server.build_pool_override_service` composes the kit service;
+  - routes and identity middleware use the kit.
+- [x] 12.6 Derivation reads the kit's `pool_overrides` rows for `vm` through the shared
+  `vm_override_view`, which the contribution also uses.
+- [x] 12.7–12.8 The CLI requires `--mode` for `get` and `delete`; `list` takes `--pool` with
+  `--site`. Stage 06 uses `SyncPoolOverrideClient` and `pool_override_statuses`.
+- [x] 12.9 The `identifier_encoding` docstring gives site and pool identifiers as examples.
+  The provisioning `Dockerfile` pins the service and both adapters exactly.
+
+## 13. Unknown sites hold their listings (decision 11)
+
+- [x] 13.1–13.2 Derivation:
+  - an empty projection map derives nothing, and only `None` selects the local tables;
+  - each configured site missing from the projection gets a `("site", site, "")` hold that
+    `_is_held` honours;
+  - every key reader takes `configured_sites` in place of the unused count;
+  - callers pass the capacity runtime's sites, and the publication loop reports a site hold
+    as `site_projection_unknown`.
+  - **Found:** the loop's hold report would have raised `TypeError` on a site hold, a
+    colliding keyword; it is fixed.
+- [x] 13.3 **Gate result: confirmed defect, fixed.**
+  - With the old code, an admin reservation of one GPU in a two-GPU projected pool closed
+    both listings, including the still-feasible one-GPU listing, because the admin path
+    derived from empty local tables. The pipeline's admin reserve that closed two listings
+    matches this.
+  - The admin close and reopen paths and the failure-action reopen now use
+    `listing_source_projection()` with buckets and configured sites.
+  - Five Slice A-era tests in `integration/test_admin_api.py` seed local-table listings.
+    They now configure local-table derivation explicitly (the `local_table_derivation`
+    fixture) rather than rely on the defect.
+
+## 14. Tests at their proper level, and validation (Slice B review)
+
+- [x] 14.1 Tombstoned: `unit/services/test_pool_override_service.py`,
+  `unit/test_pool_override_models.py`, and `integration/test_pool_override_store.py`, whose
+  claims moved to the kit. `unit/test_vm_pool_override_contribution.py` holds the VM
+  vocabulary.
+- [x] 14.2 `publication_app` composes an optional second site through
+  `fake_site.capacity_runtime_over_sites`.
+- [x] 14.3–14.9 `integration/test_pool_overrides_api.py` (23):
+  - a non-home site's write is routed to its client, refreshes only its cache, stores
+    under it, and publishes its listing;
+  - unresolvable declarations are accepted and held;
+  - a refresh failure at the cache seam does not fail the write;
+  - five refusals happen without a site call, including clauses through the real compiler
+    and an unserved mode;
+  - commercial terms reach the listing;
+  - unknown sites hold their listings and no site known derives nothing from local tables;
+  - the 13.3 gate scenario runs with the projection's availability lowered;
+  - the structural-key invariant.
+  
+  The parity, CLI, and identity-contract tests moved to the kit client and mode addressing.
+- [x] 14.10 **Validation.**
+  - VM storefront: 1086 unit (1 skipped); 243 integration, with the two Alkahest tests
+    deselected for lack of `node`.
+  - Kit: 72. Core client: 35. `core`: 101, and `typecheck-core` passes. VM buyer: 196.
+  - `e2e-tests` unit: 237, plus the known pre-existing failure
+    `test_buyer_deployment_mounts_separate_profile_state_and_credential`. The
+    `e2e_listing_shapes` scenario collects all 12 stages.
+  - Wheels: the core client carries no override module or field.
+  - `make check-reinit` passes. `openspec validate --all --strict`: 73 passed, 19 failed,
+    the baseline.
+  - Not run here: the provisioning service and adapters, whose only change this slice is the
+    Dockerfile, covered by `e2e-tests`' image-pin guard; and the maintainer's full
+    `make test`.
+
+## 15. Closeout (whole change)
+
+Per `openspec/README.md#plan-closeout-requirements`.
+
+- [x] 15.1 `make check-comment-hygiene` passes. A direct read covered the kit modules, the
+  VM contribution, the reconciler's hold docstrings, and the projection-selector docstring,
+  which now states that an empty map never selects local tables.
+- [x] 15.2 Import placement: the `capacity_client` imports added to
+  `controllers/admin_controller.py` and `failure_actions.py` moved to module level, and both
+  suites pass; new kit and storefront modules import at module level.
+- [x] 15.3 Documentation compliance: decisions 10 and 11 have promotion rows;
+  `VmSystemStatusResponse` and the kit's table contract are stated where they live.
+- [x] 15.4 Narrative compression: sections 10–14 record behaviour, evidence, and deviations.
+- [x] 15.5 Roadmap currency: Goal 2's text stands. The override kit's reuse by the planned
+  container market is recorded here and in `design.md` decision 10; Goal 2 names no gap it
+  closes.
+- [x] 15.6 Campaign index currency: this change's row now names `kit/pool-overrides`, core
+  keeping universal transport, and the unknown-site hold. The Goal 2 graph and the other
+  rows are unchanged. Goal 4's section names no storefront pool overrides, so it needs no
+  edit.
+- [x] 15.7 `make check-doc-citations CHANGE=publish-multidimensional-listing-shape` passes.
+- [ ] 15.8 **End-to-end pipeline** on the Slice C fileset. Record the run, its result, and
+  the scenarios, including `e2e_listing_shapes` stage 06.
+- [ ] 15.9 **Promotion** (after code review), for all three slices. Promote to:
   - `openspec/specs/storefront-publication/spec.md`, `openspec/specs/resource-pool-management/spec.md`,
     `openspec/specs/market-composition/spec.md`, and `openspec/specs/site-capacity/spec.md`:
-    the synced deltas, with evidence entries. Then confirm the five delta-only
-    requirement names production docstrings cite (5.5, 9.1).
+    the synced deltas, with evidence entries. Then confirm the requirement names production
+    docstrings cite (5.5, 9.1).
   - `openspec/specs/storefront-publication/architecture.md`: a section on listing shapes and
     the storefront's authority, covering:
     - the commitment argument;
@@ -368,13 +517,17 @@ B bumps the client (0.20.0), the VM storefront (0.6.0), and the provisioning ser
     - the generator seam;
     - feasibility versus admission;
     - omitted dimensions as the site's;
-    - overrides, their five status states, and why an unloaded site is unknown;
-    - the live write check and the targeted post-write refresh.
+    - overrides as a kit capability with per-market contributions;
+    - their five status states and why an unloaded site is unknown;
+    - the unknown-site hold;
+    - the live write check and the targeted post-write refresh;
+    - derivation reading the store directly, as a current limit.
   - `docs/development/ARCHITECTURE.md`:
     - storefront capacity boundary;
     - an authority-table row for listing shapes;
-    - package layers (the `kit/capability-shape` foundation kit and its dependants;
-      the identifier encoding in `market_core`);
+    - package layers: the `kit/capability-shape` foundation kit, the storefront-side
+      `kit/pool-overrides`, core holding only universal transport, and the identifier
+      encoding in `market_core`;
     - one name per concept (listing shape, `listing_shapes`);
     - the identifiers table's `pool_id` row, corrected to a site-local slug.
   - `docs/development/DEPLOYMENT_AND_CONFIG.md`:
@@ -382,13 +535,15 @@ B bumps the client (0.20.0), the VM storefront (0.6.0), and the provisioning ser
     - state a pool's `region` on the pool, which listings advertise, and `region` and
       `gpu_model` on its capacity declarations, which reservations match; a region stated
       only on the pool publishes nothing;
-    - storefront pool overrides administered through the API, and inactive while listings
-      derive from local tables;
+    - storefront pool overrides administered through the API, addressed by offering mode,
+      and inactive while listings derive from local tables;
     - the legacy home-site tier and its per-field report;
+    - an unknown site's listings held, and a storefront deriving from projections never
+      deriving from its local tables;
     - sizing pool VM defaults for omitted dimensions;
     - fail-forward upgrade with the one-time republish and seller-state carry-over.
-  - `docs/development/TESTING.md`: a listing-shape and storefront-override coverage split,
-    in the style of "Pool Offering-Mode Enforcement".
+  - `docs/development/TESTING.md`: a listing-shape and storefront-override coverage split, in
+    the style of "Pool Offering-Mode Enforcement", with the kit's library integration suite.
 
 ## Superseded plan
 
@@ -427,6 +582,8 @@ Filled in during implementation. Destinations planned:
 | Every stored override reports one of five states; an unloaded site is unknown, not absent | `openspec/specs/storefront-publication/spec.md` — "Storefront pool overrides are site-scoped and durable"; rationale in `openspec/specs/storefront-publication/architecture.md` |
 | Overrides have no effect under local-table derivation | Same requirement; `docs/development/DEPLOYMENT_AND_CONFIG.md` |
 | The post-write refresh targets the written site's cache | `openspec/specs/storefront-publication/spec.md` — "Storefront pool overrides are written against the site's live projection"; `openspec/specs/storefront-publication/architecture.md` |
+| Storefront pool overrides are a kit capability addressed by site, pool, and offering mode, with per-market contributions; core holds only universal transport | `openspec/specs/storefront-publication/spec.md` — "Storefront pool overrides are site-scoped and durable"; `openspec/specs/storefront-publication/architecture.md`; `docs/development/ARCHITECTURE.md` kit layers |
+| An unknown site's listings are held; projection derivation never falls back to local tables | `openspec/specs/storefront-publication/spec.md` — "A site whose projection is not held holds its listings"; `docs/development/DEPLOYMENT_AND_CONFIG.md` |
 | Signed override resources are unambiguous; percent-encoded as the administrator contract's other resources are | The rule: `openspec/specs/storefront-publication/spec.md` — "Storefront pool overrides are written against the site's live projection". The encoding follows an existing convention and needs no separate promotion; the rejected alternative stays in `design.md` |
 | `listing_shapes` hint and structural validation | `openspec/specs/resource-pool-management/spec.md` |
 | Family-grouped shapes flattened by one shared utility in a foundation kit; the neutral identifier encoding in the market core | `openspec/specs/market-composition/spec.md`; `docs/development/ARCHITECTURE.md` kit layers (the capability-shape foundation kit) and package layers (the encoding in `market_core`) |

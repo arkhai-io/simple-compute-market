@@ -38,6 +38,7 @@ import logging
 from dataclasses import dataclass
 
 import pytest
+from market_pool_overrides import SyncPoolOverrideClient, pool_override_statuses
 
 from tests.e2e.roles.scenarios.vms.conftest import (
     advance_storefront,
@@ -322,15 +323,16 @@ class TestStage06_StorefrontOverride:
     ):
         require_state(shape_state, "listing_id")
         require_state(shape_state, "site_id")
-        written = storefront_admin_client.admin_put_pool_override(
+        written = SyncPoolOverrideClient(storefront_admin_client).put_pool_override(
             {
                 "site_id": shape_state.site_id,
                 "pool_id": E2E_LISTING_SHAPES_POOL_ID,
+                "offering_mode": "vm",
                 "listing_shapes": [OVERRIDE_SHAPE],
             }
         )
         assert [entry.feasible for entry in written.feasibility] == [True], written
-        assert written.projection_digest, written
+        assert written.projection.digest, written
         shape_state.overridden = True
 
     def test_06b_one_cycle_replaces_the_hints_listing(self, storefront_admin_client, shape_state):
@@ -340,19 +342,17 @@ class TestStage06_StorefrontOverride:
         listings = _pool_listings(storefront_admin_client)
         assert shape_state.listing_id not in listings, listings
         assert [resource["ram_gb"] for resource in listings.values()] == [16], listings
-        status = storefront_admin_client.get_system_status()
+        statuses = pool_override_statuses(storefront_admin_client.get_system_status()) or []
         assert {
-            (o["site_id"], o["pool_id"]): o["state"] for o in status.pool_overrides or []
-        }.get((shape_state.site_id, E2E_LISTING_SHAPES_POOL_ID)) == "applied", (
-            status.pool_overrides
-        )
+            (o["site_id"], o["pool_id"], o["offering_mode"]): o["state"] for o in statuses
+        }.get((shape_state.site_id, E2E_LISTING_SHAPES_POOL_ID, "vm")) == "applied", statuses
 
     def test_06c_deleting_the_override_restores_the_hints_shape(
         self, storefront_admin_client, shape_state
     ):
         require_state(shape_state, "overridden")
-        deleted = storefront_admin_client.admin_delete_pool_override(
-            shape_state.site_id, E2E_LISTING_SHAPES_POOL_ID
+        deleted = SyncPoolOverrideClient(storefront_admin_client).delete_pool_override(
+            shape_state.site_id, E2E_LISTING_SHAPES_POOL_ID, "vm"
         )
         assert deleted.deleted
         advance_storefront(storefront_admin_client, "publication")

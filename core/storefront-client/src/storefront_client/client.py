@@ -84,10 +84,6 @@ from storefront_client.models import (
     SettleStatusResponse,
     SettleWaitResponse,
     ImportResourcesResponse,
-    PoolOverride,
-    PoolOverrideDeleteResponse,
-    PoolOverrideListResponse,
-    PoolOverrideWriteResponse,
     StageEvent,
     StageEventListResponse,
 )
@@ -174,22 +170,6 @@ def _validate_rotation_authority(authority: str) -> str:
             "authority must be 'storefront.administrator' or 'storefront.service-peer'"
         )
     return authority
-
-
-_POOL_OVERRIDES_PATH = "/api/v1/admin/pool-overrides"
-
-
-def _pool_override_resource(site_id: str, pool_id: str) -> str:
-    """The signed resource for one pool override: both IDs percent-encoded.
-
-    Site and pool IDs are operator-chosen strings, so each is encoded with no
-    safe characters before joining; the storefront builds the same string.
-    """
-    if not (isinstance(site_id, str) and site_id and isinstance(pool_id, str) and pool_id):
-        raise ValueError("pool override requires a non-empty site_id and pool_id")
-    return "/".join(
-        urllib.parse.quote(component, safe="") for component in (site_id, pool_id)
-    )
 
 
 def _rotation_resource(authority: str, subject: str) -> str:
@@ -538,58 +518,44 @@ class StorefrontClient(_StorefrontClientBase):
             raise StorefrontClientError(f"PATCH {url} returned non-object JSON")
         return payload
 
-    async def _authenticated_put(
+    async def authenticated_request(
         self,
+        method: str,
         path: str,
-        body: dict[str, Any],
         *,
         role: str,
         operation: str,
         resource: str,
+        body: Any = EMPTY_BODY,
+        params: dict[str, Any] | None = None,
         request_id: str | None = None,
     ) -> dict[str, Any]:
+        """Send one signed request and return its verified JSON object.
+
+        Market-neutral transport for routes this client has no typed method for:
+        the caller names the semantic ``operation`` and the exact ``resource`` the
+        storefront binds, and ``body`` is signed exactly as sent. The response
+        must carry a valid publisher signature; a non-2xx status then raises
+        ``StorefrontClientError`` carrying it.
+        """
         signed = self._signed_request(
             role=role,
-            method="PUT",
+            method=method,
             operation=operation,
             resource=resource,
             body=body,
             request_id=request_id,
         )
         url = self._url(path)
-        resp = await self._client.put(
+        resp = await self._client.request(
+            method.upper(),
             path,
+            params=params,
             content=signed.content,
             headers=signed.headers,
             timeout=self._timeout,
         )
-        return self._authenticated_payload("PUT", url, resp, signed)
-
-    async def _authenticated_delete(
-        self,
-        path: str,
-        *,
-        role: str,
-        operation: str,
-        resource: str,
-        params: dict[str, Any] | None = None,
-        request_id: str | None = None,
-    ) -> dict[str, Any]:
-        signed = self._signed_request(
-            role=role,
-            method="DELETE",
-            operation=operation,
-            resource=resource,
-            request_id=request_id,
-        )
-        url = self._url(path)
-        resp = await self._client.delete(
-            path,
-            params=params,
-            headers=signed.headers,
-            timeout=self._timeout,
-        )
-        return self._authenticated_payload("DELETE", url, resp, signed)
+        return self._authenticated_payload(method.upper(), url, resp, signed)
 
     async def _get(self, path: str, *, params: dict | None = None) -> dict:
         url = self._url(path)
@@ -1017,94 +983,6 @@ class StorefrontClient(_StorefrontClientBase):
             operation="admin_refresh_site_projections",
             resource="capacity/projections",
             request_id=request_id,
-        )
-
-    async def admin_put_pool_override(
-        self,
-        record: dict[str, Any],
-        *,
-        request_id: str | None = None,
-    ) -> PoolOverrideWriteResponse:
-        """PUT /api/v1/admin/pool-overrides.
-
-        Replace the whole override for ``record``'s ``site_id`` and
-        ``pool_id``. The storefront checks the pool against that site's live
-        projection first: an unconfigured site or clauses that do not compile
-        are refused with 422, an unreachable or unverifiable site with a
-        retryable 503, and a pool the site does not project with 404. A shape
-        no member is feasible for is reported in the response, not refused.
-        """
-        if not isinstance(record, dict):
-            raise TypeError("record must be a dict")
-        return PoolOverrideWriteResponse.from_dict(
-            await self._authenticated_put(
-                _POOL_OVERRIDES_PATH,
-                record,
-                role="admin",
-                operation="admin_put_pool_override",
-                resource=_pool_override_resource(
-                    record.get("site_id"), record.get("pool_id")
-                ),
-                request_id=request_id,
-            )
-        )
-
-    async def admin_get_pool_override(
-        self,
-        site_id: str,
-        pool_id: str,
-        *,
-        request_id: str | None = None,
-    ) -> PoolOverride:
-        """GET /api/v1/admin/pool-overrides for one site and pool; 404 if none."""
-        params = {"site_id": site_id, "pool_id": pool_id}
-        payload = await self._authenticated_get(
-            _POOL_OVERRIDES_PATH,
-            params=params,
-            role="admin",
-            operation="admin_get_pool_override",
-            resource=_query_resource("pool-overrides", params),
-            request_id=request_id,
-        )
-        return PoolOverride.from_dict(payload["override"])
-
-    async def admin_list_pool_overrides(
-        self,
-        *,
-        site_id: str | None = None,
-        request_id: str | None = None,
-    ) -> PoolOverrideListResponse:
-        """GET /api/v1/admin/pool-overrides: every override, or one site's."""
-        params = {"site_id": site_id} if site_id is not None else {}
-        return PoolOverrideListResponse.from_dict(
-            await self._authenticated_get(
-                _POOL_OVERRIDES_PATH,
-                params=params,
-                role="admin",
-                operation="admin_list_pool_overrides",
-                resource=_query_resource("pool-overrides", params),
-                request_id=request_id,
-            )
-        )
-
-    async def admin_delete_pool_override(
-        self,
-        site_id: str,
-        pool_id: str,
-        *,
-        request_id: str | None = None,
-    ) -> PoolOverrideDeleteResponse:
-        """DELETE /api/v1/admin/pool-overrides. Idempotent: ``deleted`` is false
-        when no override existed."""
-        return PoolOverrideDeleteResponse.from_dict(
-            await self._authenticated_delete(
-                _POOL_OVERRIDES_PATH,
-                params={"site_id": site_id, "pool_id": pool_id},
-                role="admin",
-                operation="admin_delete_pool_override",
-                resource=_pool_override_resource(site_id, pool_id),
-                request_id=request_id,
-            )
         )
 
     async def admin_resume(
@@ -2082,58 +1960,44 @@ class SyncStorefrontClient(_StorefrontClientBase):
             raise StorefrontClientError(f"PATCH {url} returned non-object JSON")
         return payload
 
-    def _authenticated_put(
+    def authenticated_request(
         self,
+        method: str,
         path: str,
-        body: dict[str, Any],
         *,
         role: str,
         operation: str,
         resource: str,
+        body: Any = EMPTY_BODY,
+        params: dict[str, Any] | None = None,
         request_id: str | None = None,
     ) -> dict[str, Any]:
+        """Send one signed request and return its verified JSON object.
+
+        Market-neutral transport for routes this client has no typed method for:
+        the caller names the semantic ``operation`` and the exact ``resource`` the
+        storefront binds, and ``body`` is signed exactly as sent. The response
+        must carry a valid publisher signature; a non-2xx status then raises
+        ``StorefrontClientError`` carrying it.
+        """
         signed = self._signed_request(
             role=role,
-            method="PUT",
+            method=method,
             operation=operation,
             resource=resource,
             body=body,
             request_id=request_id,
         )
         url = self._url(path)
-        resp = self._client.put(
+        resp = self._client.request(
+            method.upper(),
             path,
+            params=params,
             content=signed.content,
             headers=signed.headers,
             timeout=self._timeout,
         )
-        return self._authenticated_payload("PUT", url, resp, signed)
-
-    def _authenticated_delete(
-        self,
-        path: str,
-        *,
-        role: str,
-        operation: str,
-        resource: str,
-        params: dict[str, Any] | None = None,
-        request_id: str | None = None,
-    ) -> dict[str, Any]:
-        signed = self._signed_request(
-            role=role,
-            method="DELETE",
-            operation=operation,
-            resource=resource,
-            request_id=request_id,
-        )
-        url = self._url(path)
-        resp = self._client.delete(
-            path,
-            params=params,
-            headers=signed.headers,
-            timeout=self._timeout,
-        )
-        return self._authenticated_payload("DELETE", url, resp, signed)
+        return self._authenticated_payload(method.upper(), url, resp, signed)
 
     def _get(self, path: str, *, params: dict | None = None) -> dict:
         url = self._url(path)
@@ -2552,94 +2416,6 @@ class SyncStorefrontClient(_StorefrontClientBase):
             operation="admin_refresh_site_projections",
             resource="capacity/projections",
             request_id=request_id,
-        )
-
-    def admin_put_pool_override(
-        self,
-        record: dict[str, Any],
-        *,
-        request_id: str | None = None,
-    ) -> PoolOverrideWriteResponse:
-        """PUT /api/v1/admin/pool-overrides.
-
-        Replace the whole override for ``record``'s ``site_id`` and
-        ``pool_id``. The storefront checks the pool against that site's live
-        projection first: an unconfigured site or clauses that do not compile
-        are refused with 422, an unreachable or unverifiable site with a
-        retryable 503, and a pool the site does not project with 404. A shape
-        no member is feasible for is reported in the response, not refused.
-        """
-        if not isinstance(record, dict):
-            raise TypeError("record must be a dict")
-        return PoolOverrideWriteResponse.from_dict(
-            self._authenticated_put(
-                _POOL_OVERRIDES_PATH,
-                record,
-                role="admin",
-                operation="admin_put_pool_override",
-                resource=_pool_override_resource(
-                    record.get("site_id"), record.get("pool_id")
-                ),
-                request_id=request_id,
-            )
-        )
-
-    def admin_get_pool_override(
-        self,
-        site_id: str,
-        pool_id: str,
-        *,
-        request_id: str | None = None,
-    ) -> PoolOverride:
-        """GET /api/v1/admin/pool-overrides for one site and pool; 404 if none."""
-        params = {"site_id": site_id, "pool_id": pool_id}
-        payload = self._authenticated_get(
-            _POOL_OVERRIDES_PATH,
-            params=params,
-            role="admin",
-            operation="admin_get_pool_override",
-            resource=_query_resource("pool-overrides", params),
-            request_id=request_id,
-        )
-        return PoolOverride.from_dict(payload["override"])
-
-    def admin_list_pool_overrides(
-        self,
-        *,
-        site_id: str | None = None,
-        request_id: str | None = None,
-    ) -> PoolOverrideListResponse:
-        """GET /api/v1/admin/pool-overrides: every override, or one site's."""
-        params = {"site_id": site_id} if site_id is not None else {}
-        return PoolOverrideListResponse.from_dict(
-            self._authenticated_get(
-                _POOL_OVERRIDES_PATH,
-                params=params,
-                role="admin",
-                operation="admin_list_pool_overrides",
-                resource=_query_resource("pool-overrides", params),
-                request_id=request_id,
-            )
-        )
-
-    def admin_delete_pool_override(
-        self,
-        site_id: str,
-        pool_id: str,
-        *,
-        request_id: str | None = None,
-    ) -> PoolOverrideDeleteResponse:
-        """DELETE /api/v1/admin/pool-overrides. Idempotent: ``deleted`` is false
-        when no override existed."""
-        return PoolOverrideDeleteResponse.from_dict(
-            self._authenticated_delete(
-                _POOL_OVERRIDES_PATH,
-                params={"site_id": site_id, "pool_id": pool_id},
-                role="admin",
-                operation="admin_delete_pool_override",
-                resource=_pool_override_resource(site_id, pool_id),
-                request_id=request_id,
-            )
         )
 
     def admin_resume(

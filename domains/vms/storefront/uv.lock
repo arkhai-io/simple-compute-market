@@ -425,6 +425,20 @@ wheels = [
 ]
 
 [[package]]
+name = "arkhai-kit-pool-overrides"
+version = "0.1.0"
+source = { registry = "../../../.dist" }
+dependencies = [
+    { name = "arkhai-core-storefront-client" },
+    { name = "arkhai-kit-identity" },
+    { name = "arkhai-kit-site-client" },
+    { name = "pydantic" },
+]
+wheels = [
+    { path = "arkhai_kit_pool_overrides-0.1.0-py3-none-any.whl" },
+]
+
+[[package]]
 name = "arkhai-kit-resource-pools"
 version = "0.4.0"
 source = { registry = "../../../.dist" }
@@ -572,6 +586,7 @@ dependencies = [
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-negotiation-runtime" },
     { name = "arkhai-kit-policy" },
+    { name = "arkhai-kit-pool-overrides" },
     { name = "arkhai-kit-resource-pools" },
     { name = "arkhai-kit-settlement-runtime" },
     { name = "arkhai-kit-site" },
@@ -639,6 +654,7 @@ requires-dist = [
     { name = "arkhai-kit-identity", specifier = "==0.3.0" },
     { name = "arkhai-kit-negotiation-runtime", specifier = "==0.2.0" },
     { name = "arkhai-kit-policy" },
+    { name = "arkhai-kit-pool-overrides", specifier = "==0.1.0" },
     { name = "arkhai-kit-resource-pools", specifier = ">=0.3.0" },
     { name = "arkhai-kit-settlement-runtime", specifier = ">=0.1.0" },
     { name = "arkhai-kit-site", specifier = ">=0.4.0" },

@@ -49,9 +49,14 @@ a storefront cannot be the final authority over listings from any other site.
     fail-forward.
   - A seller's close or pause carries across to the successor listing.
   - Editing a shape closes the old listing and publishes a new one.
-- **Site-scoped storefront overrides.**
-  - A durable store keyed by `(site_id, pool_id)` holds SLA, pricing, settlement clauses,
-    and listing shapes.
+- **Site-scoped storefront overrides, as a kit capability.**
+  - A durable store keyed by `(site_id, pool_id, offering_mode)` holds each market's
+    commercial terms, settlement clauses, and listing shapes.
+  - It lives in a new storefront-side kit, `kit/pool-overrides`, together with the write
+    check, the override status, the signed-resource encoding, and a typed client extension.
+    Each market supplies a contribution that validates its vocabulary and judges shape
+    feasibility.
+  - The core storefront client gains only universal transport.
   - It is administered through an authenticated API, typed clients, and a storefront CLI.
   - A write is checked against the site's live projection: a pool the site does not project
     is refused, and a shape no member is feasible for is reported but accepted.
@@ -60,6 +65,9 @@ a storefront cannot be the final authority over listings from any other site.
   - System status reports each stored override as applied, orphaned, unknown (its site's
     projection is not held), site-unconfigured, or inactive (listings derive from local
     tables, where overrides do not apply).
+- **A site whose projection is not held holds its listings.** A storefront deriving from
+  projections no longer closes an unknown site's listings, or falls back to its local
+  tables when no projection is held.
 - **Family-grouped shape vocabulary**, pulled forward from `structured-capacity-requirements`:
   - shapes are declared in the family-grouped form (`gpu: {count, model}`, `cpu`, `memory`,
     `storage`);
@@ -128,9 +136,12 @@ None.
     - admin routes and the identity contract;
     - publication loop and inventory guard wiring;
     - system status and the CLI;
-  - `core/storefront-client` (override methods and authenticated `PUT` and `DELETE`
-    helpers on both variants).
-  - `provisioning/compute/service`, whose exact client pin moves with the client version.
+  - `kit/pool-overrides` (new): the override store, write service, status, signed-resource
+    encoding, and typed client extension;
+  - `core/storefront-client`: a generic `authenticated_request` on both variants, and no
+    market vocabulary;
+  - `provisioning/compute/service`, whose exact client pin moves with the client version;
+  - `e2e-tests`, which uses the kit's typed client.
 - **Behaviour:**
   - A listing with a stated shape reserves every quantity it declares. Its omitted
     dimensions stay the site's.
@@ -144,6 +155,8 @@ None.
   - Override writes now require the site to be reachable.
   - Under local-table derivation, overrides are stored but have no effect until `pools-9`
     removes that path.
+  - An unknown site's listings stay open, where they were closed until the site returned; a
+    buyer is refused at round zero meanwhile.
 - **Wire:** additive for consumers. The published fields already exist in the listing model
   and the registry schema, and the new pool hint is opaque to consumers that do not read it.
   For producers, the resource-pool projection now requires each member's `resource_type`,
@@ -193,9 +206,15 @@ None.
   remains the admission boundary — `openspec/specs/storefront-publication/spec.md`.
 - Every listing's identity includes its shape digest, and seller state carries across the
   upgrade — `openspec/specs/storefront-publication/spec.md`.
-- Storefront pool overrides are site-scoped, durable, outlive their pool, report one
-  status each (an unloaded site is unknown, not absent), and are written against the site's
-  live projection — `openspec/specs/storefront-publication/spec.md`.
+- Storefront pool overrides are addressed by site, pool, and offering mode, validated by the
+  owning market, durable, outlive their pool, report one status each (an unloaded site is
+  unknown, not absent), and are written against the site's live projection —
+  `openspec/specs/storefront-publication/spec.md`.
+- An unknown site's listings are held, and projection derivation never falls back to local
+  tables — `openspec/specs/storefront-publication/spec.md`.
+- The pool-override kit, its per-market contribution seam, and core holding only universal
+  transport — `docs/development/ARCHITECTURE.md` (kit layers) and
+  `openspec/specs/storefront-publication/architecture.md`.
 - Why a published dimension is a commitment, why shapes are stated or generated rather than
   inferred, the generator seam, and why the storefront is the final authority within
   declared capacity — `openspec/specs/storefront-publication/architecture.md`.

@@ -470,34 +470,6 @@ def _migrate_resource_settlement_clauses(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "compute_capacity_pools", "settlements", "TEXT")
 
 
-def _migrate_storefront_pool_overrides(conn: sqlite3.Connection) -> None:
-    """Create the site-scoped storefront pool override store.
-
-    Pool identifiers are site-local, so an override is keyed by its site and
-    pool together; one keyed by pool alone would apply a seller's terms to
-    another site's identically named pool. ``settlements`` and
-    ``listing_shapes`` hold JSON lists; a NULL column means the override states
-    nothing for that field and derivation falls through to the next tier.
-    """
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS storefront_pool_overrides (
-          site_id TEXT NOT NULL,
-          pool_id TEXT NOT NULL,
-          sla NUMERIC,
-          min_price TEXT,
-          token TEXT,
-          max_duration_seconds INTEGER,
-          settlements TEXT,
-          listing_shapes TEXT,
-          created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
-          updated_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
-          PRIMARY KEY (site_id, pool_id)
-        )
-        """
-    )
-
-
 VM_MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260604_001_compute_allocation_callback_metadata",
@@ -530,9 +502,5 @@ VM_MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260813_010_resource_settlement_clauses",
         _migrate_resource_settlement_clauses,
-    ),
-    Migration(
-        "20260924_011_storefront_pool_overrides",
-        _migrate_storefront_pool_overrides,
     ),
 )

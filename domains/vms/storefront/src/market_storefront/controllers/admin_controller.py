@@ -37,6 +37,10 @@ from fastapi_utils.cbv import cbv
 from market_identity import RotationRequest
 
 import market_storefront.container as _container
+from market_storefront.services.capacity_client import (
+    listing_source_projection,
+    site_capacity_buckets,
+)
 from market_storefront.services.shape_feasibility import vm_shape_feasibility
 from market_storefront.failure_actions import (
     FulfillmentFailureContext,
@@ -61,14 +65,6 @@ from market_storefront.models.capacity_admin_models import (
     ResourcePatchResponse,
     UsageStartedEventRequest,
 )
-from market_storefront.models.pool_override_models import (
-    PoolOverrideDeleteResponse,
-    PoolOverrideListResponse,
-    PoolOverrideRecord,
-    PoolOverrideResponse,
-    PoolOverrideWriteResponse,
-)
-from market_storefront.services.pool_override_service import PoolOverrideRefused
 from market_storefront.lifecycle import (
     CAPACITY_EVENTS_POLLER,
     FULFILLMENT_RESUME,
@@ -77,6 +73,15 @@ from market_storefront.lifecycle import (
     SITE_PROJECTION_POLLER,
 )
 from market_storefront.server import _set_globally_paused, _set_loops_paused
+from market_pool_overrides import (
+    PoolOverrideAddress,
+    PoolOverrideDeleteResponse,
+    PoolOverrideListResponse,
+    PoolOverrideRecord,
+    PoolOverrideRefused,
+    PoolOverrideResponse,
+    PoolOverrideWriteResponse,
+)
 from market_capacity_publication import (
     CapacityBinding,
     CapacityBindingError,
@@ -612,17 +617,17 @@ class AdminController:
     @router.put(
         "/pool-overrides",
         response_model=PoolOverrideWriteResponse,
-        summary="Replace one site's pool override, checked against the live site (admin)",
+        summary="Replace one pool override, checked against the live site (admin)",
     )
     async def put_pool_override(
         self, record: PoolOverrideRecord
     ) -> PoolOverrideWriteResponse:
-        """Replace the whole override for ``record``'s site and pool.
+        """Replace the whole override at the record's site, pool, and offering mode.
 
-        Refused with 422 for an unconfigured site or clauses that do not
-        compile, 503 (retryable) when the site cannot be reached or its answer
-        does not verify, and 404 when its live projection lacks the pool.
-        A shape no member is feasible for is reported, not refused.
+        Refused with 422 for an unconfigured site, a mode no market serves, or
+        vocabulary or clauses that do not validate; 503 (retryable) when the site
+        cannot answer usably; and 404 when its live projection lacks the pool. A
+        shape no member is feasible for is reported, not refused.
         """
         try:
             result = await self._pool_overrides().replace(record)
@@ -639,22 +644,25 @@ class AdminController:
         self,
         site_id: str | None = Query(default=None),  # noqa: B008
         pool_id: str | None = Query(default=None),  # noqa: B008
+        offering_mode: str | None = Query(default=None),  # noqa: B008
     ) -> PoolOverrideResponse | PoolOverrideListResponse:
-        """With both ``site_id`` and ``pool_id``, one override; otherwise a list,
-        optionally of one site."""
+        """With a site, pool, and offering mode, one override; otherwise a list,
+        optionally narrowed to a site or to one site's pool."""
         service = self._pool_overrides()
-        if site_id is not None and pool_id is not None:
-            override = await service.get(site_id=site_id, pool_id=pool_id)
+        if site_id is not None and pool_id is not None and offering_mode is not None:
+            address = PoolOverrideAddress(
+                site_id=site_id, pool_id=pool_id, offering_mode=offering_mode
+            )
+            override = await service.get(address)
             if override is None:
                 raise HTTPException(
                     status_code=404,
-                    detail=f"no override for site {site_id!r} pool {pool_id!r}",
+                    detail=f"no override for site {site_id!r} pool {pool_id!r} "
+                    f"mode {offering_mode!r}",
                 )
             return PoolOverrideResponse.model_validate({"override": override})
-        if pool_id is not None:
-            raise HTTPException(status_code=400, detail="pool_id requires site_id")
         return PoolOverrideListResponse.model_validate(
-            {"overrides": await service.list(site_id=site_id)}
+            {"overrides": await service.list(site_id=site_id, pool_id=pool_id)}
         )
 
     @router.delete(
@@ -666,9 +674,13 @@ class AdminController:
         self,
         site_id: str = Query(),  # noqa: B008
         pool_id: str = Query(),  # noqa: B008
+        offering_mode: str = Query(),  # noqa: B008
     ) -> PoolOverrideDeleteResponse:
-        deleted = await self._pool_overrides().delete(site_id=site_id, pool_id=pool_id)
-        return PoolOverrideDeleteResponse(site_id=site_id, pool_id=pool_id, deleted=deleted)
+        address = PoolOverrideAddress(
+            site_id=site_id, pool_id=pool_id, offering_mode=offering_mode
+        )
+        deleted = await self._pool_overrides().delete(address)
+        return PoolOverrideDeleteResponse(**address.model_dump(), deleted=deleted)
 
     @router.post(
         "/portfolio/resources/import",
@@ -1170,17 +1182,23 @@ class AdminController:
     async def _close_oversized_compute_listings(self) -> list[str]:
         from domains.vms.listings.reconciler import stale_open_listing_ids
 
-        home_site, configured_site_count = self._site_topology()
+
+        home_site, _ = self._site_topology()
         if home_site is None:
             return []
         availability = await self._member_availability()
         if availability is None:
             return []
+        projection = listing_source_projection()
         closed_listing_ids = stale_open_listing_ids(
             self._db.db_path,
             home_site=home_site,
-            configured_site_count=configured_site_count,
+            configured_sites=self._runtime().site_ids,
             member_availability=availability,
+            # The same source publication derives from, so reconciliation here
+            # cannot close a listing publication would keep.
+            site_pool_projection=projection,
+            site_capacity_buckets=site_capacity_buckets() if projection is not None else None,
             backed_only=True,
             shape_feasible=vm_shape_feasibility(),
         )
@@ -1195,17 +1213,22 @@ class AdminController:
     async def _reopen_available_compute_listings(self) -> list[str]:
         from domains.vms.listings.reconciler import closed_available_listing_ids
 
+
         home_site, _ = self._site_topology()
         if home_site is None:
             return []
         availability = await self._member_availability()
         if availability is None:
             return []
+        projection = listing_source_projection()
         reopened_listing_ids = closed_available_listing_ids(
             self._db.db_path,
             home_site=home_site,
             member_availability=availability,
+            site_pool_projection=projection,
+            site_capacity_buckets=site_capacity_buckets() if projection is not None else None,
             shape_feasible=vm_shape_feasibility(),
+            configured_sites=self._runtime().site_ids,
         )
         for listing_id in reopened_listing_ids:
             await self._db.update_listing(

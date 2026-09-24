@@ -31,6 +31,7 @@ from domains.vms.listings.resource_csv_importer import (
     upsert_resources_from_csv_content,
 )
 from market_hosted_settlement import HOSTED_SETTLEMENT_MIGRATIONS
+from market_pool_overrides import pool_override_migrations
 from market_settlement_runtime import settlement_migrations
 from market_identity import Identity
 
@@ -83,6 +84,7 @@ class SQLiteClient(CoreSQLiteClient):
         return (
             *settlement_migrations(),
             *HOSTED_SETTLEMENT_MIGRATIONS,
+            *pool_override_migrations(),
             *VM_MIGRATIONS,
         )
 
@@ -826,130 +828,6 @@ class SQLiteClient(CoreSQLiteClient):
             return out
 
         return await asyncio.to_thread(_load)
-
-    _POOL_OVERRIDE_COLUMNS = (
-        "site_id",
-        "pool_id",
-        "sla",
-        "min_price",
-        "token",
-        "max_duration_seconds",
-        "settlements",
-        "listing_shapes",
-        "created_at",
-        "updated_at",
-    )
-    _POOL_OVERRIDE_JSON_COLUMNS = frozenset({"settlements", "listing_shapes"})
-
-    @classmethod
-    def _pool_override_row(cls, row: Sequence[Any]) -> dict[str, Any]:
-        record = dict(zip(cls._POOL_OVERRIDE_COLUMNS, row))
-        for column in cls._POOL_OVERRIDE_JSON_COLUMNS:
-            if record[column] is not None:
-                record[column] = json.loads(record[column])
-        return record
-
-    async def replace_pool_override(self, record: dict[str, Any]) -> dict[str, Any]:
-        """Store ``record`` as the whole override for its site and pool.
-
-        Every field the record leaves unset is cleared, so a replacement never
-        keeps a value from the record it replaces; only ``created_at`` survives.
-        Returns the stored row.
-        """
-        values = {
-            column: record.get(column)
-            for column in self._POOL_OVERRIDE_COLUMNS
-            if column not in ("created_at", "updated_at")
-        }
-        for column in self._POOL_OVERRIDE_JSON_COLUMNS:
-            if values[column] is not None:
-                values[column] = json.dumps(values[column], sort_keys=True)
-        columns = list(values)
-        assignments = ", ".join(
-            f"{column} = excluded.{column}"
-            for column in columns
-            if column not in ("site_id", "pool_id")
-        )
-
-        def _save() -> dict[str, Any]:
-            conn = sqlite3.connect(self.db_path)
-            try:
-                with conn:
-                    conn.execute(
-                        f"INSERT INTO storefront_pool_overrides ({', '.join(columns)}) "
-                        f"VALUES ({', '.join('?' for _ in columns)}) "
-                        "ON CONFLICT(site_id, pool_id) DO UPDATE SET "
-                        f"{assignments}, "
-                        "updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')",
-                        [values[column] for column in columns],
-                    )
-                row = conn.execute(
-                    f"SELECT {', '.join(self._POOL_OVERRIDE_COLUMNS)} "
-                    "FROM storefront_pool_overrides WHERE site_id = ? AND pool_id = ?",
-                    (values["site_id"], values["pool_id"]),
-                ).fetchone()
-            finally:
-                conn.close()
-            return self._pool_override_row(row)
-
-        return await asyncio.to_thread(_save)
-
-    async def get_pool_override(
-        self, *, site_id: str, pool_id: str
-    ) -> dict[str, Any] | None:
-        """The stored override for one site and pool, if any."""
-
-        def _load() -> dict[str, Any] | None:
-            conn = sqlite3.connect(self.db_path)
-            try:
-                row = conn.execute(
-                    f"SELECT {', '.join(self._POOL_OVERRIDE_COLUMNS)} "
-                    "FROM storefront_pool_overrides WHERE site_id = ? AND pool_id = ?",
-                    (site_id, pool_id),
-                ).fetchone()
-            finally:
-                conn.close()
-            return None if row is None else self._pool_override_row(row)
-
-        return await asyncio.to_thread(_load)
-
-    async def list_pool_overrides(
-        self, *, site_id: str | None = None
-    ) -> list[dict[str, Any]]:
-        """Every stored override, or those of one site, ordered by site and pool."""
-
-        def _load() -> list[dict[str, Any]]:
-            where, params = ("WHERE site_id = ?", (site_id,)) if site_id is not None else ("", ())
-            conn = sqlite3.connect(self.db_path)
-            try:
-                rows = conn.execute(
-                    f"SELECT {', '.join(self._POOL_OVERRIDE_COLUMNS)} "
-                    f"FROM storefront_pool_overrides {where} ORDER BY site_id, pool_id",
-                    params,
-                ).fetchall()
-            finally:
-                conn.close()
-            return [self._pool_override_row(row) for row in rows]
-
-        return await asyncio.to_thread(_load)
-
-    async def delete_pool_override(self, *, site_id: str, pool_id: str) -> bool:
-        """Remove one override; return whether it existed. Idempotent."""
-
-        def _delete() -> bool:
-            conn = sqlite3.connect(self.db_path)
-            try:
-                with conn:
-                    cursor = conn.execute(
-                        "DELETE FROM storefront_pool_overrides "
-                        "WHERE site_id = ? AND pool_id = ?",
-                        (site_id, pool_id),
-                    )
-            finally:
-                conn.close()
-            return cursor.rowcount > 0
-
-        return await asyncio.to_thread(_delete)
 
     async def get_host(self, *, name: str) -> dict[str, Any] | None:
         """Read a single host row by name."""

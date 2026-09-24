@@ -29,6 +29,9 @@ dependencies = [
     # Workspace dependency: tests use the real discovery/matching logic,
     # not a re-implementation. Keeps test behavior aligned with storefront behavior.
     "arkhai-core-storefront-client>=0.20.0",
+    # Stage 06 of the listing-shapes scenario writes storefront pool overrides
+    # through the kit's typed client.
+    "arkhai-kit-pool-overrides>=0.1.0",
     "arkhai-kit-config",
     "arkhai-core-registry-client>=0.12.0",
     "arkhai-kit-alkahest>=0.1.0",

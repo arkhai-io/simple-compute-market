@@ -68,9 +68,15 @@ from market_storefront.settlement_composition import (
 from market_storefront.utils import config as storefront_config
 from market_storefront.utils.sqlite_client import SQLiteClient
 from tests._settings_overrides import settings_overrides
-from tests.fake_site import TEST_MARKETPLACE_SIGNER, FakeSite, capacity_runtime_over
+from tests.fake_site import (
+    TEST_MARKETPLACE_SIGNER,
+    FakeSite,
+    capacity_runtime_over_sites,
+)
 
 SITE = "site-a"
+#: The second configured site, composed only when a test asks for it.
+SITE_B = "site-b"
 
 # Development signers and addresses; none is ever used on a public network.
 ADMIN_SIGNER = Ed25519Signer(b"\x71" * 32)
@@ -266,12 +272,16 @@ class HarnessProjectionClient:
     def __init__(self, pools: list[dict[str, Any]]) -> None:
         self.pools = pools
         self.snapshots = 0
+        #: On: a refresh reaches the site and fails, as it would mid-outage.
+        self.failing = False
 
     async def version(self) -> ProjectionIdentity:
         return ProjectionIdentity(revision=1, digest="publication")
 
     async def snapshot(self) -> tuple[ProjectionIdentity, list[dict[str, Any]]]:
         self.snapshots += 1
+        if self.failing:
+            raise RuntimeError("site projection unavailable")
         return await self.version(), self.pools
 
 
@@ -311,6 +321,9 @@ class PublicationApp:
     buyer: StorefrontClient | None = None
     registries: RecordingRegistries | None = None
     projection: HarnessProjectionClient | None = None
+    site_b: FakeSite | None = None
+    pools_b: list[dict[str, Any]] | None = None
+    projection_b: HarnessProjectionClient | None = None
 
     def set_settlement_clauses(self, clauses: list[dict[str, Any]]) -> None:
         """Replace `[pricing].settlements`, the storefront-wide durable terms."""
@@ -326,6 +339,7 @@ async def publication_app(
     mechanism_fulfillment: Mapping[str, bool] | None = None,
     negotiation: bool = False,
     registries: bool = False,
+    second_site: bool = False,
 ) -> AsyncIterator[PublicationApp]:
     """Run the VM storefront app for publication tests.
 
@@ -335,9 +349,13 @@ async def publication_app(
     so a listing the loop published can be negotiated in the same app.
     ``registries`` enables registry publication to two registries, recorded by
     ``RecordingRegistries``; otherwise publication records locally only.
+    ``second_site`` configures ``SITE_B`` after ``SITE``, with its own fake site,
+    pool list, and projection cache; ``SITE`` stays the home site.
     """
     pools: list[dict[str, Any]] = []
     projection = HarnessProjectionClient(pools)
+    pools_b: list[dict[str, Any]] = []
+    projection_b = HarnessProjectionClient(pools_b)
     # Each app has a fresh fake site whose events restart at version one, while
     # the capacity-event cursor is process-wide; a cursor left by an earlier app
     # would skip this site's first events.
@@ -402,7 +420,10 @@ async def publication_app(
         stack.enter_context(
             patch.dict(
                 site_projection_cache._caches,
-                {SITE: _projection_caches(projection)},
+                {
+                    SITE: _projection_caches(projection),
+                    **({SITE_B: _projection_caches(projection_b)} if second_site else {}),
+                },
                 clear=True,
             )
         )
@@ -424,9 +445,11 @@ async def publication_app(
         # The site's live answer is the same list the storefront's cache holds,
         # until a test gives the site a different generation.
         site.pool_projection = pools
-        capacity = capacity_runtime_over(
-            site,
-            site_name=SITE,
+        site_b = FakeSite(deliverable_modes={"vm"}) if second_site else None
+        if site_b is not None:
+            site_b.pool_projection = pools_b
+        capacity = capacity_runtime_over_sites(
+            {SITE: site, **({SITE_B: site_b} if site_b is not None else {})},
             sqlite_client_factory=lambda: db,
         )
         registration = registry.resolve_mode("vm")
@@ -534,6 +557,9 @@ async def publication_app(
                     buyer if negotiation else None,
                     recording,
                     projection,
+                    site_b,
+                    pools_b if second_site else None,
+                    projection_b if second_site else None,
                 )
         finally:
             reset_site_event_cursors()

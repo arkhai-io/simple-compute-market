@@ -22,9 +22,9 @@ if TYPE_CHECKING:
     from market_capacity_publication import CapacityRuntime
     from market_identity import Signer
     from market_negotiation_runtime import NegotiationRuntime
+    from market_pool_overrides import PoolOverrideService
 
     from market_storefront.services.listing_service import ListingService
-    from market_storefront.services.pool_override_service import PoolOverrideService
     from market_storefront.services.system_service import SystemService
     from market_storefront.settlement_composition import VmSettlementComposition
     from market_storefront.utils.sqlite_client import SQLiteClient

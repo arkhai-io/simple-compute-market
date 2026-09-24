@@ -14,6 +14,10 @@ from domains.vms.listings.reconciler import (
 from market_settlement_runtime import FailurePolicy
 from market_identity import Identity
 
+from market_storefront.services.capacity_client import (
+    listing_source_projection,
+    site_capacity_buckets,
+)
 from market_storefront.services.shape_feasibility import vm_shape_feasibility
 from market_storefront.utils.config import (
     get_evm_wallet_address,
@@ -300,11 +304,19 @@ async def _release_capacity(
         home_site = next(iter(remote_site_clients(runtime.client())), None)
         reopened: list[str] = []
         if home_site is not None:
+            # The same source publication derives from, so a reopen here agrees
+            # with what publication would keep open.
+            projection = listing_source_projection()
             reopened = closed_available_listing_ids(
                 db.db_path,
                 home_site=home_site,
                 member_availability=await capacity_availability(runtime.client()),
+                site_pool_projection=projection,
+                site_capacity_buckets=(
+                    site_capacity_buckets() if projection is not None else None
+                ),
                 shape_feasible=vm_shape_feasibility(),
+                configured_sites=runtime.site_ids,
             )
         for listing_id in reopened:
             await db.update_listing(

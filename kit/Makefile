@@ -1,8 +1,8 @@
-.PHONY: test test-alkahest test-capability-shape test-capacity-publication test-config test-contact-exchange test-delivery test-identity test-policy test-site test-site-client test-resource-pools test-fulfillment test-settlement-runtime test-negotiation-runtime test-hosted-settlement test-storefront dist dist-ci dist-capability-shape dist-capacity-publication dist-contact-exchange dist-delivery dist-site dist-site-client dist-resource-pools dist-fulfillment dist-settlement-runtime dist-negotiation-runtime dist-hosted-settlement dist-storefront
+.PHONY: test test-alkahest test-capability-shape test-capacity-publication test-pool-overrides test-config test-contact-exchange test-delivery test-identity test-policy test-site test-site-client test-resource-pools test-fulfillment test-settlement-runtime test-negotiation-runtime test-hosted-settlement test-storefront dist dist-ci dist-capability-shape dist-capacity-publication dist-pool-overrides dist-contact-exchange dist-delivery dist-site dist-site-client dist-resource-pools dist-fulfillment dist-settlement-runtime dist-negotiation-runtime dist-hosted-settlement dist-storefront
 
 DIST_DIR ?= ../.dist
 
-test: dist test-alkahest test-capability-shape test-capacity-publication test-config test-contact-exchange test-delivery test-identity test-policy test-site test-site-client test-resource-pools test-fulfillment test-settlement-runtime test-negotiation-runtime test-hosted-settlement test-storefront
+test: dist test-alkahest test-capability-shape test-capacity-publication test-pool-overrides test-config test-contact-exchange test-delivery test-identity test-policy test-site test-site-client test-resource-pools test-fulfillment test-settlement-runtime test-negotiation-runtime test-hosted-settlement test-storefront
 
 test-alkahest:
 	cd alkahest && $(MAKE) test
@@ -18,6 +18,9 @@ test-contact-exchange:
 
 test-capability-shape:
 	cd capability-shape && $(MAKE) test
+
+test-pool-overrides:
+	cd pool-overrides && $(MAKE) test
 
 test-delivery:
 	cd delivery && $(MAKE) test
@@ -54,7 +57,7 @@ test-storefront:
 
 dist: dist-ci dist-hosted-settlement
 
-dist-ci: dist-capability-shape dist-capacity-publication dist-contact-exchange dist-delivery dist-site dist-site-client dist-resource-pools dist-fulfillment dist-settlement-runtime dist-negotiation-runtime dist-storefront
+dist-ci: dist-capability-shape dist-capacity-publication dist-pool-overrides dist-contact-exchange dist-delivery dist-site dist-site-client dist-resource-pools dist-fulfillment dist-settlement-runtime dist-negotiation-runtime dist-storefront
 
 dist-contact-exchange: dist-settlement-runtime
 	-mkdir -p $(DIST_DIR)
@@ -67,6 +70,12 @@ dist-capability-shape:
 	cd capability-shape && $(MAKE) build
 	@ls $(DIST_DIR)/arkhai_kit_capability_shape-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-kit-capability-shape produced a platform-specific wheel" && exit 1)
+
+dist-pool-overrides:
+	-mkdir -p $(DIST_DIR)
+	cd pool-overrides && $(MAKE) build
+	@ls $(DIST_DIR)/arkhai_kit_pool_overrides-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-kit-pool-overrides produced a platform-specific wheel" && exit 1)
 
 dist-delivery:
 	-mkdir -p $(DIST_DIR)

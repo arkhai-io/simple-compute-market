@@ -40,6 +40,7 @@ from domains.vms.listings.reconciler import (
     held_gpu_counts_by_resource,
     ShapeFeasibility,
     declared_shape_feasibility,
+    vm_override_view,
     listing_pool_key,
     listing_resource_key,
     listing_shape_key,
@@ -79,6 +80,7 @@ from domains.vms.listings.strategy import (
 __all__ = [
     "SHAPE_SOURCE_OVERRIDE",
     "declared_shape_feasibility",
+    "vm_override_view",
     "ResolvedShape",
     "ShapeFeasibility",
     "ShapeResolution",

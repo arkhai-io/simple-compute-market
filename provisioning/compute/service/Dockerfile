@@ -83,7 +83,9 @@ RUN mkdir -p /tmp/galaxy-tarballs && \
 COPY --chown=appuser:appuser .dist/ /dist/
 
 # Install the extracted service and both current domain adapters entirely
-# from built wheels. No repository source tree is present in the runtime image.
+# from built wheels, each pinned to the version its repository package declares
+# so the image-pin guard covers all three. No repository source tree is present
+# in the runtime image.
 RUN --mount=type=cache,target=/home/appuser/.cache/uv,uid=${APPUSER_UID} \
     uv venv /app/.venv && \
     uv pip install --python /app/.venv/bin/python --find-links /dist \
@@ -98,7 +100,9 @@ RUN --mount=type=cache,target=/home/appuser/.cache/uv,uid=${APPUSER_UID} \
         --refresh-package arkhai-core-storefront-client \
         --refresh-package arkhai-kit-identity \
         --refresh-package arkhai-kit-site-client \
-        'arkhai-compute-provisioning-service[adapters]==0.3.1'
+        arkhai-compute-provisioning-service==0.3.1 \
+        arkhai-vms-provisioning-adapter==0.3.0 \
+        arkhai-bare-metal-provisioning-adapter==0.2.0
 
 # Stage 2: Runtime
 FROM --platform=linux/amd64 python:${PYTHON_VERSION}-slim AS runtime

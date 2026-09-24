@@ -590,9 +590,10 @@ idempotent carry-over step runs at storefront startup, before the lifecycle loop
   removes them from `_projected_pool_rows` when it adds the override tier there.
   - Commercial terms then resolve only per shape model.
   - The local-table path, whose shapes are generated from the row's model, is unchanged.
-- **Not a common store yet.** A domain-neutral store in the common storefront database was
-  considered and deferred to Goal 4's kit extraction. The fields here are VM commercial
-  vocabulary.
+- **A kit capability, not a VM store** (superseded 2026-09-24; see decision 10). The store
+  was first VM-local, with a domain-neutral store deferred to Goal 4. A second market with
+  similar shape requirements, kube pods, is imminent, so the store, write check, and status
+  move to a kit now, with each market supplying its own vocabulary.
 
 ### 7. The override API checks the site's live projection before accepting
 
@@ -606,7 +607,9 @@ idempotent carry-over step runs at storefront startup, before the lifecycle loop
   - Each route has its own semantic operation in the administrator identity contract.
   - The routes inherit durable replay reservation from the administrator middleware.
 - **The signed resource is percent-encoded** (decided 2026-09-24). This follows the
-  administrator contract's existing convention for operator-chosen strings (Context):
+  administrator contract's existing convention for operator-chosen strings (Context).
+  Decision 10 adds the offering mode as a third address component and moves the encoding
+  into the kit; the rules below otherwise stand.
   - The `PUT` and `DELETE` resources are the site and pool, each percent-encoded with no
     safe characters and joined by `/`, as `identity_subject_resource` builds one.
   - The `GET` resources are the sorted, percent-encoded query, as
@@ -691,6 +694,115 @@ identity field. The dimension part of `IDENTITY_FIELDS` is derived from `DIMENSI
 rather than written as a literal, which adds a dependency from `arkhai-vms-listings` on
 `arkhai-vms`.
 
+### 10. Storefront pool overrides are a kit capability; each market supplies its vocabulary
+
+Decided 2026-09-24, after the Slice B code review. Everything that remains in a core package
+must be universal to all markets, and a second market with shape requirements is imminent.
+
+- **A new kit, `kit/pool-overrides`** (`arkhai-kit-pool-overrides`, `market_pool_overrides`).
+  - `kit/capacity-publication` was the first choice of home. Both the VM and API-credits
+    storefronts pin it exactly, so extending it would release the API-credits storefront
+    only to move a pin, for a capability that market does not use.
+  - A new kit reaches only its consumers.
+  - It is a storefront-side kit, beside `kit/capacity-publication`. It depends on the core
+    storefront client (universal transport), the site client (its error types), and pydantic.
+- **The kit owns:**
+  - the store and its migrations, which a storefront composes as it composes
+    `settlement_migrations()`;
+  - the framework-free write service with its check order, retryable refusals, and
+    refresh-and-wake effects;
+  - the five status states;
+  - one signed-resource encoding, shared by the storefront's identity contract and the
+    client;
+  - the typed client extension.
+- **The storefront composition root owns:** the thin FastAPI routes, as it does for hosted
+  settlement's route service, and the mapping from offering mode to contribution.
+- **Each market supplies a contribution per offering mode:**
+  - validation of its commercial terms and its shapes;
+  - a feasibility judge over a site's live projection;
+  - integration with its own listing derivation.
+  
+  Settlement clauses are already market-neutral; the composition root injects their
+  compiler.
+- **An override is addressed by site, pool, and offering mode.** This realizes the
+  discussion's "shapes per offering mode". A pool serving two modes carries two
+  independent overrides, each validated and read by its own market.
+  - Keying by mode rather than nesting a per-mode map inside one record keeps each record
+    wholly one market's. The kit stays opaque: it never splits a record between markets.
+  - A write for a mode no contribution serves is refused, as a vocabulary error.
+  - The mode is never defaulted (`ARCHITECTURE.md`, "One name per concept").
+- **Record shape:** `site_id`, `pool_id`, `offering_mode`; then `listing_shapes` and
+  `settlements`, each a non-empty list when set; then `terms`, an object the kit stores
+  without interpreting. For VM, `terms` holds `sla`, `min_price`, `token`, and
+  `max_duration_seconds`.
+- **Storage: a new kit-owned table, `pool_overrides`,** keyed by all three address
+  components.
+  - The VM migration that created `storefront_pool_overrides` in Slice B is retired. The
+    store was never released.
+  - A development database that ran it keeps an orphan table that nothing reads.
+  - Reusing the table name would leave `CREATE TABLE IF NOT EXISTS` silently keeping the
+    older schema there.
+- **Derivation still reads the store directly** (decision 6, "Where the tier is read";
+  retained in review). VM derivation reads the kit's documented table for its own mode.
+  The listings package cannot import the kit, because its buyers install it without
+  storefront dependencies.
+- **Core keeps only universal transport.** The core client exposes one generic
+  `authenticated_request` on both variants; every override method, model, and status field
+  leaves core.
+  - The override status field is declared on the VM storefront's own status response.
+  - The kit client reads it from the generic response's `extra`.
+- **One encoding for signed resources, owned by the kit.** Write and delete sign the three
+  address components, each percent-encoded with no safe characters and joined by `/`.
+  Reads sign the sorted, percent-encoded query under `pool-overrides`. An empty query signs
+  `pool-overrides` with no trailing `?`, as decision 7 states.
+- Rejected:
+  - keeping the typed client in core, which put VM vocabulary in a core package;
+  - a per-mode map inside one record, which splits a record between markets;
+  - extending `kit/capacity-publication`, for the exact-pin release it forces.
+
+### 11. A site whose projection is not held holds its listings
+
+Decided 2026-09-24. Found while writing a test the review asked for.
+
+- **Before:** a publication cycle closed every open listing of a configured site whose
+  resource-pool projection held no value, as `source_gone`. That happens when the
+  storefront starts while the site is unreachable, or after the admin refresh route rebuilds
+  caches during an outage. With one site, or with no site known, an empty projection map
+  also made derivation fall back to the storefront's local tables.
+- **Both contradict the permanent contract.** A failed refresh retains the last generation
+  "rather than representing an empty projection", and a local-table path is an explicit
+  rollback opt-in, not a default (`openspec/specs/storefront-publication/spec.md`,
+  "Storefronts cache independent site projections").
+- **Decision:**
+  - A configured site with no projection value holds its listings: they are neither closed
+    nor refreshed, as an unreadable pool's are.
+  - A storefront configured to derive from projections never falls back to local tables
+    for lack of one. It derives nothing for the unknown sites and holds them. Local-table
+    derivation remains only where it is configured, which `pools-9` removes.
+- **The trade-off weighed:**
+  - *Delisting and relisting.* The listing is absent for the outage plus up to one
+    projection poll interval (5 s by default). A returning projection wakes publication,
+    and the same listing IDs reopen. It costs registries a close and a reopen write per
+    listing per registry, costs sellers visibility and false `source_gone` records, and
+    loses buyers the listing for the window.
+  - *Holding.* A buyer who opens a negotiation during the window is refused at round zero
+    with `source_unavailable` by the inventory guard, before acceptance, so no escrow is
+    funded.
+  - Holding is the smaller change, and it is the one consistent with the guard and the
+    projection cache.
+  - A site that loaded once and later becomes unreachable was never affected: its cache
+    keeps the last generation as stale.
+- **Found in implementation (task 13.3's gate).** The admin reservation route, the
+  fulfillment-event callbacks, and the failure-action reopen derived from local tables even
+  where listings derive from projections. After an admin reservation of one GPU in a
+  two-GPU projected pool, both listings closed, including the one still feasible. They now
+  use the same projection selector as publication. The five older tests that seeded
+  local-table listings now configure local-table derivation explicitly.
+- **Not in this change:**
+  - A time bound on holding. A decommissioned site whose listings are never closed would
+    otherwise stay advertised indefinitely, refusing every buyer. See Open Questions.
+  - The admin refresh route discarding last-known generations.
+
 ### Retained: omission beats inference
 
 A pool with no declared shapes publishes the default shapes, which declare nothing beyond GPU
@@ -732,11 +844,16 @@ Provisioning defaults are never published.
 - **[Overrides do nothing under local-table derivation]** → Accepted until `pools-9`
   removes that path. Every stored override reports `inactive` there, so the absence of an
   effect is visible rather than silent.
+- **[Unknown sites hold their listings without a time bound]** → Accepted for now
+  (decision 11). A site decommissioned without closing its listings leaves them advertised
+  and refusing every buyer at round zero until an operator closes them; system status names
+  the site. A time bound is an open question.
 - **[A site outage blocks override writes]** → Intended: the write is refused as retryable
   rather than accepted unverified.
-- **[Scope]** → The work lands as two reviewable slices within this change (see
+- **[Scope]** → The work lands as three reviewable slices within this change (see
   `tasks.md`). Shared vocabulary, shape derivation, identity, and discovery come first; the
-  override store and its control plane second.
+  override store and its control plane second; its extraction into `kit/pool-overrides`, the
+  review's corrections, and the unknown-site hold third.
 - **[Naming exception]** → Recorded in decision 3 and in
   `structured-capacity-requirements`' design, where the rename is owned.
 
@@ -768,6 +885,11 @@ storefront rebuilds it from site projections.
 
 Older storefronts ignore the unknown `listing_shapes` tag, as the hint contract requires, and
 older pool kits store it without validation.
+
+The pool override store is created by the `kit/pool-overrides` migration (decision 10). A
+development database that ran Slice B's retired VM migration keeps an orphan
+`storefront_pool_overrides` table and its migration record. Nothing reads either, and no
+release carried them.
 
 ## Coordination with other changes
 
@@ -873,10 +995,45 @@ Implementation found two defects, neither a design question:
   app's fake site restarts its events at version one. The publication test harness resets
   it on entry and exit.
 
+## Slice B code review (2026-09-24)
+
+A review of Slice B found the architecture sound and raised one blocking layering issue. Its
+points and their dispositions, as decided with the maintainer:
+
+- **VM override vocabulary in the core storefront client (blocking).** Accepted: decision 10.
+  Core keeps only universal transport, and everything else moves to `kit/pool-overrides`.
+- **Orchestration asserted in mocked unit tests.** Accepted. Sequencing, refusal before the
+  site call through the real compiler, and refresh failure at the real seam move to
+  application integration tests. Local behaviour stays unit-tested: the status state and
+  translating site errors into refusals.
+- **The e2e log helper in this change.** Kept, at the maintainer's choice. It is not part of
+  this change's own files.
+- **A live projection row that is not a mapping.** Accepted: it is refused as an unusable
+  projection (retryable).
+- **Coverage gaps.** Accepted:
+  - a two-site application test for a non-home site;
+  - a pool whose declarations are unresolvable is accepted;
+  - a refresh failure does not fail the write;
+  - malformed clauses are refused through the real compiler;
+  - an unknown site's listings are held (decision 11);
+  - commercial terms reach the published listing.
+- **Task record overclaims.** Corrected in `tasks.md` (7.8, 8.1).
+- **Signed list resource `pool-overrides?`.** The code now follows the design: no trailing
+  `?` (decision 10).
+- **Docstrings citing delta-only requirements.** Resolved by promotion at closeout.
+- **Derivation reading the store directly.** Retained (decision 10).
+- **Moving the whole service to a kit.** Superseded by the maintainer's decision to do so
+  now (decision 10).
+
 ## Open Questions
 
-- **Should the override store become domain-neutral?** Deferred to Goal 4's kit extraction,
-  where a second domain needs storefront pool overrides.
+- **How long may an unknown site's listings be held?** Decision 11 holds them without
+  bound, so a site decommissioned without closing its listings leaves them advertised.
+  A time bound is owed, not in this change. Whichever change takes it must also decide
+  whether expiry closes as reconciliation (reopenable) or needs an operator.
+- **Should the admin projection refresh keep last-known generations?** It rebuilds every
+  site's caches, so pressing it during an outage turns a stale site into an unknown one,
+  which decision 11 now holds. It is not in this change.
 - **How is a shape generator assigned to a pool?** The generator seam exists (decision 2) but
   no pool hint selects an implementation; the default applies wherever no shape list is
   stated. Deferred to the change that introduces the first pluggable generator. It must also

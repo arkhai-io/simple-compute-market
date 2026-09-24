@@ -159,7 +159,7 @@ class VmPublicationCycle:
         self._buckets: Mapping[str, list[dict[str, Any]]] | None = None
         self._availability: Mapping[tuple[str, str], int] | None = None
         self._home_site: str | None = None
-        self._site_count = 0
+        self._sites: tuple[str, ...] = ()
         self._derived: dict[int, Any] = {}
 
     @property
@@ -181,7 +181,7 @@ class VmPublicationCycle:
         self._event_loop = asyncio.get_running_loop()
         sites = list(self._capacity.site_ids)
         self._home_site = sites[0] if sites else None
-        self._site_count = len(sites)
+        self._sites = tuple(sites)
         if self._home_site is None:
             await self._converge_registries()
             return self.report.as_dict()
@@ -251,7 +251,6 @@ class VmPublicationCycle:
         return open_listing_resource_keys(
             db_path,
             home_site=self._home_site or "",
-            configured_site_count=self._site_count,
         )
 
     def _available_candidates(self, db_path: str) -> list[dict[str, Any]]:
@@ -265,16 +264,21 @@ class VmPublicationCycle:
             hint_resolution=pool_hint_resolution_settings(),
             holds=holds,
             shape_feasible=self._shape_feasible,
+            configured_sites=self._sites,
         )
         for kind, site_id, source_id in sorted(holds):
-            self.report.record("hold", site_id=site_id, **{f"{kind}_id": source_id})
+            if kind == "site":
+                # Unknown, not empty: nothing of this site's is closed or refreshed.
+                self.report.record("hold", site_id=site_id, reason="site_projection_unknown")
+            else:
+                self.report.record("hold", site_id=site_id, **{f"{kind}_id": source_id})
         return candidates
 
     def _close_stale(self, db_path: str, _base_url: str) -> list[str]:
         stale = stale_open_listing_ids(
             db_path,
             home_site=self._home_site or "",
-            configured_site_count=self._site_count,
+            configured_sites=self._sites,
             member_availability=self._availability,
             site_pool_projection=self._projection,
             site_capacity_buckets=self._buckets,

@@ -1,7 +1,8 @@
 """Unambiguous encoding of operator-chosen identifier components.
 
-Site, pool, and resource identifiers are operator-chosen strings with no
-character restrictions, so joining them with a delimiter is not collision-free:
+Identifiers an operator chooses (a site's or a pool's, for example) are strings
+with no character restrictions, so joining them with a delimiter is not
+collision-free:
 ``("a", "b:c")`` and ``("a:b", "c")`` would join identically. Every component is
 therefore written as its decimal length, a colon, and exactly that many
 characters, which fixes each boundary regardless of content and makes a joined

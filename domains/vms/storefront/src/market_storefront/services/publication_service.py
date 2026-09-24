@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from typing import Any
 
 from core_storefront.stage_log import stage_event
@@ -145,7 +145,7 @@ async def close_stale_compute_listings_after_capacity_change(
     *,
     sqlite_client: Any,
     home_site: str,
-    configured_site_count: int,
+    configured_sites: Collection[str],
     member_availability: dict[tuple[str, str], int] | None = None,
     site_pool_projection: dict[str, list[dict]] | None = None,
     site_capacity_buckets: dict[str, list[dict]] | None = None,
@@ -157,7 +157,7 @@ async def close_stale_compute_listings_after_capacity_change(
     ids = stale_open_listing_ids(
         db_path,
         home_site=home_site,
-        configured_site_count=configured_site_count,
+        configured_sites=configured_sites,
         member_availability=member_availability,
         site_pool_projection=site_pool_projection,
         site_capacity_buckets=site_capacity_buckets,
@@ -185,6 +185,7 @@ async def reopen_available_compute_listings_after_capacity_change(
     *,
     sqlite_client: Any,
     home_site: str,
+    configured_sites: Collection[str],
     member_availability: dict[tuple[str, str], int] | None = None,
     site_pool_projection: dict[str, list[dict]] | None = None,
     site_capacity_buckets: dict[str, list[dict]] | None = None,
@@ -199,6 +200,7 @@ async def reopen_available_compute_listings_after_capacity_change(
         site_pool_projection=site_pool_projection,
         site_capacity_buckets=site_capacity_buckets,
         shape_feasible=vm_shape_feasibility(),
+        configured_sites=configured_sites,
     )
     candidates: list[PublicationCandidate[Listing]] = []
     for listing_id in ids:

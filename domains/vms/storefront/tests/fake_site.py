@@ -493,6 +493,20 @@ def capacity_runtime_over(
     sqlite_client_factory: Any | None = None,
 ):
     """A kit-owned ``CapacityRuntime`` over the fake site's transport."""
+    return capacity_runtime_over_sites(
+        {site_name: fake}, sqlite_client_factory=sqlite_client_factory
+    )
+
+
+def capacity_runtime_over_sites(
+    fakes: dict[str, FakeSite],
+    *,
+    sqlite_client_factory: Any | None = None,
+):
+    """A kit-owned ``CapacityRuntime`` over several fake sites, one per name.
+
+    Sites are configured in the mapping's order, so its first is the home site.
+    """
     from core_storefront.aggregation import fill_first
     from market_capacity_publication import CapacityRuntime, CapacitySite
     from market_site_client import SiteCapacityClient
@@ -506,21 +520,18 @@ def capacity_runtime_over(
         reconcile = _capacity_reconciler(sqlite_client_factory)
 
     return CapacityRuntime(
-        sites=(
-            CapacitySite(
-                site_name,
-                "http://fake-site:8081",
-                TEST_SITE_AUTHORITIES,
-            ),
+        sites=tuple(
+            CapacitySite(name, "http://fake-site:8081", TEST_SITE_AUTHORITIES)
+            for name in fakes
         ),
         signer=TEST_MARKETPLACE_SIGNER,
         placement=fill_first,
         reconcile=reconcile,
-        site_client_factory=lambda _site, _signer: SiteCapacityClient(
+        site_client_factory=lambda site, _signer: SiteCapacityClient(
             "http://fake-site:8081",
             signer=TEST_MARKETPLACE_SIGNER,
             expected_authorities=TEST_SITE_AUTHORITIES,
-            transport=fake.transport(),
+            transport=fakes[site.site_id].transport(),
         ),
     )
 
