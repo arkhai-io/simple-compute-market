@@ -10,6 +10,7 @@ by that service's own integration tests. ``site_capacity`` injects the exact
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import itertools
 import json
 import time
@@ -43,6 +44,9 @@ TEST_SITE_AUTHORITY_SIGNER = create_signer("ed25519", b"\x42" * 32)
 TEST_SITE_AUTHORITIES = TrustedIdentitySet(
     identities=(TEST_SITE_AUTHORITY_SIGNER.identity,)
 )
+# Signs as an authority the storefront does not trust, for answers that must not
+# verify. A development key; never used on a public network.
+TEST_UNTRUSTED_SIGNER = create_signer("ed25519", b"\x43" * 32)
 
 
 class FakeSite:
@@ -55,6 +59,18 @@ class FakeSite:
         self.events: list[dict] = []
         self._versions = itertools.count(1)
         self._ids = itertools.count(1)
+        #: The live resource-pool projection the site serves. ``None`` projects
+        #: each resource as its own one-member pool; a test sets a list to serve
+        #: exactly that generation.
+        self.pool_projection: list[dict] | None = None
+        self.pool_projection_revision = 1
+        #: Off: every request fails to connect, as an unreachable site does.
+        self.reachable = True
+        #: Off: every answer is signed by an authority the storefront does not
+        #: trust, so it arrives but does not verify.
+        self.verifiable = True
+        #: ``(method, path)`` of every request that reached the site.
+        self.requests: list[tuple[str, str]] = []
 
     def add_resource(
         self,
@@ -112,7 +128,22 @@ class FakeSite:
     def _available(self, rid: str) -> int:
         return self.available_dimensions(rid).get("gpu_count", 0)
 
+    def served_pool_projection(self) -> list[dict]:
+        if self.pool_projection is not None:
+            return self.pool_projection
+        return _pool_projection_rows(self)
+
+    def _pool_projection_generation(self) -> dict[str, Any]:
+        pools = self.served_pool_projection()
+        digest = hashlib.sha256(
+            json.dumps(pools, sort_keys=True, default=str).encode()
+        ).hexdigest()
+        return {"revision": self.pool_projection_revision, "digest": digest}
+
     def _handle(self, request: httpx.Request) -> httpx.Response:
+        if not self.reachable:
+            raise httpx.ConnectError("fake site is unreachable", request=request)
+        self.requests.append((request.method, request.url.path))
         response = self._dispatch(request)
         request_body = json.loads(request.content) if request.content else {}
         response_body = response.json() if response.content else EMPTY_BODY
@@ -121,11 +152,12 @@ class FakeSite:
             request.url.path,
             request_body,
         )
+        signer = TEST_SITE_AUTHORITY_SIGNER if self.verifiable else TEST_UNTRUSTED_SIGNER
         signed = sign_response(
-            signer=TEST_SITE_AUTHORITY_SIGNER,
+            signer=signer,
             envelope=ResponseEnvelope(
                 role="service",
-                principal=TEST_SITE_AUTHORITY_SIGNER.identity,
+                principal=signer.identity,
                 method=request.method,
                 operation=operation,
                 resource=resource,
@@ -171,6 +203,21 @@ class FakeSite:
             }
             self._emit("released", rid)
             return httpx.Response(200, json=self.resources[rid])
+
+        if request.method == "GET" and path == "/api/v1/capacity/site-resource-pools":
+            return httpx.Response(
+                200,
+                json={
+                    **self._pool_projection_generation(),
+                    "resource_pools": self.served_pool_projection(),
+                },
+            )
+
+        if (
+            request.method == "GET"
+            and path == "/api/v1/capacity/site-resource-pools/version"
+        ):
+            return httpx.Response(200, json=self._pool_projection_generation())
 
         if path == "/api/v1/capacity/snapshot":
             return httpx.Response(

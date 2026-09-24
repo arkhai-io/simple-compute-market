@@ -251,14 +251,14 @@ wheels = [
 
 [[package]]
 name = "arkhai-core-storefront-client"
-version = "0.19.1"
+version = "0.20.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-identity" },
     { name = "httpx" },
 ]
 wheels = [
-    { path = "arkhai_core_storefront_client-0.19.1-py3-none-any.whl" },
+    { path = "arkhai_core_storefront_client-0.20.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -553,7 +553,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms-storefront"
-version = "0.5.0"
+version = "0.6.0"
 source = { editable = "." }
 dependencies = [
     { name = "alkahest-py" },
@@ -630,7 +630,7 @@ requires-dist = [
     { name = "arkhai-core", specifier = ">=0.2.0" },
     { name = "arkhai-core-registry-client", specifier = ">=0.12.0" },
     { name = "arkhai-core-storefront", specifier = ">=0.6.0" },
-    { name = "arkhai-core-storefront-client", specifier = ">=0.19.1" },
+    { name = "arkhai-core-storefront-client", specifier = ">=0.20.0" },
     { name = "arkhai-kit-alkahest" },
     { name = "arkhai-kit-capacity-publication", specifier = "==0.2.0" },
     { name = "arkhai-kit-config" },

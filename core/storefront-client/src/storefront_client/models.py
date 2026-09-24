@@ -171,6 +171,7 @@ class HealthResponse:
     site_projections: dict[str, Any] | None = None  # per-site/family projection load state; present on /api/v1/system/status
     listing_cardinality_mode_explanations: dict[str, Any] | None = None  # per-site/pool cardinality-hint notices; present on /api/v1/system/status
     publication_derivation: dict[str, Any] | None = None  # per-site held pools and publication notices; present on /api/v1/system/status
+    pool_overrides: list[dict[str, Any]] | None = None  # each stored pool override and its state; present on /api/v1/system/status
     #: The storefront-to-provisioning contract major this storefront speaks,
     #: from its own installed wheel. Not the peer's, and not the same axis as
     #: a domain contribution's `contract_version`: this is the wire a cutover
@@ -185,6 +186,7 @@ class HealthResponse:
             "resource_count", "site_projections",
             "listing_cardinality_mode_explanations",
             "publication_derivation",
+            "pool_overrides",
             "provisioning_contract_version",
         }
         raw_chain_id = d.get("chain_id")
@@ -201,6 +203,7 @@ class HealthResponse:
                 "listing_cardinality_mode_explanations"
             ),
             publication_derivation=d.get("publication_derivation"),
+            pool_overrides=d.get("pool_overrides"),
             provisioning_contract_version=d.get("provisioning_contract_version"),
             extra={k: v for k, v in d.items() if k not in known},
         )
@@ -851,3 +854,107 @@ class ImportResourcesResponse:
             failed_count=int(d.get("failed_count", 0)),
             total_rows=int(d.get("total_rows", 0)),
         )
+
+
+# ---------------------------------------------------------------------------
+# Storefront pool overrides  (/api/v1/admin/pool-overrides)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class PoolOverride:
+    """One site's stored pool override. ``None`` on a term means the override
+    states nothing for it and the next precedence tier applies."""
+
+    site_id: str
+    pool_id: str
+    sla: float | None = None
+    min_price: str | None = None
+    token: str | None = None
+    max_duration_seconds: int | None = None
+    settlements: list[dict[str, Any]] | None = None
+    listing_shapes: list[dict[str, Any]] | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "PoolOverride":
+        return cls(
+            site_id=d["site_id"],
+            pool_id=d["pool_id"],
+            sla=d.get("sla"),
+            min_price=d.get("min_price"),
+            token=d.get("token"),
+            max_duration_seconds=d.get("max_duration_seconds"),
+            settlements=d.get("settlements"),
+            listing_shapes=d.get("listing_shapes"),
+            created_at=d.get("created_at"),
+            updated_at=d.get("updated_at"),
+        )
+
+
+@dataclass
+class PoolOverrideShapeFeasibility:
+    """Whether any member of the live projection is feasible for one shape."""
+
+    shape_digest: str
+    shape: dict[str, dict[str, Any]]
+    feasible: bool
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "PoolOverrideShapeFeasibility":
+        return cls(
+            shape_digest=d["shape_digest"], shape=d["shape"], feasible=bool(d["feasible"])
+        )
+
+
+@dataclass
+class PoolOverrideWriteResponse:
+    """Response from PUT /api/v1/admin/pool-overrides: the stored override, each
+    shape's feasibility, and the live projection generation it was checked
+    against."""
+
+    override: PoolOverride
+    feasibility: list[PoolOverrideShapeFeasibility]
+    projection_revision: int
+    projection_digest: str
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "PoolOverrideWriteResponse":
+        projection = d["projection"]
+        return cls(
+            override=PoolOverride.from_dict(d["override"]),
+            feasibility=[
+                PoolOverrideShapeFeasibility.from_dict(entry)
+                for entry in d.get("feasibility") or []
+            ],
+            projection_revision=int(projection["revision"]),
+            projection_digest=str(projection["digest"]),
+        )
+
+
+@dataclass
+class PoolOverrideListResponse:
+    """Response from GET /api/v1/admin/pool-overrides without a pool."""
+
+    overrides: list[PoolOverride]
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "PoolOverrideListResponse":
+        return cls(
+            overrides=[PoolOverride.from_dict(o) for o in d.get("overrides") or []]
+        )
+
+
+@dataclass
+class PoolOverrideDeleteResponse:
+    """Response from DELETE /api/v1/admin/pool-overrides; ``deleted`` is false
+    when no override existed."""
+
+    site_id: str
+    pool_id: str
+    deleted: bool
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "PoolOverrideDeleteResponse":
+        return cls(site_id=d["site_id"], pool_id=d["pool_id"], deleted=bool(d["deleted"]))

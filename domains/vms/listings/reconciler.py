@@ -16,6 +16,7 @@ from arkhai_vms import (
 from domains.vms.listings.listing_comparison import REFUSE, compare_listing
 from domains.vms.listings.listing_shapes import (
     SHAPE_SOURCE_DEFAULT,
+    SHAPE_SOURCE_OVERRIDE,
     ResolvedShape,
     resolve_shape,
     resolve_vm_listing_shapes,
@@ -376,19 +377,17 @@ def _pool_rows_from_local_tables(
 
 
 def _local_pool_pricing(conn: sqlite3.Connection) -> dict[str, sqlite3.Row]:
-    """Home site's own pool pricing/descriptive-fallback config, by pool_id.
+    """The legacy storefront-override rows for the home site's pools, by pool_id.
 
-    Never looked up for another site's pool -- compute_capacity_pools is
-    not site-scoped (``pool_id TEXT PRIMARY KEY``), so a lookup keyed only
-    on pool_id would risk the same kind of cross-site collision
-    ``derived_compute_listings``' site-scoped derivation keys guard
-    against, if it were ever consulted for a pool that isn't home_site's
-    own. Scoping every call site to home_site only is what keeps that
-    safe without needing to touch this table's schema -- deliberate:
-    this table holds pricing and descriptive fallback data the
-    projection itself doesn't carry, is intentionally not being made
-    multi-site-aware, and a non-home_site pool simply has no pricing
-    source through this table at all.
+    The lower of the storefront's two override tiers: a site-scoped override
+    (``_site_pool_overrides``) takes precedence field by field, and derivation
+    reports each field these rows supply.
+
+    Never looked up for another site's pool: ``compute_capacity_pools`` is
+    keyed by pool alone (``pool_id TEXT PRIMARY KEY``), and pool identifiers
+    are site-local, so a lookup for another site's pool could apply these
+    values to a different pool that shares the name. A non-home-site pool
+    therefore has no legacy tier, only the site-scoped one.
     """
     has_pools = (
         conn.execute(
@@ -417,10 +416,53 @@ def _local_pool_pricing(conn: sqlite3.Connection) -> dict[str, sqlite3.Row]:
     }
 
 
+def _site_pool_overrides(
+    conn: sqlite3.Connection,
+) -> dict[tuple[str, str], dict[str, Any]]:
+    """The storefront's site-scoped pool overrides, keyed by ``(site_id, pool_id)``.
+
+    The first tier of shape and commercial-term resolution on the projection
+    path. Read here, inside the derivation every structural-key caller runs,
+    because an override's shapes change listing keys: publication and source
+    reconciliation must see the same tier or reconciliation would close every
+    listing an override shaped. A database created before the store exists
+    has no overrides.
+    """
+    has_table = (
+        conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' "
+            "AND name='storefront_pool_overrides'"
+        ).fetchone()
+        is not None
+    )
+    if not has_table:
+        return {}
+    overrides: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in conn.execute(
+        """
+        SELECT site_id, pool_id, sla, min_price, token, max_duration_seconds,
+               settlements, listing_shapes
+        FROM storefront_pool_overrides
+        """
+    ).fetchall():
+        override = dict(row)
+        for column in ("settlements", "listing_shapes"):
+            raw = override[column]
+            # A stored list the storefront wrote itself; a value that does not
+            # parse is kept as text so shape resolution reports it unreadable
+            # rather than treating it as absent.
+            if isinstance(raw, str):
+                try:
+                    override[column] = json.loads(raw)
+                except json.JSONDecodeError:
+                    pass
+        overrides[(str(row["site_id"]), str(row["pool_id"]))] = override
+    return overrides
+
+
 @dataclass(frozen=True)
 class _ProjectedResourceUsage:
     resource_id: str
-    gpu_model: str | None
     total: int
     available: int
 
@@ -443,7 +485,7 @@ def _projected_resource_usage(
     site_id: str,
     member_availability: dict[tuple[str | None, str], int] | None,
 ) -> "_ProjectedResourceUsage | str | None":
-    """Derive one projected resource's identity, GPU model, and usage.
+    """Derive one projected resource's identity and GPU usage.
 
     Returns ``None`` if it has no physical_resource_id to key on, or one of the
     ``_GPU_COUNT_*`` outcomes when its declared GPU count cannot be enumerated.
@@ -456,8 +498,6 @@ def _projected_resource_usage(
     resource_type = resource.get("resource_type")
     if not isinstance(resource_type, str) or not resource_type.strip():
         return _RESOURCE_TYPE_ABSENT
-    attrs = resource.get("attributes") or {}
-    gpu_model = attrs.get("gpu_model") or None
     capacity = resource.get("capacity") or {}
     if "gpu_count" not in capacity or capacity.get("gpu_count") is None:
         return _GPU_COUNT_ABSENT
@@ -486,7 +526,7 @@ def _projected_resource_usage(
         )
     else:
         available = total
-    return _ProjectedResourceUsage(resource_id, gpu_model, total, available)
+    return _ProjectedResourceUsage(resource_id, total, available)
 
 
 def _bucket_gpu_count(bucket: Mapping[str, Any]) -> int | None:
@@ -513,8 +553,8 @@ def _bucket_gpu_count(bucket: Mapping[str, Any]) -> int | None:
 def _fungible_availability_from_buckets(
     pool_id: str,
     capacity_buckets: list[Mapping[str, Any]] | None,
-) -> tuple[int, int, str | None] | None:
-    """(max_member_available, available_gpu_count, gpu_model) from this
+) -> tuple[int, int] | None:
+    """(max_member_available, available_gpu_count) from this
     pool's matching capacity buckets, or None if the caller should fall
     back to the resource-list walk instead.
 
@@ -551,7 +591,6 @@ def _fungible_availability_from_buckets(
         return None
     max_member_available = 0
     available_gpu_count = 0
-    gpu_model: str | None = None
     saw_matching_entry = False
     saw_usable_entry = False
     for bucket in capacity_buckets:
@@ -564,18 +603,16 @@ def _fungible_availability_from_buckets(
         saw_usable_entry = True
         bucket_count = int(bucket.get("resource_count") or 0)
         available_gpu_count += bucket_available * bucket_count
-        if bucket_available > max_member_available:
-            max_member_available = bucket_available
-            gpu_model = (bucket.get("grouping_attributes") or {}).get("gpu_model")
+        max_member_available = max(max_member_available, bucket_available)
     if saw_usable_entry:
-        return max_member_available, available_gpu_count, gpu_model
+        return max_member_available, available_gpu_count
     if saw_matching_entry:
         # Every matching entry was individually unreadable -- not a
         # confirmed absence, fall back.
         return None
     # No matching entry at all in a loaded family: authoritative zero,
     # not missing data -- see this function's own docstring.
-    return 0, 0, None
+    return 0, 0
 
 
 @dataclass
@@ -594,6 +631,7 @@ class _SiteDerivationReport:
     unreadable_shapes: dict[str, list[str]] = field(default_factory=dict)
     infeasible_shapes: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     undeclared_attributes: dict[str, dict[str, Any]] = field(default_factory=dict)
+    legacy_overrides_in_effect: dict[str, list[str]] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -612,6 +650,10 @@ class _SiteDerivationReport:
             "unreadable_shapes": dict(sorted(self.unreadable_shapes.items())),
             "infeasible_shapes": dict(sorted(self.infeasible_shapes.items())),
             "undeclared_attributes": dict(sorted(self.undeclared_attributes.items())),
+            "legacy_overrides_in_effect": {
+                pool_id: sorted(fields)
+                for pool_id, fields in sorted(self.legacy_overrides_in_effect.items())
+            },
         }
 
 
@@ -695,6 +737,14 @@ def _record_site_report(site_id: str, report: _SiteDerivationReport) -> None:
             finding.get("attribute"),
             finding.get("value"),
         )
+    for pool_id, fields in current["legacy_overrides_in_effect"].items():
+        logger.info(
+            "[PUBLICATION] site %s pool %s takes %s from its legacy storefront "
+            "override row",
+            site_id,
+            pool_id,
+            ", ".join(fields),
+        )
 
 
 @dataclass(frozen=True)
@@ -750,28 +800,35 @@ def _projected_pool_rows(
     shape_feasible: ShapeFeasibility,
     hint_resolution: PoolHintResolutionSettings = _DEFAULT_POOL_HINT_RESOLUTION_SETTINGS,
     declared_only: bool = False,
+    override: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Build zero or more pool_rows entries from one projected pool.
 
-    Returns an empty list only if the pool has no `pool_id`. A missing
-    local `compute_capacity_pools` row (whether because this is a
-    non-home-site pool -- never locally priced by design, see
-    `_local_pool_pricing` -- or a home-site pool the storefront simply
-    hasn't registered) means no storefront-override tier is available,
-    not that the pool can't publish: region/SLA/pricing still resolve
-    through their pool-hint and config-default tiers. Whether the
-    resulting row ends up genuinely priceless is left to the same
-    downstream `publish_priceless` handling every other unpriced
-    candidate already goes through, not decided here. Otherwise returns
-    exactly one row for a ``fungible`` pool (matching this function's
-    original, aggregated shape), or one row per enabled member for a
-    ``specific_resource`` pool -- a pool's ``listing_cardinality_mode``
-    (from its projected `policy_tags`, domain-resolved by
-    `resolve_vm_listing_cardinality_mode`) decides which shape applies. An
-    explicit tag always wins; its *absence* falls back to exactly the
-    structural heuristic this function used before the tag existed
-    (`member_count == 1` -> specific_resource) so an untagged pool's publication shape does not
-    change out from under an existing derived-listing mapping.
+    Returns nothing for a pool with no `pool_id`, one its site does not declare
+    advertisable for the ``vm`` mode or declares disabled, and one that is
+    held. Otherwise returns exactly one row for a ``fungible`` pool, or one row
+    per enabled member for a ``specific_resource`` pool -- a pool's
+    ``listing_cardinality_mode`` (from its projected `policy_tags`,
+    domain-resolved by `resolve_vm_listing_cardinality_mode`) decides which.
+    An explicit tag always wins; its *absence* falls back to the structural
+    heuristic (`member_count == 1` -> specific_resource) so an untagged pool's
+    publication shape does not change out from under an existing
+    derived-listing mapping.
+
+    Shapes and commercial terms resolve through the storefront's two override
+    tiers before the pool's own hints and the storefront's configuration:
+    ``override`` is the site-scoped override for this site and pool, if any,
+    and ``local_pricing`` holds the legacy override rows, consulted only for
+    the home site's pools because they are keyed by pool alone. Neither tier is
+    required: a pool with neither still resolves through its hints and
+    configured defaults, and a pool that resolves no price is left to the
+    downstream ``publish_priceless`` handling. Each field a legacy row supplies
+    is reported, so an operator sees which values still come from that tier.
+
+    Every row carries the pool's resolved shapes, each GPU model's resolved
+    terms (``pricing_by_model``), and the shapes its source members are
+    feasible for (``feasible_shapes``). A listing's terms are those of its
+    shape's model.
     """
     pool_id = str(pool.get("resource_pool_id") or "").strip()
     if not pool_id:
@@ -781,23 +838,9 @@ def _projected_pool_rows(
     # A pool its site declares disabled is a withdrawn source.
     if not declaration.advertises("vm") or not declaration.enabled:
         return []
-    # `pricing` (this pool's row in the storefront's own local
-    # `compute_capacity_pools` table) is the tier-3 storefront-override
-    # source, not a prerequisite for publishing at all -- a pool with a
-    # complete pool-declared hint (tier 2) or config default (tier 1) and
-    # no local row must still resolve and publish, or the three-tier
-    # precedence this section exists to build is unreachable for exactly
-    # the pools it was meant to help (any pool the storefront hasn't
-    # locally registered, and every non-home-site pool, since
-    # `compute_capacity_pools` is intentionally never consulted for a
-    # site other than home_site -- see `_local_pool_pricing`'s own
-    # cross-site-collision rationale, unaffected by this change: that
-    # table still isn't read for a non-home-site pool, it's just no
-    # longer required to exist for a home-site one either).
-    pricing = local_pricing.get(pool_id) if site_id == home_site else None
-    local_region = pricing["region"] if pricing is not None else None
-    local_sla = pricing["sla"] if pricing is not None else None
-    local_gpu_model = pricing["gpu_model"] if pricing is not None else None
+    # The legacy rows are keyed by pool alone, so they are only ever the home
+    # site's; another site's identically named pool must not take their values.
+    legacy = local_pricing.get(pool_id) if site_id == home_site else None
 
     usages: list[_ProjectedResourceUsage] = []
     members_by_id: dict[str, Mapping[str, Any]] = {}
@@ -849,48 +892,60 @@ def _projected_pool_rows(
             holds.add(("resource", site_id, resource_id))
 
     # A stated list the VM vocabulary cannot read holds the pool's listings and
-    # never falls back to generated shapes.
+    # never falls back to a lower source's shapes.
     resolution = resolve_vm_listing_shapes(
-        policy_tags, [members_by_id[usage.resource_id] for usage in usages]
+        policy_tags,
+        [members_by_id[usage.resource_id] for usage in usages],
+        override_shapes=override.get("listing_shapes") if override else None,
     )
     if resolution.unreadable:
-        report.unreadable_shapes[pool_id] = list(resolution.problems)
+        report.unreadable_shapes[pool_id] = [
+            f"{resolution.source}: {problem}"
+            if resolution.source == SHAPE_SOURCE_OVERRIDE
+            else problem
+            for problem in resolution.problems
+        ]
         holds.add(("pool", site_id, pool_id))
         return []
 
-    region = resolve_region(policy_tags, fallback=local_region)
+    legacy_fields: set[str] = set()
+
+    def _tier(field_name: str) -> Any:
+        """The storefront-override tier's value: the site-scoped override's,
+        else the legacy row's, recorded when it is the legacy row's."""
+        if override is not None and override.get(field_name) is not None:
+            return override[field_name]
+        value = (
+            legacy[field_name]
+            if legacy is not None and field_name in legacy.keys()
+            else None
+        )
+        if value is not None:
+            legacy_fields.add(field_name)
+        return value
+
+    # Region is a physical fact, so no site-scoped override states it; the
+    # pool's own hint wins and the legacy row is only a fallback.
+    hint_region = resolve_region(policy_tags, fallback=None)
+    legacy_region = legacy["region"] if legacy is not None else None
+    region = hint_region if hint_region is not None else legacy_region
+    if hint_region is None and legacy_region is not None:
+        legacy_fields.add("region")
     sla = resolve_sla(
         policy_tags,
         accept_pool_declared_sla=hint_resolution.accept_pool_declared_sla,
-        storefront_override=local_sla,
+        storefront_override=_tier("sla"),
         config_default=hint_resolution.default_sla,
     )
     storefront_pricing_override = GpuPricingFields(
-        min_price=pricing["min_price"] if pricing is not None else None,
-        token=pricing["token"] if pricing is not None else None,
-        max_duration_seconds=(
-            pricing["max_duration_seconds"] if pricing is not None else None
-        ),
-        accepted_escrows=pricing["accepted_escrows"] if pricing is not None else None,
-        settlements=(
-            pricing["settlements"]
-            if pricing is not None and "settlements" in pricing.keys()
-            else None
-        ),
+        min_price=_tier("min_price"),
+        token=_tier("token"),
+        max_duration_seconds=_tier("max_duration_seconds"),
+        accepted_escrows=_tier("accepted_escrows"),
+        settlements=_tier("settlements"),
     )
-
-    def _resolved_pricing(gpu_model_for_pricing: str | None) -> GpuPricingFields:
-        # Pricing is resolved per GPU model, not once per pool -- the
-        # three-tier chain's middle and bottom tiers are both keyed by
-        # model, so this can't be folded into base_fields the way
-        # region/sla can (region/sla have no per-model dimension).
-        return resolve_gpu_pricing(
-            policy_tags,
-            gpu_model=gpu_model_for_pricing,
-            storefront_override=storefront_pricing_override,
-            config_defaults_by_model=hint_resolution.gpu_pricing_defaults_by_model,
-            flat_default=hint_resolution.gpu_pricing_flat_default,
-        )
+    if legacy_fields:
+        report.legacy_overrides_in_effect[pool_id] = sorted(legacy_fields)
 
     base_fields = {
         "site_id": site_id,
@@ -962,8 +1017,16 @@ def _projected_pool_rows(
             )
         return None if feasible else "available"
 
+    # Terms resolve per GPU model because the hint and configured tiers are
+    # keyed by model; a listing takes its shape's model's terms.
     pricing_by_model = {
-        model: _resolved_pricing(model)
+        model: resolve_gpu_pricing(
+            policy_tags,
+            gpu_model=model,
+            storefront_override=storefront_pricing_override,
+            config_defaults_by_model=hint_resolution.gpu_pricing_defaults_by_model,
+            flat_default=hint_resolution.gpu_pricing_flat_default,
+        )
         for model in sorted({shape.gpu_model for shape in resolution.shapes})
     }
     served: set[str] = set()
@@ -989,36 +1052,25 @@ def _projected_pool_rows(
     }
 
     if mode == "specific_resource":
-        rows = []
-        for usage in usages:
-            resolved_gpu_model = usage.gpu_model or local_gpu_model
-            resolved_pricing = _resolved_pricing(resolved_gpu_model)
-            rows.append(
-                {
-                    **base_fields,
-                    **shape_fields,
-                    "gpu_model": resolved_gpu_model,
-                    "min_price": resolved_pricing.min_price,
-                    "token": resolved_pricing.token,
-                    "accepted_escrows": resolved_pricing.accepted_escrows,
-                    "settlements": resolved_pricing.settlements,
-                    "max_duration_seconds": resolved_pricing.max_duration_seconds,
-                    "total_gpu_count": usage.total,
-                    "available_gpu_count": usage.available,
-                    "max_member_available_gpu_count": usage.available,
-                    "max_member_declared_gpu_count": usage.total,
-                    "single_resource_id": usage.resource_id,
-                    "member_count": 1,
-                    "feasible_shapes": _feasible_shapes([members_by_id[usage.resource_id]]),
-                }
-            )
+        rows = [
+            {
+                **base_fields,
+                **shape_fields,
+                "total_gpu_count": usage.total,
+                "available_gpu_count": usage.available,
+                "max_member_available_gpu_count": usage.available,
+                "max_member_declared_gpu_count": usage.total,
+                "single_resource_id": usage.resource_id,
+                "member_count": 1,
+                "feasible_shapes": _feasible_shapes([members_by_id[usage.resource_id]]),
+            }
+            for usage in usages
+        ]
     else:
         total_gpu_count = sum(usage.total for usage in usages)
-        resource_gpu_model = next((u.gpu_model for u in usages if u.gpu_model), None)
         from_buckets = _fungible_availability_from_buckets(pool_id, capacity_buckets)
         if from_buckets is not None:
-            max_member_available, available_gpu_count, bucket_gpu_model = from_buckets
-            gpu_model = bucket_gpu_model or resource_gpu_model
+            max_member_available, available_gpu_count = from_buckets
         else:
             # No usable capacity-bucket data for this pool right now (the
             # family has never loaded for this pool's site, or every
@@ -1027,20 +1079,10 @@ def _projected_pool_rows(
             # than silently publishing nothing.
             max_member_available = max((usage.available for usage in usages), default=0)
             available_gpu_count = sum(usage.available for usage in usages)
-            gpu_model = resource_gpu_model
-
-        resolved_gpu_model = gpu_model or local_gpu_model
-        resolved_pricing = _resolved_pricing(resolved_gpu_model)
         rows = [
             {
                 **base_fields,
                 **shape_fields,
-                "gpu_model": resolved_gpu_model,
-                "min_price": resolved_pricing.min_price,
-                "token": resolved_pricing.token,
-                "accepted_escrows": resolved_pricing.accepted_escrows,
-                "settlements": resolved_pricing.settlements,
-                "max_duration_seconds": resolved_pricing.max_duration_seconds,
                 "total_gpu_count": total_gpu_count,
                 "available_gpu_count": available_gpu_count,
                 "max_member_available_gpu_count": max_member_available,
@@ -1130,22 +1172,23 @@ def _pool_rows_from_projection(
     holds: set[tuple[str, str, str]],
     shape_feasible: ShapeFeasibility,
     declared_only: bool = False,
+    overrides: Mapping[tuple[str, str], Mapping[str, Any]] | None = None,
+    record_reports: bool = True,
 ) -> list[dict[str, Any]]:
     """Build pool_rows from a site_resource_pools projection.
 
-    Structure (which pools/resources exist, GPU model) comes from the
-    projection, for every site present in it. Region can come from the
-    projection's own `pool_metadata.policy_tags` hint; pricing and SLA's
-    storefront-override tier still come from the local
-    `compute_capacity_pools` table -- see `_local_pool_pricing` and
-    `domains.vms.listings.pool_descriptors`. That local table is only
-    ever consulted for home_site's own pools; a non-home_site pool, or a
-    home_site pool with no local row, simply has no storefront-override
-    tier -- region/SLA/pricing still resolve through the pool's own
-    projected hint and the storefront's configured default, the same
-    "priceless" fallback other publish flows already support if nothing
-    resolves a real price. A missing local row is not, by itself, a
-    reason to skip the pool.
+    Structure (which pools/resources exist) comes from the projection, for
+    every site present in it. Shapes and terms resolve through the
+    storefront's site-scoped overrides (``_site_pool_overrides``, read from
+    ``conn`` unless ``overrides`` is given), then the legacy override rows for
+    the home site's pools (`_local_pool_pricing`), then each pool's projected
+    hints and the storefront's configured defaults -- see
+    `_projected_pool_rows`. A pool with no override of either kind still
+    resolves through its hints and defaults.
+
+    ``record_reports`` false leaves the published per-site derivation reports
+    untouched, for a caller judging a projection other than the one
+    publication derives from.
 
     ``site_capacity_buckets`` is the matching ``site_capacity_buckets``
     projection (same per-site-list shape as ``site_pool_projection``),
@@ -1159,6 +1202,7 @@ def _pool_rows_from_projection(
     from market_resource_pools import read_site_declarations
 
     local_pricing = _local_pool_pricing(conn)
+    site_overrides = _site_pool_overrides(conn) if overrides is None else overrides
     pool_rows: list[dict[str, Any]] = []
     for site_id, pools in site_pool_projection.items():
         declarations = read_site_declarations(pools or [])
@@ -1182,9 +1226,8 @@ def _pool_rows_from_projection(
             else None
         )
         for pool in pools:
-            declaration = declarations.resolved.get(
-                str(pool.get("resource_pool_id") or "").strip()
-            )
+            pool_id = str(pool.get("resource_pool_id") or "").strip()
+            declaration = declarations.resolved.get(pool_id)
             if declaration is None:
                 continue
             pool_rows.extend(
@@ -1201,10 +1244,64 @@ def _pool_rows_from_projection(
                     hint_resolution=hint_resolution,
                     shape_feasible=shape_feasible,
                     declared_only=declared_only,
+                    override=site_overrides.get((site_id, pool_id)),
                 )
             )
-        _record_site_report(site_id, report)
+        if record_reports:
+            _record_site_report(site_id, report)
     return pool_rows
+
+
+def declared_shape_feasibility(
+    db_path: str,
+    site_pools: list[Mapping[str, Any]],
+    *,
+    site_id: str,
+    pool_id: str,
+    home_site: str,
+    override: Mapping[str, Any],
+    shape_feasible: ShapeFeasibility,
+) -> dict[str, bool]:
+    """Whether each of ``override``'s shapes is feasible on one pool's declarations.
+
+    ``site_pools`` is a whole resource-pool projection of ``site_id``, because
+    declarations are read site-wide. Judged by the derivation publication
+    runs, on declared capacity alone, with ``override`` in place of whatever
+    is stored for ``pool_id``, so an override write's report and the next
+    publication cycle cannot disagree about feasibility. Keyed by shape
+    digest. A pool that would publish nothing -- disabled, not advertisable
+    for the ``vm`` mode, held, or with unresolvable declarations -- reports
+    every shape infeasible. Records no derivation report.
+    """
+    if override.get("listing_shapes") is None:
+        return {}
+    resolution = resolve_vm_listing_shapes(
+        {}, (), override_shapes=override["listing_shapes"]
+    )
+    feasible: dict[str, bool] = {shape.digest: False for shape in resolution.shapes}
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = _pool_rows_from_projection(
+            conn,
+            {site_id: [dict(pool) for pool in site_pools]},
+            home_site=home_site,
+            member_availability=None,
+            holds=set(),
+            shape_feasible=shape_feasible,
+            declared_only=True,
+            overrides={(site_id, pool_id): override},
+            record_reports=False,
+        )
+    finally:
+        conn.close()
+    for row in rows:
+        if row.get("pool_id") != pool_id:
+            continue
+        for shape in row.get("feasible_shapes") or ():
+            if shape.digest in feasible:
+                feasible[shape.digest] = True
+    return feasible
 
 
 def _parsed_escrows(raw: Any) -> list[dict[str, Any]] | None:
@@ -1290,20 +1387,16 @@ def available_compute_slices(
     ``site_pool_projection`` is an optional ``site_id -> resource-pool
     projection rows`` mapping (the same shape
     ``site_projection_cache.projection_caches()[site].resource_pools.view().value``
-    already produces). When supplied and non-empty, pool structure and
-    GPU model come from the projection for *every* site in it, not just
-    ``home_site``. The local ``compute_capacity_pools`` table is only
-    ever consulted, for ``home_site``'s own pools, as the top-precedence
-    storefront-override tier of region/SLA/pricing resolution -- never
-    for a non-``home_site`` pool, avoiding the cross-site ``pool_id``
-    collision that table's own lack of site-scoping would otherwise risk.
-    A pool with no local override row (a non-``home_site`` pool, or a
-    ``home_site`` pool the storefront hasn't locally registered) still
-    publishes: region/SLA/pricing fall through to that pool's own
-    projected hint, then the storefront's configured default, the same
-    "priceless" handling other publish flows already support if nothing
-    resolves a real price -- a missing override is advisory-tier
-    absence, not a reason to suppress the pool.
+    already produces). When supplied and non-empty, pool structure comes
+    from the projection for *every* site in it, not just ``home_site``.
+    Shapes and terms then resolve through the storefront's site-scoped
+    overrides, stored in the same database; the legacy override rows, for
+    ``home_site``'s pools only; each pool's projected hints; and the
+    storefront's configured defaults -- see ``_projected_pool_rows``. The
+    local-table path applies no site-scoped override: its terms come from its
+    own tables. A pool with no override still publishes through its
+    hints and defaults, with the same "priceless" handling other publish
+    flows support if nothing resolves a real price.
 
     A pool's ``listing_cardinality_mode`` (from its projected
     ``policy_tags``, only available on the ``site_pool_projection`` path)
@@ -1318,8 +1411,9 @@ def available_compute_slices(
     path; the local-table fallback has no ``policy_tags``/bucket source
     and is unaffected by either parameter.
 
-    Every slice is one listing shape: the pool's stated ``listing_shapes`` for
-    the ``vm`` mode, or the default GPU-only shapes generated from its members.
+    Every slice is one listing shape: the storefront override's shapes, else
+    the pool's stated ``listing_shapes`` for the ``vm`` mode, else the default
+    GPU-only shapes generated from its members.
     A shape yields a slice only where ``shape_feasible`` judges some source
     member able to serve the claim its listing would produce: against declared
     capacity always, and for a capacity-backed pool against current
@@ -1335,10 +1429,10 @@ def available_compute_slices(
     cannot be read. Their listings must be neither closed nor refreshed, so
     callers that reconcile keep them out of both.
 
-    ``hint_resolution`` controls how much a pool's own
-    projected ``region``/``sla`` hints are trusted relative to the
-    storefront's local `compute_capacity_pools` fallback/override values
-    -- see `domains.vms.listings.pool_descriptors`. Only takes effect on
+    ``hint_resolution`` controls how much a pool's own projected
+    ``region``/``sla`` hints are trusted relative to the storefront's
+    override tiers and configured defaults -- see
+    `domains.vms.listings.pool_descriptors`. Only takes effect on
     the projection path, the same as ``site_pool_projection``/
     ``site_capacity_buckets`` above; the local-table fallback has no hint
     source to resolve against.
@@ -1446,25 +1540,17 @@ def current_available_resource_keys(
     holds: set[tuple[str, str, str]] | None = None,
     shape_feasible: ShapeFeasibility,
 ) -> set[str]:
-    # Known, accepted cost, not an oversight: `available_compute_slices`
-    # resolves each row's region/SLA/pricing (the full three-tier chain,
-    # `PoolHintResolutionSettings` and all) even though only
-    # `resource_key` is read below -- everything
-    # else is discarded. This is deliberately not worth avoiding here:
-    # resolution happens once per pool/member (not per gpu_count slice,
-    # since the gpu_count loop only copies already-resolved fields), so
-    # the actual cost is bounded by pool/member count, not capacity size.
-    # `stale_open_listing_ids` (below) calls this function for exactly this
-    # reason -- capacity-delta
-    # reconciliation compares structural derivation keys and availability;
-    # it never recomputes or republishes commercial listing terms, which
-    # is also why none of these three functions take a `hint_resolution`
-    # parameter at all (they always resolve with the default, and the
-    # result is provably identical regardless -- see
-    # `test_resource_keys_are_identical_regardless_of_hint_resolution` in
-    # `test_reconciler.py`). A narrower structural-only row builder would
-    # avoid the discarded work, but isn't warranted while the cost stays
-    # bounded this way; noted as a candidate cleanup, not a defect.
+    # Keys come from the full derivation, not a structural shortcut, because a
+    # listing's key depends on its shape and its shape can come from the
+    # storefront's override tier: a reader skipping that tier would derive
+    # different keys than publication and close every listing it shaped.
+    #
+    # The commercial terms derivation also resolves are discarded here. That
+    # cost is accepted: terms resolve once per pool and GPU model, not per
+    # shape, so it is bounded by pool count rather than capacity. Terms never
+    # affect a key, which is why none of the key readers take a
+    # `hint_resolution` (see
+    # `test_resource_keys_are_identical_regardless_of_hint_resolution`).
     keys: set[str] = set()
     for row in available_compute_slices(
         db_path,

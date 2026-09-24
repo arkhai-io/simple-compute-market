@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import httpx
@@ -55,12 +55,22 @@ def _default_publication_derivation_provider() -> dict[str, dict[str, Any]]:
     producer predating the pool declarations, which pools and members are
     unresolvable and held, which members declare no GPU count or no resource
     type, which pools state shapes the VM vocabulary cannot read, which stated
-    shapes no member is feasible for, and which pools publish nothing because
-    their listings claim an attribute no member declares.
+    shapes no member is feasible for, which pools publish nothing because
+    their listings claim an attribute no member declares, and which fields
+    each pool still takes from its legacy storefront override row.
     """
     from domains.vms.listings.reconciler import derivation_reports
 
     return derivation_reports()
+
+
+async def _default_pool_override_status_provider() -> list[dict[str, Any]] | None:
+    """Every stored storefront pool override and the one state it is in, or
+    ``None`` when no override service is composed."""
+    service = _container.resolved_pool_override_service
+    if service is None:
+        return None
+    return await service.statuses()
 
 
 def _default_listing_identity_carryover_provider() -> dict[str, Any]:
@@ -106,6 +116,9 @@ class SystemService:
             Callable[[], dict[str, dict[str, Any]]] | None
         ) = None,
         listing_identity_carryover_provider: Callable[[], dict[str, Any]] | None = None,
+        pool_override_status_provider: (
+            Callable[[], Awaitable[list[dict[str, Any]] | None]] | None
+        ) = None,
     ) -> None:
         self._db = sqlite_client
         self._marketplace_signer = marketplace_signer
@@ -123,6 +136,9 @@ class SystemService:
         self._listing_identity_carryover_provider = (
             listing_identity_carryover_provider
             or _default_listing_identity_carryover_provider
+        )
+        self._pool_override_status_provider = (
+            pool_override_status_provider or _default_pool_override_status_provider
         )
 
     # ------------------------------------------------------------------
@@ -249,6 +265,10 @@ class SystemService:
                 )
             except Exception:
                 result["listing_identity_carryover"] = None
+            try:
+                result["pool_overrides"] = await self._pool_override_status_provider()
+            except Exception:
+                result["pool_overrides"] = None
 
         return result
 

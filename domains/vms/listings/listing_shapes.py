@@ -1,10 +1,12 @@
 """Which shapes a pool's VM listings are sold in.
 
-A pool's shapes come from exactly one source: the pool's own ``listing_shapes``
-hint for the ``vm`` offering mode when it states one, otherwise the domain's
-default generator. A stated list replaces the default as a whole. A stated list
-the VM vocabulary cannot read is reported as unreadable and never replaced by the
-default, because an unreadable declaration is not a withdrawn one.
+A pool's shapes come from exactly one source, in this precedence: the
+storefront's own override for the pool's site and pool, the pool's
+``listing_shapes`` hint for the ``vm`` offering mode, and otherwise the
+domain's default generator. A stated list replaces every lower source as a
+whole. A stated list the VM vocabulary cannot read is reported as unreadable
+and never replaced by a lower source, because an unreadable declaration is not
+a withdrawn one.
 
 See openspec/specs/storefront-publication/spec.md, "Every listing is a listing
 shape".
@@ -27,6 +29,7 @@ from arkhai_vms import (
 
 VM_OFFERING_MODE = "vm"
 
+SHAPE_SOURCE_OVERRIDE = "storefront_override"
 SHAPE_SOURCE_HINT = "pool_hint"
 SHAPE_SOURCE_DEFAULT = "default"
 
@@ -107,8 +110,16 @@ def resolve_vm_listing_shapes(
     members: Iterable[Mapping[str, Any]],
     *,
     generator: ListingShapeGenerator = DEFAULT_LISTING_SHAPE_GENERATOR,
+    override_shapes: Any = None,
 ) -> ShapeResolution:
-    """A pool's VM shapes: its stated hint if any, else the default generator."""
+    """A pool's VM shapes: the storefront override's, else its stated hint,
+    else the default generator.
+
+    ``override_shapes`` is the stored override's shape list, or ``None`` when
+    the override states none.
+    """
+    if override_shapes is not None:
+        return resolve_stated_shapes(override_shapes, source=SHAPE_SOURCE_OVERRIDE)
     # Local import: buyers install this package without the resource-pool kit,
     # and only storefront derivation reads pool hints.
     from market_resource_pools import LISTING_SHAPES_POLICY_TAG, raw_listing_shapes
@@ -131,6 +142,7 @@ def resolve_vm_listing_shapes(
 __all__ = [
     "SHAPE_SOURCE_DEFAULT",
     "SHAPE_SOURCE_HINT",
+    "SHAPE_SOURCE_OVERRIDE",
     "ResolvedShape",
     "ShapeResolution",
     "resolve_shape",

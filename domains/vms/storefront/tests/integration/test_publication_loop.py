@@ -874,6 +874,9 @@ async def test_an_upgraded_storefront_republishes_once_keeping_seller_state(worl
     # The startup step, then the first cycle.
     carried = await carry_over_seller_state(world.db)
     assert set(carried.successors) == {"v1-seller", "v1-paused"}
+    # The seller learns which listing to reopen or resume from system status.
+    reported = (await world.client.get_system_status()).extra["listing_identity_carryover"]
+    assert reported["successors"] == carried.successors
     result = await _cycle(world)
 
     # Each open pre-shape listing closes once; shapes without a successor publish.

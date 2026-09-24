@@ -180,6 +180,20 @@ async def load_site_projections(sqlite_client: Any) -> None:
     _caches.update(replacements)
 
 
+async def refresh_site_resource_pools(site_id: str) -> None:
+    """Re-fetch one site's resource-pool projection into its existing cache.
+
+    Refreshes in place, through the cache's own client, and leaves every other
+    site and family alone. A site with no cache yet is left to the poller's
+    first load. A failed fetch is recorded on the cache, as a failed poll is,
+    and never raised.
+    """
+    caches = _caches.get(site_id)
+    if caches is None:
+        return
+    await caches.resource_pools.refresh(force=True)
+
+
 def _resource_pool_identities() -> dict[str, Any]:
     return {
         site: caches.resource_pools.view().identity

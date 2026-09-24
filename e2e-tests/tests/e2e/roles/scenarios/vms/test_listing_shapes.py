@@ -15,6 +15,11 @@ scenario proves the cross-service path from that declaration to discovery:
    settles, and provisions it to ready.
 5. The site's reservation holds every declared quantity, and the provisioning
    job sizes the VM from them rather than from the pool's defaults.
+6. A storefront override, written through the typed administrator client,
+   replaces the pool's stated shape: the storefront checks the pool against the
+   site's live projection and reports the shape feasible, one cycle closes the
+   hint's listing and publishes the override's, and deleting the override
+   restores the hint's shape.
 
 The listing's terms and region come from the pool's own `pricing` and `region`
 hints, so the scenario does not depend on the storefront's configured defaults.
@@ -63,6 +68,8 @@ SHAPE = {
     "storage": {"gib": 100},
 }
 PUBLISHED = {"gpu_count": 1, "vcpu_count": 8, "ram_gb": 32, "disk_gb": 100}
+#: The storefront's own shape for the pool: the hint's, with half the memory.
+OVERRIDE_SHAPE = {**SHAPE, "memory": {"gib": 16}}
 
 #: MockERC20 at its deterministic development address, pre-funded to the buyer
 #: in the baked development chain; never a public-network token.
@@ -101,6 +108,8 @@ class ShapeState:
     provisioning_armed: bool = False
     escrow_uid: str | None = None
     reservation_ids: tuple[str, ...] = ()
+    site_id: str | None = None
+    overridden: bool = False
 
 
 @pytest.fixture(scope="module")
@@ -138,7 +147,9 @@ class TestStage00_Setup:
         pool_row = provisioning_client.get_pool(E2E_LISTING_SHAPES_POOL_ID)
         assert pool_row.policy_tags["listing_shapes"] == {"vm": [SHAPE]}
         assert pool_row.policy_tags["region"] == REGION
-        refresh_storefront_projections(storefront_admin_client)
+        sites = refresh_storefront_projections(storefront_admin_client)
+        # The storefront configures one site; the override stage addresses it.
+        (shape_state.site_id,) = sites
         shape_state.declared = True
 
 
@@ -291,3 +302,62 @@ class TestStage05_Commitment:
             params.get("vm_ram"),
             params.get("vm_disk_size"),
         ) == (1, 8, 32 * 1024, "100G"), params
+
+
+def _pool_listings(storefront_admin_client) -> dict[str, dict]:
+    page = storefront_admin_client.list_listings(status="open", limit=200)
+    out = {}
+    for listing in page.listings:
+        resource = listing.listing_resource
+        if isinstance(resource, str):
+            resource = json.loads(resource)
+        if (resource or {}).get("pool_id") == E2E_LISTING_SHAPES_POOL_ID:
+            out[listing.listing_id] = resource
+    return out
+
+
+class TestStage06_StorefrontOverride:
+    def test_06a_an_override_is_checked_against_the_live_site(
+        self, storefront_admin_client, shape_state
+    ):
+        require_state(shape_state, "listing_id")
+        require_state(shape_state, "site_id")
+        written = storefront_admin_client.admin_put_pool_override(
+            {
+                "site_id": shape_state.site_id,
+                "pool_id": E2E_LISTING_SHAPES_POOL_ID,
+                "listing_shapes": [OVERRIDE_SHAPE],
+            }
+        )
+        assert [entry.feasible for entry in written.feasibility] == [True], written
+        assert written.projection_digest, written
+        shape_state.overridden = True
+
+    def test_06b_one_cycle_replaces_the_hints_listing(self, storefront_admin_client, shape_state):
+        require_state(shape_state, "overridden")
+        advance_storefront(storefront_admin_client, "publication")
+
+        listings = _pool_listings(storefront_admin_client)
+        assert shape_state.listing_id not in listings, listings
+        assert [resource["ram_gb"] for resource in listings.values()] == [16], listings
+        status = storefront_admin_client.get_system_status()
+        assert {
+            (o["site_id"], o["pool_id"]): o["state"] for o in status.pool_overrides or []
+        }.get((shape_state.site_id, E2E_LISTING_SHAPES_POOL_ID)) == "applied", (
+            status.pool_overrides
+        )
+
+    def test_06c_deleting_the_override_restores_the_hints_shape(
+        self, storefront_admin_client, shape_state
+    ):
+        require_state(shape_state, "overridden")
+        deleted = storefront_admin_client.admin_delete_pool_override(
+            shape_state.site_id, E2E_LISTING_SHAPES_POOL_ID
+        )
+        assert deleted.deleted
+        advance_storefront(storefront_admin_client, "publication")
+
+        listings = _pool_listings(storefront_admin_client)
+        assert [resource["ram_gb"] for resource in listings.values()] == [
+            PUBLISHED["ram_gb"]
+        ], listings

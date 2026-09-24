@@ -38,6 +38,8 @@ from market_storefront_kit import (
     build_composed_storefront_app,
 )
 
+from domains.vms.listings import declared_shape_feasibility
+
 import market_storefront.container as _container
 from market_storefront.domain_runtime import validate_vm_storefront_domain
 from market_storefront.middleware.admin_identity import (
@@ -60,6 +62,13 @@ from market_storefront.utils.config import (
 )
 from market_storefront.utils.sqlite_client import get_sqlite_client
 from market_storefront.negotiation_runtime import build_vm_negotiation_runtime
+
+from market_storefront.services.capacity_client import listing_source_projection
+from market_storefront.services.pool_override_service import PoolOverrideService
+from market_storefront.services.publication_loop import wake_publication_loop
+from market_storefront.services.publication_terms import compile_publication_clauses
+from market_storefront.services.shape_feasibility import vm_shape_feasibility
+from market_storefront.services.site_projection_cache import refresh_site_resource_pools
 
 logger = logging.getLogger(__name__)
 
@@ -201,6 +210,37 @@ def _build_system_service(**kwargs):
     return SystemService(agent_id=AGENT_ID, **kwargs)
 
 
+def build_pool_override_service(*, sqlite_client: Any, capacity_runtime: Any) -> Any:
+    """Compose the storefront pool override service over its production effects.
+
+    A write is judged by the derivation publication runs (declared capacity,
+    the site's whole live projection), refreshes only the written site's
+    resource-pool cache, and wakes the publication loop. Status is judged
+    against the source publication derives from. The lifespan and the
+    publication test harness compose it identically.
+    """
+    def judge_shapes(site_pools, site_id, pool_id, home_site, override):
+        return declared_shape_feasibility(
+            sqlite_client.db_path,
+            site_pools,
+            site_id=site_id,
+            pool_id=pool_id,
+            home_site=home_site,
+            override=override,
+            shape_feasible=vm_shape_feasibility(),
+        )
+
+    return PoolOverrideService(
+        sqlite_client=sqlite_client,
+        capacity_runtime=capacity_runtime,
+        projection_source=listing_source_projection,
+        compile_clauses=compile_publication_clauses,
+        judge_shapes=judge_shapes,
+        refresh_site=refresh_site_resource_pools,
+        wake_publication=wake_publication_loop,
+    )
+
+
 def _build_settlement_composition(
     *,
     domain: MarketDomainContract,
@@ -233,6 +273,7 @@ class VmStorefrontServices:
     negotiation_runtime: NegotiationRuntime
     negotiation_service: Any
     system_service: Any
+    pool_override_service: Any
     settlement_composition: Any
 
 
@@ -290,6 +331,10 @@ def _build_vm_services(
         sqlite_client=sqlite_client,
         marketplace_signer=marketplace_signer,
     )
+    pool_override_service = build_pool_override_service(
+        sqlite_client=sqlite_client,
+        capacity_runtime=capacity_runtime,
+    )
     return VmStorefrontServices(
         registry=registry,
         binding=binding,
@@ -302,6 +347,7 @@ def _build_vm_services(
         negotiation_runtime=negotiation_runtime,
         negotiation_service=negotiation_service,
         system_service=system_service,
+        pool_override_service=pool_override_service,
         settlement_composition=settlement_composition,
     )
 
@@ -328,6 +374,7 @@ async def _start_vm_services(services: VmStorefrontServices) -> None:
         _container.resolved_negotiation_runtime = services.negotiation_runtime
         _container.resolved_negotiation_service = services.negotiation_service
         _container.resolved_system_service = services.system_service
+        _container.resolved_pool_override_service = services.pool_override_service
         _container.resolved_settlement_composition = services.settlement_composition
         logger.info("[STARTUP] Singletons initialized")
         await _run_startup_tasks(

@@ -61,6 +61,14 @@ from market_storefront.models.capacity_admin_models import (
     ResourcePatchResponse,
     UsageStartedEventRequest,
 )
+from market_storefront.models.pool_override_models import (
+    PoolOverrideDeleteResponse,
+    PoolOverrideListResponse,
+    PoolOverrideRecord,
+    PoolOverrideResponse,
+    PoolOverrideWriteResponse,
+)
+from market_storefront.services.pool_override_service import PoolOverrideRefused
 from market_storefront.lifecycle import (
     CAPACITY_EVENTS_POLLER,
     FULFILLMENT_RESUME,
@@ -587,6 +595,80 @@ class AdminController:
             },
         )
         return {"sites": summary}
+
+    # -- storefront pool overrides ------------------------------------------
+    # Site and pool IDs are operator-chosen strings with no character
+    # restriction, so they travel in the body or query, never the path.
+
+    @staticmethod
+    def _pool_overrides() -> Any:
+        service = _container.resolved_pool_override_service
+        if service is None:
+            raise HTTPException(
+                status_code=503, detail="storefront pool overrides are unavailable"
+            )
+        return service
+
+    @router.put(
+        "/pool-overrides",
+        response_model=PoolOverrideWriteResponse,
+        summary="Replace one site's pool override, checked against the live site (admin)",
+    )
+    async def put_pool_override(
+        self, record: PoolOverrideRecord
+    ) -> PoolOverrideWriteResponse:
+        """Replace the whole override for ``record``'s site and pool.
+
+        Refused with 422 for an unconfigured site or clauses that do not
+        compile, 503 (retryable) when the site cannot be reached or its answer
+        does not verify, and 404 when its live projection lacks the pool.
+        A shape no member is feasible for is reported, not refused.
+        """
+        try:
+            result = await self._pool_overrides().replace(record)
+        except PoolOverrideRefused as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+        return PoolOverrideWriteResponse.model_validate(result)
+
+    @router.get(
+        "/pool-overrides",
+        response_model=PoolOverrideResponse | PoolOverrideListResponse,
+        summary="Read one pool override, or list them (admin)",
+    )
+    async def get_pool_overrides(
+        self,
+        site_id: str | None = Query(default=None),  # noqa: B008
+        pool_id: str | None = Query(default=None),  # noqa: B008
+    ) -> PoolOverrideResponse | PoolOverrideListResponse:
+        """With both ``site_id`` and ``pool_id``, one override; otherwise a list,
+        optionally of one site."""
+        service = self._pool_overrides()
+        if site_id is not None and pool_id is not None:
+            override = await service.get(site_id=site_id, pool_id=pool_id)
+            if override is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"no override for site {site_id!r} pool {pool_id!r}",
+                )
+            return PoolOverrideResponse.model_validate({"override": override})
+        if pool_id is not None:
+            raise HTTPException(status_code=400, detail="pool_id requires site_id")
+        return PoolOverrideListResponse.model_validate(
+            {"overrides": await service.list(site_id=site_id)}
+        )
+
+    @router.delete(
+        "/pool-overrides",
+        response_model=PoolOverrideDeleteResponse,
+        summary="Delete one pool override; idempotent (admin)",
+    )
+    async def delete_pool_override(
+        self,
+        site_id: str = Query(),  # noqa: B008
+        pool_id: str = Query(),  # noqa: B008
+    ) -> PoolOverrideDeleteResponse:
+        deleted = await self._pool_overrides().delete(site_id=site_id, pool_id=pool_id)
+        return PoolOverrideDeleteResponse(site_id=site_id, pool_id=pool_id, deleted=deleted)
 
     @router.post(
         "/portfolio/resources/import",

@@ -33,6 +33,7 @@ from core_storefront.site_projections import (
 )
 from fastapi import FastAPI
 from market_config.config_loader import ChainConfig
+from market_capacity_publication.capacity_remote import reset_site_event_cursors
 from market_site_client.fixtures.resource_pools import (
     build_projected_resource,
     build_resource_pool_row,
@@ -48,6 +49,7 @@ from market_storefront.middleware import admin_identity
 # The server module completes the controllers' import cycle, as the admin API
 # tests rely on; importing a controller first leaves it partially initialized.
 import market_storefront.server  # noqa: F401  (import order, see above)
+from market_storefront.server import build_pool_override_service
 import market_storefront.negotiation_runtime as negotiation_runtime
 from market_storefront.controllers.admin_controller import router as admin_router
 from market_storefront.controllers.listings_controller import (
@@ -254,9 +256,28 @@ def pool(
     )
 
 
-def _projection_caches(pools: list[dict[str, Any]]):
-    resource_pools = ProjectionCache(client=None)
-    resource_pools._value = pools
+class HarnessProjectionClient:
+    """The poller's view of the harness's pool list, as the site would serve it.
+
+    Tests edit the list in place; a refresh re-reads it rather than failing, and
+    ``snapshots`` counts refreshes so a test can assert one happened.
+    """
+
+    def __init__(self, pools: list[dict[str, Any]]) -> None:
+        self.pools = pools
+        self.snapshots = 0
+
+    async def version(self) -> ProjectionIdentity:
+        return ProjectionIdentity(revision=1, digest="publication")
+
+    async def snapshot(self) -> tuple[ProjectionIdentity, list[dict[str, Any]]]:
+        self.snapshots += 1
+        return await self.version(), self.pools
+
+
+def _projection_caches(client: HarnessProjectionClient):
+    resource_pools = ProjectionCache(client=client)
+    resource_pools._value = client.pools
     resource_pools._state = ProjectionState.loaded
     resource_pools._identity = ProjectionIdentity(revision=1, digest="publication")
     return site_projection_cache.SiteProjectionCaches(
@@ -289,6 +310,7 @@ class PublicationApp:
     site: FakeSite
     buyer: StorefrontClient | None = None
     registries: RecordingRegistries | None = None
+    projection: HarnessProjectionClient | None = None
 
     def set_settlement_clauses(self, clauses: list[dict[str, Any]]) -> None:
         """Replace `[pricing].settlements`, the storefront-wide durable terms."""
@@ -315,6 +337,11 @@ async def publication_app(
     ``RecordingRegistries``; otherwise publication records locally only.
     """
     pools: list[dict[str, Any]] = []
+    projection = HarnessProjectionClient(pools)
+    # Each app has a fresh fake site whose events restart at version one, while
+    # the capacity-event cursor is process-wide; a cursor left by an earlier app
+    # would skip this site's first events.
+    reset_site_event_cursors()
     address_config = (
         Path(negotiation_runtime.__file__).resolve().parent
         / "data"
@@ -375,7 +402,7 @@ async def publication_app(
         stack.enter_context(
             patch.dict(
                 site_projection_cache._caches,
-                {SITE: _projection_caches(pools)},
+                {SITE: _projection_caches(projection)},
                 clear=True,
             )
         )
@@ -394,6 +421,9 @@ async def publication_app(
             else {"alkahest.v1": True, "fiat.stripe.v1": True}
         )
         site = FakeSite(deliverable_modes={"vm"})
+        # The site's live answer is the same list the storefront's cache holds,
+        # until a test gives the site a different generation.
+        site.pool_projection = pools
         capacity = capacity_runtime_over(
             site,
             site_name=SITE,
@@ -419,6 +449,7 @@ async def publication_app(
                 "resolved_domain_registry",
                 "resolved_marketplace_signer",
                 "resolved_system_service",
+                "resolved_pool_override_service",
             )
         }
         container.resolved_sqlite_client = db
@@ -428,6 +459,9 @@ async def publication_app(
         container.resolved_marketplace_signer = TEST_MARKETPLACE_SIGNER
         container.resolved_system_service = SystemService(
             sqlite_client=db, marketplace_signer=TEST_MARKETPLACE_SIGNER
+        )
+        container.resolved_pool_override_service = build_pool_override_service(
+            sqlite_client=db, capacity_runtime=capacity
         )
         routers: tuple[Any, ...] = ()
         if negotiation:
@@ -499,8 +533,10 @@ async def publication_app(
                     site,
                     buyer if negotiation else None,
                     recording,
+                    projection,
                 )
         finally:
+            reset_site_event_cursors()
             thread_store._thread_store = None
             for name, value in previous.items():
                 setattr(container, name, value)

@@ -632,7 +632,10 @@ idempotent carry-over step runs at storefront startup, before the lifecycle loop
   - Accept a pool present in the live generation even if its declarations are currently
     unresolvable.
 - **The response.** It returns the stored record and a feasibility report per shape, computed
-  from the same live generation and labelled with its revision and digest. A shape no member is
+  from the same live generation and labelled with its revision and digest. The report is
+  judged by the derivation publication runs, on declared capacity, with the new record in
+  place of the stored one and without recording a derivation report, so the report and the
+  next cycle cannot disagree. A shape no member is
   feasible for is reported, and the override is accepted anyway; the resulting delisting is
   the intended side effect. The live fetch does not write the cache. For a full preview of
   the next cycle, the operator uses the existing publication dry run.
@@ -856,6 +859,19 @@ Two plan amendments needed no decision:
 
 The invariant that derivation reads the tier where structural keys are derived (decision 6)
 was implicit in the plan and is now stated.
+
+Planning then decided that an empty settlement-clause list is refused and that a delete
+refreshes nothing (decisions 6 and 7).
+
+Implementation found two defects, neither a design question:
+
+- **Status dropped undeclared keys.** The status route returns the common
+  `HealthResponse`, which drops any key it does not declare, so Slice A's carry-over report
+  never reached a caller. The VM storefront declares its own keys on a
+  `VmSystemStatusResponse`, keeping the fix out of the core package.
+- **A leaking test cursor.** The capacity-event cursor is process-wide, while each test
+  app's fake site restarts its events at version one. The publication test harness resets
+  it on entry and exit.
 
 ## Open Questions
 

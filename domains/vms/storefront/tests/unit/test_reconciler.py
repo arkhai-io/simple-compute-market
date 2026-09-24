@@ -141,6 +141,20 @@ def _projected_pool_rows(pool, **kwargs):
     return _projected_pool_rows_impl(pool, **kwargs)
 
 
+def _term(row: dict, field: str):
+    """A row's listing term, as a slice takes it: its shapes' model's terms.
+
+    Terms resolve per GPU model; a projection row carries no row-level price.
+    The model is the one its feasible shapes name, else the only one it has
+    terms for.
+    """
+    models = {shape.gpu_model for shape in row["feasible_shapes"]} or set(
+        row["pricing_by_model"]
+    )
+    (model,) = models
+    return getattr(row["pricing_by_model"][model], field)
+
+
 @pytest.fixture
 def db_path(tmp_path) -> str:
     path = str(tmp_path / "reconciler_test.db")
@@ -1175,7 +1189,7 @@ class TestProjectedResourceUsage:
             member_availability={("site-a", "kvm2"): 1},
         )
 
-        assert (live.total, live.available, live.gpu_model) == (4, 3, "H200")
+        assert (live.total, live.available) == (4, 3)
         assert "available" not in by_id["kvm2"]
         assert fallback.available == 1
 
@@ -1187,7 +1201,9 @@ class TestProjectedResourceUsage:
         )
         assert usage.available == 2
 
-    def test_gpu_model_read_from_attributes(self):
+    def test_usage_carries_no_gpu_model(self):
+        """A listing's model comes from its shape, so a member's usage is
+        counts alone; a model on the usage would be a second, unread source."""
         usage = _projected_resource_usage(
             {
                 "physical_resource_id": "res-1", "resource_type": "compute.gpu",
@@ -1196,14 +1212,7 @@ class TestProjectedResourceUsage:
             },
             site_id="site-a", member_availability=None,
         )
-        assert usage.gpu_model == "A100"
-
-    def test_gpu_model_none_when_absent(self):
-        usage = _projected_resource_usage(
-            {"physical_resource_id": "res-1", "resource_type": "compute.gpu", "capacity": {"gpu_count": 1}},
-            site_id="site-a", member_availability=None,
-        )
-        assert usage.gpu_model is None
+        assert not hasattr(usage, "gpu_model")
 
 
 # ---------------------------------------------------------------------------
@@ -1216,13 +1225,13 @@ class TestFungibleAvailabilityFromBuckets:
         assert _fungible_availability_from_buckets("gpu-pool", None) is None
 
     def test_loaded_empty_family_is_trusted_zero(self):
-        assert _fungible_availability_from_buckets("gpu-pool", []) == (0, 0, None)
+        assert _fungible_availability_from_buckets("gpu-pool", []) == (0, 0)
 
     def test_loaded_family_with_no_matching_pool_is_trusted_zero(self):
         buckets = [
             {"resource_pool_id": "other-pool", "available": {"gpu_count": 9}, "resource_count": 2},
         ]
-        assert _fungible_availability_from_buckets("gpu-pool", buckets) == (0, 0, None)
+        assert _fungible_availability_from_buckets("gpu-pool", buckets) == (0, 0)
 
     def test_matching_readable_bucket_is_used(self):
         buckets = [
@@ -1233,14 +1242,14 @@ class TestFungibleAvailabilityFromBuckets:
                 "grouping_attributes": {"gpu_model": "H100"},
             },
         ]
-        assert _fungible_availability_from_buckets("gpu-pool", buckets) == (6, 12, "H100")
+        assert _fungible_availability_from_buckets("gpu-pool", buckets) == (6, 12)
 
     def test_max_across_multiple_matching_buckets_not_sum(self):
         buckets = [
             {"resource_pool_id": "gpu-pool", "available": {"gpu_count": 2}, "resource_count": 1},
             {"resource_pool_id": "gpu-pool", "available": {"gpu_count": 6}, "resource_count": 1},
         ]
-        max_available, total_available, _ = _fungible_availability_from_buckets(
+        max_available, total_available = _fungible_availability_from_buckets(
             "gpu-pool", buckets,
         )
         assert max_available == 6
@@ -1260,7 +1269,7 @@ class TestFungibleAvailabilityFromBuckets:
             {"resource_pool_id": "gpu-pool", "available": {}, "resource_count": 1},
             {"resource_pool_id": "gpu-pool", "available": {"gpu_count": 4}, "resource_count": 1},
         ]
-        assert _fungible_availability_from_buckets("gpu-pool", buckets) == (4, 4, None)
+        assert _fungible_availability_from_buckets("gpu-pool", buckets) == (4, 4)
 
 
 # ---------------------------------------------------------------------------
@@ -1305,12 +1314,18 @@ class TestProjectedPoolRows:
         even when a same-named local row exists -- but the pool still
         publishes, priceless, since a missing storefront-override tier is
         not a reason to suppress the pool entirely."""
-        rows = _project_vm_pool_rows({"resource_pool_id": "gpu-pool", "resources": []},
+        rows = _project_vm_pool_rows({"resource_pool_id": "gpu-pool", "resources": [
+            {
+                "physical_resource_id": "res-1", "resource_type": "compute.gpu",
+                "capacity": {"gpu_count": 1}, "attributes": {"gpu_model": "H100"},
+                "enabled": True,
+            },
+        ]},
         site_id="site-b", home_site="site-a",
         local_pricing={"gpu-pool": self._pricing_row()},
         member_availability=None, capacity_buckets=None,)
         assert len(rows) == 1
-        assert rows[0]["min_price"] is None
+        assert _term(rows[0], "min_price") is None
         assert rows[0]["region"] is None
 
     def test_non_home_site_pool_publishes_from_a_complete_hint_alone(self):
@@ -1345,15 +1360,21 @@ class TestProjectedPoolRows:
         local_pricing={}, member_availability=None, capacity_buckets=None,)
         assert len(rows) == 1
         assert rows[0]["region"] == "Nevada, US"
-        assert rows[0]["min_price"] == "5.00"
-        assert rows[0]["token"] == "0xhint"
+        assert _term(rows[0], "min_price") == "5.00"
+        assert _term(rows[0], "token") == "0xhint"
 
     def test_home_site_pool_with_no_local_row_publishes_priceless_by_default(self):
-        rows = _project_vm_pool_rows({"resource_pool_id": "unpriced", "resources": []},
+        rows = _project_vm_pool_rows({"resource_pool_id": "unpriced", "resources": [
+            {
+                "physical_resource_id": "res-1", "resource_type": "compute.gpu",
+                "capacity": {"gpu_count": 1}, "attributes": {"gpu_model": "H100"},
+                "enabled": True,
+            },
+        ]},
         site_id="site-a", home_site="site-a",
         local_pricing={}, member_availability=None, capacity_buckets=None,)
         assert len(rows) == 1
-        assert rows[0]["min_price"] is None
+        assert _term(rows[0], "min_price") is None
         assert rows[0]["region"] is None
         assert rows[0]["sla"] == 0.0
 
@@ -1377,17 +1398,23 @@ class TestProjectedPoolRows:
             },
         ),)
         assert len(rows) == 1
-        assert rows[0]["min_price"] == "3.00"
+        assert _term(rows[0], "min_price") == "3.00"
 
     def test_home_site_pool_with_local_row_still_uses_it_as_the_override(self):
         """The corrected behavior doesn't disturb the ordinary case: a
         real local row still wins as the top-precedence override."""
-        rows = _project_vm_pool_rows({"resource_pool_id": "gpu-pool", "resources": []},
+        rows = _project_vm_pool_rows({"resource_pool_id": "gpu-pool", "resources": [
+            {
+                "physical_resource_id": "res-1", "resource_type": "compute.gpu",
+                "capacity": {"gpu_count": 1}, "attributes": {"gpu_model": "H100"},
+                "enabled": True,
+            },
+        ]},
         site_id="site-a", home_site="site-a",
         local_pricing={"gpu-pool": self._pricing_row(min_price="10")},
         member_availability=None, capacity_buckets=None,)
         assert len(rows) == 1
-        assert rows[0]["min_price"] == "10"
+        assert _term(rows[0], "min_price") == "10"
 
     def test_builds_one_fungible_row_for_home_site_pool_with_pricing(self):
         rows = _project_vm_pool_rows({
@@ -1415,7 +1442,7 @@ class TestProjectedPoolRows:
         assert row["pool_id"] == "gpu-pool"
         assert row["site_id"] == "site-a"
         assert row["total_gpu_count"] == 4
-        assert row["min_price"] == "10"
+        assert _term(row, "min_price") == "10"
         assert row["listing_cardinality_mode"] == "fungible"
         assert row["listing_cardinality_mode_explanation"] is None
         assert row["single_resource_id"] is None
@@ -1487,7 +1514,7 @@ class TestProjectedPoolRows:
         assert rows[0]["total_gpu_count"] == 0
         assert rows[0]["member_count"] == 0
 
-    def test_gpu_model_prefers_resource_attributes_over_local_pricing(self):
+    def test_the_listing_model_is_the_members_never_the_legacy_rows(self):
         rows = _project_vm_pool_rows({
             "resource_pool_id": "gpu-pool",
             "resources": [
@@ -1502,9 +1529,12 @@ class TestProjectedPoolRows:
         site_id="site-a", home_site="site-a",
         local_pricing={"gpu-pool": self._pricing_row(gpu_model="H100")},
         member_availability=None, capacity_buckets=None,)
-        assert rows[0]["gpu_model"] == "A100"
+        assert {shape.gpu_model for shape in rows[0]["listing_shapes"]} == {"A100"}
+        assert set(rows[0]["pricing_by_model"]) == {"A100"}
 
-    def test_gpu_model_falls_back_to_local_pricing_when_resources_lack_it(self):
+    def test_a_member_without_a_model_takes_none_from_the_legacy_row(self):
+        """A shape names a model only from a declaration; the legacy row's
+        model would advertise hardware no member declares."""
         rows = _project_vm_pool_rows({
             "resource_pool_id": "gpu-pool",
             "resources": [
@@ -1518,7 +1548,8 @@ class TestProjectedPoolRows:
         site_id="site-a", home_site="site-a",
         local_pricing={"gpu-pool": self._pricing_row(gpu_model="H100")},
         member_availability=None, capacity_buckets=None,)
-        assert rows[0]["gpu_model"] == "H100"
+        assert rows[0]["listing_shapes"] == ()
+        assert rows[0]["pricing_by_model"] == {}
 
     # -- region/sla hint resolution ---------------------------------------
 
@@ -1629,7 +1660,7 @@ class TestProjectedPoolRows:
         site_id="site-a", home_site="site-a",
         local_pricing={"gpu-pool": self._pricing_row(min_price="10")},
         member_availability=None, capacity_buckets=None,)
-        assert rows[0]["min_price"] == "10"
+        assert _term(rows[0], "min_price") == "10"
 
     def test_pricing_pool_hint_used_when_no_storefront_override(self):
         rows = _project_vm_pool_rows({
@@ -1647,7 +1678,7 @@ class TestProjectedPoolRows:
         site_id="site-a", home_site="site-a",
         local_pricing={"gpu-pool": self._pricing_row(min_price=None)},
         member_availability=None, capacity_buckets=None,)
-        assert rows[0]["min_price"] == "5.00"
+        assert _term(rows[0], "min_price") == "5.00"
 
     def test_pricing_falls_back_to_per_model_config_default(self):
         rows = _project_vm_pool_rows({
@@ -1667,7 +1698,7 @@ class TestProjectedPoolRows:
                 "H100": GpuPricingFields(min_price="3.00"),
             },
         ),)
-        assert rows[0]["min_price"] == "3.00"
+        assert _term(rows[0], "min_price") == "3.00"
 
     def test_pricing_falls_back_to_flat_config_default_as_last_resort(self):
         rows = _project_vm_pool_rows({
@@ -1685,7 +1716,7 @@ class TestProjectedPoolRows:
         hint_resolution=PoolHintResolutionSettings(
             gpu_pricing_flat_default=GpuPricingFields(min_price="1.00"),
         ),)
-        assert rows[0]["min_price"] == "1.00"
+        assert _term(rows[0], "min_price") == "1.00"
 
     def test_specific_resource_multi_member_prices_each_by_its_own_model(self):
         """Two members with different GPU models must resolve pricing
@@ -1718,9 +1749,9 @@ class TestProjectedPoolRows:
         site_id="site-a", home_site="site-a",
         local_pricing={"gpu-pool": self._pricing_row(min_price=None)},
         member_availability=None, capacity_buckets=None,)
-        by_resource = {row["single_resource_id"]: row for row in rows}
-        assert by_resource["res-1"]["min_price"] == "5.00"
-        assert by_resource["res-2"]["min_price"] == "3.00"
+        # Every row carries each model's terms; a listing takes its shape's.
+        pricing = rows[0]["pricing_by_model"]
+        assert (pricing["H100"].min_price, pricing["A100"].min_price) == ("5.00", "3.00")
 
     # -- listing_cardinality_mode resolution --------------------------------------
 
@@ -2564,3 +2595,135 @@ class TestListingShapes:
 
         assert [row["resource_id"] for row in _shape_slices(db_path, [pool], holds=holds)] == ["m1"]
         assert holds == {("resource", "site-a", "m2")}
+
+
+_TWO_GPU_SHAPE = {"gpu": {"count": 2, "model": "H100"}, "memory": {"gib": 128}}
+
+
+def _override_rows(pool, *, override=None, local_pricing=None, site_id="site-a", **kwargs):
+    """One pool's rows with ``override`` as its site-scoped override, and the
+    site report the pass recorded into."""
+    report = _SiteDerivationReport()
+    holds: set = set()
+    rows = _projected_pool_rows(
+        pool,
+        site_id=site_id,
+        home_site="site-a",
+        local_pricing=local_pricing or {},
+        member_availability=None,
+        capacity_buckets=None,
+        override=override,
+        report=report,
+        holds=holds,
+        **kwargs,
+    )
+    return rows, report, holds
+
+
+def _digests(shapes) -> set[str]:
+    return {shape.digest for shape in shapes}
+
+
+class TestStorefrontOverrideTier:
+    """The site-scoped override is the first shape and term tier."""
+
+    def test_an_override_replaces_the_pool_hint_whole(self):
+        pool = _shaped_pool("gpu", [_member("m1", capacity=_BIG)], shapes=[_SMALL_SHAPE, _TWO_GPU_SHAPE])
+
+        (row,), _, _ = _override_rows(pool, override={"listing_shapes": [_TWO_GPU_SHAPE]})
+
+        assert row["shape_source"] == "storefront_override"
+        assert [shape.shape for shape in row["listing_shapes"]] == [_TWO_GPU_SHAPE]
+
+    def test_an_override_stating_the_hints_shape_keeps_its_key(self):
+        pool = _shaped_pool("gpu", [_member("m1", capacity=_BIG)], shapes=[_SMALL_SHAPE])
+
+        (hinted,), _, _ = _override_rows(pool)
+        (overridden,), _, _ = _override_rows(pool, override={"listing_shapes": [_SMALL_SHAPE]})
+
+        # Keys depend only on the shape digest, not on the tier that stated it.
+        assert _digests(overridden["feasible_shapes"]) == _digests(hinted["feasible_shapes"])
+
+    def test_an_override_without_shapes_leaves_the_hint_in_place(self):
+        pool = _shaped_pool("gpu", [_member("m1", capacity=_BIG)], shapes=[_SMALL_SHAPE])
+
+        (row,), _, _ = _override_rows(pool, override={"sla": 99.0})
+
+        assert row["shape_source"] == "pool_hint"
+
+    def test_an_unreadable_stored_override_holds_the_pool_and_is_reported(self):
+        pool = _shaped_pool("gpu", [_member("m1", capacity=_BIG)], shapes=[_SMALL_SHAPE])
+
+        rows, report, holds = _override_rows(
+            pool, override={"listing_shapes": [{"gpu": {"count": 1, "model": "H100"}, "fpga": {}}]}
+        )
+
+        assert rows == []
+        assert ("pool", "site-a", "gpu") in holds
+        (problem,) = report.unreadable_shapes["gpu"]
+        assert problem.startswith("storefront_override: ")
+
+    def test_commercial_fields_merge_over_the_legacy_row_field_by_field(self):
+        pool = _shaped_pool("gpu", [_member("m1", capacity={"gpu_count": 1})])
+        legacy = {
+            "gpu": {
+                "gpu_model": "H100", "region": None, "sla": 90.0, "min_price": "10",
+                "token": "0xlegacy", "accepted_escrows": None, "settlements": None,
+                "max_duration_seconds": 3600,
+            }
+        }
+
+        (row,), report, _ = _override_rows(
+            pool, override={"min_price": "7", "sla": 99.5}, local_pricing=legacy,
+            hint_resolution=PoolHintResolutionSettings(),
+        )
+
+        terms = row["pricing_by_model"]["H100"]
+        assert (terms.min_price, terms.token, terms.max_duration_seconds) == ("7", "0xlegacy", 3600)
+        assert row["sla"] == 99.5
+        assert report.legacy_overrides_in_effect == {"gpu": ["max_duration_seconds", "token"]}
+
+    def test_the_legacy_report_names_region_and_accepted_escrows(self):
+        pool = _shaped_pool("gpu", [_member("m1", capacity={"gpu_count": 1})])
+        del pool["pool_metadata"]["policy_tags"]["region"]
+        legacy = {
+            "gpu": {
+                "gpu_model": "H100", "region": "us-east", "sla": None, "min_price": None,
+                "token": None, "accepted_escrows": "[]", "settlements": None,
+                "max_duration_seconds": None,
+            }
+        }
+
+        (row,), report, _ = _override_rows(pool, local_pricing=legacy)
+
+        assert row["region"] == "us-east"
+        assert report.legacy_overrides_in_effect == {"gpu": ["accepted_escrows", "region"]}
+
+    def test_a_region_hint_leaves_the_legacy_region_unreported(self):
+        pool = _shaped_pool("gpu", [_member("m1", capacity={"gpu_count": 1})])
+        legacy = {"gpu": {"gpu_model": None, "region": "elsewhere", "sla": None,
+                          "min_price": None, "token": None, "accepted_escrows": None,
+                          "settlements": None, "max_duration_seconds": None}}
+
+        (row,), report, _ = _override_rows(pool, local_pricing=legacy)
+
+        assert row["region"] == "us-east"
+        assert report.legacy_overrides_in_effect == {}
+
+    def test_an_override_at_a_non_home_site_applies(self):
+        pool = _shaped_pool("gpu", [_member("m1", capacity=_BIG)])
+
+        (row,), report, _ = _override_rows(
+            pool,
+            site_id="site-b",
+            override={"listing_shapes": [_SMALL_SHAPE], "min_price": "4"},
+            # The same-named home-site legacy row must not reach another site.
+            local_pricing={"gpu": {"gpu_model": None, "region": None, "sla": None,
+                                   "min_price": "10", "token": None, "accepted_escrows": None,
+                                   "settlements": None, "max_duration_seconds": None}},
+        )
+
+        assert [shape.shape for shape in row["listing_shapes"]] == [_SMALL_SHAPE]
+        assert row["pricing_by_model"]["H100"].min_price == "4"
+        assert report.legacy_overrides_in_effect == {}
+

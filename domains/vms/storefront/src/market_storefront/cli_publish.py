@@ -24,23 +24,10 @@ from rich.console import Console
 from rich.table import Table
 from storefront_client import StorefrontClientError, SyncStorefrontClient
 
+from .cli_common import admin_client as _admin_client
 from .cli_common import resolve_storefront_url
 
 PUBLICATION_LOOP = "publication"
-
-
-def _admin_client(base_url: str) -> SyncStorefrontClient:
-    # Loop controls are administrator routes. The storefront's own signer must
-    # be configured under `identity.administrators` for this command to act.
-    from .utils.config import resolve_marketplace_signer
-
-    signer = resolve_marketplace_signer()
-    return SyncStorefrontClient(
-        base_url,
-        signer=signer,
-        caller_role="admin",
-        expected_publishers=TrustedIdentitySet(identities=(signer.identity,)),
-    )
 
 
 def _seller_client(base_url: str) -> SyncStorefrontClient:

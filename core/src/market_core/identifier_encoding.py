@@ -7,8 +7,8 @@ therefore written as its decimal length, a colon, and exactly that many
 characters, which fixes each boundary regardless of content and makes a joined
 key injective.
 
-Derivation keys and signed administrator resources both depend on this exact
-byte form; changing it changes every stored key.
+Stored listing derivation keys depend on this exact byte form; changing it
+changes every stored key.
 """
 
 from __future__ import annotations

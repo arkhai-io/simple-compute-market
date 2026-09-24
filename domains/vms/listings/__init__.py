@@ -39,6 +39,7 @@ from domains.vms.listings.reconciler import (
     held_gpu_counts,
     held_gpu_counts_by_resource,
     ShapeFeasibility,
+    declared_shape_feasibility,
     listing_pool_key,
     listing_resource_key,
     listing_shape_key,
@@ -46,6 +47,7 @@ from domains.vms.listings.reconciler import (
     stale_open_listing_ids,
 )
 from domains.vms.listings.listing_shapes import (
+    SHAPE_SOURCE_OVERRIDE,
     ResolvedShape,
     ShapeResolution,
     resolve_shape,
@@ -75,6 +77,8 @@ from domains.vms.listings.strategy import (
 )
 
 __all__ = [
+    "SHAPE_SOURCE_OVERRIDE",
+    "declared_shape_feasibility",
     "ResolvedShape",
     "ShapeFeasibility",
     "ShapeResolution",

@@ -1,9 +1,8 @@
 """CLI helpers for the storefront's `market-storefront` console script.
 
-Container-path translation and venv-aware subprocess wrappers, used
-across the per-group CLI modules. The env-file readers that used to
-live here were retired with the TOML-only config migration; the
-`register` / `serve` commands now read CONFIG directly.
+Storefront URL resolution, the administrator client, container-path
+translation, and venv-aware subprocess wrappers, shared across the per-group
+CLI modules. Configuration is read from TOML by the commands that need it.
 """
 
 from __future__ import annotations
@@ -13,6 +12,8 @@ import os
 import subprocess
 
 import typer
+from market_identity import TrustedIdentitySet
+from storefront_client import SyncStorefrontClient
 
 # parents[2]: market_storefront -> src -> storefront
 STOREFRONT_ROOT = Path(__file__).resolve().parents[2]
@@ -54,6 +55,26 @@ def resolve_storefront_url(
     if isinstance(base_url, str) and base_url:
         return base_url
     return f"http://localhost:{default_port}"
+
+
+def admin_client(base_url: str) -> SyncStorefrontClient:
+    """A client signing as the storefront's own administrator.
+
+    Administrator routes authenticate a principal the storefront pins under
+    `identity.administrators`, so the storefront's own signer must be
+    configured there for a command using this client to act.
+    """
+    # Resolving the signer loads the storefront's settings, which only a
+    # command that talks to the storefront needs.
+    from .utils.config import resolve_marketplace_signer
+
+    signer = resolve_marketplace_signer()
+    return SyncStorefrontClient(
+        base_url,
+        signer=signer,
+        caller_role="admin",
+        expected_publishers=TrustedIdentitySet(identities=(signer.identity,)),
+    )
 
 
 def _resolve_db_path(db: str | None) -> str | None:
