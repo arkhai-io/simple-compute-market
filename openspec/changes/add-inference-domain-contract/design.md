@@ -23,6 +23,19 @@ stated in any specification and the decisions below depend on it.
 | Domain conformance | `market_core.domain_conformance.assert_domain_conformance` | Shared harness every domain's six codecs pass |
 | Inference anywhere | — | Nothing. No identity, schema, filter spec, or change |
 
+### What changed since the investigation
+
+Re-verified on 2026-09-24 against `origin/dev` at `29b84d82`. Four changes the
+table above treated as pending have merged and been archived:
+`capacity-resource-administration`, `project-capacity-resources-without-hosts`,
+`pool-declared-advertisement-and-backing`, and `unbacked-listing-publication`.
+Backing is now a declared property of every pool and listing, with promoted
+requirements in `storefront-publication` and `registry-discovery`, and the
+compute registry schema publishes it. `kit/capacity-publication`'s hooks moved
+under that work, so any copy of the API-credits publication roles must be taken
+from current `dev`. `publish-indicative-listing-rates` is design-complete and
+unblocked. The decisions below were corrected in place; none was reversed.
+
 ### What planning settled before this change
 
 Five points were settled during planning (2026-09-16 and 2026-09-19) and are
@@ -189,32 +202,38 @@ comparing across assets needs an exchange rate, which the registry must not be
 an authority on — the same reasoning `publish-indicative-listing-rates` records
 for compute.
 
-That change is also building the two generic primitives a monetary rate filter
+That change — design-complete and unblocked now that the backing work it waited
+on has merged — is building the two generic primitives a monetary rate filter
 actually needs: an exact-decimal filter value type and declarative filter
 co-requirements. Inference must not duplicate them. **Revisit trigger:** when
-`publish-indicative-listing-rates` lands, decide whether an inference listing
+`publish-indicative-listing-rates` promotes them, decide whether an inference listing
 publishes an `asking_rate` per million tokens in the settlement asset, reusing
 its shape. Until then, comparability across assets is client-side.
 
 ### Quota-backed publication in version 1
 
 An inference seller's supply is, in truth, not finite in the way a GPU is: a
-model server can keep serving. But `unbacked-listing-publication` — the change
-that makes a listing with no admission authority a legal shape — has zero of
-sixty tasks complete, and it is scoped to the compute family.
+model server can keep serving. Backing is now a declared property of every pool
+and listing — `unbacked-listing-publication` merged and was archived on
+2026-09-24 — so the question is not whether the shape exists but which value
+inference admits.
 
-So version 1 publishes exactly the way API credits does: the listing names a
-`capacity_site_id` and a `resource_id` naming a quota resource in the
-authority's ledger, the seller declares how many credits it is willing to sell,
-the reconciler closes the listing at zero and reopens it when quota is added,
-and issuance commits finite quota through an open-ended reservation. This works
-today and needs nothing new.
+Version 1 admits only the backed value, and publishes exactly the way API
+credits does: the listing names a `capacity_site_id` and a `resource_id` naming
+a quota resource in the authority's ledger, the seller declares how many credits
+it is willing to sell, the reconciler closes the listing at zero and reopens it
+when quota is added, and issuance commits finite quota through an open-ended
+reservation. The quota is a **sales cap**, not capacity: a seller whose declared
+quota reaches zero leaves discovery while the model server is fine, so the
+seller path should default it large. Inference carries the backing discriminator
+from day one with backed as its only admitted value — the capacity variant of
+the declared property, not a domain-local shape.
 
-**Revisit trigger:** when `unbacked-listing-publication` promotes the backing
-discriminator, decide whether inference publishes unbacked listings. Its design
-already says "a market family with no physical supply at all reaches it by the
-same route," so the door is open. Backing is immutable per durable listing there,
-so the transition would be close-and-republish, not a migration.
+Admitting the unbacked value later is an inference filter-specification version
+bump plus close-and-republish of affected listings, because backing is immutable
+per durable listing. It is not a migration. What unbacked would buy an inference
+seller is not declaring a sellable quantity and not being closed at zero — a
+convenience, not a correctness property — so it waits for a seller to ask.
 
 ### Provision intent is the API-credits shape under a new kind
 
@@ -345,8 +364,9 @@ usage fields under a version bump, not a reinterpretation.
   credit through the per-credit settlement rate.
 - **Declared finite supply.** Quota-backed publication means a seller declares
   a sellable credit quantity that a model server does not physically enforce.
-  This is API credits' posture today and inherits its limits; the unbacked
-  revisit trigger is the way out.
+  This is API credits' posture today and inherits its limits; the quota is a
+  sales cap, and admitting the unbacked backing value later is a
+  filter-specification bump, not a migration.
 - **Cross-asset comparison is client-side.** Accepted for the reasons
   `publish-indicative-listing-rates` records; that change owns the primitives
   for anything better.
@@ -361,11 +381,11 @@ Each carries its revisit trigger. None is prescribed by a task in this change;
 where a task touches one it is an explicit decision gate.
 
 1. **`asking_rate` per million tokens.** Trigger:
-   `publish-indicative-listing-rates` promotes the exact-decimal value type and
-   filter co-requirements.
-2. **Unbacked inference listings.** Trigger: `unbacked-listing-publication`
-   promotes the backing discriminator and its scope is widened beyond the
-   compute family.
+   `publish-indicative-listing-rates` — now unblocked — promotes the
+   exact-decimal value type and filter co-requirements.
+2. **Admitting the unbacked backing value for inference listings.** The
+   property exists; the trigger is a seller who needs it. Cost: an inference
+   filter-specification bump and close-and-republish.
 3. **Whether the inference authority is the same kit-composed service binary as
    API credits deployed twice, or a distinct distribution.** Owned by
    `extract-access-issuance-kit`; irrelevant to this change's vocabulary.
