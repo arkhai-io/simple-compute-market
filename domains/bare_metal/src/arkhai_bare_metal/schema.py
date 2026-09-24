@@ -50,6 +50,12 @@ class BareMetalListing(BaseModel):
 
     kind: Literal["bare_metal.v2"] = BARE_METAL_SCHEMA_KIND
     offering_mode: Literal["bare_metal"] = "bare_metal"
+    # Every bare-metal listing is backed by one selected-site Physical Resource.
+    # Required with no default so a listing that does not disclose it is
+    # refused rather than classified.
+    capacity_backing: Literal["backed"] = Field(
+        description="Whether an admission authority stands behind the listing.",
+    )
     host_id: str = Field(
         description="Bare-metal executor-local machine identity.",
     )

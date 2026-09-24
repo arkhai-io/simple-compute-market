@@ -60,6 +60,35 @@ The families have independent revisions and digests. A storefront replaces each 
 
 Reconciliation compares desired publication with current seller state and registry state. Capacity events trigger reconciliation regardless of which seller action caused the availability change, because a shared site may serve several storefronts. Deal-scoped outcomes travel through a separate owner-specific route and are not broadcast as capacity deltas.
 
+Two reconciliations run over listings, and they differ in scope:
+
+- **Source publication** applies to every listing, backed or not. A removed or disabled source closes the listings derived from it, and a changed source is reflected according to the identity rule below. Without it an unbacked listing's advertisement would outlive its declaration indefinitely, which is worse than a stale capacity number because no later event corrects it.
+- **Capacity availability** applies only to capacity-backed listings, with its close-before-reopen sequencing. An unbacked listing has no availability to track; its quantity is bounded by what its source declares, which is what being inexhaustible means. The availability paths — capacity events, a released reservation, a failed deal — read only listings bound as backed, so an unbacked listing never enters them.
+
+One comparison gates a refresh and every reopen. A listing whose published identity differs from what its source now derives, or whose binding's backing disagrees with its source's, is not refreshed in place and is not reopened by any path, including one a capacity event drives. The same derivation serves the seller's inventory guard, which compares a listing against a fresh derivation of its own source rather than against any matching row, because a field's provenance is decided per listing, not per field.
+
+## Listing identity
+
+A listing's identity is the physical resource it offers: the supply it draws from (site, and pool or Physical Resource), what the resource is (offering mode, resource type and subtype, and categorical attributes such as `gpu_model`), where it is (`region`), and how much one listing offers (the enumerated slice quantity and every other declared dimension it publishes). Everything else — price and pricing hints, settlement options, maximum duration, SLA — is a term of sale.
+
+The line falls there for three reasons. A listing ID is what a buyer saves and negotiates against, and what accepted terms and settlement records reference, so changing what is sold under one ID reinterprets every such reference. Terms of sale are meant to move: a price change that orphaned buyer references would make every repricing a delisting. And the identity fields are the ones admission matches — the capacity claim carries the pool or resource, region, model, and requested dimensions — so what a listing is and what a reservation will look for are one set of fields.
+
+A term change therefore refreshes an open listing in place, and an identity change closes it and, where the source still supports one, publishes a listing under a new derivation identity. A listing commits only to the fields it publishes: reconciliation never adds an identity field a listing did not publish, since that would make a new commitment under an existing identity. Capacity backing sits outside the split. It is not a property of the resource but of whether an admission authority stands behind the listing, and it is fixed on the binding when the listing is created.
+
+## Autonomous publication
+
+VM publication runs as a lifecycle loop in the storefront's own process, not on an operator's command; bare-metal publication remains an operator-invoked command over the same publication sources. A seller declares supply at their site, and the site's projection carries it to every storefront that trusts that site; one storefront can publish for several seller sites whose sellers hold no storefront credential. An operator-run command would leave a site's declaration unpublished until someone ran it.
+
+The loop follows the storefront's lifecycle conventions: the pause holds it with every other loop without affecting trading, one cycle can be run while held, and a dry run reports what that cycle would do and changes nothing. A change in a site's projection generation wakes an unheld loop. Terms come only from durable sources — pool declarations, the storefront's per-pool overrides, and configuration — because a cycle must be reproducible without the arguments of whatever command last ran. The loop builds only the publication sources of the domains it publishes, so a storefront can register another domain whose publication runs elsewhere.
+
+## Durable seller close
+
+Every close records whether its seller or reconciliation made it. A seller's close is enforced at the listing write every reopen passes through, not by each domain's reconciler: a write that would reopen it is refused unless the seller asks, and a later reconciliation close keeps the seller as its reason. Enforcing it once at that write is what keeps a domain that forgets the rule from undoing a seller's decision on its next capacity event.
+
+## Registry convergence
+
+For VM and API-credit publication, the local listing is the publication decision and registries follow it; bare-metal publication does not yet record per-registry outcomes. A close or reopen changes the local listing first, so a registry never holds a state the storefront has not decided, and a local change that fails reaches the caller with no registry told. Each registry's outcome is recorded per listing, and every publication pass resends to any registry whose recorded outcome disagrees with its listing's local status exactly what that status implies, and only to that registry. The records are the repair source, so no separate journal exists, and a registry that stays unreachable remains diverged for the next pass.
+
 ## Stable subjects and canonical principals
 
 Storefront records distinguish durable market subjects from credentials. Listings retain their listing identity and storefront ownership context; negotiation threads, messages, accepted terms, settlement plans, heartbeat evidence, claims, obligations, and audit records carry the exact canonical buyer, seller, sender, payer, claimant, or actor principal appropriate to the record. Administrator and service-peer records similarly bind a complete principal to a named subject and role.

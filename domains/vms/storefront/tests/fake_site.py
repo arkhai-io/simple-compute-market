@@ -73,6 +73,10 @@ class FakeSite:
     def transport(self) -> httpx.MockTransport:
         return httpx.MockTransport(self._handle)
 
+    def emit(self, kind: str, resource_id: str | None = None) -> None:
+        """Append one capacity event to the feed, as the site would on a change."""
+        self._emit(kind, resource_id)
+
     def _emit(self, kind: str, resource_id: str | None) -> None:
         self.events.append(
             {

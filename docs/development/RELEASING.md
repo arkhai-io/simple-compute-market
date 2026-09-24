@@ -36,8 +36,11 @@ constrained with lower bounds (see Versioning policy).
 | `arkhai-kit-alkahest` | `kit/alkahest/` | 0.1.0 | none |
 | `arkhai-kit-config` | `kit/config/` | 0.1.0 | `arkhai-kit-alkahest` |
 | `arkhai-bare-metal` | `domains/bare_metal/` | 0.1.0 | none (`storefront` extra: `arkhai-core-storefront`) |
-| `arkhai-vms-buyer` | `domains/vms/buyer/` | 0.1.0 | `arkhai-core`, `arkhai-core-buyer`, `arkhai-kit-alkahest`, `arkhai-kit-config`, `arkhai-kit-policy` |
-| `arkhai-vms-storefront` | `domains/vms/storefront/` | 0.1.0 | `arkhai-core`, `arkhai-core-registry-client`, `arkhai-core-storefront`, `arkhai-core-storefront-client`, `arkhai-kit-alkahest`, `arkhai-kit-config`, `arkhai-kit-identity`, `arkhai-kit-policy` |
+| `arkhai-vms-listings` | `domains/vms/listings/` | 0.1.0 | `arkhai-kit-alkahest`, `arkhai-kit-identity`, `arkhai-kit-settlement-runtime` (`pools` extra: `arkhai-kit-resource-pools`) |
+| `arkhai-vms-negotiation` | `domains/vms/negotiation/` | 0.1.0 | `arkhai-vms-listings`, `arkhai-kit-alkahest`, `arkhai-kit-policy` |
+| `arkhai-vms-settlement` | `domains/vms/settlement/` | 0.1.0 | `arkhai-vms-listings`, `arkhai-kit-alkahest` |
+| `arkhai-vms-buyer` | `domains/vms/buyer/` | 0.1.0 | `arkhai-core`, `arkhai-core-buyer`, `arkhai-kit-alkahest`, `arkhai-kit-config`, `arkhai-kit-policy`, `arkhai-vms-listings`, `arkhai-vms-negotiation`, `arkhai-vms-settlement` |
+| `arkhai-vms-storefront` | `domains/vms/storefront/` | 0.1.0 | `arkhai-core`, `arkhai-core-registry-client`, `arkhai-core-storefront`, `arkhai-core-storefront-client`, `arkhai-kit-alkahest`, `arkhai-kit-config`, `arkhai-kit-identity`, `arkhai-kit-policy`, `arkhai-vms-listings` (`pools`), `arkhai-vms-negotiation`, `arkhai-vms-settlement` |
 | `arkhai-compute-provisioning-service` | `provisioning/compute/service/` | 0.1.0 | `arkhai-compute-provisioning`, `arkhai-kit-site`, `arkhai-kit-resource-pools`, `arkhai-core-storefront-client` (`adapters` extra installs both current adapters) |
 | `arkhai-vms-provisioning-adapter` | `domains/vms/provisioning/adapter/` | 0.1.0 | compute service, VM operator client, resource pools |
 | `arkhai-bare-metal-provisioning-adapter` | `domains/bare_metal/provisioning/adapter/` | 0.1.0 | compute service, bare-metal domain |
@@ -62,11 +65,18 @@ below.
 - Each job builds with `uv build --no-sources` and publishes via OIDC
   trusted publishing.
 
-Most packages publish an sdist and a wheel. The two buyer plugins
-(`arkhai-vms-buyer`, `arkhai-apicredits-buyer`) publish a wheel only: they
-vendor sibling concept modules (`listings`, `negotiation`) through `../`
-force-includes that an sdist cannot carry. They are marked `wheel_only`
-in the table and built with `uv build --wheel`.
+Most packages publish an sdist and a wheel. Packages marked `wheel_only`
+in the table (the two buyer plugins and the VM storefront) are built with
+`uv build --wheel` and publish a wheel only.
+
+No package vendors another's modules. A package whose sources sit at their
+own import path, such as `domains/vms/listings` or
+`domains/apicredits/buyer`, maps its directory onto that path in its wheel
+configuration instead of listing files, so a module added there ships
+without a packaging edit. Code another package needs is its own wheel and a
+declared dependency: the VM storefront and buyer depend on
+`arkhai-vms-listings`, `arkhai-vms-negotiation`, and `arkhai-vms-settlement`
+rather than carrying their sources.
 
 Build order is not constrained. `uv build --no-sources` builds in an
 isolated environment that installs only the build backend, never the

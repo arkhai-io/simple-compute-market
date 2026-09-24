@@ -9,7 +9,7 @@ dependencies = [
     # requests, so the identity primitives are a runtime dependency of the
     # router package, not only of its clients.
     "arkhai-kit-identity>=0.3.0",
-    "arkhai-kit-resource-pools>=0.2.0",
+    "arkhai-kit-resource-pools>=0.3.0",
     "fastapi>=0.115.0",
     "pydantic>=2.7",
     # Capacity-definitions documents are YAML.

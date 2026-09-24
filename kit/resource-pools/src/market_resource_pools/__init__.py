@@ -21,6 +21,12 @@ from .hints import (
     validate_pool_declarations,
 )
 from .host_requirement import HostRequirement, pool_needs_host
+from .site_declarations import (
+    POOL_ENABLEMENT_UNDECLARED,
+    ResolvedPool,
+    SiteDeclarations,
+    read_site_declarations,
+)
 from .pool_config_handler import PoolConfigHandler, PoolConfigValidationProblem
 from .pools import (
     PoolCreate,
@@ -63,6 +69,10 @@ __all__ = [
     "resolve_pool_declarations",
     "validate_pool_declarations",
     "pool_needs_host",
+    "POOL_ENABLEMENT_UNDECLARED",
+    "ResolvedPool",
+    "SiteDeclarations",
+    "read_site_declarations",
     "DocumentValidationResult",
     "HostRequirement",
     "PoolAlreadyExistsError",

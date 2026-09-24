@@ -14,6 +14,7 @@ from core_storefront.site_projections import (
 )
 from market_capacity_publication import remote_site_clients
 from market_storefront.services.capacity_client import build_capacity_client
+from market_storefront.services.publication_loop import wake_publication_loop
 
 logger = logging.getLogger(__name__)
 
@@ -179,6 +180,13 @@ async def load_site_projections(sqlite_client: Any) -> None:
     _caches.update(replacements)
 
 
+def _resource_pool_identities() -> dict[str, Any]:
+    return {
+        site: caches.resource_pools.view().identity
+        for site, caches in _caches.items()
+    }
+
+
 async def site_projection_poller_loop(sqlite_client: Any) -> None:
     from market_storefront.lifecycle import SITE_PROJECTION_POLLER, gate
     from market_storefront.utils import config
@@ -191,6 +199,7 @@ async def site_projection_poller_loop(sqlite_client: Any) -> None:
             await asyncio.sleep(0.05)
             continue
         try:
+            before = _resource_pool_identities()
             if not _caches:
                 await load_site_projections(sqlite_client)
             else:
@@ -201,6 +210,11 @@ async def site_projection_poller_loop(sqlite_client: Any) -> None:
                         for cache in (site.resource_pools, site.capacity_buckets)
                     )
                 )
+            if _resource_pool_identities() != before:
+                # A pool-level change a site declares — a tag edit, a disabled
+                # pool — emits no capacity event, so the publication loop is
+                # woken here instead of waiting out its interval.
+                wake_publication_loop()
         except Exception as exc:
             logger.warning("[PROJECTIONS] refresh failed: %s", exc)
         await asyncio.sleep(interval)

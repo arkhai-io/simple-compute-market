@@ -54,7 +54,7 @@ def _chains(config_path):
 
 
 def test_default_posture_publishes_recipient_demands():
-    from market_storefront.cli_publish import _demands_for_chains
+    from market_storefront.services.publication_terms import _demands_for_chains
 
     with patch("market_storefront.utils.config.settings", _settings()):
         demands = _demands_for_chains(CHAINS, {"base_sepolia"}, WALLET)
@@ -64,7 +64,7 @@ def test_default_posture_publishes_recipient_demands():
 
 
 def test_gated_posture_publishes_third_party_oracle_demands():
-    from market_storefront.cli_publish import _demands_for_chains
+    from market_storefront.services.publication_terms import _demands_for_chains
 
     with patch(
         "market_storefront.utils.config.settings",
@@ -78,7 +78,7 @@ def test_gated_posture_publishes_third_party_oracle_demands():
 def test_gated_posture_requires_an_oracle():
     import pytest
 
-    from market_storefront.cli_publish import _demands_for_chains
+    from market_storefront.services.publication_terms import _demands_for_chains
 
     with patch(
         "market_storefront.utils.config.settings",
@@ -92,7 +92,7 @@ def test_gated_posture_rejects_self_oracle():
     """The party collecting cannot also be the party deciding collection."""
     import pytest
 
-    from market_storefront.cli_publish import _demands_for_chains
+    from market_storefront.services.publication_terms import _demands_for_chains
 
     with patch(
         "market_storefront.utils.config.settings",
@@ -107,7 +107,7 @@ def test_interruptible_posture_publishes_splitter_demands(tmp_path):
 
     from market_alkahest.alkahest import _load_override_config_cached
 
-    from market_storefront.cli_publish import _demands_for_chains
+    from market_storefront.services.publication_terms import _demands_for_chains
 
     override = {"arbiters_addresses": {"erc20_splitter": SPLITTER}}
     path = tmp_path / "alkahest_override.json"
@@ -129,7 +129,7 @@ def test_interruptible_posture_allows_explicit_refund_authority(tmp_path):
 
     from market_alkahest.alkahest import _load_override_config_cached
 
-    from market_storefront.cli_publish import _demands_for_chains
+    from market_storefront.services.publication_terms import _demands_for_chains
 
     override = {"arbiters_addresses": {"erc20_splitter": SPLITTER}}
     path = tmp_path / "alkahest_override.json"
@@ -149,7 +149,7 @@ def test_interruptible_posture_allows_explicit_refund_authority(tmp_path):
 def test_interruptible_and_oracle_gated_are_mutually_exclusive():
     import pytest
 
-    from market_storefront.cli_publish import _demands_for_chains
+    from market_storefront.services.publication_terms import _demands_for_chains
 
     with patch(
         "market_storefront.utils.config.settings",
@@ -164,7 +164,9 @@ def test_interruptible_and_oracle_gated_are_mutually_exclusive():
 
 
 def test_interruptible_listing_resource_is_marked():
-    from market_storefront.cli_publish import _listing_resource_for_listing
+    from market_storefront.services.publication_terms import (
+        listing_resource_for_candidate,
+    )
 
     resource = {
         "offering_mode": "vm",
@@ -174,12 +176,13 @@ def test_interruptible_listing_resource_is_marked():
         "gpu_count": 1,
         "sla": "best_effort",
         "region": "iad",
+        "capacity_backing": "backed",
     }
     with patch(
         "market_storefront.utils.config.settings",
         _settings(interruptible=True),
     ):
-        listing_resource = _listing_resource_for_listing(resource)
+        listing_resource = listing_resource_for_candidate(resource)
     assert listing_resource["interruptible"] is True
     assert listing_resource["settlement_model"] == "splitter_refund"
 

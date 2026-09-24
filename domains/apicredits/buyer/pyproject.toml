@@ -37,6 +37,16 @@ dev = [
   "pytest>=8.0.0",
 ]
 
+[tool.uv]
+# Tests import this package from its installed wheel, not an editable
+# install: a directory-mapped package has no editable form that presents it
+# under its import path. The Makefile and CI set UV_NO_EDITABLE, and these
+# keys make uv rebuild that wheel whenever a module changes.
+cache-keys = [
+    { file = "pyproject.toml" },
+    { file = "*.py" },
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
@@ -45,25 +55,13 @@ build-backend = "hatchling.build"
 allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
-only-include = ["__init__.py"]
-
 # Shared schema, listing, negotiation, settlement, and contract modules are
-# owned by arkhai-apicredits-domain; this wheel owns only buyer-role modules.
-[tool.hatch.build.targets.wheel.force-include]
-"__init__.py" = "domains/apicredits/buyer/__init__.py"
-"buy_cli.py" = "domains/apicredits/buyer/buy_cli.py"
-"buyer_client.py" = "domains/apicredits/buyer/buyer_client.py"
-"deal_helpers.py" = "domains/apicredits/buyer/deal_helpers.py"
-"escrow_client.py" = "domains/apicredits/buyer/escrow_client.py"
-"escrow_selection.py" = "domains/apicredits/buyer/escrow_selection.py"
-"hosted_authorization.py" = "domains/apicredits/buyer/hosted_authorization.py"
-"cli.py" = "domains/apicredits/buyer/cli.py"
-"cli_helpers.py" = "domains/apicredits/buyer/cli_helpers.py"
-"common.py" = "domains/apicredits/buyer/common.py"
-"listing_cli.py" = "domains/apicredits/buyer/listing_cli.py"
-"negotiate_cli.py" = "domains/apicredits/buyer/negotiate_cli.py"
-"settle_cli.py" = "domains/apicredits/buyer/settle_cli.py"
-"settlement_composition.py" = "domains/apicredits/buyer/settlement_composition.py"
+# owned by arkhai-apicredits-domain; this wheel owns only the buyer-role
+# modules in this directory, mapped by directory.
+include = ["/*.py"]
+
+[tool.hatch.build.targets.wheel.sources]
+"" = "domains/apicredits/buyer/"
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

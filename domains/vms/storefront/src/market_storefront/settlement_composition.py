@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 import logging
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import partial
+from types import MappingProxyType
 from typing import Any
 
 from arkhai_vms import VmProvisionTerms, normalize_vm_provision_terms
@@ -76,6 +77,68 @@ class VmProjectionContext:
     obligation_index: int
 
 
+# Whether settling through each mechanism this storefront composes delivers
+# through VM capacity-backed fulfillment (``fulfill_vm_settlement``). Every
+# composed mechanism has an explicit entry: an unbacked listing may publish only
+# options whose mechanism does not, because a deal that reached VM fulfillment
+# against a listing with no admission authority could only be refused after it
+# was funded.
+VM_MECHANISM_FULFILLS_THROUGH_CAPACITY: Mapping[str, bool] = MappingProxyType(
+    {
+        "alkahest.v1": True,
+        "fiat.stripe.v1": True,
+    }
+)
+
+
+class UndeclaredMechanismFulfillmentError(RuntimeError):
+    """A composed mechanism has no declaration of how it is fulfilled."""
+
+
+def mechanism_fulfills_through_capacity(
+    mechanism: str,
+    declarations: Mapping[str, bool],
+) -> bool:
+    """Look up a mechanism's declaration, refusing one the composition lacks."""
+    try:
+        return bool(declarations[mechanism])
+    except KeyError as exc:
+        raise UndeclaredMechanismFulfillmentError(
+            f"settlement mechanism {mechanism!r} has no declaration of whether it "
+            "is fulfilled through VM capacity"
+        ) from exc
+
+
+def admissible_settlement_clauses(
+    clauses: Sequence[Any],
+    *,
+    capacity_backing: str,
+    declarations: Mapping[str, bool],
+) -> tuple[list[Any], list[str]]:
+    """Split a candidate's clauses into those it may publish and dropped mechanisms.
+
+    A capacity-backed candidate keeps every clause. An unbacked one keeps only
+    clauses whose mechanism is not fulfilled through capacity. Each clause names
+    its mechanism under ``mechanism``, whether it is a compiled clause or its
+    serialized form.
+    """
+    kept: list[Any] = []
+    dropped: list[str] = []
+    for clause in clauses:
+        mechanism = (
+            clause.get("mechanism")
+            if isinstance(clause, Mapping)
+            else getattr(clause, "mechanism", None)
+        )
+        if capacity_backing != "unbacked" or not mechanism_fulfills_through_capacity(
+            str(mechanism), declarations
+        ):
+            kept.append(clause)
+        elif str(mechanism) not in dropped:
+            dropped.append(str(mechanism))
+    return kept, dropped
+
+
 @dataclass(frozen=True)
 class VmSettlementComposition:
     domain: MarketDomainContract
@@ -89,6 +152,9 @@ class VmSettlementComposition:
     settlement_config: SettlementConfig
     configuration_registry: SettlementConfigurationRegistry
     mechanism_resources: Mapping[str, Any]
+    # Injected rather than read from the module constant so a composition that
+    # adds a mechanism states how that mechanism is fulfilled where it adds it.
+    mechanism_fulfillment: Mapping[str, bool] = VM_MECHANISM_FULFILLS_THROUGH_CAPACITY
 
     async def readiness(self) -> tuple[MechanismReadiness, ...]:
         return await self.configuration_registry.ordered_readiness(
@@ -1290,6 +1356,7 @@ def build_vm_settlement_composition(
     sqlite_client: Any,
     alkahest_clients: Mapping[str, Any],
     marketplace_signer: Signer,
+    mechanism_fulfillment: Mapping[str, bool] = VM_MECHANISM_FULFILLS_THROUGH_CAPACITY,
 ) -> VmSettlementComposition:
     """Construct the VM runtime from explicit settlement mechanisms."""
     registry_owner = getattr(sqlite_client, "domain_registry", None)
@@ -1475,6 +1542,7 @@ def build_vm_settlement_composition(
         settlement_config=settlement_config,
         configuration_registry=registry,
         mechanism_resources=mechanism_resources,
+        mechanism_fulfillment=mechanism_fulfillment,
     )
     composition_holder["value"] = composition
     return composition

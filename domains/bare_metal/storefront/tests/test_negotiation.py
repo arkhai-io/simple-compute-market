@@ -10,6 +10,7 @@ from market_policy.negotiation_middleware import NegotiationRound
 
 def _listing(**overrides):
     listing_resource = {
+        "capacity_backing": "backed",
         "kind": "bare_metal.v2",
         "host_id": "machine-trusted",
         "physical_host_id": "host-trusted",

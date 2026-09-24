@@ -12,7 +12,7 @@ from __future__ import annotations
 import inspect
 import json
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Collection
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -44,9 +44,13 @@ async def publish_listing_to_registries(
     storefront_url: str | None,
     record_publications: RecordPublications | None = None,
     on_published: PublishEvent | None = None,
+    registry_urls: Collection[str] | None = None,
 ) -> dict[str, Any]:
-    """Publish a listing to every configured registry.
+    """Publish a listing to every configured registry, or to ``registry_urls``.
 
+    ``registry_urls`` narrows the fan-out to those configured registries, for a
+    repair that resends only where a registry diverged; a URL the client is not
+    configured for is refused.
     ``listing`` may be a plain dict or a model exposing ``model_dump``.
     Request construction and client behavior are injected so the helper
     stays independent of a concrete registry-client package.
@@ -81,7 +85,16 @@ async def publish_listing_to_registries(
                 max_duration_seconds=max_duration_seconds,
                 storefront_url=listing_storefront_url,
             )
-            payloads = {url: request for url in registry_client.urls}
+            targets = list(registry_client.urls)
+            if registry_urls is not None:
+                unknown = set(registry_urls).difference(targets)
+                if unknown:
+                    raise ValueError(
+                        "publication targets unconfigured registries: "
+                        + ", ".join(sorted(unknown))
+                    )
+                targets = [url for url in targets if url in set(registry_urls)]
+            payloads = {url: request for url in targets}
             results = await registry_client.publish_listing_per_registry(
                 payloads=payloads,
             )
@@ -126,6 +139,53 @@ async def close_listing_in_registries(
     record_publications: RecordPublications | None = None,
 ) -> dict[str, Any]:
     """Mark a listing closed in the registries that should receive updates."""
+    return await _set_listing_status_in_registries(
+        listing_id,
+        status="closed",
+        enabled=enabled,
+        registry_client_factory=registry_client_factory,
+        update_listing_request_factory=update_listing_request_factory,
+        select_target_registries=select_target_registries,
+        record_publications=record_publications,
+    )
+
+
+async def reopen_listing_in_registries(
+    listing_id: str,
+    *,
+    enabled: bool,
+    registry_client_factory: RegistryClientFactory,
+    update_listing_request_factory: UpdateListingRequestFactory,
+    select_target_registries: RegistryTargetSelector,
+    record_publications: RecordPublications | None = None,
+) -> dict[str, Any]:
+    """Mark a listing open again in the registries that should receive updates.
+
+    Republishing a listing a registry already holds updates its payload and
+    leaves its status alone, so a listing closed at a registry stays closed
+    there until its status is set explicitly.
+    """
+    return await _set_listing_status_in_registries(
+        listing_id,
+        status="open",
+        enabled=enabled,
+        registry_client_factory=registry_client_factory,
+        update_listing_request_factory=update_listing_request_factory,
+        select_target_registries=select_target_registries,
+        record_publications=record_publications,
+    )
+
+
+async def _set_listing_status_in_registries(
+    listing_id: str,
+    *,
+    status: str,
+    enabled: bool,
+    registry_client_factory: RegistryClientFactory,
+    update_listing_request_factory: UpdateListingRequestFactory,
+    select_target_registries: RegistryTargetSelector,
+    record_publications: RecordPublications | None = None,
+) -> dict[str, Any]:
     if not enabled:
         return {
             "status": "skipped",
@@ -139,7 +199,7 @@ async def close_listing_in_registries(
                 listing_id,
                 registry_client.urls,
             )
-            request = update_listing_request_factory(updates={"status": "closed"})
+            request = update_listing_request_factory(updates={"status": status})
             payloads = {url: request for url in target_urls}
             results = await registry_client.update_listing_per_registry(
                 listing_id=listing_id,
@@ -153,8 +213,8 @@ async def close_listing_in_registries(
         )
         if first_ok:
             return {
-                "status": "closed",
-                "message": f"Order {listing_id} marked closed in registry",
+                "status": status,
+                "message": f"Order {listing_id} marked {status} in registry",
                 "listing_id": listing_id,
                 "registry_result": first_ok,
             }
@@ -164,7 +224,9 @@ async def close_listing_in_registries(
             "listing_id": listing_id,
         }
     except Exception as exc:
-        logger.warning("[REGISTRY] Failed to close listing %s: %s", listing_id, exc)
+        logger.warning(
+            "[REGISTRY] Failed to mark listing %s %s: %s", listing_id, status, exc
+        )
         return {
             "status": "error",
             "message": f"Registry update failed for order {listing_id}: {exc}",

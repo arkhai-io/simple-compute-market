@@ -6,10 +6,13 @@ from datetime import UTC, datetime
 from typing import Any
 
 from core_storefront.domain_registry import (
+    CAPACITY_BACKING_VALUES,
     StorefrontListingBinding,
     build_storefront_derivation_key,
     canonical_source_envelope,
 )
+
+from domains.vms.listings.reconciler import positive_gpu_count
 
 from .domain_runtime import build_vm_storefront_registry
 from .utils.sqlite_client import SQLiteClient
@@ -29,6 +32,20 @@ def prepare_vm_listing_binding(
     resource_id = candidate.get("resource_id")
     if pool_id is None and resource_id is None:
         raise ValueError("VM publication candidate requires pool or resource provenance")
+    gpu_count = positive_gpu_count(candidate.get("gpu_count"))
+    if gpu_count is None:
+        # Every derivation path produces a positive count; a candidate without
+        # one is a programming error, not a 1-GPU slice.
+        raise ValueError(
+            "VM publication candidate requires a positive integer gpu_count, "
+            f"not {candidate.get('gpu_count')!r}"
+        )
+    capacity_backing = candidate.get("capacity_backing")
+    if capacity_backing not in CAPACITY_BACKING_VALUES:
+        raise ValueError(
+            "VM publication candidate requires an explicit capacity_backing, "
+            f"not {capacity_backing!r}"
+        )
     registry = build_vm_storefront_registry()
     registration = registry.resolve_mode("vm")
     source = {
@@ -38,7 +55,7 @@ def prepare_vm_listing_binding(
             "site_id": site_id,
             "pool_id": str(pool_id) if pool_id is not None else None,
             "resource_id": str(resource_id) if resource_id is not None else None,
-            "gpu_count": int(candidate.get("gpu_count") or 1),
+            "gpu_count": gpu_count,
         },
     }
     return StorefrontListingBinding(
@@ -53,6 +70,7 @@ def prepare_vm_listing_binding(
         ),
         source_envelope_json=canonical_source_envelope(source),
         last_reconciled_at=datetime.now(UTC).isoformat(),
+        capacity_backing=capacity_backing,
         pool_id=str(pool_id) if pool_id is not None else None,
         physical_resource_id=(
             str(resource_id) if resource_id is not None else None

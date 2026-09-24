@@ -53,27 +53,6 @@ async def _seed_fungible_compute_pool(client: SQLiteClient) -> None:
         )
 
 
-def test_sqlite_schema_includes_derived_compute_listings(client):
-    conn = sqlite3.connect(client.db_path)
-    try:
-        cols = {
-            row[1]
-            for row in conn.execute(
-                "PRAGMA table_info(derived_compute_listings)"
-            ).fetchall()
-        }
-    finally:
-        conn.close()
-
-    assert {
-        "listing_id",
-        "resource_id",
-        "gpu_count",
-        "status",
-        "derivation_key",
-        "last_reconciled_at",
-    } <= cols
-
 def test_vm_schema_does_not_create_bare_metal_listing_tables(client):
     conn = sqlite3.connect(client.db_path)
     try:

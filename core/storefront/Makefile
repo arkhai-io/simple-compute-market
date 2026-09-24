@@ -25,4 +25,4 @@ reinit:
 		--upgrade-package arkhai-kit-settlement-runtime --reinstall-package arkhai-kit-settlement-runtime
 
 test: reinit
-	uv run --find-links $(DIST_DIR) pytest tests/unit -q
+	uv run --find-links $(DIST_DIR) pytest tests/unit tests/integration -q

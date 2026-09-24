@@ -63,6 +63,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
             --refresh-package arkhai-kit-resource-pools \
             --refresh-package arkhai-kit-fulfillment \
             --refresh-package arkhai-vms \
+            --refresh-package arkhai-vms-listings \
+            --refresh-package arkhai-vms-negotiation \
+            --refresh-package arkhai-vms-settlement \
             --refresh-package arkhai-bare-metal \
             --refresh-package arkhai-bare-metal-storefront \
             --refresh-package arkhai-vms-storefront \
@@ -88,6 +91,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
             --refresh-package arkhai-kit-resource-pools \
             --refresh-package arkhai-kit-fulfillment \
             --refresh-package arkhai-vms \
+            --refresh-package arkhai-vms-listings \
+            --refresh-package arkhai-vms-negotiation \
+            --refresh-package arkhai-vms-settlement \
             --refresh-package arkhai-bare-metal \
             --refresh-package arkhai-bare-metal-storefront \
             --refresh-package arkhai-vms-storefront \
@@ -138,8 +144,8 @@ COPY .dist/ /.dist/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --python /app/.venv/bin/python --no-deps --no-index \
         --find-links /.dist \
-        arkhai-vms-storefront==0.4.0 \
-        arkhai-bare-metal-storefront==0.3.0
+        arkhai-vms-storefront==0.5.0 \
+        arkhai-bare-metal-storefront==0.4.0
 
 # Fail the image build if the immutable hosted client regains a seller command
 # or any repository dependency was installed as an editable sibling source.

@@ -87,6 +87,9 @@ jobs:
             bare-metal-storefront: ['domains/bare_metal/storefront/**', '.github/workflows/publish-pypi.yml']
             bare-metal-provisioning-adapter: ['domains/bare_metal/provisioning/adapter/**', '.github/workflows/publish-pypi.yml']
             vms: ['domains/vms/domain/**', '.github/workflows/publish-pypi.yml']
+            vms-listings: ['domains/vms/listings/**', '.github/workflows/publish-pypi.yml']
+            vms-negotiation: ['domains/vms/negotiation/**', '.github/workflows/publish-pypi.yml']
+            vms-settlement: ['domains/vms/settlement/**', '.github/workflows/publish-pypi.yml']
             vms-buyer: ['domains/vms/buyer/**', '.github/workflows/publish-pypi.yml']
             vms-provisioning-adapter: ['domains/vms/provisioning/adapter/**', '.github/workflows/publish-pypi.yml']
             compute-provisioning-service: ['provisioning/compute/service/**', '.github/workflows/publish-pypi.yml']
@@ -126,6 +129,9 @@ jobs:
             {"key": "bare-metal-storefront", "path": "domains/bare_metal/storefront",   "dist": "arkhai-bare-metal-storefront"},
             {"key": "bare-metal-provisioning-adapter", "path": "domains/bare_metal/provisioning/adapter", "dist": "arkhai-bare-metal-provisioning-adapter"},
             {"key": "vms",                   "path": "domains/vms/domain",              "dist": "arkhai-vms"},
+            {"key": "vms-listings", "path": "domains/vms/listings", "dist": "arkhai-vms-listings"},
+            {"key": "vms-negotiation", "path": "domains/vms/negotiation", "dist": "arkhai-vms-negotiation"},
+            {"key": "vms-settlement", "path": "domains/vms/settlement", "dist": "arkhai-vms-settlement"},
             {"key": "vms-buyer",              "path": "domains/vms/buyer",                "dist": "arkhai-vms-buyer", "wheel_only": true},
             {"key": "vms-provisioning-adapter", "path": "domains/vms/provisioning/adapter", "dist": "arkhai-vms-provisioning-adapter"},
             {"key": "compute-provisioning-service", "path": "provisioning/compute/service", "dist": "arkhai-compute-provisioning-service"},

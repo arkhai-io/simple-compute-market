@@ -10,7 +10,6 @@ from typing import Any
 from core_storefront.stage_log import stage_event
 from domains.vms.listings.reconciler import (
     closed_available_listing_ids,
-    mark_derived_listings_open,
 )
 from market_settlement_runtime import FailurePolicy
 from market_identity import Identity
@@ -306,8 +305,9 @@ async def _release_capacity(
                 member_availability=await capacity_availability(runtime.client()),
             )
         for listing_id in reopened:
-            await db.update_listing(listing_id=listing_id, status="open")
-        mark_derived_listings_open(db.db_path, reopened)
+            await db.update_listing(
+                listing_id=listing_id, status="open", reopened_by="reconciliation"
+            )
         result.reopened_listing_ids = reopened
     return result
 

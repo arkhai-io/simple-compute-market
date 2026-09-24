@@ -100,6 +100,7 @@ async def _seed_order(db: SQLiteClient, order_id: str) -> None:
             "payload": {"pool_id": f"pool-{order_id}"},
         },
         last_reconciled_at=datetime.now().isoformat(),
+        capacity_backing="backed",
     )
     await db.upsert_listing_with_binding(
         binding=listing_binding,

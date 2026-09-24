@@ -9,6 +9,15 @@ import httpx
 import pytest
 
 from core_storefront.auth import signed_response_headers
+from core_storefront.capacity import CapacityDelta
+from market_capacity_publication import CapacityReconcileContext
+
+from apicredits_storefront.services.capacity_client import _capacity_reconciler
+from apicredits_storefront.services.publication_service import (
+    close_order,
+    close_token_listings_after_capacity_change,
+)
+from apicredits_storefront.utils import sqlite_client as sqlite_module
 from market_site_client import SiteCapacityClient
 from market_identity import Ed25519Signer, TrustedIdentitySet
 
@@ -236,3 +245,34 @@ async def test_capacity_deltas_close_and_reopen_token_listings(db, monkeypatch):
     reopened = await reopen_token_listings_after_capacity_change(db, availability)
     assert reopened == ["L-dry"]
     assert (await db.load_listing(listing_id="L-dry"))["status"] == "open"
+
+
+async def test_capacity_release_does_not_reopen_a_listing_its_seller_closed(
+    db, monkeypatch
+):
+    """The capacity-event reconciler, entered as a released delta, leaves a
+    seller's close alone while still reopening a listing quota exhaustion closed."""
+    monkeypatch.setattr(sqlite_module, "_sqlite_client", db)
+    await _insert_listing(db, "L-withdrawn", "svc-a", "open")
+    await _insert_listing(db, "L-exhausted", "svc-b", "open")
+
+    await close_order({"listing_id": "L-withdrawn"})
+    exhausted = await _QuotaRuntime({"svc-a": 0, "svc-b": 0}).availability()
+    await close_token_listings_after_capacity_change(db, exhausted)
+    assert (await db.load_listing(listing_id="L-withdrawn"))["closed_by"] == "seller"
+    assert (await db.load_listing(listing_id="L-exhausted"))["closed_by"] == (
+        "reconciliation"
+    )
+
+    released = await _QuotaRuntime({"svc-a": 5, "svc-b": 5}).availability()
+    await _capacity_reconciler(lambda: db)(
+        CapacityReconcileContext(
+            projections=(),
+            availability=released,
+            delta=CapacityDelta(kind="released", version=2, site="tokens"),
+        )
+    )
+
+    withdrawn = await db.load_listing(listing_id="L-withdrawn")
+    assert (withdrawn["status"], withdrawn["closed_by"]) == ("closed", "seller")
+    assert (await db.load_listing(listing_id="L-exhausted"))["status"] == "open"

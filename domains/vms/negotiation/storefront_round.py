@@ -8,6 +8,7 @@ import os
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
+from collections.abc import Awaitable, Callable
 from typing import Any, Iterable, Mapping
 
 from domains.vms.listings import (
@@ -39,18 +40,16 @@ from market_policy.seller_round import (  # noqa: E402,F401
 )
 
 
-async def _default_seller_policy_inputs(capacity: Any) -> dict[str, Any]:
-    """Advisory availability snapshot for the inventory guard.
+async def _default_seller_policy_inputs(
+    source_check: Callable[[], Awaitable[dict[str, Any]]],
+) -> dict[str, Any]:
+    """The listing's own-source check, for the inventory guard.
 
-    ``capacity`` is a site-authority capacity client (anything with an
-    async ``snapshot()`` returning resource rows) — duck-typed so this
-    concept module needs no core import.
+    ``source_check`` is supplied by the storefront, which holds the listing's
+    durable binding and its site's projection; this concept module imports no
+    storefront code.
     """
-    return {
-        "available_resources": {
-            "resources": await capacity.snapshot() or [],
-        },
-    }
+    return {"available_resources": {"source_check": await source_check()}}
 
 
 _FILE_POLICIES_DISCOVERED = False
@@ -303,7 +302,7 @@ async def _run_default_seller_round_policy(
 
 @dataclass
 class _DefaultSellerRoundHook:
-    capacity: Any
+    source_check: Callable[[], Awaitable[dict[str, Any]]]
     negotiation_config: Any = None
     chains: Mapping[str, Any] | None = None
     extra_policy_paths: Iterable[str | Path] | None = None
@@ -317,7 +316,7 @@ class _DefaultSellerRoundHook:
         requested_duration_seconds: int | None = None,
         strategy_label: str | None = None,
     ) -> SellerRoundResult:
-        policy_inputs = await _default_seller_policy_inputs(self.capacity)
+        policy_inputs = await _default_seller_policy_inputs(self.source_check)
         return await _run_default_seller_round_policy(
             listing=listing,
             history=history,
@@ -332,21 +331,21 @@ class _DefaultSellerRoundHook:
 
 
 def default_seller_round_hook(
-    capacity: Any,
     *,
+    source_check: Callable[[], Awaitable[dict[str, Any]]],
     negotiation_config: Any = None,
     chains: Mapping[str, Any] | None = None,
     extra_policy_paths: Iterable[str | Path] | None = None,
     default_min_price: Any = None,
 ) -> SellerRoundHook:
-    """Build the default VM seller round hook.
+    """Build the default VM seller round hook for one listing's round.
 
-    ``capacity`` provides the round-start availability snapshot
-    (site-authority capacity client; ``snapshot()`` feeds the inventory
-    guard's ``available_resources`` input).
+    ``source_check`` returns the listing's own-source check for the inventory
+    guard. The storefront builds it per round from the negotiation's durable
+    binding, so the guard never judges a listing against capacity elsewhere.
     """
     return _DefaultSellerRoundHook(
-        capacity=capacity,
+        source_check=source_check,
         negotiation_config=negotiation_config,
         chains=chains,
         extra_policy_paths=extra_policy_paths,

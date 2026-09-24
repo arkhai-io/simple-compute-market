@@ -117,12 +117,14 @@ async def _seed_listing(
         "max_duration_seconds": 7200,
         "storefront_url": "http://seller:8001",
         "seller_principal": _TEST_SELLER_PRINCIPAL,
+        "closed_by": "seller" if status == "closed" else None,
     }
     if valid_capacity_identity:
         await db.upsert_listing_with_binding(
             binding=prepare_vm_listing_binding(
                 listing_id=listing_id,
                 candidate={
+                    "capacity_backing": "backed",
                     "site_id": _HOME_SITE,
                     "pool_id": "pool-vm",
                     "resource_id": f"res-{listing_id}",
@@ -362,6 +364,34 @@ class TestResumeListing:
         await _seed_listing(db, "pause-no-registry")
         result = await c.pause_listing("pause-no-registry")
         assert result.registry_status == ""
+
+    async def test_resume_reopens_a_listing_its_seller_closed(self, client):
+        c, db = client
+        await _seed_listing(db, "withdrawn", status="closed")
+
+        result = await c.resume_listing("withdrawn")
+
+        assert result.paused is False
+        assert (await db.load_listing(listing_id="withdrawn"))["status"] == "open"
+        assert (await db.load_listing(listing_id="withdrawn"))["closed_by"] is None
+
+    async def test_resume_refuses_a_listing_reconciliation_closed(self, client):
+        c, db = client
+        await _seed_listing(db, "no-source")
+        await db.update_listing(
+            listing_id="no-source", status="closed", closed_by="reconciliation"
+        )
+
+        with pytest.raises(StorefrontClientError) as exc_info:
+            await c.resume_listing("no-source")
+
+        assert "409" in str(exc_info.value)
+        assert "listing_closed_by_reconciliation" in str(exc_info.value)
+        assert (await db.load_listing(listing_id="no-source"))["status"] == "closed"
+        assert (
+            (await db.load_listing(listing_id="no-source"))["closed_by"]
+            == "reconciliation"
+        )
 
     async def test_resume_unknown_listing_raises(self, client):
         c, _ = client
@@ -701,6 +731,36 @@ async def seller_auth_client(db):
     _container.resolved_marketplace_signer = None
 
 
+def _declared_pool_projection_caches(
+    *, resource_id: str = "res-test-1", capacity_backing: str = "backed"
+):
+    """A site projection whose pool declares both declarations explicitly."""
+    resource_pools = ProjectionCache(client=None)
+    resource_pools._value = [{
+        "resource_pool_id": "pool-vm",
+        "pool_metadata": {
+            "enabled": True,
+            "policy_tags": {
+                "deliverable_modes": [] if capacity_backing == "unbacked" else ["vm"],
+                "advertisable_modes": ["vm"],
+                "capacity_backing": capacity_backing,
+            },
+        },
+        "resources": [{
+            "physical_resource_id": resource_id,
+            "enabled": True,
+            "capacity": {"gpu_count": 1},
+            "attributes": {"gpu_model": "H200", "region": "California, US"},
+        }],
+    }]
+    resource_pools._state = ProjectionState.loaded
+    resource_pools._identity = ProjectionIdentity(revision=1, digest="declared-pool")
+    return site_projection_cache.SiteProjectionCaches(
+        resource_pools=resource_pools,
+        capacity_buckets=ProjectionCache(client=None),
+    )
+
+
 @pytest_asyncio.fixture
 async def seller_auth_full_client(db):
     """Listing lifecycle app with a real signer-aware ListingService."""
@@ -736,14 +796,19 @@ async def seller_auth_full_client(db):
     app.middleware("http")(listing_lifecycle_middleware)
 
     transport = httpx.ASGITransport(app=app)
-    async with StorefrontClient(
-        "http://test",
-        signer=_TEST_MARKETPLACE_SIGNER,
-        caller_role="seller",
-        expected_publishers=_TEST_PUBLISHERS,
-        transport=transport,
-    ) as c:
-        yield c, db
+    with patch.dict(
+        site_projection_cache._caches,
+        {_HOME_SITE: _declared_pool_projection_caches()},
+        clear=True,
+    ):
+        async with StorefrontClient(
+            "http://test",
+            signer=_TEST_MARKETPLACE_SIGNER,
+            caller_role="seller",
+            expected_publishers=_TEST_PUBLISHERS,
+            transport=transport,
+        ) as c:
+            yield c, db
 
     _container.resolved_sqlite_client = None
     _container.resolved_listing_service = None

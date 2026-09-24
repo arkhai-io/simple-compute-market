@@ -167,6 +167,7 @@ async def _accepted_runtime(
         pool_id="pool-a",
         physical_resource_id="resource-1",
         listing={
+            "capacity_backing": "backed",
             "kind": "bare_metal.v2",
             "host_id": "machine-1",
             "physical_host_id": "host-1",

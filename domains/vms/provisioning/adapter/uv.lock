@@ -157,15 +157,15 @@ wheels = [
 
 [[package]]
 name = "arkhai-bare-metal"
-version = "0.3.0"
+version = "0.4.0"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_bare_metal-0.3.0-py3-none-any.whl" },
-    { path = "arkhai_bare_metal-0.3.0-py3-none-any.whl" },
+    { path = "arkhai_bare_metal-0.4.0-py3-none-any.whl" },
+    { path = "arkhai_bare_metal-0.4.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -232,15 +232,15 @@ wheels = [
 
 [[package]]
 name = "arkhai-core-storefront-client"
-version = "0.19.0"
+version = "0.19.1"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-identity" },
     { name = "httpx" },
 ]
 wheels = [
-    { path = "arkhai_core_storefront_client-0.19.0-py3-none-any.whl" },
-    { path = "arkhai_core_storefront_client-0.19.0-py3-none-any.whl" },
+    { path = "arkhai_core_storefront_client-0.19.1-py3-none-any.whl" },
+    { path = "arkhai_core_storefront_client-0.19.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -294,7 +294,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-resource-pools"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "pydantic" },
@@ -302,8 +302,8 @@ dependencies = [
     { name = "sqlalchemy" },
 ]
 wheels = [
-    { path = "arkhai_kit_resource_pools-0.2.0-py3-none-any.whl" },
-    { path = "arkhai_kit_resource_pools-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_kit_resource_pools-0.3.0-py3-none-any.whl" },
+    { path = "arkhai_kit_resource_pools-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -339,15 +339,15 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_vms-0.2.0-py3-none-any.whl" },
-    { path = "arkhai_vms-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_vms-0.3.0-py3-none-any.whl" },
+    { path = "arkhai_vms-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -377,13 +377,13 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arkhai-bare-metal", specifier = ">=0.3.0" },
+    { name = "arkhai-bare-metal", specifier = ">=0.4.0" },
     { name = "arkhai-compute-provisioning", specifier = ">=0.6.1" },
     { name = "arkhai-compute-provisioning-service", specifier = ">=0.3.0" },
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-fulfillment", specifier = ">=0.3.0" },
-    { name = "arkhai-kit-resource-pools", specifier = ">=0.2.0" },
-    { name = "arkhai-vms", specifier = ">=0.2.0" },
+    { name = "arkhai-kit-resource-pools", specifier = ">=0.3.0" },
+    { name = "arkhai-vms", specifier = ">=0.3.0" },
     { name = "arkhai-vms-provisioning-operator-client", specifier = ">=0.4.0" },
     { name = "cryptography", specifier = ">=42.0" },
     { name = "dependency-injector", specifier = ">=4.41.0" },

@@ -129,13 +129,10 @@ settlements = [
 ]
 ```
 
-The equivalent command-level override combines decimal rate and unit in
-`rate=<decimal>/<unit>` and accepts only registered public Stripe fields:
-
-```bash
-market-storefront publish --inventory /app/resources.csv \
-  --settlement 'mechanism=fiat.stripe.v1 asset=usd rate=2/hour stripe.funding_profile=card.v1 stripe.interaction=interactive'
-```
+These clauses are the storefront-wide terms. A pool's own `pricing` declaration
+at its site, and the storefront's per-pool overrides, take precedence over them;
+there is no command-level override, because the storefront republishes on its
+own and must reach the same terms every cycle.
 
 `funds_flow="separate_charges_transfers"` is fixed by the hosted registration;
 callers cannot override it. Hosted authority trust, account, condition,
@@ -245,16 +242,24 @@ market-storefront config migrate --scope publication \
   --inventory /app/resources.csv --write --backup
 ```
 
-Then publish through the mechanism-neutral storefront command:
+The storefront then publishes on its own. It derives listings from every
+advertisable pool its trusted sites project, publishes them, refreshes open
+listings when their terms change, and closes those whose source no longer
+supports them. To see what its next publication cycle would do, or to run one
+now rather than wait for the timer:
 
 ```bash
 docker compose -f compose/seller.yml exec seller-storefront \
-  market-storefront publish --inventory /app/resources.csv
+  market-storefront publish --dry-run
+docker compose -f compose/seller.yml exec seller-storefront \
+  market-storefront publish
 ```
 
-Repeat `--settlement '<complete clause>'` to override configured clauses in
-command order. Resource-row `settlements` still take highest whole-list
-precedence. Inspect readiness without publishing:
+`market-storefront publish --abort-all` closes every open listing as the seller.
+Publication never reopens a listing its seller closed; resume a listing to re-list
+it. The storefront's lifecycle pause (`POST /api/v1/admin/lifecycle/pause`) holds
+publication with its other loops without affecting trading, and a cycle can still
+be run or previewed while held. Inspect readiness without publishing:
 
 ```bash
 market-storefront settlement status --json

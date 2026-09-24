@@ -213,6 +213,7 @@ def test_upsert_listing_stores_explicit_accepted_escrows(tmp_db_path):
         ),
         source_envelope=source,
         last_reconciled_at="2026-08-15T00:00:00Z",
+        capacity_backing="backed",
         pool_id="pool-1",
     )
     asyncio.run(db.upsert_listing_with_binding(

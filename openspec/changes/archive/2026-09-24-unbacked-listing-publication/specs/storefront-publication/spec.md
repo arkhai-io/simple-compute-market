@@ -57,8 +57,8 @@ copy of a site fact, and the two MUST NOT be conflated. Backing MUST NOT be infe
 from absent capacity data, an empty projection, or a stale generation.
 
 A storefront MUST judge a projection's declarations jointly, per site and per
-projection generation. A generation in which no projected pool carries either the
-backing or the advertisement declaration comes from a producer that predates them:
+projection generation. A generation that projects pools, none of which carries either
+the backing or the advertisement declaration, comes from a producer that predates them:
 every pool in it MUST resolve as capacity-backed with delivery authorization serving
 as advertisement authorization, reproducing the contract that applied before the
 declarations existed, under one compatibility rule that is logged and reported in
@@ -79,6 +79,11 @@ reasons it could not be resolved.
 - **THEN** every pool resolves as capacity-backed with delivery authorization serving as advertisement authorization
 - **AND** the compatibility rule is logged and reported in system status
 - **AND** listings previously derived from that site continue to publish unchanged
+
+#### Scenario: A generation projects no pools
+
+- **WHEN** a site's projection generation contains no pools
+- **THEN** it is not read under the compatibility rule, and system status does not report the site as an older producer
 
 #### Scenario: A producer omits a declaration for one pool
 
@@ -103,11 +108,13 @@ reasons it could not be resolved.
 
 ### Requirement: A listing advertises only a mode its pool authorizes
 
-A listing derived from a Resource Pool MUST offer only an offering mode that pool
-declares advertisable, whether the listing is capacity-backed or unbacked. The
-listing's offering mode continues to resolve from the frozen contribution
-registration, and the public offer's mode MUST continue to equal the recorded
-offering mode.
+A listing a storefront derives from a site's resource-pool projection MUST offer only
+an offering mode its Resource Pool declares advertisable, whether the listing is
+capacity-backed or unbacked. The listing's offering mode continues to resolve from
+the frozen contribution registration, and the public offer's mode MUST continue to
+equal the recorded offering mode. Bare-metal publication derives its candidates from
+the site's capacity snapshot rather than that projection, and reads no pool
+declaration.
 
 The pool's delivery authorization MUST continue to be rechecked at reservation,
 scheduling, and provider dispatch, and those rechecks apply only to capacity-backed
@@ -366,8 +373,9 @@ listing-level field names a settlement mechanism.
 
 ### Requirement: Publication runs as a controllable storefront lifecycle loop
 
-A storefront MUST run publication in its own process as a timer-driven lifecycle
-loop. Each cycle derives candidates from its configured sources, publishes new
+The VM storefront, alone or within the combined compute-family storefront, MUST run
+its publication in its own process as a timer-driven lifecycle loop. Bare-metal
+publication is operator-invoked and is outside this requirement. Each cycle derives candidates from its configured sources, publishes new
 listings, refreshes open listings, closes listings whose source no longer supports
 them, holds listings whose source is unresolvable, and reopens listings reconciliation
 closed, subject to the listing identity comparison. A change in a site's resource-pool
@@ -384,6 +392,11 @@ The loop MUST publish through the storefront's own services. A publication comma
 MUST reach the loop only through the storefront's API and MUST NOT read or write the
 storefront's database directly.
 
+The loop MUST build only the publication sources of the domains it publishes. A
+storefront may register several domains whose publication runs in different places;
+each publisher names the domains it builds, and naming one no registration carries
+MUST fail before any source is built.
+
 #### Scenario: A site declares new supply
 
 - **WHEN** a site's projection gains an advertisable pool with enabled declarations and the loop is not held
@@ -399,6 +412,11 @@ storefront's database directly.
 - **WHEN** an operator previews a publication cycle twice without an intervening change
 - **THEN** both previews report the same planned actions and reasons, and no listing, binding, or registry publication changed
 
+#### Scenario: A storefront registers another domain beside the one its loop publishes
+
+- **WHEN** a storefront registers both the domain its loop publishes and another whose publication runs elsewhere
+- **THEN** each cycle builds only the loop's own domain's sources and completes
+
 #### Scenario: An operator runs one cycle while held
 
 - **WHEN** an operator runs one publication cycle while the loops are held
@@ -408,7 +426,8 @@ storefront's database directly.
 
 Every close of a listing MUST record whether its seller or reconciliation closed it,
 and a closed listing MUST NOT be recorded without that reason. Reopening a listing
-MUST clear it.
+MUST clear it. A later close of a listing its seller closed, by any write, MUST keep
+the seller as its reason.
 
 No reconciliation path — a capacity event, the publication loop, or any other — MUST
 reopen a listing its seller closed, and publication MUST NOT bind a replacement listing
@@ -432,10 +451,46 @@ reason, because its source does not currently support it.
 - **WHEN** a seller resumes a listing that reconciliation closed
 - **THEN** the request is refused with a conflict naming the closure reason and the listing is unchanged
 
+#### Scenario: Reconciliation closes a listing its seller already closed
+
+- **WHEN** reconciliation writes a close for a listing its seller closed
+- **THEN** the listing's closure reason remains the seller, and no later reconciliation reopens it
+
 #### Scenario: A close names no reason
 
 - **WHEN** a writer closes a listing without recording who closed it
 - **THEN** the write is refused
+
+### Requirement: Registries converge on each listing's local status
+
+This requirement governs VM publication and API-credit publication; bare-metal
+publication is outside it.
+
+For those, a listing's local status is the publication decision and its registries
+follow it. A close or reopen MUST change the local listing before any registry is
+told, and a local change that fails MUST be reported to its caller with no registry
+told — a seller's close is reported as retryable. Each registry's outcome for every
+publish, close, and reopen MUST be recorded durably. Every publication pass — each
+VM publication cycle and each API-credit capacity reconciliation — MUST then resend,
+to each configured registry whose recorded outcome disagrees with its listing's
+local status, exactly what that status implies — a close for a closed listing, and
+for an open one the listing republished and reopened — and to no other registry. A
+registry still unreachable stays recorded as diverged for the next pass.
+
+#### Scenario: A registry misses a close
+
+- **WHEN** a listing closes locally and one of its registries fails the close
+- **THEN** the next publication pass sends the close to that registry alone
+
+#### Scenario: A registry misses a reopen
+
+- **WHEN** a listing reopens locally and one registry fails to reopen it
+- **THEN** the next publication pass republishes and reopens the listing at that registry alone
+
+#### Scenario: A local close fails
+
+- **WHEN** the local close of a listing fails
+- **THEN** no registry is told, and a seller's close is reported as retryable with the listing unchanged
 
 ## MODIFIED Requirements
 

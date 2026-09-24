@@ -165,6 +165,11 @@ hold_ttl_seconds = 0
 # specific-resource listings, and listing-mode hints. Set to false
 # to fall back to local tables for a staged/canary rollout.
 use_site_projection_for_listings = true
+# The publication loop's interval between cycles, in seconds. A change a site
+# declares wakes it sooner, and a loop pause reaches it at once whatever this
+# is; deterministic callers hold the loop and advance it with run-cycle rather
+# than wait on this.
+publication_interval_seconds = 30
 
 [provisioning]
 service_url            = "http://localhost:8085"

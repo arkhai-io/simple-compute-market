@@ -267,14 +267,14 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_vms-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_vms-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -292,6 +292,9 @@ dependencies = [
     { name = "arkhai-kit-policy" },
     { name = "arkhai-kit-settlement-runtime" },
     { name = "arkhai-vms" },
+    { name = "arkhai-vms-listings" },
+    { name = "arkhai-vms-negotiation" },
+    { name = "arkhai-vms-settlement" },
     { name = "eth-account" },
     { name = "pyinstaller" },
     { name = "pyyaml" },
@@ -322,7 +325,10 @@ requires-dist = [
     { name = "arkhai-kit-identity", specifier = "==0.3.0" },
     { name = "arkhai-kit-policy" },
     { name = "arkhai-kit-settlement-runtime", specifier = "==0.1.2" },
-    { name = "arkhai-vms", specifier = ">=0.2.0" },
+    { name = "arkhai-vms", specifier = ">=0.3.0" },
+    { name = "arkhai-vms-listings", specifier = ">=0.1.0" },
+    { name = "arkhai-vms-negotiation", specifier = ">=0.1.0" },
+    { name = "arkhai-vms-settlement", specifier = ">=0.1.0" },
     { name = "eth-account", specifier = ">=0.13.0" },
     { name = "pyinstaller", specifier = ">=6.19.0" },
     { name = "pyyaml", specifier = ">=6.0.0" },
@@ -336,6 +342,45 @@ provides-extras = ["rl"]
 dev = [
     { name = "pytest", specifier = ">=8.3.4,<9.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.23.8,<1.0.0" },
+]
+
+[[package]]
+name = "arkhai-vms-listings"
+version = "0.1.0"
+source = { registry = "../../../.dist" }
+dependencies = [
+    { name = "arkhai-kit-alkahest" },
+    { name = "arkhai-kit-identity" },
+    { name = "arkhai-kit-settlement-runtime" },
+    { name = "pydantic" },
+]
+wheels = [
+    { path = "arkhai_vms_listings-0.1.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-vms-negotiation"
+version = "0.1.0"
+source = { registry = "../../../.dist" }
+dependencies = [
+    { name = "arkhai-kit-alkahest" },
+    { name = "arkhai-kit-policy" },
+    { name = "arkhai-vms-listings" },
+]
+wheels = [
+    { path = "arkhai_vms_negotiation-0.1.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-vms-settlement"
+version = "0.1.0"
+source = { registry = "../../../.dist" }
+dependencies = [
+    { name = "arkhai-kit-alkahest" },
+    { name = "arkhai-vms-listings" },
+]
+wheels = [
+    { path = "arkhai_vms_settlement-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]

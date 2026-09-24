@@ -30,7 +30,7 @@ def test_vm_candidate_skip_keys_include_current_and_legacy_keys() -> None:
 def test_vm_candidate_skip_keys_fallback_to_resource_key() -> None:
     assert vm_candidate_skip_keys({
         "resource_id": "host-a",
-        "gpu_count": "1",
+        "gpu_count": 1,
     }) == {
         "host-a:gpus:1",
         "host-a",
@@ -101,6 +101,7 @@ def test_vm_publication_adapter_fills_core_publication_source_slots() -> None:
 def test_vm_listing_resource_for_listing_builds_domain_payload() -> None:
     listing_resource = vm_listing_resource_for_listing({
         "offering_mode": "vm",
+        "capacity_backing": "unbacked",
         "pool_id": "pool-a",
         "resource_id": "host-a",
         "gpu_model": "H200",
@@ -111,6 +112,7 @@ def test_vm_listing_resource_for_listing_builds_domain_payload() -> None:
 
     assert listing_resource == {
         "offering_mode": "vm",
+        "capacity_backing": "unbacked",
         "pool_id": "pool-a",
         "resource_id": "host-a",
         "gpu_model": "H200",
@@ -124,6 +126,7 @@ def test_vm_listing_resource_for_listing_marks_interruptible() -> None:
     listing_resource = vm_listing_resource_for_listing(
         {
             "offering_mode": "vm",
+            "capacity_backing": "backed",
             "pool_id": "pool-a",
             "gpu_model": "H200",
             "gpu_count": 2,
@@ -135,3 +138,22 @@ def test_vm_listing_resource_for_listing_marks_interruptible() -> None:
 
     assert listing_resource["interruptible"] is True
     assert listing_resource["settlement_model"] == "splitter_refund"
+
+
+@pytest.mark.parametrize("gpu_count", [None, 0, -1, "1", True, 1.5])
+def test_vm_candidate_skip_keys_refuse_a_substituted_count(gpu_count) -> None:
+    """A candidate is always N GPUs; no count is keyed as one GPU."""
+    with pytest.raises(ValueError, match="gpu_count"):
+        vm_candidate_skip_keys({"resource_id": "host-a", "gpu_count": gpu_count})
+
+
+def test_vm_listing_resource_requires_the_candidate_backing() -> None:
+    with pytest.raises(KeyError):
+        vm_listing_resource_for_listing({
+            "offering_mode": "vm",
+            "pool_id": "pool-a",
+            "gpu_model": "H200",
+            "gpu_count": 2,
+            "sla": 0.99,
+            "region": "California, US",
+        })

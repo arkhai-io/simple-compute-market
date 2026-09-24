@@ -434,3 +434,36 @@ async def test_second_domain_owns_a_different_proposal_schema() -> None:
     assert repository.threads["neg-fixed"]["buyer_escrow_proposal"] == {
         "tokens": 41
     }
+
+
+async def test_policy_rounds_receive_the_resolved_binding() -> None:
+    repository = RecordingRepository()
+    harness = HookHarness()
+    runtime = runtime_for(repository, harness)
+    await runtime.start(
+        repository=repository,
+        listing_id="listing-1",
+        buyer_principal=_BUYER,
+        seller_principal=_SELLER,
+        actor_principal=_BUYER,
+        proposal={"price": 10},
+        terms={"units": 2},
+        seller_agent_url="https://seller.example",
+        buyer_agent_url="https://buyer.example",
+    )
+    await runtime.continue_negotiation(
+        repository=repository,
+        negotiation_id="neg-fixed",
+        buyer_action="counter",
+        buyer_proposal={"price": 11},
+        buyer_reason=None,
+        buyer_principal=_BUYER,
+        actor_principal=_BUYER,
+        actor_role="buyer",
+    )
+
+    assert len(harness.policy_calls) == 2
+    assert [call.binding for call in harness.policy_calls] == [
+        "binding-1",
+        "binding-1",
+    ]

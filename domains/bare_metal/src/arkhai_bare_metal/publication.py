@@ -137,6 +137,7 @@ def available_bare_metal_listings(
             capabilities[key] = value
         listings.append(
             BareMetalListing(
+                capacity_backing="backed",
                 host_id=resource.host_id,
                 physical_host_id=resource.physical_host_id,
                 access_methods=list(resource.access_methods),

@@ -103,6 +103,7 @@ class TestRegisteredNamesAreTheGatedNames:
             "FULFILLMENT_RESUME",
             "CAPACITY_EVENTS_POLLER",
             "SITE_PROJECTION_POLLER",
+            "PUBLICATION",
         ):
             assert f"name={constant}" in source, (
                 f"{constant} is no longer used to register its loop; a literal "
@@ -286,6 +287,106 @@ class TestEachProductionLoopAcknowledges:
         )
 
         assert _acknowledged(lifecycle.SITE_PROJECTION_POLLER)
+
+    async def test_publication_loop_gates_before_any_cycle(self):
+        """Held, the publication loop reaches its gate and runs no cycle."""
+        from market_storefront.services.publication_loop import publication_loop
+
+        cycles: list[bool] = []
+
+        async def _cycle(*, dry_run):
+            cycles.append(dry_run)
+            return {}
+
+        server._LOOPS_PAUSED = True
+        await _run_briefly(
+            partial(publication_loop, _cycle),
+            lifecycle.PUBLICATION,
+        )
+
+        assert _acknowledged(lifecycle.PUBLICATION)
+        assert cycles == []
+
+    async def test_a_pause_during_the_idle_wait_reaches_the_gate(self):
+        """A pause issued between cycles reaches the loop's gate at once.
+
+        The pause wakes the idle wait, so it never waits on the loop's interval,
+        which is far longer than any pause should take.
+        """
+        from market_storefront.services.publication_loop import publication_loop
+
+        cycles: list[bool] = []
+        first_cycle = asyncio.Event()
+
+        async def _cycle(*, dry_run):
+            cycles.append(dry_run)
+            first_cycle.set()
+            return {}
+
+        task = asyncio.create_task(publication_loop(_cycle))
+        lifecycle._HANDLES[lifecycle.PUBLICATION] = task
+        try:
+            await asyncio.wait_for(first_cycle.wait(), timeout=1.0)
+            loop = asyncio.get_running_loop()
+            started = loop.time()
+            states = await server._set_loops_paused(True)
+
+            assert states[lifecycle.PUBLICATION] == "paused"
+            assert loop.time() - started < 1.0
+            assert cycles == [False]
+        finally:
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+    async def test_a_projection_change_wakes_the_idle_loop(self):
+        """A site's declaration change starts the next cycle without its interval."""
+        from market_storefront.services.publication_loop import (
+            publication_loop,
+            wake_publication_loop,
+        )
+
+        cycles: list[bool] = []
+        ran = asyncio.Event()
+
+        async def _cycle(*, dry_run):
+            cycles.append(dry_run)
+            ran.set()
+            return {}
+
+        task = asyncio.create_task(publication_loop(_cycle))
+        lifecycle._HANDLES[lifecycle.PUBLICATION] = task
+        try:
+            await asyncio.wait_for(ran.wait(), timeout=1.0)
+            ran.clear()
+            wake_publication_loop()
+            await asyncio.wait_for(ran.wait(), timeout=1.0)
+
+            assert cycles == [False, False]
+        finally:
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+    async def test_publication_loop_runs_real_cycles_when_not_held(self):
+        from market_storefront.services.publication_loop import publication_loop
+
+        cycles: list[bool] = []
+
+        async def _cycle(*, dry_run):
+            cycles.append(dry_run)
+            return {}
+
+        await _run_briefly(
+            partial(publication_loop, _cycle),
+            lifecycle.PUBLICATION,
+        )
+
+        assert cycles and set(cycles) == {False}
 
     async def test_capacity_events_poller(self, monkeypatch):
         """The aggregate loop gates under its own name.

@@ -47,6 +47,7 @@ class FakeDb:
             ssh_public_key="ssh-ed25519 buyer",
         )
         self.listing = BareMetalListing(
+            capacity_backing="backed",
             host_id="machine-a",
             physical_host_id="host-a",
             capabilities={"gpu_model": "H200"},

@@ -21,7 +21,10 @@ from market_site_client import (
     SiteCapacityClientError,
 )
 from compute_provisioning import PoolCreate
-from market_resource_pools import resolve_pool_declarations
+from market_resource_pools import read_site_declarations, resolve_pool_declarations
+from market_site_client.fixtures.resource_pools import (
+    validate_resource_pool_projection,
+)
 from vm_provisioning_operator.models import HostCreate
 
 from .conftest import SERVICE_AUTHORITIES, STOREFRONT_SIGNER
@@ -510,6 +513,68 @@ async def test_site_resource_pools_projection_declares_every_pool(
     assert set(resolved) == {"default", "bare-metal-west"}
     assert resolved["bare-metal-west"].advertisable_modes == frozenset({"bare_metal"})
     assert all(declarations.backed for declarations in resolved.values())
+
+
+@pytest.mark.asyncio
+async def test_the_projection_carries_both_declarations_as_storefronts_read_them(
+    capacity: CapacityApi, client_and_queue,
+):
+    """The producer half of the resource-pool projection contract.
+
+    A backed and an unbacked pool, written through the pool API, reach the
+    canonical site client in the shape storefront tests build with the same
+    contract fixture, and resolve through the reader a storefront uses. The
+    unbacked pool's member names no host, as a declaration with no admission
+    authority behind it may.
+    """
+    provisioning_client, _ = client_and_queue
+    await provisioning_client.create_pool(PoolCreate(
+        id="vm-backed",
+        label="VM backed",
+        provider="ansible",
+        policy_tags={
+            "deliverable_modes": ["vm"],
+            "advertisable_modes": ["vm"],
+            "capacity_backing": "backed",
+        },
+        provider_config={"playbook_path": "playbooks/vm-operations.yaml"},
+    ))
+    await provisioning_client.create_pool(PoolCreate(
+        id="broker-unbacked",
+        label="Broker",
+        provider="ansible",
+        policy_tags={
+            "deliverable_modes": [],
+            "advertisable_modes": ["vm"],
+            "capacity_backing": "unbacked",
+        },
+        provider_config={"playbook_path": "playbooks/vm-operations.yaml"},
+    ))
+    await capacity.register(
+        "backed-001",
+        pool_id="vm-backed",
+        total_units=4,
+        host_id="kvm1",
+        attributes={"gpu_model": "H100"},
+    )
+    await capacity.register(
+        "broker-001",
+        pool_id="broker-unbacked",
+        total_units=8,
+        attributes={"gpu_model": "H100"},
+    )
+
+    remote = _site_capacity_client("http://test", transport=ASGITransport(app=app))
+    projection = await remote.resource_pool_projection()
+
+    validate_resource_pool_projection(projection)
+    reading = read_site_declarations(projection["resource_pools"])
+    assert reading.compatibility_rule is False
+    assert dict(reading.unresolvable) == {}
+    assert reading.resolved["vm-backed"].backed
+    assert not reading.resolved["broker-unbacked"].backed
+    assert reading.resolved["broker-unbacked"].advertises("vm")
+    assert reading.resolved["broker-unbacked"].enabled
 
 
 @pytest.mark.asyncio

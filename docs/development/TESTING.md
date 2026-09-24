@@ -154,6 +154,11 @@ drives transitions instead of waiting for a timer:
 |---|---|---|
 | Lease watchdog | `POST /api/v1/system/lease-watchdog/pause` | `POST /api/v1/system/check-leases` |
 | Fulfillment convergence | `POST /api/v1/system/fulfillment-convergence/pause` | `POST /api/v1/system/fulfillment-convergence/advance-cycle` |
+| VM storefront loops (`publication`, `capacity-events`, `site-projections`, `settlement-servicing`, `fulfillment-resume`) | `POST /api/v1/admin/lifecycle/pause`, which holds them all | `POST /api/v1/admin/lifecycle/<loop>/run-cycle`, previewed by `.../<loop>/dry-run` |
+
+The VM storefront's loops hold no claim between cycles, so their `run-cycle`
+is a step: it runs exactly the cycle the timer runs, whether or not the
+loops are held.
 
 Two traps this has already sprung, both worth checking for a new loop:
 

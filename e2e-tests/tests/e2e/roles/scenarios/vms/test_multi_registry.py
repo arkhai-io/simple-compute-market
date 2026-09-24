@@ -108,7 +108,7 @@ from tests.e2e.roles.scenarios.vms.host_registry import (
     provision_e2e_executor,
     refresh_storefront_projections,
 )
-from tests.e2e.roles.scenarios.vms.conftest import _require_setting, _signer, _trust, capacity_source_for, signed_listing_read_headers
+from tests.e2e.roles.scenarios.vms.conftest import _require_setting, _signer, _trust, capacity_source_for, pause_storefront, signed_listing_read_headers
 
 log = logging.getLogger(__name__)
 
@@ -461,6 +461,22 @@ _MULTI_STOREFRONT_SKIP = (
     "identity, so Alice is not a trusted caller and never loads capacity. "
     "See docs/development/ROADMAP.md Goal 1."
 )
+
+
+class TestStage00_PausesBothStorefronts:
+    def test_00_pauses_both_storefronts_loops(
+        self, storefront_admin_client, alice_admin_client
+    ):
+        """Hold both storefronts' timer loops before any listing is created.
+
+        Each storefront publishes what its sites declare on its own publication
+        loop. This scenario creates its listings explicitly, so a loop left
+        running could bind the same slice first and the explicit create would
+        be refused. It holds the loops rather than relying on an earlier
+        scenario having done so, which a marker-selected run would not.
+        """
+        pause_storefront(storefront_admin_client)
+        pause_storefront(alice_admin_client)
 
 
 class TestStage00a_BobHealth:

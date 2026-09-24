@@ -54,6 +54,7 @@ def _record_bound_listing(
     binding = prepare_vm_listing_binding(
         listing_id=listing_id,
         candidate={
+            "capacity_backing": "backed",
             "site_id": site_id,
             "pool_id": pool_id,
             "resource_id": resource_id,

@@ -40,10 +40,11 @@ from core_storefront.aggregation import (
     most_available,
 )
 from market_capacity_publication import (
-    CapacityBinding,
     CapacityReconcileContext,
     CapacityRuntime,
     CapacitySite,
+    PublicationBinding,
+    publication_binding,
 )
 from market_fulfillment import VersionedEnvelope
 from market_site import dict_resource_satisfies_claim
@@ -112,17 +113,7 @@ def _capacity_reconciler(
 
         home_site = context.projections[0].site_id
         db = sqlite_client_factory()
-        projection = (
-            site_pool_projection()
-            if bool(
-                getattr(
-                    getattr(settings, "capacity", None),
-                    "use_site_projection_for_listings",
-                    False,
-                )
-            )
-            else None
-        )
+        projection = listing_source_projection()
         buckets = site_capacity_buckets() if projection is not None else None
         delta = context.delta
         close = (
@@ -253,8 +244,13 @@ def build_capacity_client(
 async def capacity_binding_for_listing(
     sqlite_client: Any,
     listing_id: str,
-) -> CapacityBinding:
-    """Resolve the VM candidate's exact durable site, mode, and source."""
+) -> PublicationBinding:
+    """Resolve the VM listing's exact durable site, mode, source, and backing.
+
+    The result is a ``CapacityBinding`` only when the durable binding records
+    the listing as capacity-backed; callers that reserve, commit, or release
+    require that class and refuse an ``UnbackedBinding``.
+    """
     from domains.vms.listings.models import Listing
 
     durable = await sqlite_client.load_listing_binding(listing_id=listing_id)
@@ -275,7 +271,12 @@ async def capacity_binding_for_listing(
         raise RuntimeError(
             f"listing {listing_id!r} offering mode disagrees with its durable binding"
         )
-    return CapacityBinding(durable.site_id, offering_mode, source_id)
+    return publication_binding(
+        capacity_backing=durable.capacity_backing,
+        site_id=durable.site_id,
+        offering_mode=offering_mode,
+        source_id=source_id,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -501,6 +502,23 @@ def build_fulfillment_client(
     return aggregate
 
 
+
+
+def listing_source_projection() -> dict[str, list[dict[str, Any]]] | None:
+    """The projection listings derive from, or ``None`` on the local-table path.
+
+    Publication, capacity reconciliation, and the inventory guard all select
+    their source through this, so they never disagree about which one applies.
+    """
+    if not bool(
+        getattr(
+            getattr(settings, "capacity", None),
+            "use_site_projection_for_listings",
+            False,
+        )
+    ):
+        return None
+    return site_pool_projection()
 
 
 def site_pool_projection() -> dict[str, list[dict[str, Any]]]:

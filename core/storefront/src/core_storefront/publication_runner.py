@@ -39,6 +39,10 @@ PayloadBuilder = Callable[
 ]
 PublishOffer = Callable[..., dict[str, Any]]
 
+# The status a source's ``reopen_existing`` returns when the listing bound under
+# a candidate's identity needs no publication this cycle.
+REOPEN_UNCHANGED = "unchanged"
+
 
 @dataclass(frozen=True)
 class PublicationCycleResult:
@@ -373,6 +377,13 @@ def publish_round(
                 continue
 
             if reopened is not None:
+                # A source may report that the listing already bound under the
+                # candidate's identity needs nothing: it is current, or it is
+                # withheld for a reason the source records. Neither is a failure,
+                # and neither may fall through to creating a second listing.
+                if reopened.get("status") == REOPEN_UNCHANGED:
+                    skipped.append(candidate)
+                    continue
                 if reopened.get("status") in {"published", "disabled"}:
                     published.append(
                         {

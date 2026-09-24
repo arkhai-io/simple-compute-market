@@ -10,6 +10,9 @@ from .capacity import (
     CapacityReconciler,
     CapacityRuntime,
     CapacitySite,
+    PublicationBinding,
+    UnbackedBinding,
+    publication_binding,
     remote_site_clients,
 )
 from .publication import (
@@ -18,6 +21,7 @@ from .publication import (
     PublicationDomainHooks,
     PublicationRepository,
     PublicationRuntime,
+    RegistryDivergence,
     ReconciliationPlan,
 )
 
@@ -32,10 +36,14 @@ __all__ = [
     "CapacityReconciler",
     "CapacityRuntime",
     "CapacitySite",
+    "PublicationBinding",
+    "publication_binding",
+    "UnbackedBinding",
     "remote_site_clients",
     "PublicationCandidate",
     "PublicationDomainHooks",
     "PublicationRepository",
     "PublicationRuntime",
+    "RegistryDivergence",
     "ReconciliationPlan",
 ]

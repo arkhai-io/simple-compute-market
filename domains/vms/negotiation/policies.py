@@ -220,39 +220,39 @@ def has_matching_inventory_guard(
     history: list[NegotiationRound],
     context: NegotiationContext,
 ) -> NegotiationStep:
-    """Veto when no available VM inventory resource matches the listing."""
+    """Veto a listing its own source no longer supports, or cannot supply.
+
+    Two checks, both about this listing's own site and pool or Physical
+    Resource, never capacity elsewhere:
+
+    - **Declared match**, for every listing: each published field sourced from
+      its declaration or pool still matches that source, and the published
+      quantity fits what it declares. A failure is ``no_matching_declaration``.
+    - **Availability**, for capacity-backed listings only: the published
+      quantity is currently free at the listing's own site. A failure is
+      ``no_matching_inventory``, which keeps meaning "nothing free".
+
+    The storefront computes both from the listing's durable binding and passes
+    the result as ``available_resources["source_check"]``; an unbacked listing
+    is never checked for availability and makes no site call. See
+    openspec/specs/storefront-publication/spec.md, "The seller's inventory guard
+    checks a listing against its own source".
+    """
     listing_resource = _coerce_resource_dict(context.listing.get("listing_resource"))
     if "gpu_model" not in listing_resource:
         return None, context
-
-    required: dict[str, Any] = {}
-    for key in ("region", "gpu_model"):
-        v = listing_resource.get(key)
-        if v is not None:
-            required[key] = v
-
-    portfolio_raw = (context.available_resources or {}).get("resources") or []
-
-    import json
-
-    for row in portfolio_raw:
-        if (row.get("state") or "").strip() != "available":
-            continue
-        attrs = row.get("attributes")
-        if isinstance(attrs, str):
-            try:
-                attrs = json.loads(attrs)
-            except (ValueError, TypeError):
-                continue
-        if not isinstance(attrs, dict):
-            continue
-        if all(attrs.get(k) == v for k, v in required.items()):
-            return None, context
-
-    return (
-        NegotiationDecision(action="reject", reason="no_matching_inventory"),
-        context,
-    )
+    check = (context.available_resources or {}).get("source_check") or {}
+    if check.get("declared_match") is not True:
+        return (
+            NegotiationDecision(action="reject", reason="no_matching_declaration"),
+            context,
+        )
+    if check.get("available") is False:
+        return (
+            NegotiationDecision(action="reject", reason="no_matching_inventory"),
+            context,
+        )
+    return None, context
 
 
 __all__ = [

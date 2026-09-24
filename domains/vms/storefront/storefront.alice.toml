@@ -105,6 +105,14 @@ principals = [
 [capacity.sites]
 default = "http://provisioning:8081"
 
+[capacity]
+# Provisioning trusts one storefront per site, and it is Bob, so Alice never
+# loads a site projection. Listings derived from projections resolve their
+# backing from what the site declares, so on that path Alice could create no
+# listing at all. She derives from her local tables instead, where every source
+# is capacity-backed.
+use_site_projection_for_listings = false
+
 [provisioning]
 # Shares Bob's provisioning service for now. The multi-registry test
 # stops at negotiation start so we never hit settle/lease/watchdog —

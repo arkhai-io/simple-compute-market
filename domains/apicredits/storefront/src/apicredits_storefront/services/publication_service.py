@@ -38,7 +38,9 @@ class ApiCreditPublicationHooks:
         if listing_resource.get("offering_mode") != candidate.binding.offering_mode:
             raise CapacityBindingError("API-credit listing_resource mode differs from binding")
 
-    async def binding_for_listing(self, listing_id: str) -> CapacityBinding | None:
+    async def binding_for_listing(
+        self, listing_id: str
+    ) -> CapacityBinding | None:
         row = await self._db.load_listing(listing_id=listing_id)
         if row is None:
             return None
@@ -94,7 +96,19 @@ async def close_order(parameters: dict[str, Any] | None = None) -> dict[str, Any
     binding = await ApiCreditPublicationHooks(db).binding_for_listing(listing_id)
     if binding is None:
         raise CapacityBindingError("API-credit listing has no durable capacity binding")
-    return await build_publication_runtime(db).close(BoundListing(listing_id, binding))
+    return await build_publication_runtime(db).close(
+        BoundListing(listing_id, binding), closed_by="seller"
+    )
+
+
+async def converge_registries(db: Any) -> dict[str, tuple[str, ...]]:
+    """Repair every registry that missed a publish, close, or reopen.
+
+    Run at the end of each capacity reconciliation, the storefront's recurring
+    publication pass; a registry still unreachable stays recorded as diverged
+    for the next one.
+    """
+    return await build_publication_runtime(db).converge()
 
 
 async def close_token_listings_after_capacity_change(db: Any, availability: dict) -> list[str]:

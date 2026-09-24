@@ -28,6 +28,7 @@ Admin evaluation (X-Admin-Key, no side effects):
 from __future__ import annotations
 
 import logging
+import sqlite3
 
 from market_storefront.services.listing_service import (
     ListingSourceAlreadyBound,
@@ -176,15 +177,36 @@ class ListingsController:
                 },
             ) from exc
 
-        await self._db.set_listing_paused(listing_id=listing_id, paused=False)
         from market_storefront.services.publication_service import (
             publish_order_to_registry,
+            reopen_order,
         )
 
-        publish_result = await publish_order_to_registry(
-            listing,
-            sqlite_client=self._db,
-        )
+        if row.get("status") == "closed":
+            # Only a listing its seller withdrew is the seller's to re-list. One
+            # reconciliation closed has no source supporting it right now, and
+            # the publication loop reopens it when its source does.
+            closed_by = row.get("closed_by")
+            if closed_by != "seller":
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "error": "listing_closed_by_reconciliation",
+                        "closed_by": closed_by,
+                        "hint": (
+                            "Its source does not currently support this "
+                            "listing; it reopens when the source does."
+                        ),
+                    },
+                )
+            await self._db.set_listing_paused(listing_id=listing_id, paused=False)
+            publish_result = await reopen_order(listing, sqlite_client=self._db)
+        else:
+            await self._db.set_listing_paused(listing_id=listing_id, paused=False)
+            publish_result = await publish_order_to_registry(
+                listing,
+                sqlite_client=self._db,
+            )
         registry_status = publish_result.get("status", "unknown")
         return PauseListingResponse(
             listing_id=listing_id,
@@ -223,6 +245,17 @@ class ListingsController:
             result = await self._listing_svc.close_listing(listing_id)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
+        except sqlite3.OperationalError as exc:
+            # The close did not reach local state, so no registry was told
+            # either; the seller can simply retry.
+            logger.warning("[LISTINGS] close of %s did not complete: %s", listing_id, exc)
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "listing_close_incomplete",
+                    "hint": "The listing is unchanged; retry the close.",
+                },
+            ) from exc
         except Exception as exc:
             logger.error("[LISTINGS] close unexpected: %s", exc, exc_info=True)
             raise HTTPException(status_code=500, detail=str(exc))

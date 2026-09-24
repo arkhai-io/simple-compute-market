@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-apicredits-domain"
-version = "0.2.0"
+version = "0.3.0"
 license = "MIT"
 description = "Shared API-credit domain models, policies, and market-domain contract."
 requires-python = ">=3.12,<3.14"
@@ -13,6 +13,19 @@ dependencies = [
     "pydantic>=2",
 ]
 
+[tool.uv]
+# Tests import this package from its installed wheel, not an editable
+# install: a directory-mapped package has no editable form that presents it
+# under its import path. The Makefile and CI set UV_NO_EDITABLE, and these
+# keys make uv rebuild that wheel whenever a module changes.
+cache-keys = [
+    { file = "pyproject.toml" },
+    { file = "*.py" },
+    { file = "listings/*.py" },
+    { file = "negotiation/*.py" },
+    { file = "settlement/*.py" },
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
@@ -21,25 +34,14 @@ build-backend = "hatchling.build"
 allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
-only-include = ["__init__.py"]
+# This directory is the `domains.apicredits` package; its role packages
+# (buyer, service, storefront, middleware, sample-app) are separate projects
+# nested inside it. The wheel maps the shared modules and subpackages by
+# directory, so a module added to one ships without a packaging edit.
+include = ["/*.py", "/listings/*.py", "/negotiation/*.py", "/settlement/*.py"]
 
-[tool.hatch.build.targets.wheel.force-include]
-"__init__.py" = "domains/apicredits/__init__.py"
-"domain_runtime.py" = "domains/apicredits/domain_runtime.py"
-"schema.py" = "domains/apicredits/schema.py"
-"listings/__init__.py" = "domains/apicredits/listings/__init__.py"
-"listings/models.py" = "domains/apicredits/listings/models.py"
-"listings/pricing.py" = "domains/apicredits/listings/pricing.py"
-"listings/reconciler.py" = "domains/apicredits/listings/reconciler.py"
-"negotiation/__init__.py" = "domains/apicredits/negotiation/__init__.py"
-"negotiation/buyer_policies.py" = "domains/apicredits/negotiation/buyer_policies.py"
-"negotiation/policies.py" = "domains/apicredits/negotiation/policies.py"
-"negotiation/storefront_round.py" = "domains/apicredits/negotiation/storefront_round.py"
-"negotiation/terms.py" = "domains/apicredits/negotiation/terms.py"
-"settlement/__init__.py" = "domains/apicredits/settlement/__init__.py"
-"settlement/credits_client.py" = "domains/apicredits/settlement/credits_client.py"
-"settlement/fulfillment.py" = "domains/apicredits/settlement/fulfillment.py"
-"settlement/issuance_evidence.py" = "domains/apicredits/settlement/issuance_evidence.py"
+[tool.hatch.build.targets.wheel.sources]
+"" = "domains/apicredits/"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

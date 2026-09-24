@@ -86,13 +86,17 @@ def reopenable_credit_listing_ids(
 
     ``availability=None`` reopens nothing: with no consumption
     information everything would look free, and reopening on ignorance
-    over-sells (same rule as the VM reconciler).
+    over-sells (same rule as the VM reconciler). Only a listing
+    reconciliation closed is a candidate; one its seller closed stays
+    closed until the seller reopens it, whatever quota returns.
     """
     if availability is None:
         return []
     reopenable: list[str] = []
     for row in listing_rows:
         if (row.get("status") or "").strip() != "closed":
+            continue
+        if row.get("closed_by") != "reconciliation":
             continue
         resource_id = listing_quota_resource_id(row)
         site_id = listing_capacity_site_id(row)

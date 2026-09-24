@@ -57,6 +57,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         --refresh-package arkhai-apicredits-storefront \
         --refresh-package arkhai-vms-buyer \
         --refresh-package arkhai-vms \
+        --refresh-package arkhai-vms-listings \
+        --refresh-package arkhai-vms-negotiation \
+        --refresh-package arkhai-vms-settlement \
         --refresh-package arkhai-apicredits-buyer \
         --refresh-package arkhai-apicredits-domain \
         --refresh-package arkhai-kit-policy \

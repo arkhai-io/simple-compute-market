@@ -435,3 +435,34 @@ class TestMixedForms:
                       gpu_model="in:[A100]", ram_gb_min=32) is False
         assert _match(spec, listing,
                       gpu_model="in:[H200,A100]", ram_gb_min=128) is False
+
+
+# ---------------------------------------------------------------------------
+# Capacity backing: exact and fail-on-missing
+# ---------------------------------------------------------------------------
+
+
+class TestCapacityBackingFilter:
+    """A discriminator gets no tolerant reading.
+
+    A listing that does not publish its backing matches neither value, so a
+    buyer asking for unbacked supply never receives a backed listing that
+    simply predates the field, and the reverse.
+    """
+
+    @pytest.mark.parametrize("published", ["backed", "unbacked"])
+    def test_matches_only_its_own_value(self, spec, published):
+        listing = _listing(capacity_backing=published)
+        other = "unbacked" if published == "backed" else "backed"
+
+        assert _match(spec, listing, capacity_backing=published) is True
+        assert _match(spec, listing, capacity_backing=other) is False
+
+    @pytest.mark.parametrize("query", ["backed", "unbacked"])
+    def test_a_listing_without_backing_matches_neither_value(self, spec, query):
+        assert _match(spec, _listing(), capacity_backing=query) is False
+
+    def test_no_backing_query_returns_both_kinds(self, spec):
+        assert _match(spec, _listing(capacity_backing="backed")) is True
+        assert _match(spec, _listing(capacity_backing="unbacked")) is True
+        assert _match(spec, _listing()) is True

@@ -1,0 +1,21 @@
+[project]
+name = "arkhai-vms-settlement"
+version = "0.1.0"
+license = "MIT"
+description = "VM settlement terms, proposals, and fulfillment helpers, shared by the VM storefront and buyer."
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "arkhai-vms-listings>=0.1.0",
+    "arkhai-kit-alkahest",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# Mapped by directory, as arkhai-vms-listings is.
+[tool.hatch.build.targets.wheel]
+include = ["*.py"]
+
+[tool.hatch.build.targets.wheel.sources]
+"" = "domains/vms/settlement/"

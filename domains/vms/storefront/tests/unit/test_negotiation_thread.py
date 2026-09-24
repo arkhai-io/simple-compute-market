@@ -70,6 +70,7 @@ async def _seed_owned_threads(client: SQLiteClient) -> None:
         ),
         source_envelope=source,
         last_reconciled_at="2026-08-15T00:00:00Z",
+        capacity_backing="backed",
         pool_id="pool-1",
     )
     await client.upsert_listing_with_binding(
