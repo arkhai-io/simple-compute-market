@@ -90,6 +90,10 @@ negotiate, settle, issue, call the model, exhaust, top up — is correct.
   and `meter-inference-usage` by supplying the stack it changes.
 - `repair-storefront-alkahest-configuration` owns the development stack's
   Alkahest readiness; this change's scenario needs it green.
+- [`unbacked-listing-publication`](../archive/2026-09-24-unbacked-listing-publication/)
+  (archived 2026-09-24) moved the publication hooks a copy of the API-credits
+  roles takes and made backing a declared listing property. The copies are taken
+  from current `dev`, and inference listings carry the backed value from day one.
 
 ## Impact
 

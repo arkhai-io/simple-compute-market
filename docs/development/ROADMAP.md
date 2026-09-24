@@ -355,16 +355,19 @@ External rating and billing platforms were evaluated during planning and are
 deliberately kept at the usage-record seam as optional seller-side adapters —
 the authority remains the only synchronous admission decision.
 
-Two further shapes are anticipated with recorded triggers rather than owned: an
-unbacked inference listing, once
-[`unbacked-listing-publication`](../../openspec/changes/unbacked-listing-publication/)
-promotes the backing discriminator and widens beyond the compute family, since a
-model server's supply is not finite the way a GPU is; and a monetary
-`asking_rate` per million tokens, once
+Two further shapes are anticipated with recorded triggers rather than owned. An
+unbacked inference listing: backing is a declared property of every pool and
+listing since
+[`unbacked-listing-publication`](../../openspec/changes/archive/2026-09-24-unbacked-listing-publication/)
+was archived on 2026-09-24, and version-1 inference listings carry the backed
+value — quota as a sales cap, not capacity — so admitting the unbacked value is
+an inference filter-specification bump when a seller needs it, since a model
+server's supply is not finite the way a GPU is. And a monetary `asking_rate` per
+million tokens, once
 [`publish-indicative-listing-rates`](../../openspec/changes/publish-indicative-listing-rates/)
-promotes the exact-decimal filter value type and declarative co-requirements.
-Until then inference publishes quota-backed listings on the API-credits path and
-compares on integer credit rates and the settlement asset.
+— now unblocked — promotes the exact-decimal filter value type and declarative
+co-requirements. Until then inference compares on integer credit rates and the
+settlement asset.
 
 **Completion test.** Two independent sellers list the same model at different
 rate cards; a buyer discovers both on an inference registry, buys credits from

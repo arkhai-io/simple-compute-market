@@ -213,6 +213,18 @@ availability reaches zero and MAY reopen it when availability later becomes
 positive; an unavailable authority MUST preserve the last complete listing state
 rather than be read as zero.
 
+The declared quota is a sales cap, not capacity. An inference listing MUST carry
+the backed value of the declared backing property; a listing MUST NOT change
+backing in place, and admitting the unbacked value is a filter-specification
+version change.
+
+#### Scenario: Seller declares no sellable quantity
+
+- **WHEN** a seller submits an inference listing candidate with no quota resource
+  or a zero declared quantity
+- **THEN** publication is refused, because version 1 admits only the backed
+  value, and the seller declares a cap instead
+
 #### Scenario: Declared credits are sold out and later replenished
 
 - **WHEN** reconciliation observes zero available credits for an open listing and

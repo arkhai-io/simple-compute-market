@@ -233,7 +233,7 @@ open gate remains in this change.
 | Three identities; the bearer credential is delivery | the `inference` capability's `spec.md` — "Bearer credential is delivery, not identity or payment authority" |
 | The authority is the singular synchronous admission decision; rating systems are downstream | the `inference` capability's `spec.md` — "Admission authority is synchronous and singular"; rationale in the `inference` capability's `architecture.md` |
 | Discovery under the `inference` schema identity | the `inference` capability's `spec.md` — "Discovery under the inference schema identity" |
-| Quota-backed publication in version 1, with the unbacked revisit trigger | the `inference` capability's `spec.md` — "Quota-backed publication"; trigger in the `inference` capability's `architecture.md` — "Current limits" |
+| Quota-backed publication in version 1 as the backed value of the declared backing property, quota being a sales cap | the `inference` capability's `spec.md` — "Quota-backed publication"; trigger in the `inference` capability's `architecture.md` — "Current limits" |
 | No derived discovery price; comparability is on integer rates and asset until the exact-decimal primitives land | the `inference` capability's `architecture.md` — "Current limits" |
 | Copy first, extract after two consumers | the `inference` capability's `architecture.md` — "Implementation composition"; `docs/development/ROADMAP.md` Goal 8 current state |
 | `inference` joins the enumerated offering modes; **rate card** and **usage record** join the Terms table | `docs/development/ARCHITECTURE.md` — "One name per concept", "Terms" |
