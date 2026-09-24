@@ -271,3 +271,25 @@ reach this change:
   search during `pools-8`'s own Section 6 design pass (2026-08-05); their
   contents may have changed by the time this change starts — re-confirm
   the same search rather than trusting this list unchanged.
+
+## Storefront override endpoint superseded by `publish-multidimensional-listing-shape` (recorded 2026-09-24)
+
+`publish-multidimensional-listing-shape` builds the storefront's per-pool override
+write path as a new site-scoped store, keyed by `(site_id, pool_id)`, with
+authenticated administrator routes, typed clients, and a CLI. The `PUT`/`PATCH`
+endpoint over `compute_capacity_pools`' commercial columns that "Why CSV-import
+removal needs a replacement write path first" scopes is therefore no longer this
+change's to build, and the prerequisite that section names is met by that change.
+
+What remains here:
+
+- `compute_capacity_pools`' commercial columns stay the lower storefront-override tier,
+  consulted for home-site pools only, beneath the site-scoped store.
+- They remain so for as long as the resource import writes them. This change retires
+  the import and that tier together.
+- It still owes a decision on whether any legacy commercial values are carried into
+  the site-scoped store when the tier is retired.
+  - A migration cannot attribute a legacy row to a site without reading live
+    configuration.
+  - An explicit, preview-first command that names the site is the pattern this
+    repository uses for such cutovers.

@@ -111,3 +111,18 @@ revert; declared tags on unmigrated pools are ignored by the restored reader.
 - **Should the range query report a reason when a dimension has no admissible range at
   all?** Useful for counter-offer messages, but the vocabulary for such reasons is a
   negotiation concern. Deferrable until a caller needs it.
+
+## Coordination: listing shapes share this vocabulary (recorded 2026-09-24)
+
+`publish-multidimensional-listing-shape` adds chosen listing shapes: a pool hint and
+storefront overrides declaring the exact shapes a pool is listed in. They are
+expressed in the family-grouped form and flattened by a shared, domain-schema-driven
+utility in `market_core`. Two consequences for this change:
+
+- **Vocabulary.** Bounds should be declared in the same family-grouped vocabulary,
+  through the same utility, so that a listing shape and the bounds it must fall within
+  cannot name one dimension two ways.
+- **Publication gains an admissibility check.** Publication already refuses a listing
+  shape that no member can hold. Once bounds exist, it should also ask this change's
+  admissibility predicate whether the pool admits the shape, and treat an inadmissible
+  shape the same way: no listing, reported.

@@ -258,3 +258,31 @@ Steps 2–4 are this change's job.
 ## Design promotion record
 
 Not started. No decisions in this document are implemented yet.
+
+### Fourth coordination point: listing shapes implement part of this direction (2026-09-24)
+
+`publish-multidimensional-listing-shape` implements a contained part of this design,
+so that nothing it stores or keys on needs rework when this change lands. Its
+`design.md` decision 3 has the detail.
+
+- **The family-grouped form** is the only form for declaring a listing shape. That
+  covers the `listing_shapes` pool hint and storefront pool overrides. These are the
+  first durable, operator-written inputs in this form.
+- **The shared flattening utility** is implemented in `market_core`, beside
+  `market_core.query_dsl`, rather than in `kit/site` as the note above expected. It is
+  driven by a domain-supplied schema and knows no family or field names. `market_core`
+  is dependency-light and importable by the site, the pool kit, storefronts, and
+  domains, whereas the VM listings and negotiation packages deliberately avoid
+  depending on `kit/site`.
+- **The VM family schema** is defined for four families: `gpu.count`, `gpu.model`,
+  `cpu.count`, `memory.gib`, and `storage.gib`. Its flat names are today's wire names
+  (`vcpu_count`, `ram_gb`, `disk_gb`) rather than the family-prefixed names this
+  design's convention produces. That is a recorded exception. The wire rename this
+  change owns becomes those schema rows plus the wire rename itself. The units agree:
+  the VM requirement delegate already treats `ram_gb` and `disk_gb` as GiB.
+- **Shape digests** are taken over the family-grouped form, so the rename changes no
+  listing key.
+
+Unchanged here: the buyer-facing `requirements` object, the claim restructure and
+`probe` signature, the `offering_mode`/`resource_type` split, the wire rename, and
+expressing the site's resource side in the family form.
