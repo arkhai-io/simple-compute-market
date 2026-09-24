@@ -26,22 +26,27 @@ quantity, and select either a new key or an existing key identified by `key_id`.
 ### Requirement: One listing is one served model
 
 An inference listing MUST describe exactly one served model at one seller. Its
-`listing_resource` MUST carry a canonical `model_id`, an `artifact_ref` naming
-the exact weights it serves, the seller's `served_model_name`, `context_length`,
-`quantization`, an architecture block naming modality, `supported_parameters`,
-an endpoint block whose `api_style` is `openai.v1`, a complete rate card, and
-`offering_mode` equal to `inference`; it MAY carry an `artifact_digest` and a
-mutable `display_name`. A listing omitting any field a buyer filters on MUST be
-rejected at publication rather than published with the field absent.
+`listing_resource` MUST carry a non-empty seller-asserted `model_id`, an
+`artifact_ref` naming the weights served under any scheme, the seller's
+`served_model_name`, `context_length`, an enumerated `quantization`, an
+architecture block naming modality, `supported_parameters`, an endpoint block
+whose `api_style` is `openai.v1`, a complete rate card, a `provenance` of
+`self-hosted` or `resold`, and `offering_mode` equal to `inference`; it MAY
+carry an `artifact_digest`, a mutable `display_name`, a `model_owner` principal
+distinct from the seller, and an `attestation` envelope. A listing omitting any
+required field MUST be rejected at publication rather than published with the
+field absent.
 
-`model_id` MUST identify the logical model — one weights lineage at one version
-— under the domain-defined canonical format: lowercase, `<org>/<name>`, with the
-version inside the name and no alias segment such as `latest`. Quantization,
-runtime, and context limits MUST NOT be encoded in `model_id`; they are explicit
-fields. A fine-tune is a different logical model and MUST carry its own
-`model_id`. The domain MUST own the format. A registry MUST validate the format
-from its filter specification and MAY restrict the accepted vocabulary by
-operator policy, but MUST NOT mint, resolve, or alias identifiers.
+A listing SHOULD derive `model_id` by the domain's derivation rule — the
+upstream owner and repository name, lowercased, with revision and quantization
+suffixes stripped; the owner's namespace for private weights; the fine-tuner's
+for a fine-tune — so that independent sellers of the same weights converge on
+one identifier. Quantization, runtime, and context limits MUST be carried as
+explicit fields and MUST NOT be the only place a deployment property is
+expressed. The domain MUST NOT maintain a list of admitted models. A registry
+MAY narrow the accepted `model_id` vocabulary by operator policy through its
+filter specification and MUST NOT mint, resolve, or alias identifiers. A resold
+listing is a legitimate listing.
 
 #### Scenario: Seller serves several models
 
@@ -49,23 +54,18 @@ operator policy, but MUST NOT mint, resolve, or alias identifiers.
 - **THEN** it publishes three listings, each with its own `listing_id` and one
   model card, and a filter on one model's rate matches only that model's listing
 
-#### Scenario: Listing omits a comparison field
+#### Scenario: Two sellers serve the same weights
 
-- **WHEN** a listing candidate lacks `context_length`, `quantization`, or a rate
+- **WHEN** two sellers independently derive `model_id` for the same upstream
+  weights and publish with different `quantization`, `artifact_ref`, and rate
+  cards
+- **THEN** both listings carry the same `model_id`, a filter on it returns both,
+  and filters on quantization and rate distinguish them
+
+#### Scenario: Listing omits a required field
+
+- **WHEN** a listing candidate lacks `context_length`, `provenance`, or a rate
   card entry
-- **THEN** publication is rejected before the registry stores it
-
-#### Scenario: Two sellers serve the same logical model
-
-- **WHEN** two sellers publish listings carrying the same `model_id` with
-  different `artifact_ref`, `quantization`, and rate cards
-- **THEN** both are stored under their own `listing_id`, a filter on that
-  `model_id` returns both, and a filter on rate distinguishes them
-
-#### Scenario: Identifier violates the canonical format
-
-- **WHEN** a listing's `model_id` carries uppercase, an alias segment such as
-  `latest`, or an encoded quantization
 - **THEN** publication is rejected before the registry stores it
 
 #### Scenario: Registry operator narrows the vocabulary
@@ -75,24 +75,36 @@ operator policy, but MUST NOT mint, resolve, or alias identifiers.
 - **THEN** the registry rejects the listing at validation, and no component of
   the domain or registry resolves or aliases the identifier
 
-### Requirement: Purchase is priced per credit
+#### Scenario: Listing is resold
 
-Inference negotiation MUST interpret an advertised settlement rate as a
-per-credit rate with `per` equal to `credit`, and MUST compute the scalar
-reference payment as quantity multiplied by that rate in payment base units.
-Seller and buyer policy MUST evaluate offers against that same quantity-scaled
-amount. The rate card MUST NOT participate in the purchase price.
+- **WHEN** a seller publishes a listing with `provenance: resold` fronting a
+  model hosted elsewhere
+- **THEN** the listing is accepted and discoverable, and a buyer may filter on
+  provenance
+### Requirement: Purchase is priced in settlement-asset base units
 
-#### Scenario: Buyer requests credits
+One inference credit MUST equal one base unit of the asset the selected
+settlement option settles in. An inference settlement option MUST advertise a
+per-credit rate of exactly one base unit, provision intent's `quantity` MUST be
+read as base units purchased, and the scalar reference payment MUST equal that
+quantity. Rate-card values MUST be read as base units of the same asset per
+million tokens or per request.
 
-- **WHEN** a buyer requests one million credits from a listing whose selected
-  option's rate is 3 base units per credit
-- **THEN** buyer and seller policy use 3,000,000 base units as the scalar
-  reference payment regardless of the listing's rate card
+#### Scenario: Buyer purchases a balance
 
+- **WHEN** a buyer requests a quantity of 2,000,000 from a listing settling in an
+  asset with six decimals
+- **THEN** the reference payment is 2,000,000 base units (two whole units of the
+  asset) and the issued key's balance is 2,000,000
+
+#### Scenario: Seller advertises a non-unit credit rate
+
+- **WHEN** an inference settlement option carries a per-credit rate other than
+  one
+- **THEN** the listing is rejected before publication
 ### Requirement: Rate card is integer-valued and pinned at issuance
 
-A rate card MUST express credits per million prompt tokens and credits per
+A rate card MUST express base units per million prompt tokens and base units per
 million completion tokens as non-negative integers, MAY express an integer flat
 charge per request and integer rates for cached prompt tokens and images, and
 MUST reject fractional or negative values. A credit grant MUST record the rate
@@ -103,7 +115,7 @@ only grants issued after republication.
 #### Scenario: Seller reprices after a sale
 
 - **WHEN** a seller republishes a model's listing with higher rates after a buyer
-  has purchased credits under the previous card
+  has purchased a balance under the previous card
 - **THEN** the buyer's existing grant consumes at the previous card and only new
   purchases consume at the new one
 
@@ -111,7 +123,6 @@ only grants issued after republication.
 
 - **WHEN** a rate card entry is not a non-negative integer
 - **THEN** the listing is rejected before publication
-
 ### Requirement: Usage record and deterministic charge derivation
 
 A usage record MUST carry the model and key the request ran under, a request
@@ -149,6 +160,20 @@ bearer secret, the prompt, the completion, or any response payload.
 - **THEN** a canary bearer secret, prompt text, and completion text supplied to
   the producing code are absent from the serialized body
 
+### Requirement: Attestation is reserved and unverified
+
+The model card and the usage evidence MAY each carry an optional `attestation`
+envelope with a `kind`, a `schema_version`, and an opaque `payload`. In this
+version no component MUST verify, interpret, or act on its contents, a consumer
+MUST treat a listing or record with the envelope exactly as one without it, and
+a registry MUST NOT expose the envelope as a filter. A future proof format is
+introduced as a new `kind` under the same envelope.
+
+#### Scenario: Seller publishes an attestation nobody verifies
+
+- **WHEN** a listing carries an `attestation` envelope
+- **THEN** publication, discovery, negotiation, and settlement proceed exactly as
+  for a listing without one, and no filter selects on its presence or contents
 ### Requirement: Bearer credential is delivery, not identity or payment authority
 
 The inference domain MUST treat the marketplace principal that negotiates and
@@ -185,17 +210,25 @@ balance the authority treats as authoritative.
 A registry serving inference listings MUST declare schema identity `inference`
 version `1` and MUST validate and filter listings from the inference filter
 specification: exact filters on `model_id`, `model_family`, `quantization`,
-modality, and `supported_parameters`; range filters on `context_length` and on
-the rate card's integer credit rates; and the settlement mechanism, asset, and
-funding projections. The inference buyer plugin MUST declare the `inference`
-schema identity and MUST query only registries declaring it.
+modality, `supported_parameters`, and `provenance`; range filters on
+`context_length` and on the rate card's base-unit integers; and the settlement
+mechanism, asset, and funding projections. The inference buyer plugin MUST
+declare the `inference` schema identity, MUST query only registries declaring
+it, and MUST refuse to compile a rate bound that is not paired with a settlement
+asset.
 
 #### Scenario: Buyer bounds a rate
 
-- **WHEN** a buyer queries with a maximum of 500 credits per million completion
-  tokens
-- **THEN** listings whose card exceeds 500 are excluded, and a listing missing
-  the rate is excluded rather than matched
+- **WHEN** a buyer queries with `settlement_asset` set and a maximum of 500 base
+  units per million completion tokens
+- **THEN** listings in that asset whose card exceeds 500 are excluded, and a
+  listing missing the rate is excluded rather than matched
+
+#### Scenario: Buyer bounds a rate without naming an asset
+
+- **WHEN** a buyer supplies a rate bound and no settlement asset
+- **THEN** the buyer plugin refuses to compile the query and names the pairing
+  rule
 
 #### Scenario: Compute and API-credit registries are also configured
 
@@ -203,7 +236,6 @@ schema identity and MUST query only registries declaring it.
   registry, and an inference registry
 - **THEN** inference discovery queries only the registry declaring the
   `inference` schema identity
-
 ### Requirement: Quota-backed publication
 
 An inference listing MUST identify an authoritative quota resource at a
