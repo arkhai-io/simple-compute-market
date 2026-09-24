@@ -100,6 +100,7 @@ class ShapeState:
     listing_id: str | None = None
     provisioning_armed: bool = False
     escrow_uid: str | None = None
+    reservation_ids: tuple[str, ...] = ()
 
 
 @pytest.fixture(scope="module")
@@ -264,14 +265,25 @@ class TestStage05_Commitment:
         # The claim requests exactly the shape's quantities: no more, and no
         # dimension the shape omits.
         assert {r["dimensions"] == PUBLISHED for r in reservations} == {True}, reservations
+        shape_state.reservation_ids = tuple(
+            str(r["capacity_reservation_id"]) for r in reservations
+        )
 
     def test_05b_the_vm_is_sized_from_the_shape_not_pool_defaults(
         self, provisioning_client, shape_state
     ):
-        require_state(shape_state, "escrow_uid")
-        jobs = provisioning_client.list_jobs(escrow_uid=shape_state.escrow_uid).jobs
+        require_state(shape_state, "reservation_ids")
+        # A provisioning job records the capacity reservation it fulfils in its
+        # `escrow_uid` field, not the on-chain escrow.
+        jobs = [
+            job
+            for reservation_id in shape_state.reservation_ids
+            for job in provisioning_client.list_jobs(escrow_uid=reservation_id).jobs
+        ]
         creates = [job for job in jobs if job.params.get("vm_action") == "create"]
-        assert creates, f"no create job for escrow {shape_state.escrow_uid}: {jobs}"
+        assert creates, (
+            f"no create job for reservations {shape_state.reservation_ids}: {jobs}"
+        )
         params = creates[0].params
         assert (
             params.get("vm_gpu_count"),

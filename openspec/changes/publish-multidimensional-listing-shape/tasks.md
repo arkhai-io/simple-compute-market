@@ -529,6 +529,12 @@ only in integration tests, and rejection-path exceptions commented as such.
     scenarios' pools for the same reason; that predates this change, since region
     resolution is unchanged, and those scenarios publish through the API. 5.3 needs a third
     run.
+  - **Third pipeline run (2026-09-24):** 122 passed, 1 failed. Every stage through 05a
+    passed: publication of exactly the stated shape, discovery at 32 and 33 GiB, `market buy`
+    to ready, and a reservation holding exactly the shape's quantities. 05b found no create
+    job because it filtered jobs by the on-chain escrow UID; a provisioning job's `escrow_uid`
+    field holds the capacity reservation it fulfils. 05a now records the reservation IDs and
+    05b looks jobs up by them. 5.3 needs a fourth run.
 
 # Slice B
 
