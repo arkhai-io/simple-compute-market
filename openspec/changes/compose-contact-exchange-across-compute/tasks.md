@@ -50,7 +50,7 @@ before it has.
       which currently registers Alkahest and Stripe only, supplying persistence and
       configured values only. Declare it as not fulfilling through capacity in the
       composition's per-mechanism fulfillment declaration, which
-      `unbacked-listing-publication` adds; that declaration is what lets an unbacked VM
+      `unbacked-listing-publication` added; that declaration is what lets an unbacked VM
       listing carry the option.
 - [ ] 3.2 Add VM's introduction persistence as thin wrappers over the kit's
       `insert_introduction` and `load_introduction`, matching the shape the promoted
@@ -109,6 +109,16 @@ before it has.
       the mismatch refusal.
 - [ ] 6.3 An end-to-end deal settling by introduction in a newly composing domain,
       including delivery.
+- [ ] 6.4 **System.** Backed and unbacked VM listings from one storefront are returned
+      by one buyer query across running services, and an unbacked one reaches a
+      usable introduction. Needs Sections 1–3: until introduction is composed for VM,
+      an unbacked VM listing has no settlement option it may publish. Transferred
+      from `unbacked-listing-publication` (its 6.7), which implemented the listings
+      but could not run them in a stack.
+- [ ] 6.5 **System.** Two seller sites publishing unbacked supply to one storefront
+      retain distinct origin and source identity, and each introduction reveals its
+      own seller's contact. Needs 3b. Transferred from `unbacked-listing-publication`
+      (its 6.8).
 
 ## 7. Closeout
 

@@ -21,9 +21,13 @@ from dataclasses import asdict
 
 import pytest
 
+from market_storefront import lifecycle, server
+from market_storefront.startup import _start_publication_loop
+
 from tests._settings_overrides import settings_overrides
 from tests.fixtures.publication_cycle import validate_cycle_report
 from tests.publication_app import (
+    BUYER_SIGNER,
     SITE,
     pool,
     publication_app,
@@ -456,8 +460,6 @@ async def test_an_unbacked_listing_publishes_and_negotiates_to_acceptance(tmp_pa
 @pytest.fixture
 def lifecycle_registry():
     """A clean loop registry and pause flag, as a fresh process has."""
-    from market_storefront import lifecycle, server
-
     lifecycle.reset_for_tests()
     server._LOOPS_PAUSED = False
     yield
@@ -468,8 +470,6 @@ def lifecycle_registry():
 async def test_the_lifecycle_pause_holds_the_loop_while_its_controls_step_it(
     world, lifecycle_registry
 ):
-    from market_storefront.startup import _start_publication_loop
-
     # Held before it starts, so the running loop never begins a cycle of its own.
     await world.client.admin_pause_lifecycle_loops()
     _start_publication_loop(world.db)
@@ -495,8 +495,6 @@ async def test_the_lifecycle_pause_holds_the_loop_while_its_controls_step_it(
 async def test_round_zero_evaluation_runs_the_inventory_guard(world):
     """The admin dry run of a buyer's opening round checks the listing against a
     fresh derivation of its own source, as a real round does."""
-    from tests.publication_app import BUYER_SIGNER
-
     world.pools.append(pool("broker-a", backing="unbacked", gpu_count=2))
     await _cycle(world)
     listing_id, listing = max(

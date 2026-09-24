@@ -1567,6 +1567,31 @@ cycles — pause, dry-run repeatability, refresh, close, reopen, and E1's two-do
 registration — belongs to the real-app integration tests (R4–R5). The end-to-end
 record for this change says so rather than citing scenarios that do not run it.
 
+## Closeout: system evidence and completion
+
+Two things were recorded as holding this change open after its implementation,
+review, and promotion were complete. Neither is work this change can do.
+
+**System evidence for unbacked listings (6.7, 6.8, and 7.9's unbacked scenarios)**
+moves to `compose-contact-exchange-across-compute` as its 6.4 and 6.5. An unbacked
+listing publishes only settlement options its domain does not fulfil through
+capacity, and VM composes none until that change composes introduction, so no stack
+can show an unbacked VM listing to a buyer before it lands. The scenarios belong to
+the change that first makes them runnable; its own end-to-end introduction deal
+(its 6.3) is the same flow, and 6.8's two-seller case is the system form of its 3b.
+This change's behaviour is proven at integration level through the storefront app
+(E3), and the end-to-end pipeline passes. Keeping the change open instead would
+have left it unarchived until `contact-payload-retention` and the composition both
+landed, with nothing left for it to do.
+
+**The completion dependency on `pools-9-retire-local-physical-authority`** existed
+so this change would not promote "no storefront-local table authors a listing" as
+true of every listing while backed listings could still come from local tables. The
+promotion scopes that rule to unbacked listings, which this change makes true, and
+`ARCHITECTURE.md` states the backed exception. `pools-9`'s promotion task widens
+both when it retires the local-table path, so nothing this change promoted waits on
+it.
+
 ## Findings during implementation
 
 Recorded as implementation found them. Each is either fixed here, because this change

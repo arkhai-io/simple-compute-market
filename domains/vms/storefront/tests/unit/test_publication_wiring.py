@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from core_storefront.domain_plugins import (
+    discover_storefront_domain_registry,
+    parse_storefront_contribution_selections,
+)
 from market_storefront.publication_wiring import (
     VmPublicationSourceCallbacks,
     build_vm_publication_source_kwargs,
@@ -43,11 +47,6 @@ def _combined_registry():
     Built by the same discovery over installed contributions that startup runs,
     from the selections a combined storefront configures.
     """
-    from core_storefront.domain_plugins import (
-        discover_storefront_domain_registry,
-        parse_storefront_contribution_selections,
-    )
-
     return discover_storefront_domain_registry(
         parse_storefront_contribution_selections(
             [

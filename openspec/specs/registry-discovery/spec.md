@@ -49,8 +49,6 @@ The registry MUST identify a filter-spec version with an ETag and MUST reject a 
 - **WHEN** a client queries listings with an ETag that does not match the active filter-spec
 - **THEN** the registry returns HTTP 412
 
-
-
 ### Requirement: Body-bound version 2 registry authentication
 
 The registry client MUST receive an injected scheme-neutral signer and MUST NOT accept or derive publisher authority from a private-key string or address-only credential. Publication, update, close, publisher-identity rotation, and authenticated discovery MUST use the shared `arkhai.market-request-signature.v2` contract. The proof MUST bind the complete canonical body or empty-body marker together with the caller role, exact principal, method, semantic operation, resource, request ID, and timestamp before validation, dispatch, or persistence. Behavior-affecting query values MUST be included in the signed semantic body.
@@ -167,16 +165,6 @@ principal set carried in the validated descriptor before returning it.
 - **WHEN** a client verifies the signed response against the principal carried in the descriptor
 - **THEN** the proof establishes credential possession but does not by itself establish third-party endorsement of the operator or URL
 
-## Evidence
-
-- Schema loading, validation, and ETag behavior: `core/registry/tests/unit/test_filter_spec.py`, `core/registry/tests/integration/test_filter_spec.py`, and `core/registry/tests/integration/test_validate_publish.py`.
-- Declarative filtering and stale `If-Match`: `core/registry/tests/unit/test_filter_eval.py` and `core/registry/tests/integration/test_listings_filtering.py`.
-- Injected dual-scheme publisher identity, stable listing ownership, body-bound requests, signed responses, and replay behavior: `core/registry/tests/integration/test_identity_publish.py`, `core/registry/tests/integration/test_listings.py`, `core/registry/tests/unit/test_publisher_auth.py`, and `core/registry-client/tests/test_auth.py`.
-- Publisher rotation and stable-subject ownership: `core/registry/tests/integration/test_publisher_rotation.py`.
-- Atomic canonical-principal migration and rollback: `core/registry/tests/unit/test_principal_migrations.py`.
-- Strict descriptor carriers, startup derivation, access posture, signed reads, and durable replay: `core/tests/unit/test_registry_descriptor.py`, `core/registry/tests/unit/test_registry_descriptor.py`, and `core/registry/tests/integration/test_registry_descriptor.py`.
-- Helm descriptor configuration and Secret separation: `helm/scripts/test-render.sh`.
-
 ### Requirement: The compute schema names its family, not one domain
 
 The compute-family filter specification MUST declare a schema identity naming the
@@ -219,3 +207,66 @@ backwards-incompatible and MUST bump the specification version.
 - **WHEN** a buyer filters listings by offering mode
 - **THEN** the filter reads `listing_resource.offering_mode`
 - **AND** a listing publishing no offering mode is excluded rather than matching
+
+### Requirement: Compute listings publish their capacity backing
+
+A compute listing MUST publish whether an admission authority stands behind it.
+The value is part of the compute listing shape rather than an optional annotation,
+because a buyer cannot otherwise tell a listing they can reserve capacity against
+from one where reservation is a no-op and any number of buyers may settle against
+the same supply.
+
+This value describes what the marketplace will do with the listing, not how far a
+buyer should trust it. Every field a listing publishes is a seller assertion, and
+no requirement in this capability verifies any of them for either kind of
+listing.
+
+A registry filter on backing MUST match exactly and MUST exclude a listing that
+does not publish the field. A permissive match would return listings a buyer
+specifically excluded: a listing predating the field would satisfy a query for
+unbacked supply while being backed.
+
+Listings published before this field existed MUST be republished carrying an
+explicit capacity-backed value. They are semantically known to be backed and MUST
+NOT depend on an absent field to be classified.
+
+Every compute-family domain publishing into the compute listing shape MUST publish
+the value, including a domain whose listings are always capacity-backed. The value
+belongs to the compute listing shape; a registry profile with a different schema
+identity is not required to carry it.
+
+#### Scenario: A buyer queries for unbacked supply
+
+- **WHEN** a buyer filters for listings with no admission authority behind them
+- **THEN** only listings publishing that value are returned
+
+#### Scenario: A listing does not publish backing
+
+- **WHEN** a listing publishes no backing value and a buyer filters on backing
+- **THEN** that listing is excluded from the result rather than matching either value
+
+#### Scenario: A listing published before the field existed
+
+- **WHEN** a listing published before backing was part of the compute listing shape is republished
+- **THEN** it carries an explicit capacity-backed value under its existing listing identity
+
+#### Scenario: Backed and unbacked listings share one catalogue
+
+- **WHEN** a buyer queries without filtering on backing
+- **THEN** both capacity-backed and unbacked listings are returned together, each carrying its published backing value
+
+#### Scenario: A bare-metal listing is published
+
+- **WHEN** a bare-metal storefront publishes a listing into the compute listing shape
+- **THEN** the listing carries an explicit capacity-backed value and is returned by an exact filter for backed supply
+
+## Evidence
+
+- Schema loading, validation, and ETag behavior: `core/registry/tests/unit/test_filter_spec.py`, `core/registry/tests/integration/test_filter_spec.py`, and `core/registry/tests/integration/test_validate_publish.py`.
+- Declarative filtering and stale `If-Match`: `core/registry/tests/unit/test_filter_eval.py` and `core/registry/tests/integration/test_listings_filtering.py`.
+- Injected dual-scheme publisher identity, stable listing ownership, body-bound requests, signed responses, and replay behavior: `core/registry/tests/integration/test_identity_publish.py`, `core/registry/tests/integration/test_listings.py`, `core/registry/tests/unit/test_publisher_auth.py`, and `core/registry-client/tests/test_auth.py`.
+- Publisher rotation and stable-subject ownership: `core/registry/tests/integration/test_publisher_rotation.py`.
+- Atomic canonical-principal migration and rollback: `core/registry/tests/unit/test_principal_migrations.py`.
+- Strict descriptor carriers, startup derivation, access posture, signed reads, and durable replay: `core/tests/unit/test_registry_descriptor.py`, `core/registry/tests/unit/test_registry_descriptor.py`, and `core/registry/tests/integration/test_registry_descriptor.py`.
+- Helm descriptor configuration and Secret separation: `helm/scripts/test-render.sh`.
+- Published capacity backing and its filter: `core/registry/tests/integration/test_capacity_backing_filter.py` and `core/registry/tests/unit/test_filter_eval.py`.

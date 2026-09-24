@@ -221,6 +221,26 @@ conflicts, orphan relationships, and derivation collisions fail without
 mutating the source. Once accepted effects use common bindings, rollback is
 forward recovery under those bindings, not restoration of an unbound schema.
 
+Each listing binding records its capacity backing, and each closed listing records
+whether its seller or reconciliation closed it. Both columns are enforced by
+triggers rather than by rebuilding the tables, so rolling the storefront back to
+code that predates them means dropping the triggers and leaving the columns, which
+the older code ignores: the required-backing insert trigger
+`storefront_listing_binding_backing_required`, and the two closure-reason triggers
+`listing_closed_by_consistent_insert` and `listing_closed_by_consistent_update`.
+Dropping the required-backing trigger is safe only while no unbacked listing has
+been published, because older code reads every listing as backed and would attempt
+reservations its site refuses. A registry that already publishes the backing field
+keeps it; an older reader ignores it.
+
+The storefront's VM publication runs on its own; bare-metal publication remains an
+operator-invoked command. Storefront-wide terms of sale are configuration — `[pricing].settlements` and the per-model
+`[pricing.defaults.gpu.<model>].settlements`, and `default_max_duration_seconds` —
+beneath each pool's own `pricing` declaration and the storefront's per-pool
+overrides. A change to any of them reaches open listings on the next publication
+cycle; `market-storefront publish` runs or previews that cycle and takes no terms
+of its own.
+
 ## Definition documents
 
 A service may be given the path to a YAML document describing resources it

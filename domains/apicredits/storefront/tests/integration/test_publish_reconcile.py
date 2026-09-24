@@ -9,6 +9,15 @@ import httpx
 import pytest
 
 from core_storefront.auth import signed_response_headers
+from core_storefront.capacity import CapacityDelta
+from market_capacity_publication import CapacityReconcileContext
+
+from apicredits_storefront.services.capacity_client import _capacity_reconciler
+from apicredits_storefront.services.publication_service import (
+    close_order,
+    close_token_listings_after_capacity_change,
+)
+from apicredits_storefront.utils import sqlite_client as sqlite_module
 from market_site_client import SiteCapacityClient
 from market_identity import Ed25519Signer, TrustedIdentitySet
 
@@ -243,16 +252,6 @@ async def test_capacity_release_does_not_reopen_a_listing_its_seller_closed(
 ):
     """The capacity-event reconciler, entered as a released delta, leaves a
     seller's close alone while still reopening a listing quota exhaustion closed."""
-    from core_storefront.capacity import CapacityDelta
-    from market_capacity_publication import CapacityReconcileContext
-
-    from apicredits_storefront.services.capacity_client import _capacity_reconciler
-    from apicredits_storefront.services.publication_service import (
-        close_order,
-        close_token_listings_after_capacity_change,
-    )
-    from apicredits_storefront.utils import sqlite_client as sqlite_module
-
     monkeypatch.setattr(sqlite_module, "_sqlite_client", db)
     await _insert_listing(db, "L-withdrawn", "svc-a", "open")
     await _insert_listing(db, "L-exhausted", "svc-b", "open")

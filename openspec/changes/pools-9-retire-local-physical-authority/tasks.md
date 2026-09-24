@@ -224,7 +224,14 @@ Per `openspec/README.md#plan-closeout-requirements`.
       gap mapping in `docs/development/ROADMAP.md`. If `add-development-roadmap`
       has not landed when this change completes, record that disposition
       explicitly rather than skipping the step.
-- [ ] 7.6 **Promotion.** Complete the design-promotion record below.
+- [ ] 7.6 **Promotion.** Complete the design-promotion record below. Widen
+      `openspec/specs/storefront-publication/spec.md`'s rule that an unbacked
+      listing is derived only from the site projection to every listing, and correct
+      `docs/development/ARCHITECTURE.md`'s "Storefront capacity boundary", which
+      says a storefront disabling projection-backed derivation still derives backed
+      listings from local tables. Both became true only for unbacked listings when
+      `unbacked-listing-publication` promoted them; retiring the local-table path
+      (Section 4) makes them true of every listing.
 - [ ] 7.7 **Campaign index currency** (part seven, added when
       `openspec/README.md#plan-closeout-requirements` was extended from six parts to seven).
       Appended rather than folded into an existing task, per `AGENTS.md`'s rule to amend

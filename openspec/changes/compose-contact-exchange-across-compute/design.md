@@ -131,8 +131,10 @@ publishes only options its domain does not fulfil that way. That is a fact about
 the domain composes each mechanism, so no pool-level or listing-level field names a
 mechanism. When this change composes contact exchange for VM (task 3.1), the VM
 composition declares it as not fulfilling through capacity. Until then no unbacked VM
-listing has a settlement option, so `unbacked-listing-publication`'s system evidence
-waits on Sections 1–3 and 3b of this change. Nothing here waits on that change.
+listing has a settlement option, so the system evidence for unbacked listings lives
+here, as tasks 6.4 and 6.5, transferred from the archived
+`unbacked-listing-publication` when it closed. Nothing here waits on that change: it
+has landed.
 
 ### One contact per origin
 

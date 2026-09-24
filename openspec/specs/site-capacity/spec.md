@@ -14,9 +14,12 @@ A site authority MUST own physical resource capacity and allocations; a storefro
 - **THEN** it skips capacity-driven close/reopen actions rather than treating ignorance as zero capacity
 
 ### Requirement: Storefront capacity-claim identity
-VM compute listings MUST normalize surrounding whitespace and carry at least one valid `pool_id` or `resource_id`. Every supplied identity MUST begin with an alphanumeric character, contain only letters, digits, `.`, `_`, `:`, or `-`, and contain at most 128 characters. A pool-only listing produces a pool-scoped reservation claim. A listing carrying `resource_id`, whether alone or with `pool_id`, produces a resource-specific claim and excludes `pool_id`. Ordinary pool-scoped claims MUST NOT require or select a `host_id` or `resource_id`.
+
+VM compute listings MUST normalize surrounding whitespace and carry at least one valid `pool_id` or `resource_id`. Every supplied identity MUST begin with an alphanumeric character, contain only letters, digits, `.`, `_`, `:`, or `-`, and contain at most 128 characters. Where a reservation claim is constructed, a listing carrying `resource_id`, whether alone or with `pool_id`, produces a resource-specific claim and excludes `pool_id`. Ordinary pool-scoped claims MUST NOT require or select a `vm_host` or `resource_id`. Which listings construct a claim at all is stated below; carrying a valid identity is an invariant of every listing, including one no claim is ever constructed for.
 
 Claim construction MUST reject a missing, empty, or malformed settlement order and any extracted claim lacking both identities before probing or reserving capacity. Stored listings that violate the identity invariant MUST fail closed on publication or republication. Resuming such a listing MUST return an actionable conflict before changing pause state or contacting a registry; the seller-authenticated close operation MUST remain available without implicit identity backfill or automatic unpublication.
+
+Where capacity admission is requested for such a listing, a pool-only listing produces a pool-scoped reservation claim and a listing carrying Physical Resource identity produces a resource-scoped claim. A listing with no admission authority behind it constructs no reservation claim at all, so this construction does not apply to it; its identity requirements are unchanged.
 
 #### Scenario: Pool-only listing creates an ordinary reservation
 - **WHEN** a buyer reserves through a listing carrying `pool_id` without `resource_id`
@@ -49,6 +52,11 @@ Claim construction MUST reject a missing, empty, or malformed settlement order a
 #### Scenario: Legacy-invalid listing is explicitly closed
 - **WHEN** the operator invokes the seller-authenticated close operation after the validation conflict
 - **THEN** the storefront removes it from active registry discovery without inventing a capacity identity
+
+#### Scenario: A listing with no admission authority is not reserved against
+
+- **WHEN** capacity admission is attempted for a listing with no admission authority behind it
+- **THEN** no reservation claim is constructed and the attempt is refused
 
 ### Requirement: Requested offering mode is explicit and bounded by the pool
 
@@ -308,7 +316,6 @@ Provisioning-owned site-capacity persistence MUST NOT redundantly store storefro
 - **WHEN** a provisioning endpoint returns or accepts a payload containing a caller-selected `site_id`
 - **THEN** the storefront ignores that assertion and uses the identity bound to the configured connection
 - **AND** provisioning capacity rows remain scoped by the local database authority rather than a redundant site column
-
 
 **Internal capacity accounting**
 

@@ -233,11 +233,13 @@ None. This is a posture within existing capabilities, not a new domain.
   the confirmed region-at-admission finding, and
   `pools-9-retire-local-physical-authority` is told that `publish --inventory` is
   retired here and that the per-pool override write path remains its own.
-- **Completion dependency on `pools-9-retire-local-physical-authority`.**
-  Implementation may proceed before it; closeout cannot, because this change's
-  promoted architecture text sits alongside the origination statement that change
-  owns and makes true. Not a blocking dependency for starting work — a dependency
-  for finishing it.
+- **`pools-9-retire-local-physical-authority` widens what this change promoted.**
+  This change's origination rule is promoted scoped to unbacked listings, which it
+  makes true; retiring the local-table path makes it true of every listing, and
+  that change's promotion widens it. First recorded as a completion dependency;
+  discharged at closeout (`design.md`, "Closeout: system evidence and completion").
+- **System evidence belongs to `compose-contact-exchange-across-compute`.** Tasks
+  6.7 and 6.8 moved there as its 6.4 and 6.5.
 
 ## Permanent documentation impact
 

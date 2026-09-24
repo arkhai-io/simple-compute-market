@@ -29,47 +29,21 @@ Makefile target: `make test-core`, `make test-kits`, `make test-storefront`,
 
 ## Implementation record
 
-Implemented and reviewed. The review's findings and the agreed resolutions are in
-`design.md`, "Decisions from the code review"; Section 8 implements them and reopens
-the tasks whose claims the review showed false or overclaimed. Promotion (7.7) and the
-rest of closeout land on this branch after Section 8, before merge.
+Implemented, reviewed, remediated (Section 8), and promoted (7.7). The permanent
+specifications and documentation describe the result; `design.md` keeps the
+decisions and their reasons.
 
-Landed since the review, each in its own commit: the VM listings, negotiation, and
-settlement wheels (`design.md`, "Packaging decided alongside the review"); and fixes
-from the first two end-to-end runs — the pause wakes an idle loop, the guard compares
-only fields its source resolves, and the second e2e seller derives from local tables
-(`design.md`, "Findings during implementation").
+Validation: `make test` passes in a full environment, and the latest end-to-end run
+passes. In the build container, where suites run against committed lockfiles because
+the torch index is unreachable, the only failures are three that are not this
+change's: VM storefront integration `test_alkahest.py` (two tests) needs a local
+chain, and `e2e-tests` unit `test_hosted_public_boundary.py` asserts compose content.
 
-Open before completion:
-
-- **6.9** — provisioning emitting both declarations, parsed by the canonical site
-  client and consumed by the storefront, as one integration test.
-- **6.17** — the loop is held by the lifecycle pause, a pause reaches an idle loop at
-  once, a projection change wakes an idle loop, its dry run is repeatable, and its
-  routes run the timer's cycle (unit tests). Still missing, as 8.14: the same through
-  the typed client against the real app, and sync/async parity for the loop name.
-- **6.18** — refresh, divergence, undisclosed backing, and the site-reset refusal
-  are covered against storefront state. The registry side of an in-place refresh
-  is covered only by the kit's publish and reopen tests.
-- **6.19** — the source check is covered for the pinned site, another pool or
-  site, a fungible member, an unbacked listing with no site call, and an unloaded
-  projection; negotiation covers both refusal reasons. Round zero of
-  `evaluate-negotiate` is not yet exercised separately.
-- **6.7, 6.8** — gated on `compose-contact-exchange-across-compute` Sections 1–3
-  and 3b.
-- **6.25** — `make test` passes in a full environment, and the latest end-to-end
-  run passes. In the build container, where they run against committed lockfiles
-  because the torch index is unreachable, the only failures are two that are not this
-  change's: `domains/vms/storefront` integration `test_alkahest.py` needs a local
-  chain, and `e2e-tests` unit `test_hosted_public_boundary.py` asserts compose
-  content. `make check-reinit` passes.
-- **7.3–7.9** — documentation compliance, compression, roadmap and index currency,
-  promotion, citations, and the end-to-end pipeline. Two things found now bear on
-  them. `openspec/specs/registry-discovery/spec.md` places two requirements after
-  its `## Evidence` section, so OpenSpec cannot archive this change's
-  registry-discovery delta until they move inside `## Requirements`. The citation
-  check reports 17 unresolvable citations, all present at the planning checkpoint
-  and none in a file this change touches.
+Complete. System evidence for unbacked listings (6.7, 6.8) is transferred to
+`compose-contact-exchange-across-compute` 6.4 and 6.5, and the completion dependency
+on `pools-9-retire-local-physical-authority` is discharged (`design.md`, "Closeout:
+system evidence and completion"). Archived with `--skip-specs`: the deltas were
+promoted in 7.7.
 
 ## 0. Settled preconditions
 
@@ -367,12 +341,14 @@ named.
       derivation key, leaving the original binding row unmodified.
 - [x] 6.6 *(reopened by review, closed by 8.12–8.13: evidence is not app-level (8.12))* **Integration.** A backed listing's publication path is unchanged apart
       from the disclosed backing and the corrections the design lists.
-- [ ] 6.7 **System.** Backed and unbacked listings from one storefront are returned
-      by one buyer query across running services. Gated on
-      `compose-contact-exchange-across-compute` Sections 1–3.
-- [ ] 6.8 **System.** Two seller sites publishing unbacked supply to one storefront
-      retain distinct origin and source identity. Gated on that change's Sections 1–3
-      and 3b.
+- [x] 6.7 *(transferred, not run here)* **System.** Backed and unbacked listings from
+      one storefront are returned by one buyer query across running services.
+      Transferred to `compose-contact-exchange-across-compute` 6.4: no stack can
+      show an unbacked VM listing until that change composes introduction for VM
+      (`design.md`, "Closeout: system evidence and completion").
+- [x] 6.8 *(transferred, not run here)* **System.** Two seller sites publishing
+      unbacked supply to one storefront retain distinct origin and source identity.
+      Transferred to `compose-contact-exchange-across-compute` 6.5, with its 3b.
 - [x] 6.9 **Integration.** The real provisioning app emits `capacity_backing` and
       `advertisable_modes`, the canonical site client parses them, and the storefront
       consumes that exact response.
@@ -449,45 +425,59 @@ named.
       `e2e-tests/tests/e2e/roles/scenarios/vms/` — so each holds the loops with
       `pause_storefront` before creating listings or advances the publication loop and
       asserts on what it derives, per `docs/development/TESTING.md`.
-- [ ] 6.25 Run `make test-kits`, `make test-core`, `make test-storefront`,
+- [x] 6.25 Run `make test-kits`, `make test-core`, `make test-storefront`,
       `make test-vms-domain`, `make test-bare-metal`, `make test-apicredits`,
       `make test-registry`, and `make test-compute-provisioning`; then
       `make check-reinit`, adding reinit upgrade lines for every consumer of
       `arkhai-kit-negotiation-runtime`, `arkhai-kit-capacity-publication`, the core
       storefront, and the storefront client.
+      Done: `make test` passes in a full environment, and `make check-reinit`
+      passes after the version bump (8.19).
 
 ## 7. Closeout
 
-- [x] 7.1 **Comment hygiene.** Run `make check-comment-hygiene` and resolve every
+- [x] 7.1 *(re-run after Section 8)* **Comment hygiene.** Run `make check-comment-hygiene` and resolve every
       match. The rationale to keep at the binding is why origin and admission are
       separate; at the loop, why terms come only from durable sources; at the close,
       why a seller's close is never reopened by reconciliation. None names a review
       or change.
-- [x] 7.2 **Import placement.** Review imports this change added or touched —
+- [x] 7.2 *(re-run after Section 8: the test imports it added moved to module level; the two bare-metal production imports stay local for their stated reason)* **Import placement.** Review imports this change added or touched —
       including the lazy imports in `_projected_pool_rows`, `negotiation_runtime.py`,
       and the new loop — and migrate function-level ones to module level where no
       genuine circular import or documented lazy-load reason exists. Verify against
       the real test suites.
-- [ ] 7.3 **Documentation compliance.** Re-check accepted decisions against
+- [x] 7.3 **Documentation compliance.** Re-check accepted decisions against
       `openspec/README.md`'s placement table. Confirm the no-source-inventory rule, the
       two reconciliation loops, the publication loop, the durable seller close, and
       durable terms landed as normative requirements.
-- [ ] 7.4 **Narrative compression.** Shorten completed-task notes to final behavior,
+      Done: each named decision is a normative requirement in
+      `openspec/specs/storefront-publication/spec.md`; placements are in the
+      promotion record below.
+- [x] 7.4 **Narrative compression.** Shorten completed-task notes to final behavior,
       material validation evidence, unresolved work, and promotion destinations; move
       any remaining rationale into `design.md` first.
-- [ ] 7.5 **Roadmap currency.** In `docs/development/ROADMAP.md`, remove this change's
+      Done: Section 8 compressed to final behaviour and evidence, and the
+      implementation record to what remains open.
+- [x] 7.5 **Roadmap currency.** In `docs/development/ROADMAP.md`, remove this change's
       row from Goal 7's gap table and absorb the result into that goal's
       current-state prose. Goal 7 keeps its rate-comparison gap, its introduction
       gap until `compose-contact-exchange-across-compute` lands, and gains a
       bare-metal advertisement gap owned by
       `bare-metal-publication-reads-pool-declarations`.
-- [ ] 7.6 **Campaign index currency.** Update this change's row and Goal 7's
+      Done: Goal 7's current state describes the implemented system; its gaps are
+      the rate, introduction composed for compute (owned by
+      `compose-contact-exchange-across-compute`), and bare metal's advertisement and
+      convergence (owned by `bare-metal-publication-reads-pool-declarations`).
+- [x] 7.6 **Campaign index currency.** Update this change's row and Goal 7's
       dependency graph in `openspec/changes/README.md`, including the system-evidence
       gate on `compose-contact-exchange-across-compute` and the completion dependency
       on `pools-9-retire-local-physical-authority`. The row and graph edge for
       `bare-metal-publication-reads-pool-declarations` were added when it was
       created; confirm them.
-- [ ] 7.7 **Promotion.** Promote, after code review:
+      Done: this change's row records implemented and promoted, not archived, with
+      its gates; `publish-indicative-listing-rates` is marked unblocked; the graph
+      edges were already current.
+- [x] 7.7 **Promotion.** Promote, after code review:
       - `openspec/specs/storefront-publication/spec.md`,
         `openspec/specs/registry-discovery/spec.md`, and
         `openspec/specs/site-capacity/spec.md` from the delta specs. Moving
@@ -507,10 +497,18 @@ named.
       - `docs/seller-quickstart.md`: publication without `--settlement` or
         `--inventory`, and the loop controls.
       Then complete the design-promotion record below.
-- [ ] 7.8 **Documentation citations.** Run
+      Done. The delta specs were first brought up to the implementation (the empty
+      generation, named contributions, a close keeping the seller's reason, and
+      registry convergence), then merged by OpenSpec's archive on a scratch copy with
+      only the merged specs kept; `registry-discovery`'s two requirements moved
+      inside `## Requirements` first. Each target document is in the promotion
+      record.
+- [x] 7.8 **Documentation citations.** Run
       `make check-doc-citations CHANGE=unbacked-listing-publication` and resolve every
       match, including any citation of a tombstoned file.
-- [ ] 7.9 **End-to-end pipeline.** Confirm the end-to-end pipeline (`make
+      Done: the scoped check passes; the repository-wide count is unchanged at 17,
+      none in a file this change touches.
+- [x] 7.9 **End-to-end pipeline.** Confirm the end-to-end pipeline (`make
       test-deployment`) passes and record the run, its result, and the scenarios that
       exercise this change: 6.7, 6.8, and the 6.24 scenarios. Gated like 6.7 and 6.8.
       The system tier advances individual stages and does not run the publication
@@ -518,270 +516,123 @@ named.
       scenario. Run 3 (114 passed, 3 skipped) predates E1 and is not this evidence.
       If the pipeline cannot run for an unrelated reason, record the blocker, its
       cause, and the change that owns it, and treat the gated validations as unrun.
+      Done. The pipeline passes on the remediated branch. Run 3 (114 passed, 3
+      skipped) showed the defect E1 then fixed; the latest run passes with every
+      scenario this change touches — the 6.24 scenarios, which hold the
+      storefront's loops and create their listings explicitly. The system tier does
+      not run the publication loop; its evidence is the integration suite (E3). The
+      unbacked scenarios are transferred with 6.7 and 6.8, not recorded as passed.
 
 ## 8. Code review remediation
 
 Decisions and reasons: `design.md`, "Decisions from the code review" and "Decisions
-from the third end-to-end run". Order: R1–R3, then R7–R8, then R6 with E1 and E2,
-then R4–R5 together with 6.2, 6.9, and 6.17–6.19, then closeout (Section 7). Run every affected suite, `make check-reinit`, and `make dist`
-after each group; each group can be its own fileset.
+from the third end-to-end run". Each regression test named below was confirmed to
+fail with its fix reverted, except where a note says otherwise.
 
 **Correctness (R1–R3)**
 
-- [x] 8.1 **Core reopen guard (R1).** `core/storefront/src/core_storefront/sqlite_client.py`:
-      `update_listing(status="open")` on a seller-closed listing raises unless called
-      with `reopened_by="seller"`; state the refusal's reason in the exception. Unit
-      tests: reconciliation reopen of a seller close refused; seller reopen allowed and
-      clears `closed_by`; reconciliation reopen of a reconciliation close allowed.
-      Done. The guard is `write_listing_update` in `core_storefront.sqlite_client`, a
-      connection-level write inside the caller's `BEGIN IMMEDIATE` transaction;
-      `update_listing` wraps it and raises `SellerClosedListingError`. It also keeps
-      `seller` when reconciliation closes an already seller-closed listing, and the
-      upsert conflict path refuses to overwrite a seller's close with another
-      status and keeps `seller` when it writes another close (the second found in
-      pre-closeout review; `test_an_upserted_close_keeps_a_seller_close` fails
-      without it). Tests are real-DB
-      library integration, in the new `core/storefront/tests/integration/`
-      (`test_listing_closure.py`), which `make test` now runs; 4 of 8 fail without
-      the guard.
-- [x] 8.2 **Kit reopen names who reopens (R1).**
-      `kit/capacity-publication/src/market_capacity_publication/publication.py`:
-      `reopen` takes the reopener and passes it to the repository; `reconcile` passes
-      reconciliation and skips a seller-closed candidate, reporting it, rather than
-      failing the plan. The VM storefront's `reopen_order` (used by `resume`) passes
-      seller.
-      Done. `reopen` requires `reopened_by`; `reconcile` reports a seller-closed
-      candidate under `seller_closed`. The VM `resume` reopens as the seller; the
-      loop, admin release, and failure-handling reopens name reconciliation.
-- [x] 8.3 **API credits (R1).** `domains/apicredits/listings/reconciler.py`
-      (`reopenable_credit_listing_ids`) and the storefront's capacity reopen in
-      `domains/apicredits/storefront/.../services/publication_service.py` exclude
-      seller-closed listings. Regression test through the API-credits storefront: seller
-      close, quota returns, capacity reconciliation does not reopen it.
-      Done. `reopenable_credit_listing_ids` admits only reconciliation closes. The
-      regression enters the capacity-event reconciler (`_capacity_reconciler`) with a
-      `released` delta over a real database; the API-credits storefront exposes no
-      capacity-event control through its typed client, so it cannot be driven from
-      the app (recorded in `design.md`). It fails only with both this predicate and
-      the core guard removed; the predicate has its own unit test.
-- [x] 8.4 **Bare metal (R1).** `reopen_derived_bare_metal_listing_if_present` reopens
-      through `update_listing` instead of raw SQL, and `load_derived_bare_metal_listing`
-      or its caller sees `closed_by`. Regression test: a seller-closed bare-metal listing
-      is not reopened by its publication command.
-      Done. Bare metal's reopen and reconciliation close go through
+- [x] 8.1 **Seller close enforced at the listing write (R1).** `write_listing_update`
+      (`core_storefront.sqlite_client`), wrapped by `update_listing`, refuses a
+      reopen of a seller's close unless the seller asks (`SellerClosedListingError`),
+      and every later close — by update or upsert — keeps `seller`. Evidence:
+      `core/storefront/tests/integration/test_listing_closure.py`.
+- [x] 8.2 **Named reopener (R1).** The kit's `reopen` requires `reopened_by`;
+      `reconcile` reopens as reconciliation and reports a seller-closed candidate
+      under `seller_closed`. The VM `resume` reopens as the seller. Evidence:
+      `kit/capacity-publication/tests/unit/test_publication.py`.
+- [x] 8.3 **API credits (R1).** `reopenable_credit_listing_ids` admits only
+      reconciliation closes. Evidence: the capacity-release regression in
+      `domains/apicredits/storefront/tests/integration/test_publish_reconcile.py`,
+      entered at the reconciler because the storefront exposes no capacity-event
+      control (`design.md`, "Findings recorded, not fixed here"); it fails only with
+      both this predicate and the core guard reverted, and the predicate has its own
+      unit test.
+- [x] 8.4 **Bare metal (R1).** Its reopen and reconciliation close go through
       `write_listing_update`, imported where used because the package root is
-      installed without the storefront extra by the buyer and provisioning adapters.
-      The reopen reads `closed_by` and leaves a seller close as a clean skip. Tests
-      drive the core publication runner: a seller close stays closed with no failure
-      and nothing published; a reconciliation close reopens in place.
+      installed without the storefront extra; a seller close is a clean skip.
+      Evidence: `domains/bare_metal/storefront/tests/test_publication.py`.
 - [x] 8.5 **Closure provenance in the listing (R2).** `load_listing` and
-      `list_listings` return `closed_by`; remove `load_listing_closed_by` and move its
-      callers (VM publication loop, listings controller `resume`, reconciler predicates
-      as needed) onto the listing's own field. Task 1.8 is then true as written.
-      Done. Both return `closed_by`; `load_listing_closed_by` is gone and its
-      callers read the listing.
-- [x] 8.6 **Close is local first (R3).** `PublicationRuntime.close` lets a local
-      failure propagate before any registry close; `reconcile` records a failed close
-      per listing and continues. Failure-ordering test: the repository raises, the
-      registry is never called, and the error reaches the caller.
-      Done. The kit's close lets a local failure propagate before any registry;
-      `reconcile` reports `failed_closes` and continues, and the VM loop records each
-      as a `fail` action. The VM close route answers a local database failure with
-      503 `listing_close_incomplete` (controller unit test).
+      `list_listings` return `closed_by`; `load_listing_closed_by` is removed.
+- [x] 8.6 **Local close first (R3).** The kit's close propagates a local failure
+      before any registry is told; `reconcile` reports `failed_closes` and continues;
+      the VM loop reports them as `fail`, and the seller close route answers 503
+      `listing_close_incomplete`. Evidence: kit `test_publication.py`, VM
+      `tests/unit/test_listing_close_incomplete.py`.
 
-**Structure (R7, R8, R6)**
+**Structure (R7, R8, R6, E1, E2)**
 
-- [x] 8.7 **No hidden reconciler state (R7).** Replace `_BINDING_BACKING` in
-      `domains/vms/listings/reconciler.py` with an immutable row record (listing ID,
-      listing resource, site, binding backing) returned by `_bound_vm_listings`.
-      Done. `BoundVmListing` (listing ID, listing resource, site, binding backing)
-      replaces the process-global map; `closed_available_listing_ids` reads the
-      backing from the row.
-- [x] 8.8 **Capacity events are backed-only (R8).** The capacity-event path in
-      `domains/vms/storefront/src/market_storefront/services/capacity_client.py` (and
-      the admin release and failure-handling reopen paths that share its predicates)
-      acts only on listings bound as backed. Test through the real capacity-event
-      path: one backed and one unbacked listing, an availability-only delta, only the
-      backed listing changes.
-      Done. `stale_open_listing_ids` takes a required `backed_only`: the loop passes
-      `False`, the capacity-event close and the admin release handler `True`.
-      `closed_available_listing_ids`, whose callers are all availability paths,
-      reads backed listings only. The test publishes one listing of each kind
-      through the loop, then enters the capacity-event reconciler with
-      availability-only deltas: a drop closes only the backed listing and a release
-      reopens only the backed one. The reopen half fails without the filter; the
-      close half held already, because unbacked slices range over declared
-      quantity. It lives in `test_publication_loop.py` with the world it shares and
-      moves onto the real app with that file in 8.12.
-- [x] 8.9 **Declaration reader in the kit (R6).** Move the site-generation reader
-      (`read_site_declarations`, `ResolvedPool`, `SiteDeclarations`, the enablement
-      reason) from `domains/vms/listings/pool_declarations.py` into
-      `kit/resource-pools/src/market_resource_pools/` beside `resolve_pool_declarations`,
-      with its tests; VM imports it. Bump the kit's version if its public surface
-      changes, and add `reinit` lines where its consumers need them. In the move, a
-      generation with no pools is not read under the compatibility rule (E2); unit
-      test that an empty generation reports no compatibility reading.
-      Done. `market_resource_pools.site_declarations`, exported from the package;
-      `domains/vms/listings/pool_declarations.py` and its VM test file are
-      tombstoned, and the tests live in
-      `kit/resource-pools/tests/unit/test_site_declarations.py`. E2: a generation
-      with no named pools is not read under the compatibility rule (two tests, both
-      failing under the old rule). The reconciler keeps its import local, since the
-      buyer installs `arkhai-vms-listings` without the `pools` extra; the buyer suite
-      passes with no resource-pools kit installed. The kit stays at 0.2.0: the
-      addition is additive and a bump would force every consumer's lock, so `reinit`
-      reinstalling it carries the change, as for the other packages this section
-      touches.
-- [x] 8.10 **Bare-metal advertisement (R6 follow-up).** Confirm whether bare-metal
-      publication reads a pool's `advertisable_modes`. If it does not, report the
-      finding before changing anything: fixing it may be out of this change's scope.
-      Done: it does not. Decided to record it rather than fix it here (`design.md`,
-      R6 follow-up): the new change `bare-metal-publication-reads-pool-declarations`
-      owns it, indexed under Goal 7, and the advertisement requirement is scoped to
-      listings derived from the resource-pool projection.
-- [x] 8.10a **Publishers name their contributions (E1).**
-      `core/storefront/src/core_storefront/publication_plugins.py` and
-      `publication_composition.py`: the builder takes the exact contributions to
-      build and refuses a name no registration carries before calling any factory.
-      `domains/vms/storefront/src/market_storefront/publication_wiring.py` names
-      `vms`; `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/publication.py`
-      names its resolved registration. Core unit tests: a two-contribution registry
-      builds only the named source and calls no other factory; an unknown name fails
-      first. Replace `test_publication_wiring.py`'s patched core builder with a real
-      two-contribution registry. The app-level proof is 8.11's fixture.
-      Done. Core requires `contributions` and refuses, before any factory runs, an
-      unregistered name, arguments for a contribution not being built, an empty
-      selection, or a bare string. The VM loop resolves its registration by
-      offering mode. `test_publication_wiring.py` builds the registry through
-      startup discovery from a two-domain selection instead of patching the core
-      builder; it and the core test fail with the builder building every
-      registration.
+- [x] 8.7 **No hidden reconciler state (R7).** `BoundVmListing` carries each bound
+      listing's backing; the process-global map is gone.
+- [x] 8.8 **Capacity events are backed-only (R8).** `stale_open_listing_ids` takes a
+      required `backed_only`, and `closed_available_listing_ids` reads backed listings
+      only. Evidence: `test_a_capacity_event_acts_only_on_backed_listings` through the
+      `capacity-events` route; its reopen half fails without the filter, and its
+      close half already held because unbacked slices range over declared quantity.
+- [x] 8.9 **Declaration reader in the kit (R6, E2).** `market_resource_pools.site_declarations`;
+      a generation with no named pools is not read under the compatibility rule.
+      Evidence: `kit/resource-pools/tests/unit/test_site_declarations.py`; the VM buyer
+      suite passes without the kit installed.
+- [x] 8.10 **Bare-metal advertisement (R6 follow-up).** Bare-metal publication reads
+      no pool declaration. Recorded, not fixed: owned by
+      `bare-metal-publication-reads-pool-declarations`; the advertisement requirement
+      covers listings derived from the resource-pool projection.
+- [x] 8.10a **Publishers name their contributions (E1).** The core builder builds only
+      the named contributions and refuses an unregistered name, arguments for an
+      unbuilt one, an empty selection, or a bare string before any factory runs.
+      Evidence: `core/storefront/tests/unit/test_publication_plugins.py` and
+      `domains/vms/storefront/tests/unit/test_publication_wiring.py`, which builds the
+      registry through startup discovery from a two-domain selection.
 
 **Test levels (R4–R5) and the open validation**
 
-- [x] 8.11 **Real-app publication fixture.** An integration fixture running the VM
-      storefront app with its container wired, a patched site projection, real
-      `[Settlement]` and `[pricing].settlements` configuration compiled by the loop's
-      own request path, a settlement-composition double at the mechanism boundary
-      declaring per test which mechanisms fulfil through capacity (`design.md`,
-      R4–R5), and the canonical `StorefrontClient`. Reuse the admin-API and
-      negotiate-controller fixtures' app and chain patterns. Register both `vms`
-      and `bare_metal`, as the combined e2e storefront does, so every loop test runs
-      under the registry that exposed E1.
-      Done: `domains/vms/storefront/tests/publication_app.py`. Settings select both
-      `vms` and `bare_metal`; `storefront_domains`, `settlement`, and
-      `pricing.settlements` are replaced rather than overridden, since an override
-      merges into the test configuration's lists. The double carries an integral
-      clause rate into the escrow's base-unit rate. An opt-in `negotiation` flag adds
-      the negotiation route, its runtime, and a buyer client.
-- [x] 8.12 **Convert every publication-loop case.** Every case in
-      `tests/integration/test_publication_loop.py` drives the loop through
-      `admin_run_lifecycle_cycle("publication")` or
-      `admin_dry_run_lifecycle_cycle("publication")` and asserts through the client
-      where an API exists. Cases that only make sense directly become unit tests with
-      mocked collaborators. Remove `VmPublicationCycle`'s injected `request_builder` if
-      nothing then uses it.
-      Done. All eighteen cases run through the client; none needed to become a unit
-      test. Bindings, which no API exposes, are read from storefront persistence, and
-      raw SQL is used only for state no API reaches. The R8 case now advances the
-      `capacity-events` loop through its route. Reverting E1's builder fails all
-      eighteen; reverting R8's filter fails only its own. `request_builder` is
-      removed.
-- [x] 8.13 **6.2 in one flow.** One test publishes an unbacked listing through the loop
-      and negotiates it to acceptance through the same app.
-      Done: `test_an_unbacked_listing_publishes_and_negotiates_to_acceptance`, with
-      no reservation or hold at any point.
-- [x] 8.14 **6.17.** Through the typed client: pause holds the loop, dry-run twice
-      reports the same actions and changes nothing, run-cycle while held applies one
-      cycle and leaves the loop held, and the sync and async clients accept the loop
-      name alike. (A projection change waking an idle loop is covered in
-      `tests/unit/test_loop_gate_wiring.py`.)
-      Done. `test_the_lifecycle_pause_holds_the_loop_while_its_controls_step_it`
-      starts the loop as startup does while held: the pause reports it `paused`,
-      two dry runs match and change nothing, `run-cycle` applies exactly that plan,
-      and the loop is still `paused` after. It fails with the loop's gate removed
-      (the loop reports `starting`). `test_both_clients_address_the_publication_loop_alike`
-      checks both variants send the same route and operation for the step and the
-      dry run; signature parity was already covered.
-- [x] 8.15 **6.18.** The registry side of an in-place refresh and of a reopen, through
-      a registry reachable by the app, in addition to storefront state.
-      Done. The fixture's opt-in `registries` replaces `MultiRegistryClient`, where
-      this codebase wraps the independently operated registries, with a recorder
-      across two configured registries with development authority pins; the
-      registry's own side is 6.4's. A term refresh republishes in place to both with
-      no status change; a reconciliation close sends `closed` to both; a reopen
-      republishes and sends `open` to both. The reopen test fails when the kit's
-      `reopen` omits the explicit registry reopen.
-- [x] 8.16 **6.19.** Round zero of `evaluate-negotiate` runs the guard, through the admin
-      route.
-      Done. `test_round_zero_evaluation_runs_the_inventory_guard` evaluates an opening
-      round against a loop-published unbacked listing: `accept` while its declaration
-      supports it, `reject` with `no_matching_declaration` once the declaration
-      shrinks and before any cycle closes the listing. This is new evidence for
-      behaviour already implemented; it was not re-verified by reverting round
-      zero's hook construction.
-- [x] 8.17 **6.9.** One integration test: the provisioning app emits both declarations,
-      the canonical site client parses them, and the storefront consumes them.
-      Done through a contract fixture (`design.md`, R4–R5):
-      `kit/site-client/src/market_site_client/fixtures/resource_pools.py`, with its
-      own unit test that the validator refuses a missing declaration, enablement,
-      metadata, or capacity. Producer: the provisioning integration test
-      `test_the_projection_carries_both_declarations_as_storefronts_read_them`
-      creates a backed and an unbacked pool (its member naming no host) through the
-      pool API, reads the projection through `SiteCapacityClient`, validates it, and
-      resolves it through `read_site_declarations`. Consumer: the storefront
-      fixture's `pool()` builds every projection with the same builders.
-- [x] 8.18 **Library tests out of `unit/`.** Move the core migration and trigger tests
-      that open a real database from `core/storefront/tests/unit/` to
-      `core/storefront/tests/integration/`, and relabel any other claim in Section 6
-      whose evidence is at a different level than it states.
-      Done. `test_domain_binding_migrations.py` moved to
-      `core/storefront/tests/integration/`, beside `test_listing_closure.py`; it
-      reuses the unit suite's test contract rather than copying it. The other
-      real-database files in `core/storefront/tests/unit/` predate this change and
-      move when next touched. Relabelled: 6.1 (its migration and trigger evidence is
-      library integration), and 6.21, whose integration half is bare metal's
-      operator-invoked publication command run through the core publication runner
-      against a real database, since bare-metal publication has no service route
-      to drive.
-- [x] 8.20 **Registries converge on local status (R3, pre-closeout review).**
-      Core: `list_publication_divergence`, and `publish_listing_to_registries`
-      takes an optional target subset. Kit: `publication_divergence`, `converge`,
-      and the reopen's status update recorded. VM: each cycle converges, reported
-      as `converge` (and `fail` if unrepaired). API credits: each capacity
-      reconciliation converges. Tests: core real-DB divergence; kit unit tests for
-      a missed close, a failed reopen (fails without the reopen being recorded),
-      and a still-unreachable registry; VM app-level, one of two registries missing
-      a close and then a reopen, repaired by the next `run-cycle` alone (both fail
-      without convergence); API-credits unit test that every reconciliation ends by
-      converging. The API-credits reconcile tests moved to `tests/integration/`.
-- [x] 8.21 **Bare-metal registry convergence.** Decided: owned by
-      `bare-metal-publication-reads-pool-declarations` (its task 2.4 and a spec
-      requirement), and its index row says so.
-- [x] 8.19 **Version `kit/resource-pools` and `kit/site-client`.** Once every
-      Section 8 change is in place and `make test` passes, bump
-      `arkhai-kit-resource-pools` for the `site_declarations` addition and
-      `arkhai-kit-site-client` for its `fixtures` subpackage, raise `arkhai-vms-listings`' `pools` extra to
-      require it, and update every consumer's lock (the VM storefront's by hand, as
-      its torch index cannot be reached from the build container), then rerun
-      `make check-reinit` and the consumers' suites.
-      Done, widened to every package whose sources this change altered, minor for
-      new or changed API and patch otherwise: `arkhai-core-storefront` 0.6.0,
-      `arkhai-core-storefront-client` 0.19.1, `arkhai-kit-capacity-publication`
-      0.2.0, `arkhai-kit-negotiation-runtime` 0.2.0, `arkhai-kit-resource-pools`
-      0.3.0, `arkhai-kit-site-client` 0.4.0, `arkhai-vms` 0.3.0,
-      `arkhai-vms-storefront` 0.5.0, `arkhai-bare-metal` 0.4.0,
-      `arkhai-bare-metal-storefront` 0.4.0, `arkhai-apicredits-domain` 0.3.0, and
-      `arkhai-apicredits-storefront` 0.4.0. The three VM wheels this change created
-      stay at their first version, 0.1.0; `core/registry`'s filter spec is not in its
-      wheel, so that package is unchanged. Every internal constraint on a bumped
-      package names its new version, plus `arkhai-apicredits-domain>=0.3.0` in the
-      API-credits storefront and `arkhai-core-storefront>=0.6.0` in the VM domain.
-      Locks re-resolved from their committed state upgrading only the bumped
-      packages; the VM storefront's by hand, confirmed with
-      `uv lock --locked --offline`. No lock's package sources changed, and no lock
-      holds an internal version other than the built one. Image version pins follow.
-      The gitignored VM buyer lock needs the same update locally.
+- [x] 8.11 **Real-app publication fixture.** `domains/vms/storefront/tests/publication_app.py`:
+      the routers and container as the composition root wires them, real settlement
+      configuration compiled by the loop, a settlement-composition double at the
+      mechanism boundary, a two-domain registry, the canonical client, and opt-in
+      negotiation and recorded registries.
+- [x] 8.12 **Every publication-loop case through the app.** All cases in
+      `tests/integration/test_publication_loop.py` drive the loop with `run-cycle` and
+      `dry-run` and read back through the client; reverting E1 fails every one.
+      `VmPublicationCycle`'s injected `request_builder` is removed.
+- [x] 8.13 **6.2 in one flow.** `test_an_unbacked_listing_publishes_and_negotiates_to_acceptance`.
+- [x] 8.14 **6.17.** `test_the_lifecycle_pause_holds_the_loop_while_its_controls_step_it`
+      (fails with the loop's gate removed) and
+      `tests/unit/test_lifecycle_client_parity.py`.
+- [x] 8.15 **6.18, registry side.** A term refresh republishes in place at both
+      recorded registries; a close sends `closed` and a reopen republishes and sends
+      `open`. The reopen test fails without the explicit registry reopen.
+- [x] 8.16 **6.19, round zero.** `test_round_zero_evaluation_runs_the_inventory_guard`;
+      new evidence for implemented behaviour, not re-verified by reverting.
+- [x] 8.17 **6.9, provisioning to storefront.** Through the contract fixture
+      `market_site_client.fixtures.resource_pools`: the provisioning integration test
+      validates the real app's projection and resolves it through the storefront's
+      reader, and the storefront's publication tests build every projection with the
+      same builders (`design.md`, R4–R5).
+- [x] 8.18 **Library tests out of `unit/`.** `test_domain_binding_migrations.py` moved
+      to `core/storefront/tests/integration/`; 6.1 and 6.21 relabelled. Other
+      real-database files there predate this change and move when next touched.
+
+**Pre-closeout review**
+
+- [x] 8.20 **Registries converge on local status (R3).** Every publication pass
+      resends to each diverged registry what its listing's local status implies,
+      from the per-registry records; the reopen's status update is now recorded.
+      VM converges each cycle and API credits at each capacity reconciliation.
+      Evidence: core `test_listing_closure.py`, kit `test_registry_convergence.py`,
+      the two VM `..._repaired_by_the_next_cycle` tests, and API-credits
+      `test_capacity_reconcile_converges.py`.
+- [x] 8.21 **Bare-metal registry convergence.** Owned by
+      `bare-metal-publication-reads-pool-declarations`.
+- [x] 8.19 **Versions.** Every package whose sources this change altered is bumped —
+      minor for new or changed API, patch otherwise — with every internal constraint
+      on it raised: `arkhai-core-storefront` 0.6.0, `arkhai-core-storefront-client`
+      0.19.1, `arkhai-kit-capacity-publication` 0.2.0,
+      `arkhai-kit-negotiation-runtime` 0.2.0, `arkhai-kit-resource-pools` 0.3.0,
+      `arkhai-kit-site-client` 0.4.0, `arkhai-vms` 0.3.0, `arkhai-vms-storefront` 0.5.0,
+      `arkhai-bare-metal` 0.4.0, `arkhai-bare-metal-storefront` 0.4.0,
+      `arkhai-apicredits-domain` 0.3.0, `arkhai-apicredits-storefront` 0.4.0. The new
+      VM wheels keep their first version, 0.1.0. Locks re-resolved upgrading only
+      those packages, with no package's source changed; image pins follow.
 
 ## Plan history
 
@@ -818,17 +669,31 @@ The pre-revision plan was replaced during planning. Its tasks map as follows:
 | An unbacked listing is derived only from the site projection | `openspec/specs/storefront-publication/spec.md` |
 | Backing transitions are close-and-republish, not in-place | `openspec/specs/storefront-publication/spec.md` |
 | A listing's identity is the physical resource it offers; terms of sale change in place; a listing commits only to the fields it publishes | `openspec/specs/storefront-publication/spec.md`; rationale in `openspec/specs/storefront-publication/architecture.md` |
-| Projected pool declarations are judged jointly per site generation; unresolvable pools are held | `openspec/specs/storefront-publication/spec.md` |
+| Projected pool declarations are judged jointly per site generation; unresolvable pools are held; a generation with no pools is not an older producer's | `openspec/specs/storefront-publication/spec.md` |
 | Claim construction describes what happens when capacity admission is requested | `openspec/specs/site-capacity/spec.md` |
 | A published shape comes from its source declaration; a declaration with no enumeration quantity yields no listing | `openspec/specs/storefront-publication/spec.md` |
 | A listing derived from the resource-pool projection advertises only a mode its pool declares advertisable, backed or not; bare metal is outside it until `bare-metal-publication-reads-pool-declarations` | `openspec/specs/storefront-publication/spec.md` |
 | The seller's inventory guard rechecks a listing against a fresh derivation of its own source, and checks availability only for backed listings | `openspec/specs/storefront-publication/spec.md` |
 | The common listing binding is the only VM listing mapping | `openspec/specs/storefront-publication/spec.md` |
 | An unbacked listing publishes only settlement options its domain does not fulfil through capacity | `openspec/specs/storefront-publication/spec.md` |
-| Publication runs as a controllable storefront lifecycle loop | `openspec/specs/storefront-publication/spec.md`; controls in `docs/development/TESTING.md`; rationale in `openspec/specs/storefront-publication/architecture.md` |
+| VM publication runs as a controllable storefront lifecycle loop, building only the sources of the domains it publishes; bare-metal publication stays operator-invoked | `openspec/specs/storefront-publication/spec.md`; controls in `docs/development/TESTING.md` and `docs/seller-quickstart.md`; rationale in `openspec/specs/storefront-publication/architecture.md` — "Autonomous publication" |
 | Terms come only from durable sources | `openspec/specs/storefront-publication/spec.md`; `docs/development/DEPLOYMENT_AND_CONFIG.md` |
-| A seller's close is durable | `openspec/specs/storefront-publication/spec.md` |
+| A seller's close is durable, enforced at the listing write and kept by every later close | `openspec/specs/storefront-publication/spec.md`; rationale in `openspec/specs/storefront-publication/architecture.md` — "Durable seller close" |
+| For VM and API-credit publication, registries converge on each listing's local status and a close or reopen changes the local listing first; bare metal is outside the requirement until `bare-metal-publication-reads-pool-declarations` modifies it | `openspec/specs/storefront-publication/spec.md`; rationale in `openspec/specs/storefront-publication/architecture.md` — "Registry convergence" |
+| Source publication and capacity availability reconcile separately; one comparison gates refresh and every reopen | `openspec/specs/storefront-publication/spec.md`; rationale in `openspec/specs/storefront-publication/architecture.md` — "Reconciliation" |
+| Site-generation declaration reading is provider-neutral and shared | `kit/resource-pools/src/market_resource_pools/site_declarations.py`, whose module documentation states the rule; normative form in `openspec/specs/storefront-publication/spec.md` |
+| The resource-pool projection's shape is a contract between site and storefront | `kit/site-client/src/market_site_client/fixtures/resource_pools.py`, under the contract-fixture pattern in `docs/development/TESTING.md` |
 | Backing is filtered exactly and fail-on-missing; every compute-family domain publishes it | `openspec/specs/registry-discovery/spec.md` |
 | The binding discriminator and closure reason are enforced by trigger; rollback drops those triggers | `docs/development/DEPLOYMENT_AND_CONFIG.md` — "Combined compute-family storefront" |
 | Roadmap currency | `docs/development/ROADMAP.md` — Goal 7 |
 | Campaign index currency | `openspec/changes/README.md` — Goal 7 row and graph |
+
+Not promoted, and why:
+
+| Decision | Classification |
+|---|---|
+| Publication tests run through the real app; the system tier advances stages | Temporary: this change's validation, under rules `docs/development/TESTING.md` already states |
+| Bare-metal advertisement and registry convergence | Deferred to `bare-metal-publication-reads-pool-declarations`; both permanent requirements are scoped to the publication paths that implement them, and that change modifies them to include bare metal |
+| Version bumps (8.19) | Release history, recorded in the packages' own versions |
+| `load_listing_closed_by` and the injected `request_builder` | Superseded: removed from the code |
+| Registry retry "by republication and reconciliation" (R3's first form) | Rejected: no such retry existed; replaced by convergence |
