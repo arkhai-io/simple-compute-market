@@ -82,9 +82,9 @@ market that sells a bearer credential.
 
 - **Depends on** `compose-inference-domain-stack` having proven its deal, so
   the second consumer is real.
-- **Sequenced with** `meter-inference-usage`: the metering surface is
-  inference-owned and is not extracted, so the two may proceed in parallel;
-  whichever lands second rebases.
+- **Blocks** `meter-inference-usage`: metering mutates the authority and does so
+  against the kit-composed authority once this change is accepted; copied
+  modules are frozen until then.
 - `sign-multi-language-credits-middleware` owns the TypeScript and Rust gates;
   relocating the Python client's signing must keep their conformance fixture
   green and must not move the fixture.

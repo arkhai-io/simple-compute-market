@@ -5,10 +5,11 @@ Sections 1–4 are pure vocabulary and tests with no runtime, deployment, or
 packaging effect; Section 5 touches the registry image; Section 6 packages.
 Nothing here starts a service or changes API credits.
 
-**Decision gate.** Task 7.1's question — the `model_id` naming authority — was
-decided on 2026-09-21 and is recorded in `design.md`'s decisions ("Model
-identity is domain-canonical"). The task remains as the record of the gate; no
-open gate remains in this change.
+**Decision gates.** Both gates this change carried are closed and recorded in
+`design.md`: 7.1, model identity (decided 2026-09-21, revised 2026-09-24 to a
+seller-asserted identifier with a SHOULD derivation rule); and 7.2, credit
+denomination (decided 2026-09-24: one credit is one base unit of the settlement
+asset). The tasks remain as the record; no open gate remains in this change.
 
 ## 1. Domain identity and listing vocabulary
 
@@ -25,19 +26,31 @@ open gate remains in this change.
 - [ ] 1.3 `domains/inference/listings/models.py`: `INFERENCE_KIND =
       "inference.v1"`, `INFERENCE_OFFERING_MODE = "inference"`, and the
       `InferenceModelCard` model (`listing_resource` payload) with `model_id`
-      (validated against the domain's canonical pattern: lowercase
-      `<org>/<name>`, no alias segment), `artifact_ref` (non-empty,
-      scheme-prefixed source reference), `artifact_digest` (optional,
-      `sha256:` hex), `display_name` (optional),
+      (non-empty; characters restricted to what a filter path can carry, no
+      format beyond that), `artifact_ref` (non-empty, any scheme including
+      private ones), `artifact_digest` (optional, `sha256:` hex),
+      `display_name` (optional), `model_owner` (optional marketplace
+      principal), `provenance` (required, `self-hosted` | `resold`),
+      `attestation` (optional `{kind, schema_version, payload}` envelope, opaque),
       `served_model_name`, `model_family`, `context_length` (positive int),
       `max_completion_tokens` (optional positive int), `quantization`,
       `architecture` (`modality`, `tokenizer`, `instruct_type`),
-      `supported_parameters` (list of non-empty strings), `endpoint` (`base_url`,
+      `supported_parameters` (list of non-empty strings), `quantization` as an
+      enumeration (`none`, `fp16`, `bf16`, `fp8`, `int8`, `int4`, `awq`,
+      `gptq`), `endpoint` (`base_url`,
       `openapi_url`, `api_style` literal `openai.v1`), `rate_card`
       (Section 2's model), `capacity_site_id`, `resource_id`, and
       `offering_mode` pinned to `inference`. `extra="forbid"`. Include the
       `coerce_resource_dict` and `resource_is_inference` helpers on the
       API-credits pattern.
+- [ ] 1.3a `domains/inference/listings/identity.py`: `derive_model_id(...)`,
+      a pure function implementing the derivation rule — public upstream owner
+      and repository lowercased with revision, branch, and quantization
+      suffixes stripped; the owner's namespace for private weights; the
+      fine-tuner's for a fine-tune — plus focused tests that two independent
+      inputs for the same weights derive the same identifier and that the
+      three suffix kinds are stripped. Sellers and the seller path call it; the
+      card does not require it.
 - [ ] 1.4 `domains/inference/schema.py`: `InferenceListing` (kind,
       `listing_resource`, `accepted_escrows`, `settlement_options`, `demands`)
       with the same before-validator that normalizes a wheel-boundary model back
@@ -47,10 +60,12 @@ open gate remains in this change.
       validates; each comparison field missing is rejected with the field named;
       `offering_mode` other than `inference` is rejected; `api_style` other than
       `openai.v1` is rejected; a listing round-trips through JSON text as the
-      storefront's SQLite path stores it; a `model_id` with uppercase, an alias
-      segment, or an encoded quantization is rejected with the format rule
-      named; two cards sharing one `model_id` with different `artifact_ref` and
-      rate cards both validate independently.
+      storefront's SQLite path stores it; a card without `provenance` or with a
+      value outside the enumeration is rejected; a card with a `quantization`
+      outside the enumeration is rejected; two cards sharing one `model_id`
+      with different `artifact_ref`, `quantization`, and rate cards both
+      validate independently; a card with and without the `attestation`
+      envelope validate identically; a card naming a `model_owner` validates.
 
 ## 2. Rate card and pricing arithmetic
 
@@ -58,18 +73,21 @@ open gate remains in this change.
       `prompt_credits_per_million`, `completion_credits_per_million`
       (non-negative int, required), `request_credits` (non-negative int, default
       0), `cached_prompt_credits_per_million` and `image_credits_per_unit`
-      (optional non-negative int). Strict integer validation: `bool`, `float`,
+      (optional non-negative int) — all denominated in base units of the
+      listing's settlement asset. Strict integer validation: `bool`, `float`,
       and numeric strings are rejected, matching `checked_credit_total`'s
       posture in the API-credits pricing module.
 - [ ] 2.2 `domains/inference/listings/pricing.py`: `selected_unit_price` and
-      `extract_unit_price_from_order` accepting `per: credit` only, computing
-      `quantity × rate` with the uint256 overflow guard;
+      `extract_unit_price_from_order` accepting `per: credit` with a value of
+      exactly `1` and refusing any other value or unit; the reference payment
+      equals `quantity`, with the uint256 overflow guard;
       `determine_strategy_from_order` returning `maximize` for inference
       listings. Copied from the API-credits module and narrowed, not imported.
-- [ ] 2.3 Focused tests (`tests/test_pricing.py`): per-credit scaling; `per:
-      hour` and `per: token` rejected; fractional and overflow rejected;
-      hidden-reserve fallback to a configured minimum; the rate card has no
-      effect on the purchase price (spec: "Purchase is priced per credit").
+- [ ] 2.3 Focused tests (`tests/test_pricing.py`): a unit rate scales to
+      `quantity`; a per-credit rate other than one is rejected; `per: hour` and
+      `per: token` rejected; overflow rejected; hidden-reserve fallback to a
+      configured minimum; the rate card has no effect on the purchase price
+      (spec: "Purchase is priced in settlement-asset base units").
 
 ## 3. Provision intent, negotiation carriers, and codecs
 
@@ -113,9 +131,10 @@ open gate remains in this change.
 - [ ] 4.3 `domains/inference/usage/evidence.py`: `InferenceUsageEvidenceBodyV1`
       (protocol `arkhai.inference.usage-evidence.v1`, schema version `1`,
       `domain: inference`, the record, the pinned card, the derived charge,
-      `grant_id`, `fulfillment_id`, `issuer`) with canonical-JSON digest and
-      signing/verification helpers on the pattern of the API-credits issuance
-      evidence module. Copied and renamed, not imported.
+      `grant_id`, `fulfillment_id`, `issuer`, and an optional opaque
+      `attestation` envelope that verification ignores) with canonical-JSON
+      digest and signing/verification helpers on the pattern of the API-credits
+      issuance evidence module. Copied and renamed, not imported.
 - [ ] 4.4 Canary test (`tests/test_usage_evidence.py`): construct evidence with
       a sentinel bearer secret, prompt text, and completion text available to
       the producing code and assert none appears in the canonical bytes;
@@ -126,29 +145,36 @@ open gate remains in this change.
 - [ ] 5.1 `domains/inference/registry/filter-spec.yaml`, version 1, `schema: {id:
       inference, version: 1}`. `listing_shape` requires `listing_id`,
       `listing_resource`, `storefront_url`, and inside `listing_resource`
-      requires `model_id` (with the canonical `pattern`), `artifact_ref`,
+      requires `model_id` (non-empty), `artifact_ref`, `provenance` (`enum`),
       `served_model_name`, `context_length`,
       `quantization`, `architecture.modality`, `supported_parameters`,
       `endpoint.base_url`, `rate_card.prompt_credits_per_million`,
       `rate_card.completion_credits_per_million`, and `offering_mode`
       (`const: inference`). Settlement-option and accepted-escrow shapes copied
-      from the API-credits specification. State in the `model_id` field
-      description that a registry operator may narrow it to an `enum` by
-      policy and that the registry never mints or resolves identifiers.
+      from the API-credits specification. `quantization` is an `enum`. The
+      `attestation` envelope is admitted by shape and declared by no filter.
+      State in the `model_id` field description that the domain's derivation
+      rule is a SHOULD, that a registry operator may narrow the field to an
+      `enum` or pattern by policy, and that the registry never mints or
+      resolves identifiers.
 - [ ] 5.2 Filters: `model_id`, `model_family`, `quantization`, `modality`
-      (`$.listing_resource.architecture.modality`), and `supported_parameter`
-      (`$.listing_resource.supported_parameters[*]`) as `in`, fail-on-missing
-      for required paths; `context_length_min` as `range` lower bound;
-      `prompt_credits_max` and `completion_credits_max` as `range` upper bounds
-      over the rate card; `offering_mode` as `in`, fail-on-missing; the
+      (`$.listing_resource.architecture.modality`), `supported_parameter`
+      (`$.listing_resource.supported_parameters[*]`), and `provenance` as `in`,
+      fail-on-missing for required paths; `context_length_min` as `range` lower
+      bound; `prompt_credits_max` and `completion_credits_max` as `range` upper
+      bounds over the rate card's base-unit integers, with a comment that a
+      bound is meaningful only with `settlement_asset` and that the buyer
+      plugin enforces the pairing until the registry can; no filter over
+      `attestation`; `offering_mode` as `in`, fail-on-missing; the
       `token`, `token_exclude`, `settlement_mechanism`, `settlement_asset`,
       `funding_profile`, and `funding_interaction` projections verbatim from the
       API-credits specification.
 - [ ] 5.3 `core/registry/tests/unit/test_filter_spec.py`: add
       `test_repo_inference_spec_loads` beside `test_repo_api_credits_spec_loads`,
       asserting schema identity `inference` version 1, that every filter path
-      resolves against a sample listing built from Section 1's model, and that
-      a `model_id` violating the canonical pattern is refused at validation.
+      resolves against a sample listing built from Section 1's model, that a
+      listing without `provenance` is refused at validation, and that no filter
+      declaration names the `attestation` path.
 - [ ] 5.4 `core/registry/Dockerfile`: `COPY domains/inference/registry/filter-spec.yaml
       ./filter-spec-inference.yaml` in the builder stage and the matching
       `COPY --from=builder` in the runtime stage, beside the API-credits lines.
@@ -176,17 +202,27 @@ open gate remains in this change.
 
 ## 7. Decision gates
 
-- [x] 7.1 **Decision gate — `model_id` naming authority.** Decided 2026-09-21
-      and recorded in `design.md`, "Model identity is domain-canonical": the
-      domain owns a canonical lowercase `<org>/<name>` format identifying the
-      logical model at one version; `artifact_ref` and an optional
-      `artifact_digest` carry the exact source; quantization, runtime, and
-      context limits stay explicit fields; aliases are not in the protocol; a
-      registry validates the format and may narrow the vocabulary by operator
-      policy but never mints, resolves, or aliases identifiers; `deployment_id`
-      was rejected as a second name for `listing_id`. The item is out of "Open
-      questions". Sections 1.3, 1.5, 5.1, and 5.3 carry the resulting work. The
-      field's type is unchanged.
+- [x] 7.1 **Decision gate — `model_id` naming authority.** Decided
+      2026-09-21 as a domain-owned canonical format; **revised 2026-09-24** on
+      review and recorded in `design.md`, "Model identity is seller-asserted and
+      convergent": the seller asserts `model_id`; the domain ships a derivation
+      rule as a pure function and the spec says a listing SHOULD use it; the
+      domain keeps no model list; a registry operator may make the rule a MUST
+      for their registry through the filter specification and the registry
+      never mints, resolves, or aliases identifiers; `quantization` is an
+      enumerated field; a required, filterable `provenance` states
+      `self-hosted` or `resold`, and resale is legitimate; an optional
+      `model_owner` principal is the three-party hook, with no royalty field;
+      `deployment_id` was rejected as a second name for `listing_id`. Sections
+      1.3, 1.3a, 1.5, 5.1, 5.2, and 5.3 carry the resulting work.
+- [x] 7.2 **Decision gate — credit denomination.** Decided 2026-09-24 and
+      recorded in `design.md`, "One pricing layer": one credit is one base unit
+      of the listing's settlement asset, the settlement option's per-credit rate
+      is exactly one, `quantity` is base units purchased, and rate-card integers
+      are prices in that asset. The alternative — an abstract credit each seller
+      denominates — was rejected because it makes rate filters compare unlike
+      units. Sections 2.1–2.3, 5.2, and the buyer plugin's rate-bound pairing
+      rule carry the resulting work.
 
 ## 8. Closeout
 
@@ -226,7 +262,7 @@ open gate remains in this change.
 |---|---|
 | A market domain is where a credit's interpretation is pinned; inference fixes it per model, API credits leaves it to the seller | the `inference` capability's `architecture.md` — "Market shape"; one sentence in `openspec/specs/api-credits/architecture.md` — "Market shape" |
 | One listing is one served model | the `inference` capability's `spec.md` — "One listing is one served model" |
-| Purchase is priced per credit; consumption is priced per token through a rate card; the layers are independent | the `inference` capability's `spec.md` — "Purchase is priced per credit", "Rate card is integer-valued and pinned at issuance" |
+| One credit is one base unit of the settlement asset; the settlement rate is one; rate-card integers are prices in that asset | the `inference` capability's `spec.md` — "Purchase is priced in settlement-asset base units", "Rate card is integer-valued and pinned at issuance"; rationale in its `architecture.md` |
 | The rate card is pinned at issuance | the `inference` capability's `spec.md` — "Rate card is integer-valued and pinned at issuance" |
 | Charge derivation is a pure function of record and card | the `inference` capability's `spec.md` — "Usage record and deterministic charge derivation" |
 | Usage evidence is secret-free | the `inference` capability's `spec.md` — "Usage evidence is secret-free" |
@@ -234,7 +270,9 @@ open gate remains in this change.
 | The authority is the singular synchronous admission decision; rating systems are downstream | the `inference` capability's `spec.md` — "Admission authority is synchronous and singular"; rationale in the `inference` capability's `architecture.md` |
 | Discovery under the `inference` schema identity | the `inference` capability's `spec.md` — "Discovery under the inference schema identity" |
 | Quota-backed publication in version 1 as the backed value of the declared backing property, quota being a sales cap | the `inference` capability's `spec.md` — "Quota-backed publication"; trigger in the `inference` capability's `architecture.md` — "Current limits" |
-| No derived discovery price; comparability is on integer rates and asset until the exact-decimal primitives land | the `inference` capability's `architecture.md` — "Current limits" |
+| No derived discovery price; a rate bound is paired with an asset by the buyer plugin until the registry can express the co-requirement | the `inference` capability's `spec.md` — "Discovery under the inference schema identity"; `architecture.md` — "Current limits" |
+| Attestation is reserved as an opaque envelope on the card and the evidence, unverified and unfilterable in this version | the `inference` capability's `spec.md` — "Attestation is reserved and unverified"; rationale in its `architecture.md` |
+| Copies are frozen and extraction blocks metering | `docs/development/ROADMAP.md` Goal 8 current state; the campaign section of `openspec/changes/README.md` |
 | Copy first, extract after two consumers | the `inference` capability's `architecture.md` — "Implementation composition"; `docs/development/ROADMAP.md` Goal 8 current state |
 | `inference` joins the enumerated offering modes; **rate card** and **usage record** join the Terms table | `docs/development/ARCHITECTURE.md` — "One name per concept", "Terms" |
-| Model identity is domain-canonical: a logical-model identifier in a domain-defined format, the exact source in `artifact_ref`, quantization as a field, no protocol aliases, and a registry that validates but never mints | the `inference` capability's `spec.md` — "One listing is one served model"; rationale in its `architecture.md` |
+| Model identity is seller-asserted with a SHOULD derivation rule; the domain keeps no model list; quantization is an enumerated field; provenance is required and resale legitimate; a registry may curate but never mints; `model_owner` is the three-party hook with no royalty field | the `inference` capability's `spec.md` — "One listing is one served model"; rationale in its `architecture.md` |
