@@ -45,23 +45,31 @@ shared.
   mode joins the enumerated values in `ARCHITECTURE.md`'s one-name table at
   promotion.
 - Define the published listing shape. One listing is one served model at one
-  seller. `listing_resource` is a **model card**: a canonical `model_id` in a
-  domain-defined format naming the logical model at one version, an
-  `artifact_ref` naming the exact weights served (optionally with an
-  `artifact_digest`), the seller's `served_model_name`, `model_family`, `context_length`,
-  `max_completion_tokens`, `quantization`, an `architecture` block (modality,
-  tokenizer, instruct type), `supported_parameters`, an `endpoint` block
-  (`base_url`, `openapi_url`, `api_style: "openai.v1"`), a **rate card**, and
-  the quota-backing fields API credits already uses (`capacity_site_id`,
-  `resource_id`). Every field a buyer compares on is required; `display_name`
-  is an optional mutable label. The domain owns the identifier format; a
-  registry validates it and may narrow the vocabulary by operator policy but
-  never mints or resolves identifiers.
-- Define the **rate card** as exact integers: credits per million prompt
-  tokens, credits per million completion tokens, an optional flat credits-per-
-  request floor, and optional cached-prompt and image rates. Pricing in
-  `settlement_options[*].rates` stays per **credit**; the rate card says what a
-  credit buys. The card in force at issuance is pinned to the grant.
+  seller. `listing_resource` is a **model card**: a seller-asserted `model_id`
+  (with a domain-shipped derivation rule a listing SHOULD follow so sellers of
+  the same weights converge), an `artifact_ref` naming the weights served under
+  any scheme (optionally with an `artifact_digest`), the seller's
+  `served_model_name`, `model_family`, `context_length`, `max_completion_tokens`,
+  an enumerated `quantization`, an `architecture` block (modality, tokenizer,
+  instruct type), `supported_parameters`, an `endpoint` block (`base_url`,
+  `openapi_url`, `api_style: "openai.v1"`), a **rate card**, a required
+  `provenance` of `self-hosted` or `resold` (resale is legitimate), and the
+  quota-backing fields API credits already uses (`capacity_site_id`,
+  `resource_id`). Optional: a mutable `display_name`, a `model_owner` principal
+  distinct from the seller, and an opaque `attestation` envelope. The domain
+  keeps no list of models; a registry operator may narrow the vocabulary by
+  policy, and the registry never mints or resolves identifiers.
+- Define **one credit as one base unit of the listing's settlement asset**.
+  The settlement option's per-credit rate is exactly one, `quantity` at
+  purchase is base units bought, and the **rate card** is exact integers in
+  that asset: base units per million prompt tokens, per million completion
+  tokens, an optional flat charge per request, and optional cached-prompt and
+  image rates. One authoritative number is what the buyer sees, what the meter
+  charges, and what the balance is kept in. The card in force at issuance is
+  pinned to the grant.
+- Reserve an opaque, unverified `attestation` envelope on the model card and
+  on usage evidence, not exposed as a filter, so a future trusted-execution
+  proof lands as a new `kind` rather than a schema change.
 - Define round-zero provision intent `inference.v1`: a positive integer credit
   `quantity` and a key disposition of `new` or `existing` with `key_id`. This is
   the API-credits purchase shape under a new kind, because the purchase layer is
@@ -119,8 +127,10 @@ shared.
 - No Arkhai-hosted inference registry deployment, no Helm alias, no webapp
   integration.
 - No unbacked inference listing: version 1 admits only the backed value of the
-  declared backing property. No `asking_rate` field. Both are revisited on the
-  triggers recorded in `design.md`.
+  declared backing property; revisited on the trigger recorded in `design.md`.
+- No royalty or revenue-share field, and no payment to a `model_owner`. The
+  three-party arrangement is a separate domain; this one only leaves room.
+- No verification of the `attestation` envelope, and no filter over it.
 - No embeddings, image, audio, or batch endpoints. Version 1 names chat
   completions and completions.
 - No seller packaging or installer.
@@ -161,22 +171,25 @@ shared.
 
 ### Knowledge to promote
 
-- A market domain is where the interpretation of a prepaid credit is pinned;
-  API credits leaves it to the seller, inference fixes it per model —
-  the `inference` capability's `architecture.md` and, as one sentence, the
-  API-credits architecture companion's "Market shape".
-- Purchase is priced per credit and consumption is priced per token through a
-  rate card pinned at issuance; the two layers are independent —
-  the `inference` capability's `spec.md`.
+- The domain owns listing, rate-card, and usage shapes; a storefront decides
+  what it sells and charges; the payment kit converts money; comparability
+  across sellers is a registry operator's policy — the `inference`
+  capability's `architecture.md`.
+- One credit is one base unit of the settlement asset, so the rate card is the
+  price and there is one authoritative number; the card is pinned at issuance
+  — the `inference` capability's `spec.md`.
+- Attestation is reserved as an opaque, unverified envelope on the card and
+  the evidence — the `inference` capability's `spec.md` and `architecture.md`.
 - One listing is one served model, so the registry compares sellers per model —
   the `inference` capability's `spec.md`.
 - Marketplace principal, bearer credential, and spending authority are three
   identities; the bearer credential is delivery, never payment authorization —
   the `inference` capability's `spec.md`, restating the API-credits companion's
   "Commercial and usage identity" for the new domain.
-- Model identity is domain-canonical: `model_id` names the logical model,
-  `artifact_ref` the exact source, quantization stays a field, and a registry
-  validates the format but never mints or resolves identifiers — the
+- Model identity is seller-asserted with a SHOULD derivation rule; the domain
+  keeps no model list; quantization is an enumerated field; provenance is
+  required and resale is legitimate; a registry may curate but never mints;
+  `model_owner` is the three-party hook and there is no royalty field — the
   `inference` capability's `spec.md` and `architecture.md`.
 - Charge derivation is a pure function of a usage record and a rate card —
   the `inference` capability's `spec.md`.
