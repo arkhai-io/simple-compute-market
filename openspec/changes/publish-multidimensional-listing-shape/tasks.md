@@ -109,6 +109,9 @@ only in integration tests, and rejection-path exceptions commented as such.
     core package, so the move was reverted and is held for the open question in `design.md`
     ("How do VM concept modules reach the shared shape utility and encoding?"). The
     known-key test stands.
+  - **Amended after implementation review:** the key builders moved to
+    `arkhai_vms/listing_keys.py`, which uses the encoding; `arkhai_vms` no longer exports it.
+    The reconciler imports the builders, and their byte forms are unchanged.
 - [x] 1.3 Tests in `core/tests/unit/`. For `test_capability_shape.py`:
   - structure accepted and refused without a schema;
   - flatten with a test schema;
@@ -332,6 +335,11 @@ only in integration tests, and rejection-path exceptions commented as such.
     `load_listing_binding_by_derivation`: `core_storefront`'s
     `listing_id_for_derivation_key` calls an undefined `_connect()`, a pre-existing defect
     outside this change.
+  - **Amended after implementation review:** the listing-source query is a repository
+    method, `list_listing_source_envelopes`. A successor already bound under its key is
+    brought to the seller's state through the seller's own operations: an open one is
+    closed as its seller (`close_order`) or paused (`set_listing_paused`); one reconciliation
+    already closed is reported, since no seller operation changes who closed a listing.
 - [x] 4.8 **Status.** `services/system_service.py` surfaces the new report fields and the
   carry-over count. If the typed status model in `core/storefront-client` names
   derivation-report fields, extend it there too.
@@ -373,6 +381,13 @@ only in integration tests, and rejection-path exceptions commented as such.
     model their members did not declare, or bound a listing differently from what it
     publishes, were corrected: both were hidden while keys were rebuilt from published
     fields.
+  - **Amended after implementation review:** `test_shape_feasibility.py` moved to
+    `tests/integration/` and compares against the ledger's public admission dry run,
+    `CapacityLedgerService.probe`: declared feasibility on a ledger holding nothing,
+    availability on one holding part of a member. No private site-kit helper is imported,
+    and a check confirms both outcomes occur. `test_listing_identity_carryover.py` moved to
+    `tests/integration/` too: both use a real database. `test_reconciler.py` stays where it is
+    for now.
 - [x] 4.10 **Provider-input test.** In
   `provisioning/compute/service/tests/unit/services/test_ansible_fulfillment_provider.py`,
   the existing provider suite:
@@ -415,6 +430,8 @@ only in integration tests, and rejection-path exceptions commented as such.
   - The provisioning producer test that already calls the validator keeps proving real sites
     comply.
   - **Done.** Done as specified.
+  - **Amended after implementation review:** the requirement is a producer contract, so it is
+    stated in a `site-capacity` delta modifying "Resource-pool projection metadata".
 - [x] 4.13 **Fake site projects the contract and accounts per dimension.** In
   `domains/vms/storefront/tests/fake_site.py`:
   - projected members carry `resource_type`, and hand-built members in the storefront's own
@@ -433,6 +450,9 @@ only in integration tests, and rejection-path exceptions commented as such.
   - a listing with a stated shape validates against `core/registry/filter-spec.yaml`.
   - **Done.** Added the at-value and above-value bounds, the GPU-only exclusion, and a
     shaped listing validating against the filter spec's listing schema.
+  - **Amended after implementation review:** both new tests use the canonical
+    `RegistryClient` against the in-process app: `list_listings(ram_gb_min=...)` for the
+    filter bounds, and `validate_publish_listing` for the shaped listing.
 - [x] 5.2 **End-to-end helpers.** In `e2e-tests/tests/e2e/roles/scenarios/vms/host_registry.py`,
   `declare_e2e_capacity` accepts a full capacity map and `register_e2e_pool` accepts
   `listing_shapes`. Existing callers are unchanged.
@@ -499,6 +519,16 @@ only in integration tests, and rejection-path exceptions commented as such.
   - Recorded evidence: `make dist-ci` and `make dist-kits` succeed; `make check-reinit`
     passes; strict OpenSpec validation completes at the repository baseline (73 passed,
     19 failed, all pre-existing), with this change passing.
+  - **Second pipeline run (2026-09-24):** 116 passed, 1 failed, 9 skipped. The new
+    scenario ran and failed at 01a: the cycle refused its candidate because the listing's
+    `region` was null. A listing advertises its pool's `region` hint (or the legacy local
+    row), never a member attribute, and the scenario's pool stated none. The pool helpers
+    gained a `region` argument and the scenario states the region on the pool as well as on
+    the declaration, which reservations match. Stage 01a now reports the cycle's actions
+    for its pool when it fails. The same cycle refused the `buy`, `deal-cli`, and `deal`
+    scenarios' pools for the same reason; that predates this change, since region
+    resolution is unchanged, and those scenarios publish through the API. 5.3 needs a third
+    run.
 
 # Slice B
 
@@ -752,7 +782,8 @@ Filled in during implementation. Destinations planned:
 | Site-scoped, durable storefront pool overrides and the legacy tier | `openspec/specs/storefront-publication/spec.md` — "Storefront pool overrides are site-scoped and durable"; `docs/development/DEPLOYMENT_AND_CONFIG.md` |
 | Override writes are checked against the site's live projection | `openspec/specs/storefront-publication/spec.md` — "Storefront pool overrides are written against the site's live projection" |
 | `listing_shapes` hint and structural validation | `openspec/specs/resource-pool-management/spec.md` |
-| Family-grouped shapes flattened by one shared utility; the neutral identifier encoding | `openspec/specs/market-composition/spec.md`; `docs/development/ARCHITECTURE.md` package layers |
+| Family-grouped shapes flattened by one shared utility in a foundation kit; the neutral identifier encoding in the market core | `openspec/specs/market-composition/spec.md`; `docs/development/ARCHITECTURE.md` kit layers (the capability-shape foundation kit) and package layers (the encoding in `market_core`) |
+| Every projected resource-pool member states its resource kind | `openspec/specs/site-capacity/spec.md` — "Resource-pool projection metadata" |
 | Fail-forward deployment; one-time republish at upgrade | `docs/development/DEPLOYMENT_AND_CONFIG.md` |
 | Omission beats inference; flat-name exception; review outcomes | This change's `design.md`; flat-name exception also in `structured-capacity-requirements`' `design.md` |
 | Roadmap currency | `docs/development/ROADMAP.md` Goal 2 (task 9.5) |

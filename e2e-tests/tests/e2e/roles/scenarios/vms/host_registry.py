@@ -100,6 +100,7 @@ def register_e2e_pool(
     label: str | None = None,
     listing_shapes: dict[str, list[dict[str, Any]]] | None = None,
     pricing: dict[str, Any] | None = None,
+    region: str | None = None,
 ) -> Any:
     """Create the resource pool, idempotently, and return the pool row.
 
@@ -107,7 +108,10 @@ def register_e2e_pool(
     offering mode, the shapes its listings are sold in. Omitted, the pool states
     none and the storefront publishes its default shapes. `pricing`, when given,
     is the pool's `pricing` hint, the durable terms a published listing takes
-    ahead of the storefront's configured defaults.
+    ahead of the storefront's configured defaults. `region`, when given, is the
+    pool's `region` hint: the region its listings advertise, which a storefront
+    takes from the pool rather than from its members, while a reservation matches
+    it against each member's declared `region` attribute.
 
     `listing_mode` is a pool policy tag the storefront's publication resolves. It is
     passed explicitly rather than defaulted because the structural fallback —
@@ -140,6 +144,7 @@ def register_e2e_pool(
             **_backed_declarations(deliverable_modes),
             **({"listing_shapes": listing_shapes} if listing_shapes is not None else {}),
             **({"pricing": pricing} if pricing is not None else {}),
+            **({"region": region} if region is not None else {}),
         }
         if any(tags.get(k) != v for k, v in wanted.items()):
             provisioning_client.patch_pool(pool_id, PoolUpdate(
@@ -162,6 +167,7 @@ def register_e2e_pool(
             **_backed_declarations(deliverable_modes),
             **({"listing_shapes": listing_shapes} if listing_shapes is not None else {}),
             **({"pricing": pricing} if pricing is not None else {}),
+            **({"region": region} if region is not None else {}),
         },
         provider_config=_default_pool_provider_config(provisioning_client),
     ))
@@ -317,11 +323,12 @@ def provision_e2e_executor(
     listing_shapes: dict[str, list[dict[str, Any]]] | None = None,
     capacity: dict[str, int] | None = None,
     pricing: dict[str, Any] | None = None,
+    region: str | None = None,
 ) -> Any:
     """Pool, executor host, and its one capacity declaration, in dependency order.
 
-    `listing_shapes`, `pricing`, and `capacity` are passed to the pool and the
-    declaration; see `register_e2e_pool` and `declare_e2e_capacity`.
+    `listing_shapes`, `pricing`, `region`, and `capacity` are passed to the pool
+    and the declaration; see `register_e2e_pool` and `declare_e2e_capacity`.
 
     `sellable_units` is what the declaration offers and must match the scenario's
     seeded resource; `host_gpu_count` is the hardware the executor has. They are
@@ -338,6 +345,7 @@ def provision_e2e_executor(
         deliverable_modes=deliverable_modes,
         listing_shapes=listing_shapes,
         pricing=pricing,
+        region=region,
     )
     host_row = register_e2e_host(
         provisioning_client, name=host, pool_id=pool_id, gpu_count=host_gpu_count,

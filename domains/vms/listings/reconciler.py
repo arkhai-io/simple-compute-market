@@ -6,7 +6,12 @@ import sqlite3
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Mapping, Protocol
 
-from arkhai_vms import DIMENSION_KEYS, length_prefixed
+from arkhai_vms import (
+    DIMENSION_KEYS,
+    listing_pool_key,
+    listing_resource_key,
+    listing_shape_key,
+)
 
 from domains.vms.listings.listing_comparison import REFUSE, compare_listing
 from domains.vms.listings.listing_shapes import (
@@ -49,63 +54,6 @@ def positive_gpu_count(value: Any) -> int | None:
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         return None
     return value
-
-
-def _required_gpu_count(gpu_count: Any) -> int:
-    count = positive_gpu_count(gpu_count)
-    if count is None:
-        raise ValueError(f"gpu_count must be a positive integer, not {gpu_count!r}")
-    return count
-
-
-def listing_resource_key(
-    site_id: str,
-    resource_id: str,
-    gpu_count: int,
-) -> str:
-    if not site_id or not site_id.strip():
-        raise ValueError("site_id must be non-empty")
-    return (
-        f"{length_prefixed(site_id)}:{length_prefixed(resource_id)}"
-        f":gpus:{_required_gpu_count(gpu_count)}"
-    )
-
-
-def listing_pool_key(
-    site_id: str,
-    pool_id: str,
-    gpu_count: int,
-) -> str:
-    if not site_id or not site_id.strip():
-        raise ValueError("site_id must be non-empty")
-    return (
-        f"pool:{length_prefixed(site_id)}:{length_prefixed(pool_id)}"
-        f":gpus:{_required_gpu_count(gpu_count)}"
-    )
-
-
-def listing_shape_key(
-    site_id: str,
-    *,
-    shape_digest: str,
-    pool_id: str | None = None,
-    resource_id: str | None = None,
-) -> str:
-    """The structural key of one listing shape from a pool or a specific resource.
-
-    A resource names a specific-resource listing and takes precedence over its
-    pool, as it does in the capacity claim. The shape enters by digest, so which
-    source produced the shape never changes the key.
-    """
-    if not site_id or not site_id.strip():
-        raise ValueError("site_id must be non-empty")
-    if not shape_digest:
-        raise ValueError("shape_digest must be non-empty")
-    if resource_id:
-        return f"{length_prefixed(site_id)}:{length_prefixed(resource_id)}:shape:{shape_digest}"
-    if pool_id:
-        return f"pool:{length_prefixed(site_id)}:{length_prefixed(pool_id)}:shape:{shape_digest}"
-    raise ValueError("a listing shape key needs a pool or a resource")
 
 
 class ShapeFeasibility(Protocol):

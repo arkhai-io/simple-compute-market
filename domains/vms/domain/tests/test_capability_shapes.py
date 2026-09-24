@@ -8,7 +8,6 @@ from arkhai_vms import (
     CapabilityShapeError,
     canonical_vm_shape,
     flatten_vm_shape,
-    length_prefixed,
     vm_shape_digest,
     vm_shape_problems,
 )
@@ -35,7 +34,3 @@ def test_digest_ignores_key_order():
     reordered = {"gpu": {"count": 1, "model": "H100"}, "memory": {"gib": 64}}
     assert vm_shape_digest(SHAPE) == vm_shape_digest(reordered)
     assert list(canonical_vm_shape(SHAPE)) == ["gpu", "memory"]
-
-
-def test_the_encoding_is_the_shared_one():
-    assert length_prefixed("a:b") == "3:a:b"

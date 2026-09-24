@@ -14,8 +14,15 @@ the successor first, with the seller's state:
 
 Nothing is recorded for a listing reconciliation closed or an open unpaused one;
 publication handles those. The step runs before any lifecycle loop, because the
-first publication cycle would otherwise publish the successor first. It is
-idempotent: a successor already bound under its derivation key is left alone.
+first publication cycle would otherwise publish the successor first.
+
+It is idempotent in effect, not only in identity. A successor already bound
+under its derivation key, as after a partial upgrade that let a cycle run first,
+is brought to the seller's state through the operations a seller uses: an open
+successor of a seller-closed listing is closed as its seller, and an open,
+unpaused successor of a paused listing is paused. A successor that reconciliation
+already closed cannot be made seller-closed by any seller operation; it is
+reported, and stays closed until publication derives its shape again.
 
 See openspec/specs/storefront-publication/spec.md, "A listing's derivation
 identity includes its shape".
@@ -25,7 +32,6 @@ from __future__ import annotations
 
 import json
 import logging
-import sqlite3
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -35,6 +41,7 @@ from domains.vms.listings.reconciler import LISTING_SOURCE_KIND, positive_gpu_co
 from market_identity import Identity
 
 from market_storefront.publication_binding import prepare_vm_listing_binding
+from market_storefront.services.publication_service import close_order
 
 logger = logging.getLogger(__name__)
 
@@ -64,31 +71,6 @@ def carryover_report() -> dict[str, Any]:
     return _LATEST_REPORT.as_dict()
 
 
-def _pre_shape_listings(db_path: str) -> list[tuple[str, dict[str, Any]]]:
-    """Listing IDs and source payloads of every VM listing bound before shapes."""
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
-    try:
-        rows = conn.execute(
-            "SELECT listing_id, source_envelope_json FROM storefront_listing_bindings "
-            "WHERE offering_mode = 'vm'"
-        ).fetchall()
-    finally:
-        conn.close()
-    out: list[tuple[str, dict[str, Any]]] = []
-    for listing_id, raw in rows:
-        try:
-            envelope = json.loads(raw or "")
-        except json.JSONDecodeError:
-            continue
-        if (
-            isinstance(envelope, dict)
-            and envelope.get("kind") == LISTING_SOURCE_KIND
-            and envelope.get("schema_version") == _PRE_SHAPE_SCHEMA_VERSION
-        ):
-            out.append((str(listing_id), dict(envelope.get("payload") or {})))
-    return out
-
-
 def _listing_resource(record: dict[str, Any]) -> dict[str, Any]:
     raw = record.get("listing_resource")
     if hasattr(raw, "model_dump"):
@@ -98,11 +80,38 @@ def _listing_resource(record: dict[str, Any]) -> dict[str, Any]:
     return dict(raw or {})
 
 
+async def _carry_onto_existing(
+    sqlite_client: Any, successor_id: str, *, seller_closed: bool
+) -> str | None:
+    """Bring an already-bound successor to the seller's state; a reason if not."""
+    successor = await sqlite_client.load_listing(listing_id=successor_id)
+    if successor is None:
+        return "successor binding has no listing"
+    if successor["status"] == "closed":
+        if not seller_closed or successor.get("closed_by") == "seller":
+            return None
+        return "successor already closed by reconciliation"
+    if seller_closed:
+        # Local close, then every registry: the operation a seller's close uses.
+        await close_order({"listing_id": successor_id}, sqlite_client=sqlite_client)
+    elif not successor.get("paused"):
+        await sqlite_client.set_listing_paused(listing_id=successor_id, paused=True)
+    return None
+
+
 async def carry_over_seller_state(sqlite_client: Any) -> CarryOverReport:
     """Bind a successor carrying each pre-shape listing's seller close or pause."""
     global _LATEST_REPORT
     report = CarryOverReport()
-    for listing_id, payload in _pre_shape_listings(sqlite_client.db_path):
+    for listing_id, envelope in await sqlite_client.list_listing_source_envelopes(
+        offering_mode="vm"
+    ):
+        if (
+            envelope.get("kind") != LISTING_SOURCE_KIND
+            or envelope.get("schema_version") != _PRE_SHAPE_SCHEMA_VERSION
+        ):
+            continue
+        payload = dict(envelope.get("payload") or {})
         record = await sqlite_client.load_listing(listing_id=listing_id)
         if record is None:
             continue
@@ -133,6 +142,11 @@ async def carry_over_seller_state(sqlite_client: Any) -> CarryOverReport:
         )
         if existing is not None:
             report.successors[listing_id] = existing.listing_id
+            problem = await _carry_onto_existing(
+                sqlite_client, existing.listing_id, seller_closed=seller_closed
+            )
+            if problem is not None:
+                report.not_carried[listing_id] = problem
             continue
         now = datetime.now(UTC).isoformat()
         await sqlite_client.upsert_listing_with_binding(

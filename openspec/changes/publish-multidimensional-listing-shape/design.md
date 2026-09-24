@@ -300,8 +300,11 @@ Why each piece:
   - *Decided (design review, 2026-09-24):* the concept packages reach the utility and the
     encoding only through `arkhai_vms`. The VM vocabulary package already depends on
     `arkhai-core` and exposes the VM-bound operations: validating, flattening, and digesting
-    a VM shape, and the identifier encoding. The guardrail stands unchanged. It still holds
+    a VM shape, and building VM listing keys. The guardrail stands unchanged. It still holds
     now the utility is a kit: `arkhai_vms` binds the VM schema in one place.
+  - *Refined after implementation review:* `arkhai_vms` exposes the listing key builders,
+    which use the encoding, rather than re-exporting the encoding itself; a VM concept
+    package gains a VM operation, not a core primitive under another name.
   - Rejected for now: narrowing the guardrail to admit `market_core`, which loosens a
     deliberate rule; and moving shape resolution and keys out of the listings package, which
     separates keys from the reconciler that owns them.
@@ -599,8 +602,8 @@ Provisioning defaults are never published.
 
 ## Risks / Trade-offs
 
-- **[Declared shapes change what is reserved and provisioned]** → Intended: the buyer gets
-  every quantity the listing states. A declaration that overstates what the hypervisor can
+- **[Declared quantities change what is reserved and provisioned]** → Intended: the buyer
+  gets every quantity the listing states; a dimension it omits is sized by the site. A declaration that overstates what the hypervisor can
   allocate now fails at fulfillment. Declaration accuracy stays the site operator's
   responsibility.
 - **[Omitted dimensions are provisioned but not reserved]** → Accepted division of
@@ -688,6 +691,17 @@ and resolved in the decisions above.
   its shape" was false, because the provider provisions pool defaults for any dimension the
   reservation omits.
   - Considered: requiring every quantity family on a shape.
+  - Considered after implementation review: requiring completeness only of stated shapes
+    (a pool hint or a storefront override), leaving generated shapes GPU-only. It would
+    make a stated shape's advertised, reserved, and provisioned quantities coincide.
+    Rejected, because:
+    - one commitment rule serves every source, so a stated shape identical to a default
+      one is the same listing and keeps its key; under the narrower rule an operator
+      adopting a hint for a pool's existing GPU-only listings could not state them;
+    - the pool kit cannot validate the VM vocabulary, so an incomplete hint would be
+      refused only when a storefront reads it, far from the operator who wrote it;
+    - later families could not be left out of existing stated shapes without making
+      them invalid.
   - Resolved instead by stating the commitment precisely (decisions 2 and 3): a listing
     commits to and reserves only what its shape declares; for anything omitted the site
     decides and the site administrator sizes the defaults. Every listing is a shape, and

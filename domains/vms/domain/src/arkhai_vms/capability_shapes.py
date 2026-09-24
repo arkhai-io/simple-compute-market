@@ -1,9 +1,7 @@
-"""VM capability shapes and listing identifiers, for VM concept packages.
+"""VM capability shapes, for VM concept packages.
 
-VM concept packages (listing derivation, negotiation, settlement) import no
-core package, so they reach the identifier encoding in ``market_core`` through
-this module, and use the shared capability-shape kit through it as well so the
-VM schema is bound in one place. Every
+Every operation here binds the VM schema to the shared capability-shape kit, so
+the schema is bound in one place and the kit stays schema-free. Every
 function here binds the VM schema; the shared utility stays schema-free.
 """
 
@@ -20,8 +18,6 @@ from market_capability_shape import (
     shape_digest,
     shape_problems,
 )
-from market_core.identifier_encoding import length_prefixed, length_prefixed_join
-
 from arkhai_vms.compute_requirements import VM_CAPABILITY_SCHEMA
 
 
@@ -54,8 +50,6 @@ __all__ = [
     "ShapeProblem",
     "canonical_vm_shape",
     "flatten_vm_shape",
-    "length_prefixed",
-    "length_prefixed_join",
     "vm_shape_digest",
     "vm_shape_problems",
 ]

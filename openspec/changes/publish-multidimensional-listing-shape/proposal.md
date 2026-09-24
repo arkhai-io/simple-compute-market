@@ -79,6 +79,8 @@ None.
   validation on every pool-write surface.
 - `market-composition`: family-grouped capability shapes flattened through one shared
   utility driven by a domain-supplied schema.
+- `site-capacity`: every projected resource-pool member states its resource kind, which a
+  storefront needs to judge whether the member can serve a listing's claim.
 
 ## Non-Goals
 
@@ -138,8 +140,9 @@ None.
   - registry filter coverage;
   - a provider-input test proving that declared quantities, not defaults, size the VM;
   - upgrade tests for the identity change and the seller-state carry-over;
-  - one end-to-end path in which a declared shape is discovered with a `ram_gb` query,
-    negotiated, and provisioned at that shape.
+  - one end-to-end path in which a shape declaring every family is discovered with a
+    `ram_gb` query, negotiated, reserved at its declared quantities, and provisioned with
+    them.
 
 ## Permanent documentation impact
 

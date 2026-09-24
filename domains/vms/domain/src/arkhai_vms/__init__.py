@@ -6,10 +6,13 @@ from arkhai_vms.capability_shapes import (
     ShapeProblem,
     canonical_vm_shape,
     flatten_vm_shape,
-    length_prefixed,
-    length_prefixed_join,
     vm_shape_digest,
     vm_shape_problems,
+)
+from arkhai_vms.listing_keys import (
+    listing_pool_key,
+    listing_resource_key,
+    listing_shape_key,
 )
 from arkhai_vms.compute_requirements import (
     DIMENSION_KEYS,
@@ -46,13 +49,14 @@ from arkhai_vms.schema import (
 )
 
 __all__ = [
+    "listing_pool_key",
+    "listing_resource_key",
+    "listing_shape_key",
     "CapabilityShapeError",
     "FlatShape",
     "ShapeProblem",
     "canonical_vm_shape",
     "flatten_vm_shape",
-    "length_prefixed",
-    "length_prefixed_join",
     "vm_shape_digest",
     "vm_shape_problems",
     "DEFAULT_LISTING_SHAPE_GENERATOR",

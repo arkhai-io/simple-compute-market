@@ -16,8 +16,12 @@ scenario proves the cross-service path from that declaration to discovery:
 5. The site's reservation holds every declared quantity, and the provisioning
    job sizes the VM from them rather than from the pool's defaults.
 
-The listing's terms come from the pool's own `pricing` hint, so the scenario
-does not depend on the storefront's configured defaults. How many of the shape
+The listing's terms and region come from the pool's own `pricing` and `region`
+hints, so the scenario does not depend on the storefront's configured defaults.
+The region is stated twice on purpose: a listing advertises its pool's region
+hint, and a reservation matches that region against the declaration's own
+`region` attribute, so a pool whose members did not declare it would publish
+nothing. How many of the shape
 fit, and whether a reservation will be admitted, stay the site's: publication
 judges only that the declaration can serve the shape.
 """
@@ -127,9 +131,12 @@ class TestStage00_Setup:
             listing_mode="fungible",
             listing_shapes={"vm": [SHAPE]},
             pricing=PRICING,
+            # The region the listing advertises; see the module docstring.
+            region=REGION,
         )
         pool_row = provisioning_client.get_pool(E2E_LISTING_SHAPES_POOL_ID)
         assert pool_row.policy_tags["listing_shapes"] == {"vm": [SHAPE]}
+        assert pool_row.policy_tags["region"] == REGION
         refresh_storefront_projections(storefront_admin_client)
         shape_state.declared = True
 
@@ -139,7 +146,12 @@ class TestStage01_Publication:
         self, storefront_admin_client, shape_state
     ):
         require_state(shape_state, "declared")
-        advance_storefront(storefront_admin_client, "publication")
+        cycle = advance_storefront(storefront_admin_client, "publication")
+        # What the cycle did with this pool's candidates, so a failure says why.
+        this_pool = [
+            action for action in cycle.get("actions") or []
+            if (action.get("source") or {}).get("pool_id") == E2E_LISTING_SHAPES_POOL_ID
+        ]
 
         page = storefront_admin_client.list_listings(status="open", limit=200)
         shaped = []
@@ -151,7 +163,10 @@ class TestStage01_Publication:
                 shaped.append((listing.listing_id, resource))
 
         # The stated list replaces the default shapes as a whole.
-        assert len(shaped) == 1, f"expected one listing for the stated shape, got {shaped}"
+        assert len(shaped) == 1, (
+            f"expected one listing for the stated shape, got {shaped}; "
+            f"the cycle's actions for this pool: {this_pool}"
+        )
         listing_id, resource = shaped[0]
         assert {key: resource.get(key) for key in PUBLISHED} == PUBLISHED
         assert (resource["gpu_model"], resource["region"]) == (GPU_MODEL, REGION)

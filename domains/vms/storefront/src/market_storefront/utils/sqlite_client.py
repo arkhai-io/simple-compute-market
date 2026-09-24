@@ -796,6 +796,37 @@ class SQLiteClient(CoreSQLiteClient):
 
         await asyncio.to_thread(_save)
 
+    async def list_listing_source_envelopes(
+        self, *, offering_mode: str
+    ) -> list[tuple[str, dict[str, Any]]]:
+        """Each bound listing of ``offering_mode`` with its parsed source envelope.
+
+        A binding whose stored envelope is not a JSON object is skipped: it names
+        no source a reader could act on.
+        """
+
+        def _load() -> list[tuple[str, dict[str, Any]]]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                rows = conn.execute(
+                    "SELECT listing_id, source_envelope_json "
+                    "FROM storefront_listing_bindings WHERE offering_mode = ?",
+                    (offering_mode,),
+                ).fetchall()
+            finally:
+                conn.close()
+            out: list[tuple[str, dict[str, Any]]] = []
+            for listing_id, raw in rows:
+                try:
+                    envelope = json.loads(raw or "")
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(envelope, dict):
+                    out.append((str(listing_id), envelope))
+            return out
+
+        return await asyncio.to_thread(_load)
+
     async def get_host(self, *, name: str) -> dict[str, Any] | None:
         """Read a single host row by name."""
         cols = ", ".join(self._HOST_COLUMNS)
