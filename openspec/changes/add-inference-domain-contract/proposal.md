@@ -118,8 +118,9 @@ shared.
   route is owned outside this repository's workstream.
 - No Arkhai-hosted inference registry deployment, no Helm alias, no webapp
   integration.
-- No unbacked inference listing and no `asking_rate` field. Both are revisited
-  on the triggers recorded in `design.md`.
+- No unbacked inference listing: version 1 admits only the backed value of the
+  declared backing property. No `asking_rate` field. Both are revisited on the
+  triggers recorded in `design.md`.
 - No embeddings, image, audio, or batch endpoints. Version 1 names chat
   completions and completions.
 - No seller packaging or installer.
@@ -196,13 +197,15 @@ shared.
   [`qualify-inference-market`](../qualify-inference-market/) follow this change
   in that dependency order; each is opened in design phase and planned when its
   predecessor is accepted.
-- [`unbacked-listing-publication`](../unbacked-listing-publication/) — version-1
-  inference listings are quota-backed on the API-credits path that exists today.
-  When backing becomes an explicit listing property, an inference listing with
-  no finite supply behind it is the natural next shape; `design.md` records the
-  trigger.
+- [`unbacked-listing-publication`](../archive/2026-09-24-unbacked-listing-publication/)
+  — archived 2026-09-24. Backing is a declared pool and listing property;
+  version-1 inference listings carry the backed value and publish on the
+  API-credits quota path, quota being a sales cap rather than capacity.
+  Admitting the unbacked value is an inference filter-specification bump;
+  `design.md` records the trigger. Its publication-hook changes mean the stack
+  change copies from current `dev`.
 - [`publish-indicative-listing-rates`](../publish-indicative-listing-rates/) —
-  owns the exact-decimal filter value type and declarative filter
+  now design-complete and unblocked; owns the exact-decimal filter value type and declarative filter
   co-requirements the generic registry lacks. Inference does not duplicate that
   work; it filters on integer credit rates and the settlement asset today and
   revisits a monetary `asking_rate` when those primitives land.
