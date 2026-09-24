@@ -63,7 +63,7 @@ HOSTED_STRIPE_TEST_EVIDENCE ?= $(DIST_DIR)/hosted-stripe-test-evidence.json
 .PHONY: dist-arkhai-core-registry
 .PHONY: build-bare-metal-storefront
 .PHONY: dist-bare-metal-buyer
-.PHONY: run-e2e
+.PHONY: run-e2e fetch-e2e-logs
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -934,6 +934,14 @@ run-e2e: ## Run the E2E GitHub Actions workflow on the current branch.
 	fi; \
 	echo "Triggering E2E workflow on branch $$branch..."; \
 	gh workflow run e2e.yml --ref "$$branch"
+
+E2E_LOG_DIR ?= $(CURDIR)/.snapshot/e2e-logs
+E2E_RUN_ID ?=
+
+fetch-e2e-logs: ## Wait for an E2E run, then fetch its Actions and compose logs.
+	@$(CURDIR)/scripts/fetch-e2e-logs.py \
+		--output-dir "$(E2E_LOG_DIR)" \
+		$(if $(strip $(E2E_RUN_ID)),--run-id "$(E2E_RUN_ID)")
 
 prune-tombstones: ## Delete every file whose contents are a tombstone comment
 	@python3 scripts/prune_tombstones.py
