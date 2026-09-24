@@ -144,7 +144,7 @@ NETWORK ?= simple-market-service_default
 BUYER_MODULE ?= e2e_deal_buyer_cli or e2e_buy
 E2E_MODULE ?= e2e_deal or e2e_deal_buyer_cli or e2e_buy or multi_registry \
               or e2e_compute_dynamic_listings or e2e_alkahest_escrow_codecs \
-              or e2e_credits_deal or e2e_bare_metal_deal
+              or e2e_credits_deal or e2e_bare_metal_deal or e2e_listing_shapes
 
 test-buyer-machine:
 	docker run --rm \

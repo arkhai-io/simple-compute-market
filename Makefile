@@ -384,10 +384,10 @@ hosted-stripe-test: hosted-preflight ## Run one protected Stripe test-mode syste
 # and `.dist` holds only what this repository builds. Release verification
 # remains available as `verify-hosted-release` for a path that consumes a
 # staged release; no build or test target invokes it.
-dist-kits: dist-core ## Build kit-owned wheels into .dist/
+dist-kits: ## Build kit-owned wheels into .dist/
 	$(MAKE) -C kit dist DIST_DIR=$(DIST_DIR)
 
-dist-ci-kits: dist-core ## Build kit-owned wheels that do not require separately released artifacts.
+dist-ci-kits: ## Build kit-owned wheels that do not require separately released artifacts.
 	$(MAKE) -C kit dist-ci DIST_DIR=$(DIST_DIR)
 
 dist-alkahest: ## Build arkhai-kit-alkahest wheel into .dist/

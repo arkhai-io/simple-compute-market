@@ -22,7 +22,7 @@ only in integration tests, and rejection-path exceptions commented as such.
 
 ## 0. Pre-implementation gates
 
-- [ ] 0.1 **Decision gate — feasibility-predicate parity** (decision 4).
+- [x] 0.1 **Decision gate — feasibility-predicate parity** (decision 4).
   - What to check: `compute_capacity_claim_from_order` applied to a shaped
     `listing_resource`, then `market_site.dict_resource_satisfies_claim` applied to a
     projected member or capacity bucket adapted to the snapshot-row shape. It must give the
@@ -39,7 +39,17 @@ only in integration tests, and rejection-path exceptions commented as such.
     listed in decision 4.
   - Outcome: record the result in `design.md` decision 4. Where the predicate disagrees with
     the ledger's own requirement step, **pause for design review**.
-- [ ] 0.2 Re-verify the Context findings in `design.md` that later tasks depend on:
+  - **Result (2026-09-24):** recorded in `design.md` decision 4, "Parity gate result".
+    - The predicate agrees with the ledger's step on every real projected member and bucket
+      once the adapter maps the projection's field names.
+    - It disagrees on a member without `resource_type`: the contract builder, the fake site,
+      and hand-built test members produce one.
+    - A hint-only `region` is refused by both, which silently delists such pools.
+    - Both were put to design review, which answered them the same day (`design.md`
+      decision 4, "Design review of the gate"): the projection contract requires
+      `resource_type` and a member without one is unresolvable (4.12); a default shape
+      failing against declared capacity is reported per pool (4.2). Gate cleared.
+- [x] 0.2 Re-verify the Context findings in `design.md` that later tasks depend on:
   - `_projected_resource_usage` reads only `gpu_count`;
   - enumeration keys and the version 1 envelope;
   - the claim copies `DIMENSION_KEYS`;
@@ -53,10 +63,23 @@ only in integration tests, and rejection-path exceptions commented as such.
   - seller-close and pause semantics.
   
   Record any that moved.
+  - **Result (2026-09-24):** every listed finding holds. Additional facts later tasks depend
+    on:
+    - The provider's default fallback is in
+      `domains/vms/provisioning/adapter/src/vm_provisioning_adapter/services/ansible_fulfillment_provider.py`,
+      per dimension; its tests stay where 4.10 names them.
+    - The version 1 envelope carries site, pool, resource, and `gpu_count`, but no
+      `gpu_model`. The carry-over (4.7) reads the model from the stored listing.
+    - Bindings enforce a unique `derivation_key`. The loop finds a seller-closed listing
+      under the derived key and skips it, as the carry-over relies on.
+    - The fake site's projection omits `resource_type` and advertisement/backing
+      declarations, and its matcher tracks availability for `gpu_count` only. Two 4.11
+      cases need per-dimension fake-site accounting, which no task yet names: backed memory
+      being taken, and a reservation requesting every declared dimension.
 
 ## 1. Shared utilities in `market_core` (decisions 3, 7; `market-composition` delta)
 
-- [ ] 1.1 Add `core/src/market_core/capability_shape.py`. Provide:
+- [x] 1.1 Add `core/src/market_core/capability_shape.py`. Provide:
   - the schema types: per family field, its kind (quantity or attribute), whether it is
     required, and its flat name;
   - `shape_structure_problems(shape)`, which needs no schema;
@@ -68,11 +91,25 @@ only in integration tests, and rejection-path exceptions commented as such.
     family-grouped JSON.
   
   The module names no family or field.
-- [ ] 1.2 Add a small neutral module in `market_core` exporting the length-prefixed
+  - **Done.** Problems come from `shape_problems`; `flatten_shape` raises
+    `CapabilityShapeError` carrying every problem, rather than returning a union of shape
+    and problems.
+  - **Amended after code review:** moved out of the market core to the foundation kit
+    `kit/capability-shape` (`market_capability_shape`, see 1.5), because a capability
+    shape is capacity vocabulary, not a concept every market shares.
+- [x] 1.2 Add a small neutral module in `market_core` exporting the length-prefixed
   component encoding now private to `domains/vms/listings/reconciler.py`
   (`_length_prefixed`), byte-identical. Move the reconciler onto it. Every existing
   derivation key must be unchanged; a test asserts known keys.
-- [ ] 1.3 Tests in `core/tests/unit/`. For `test_capability_shape.py`:
+  - **Done.** The concept packages reach the encoding through `arkhai_vms`
+    (`arkhai_vms/capability_shapes.py`, design decision 3), and the reconciler now uses
+    it; the known keys are unchanged.
+  - **Earlier note:** `core/src/market_core/identifier_encoding.py` exists and is tested.
+    Moving the reconciler onto it broke the enforced rule that VM concept modules import no
+    core package, so the move was reverted and is held for the open question in `design.md`
+    ("How do VM concept modules reach the shared shape utility and encoding?"). The
+    known-key test stands.
+- [x] 1.3 Tests in `core/tests/unit/`. For `test_capability_shape.py`:
   - structure accepted and refused without a schema;
   - flatten with a test schema;
   - a missing required field;
@@ -83,7 +120,11 @@ only in integration tests, and rejection-path exceptions commented as such.
   
   Add encoding tests for delimiter-bearing values, and confirm `test_carrier_purity.py` and
   `test_domain_boundaries.py` still pass.
-- [ ] 1.4 **Version and pins.**
+  - **Done.** `test_capability_shape.py` (now in `kit/capability-shape/tests/unit/`) and
+    `test_identifier_encoding.py`; the known-key
+    test is in `domains/vms/storefront/tests/unit/test_reconciler.py`. Core suite 132
+    passed, purity and domain-boundary tests included.
+- [x] 1.4 **Version and pins.**
   - Bump `arkhai-core` from 0.2.0 to 0.3.0 (new public API).
   - Update the exact `arkhai-core==0.2.0` pins to `==0.3.0` in:
     - `kit/settlement-runtime/pyproject.toml`
@@ -93,10 +134,28 @@ only in integration tests, and rejection-path exceptions commented as such.
     - `core/registry/pyproject.toml`
   - Raise the lower bound to `>=0.3.0` where a consumer imports the new modules.
   - Relock every project whose lock changes.
+  - **Done.** `arkhai-core` 0.3.0; the five exact pins updated. Every lock carrying a
+    changed internal package was relocked with its relative wheel path. Two locks resolve
+    `torch` from an index outside the implementation environment, so their changed internal
+    entries were edited by hand and proved with a frozen sync: `domains/vms/storefront`
+    and `domains/vms/buyer`. They should be relocked where that index is reachable.
+
+- [x] 1.5 **Capability-shape foundation kit** (code review of 1.1).
+  - Add `kit/capability-shape`, distribution `arkhai-kit-capability-shape` 0.1.0,
+    importing only the standard library, with build and test targets, a boundary test,
+    and entries in `kit/Makefile`'s `dist-ci` and `test` lists.
+  - Move the utility and its tests there from `core`. `arkhai-core` stays 0.3.0 for the
+    identifier encoding.
+  - `kit/resource-pools` and `arkhai-vms` depend on the kit rather than on `arkhai-core` for
+    shapes.
+  - **Done.** Kit suite 32 passed. Every lock installing the kit was relocked, the two
+    torch-bound locks by hand, and `make check-reinit` required the kit in the `reinit` of
+    ten projects, now added. The `arkhai-core` `reinit` lines added under 3.3 were
+    withdrawn, because those locks no longer install `arkhai-core`.
 
 ## 2. VM family schema and default generator (decisions 2, 3)
 
-- [ ] 2.1 In `domains/vms/domain/src/arkhai_vms/compute_requirements.py`, add
+- [x] 2.1 In `domains/vms/domain/src/arkhai_vms/compute_requirements.py`, add
   `VM_CAPABILITY_SCHEMA`:
   - `gpu.count` → `gpu_count`, a required quantity;
   - `gpu.model` → the `gpu_model` attribute, required;
@@ -106,40 +165,55 @@ only in integration tests, and rejection-path exceptions commented as such.
   
   Export it from `arkhai_vms/__init__.py`. Carry the flat-name exception as a comment
   stating the rule: these are the published wire names, and they are GiB.
-- [ ] 2.2 Add the default shape generator interface and its GPU-only implementation in the
+  - **Done.** Exported from `arkhai_vms`, with `GPU_MODEL_ATTRIBUTE`.
+- [x] 2.2 Add the default shape generator interface and its GPU-only implementation in the
   VM domain. Members go in; shapes come out, one per GPU count from 1 to the largest declared
   count, for each GPU model present among enabled members. The implementation can live in
   `arkhai_vms` or in `domains/vms/listings`; choose the lowest package whose dependencies
   already allow it and record the choice.
-- [ ] 2.3 In `domains/vms/domain/pyproject.toml`, set `arkhai-core>=0.3.0` and bump
+  - **Done.** `arkhai_vms/shape_generation.py`, the lowest package whose dependencies
+    already allow it: `ListingShapeGenerator`, `gpu_count_shapes`, and
+    `DEFAULT_LISTING_SHAPE_GENERATOR`.
+- [x] 2.3 In `domains/vms/domain/pyproject.toml`, set `arkhai-core>=0.3.0` and bump
   `arkhai-vms` from 0.3.0 to 0.4.0.
-- [ ] 2.4 In `domains/vms/domain/tests/test_compute_requirements.py`, and a generator unit
+  - **Done.**
+- [x] 2.4 In `domains/vms/domain/tests/test_compute_requirements.py`, and a generator unit
   test, cover:
   - the schema's quantity flat names equal `DIMENSION_KEYS`;
   - the required and optional fields;
   - one representative flatten;
   - generator output for single-model and mixed-model pools;
   - members with no GPU count are skipped.
+  - **Done.** `test_compute_requirements.py` and `test_shape_generation.py`; suite 28 passed.
 
 ## 3. `listing_shapes` pool hint (decision 8; `resource-pool-management` delta)
 
-- [ ] 3.1 In `kit/resource-pools/src/market_resource_pools/hints.py`, add:
+- [x] 3.1 In `kit/resource-pools/src/market_resource_pools/hints.py`, add:
   - `LISTING_SHAPES_POLICY_TAG`;
   - `raw_listing_shapes(policy_tags, offering_mode)`;
   - `validate_listing_shapes(policy_tags)`, which requires a mapping of offering mode to a
-    non-empty list, with each shape passing `market_core`'s structure check.
+    non-empty list, with each shape passing the capability-shape kit's structure check.
   
   Export them from `market_resource_pools/__init__.py`.
-- [ ] 3.2 In `kit/resource-pools/src/market_resource_pools/service.py`, add
+  - **Done.**
+- [x] 3.2 In `kit/resource-pools/src/market_resource_pools/service.py`, add
   `validate_listing_shapes` to `_require_valid_policy_tag_hints` and to the bulk-document
   path, with path `...policy_tags.listing_shapes` and code `invalid_listing_shapes`.
-- [ ] 3.3 **Packaging for `kit/resource-pools`.**
+  - **Done.**
+- [x] 3.3 **Packaging for `kit/resource-pools`.**
   - Add `arkhai-core>=0.3.0` to its `pyproject.toml` and bump it from 0.3.0 to 0.4.0.
   - Add a `reinit` target to `kit/resource-pools/Makefile` that reinstalls `arkhai-core`
     from `.dist`.
   - In the root `Makefile`, declare `dist-ci-kits` and `dist-kits` after `dist-core`.
   - Relock.
-- [ ] 3.4 **`kit/resource-pools` tests.**
+  - **Done.** `make check-reinit` then required `arkhai-core` in the `reinit` of
+    `kit/fulfillment`, `kit/site`, and `provisioning/compute`, now added.
+  - **Amended after code review:** the root `Makefile` ordering was not made. `uv build`
+    builds each wheel in isolation with only its build backend and resolves no runtime
+    dependency, so a kit wheel builds without the `arkhai-core` wheel present; ordering
+    matters only to `uv sync`, which runs after `make dist`. The edge added nothing but a
+    core rebuild on a standalone `make dist-kits` and a constraint on parallel builds.
+- [x] 3.4 **`kit/resource-pools` tests.**
   - `tests/unit/test_hints.py`:
     - valid shapes;
     - an empty list;
@@ -148,22 +222,26 @@ only in integration tests, and rejection-path exceptions commented as such.
     - a field no domain defines, which is accepted.
   - `tests/integration/test_resource_pool_service.py`: identical refusal across create,
     replace, patch, and bulk import, with nothing stored.
-- [ ] 3.5 **Provisioning tests.**
+  - **Done.** Suite 222 passed.
+- [x] 3.5 **Provisioning tests.**
   - `provisioning/compute/service/tests/integration/test_pools_api.py`: refusal through the
     typed provisioning client, asserting status and stored state only (rejection path).
   - `provisioning/compute/service/tests/integration/test_capacity_api.py`: the hint is
     projected verbatim.
+  - **Done.** A pool is projected with its members, so the projection test declares one.
 
 ## 4. Shapes for every listing, feasibility, identity (decisions 2, 4, 5, 9)
 
-- [ ] 4.1 Add `domains/vms/listings/listing_shapes.py`. It resolves a pool's VM shapes:
+- [x] 4.1 Add `domains/vms/listings/listing_shapes.py`. It resolves a pool's VM shapes:
   - the pool's `listing_shapes` hint for `vm` if stated;
   - otherwise the default generator.
   
   It validates stated shapes through `VM_CAPABILITY_SCHEMA` and returns one outcome: `shapes`
   (with their source) or `unreadable` (with its problems). Slice B adds the override tier
   above the hint.
-- [ ] 4.2 **Reconciler** (`domains/vms/listings/reconciler.py`).
+  - **Done.** `domains/vms/listings/listing_shapes.py`. A present `listing_shapes` value
+    that is not a mapping is unreadable too, never the default.
+- [x] 4.2 **Reconciler** (`domains/vms/listings/reconciler.py`).
   - Replace per-pool GPU-count enumeration with shape resolution and feasibility for every
     pool:
     - fungible: one row per feasible shape;
@@ -174,9 +252,13 @@ only in integration tests, and rejection-path exceptions commented as such.
       loaded, empty, and unreadable rules; otherwise per-member `available`;
     - for backed specific-resource pools, the member's `available`;
     - a member reporting no availability is judged on declared capacity.
-  - A stated shape no member is feasible for yields no row and is reported. An unreadable
-    hint holds the pool and is reported, with no fallback to the default generator. Holds for
-    malformed GPU counts are unchanged.
+  - A stated shape no member is feasible for yields no row and is reported per shape. A
+    default shape no member is feasible for against declared capacity is reported once per
+    pool, naming the claim attribute no enabled member declares; failing only against
+    availability is not reported. An unreadable hint holds the pool and is reported, with no
+    fallback to the default generator.
+  - A member with a malformed GPU count, or without a `resource_type`, is unresolvable and
+    reported, and holds its pool (fungible) or its own listings (specific resource).
   - Price each row by its shape's `gpu.model`.
   - Candidates carry the canonical shape, its digest, the flattened quantities and
     attributes, and a reconciler key built from site, pool or resource, and the digest.
@@ -189,18 +271,30 @@ only in integration tests, and rejection-path exceptions commented as such.
     `DIMENSION_KEYS`.
   - `_SiteDerivationReport` adds `infeasible_shapes` and `unreadable_shapes`, and drops
     `mixed_kind_pools`, which per-model generation makes obsolete.
-- [ ] 4.3 **Identity fields and packaging for `domains/vms/listings`.**
+  - **Done.** Shapes × feasibility replace GPU-count enumeration; pool rows keep their
+    aggregate fields and gain the resolved and feasible shapes. Keys are
+    `…:shape:<digest>`; the separate legacy key is gone. Stored keys come from the binding
+    envelope; version 1 keeps its GPU-count key, which nothing derives. Stated infeasible
+    shapes are reported per shape, a default shape failing on declared capacity per pool
+    with the undeclared attribute; members without `resource_type` are held. The VM
+    concept packages reach shape operations and the encoding through `arkhai_vms` (design
+    decision 3).
+- [x] 4.3 **Identity fields and packaging for `domains/vms/listings`.**
   - In `domains/vms/listings/listing_comparison.py`, build the dimension part of
     `IDENTITY_FIELDS` from `arkhai_vms.DIMENSION_KEYS`.
   - In `domains/vms/listings/pyproject.toml`, add `arkhai-vms>=0.4.0` and bump
     `arkhai-vms-listings` from 0.1.0 to 0.2.0.
   - Add `reinit` lines, relock, and export new names from
     `domains/vms/listings/__init__.py`.
-- [ ] 4.4 **Adapter.** In `domains/vms/domain/src/arkhai_vms/storefront_adapter.py`:
+  - **Done.** `arkhai-vms-listings` 0.2.0 depends on `arkhai-vms>=0.4.0`; new names
+    exported.
+- [x] 4.4 **Adapter.** In `domains/vms/domain/src/arkhai_vms/storefront_adapter.py`:
   - `vm_listing_resource_for_listing` publishes a candidate's `gpu_model`, `gpu_count`, and
     each quantity its shape declares, and nothing its shape omits;
   - `vm_candidate_skip_keys` handles shape keys.
-- [ ] 4.5 **Feasibility callable.** Add `domains/vms/storefront/src/market_storefront/services/shape_feasibility.py`.
+  - **Done.** Publishes exactly the flattened shape; a candidate without a shape or a
+    structural key is refused. The obsolete `vm_listing_resource_key` is removed.
+- [x] 4.5 **Feasibility callable.** Add `domains/vms/storefront/src/market_storefront/services/shape_feasibility.py`.
   - It provides the injected callable: it builds the claim with
     `compute_capacity_claim_from_order` and judges it with
     `market_site.dict_resource_satisfies_claim`, configured with the container's unit claim
@@ -212,14 +306,19 @@ only in integration tests, and rejection-path exceptions commented as such.
     - `services/listing_source_check.py`
     - `failure_actions.py`
     - `controllers/admin_controller.py` (fulfillment-event handlers)
-- [ ] 4.6 **Binding.**
+  - **Done.** `SiteShapeFeasibility`, with member and bucket adapters that invent nothing,
+    wired into all five callers; the publication cycle and the guard take it by injection.
+    The guard reads the listing's key from its stored binding.
+- [x] 4.6 **Binding.**
   - `domains/vms/storefront/src/market_storefront/publication_binding.py`: every candidate
     writes `compute.listing_source` schema version 2 (site, pool, resource, canonical shape).
   - `models/listing_models.py`: `VmCapacitySource` gains `listing_shape`.
   - `services/listing_service.py`: `derive_listing` checks that the source's flattened shape
     equals the listing's published quantities and attributes.
   - `services/publication_loop.py`: `_create_request` passes the shape.
-- [ ] 4.7 **Seller-state carry-over** (decision 5). Add
+  - **Done.** `VmCapacitySource.listing_shape` replaces `gpu_count`; `derive_listing`
+    refuses a listing whose published quantities or model differ from its shape.
+- [x] 4.7 **Seller-state carry-over** (decision 5). Add
   `domains/vms/storefront/src/market_storefront/services/listing_identity_carryover.py`,
   invoked from `startup.py` before any lifecycle loop starts. For each version 1 VM listing:
   - compute the equivalent default shape and its version 2 derivation key from the stored
@@ -229,10 +328,16 @@ only in integration tests, and rejection-path exceptions commented as such.
   - do nothing when a successor is already bound.
   
   Report the count carried in system status.
-- [ ] 4.8 **Status.** `services/system_service.py` surfaces the new report fields and the
+  - **Done.** Runs as a fail-fast startup step before the negotiation watchdog. Uses
+    `load_listing_binding_by_derivation`: `core_storefront`'s
+    `listing_id_for_derivation_key` calls an undefined `_connect()`, a pre-existing defect
+    outside this change.
+- [x] 4.8 **Status.** `services/system_service.py` surfaces the new report fields and the
   carry-over count. If the typed status model in `core/storefront-client` names
   derivation-report fields, extend it there too.
-- [ ] 4.9 **Unit tests.**
+  - **Done.** Status gains `listing_identity_carryover`; the new derivation fields pass
+    through the existing opaque `publication_derivation`, so no client change was needed.
+- [x] 4.9 **Unit tests.**
   - `domains/vms/storefront/tests/unit/test_reconciler.py`:
     - hint shapes, fungible and specific;
     - default shapes reproduce today's published fields for a single-model pool (golden
@@ -243,6 +348,10 @@ only in integration tests, and rejection-path exceptions commented as such.
     - unknown availability;
     - an infeasible stated shape reported with no fallback;
     - an unreadable hint held with no fallback to the default generator;
+    - a pool whose `region` is only a pool hint publishes nothing and is reported once,
+      naming `region`; a default shape unavailable only on load is not reported;
+    - a member without `resource_type` holds its fungible pool, or only itself in a
+      specific-resource pool, and is reported;
     - digest keys differ on edit;
     - a declared shape identical to a default shape keeps its key;
     - the stored key read from the binding;
@@ -258,14 +367,22 @@ only in integration tests, and rejection-path exceptions commented as such.
     - seller-closed and paused successors;
     - reconciliation-closed and open listings untouched;
     - idempotent rerun.
-- [ ] 4.10 **Provider-input test.** In
+  - **Done.** All planned cases, plus the hint-only-region report and the missing-type
+    hold (`TestListingShapes`, 15 cases). `test_shape_feasibility.py` holds gate 0.1's
+    parity against a real ledger (24 cases). Existing fixtures that claimed a region or
+    model their members did not declare, or bound a listing differently from what it
+    publishes, were corrected: both were hidden while keys were rebuilt from published
+    fields.
+- [x] 4.10 **Provider-input test.** In
   `provisioning/compute/service/tests/unit/services/test_ansible_fulfillment_provider.py`,
   the existing provider suite:
   - a reservation carrying every declared dimension sizes the VM from them, not from pool
     defaults;
   - a reservation omitting a dimension uses the pool default, the accepted behaviour
     decision 3 records.
-- [ ] 4.11 **Integration tests.** In
+  - **Done.** The existing suite already proved declared dimensions win and defaults fill
+    an empty reservation; added the GPU-only-shape case.
+- [x] 4.11 **Integration tests.** In
   `domains/vms/storefront/tests/integration/test_publication_loop.py`, test:
   - a pool hint publishes its shapes and no default shapes;
   - a pool without a hint publishes default shapes whose fields match today's;
@@ -283,16 +400,44 @@ only in integration tests, and rejection-path exceptions commented as such.
     - no version 1 listing reopens on a later capacity event;
     - no duplicate is open for any shape.
 
+  - **Done.** All planned scenarios in `test_publication_loop.py`. A changed GPU model now
+    closes and republishes, since the model is part of the shape; that test was rewritten
+    for it.
+- [x] 4.12 **Projection contract requires `resource_type`** (decision 4, gate review).
+  - `kit/site-client/src/market_site_client/fixtures/resource_pools.py`:
+    `build_projected_resource` sends `resource_type="compute.gpu"` by default, and
+    `validate_resource_pool_projection` requires a non-empty string `resource_type` on every
+    member.
+  - `kit/site-client/tests/unit/test_resource_pool_fixture.py`: the validator refuses a
+    member without it.
+  - Bump `arkhai-kit-site-client` from 0.4.0 to 0.5.0. Resolve the consumers
+    `make check-reinit` lists.
+  - The provisioning producer test that already calls the validator keeps proving real sites
+    comply.
+  - **Done.** Done as specified.
+- [x] 4.13 **Fake site projects the contract and accounts per dimension.** In
+  `domains/vms/storefront/tests/fake_site.py`:
+  - projected members carry `resource_type`, and hand-built members in the storefront's own
+    tests do too;
+  - resources declare a full capacity map, and the matcher admits and holds every requested
+    dimension, so 4.11's memory-taken and every-dimension reservation cases can be observed.
+  - **Done.** Resources may declare a full capacity map; matching, holds, snapshots, and
+    projections work per dimension, and reservations record every requested dimension.
+
 ## 5. Discovery, end to end, and slice A validation
 
-- [ ] 5.1 **Registry filters.** In `core/registry/tests/integration/test_listings_filtering.py`:
+- [x] 5.1 **Registry filters.** In `core/registry/tests/integration/test_listings_filtering.py`:
   - a listing publishing `ram_gb` matches `ram_gb` lower bounds at or below its value and
     is excluded above;
   - a listing without `ram_gb` is still excluded by any `ram_gb` filter;
   - a listing with a stated shape validates against `core/registry/filter-spec.yaml`.
-- [ ] 5.2 **End-to-end helpers.** In `e2e-tests/tests/e2e/roles/scenarios/vms/host_registry.py`,
+  - **Done.** Added the at-value and above-value bounds, the GPU-only exclusion, and a
+    shaped listing validating against the filter spec's listing schema.
+- [x] 5.2 **End-to-end helpers.** In `e2e-tests/tests/e2e/roles/scenarios/vms/host_registry.py`,
   `declare_e2e_capacity` accepts a full capacity map and `register_e2e_pool` accepts
   `listing_shapes`. Existing callers are unchanged.
+  - **Done.** `provision_e2e_executor` passes both through. `capacity_source_for` and the
+    hosted scenario's capacity source now send `listing_shape`.
 - [ ] 5.3 **Scenario.** Add a new `test_listing_shapes.py` scenario under
   `e2e-tests/tests/e2e/roles/scenarios/vms/`, with marker `e2e_listing_shapes` registered in
   `e2e-tests/pyproject.toml`.
@@ -304,6 +449,18 @@ only in integration tests, and rejection-path exceptions commented as such.
   - The committed reservation dimensions equal the shape, and the provisioning job's VM
     parameters come from them.
   - The existing VM scenarios, now publishing default shapes, pass unchanged.
+  - **Written; not yet run.** The scenario's nine stages cover the pool hint and
+    multidimensional declaration, publication of exactly the stated shape, `--resource`
+    discovery at 32 and 33 GiB, a one-shot `market buy` to ready through the same memory
+    query, the site reservation holding exactly the shape's quantities, and the create
+    job's VM parameters (1 GPU, 8 vCPUs, 32 768 MiB, `100G`).
+  - Statically confirmed seams: the listing's terms come from the pool's own `pricing`
+    hint, which outranks storefront configuration and has no legacy row above it; the
+    Alkahest composition scales a clause rate of `10` to 10¹⁹ base units, the rate the
+    one-shot buy scenario's listing advertises, so its buyer prices carry over; the
+    typed `SyncProvisioningClient` exposes `list_capacity_reservations` (whose payload
+    carries `dimensions`) and `list_jobs` (whose jobs carry `params`). The pool helpers
+    gained a `pricing` argument.
 - [ ] 5.4 **Slice A validation.**
   - Run the default `make test` of every project slice A touches:
     - `core`, `core/registry`;
@@ -316,8 +473,67 @@ only in integration tests, and rejection-path exceptions commented as such.
   - Run `make dist-ci`, then `make check-reinit`, resolving every gap.
   - Run `openspec validate --all --strict` against the baseline.
   - Disclose anything not run.
+  - **Status (2026-09-24):** every listed project's default `make test` passes, plus
+    `kit/capability-shape`, `kit/capacity-publication`, `kit/fulfillment`, and
+    `core/registry-client`. The VM storefront and buyer ran against frozen environments,
+    because their `reinit` resolves `torch` from an index the implementation environment
+    cannot reach; the storefront's two Alkahest integration tests need a `node` runtime it
+    lacks. One `e2e-tests` unit test fails identically on the unchanged tree.
+    `make check-reinit` passes. **Not run:** the end-to-end pipeline, which this task and
+    5.3 still need.
+  - **First pipeline run (2026-09-24):** 114 passed, 3 skipped, and every existing VM
+    scenario passed against Slice A, including those creating listings through the
+    shape-bearing capacity source. The new scenario did **not** run: CI selects scenarios
+    through `E2E_MODULE` in `e2e-tests/Makefile`, and 5.3 registered the marker only in
+    `pyproject.toml`. The marker is now in `E2E_MODULE`; 5.3 needs a second run.
+  - **`make test`:** `domains/apicredits` failed one install test, whose wheel set in
+    `domains/apicredits/tests/conftest_wheels.py` lacked `kit/capability-shape`, now a
+    dependency of the pool kit. Added; the suite passes (42). The earlier sweep had run the
+    `service` and `storefront` projects but not the `domains/apicredits` root project.
+  - **Lockfiles:** the maintainer's `uv` regenerated five locks without the platform and
+    Python markers the implementation environment's `uv` wrote; two returned exactly to
+    their original form. Those are canonical and adopted. Internal wheels listed twice in
+    eleven locks are pre-existing: a lock records one entry per `find-links` source, and
+    each `reinit` passes `--find-links` for the directory its `pyproject.toml` already names.
+    Out of scope here; worth its own issue.
+  - Recorded evidence: `make dist-ci` and `make dist-kits` succeed; `make check-reinit`
+    passes; strict OpenSpec validation completes at the repository baseline (73 passed,
+    19 failed, all pre-existing), with this change passing.
 
 # Slice B
+
+## Plan check before Slice B (2026-09-24)
+
+Tasks 6–7 were checked against the code as Slice A left it. Every named module, function,
+and test file exists; the details below amend the tasks they name.
+
+- **6.4, shapes.** `resolve_vm_listing_shapes` takes the override tier as a keyword and
+  resolves it with the existing `resolve_stated_shapes` under a `storefront_override`
+  source. Keys depend only on the shape digest, so an override stating the pool's hint
+  shape keeps its listing.
+- **6.4, commercial fields.** The new store merges over the legacy home-site row field by
+  field, through the existing per-field fall-through (`GpuPricingFields`, and
+  `resolve_sla`'s override argument), before the pool hint and configuration.
+- **6.4, report.** `_SiteDerivationReport` gains `legacy_overrides_in_effect` and
+  `orphaned_overrides` beside Slice A's fields; system status already passes the report
+  through without a client change.
+- **7.1, refresh and fetch.** The post-write refresh is `load_site_projections`, the
+  function the admin refresh route calls. The live read is
+  `capacity_runtime.site_client(site_id).resource_pool_projection()`, whose response
+  carries `revision`, `digest`, and `resource_pools`. Feasibility is reported with
+  `vm_shape_feasibility()` against declared capacity.
+- **7.3, signed resource.** Encoded with `market_core.identifier_encoding`: the storefront
+  is a composition root, and the rule that VM concept packages import no core package
+  does not bind it.
+- **7.4, versions.** Slice A changed nothing in `core/storefront-client`, so 0.19.1 →
+  0.20.0 stands; the VM storefront's lower bound is currently `>=0.19.1`.
+- **7.6, fake site.** The route answers `revision`, `digest`, and `resource_pools`, signed
+  through the fake site's existing response path; its members already carry
+  `resource_type` and full capacity maps (4.12, 4.13).
+- **8.2.** `arkhai-vms-storefront` is still 0.5.0, pinned at line 147 of
+  `domains/vms/storefront/Dockerfile`; its code changed in Slice A, so the bump is owed.
+- **Start condition.** Slice B starts once the end-to-end pipeline has run against Slice A
+  (5.3, 5.4).
 
 ## 6. Site-scoped storefront override store and resolution tier (decision 6)
 
@@ -428,7 +644,8 @@ only in integration tests, and rejection-path exceptions commented as such.
   `core/storefront-client`. Disclose any suite not run.
 - [ ] 8.2 **Packaging.**
   - Run `make dist-ci`.
-  - Check wheel contents for the new `market_core` modules.
+  - Check wheel contents: `market_core.identifier_encoding` in `arkhai-core`, and no
+    capability-shape module there; `market_capability_shape` in its kit.
   - Bump `arkhai-vms-storefront` from 0.5.0 to 0.6.0 and its pin in
     `domains/vms/storefront/Dockerfile`, so the image-version guard holds.
   - Run type checks where the affected projects configure them.
@@ -490,12 +707,14 @@ Per `openspec/README.md#plan-closeout-requirements`.
   - `docs/development/ARCHITECTURE.md`:
     - storefront capacity boundary;
     - an authority-table row for listing shapes;
-    - package layers (`market_core` capability shape and encoding;
-      `kit/resource-pools` → `arkhai-core`);
+    - package layers (the `kit/capability-shape` foundation kit and its dependants;
+      the identifier encoding in `market_core`);
     - one name per concept (listing shape, `listing_shapes`);
     - the identifiers table's `pool_id` row, corrected to a site-local slug;
   - `docs/development/DEPLOYMENT_AND_CONFIG.md`:
     - `listing_shapes` in pool definition entries;
+    - declare `region` and `gpu_model` on capacity declarations, since claims match them
+      against the declaration and a pool-hint region alone publishes nothing;
     - storefront pool overrides administered through the API;
     - the legacy home-site tier;
     - sizing pool VM defaults for omitted dimensions;
