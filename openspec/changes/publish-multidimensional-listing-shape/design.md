@@ -534,6 +534,9 @@ idempotent carry-over step runs at storefront startup, before the lifecycle loop
   - Shapes and settlement clauses each replace the lower tier's list as a whole.
   - An empty shape list is refused: to stop selling a pool the seller closes its listings,
     which is already durable.
+  - An empty settlement-clause list is refused for the same reason (decided in planning,
+    2026-09-24). It would leave every listing of the pool with no settlement option, a
+    second, less visible way to stop selling it.
 - **Precedence, highest first.**
   - Commercial fields: the new store; the legacy home-site `compute_capacity_pools` row; the
     pool's hint; the storefront's configured default.
@@ -648,6 +651,9 @@ idempotent carry-over step runs at storefront startup, before the lifecycle loop
     loops advances publication explicitly.
   - Rejected: `load_site_projections`. It rebuilds every site's caches, including capacity
     buckets, through a capacity client it builds itself rather than the composed runtime.
+- **After a delete**, the storefront wakes the publication loop and refreshes nothing. A
+  delete contacts no site and verifies no pool, so it has no newer generation to bring the
+  cache up to.
 - **Clients and CLI.** Methods on both storefront client variants, covered by the
   sync/async parity test, and a `market-storefront` command group that reads a record from
   a document and calls the client. Both variants gain authenticated `PUT` and `DELETE`

@@ -208,7 +208,8 @@ A storefront's per-pool overrides MUST be stored durably, keyed by site and pool
 MAY state SLA, pricing, settlement clauses, and listing shapes. An override MUST NOT state
 region, offering mode, or capacity backing. A field an override leaves unset MUST fall
 through to the next precedence tier. Listing shapes and settlement clauses MUST each replace
-the lower tier's list as a whole, and an empty shape list MUST be refused.
+the lower tier's list as a whole, and an empty shape list or an empty settlement-clause list
+MUST be refused.
 
 Within the storefront-override tier, a value in the site-scoped store MUST take precedence
 over the home-site legacy override record. While a legacy value is in effect for a pool, the

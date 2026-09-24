@@ -130,6 +130,7 @@ None.
     - system status and the CLI;
   - `core/storefront-client` (override methods and authenticated `PUT` and `DELETE`
     helpers on both variants).
+  - `provisioning/compute/service`, whose exact client pin moves with the client version.
 - **Behaviour:**
   - A listing with a stated shape reserves every quantity it declares. Its omitted
     dimensions stay the site's.
