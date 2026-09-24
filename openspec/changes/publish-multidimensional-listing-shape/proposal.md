@@ -55,7 +55,11 @@ a storefront cannot be the final authority over listings from any other site.
   - It is administered through an authenticated API, typed clients, and a storefront CLI.
   - A write is checked against the site's live projection: a pool the site does not project
     is refused, and a shape no member is feasible for is reported but accepted.
-  - The existing home-site override rows remain a lower tier until `pools-9` retires them.
+  - The existing home-site override rows remain a lower tier until `pools-9` retires them;
+    system status names each field a legacy row supplies.
+  - System status reports each stored override as applied, orphaned, unknown (its site's
+    projection is not held), site-unconfigured, or inactive (listings derive from local
+    tables, where overrides do not apply).
 - **Family-grouped shape vocabulary**, pulled forward from `structured-capacity-requirements`:
   - shapes are declared in the family-grouped form (`gpu: {count, model}`, `cpu`, `memory`,
     `storage`);
@@ -124,7 +128,8 @@ None.
     - admin routes and the identity contract;
     - publication loop and inventory guard wiring;
     - system status and the CLI;
-  - `core/storefront-client` (override methods on both variants).
+  - `core/storefront-client` (override methods and authenticated `PUT` and `DELETE`
+    helpers on both variants).
 - **Behaviour:**
   - A listing with a stated shape reserves every quantity it declares. Its omitted
     dimensions stay the site's.
@@ -136,6 +141,8 @@ None.
   - Every VM listing closes and republishes once at upgrade, keeping seller closes and
     pauses.
   - Override writes now require the site to be reachable.
+  - Under local-table derivation, overrides are stored but have no effect until `pools-9`
+    removes that path.
 - **Wire:** additive for consumers. The published fields already exist in the listing model
   and the registry schema, and the new pool hint is opaque to consumers that do not read it.
   For producers, the resource-pool projection now requires each member's `resource_type`,
@@ -167,7 +174,8 @@ None.
   - `openspec/specs/market-composition/spec.md`.
 - [x] `docs/development/DEPLOYMENT_AND_CONFIG.md`:
   - a pool definition entry may declare `listing_shapes`;
-  - storefront pool overrides are administered through the API rather than configuration;
+  - storefront pool overrides are administered through the API rather than configuration,
+    and have no effect while listings derive from local tables;
   - the site administrator sizes the pool VM defaults for dimensions listings omit;
   - upgrade is fail-forward: every VM listing republishes once and seller state carries
     across.
@@ -184,8 +192,9 @@ None.
   remains the admission boundary — `openspec/specs/storefront-publication/spec.md`.
 - Every listing's identity includes its shape digest, and seller state carries across the
   upgrade — `openspec/specs/storefront-publication/spec.md`.
-- Storefront pool overrides are site-scoped, durable, outlive their pool, and are written
-  against the site's live projection — `openspec/specs/storefront-publication/spec.md`.
+- Storefront pool overrides are site-scoped, durable, outlive their pool, report one
+  status each (an unloaded site is unknown, not absent), and are written against the site's
+  live projection — `openspec/specs/storefront-publication/spec.md`.
 - Why a published dimension is a commitment, why shapes are stated or generated rather than
   inferred, the generator seam, and why the storefront is the final authority within
   declared capacity — `openspec/specs/storefront-publication/architecture.md`.

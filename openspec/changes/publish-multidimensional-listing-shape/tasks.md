@@ -20,7 +20,7 @@ only in integration tests, and rejection-path exceptions commented as such.
 
 # Slice A
 
-Complete apart from 5.4's final `make test`. Rationale for every choice below is in
+Complete. Rationale for every choice below is in
 `design.md`; these notes record what exists and the evidence for it.
 
 ## 0. Pre-implementation gates
@@ -138,7 +138,7 @@ Complete apart from 5.4's final `make test`. Rationale for every choice below is
   discovery finds it at `ram_gb>=32` and not at `ram_gb>=33`; `market buy` reaches ready; the
   reservation holds exactly the shape's quantities; the create job is sized from them (1 GPU,
   8 vCPUs, 32 768 MiB, `100G`).
-- [ ] 5.4 **Slice A validation.**
+- [x] 5.4 **Slice A validation.**
   - End-to-end pipeline: 123 passed, 3 skipped, all nine `e2e_listing_shapes` stages
     passing; the skips (bare-metal deal, two Alice multi-registry stages) predate this
     change.
@@ -148,7 +148,8 @@ Complete apart from 5.4's final `make test`. Rationale for every choice below is
     `domains/apicredits`' middleware toolchain check needs `cargo`.
   - `make dist-ci`, `make dist-kits`, `make check-reinit`, and strict OpenSpec validation
     (baseline 73 passed, 19 failed, this change passing) succeed.
-  - **Open:** the maintainer's full `make test` run.
+  - The maintainer's full `make test` passed (reported at the start of the Slice B
+    session, 2026-09-24).
 - [x] 5.5 **Slice A closeout** (the plan closeout requirements of `openspec/README.md`,
   applied at section scope).
   - Comment hygiene: `make check-comment-hygiene` passes. A direct read of every production
@@ -208,6 +209,21 @@ and test file exists; the details below amend the tasks they name.
   `domains/vms/storefront/Dockerfile`; its code changed in Slice A, so the bump is owed.
 - **Start condition.** Slice B starts once the end-to-end pipeline has run against Slice A
   (5.3, 5.4).
+
+## Design amendments after the plan check (2026-09-24)
+
+The Slice B discussion (`design.md`, "Slice B discussion") changed decisions 6 and 7 after
+the plan check above was written. Tasks 6–7 are re-planned in the planning phase; until
+then, where a task or plan-check note below conflicts with `design.md`, the design governs.
+Known conflicts:
+
+- 7.1 and the plan check's "7.1, refresh and fetch": the post-write refresh is the written
+  site's resource-pool cache refreshed in place, not `load_site_projections`.
+- 7.3 and the plan check's "7.3, signed resource": resources are percent-encoded, not
+  length-prefixed.
+- 6.4 and the plan check's "6.4, report": override status is computed in system status in
+  five states, not as `orphaned_overrides` in the derivation report. The dead legacy
+  `gpu_model` fallback is removed.
 
 ## 6. Site-scoped storefront override store and resolution tier (decision 6)
 

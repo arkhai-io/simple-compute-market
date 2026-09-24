@@ -86,6 +86,29 @@ is the resource import that `pools-9-retire-local-physical-authority` retires. T
 administrator API for it. The same row also carries physical bookkeeping: its `status`
 becomes `deleted` when the pool's local GPU count reaches zero.
 
+**The administrator surface and the projection cache** (verified before Slice B,
+2026-09-24).
+
+- Every administrator route that signs operator-chosen strings percent-encodes each one
+  with no safe characters: `identity_subject_resource` and `identity_status_resource`
+  (`core_storefront.identity_lifecycle`), the query-routed status and event resources in
+  `middleware/admin_identity.py`, and the client's `_query_resource` and
+  `_rotation_resource`. `arkhai-core-storefront-client` depends only on `httpx` and
+  `arkhai-kit-identity`.
+- The client has authenticated `POST`, `GET`, and `PATCH` helpers, and no `PUT` or `DELETE`.
+- `site_projection_cache.load_site_projections` replaces every site's caches with new ones,
+  built through its own `build_capacity_client` rather than the composed capacity runtime.
+  Each `ProjectionCache` can instead refresh itself in place (`refresh(force=True)`).
+- Publication, capacity reconciliation, and the inventory guard select their source through
+  `capacity_client.listing_source_projection()`. It returns `None` when derivation reads
+  local tables. Otherwise it maps each site whose resource-pool cache holds a value, loaded
+  or stale, to that value. A site that has never loaded, or whose load failed without an
+  earlier value, is absent: unknown, not empty.
+- On the projection path, the per-row `gpu_model` and commercial fields `_projected_pool_rows`
+  resolves, including the legacy row's `gpu_model` fallback, are read only by that
+  function's own unit tests. Every candidate takes its terms from `pricing_by_model`, keyed
+  by its shape's model.
+
 **Adjacent work.**
 
 - `pools-8-capacity-projection-and-listing-hints` task 3.5 made per-pool VM size defaults
@@ -516,14 +539,54 @@ idempotent carry-over step runs at storefront startup, before the lifecycle loop
     pool's hint; the storefront's configured default.
   - Shapes: the new store; the pool's `listing_shapes` hint; otherwise the domain's default
     shape generator.
+- **Where the tier is read.** Derivation reads the store itself, inside the one function
+  every projection-path caller goes through (`available_compute_slices`). Publication,
+  capacity reconciliation (`stale_open_listing_ids`, `current_available_resource_keys`),
+  and the inventory guard all derive structural keys there. An override's shapes change
+  those keys, so a tier applied on the publication path alone would have reconciliation
+  close every listing an override shaped.
 - **The legacy tier stays until `pools-9`.** It remains live for as long as its writer, the
   resource import, exists; `pools-9` retires both together. A migration could not attribute
   legacy rows to a site without reading live configuration, which `pools-8` found unsafe.
-  System status reports every pool where a legacy value is in effect, so deleting a new
-  override and seeing a legacy value reappear is visible.
+- **Reporting the legacy tier.** System status names, per pool, every field whose resolved
+  value came from the legacy row, so deleting a new override and seeing a legacy value
+  reappear is visible.
+  - This includes `region` and `accepted_escrows`, which the new store cannot state.
+  - It excludes the row's `gpu_model`, which no longer decides anything on the projection
+    path (see "Dead legacy model fallback" below).
 - **Durable intention.** An override outlives its pool. If the pool disappears from the
   projection the override has no effect and is reported as orphaned; if the pool returns, it
   applies again.
+- **Override status: unknown is not absent.** System status reports every stored override
+  in exactly one state:
+  - `inactive`: listings derive from local tables, so no override applies;
+  - `site_unconfigured`: the storefront no longer configures the override's site;
+  - `unknown`: the site is configured, but no projection value is held for it, so whether
+    the pool exists is not known;
+  - `orphaned`: the projection generation publication derives from holds no such pool;
+  - `applied`: that generation holds the pool.
+  
+  It is judged against `listing_source_projection()`, the selector publication uses. Status
+  therefore cannot call an override orphaned while publication has no answer for its site,
+  and cannot disagree with publication about which generation counts.
+  - It is computed in system status from the store, the configured sites, and that
+    selector, rather than inside derivation. Derivation runs only for sites that hold a
+    value, so it can never observe the `unknown`, `site_unconfigured`, or `inactive` states.
+  - Rejected: judging only loaded sites and omitting the rest, which makes an unknown
+    override indistinguishable from an applied one.
+- **Local-table derivation ignores overrides.** When listings derive from local tables, no
+  override applies. Writes are still accepted and checked against the live projection,
+  because the check needs only the site's client. Each stored override reports `inactive`.
+  - Rejected: refusing writes with `409`, which would stop an operator preparing overrides
+    before switching derivation to projections.
+  - Rejected: applying the commercial fields on the local-table path, which would add a
+    partial precedence chain to a path `pools-9` removes.
+- **Dead legacy model fallback.** On the projection path, shapes carry the GPU model and
+  every candidate's terms resolve per shape model (Context). The legacy row's `gpu_model`
+  fallback, and the per-row model and commercial fields it feeds, decide nothing. Slice B
+  removes them from `_projected_pool_rows` when it adds the override tier there.
+  - Commercial terms then resolve only per shape model.
+  - The local-table path, whose shapes are generated from the row's model, is unchanged.
 - **Not a common store yet.** A domain-neutral store in the common storefront database was
   considered and deferred to Goal 4's kit extraction. The fields here are VM commercial
   vocabulary.
@@ -536,13 +599,25 @@ idempotent carry-over step runs at storefront startup, before the lifecycle loop
     optionally filtered by `site_id`.
   - `DELETE /pool-overrides` with `site_id` and `pool_id` removes one. It is idempotent.
 - **Addressing.** Site and pool IDs are operator-chosen strings with no character
-  restriction, so they travel in the body or query rather than the path. Each route has its
-  own semantic operation in the administrator identity contract. Its signed resource uses
-  the same length-prefixed encoding as derivation keys. That encoding moves into a small
-  neutral `market_core` module, byte-identical, so both the reconciler and the
-  administrator identity contract depend on it rather than the middleware depending on
-  the reconciler. The routes inherit durable
-  replay reservation from the administrator middleware.
+  restriction, so they travel in the body or query rather than the path.
+  - Each route has its own semantic operation in the administrator identity contract.
+  - The routes inherit durable replay reservation from the administrator middleware.
+- **The signed resource is percent-encoded** (decided 2026-09-24). This follows the
+  administrator contract's existing convention for operator-chosen strings (Context):
+  - The `PUT` and `DELETE` resources are the site and pool, each percent-encoded with no
+    safe characters and joined by `/`, as `identity_subject_resource` builds one.
+  - The `GET` resources are the sorted, percent-encoded query, as
+    `identity_status_resource` builds one. They are `pool-overrides?pool_id=…&site_id=…` for
+    one record, and `pool-overrides` or `pool-overrides?site_id=…` for a list.
+  - The query admits only `site_id` and `pool_id`, each at most once, as the existing query
+    resources do. `pool_id` without `site_id` is refused.
+  - Percent-encoding with no safe characters is injective, which is all a signed resource
+    needs. The client reproduces it with the standard library, so it gains no dependency.
+  - Rejected: the length-prefixed encoding in `market_core.identifier_encoding`. The client
+    would need `arkhai-core` only to rebuild a string, and the administrator contract would
+    use two encodings. That module keeps its one consumer, VM listing keys through
+    `arkhai_vms`. Its docstring's claim that signed administrator resources depend on its
+    byte form is corrected in implementation.
 - **Before accepting a `PUT`:**
   - Refuse a site the storefront has not configured, and a structurally invalid record: an
     unknown field, a malformed shape, or a malformed settlement clause. The refusal is `422`.
@@ -556,13 +631,27 @@ idempotent carry-over step runs at storefront startup, before the lifecycle loop
 - **The response.** It returns the stored record and a feasibility report per shape, computed
   from the same live generation and labelled with its revision and digest. A shape no member is
   feasible for is reported, and the override is accepted anyway; the resulting delisting is
-  the intended side effect. The live fetch does not write the cache. After a write the storefront
-  triggers a projection refresh and wakes the publication loop, so the override takes effect
-  promptly. For a full preview of the next cycle, the operator uses the existing publication
-  dry run.
+  the intended side effect. The live fetch does not write the cache. For a full preview of
+  the next cycle, the operator uses the existing publication dry run.
+- **After a write** (decided 2026-09-24), the storefront refreshes that one site's
+  resource-pool cache in place and wakes the publication loop, so the override takes
+  effect promptly.
+  - The override itself is read from the store on the next cycle. The refresh only ensures
+    that cycle derives from a generation no older than the one the write was checked
+    against. The wake is what makes the effect prompt rather than one interval late.
+  - A site with no cache yet is left to the poller's first load. Its override reports
+    `unknown` until then (decision 6).
+  - A refresh failure does not fail the write, which is already stored. The cache records
+    the failure as it does for a poll, and the next poll retries.
+  - A lifecycle pause does not suppress the refresh, as it does not suppress the admin
+    refresh route. A held publication loop does not observe the wake; a caller holding the
+    loops advances publication explicitly.
+  - Rejected: `load_site_projections`. It rebuilds every site's caches, including capacity
+    buckets, through a capacity client it builds itself rather than the composed runtime.
 - **Clients and CLI.** Methods on both storefront client variants, covered by the
   sync/async parity test, and a `market-storefront` command group that reads a record from
-  a document and calls the client.
+  a document and calls the client. Both variants gain authenticated `PUT` and `DELETE`
+  helpers beside their existing `POST`, `GET`, and `PATCH` ones.
 
 ### 8. Pool hints are validated for structure at the site, and for vocabulary by the domain
 
@@ -631,6 +720,9 @@ Provisioning defaults are never published.
   exactly one source's. System status names each pool's source.
 - **[A deleted override reveals a legacy value]** → Reported in system status whenever a
   legacy value is in effect; ends when `pools-9` retires the tier.
+- **[Overrides do nothing under local-table derivation]** → Accepted until `pools-9`
+  removes that path. Every stored override reports `inactive` there, so the absence of an
+  effect is visible rather than silent.
 - **[A site outage blocks override writes]** → Intended: the write is refused as retryable
   rather than accepted unverified.
 - **[Scope]** → The work lands as two reviewable slices within this change (see
@@ -726,10 +818,38 @@ and resolved in the decisions above.
 
 The review's other recommendations were adopted:
 - the length-prefixed encoding moves to a neutral `market_core` module (decision 7);
+  the administrator contract later kept its own percent-encoding instead ("Slice B
+  discussion"), so the module's consumer is VM listing keys;
 - implementation lands as two reviewable slices (`tasks.md`);
 - a provider-input test is added;
 - the stale "globally unique `pool_id`" row in `docs/development/ARCHITECTURE.md`'s
   identifiers table is corrected at promotion.
+
+## Slice B discussion (2026-09-24)
+
+Slice B's plan was checked against the code before implementation. Five points needed a
+decision; the maintainer decided each, and decisions 6 and 7 record the results.
+
+- **Signed-resource encoding.** Percent-encoding, following the administrator contract's
+  existing convention, instead of the length-prefixed encoding task 7.3 named (decision 7).
+- **Post-write refresh.** An in-place refresh of the written site's resource-pool cache,
+  plus a publication wake, instead of `load_site_projections` (decision 7).
+- **Local-table derivation.** Writes accepted, no effect, each override reported
+  `inactive`. It is kept lightweight because `pools-9` removes the path (decision 6).
+- **Legacy reporting scope.** Every field resolved from the legacy row, `region` and
+  `accepted_escrows` included. The row's dead `gpu_model` fallback is removed rather than
+  reported (decision 6).
+- **Unloaded sites.** An override at a site with no projection value is `unknown`, never
+  `orphaned`, and is judged through the selector publication uses (decision 6).
+
+Two plan amendments needed no decision:
+
+- Client `PUT` and `DELETE` helpers (decision 7).
+- A fake-site live projection settable apart from the test harness's cache, which task
+  7.8's cached-but-absent case needs.
+
+The invariant that derivation reads the tier where structural keys are derived (decision 6)
+was implicit in the plan and is now stated.
 
 ## Open Questions
 

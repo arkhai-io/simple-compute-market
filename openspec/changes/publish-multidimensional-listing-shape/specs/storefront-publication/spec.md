@@ -212,11 +212,26 @@ the lower tier's list as a whole, and an empty shape list MUST be refused.
 
 Within the storefront-override tier, a value in the site-scoped store MUST take precedence
 over the home-site legacy override record. While a legacy value is in effect for a pool, the
-storefront's system status MUST report it.
+storefront's system status MUST report it, naming each field whose value came from the legacy
+record.
 
-An override MUST outlive the projection of its pool. While the pool is absent from its site's
-projection the override has no effect and MUST be reported as orphaned. When the pool returns,
-the override MUST apply again.
+Every listing-derivation path that computes a listing's derivation identity, including
+source reconciliation and the inventory guard, MUST resolve the override tier, so that
+publication and reconciliation derive the same listings.
+
+An override MUST outlive the projection of its pool. The storefront's system status MUST
+report every stored override in exactly one state, judged against the projection its
+listings are derived from:
+
+- `inactive` when listings derive from local tables, where no override applies;
+- `site_unconfigured` when the storefront does not configure the override's site;
+- `unknown` when the site is configured but no projection of it is held;
+- `orphaned` when the projection derived from holds no such pool;
+- `applied` otherwise.
+
+A site with no projection held MUST NOT make an override `orphaned`, because the pool's
+absence is not known. An orphaned override has no effect. When its pool returns, the
+override MUST apply again.
 
 #### Scenario: Two sites name a pool identically
 
@@ -242,6 +257,25 @@ the override MUST apply again.
 - **THEN** the override is retained and reported as orphaned while the pool is absent, and
   applies again once the pool is projected
 
+#### Scenario: A site's projection has not loaded
+
+- **WHEN** an override names a configured site whose projection the storefront has never
+  loaded
+- **THEN** system status reports the override as unknown rather than orphaned, and nothing
+  is closed or published for it
+
+#### Scenario: Listings derive from local tables
+
+- **WHEN** a storefront deriving listings from its local tables accepts an override write
+  whose pool its site's live projection contains
+- **THEN** the override is stored, no listing changes, and system status reports it as
+  inactive
+
+#### Scenario: An override shapes a pool's listings
+
+- **WHEN** an override states a shape for a pool and a publication cycle has published it
+- **THEN** a later capacity reconciliation derives the same listing and does not close it
+
 ### Requirement: Storefront pool overrides are written against the site's live projection
 
 A storefront MUST expose authenticated administrator operations to replace, read, list, and
@@ -265,8 +299,9 @@ authenticated client, not from its cache:
 
 A shape no member of the live projection is feasible for MUST NOT cause refusal. The
 response MUST report feasibility per shape against that live projection and identify the projection generation it
-used. After accepting a write, the storefront MUST cause its cached projection to refresh
-and its publication loop to run, without writing the live result into the cache itself.
+used. After accepting a write, the storefront MUST cause its cached projection of that site
+to refresh and its publication loop to run, without writing the live result into the cache
+itself. A failed refresh MUST NOT fail the accepted write.
 
 #### Scenario: The pool is unknown to the site
 
