@@ -17,6 +17,7 @@ from compute_provisioning import COMPUTE_PROVISIONING_CONTRACT_VERSION
 from market_identity import Signer
 
 import market_storefront.container as _container
+from market_storefront.services.listing_identity_carryover import carryover_report
 from market_storefront.settlement_composition import (
     build_storefront_publication_clause_compiler,
 )
@@ -65,8 +66,6 @@ def _default_publication_derivation_provider() -> dict[str, dict[str, Any]]:
 def _default_listing_identity_carryover_provider() -> dict[str, Any]:
     """Which pre-shape listings carried a seller's close or pause, and to which
     shape-bearing successor: the listing a seller should reopen or resume."""
-    from market_storefront.services.listing_identity_carryover import carryover_report
-
     return carryover_report()
 
 

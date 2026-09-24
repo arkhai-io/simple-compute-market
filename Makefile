@@ -63,6 +63,7 @@ HOSTED_STRIPE_TEST_EVIDENCE ?= $(DIST_DIR)/hosted-stripe-test-evidence.json
 .PHONY: dist-arkhai-core-registry
 .PHONY: build-bare-metal-storefront
 .PHONY: dist-bare-metal-buyer
+.PHONY: run-e2e
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -924,6 +925,15 @@ review-wheelhouse-scope: ## Print the review projects resolved from REVIEW_PROJE
 	if [ -n "$${REVIEW_PROJECTS:-}" ]; then args="$$args --projects $$REVIEW_PROJECTS"; \
 	elif [ -n "$${REVIEW_SCOPE_FILE:-}" ]; then args="$$args --scope-file $$REVIEW_SCOPE_FILE"; fi; \
 	$(CURDIR)/scripts/resolve-review-scope.py $$args
+
+run-e2e: ## Run the E2E GitHub Actions workflow on the current branch.
+	@branch="$$(git branch --show-current)"; \
+	if [ -z "$$branch" ]; then \
+		echo "ERROR: run-e2e requires a checked-out branch." >&2; \
+		exit 1; \
+	fi; \
+	echo "Triggering E2E workflow on branch $$branch..."; \
+	gh workflow run e2e.yml --ref "$$branch"
 
 prune-tombstones: ## Delete every file whose contents are a tombstone comment
 	@python3 scripts/prune_tombstones.py

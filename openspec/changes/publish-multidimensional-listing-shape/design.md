@@ -389,6 +389,11 @@ remains the final admission boundary.
   a pool publishes listings no reservation can admit. The same holds for a `region` or
   `gpu_model` taken from the legacy home-site row. Resolved below: such pools publish nothing
   and are reported per pool.
+  - The two places are not interchangeable. A listing advertises its pool's `region` hint
+    (or the legacy home-site row), never a member attribute, and a listing with no region
+    cannot be built; a reservation matches the claimed region against the declaration's own
+    attribute. A pool therefore states its region on the pool and on its declarations. The
+    end-to-end scenario first failed on exactly this (task 5.4).
 - **Disagreement: a projected member without `resource_type`.** The predicate reads an
   absent type as `""` and refuses every claim; the ledger cannot store one (the column is
   non-null with default `compute.gpu`), and the provisioning projection fills in the same

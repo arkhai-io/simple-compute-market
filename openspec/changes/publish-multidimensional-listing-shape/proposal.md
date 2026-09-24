@@ -111,10 +111,12 @@ None.
     reconciler);
   - `kit/resource-pools` (hint key and structural validation; new dependency on
     `kit/capability-shape`);
-  - the VM domain package (family schema);
-  - `domains/vms/listings` (shape resolution and the default generator, feasibility through
-    the injected site predicate, shape keys, identity fields derived from `DIMENSION_KEYS`;
-    new dependency on `arkhai-vms`);
+  - the VM domain package (family schema, the default shape generator, VM-bound shape
+    operations, and listing key builders; new dependency on `kit/capability-shape`);
+  - `domains/vms/listings` (shape resolution, feasibility through the injected site
+    predicate, identity fields derived from `DIMENSION_KEYS`; new dependency on
+    `arkhai-vms`);
+  - `kit/site-client` (the projection contract requires each member's `resource_type`);
   - the VM storefront:
     - binding envelope version 2 for every listing, and the startup carry-over of seller
       state;
@@ -128,11 +130,16 @@ None.
     dimensions stay the site's.
   - Pools without stated shapes publish the same fields as today, except that mixed-model
     pools publish per model.
+  - A pool whose listings claim a region or model no member declares, so no reservation
+    could be admitted, publishes nothing and is reported per pool. A member projecting no
+    `resource_type` is held and reported.
   - Every VM listing closes and republishes once at upgrade, keeping seller closes and
     pauses.
   - Override writes now require the site to be reachable.
-- **Wire:** additive. The published fields already exist in the listing model and the
-  registry schema. The new pool hint is opaque to consumers that do not read it.
+- **Wire:** additive for consumers. The published fields already exist in the listing model
+  and the registry schema, and the new pool hint is opaque to consumers that do not read it.
+  For producers, the resource-pool projection now requires each member's `resource_type`,
+  which the site already projects.
 - **Tests:**
   - unit tests for the utility, the schema, hint validation, fit, and keys;
   - integration tests for the override API through the typed client against the live-fetch
