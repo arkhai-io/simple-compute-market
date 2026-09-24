@@ -10,7 +10,6 @@ init: ## Create or update the environment
 
 reinit: ## Reinstall internal dependencies from the shared wheel directory
 	uv sync --dev --find-links $(DIST_DIR) \
-		--upgrade-package arkhai-core-storefront-client --reinstall-package arkhai-core-storefront-client \
 		--upgrade-package arkhai-kit-identity --reinstall-package arkhai-kit-identity \
 		--upgrade-package arkhai-kit-site-client --reinstall-package arkhai-kit-site-client
 

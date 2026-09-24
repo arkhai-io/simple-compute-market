@@ -10,7 +10,7 @@ report and the next publication cycle cannot disagree.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from arkhai_vms import canonical_vm_shape, vm_shape_digest, vm_shape_problems
@@ -32,9 +32,19 @@ class VmPoolOverrideContribution:
 
     offering_mode = VM_OFFERING_MODE
 
-    def __init__(self, *, db_path: str, shape_feasible: ShapeFeasibilityJudge) -> None:
+    def __init__(
+        self,
+        *,
+        db_path: str,
+        shape_feasible: ShapeFeasibilityJudge,
+        home_site: Callable[[], str | None],
+    ) -> None:
+        # The home site is the VM storefront's own notion: its legacy override
+        # rows apply only there. It is resolved when a record is judged, from the
+        # storefront's configured sites.
         self._db_path = db_path
         self._shape_feasible = shape_feasible
+        self._home_site = home_site
 
     def vocabulary_problems(self, record: PoolOverrideRecord) -> Sequence[str]:
         problems: list[str] = []
@@ -56,7 +66,6 @@ class VmPoolOverrideContribution:
         site_pools: Sequence[Mapping[str, Any]],
         *,
         record: PoolOverrideRecord,
-        home_site: str,
     ) -> Sequence[ShapeFeasibility]:
         shapes = record.listing_shapes or ()
         if not shapes:
@@ -66,7 +75,7 @@ class VmPoolOverrideContribution:
             list(site_pools),
             site_id=record.site_id,
             pool_id=record.pool_id,
-            home_site=home_site,
+            home_site=self._home_site() or "",
             override=vm_override_view(
                 listing_shapes=record.listing_shapes,
                 settlements=record.settlements,

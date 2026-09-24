@@ -93,3 +93,53 @@ async def test_delete_is_idempotent_and_reports_existence(store):
     assert await store.delete(address) is True
     assert await store.delete(address) is False
     assert await store.get(address) is None
+
+
+def test_the_reader_returns_one_modes_overrides_decoded(tmp_path):
+    import asyncio
+
+    from market_pool_overrides import read_pool_overrides
+
+    store = _migrated(tmp_path / "reader.db")
+    asyncio.run(store.replace(_record(mode="vm", listing_shapes=[SHAPE], terms={"sla": 1.0})))
+    asyncio.run(store.replace(_record(pool="other", mode="kube_pod", terms={"sla": 2.0})))
+
+    conn = sqlite3.connect(store.db_path)
+    try:
+        (vm,) = read_pool_overrides(conn, offering_mode="vm")
+    finally:
+        conn.close()
+
+    assert (vm.site_id, vm.pool_id, vm.offering_mode) == ("site-a", "gpu", "vm")
+    assert (vm.listing_shapes, vm.settlements, vm.terms) == ([SHAPE], None, {"sla": 1.0})
+    assert vm.problems == ()
+
+
+def test_a_database_without_the_store_reads_as_no_overrides(tmp_path):
+    from market_pool_overrides import read_pool_overrides
+
+    conn = sqlite3.connect(tmp_path / "empty.db")
+    try:
+        assert read_pool_overrides(conn, offering_mode="vm") == []
+    finally:
+        conn.close()
+
+
+def test_an_undecodable_field_is_kept_and_named(tmp_path):
+    from market_pool_overrides import read_pool_overrides
+
+    path = tmp_path / "corrupt.db"
+    _migrated(path)
+    conn = sqlite3.connect(path)
+    try:
+        with conn:
+            conn.execute(
+                "INSERT INTO pool_overrides (site_id, pool_id, offering_mode, listing_shapes) "
+                "VALUES ('site-a', 'gpu', 'vm', '[not json')"
+            )
+        (row,) = read_pool_overrides(conn, offering_mode="vm")
+    finally:
+        conn.close()
+
+    assert row.listing_shapes == "[not json"
+    assert row.problems == ("listing_shapes: the stored value is not JSON",)

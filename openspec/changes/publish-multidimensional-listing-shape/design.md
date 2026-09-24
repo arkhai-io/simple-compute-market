@@ -704,8 +704,11 @@ must be universal to all markets, and a second market with shape requirements is
     storefronts pin it exactly, so extending it would release the API-credits storefront
     only to move a pin, for a capability that market does not use.
   - A new kit reaches only its consumers.
-  - It is a storefront-side kit, beside `kit/capacity-publication`. It depends on the core
-    storefront client (universal transport), the site client (its error types), and pydantic.
+  - It is a storefront-side kit, beside `kit/capacity-publication`. It depends on the
+    identity kit (the empty-body marker its contract signs), the site client (its error
+    types), and pydantic.
+  - Its typed client needs only a transport exposing `authenticated_request`, so it names a
+    protocol rather than depending on the core client package (Slice C review).
 - **The kit owns:**
   - the store and its migrations, which a storefront composes as it composes
     `settlement_migrations()`;
@@ -714,7 +717,9 @@ must be universal to all markets, and a second market with shape requirements is
   - the five status states;
   - one signed-resource encoding, shared by the storefront's identity contract and the
     client;
-  - the typed client extension.
+  - the typed client extension;
+  - a reader derivation uses to load one offering mode's stored overrides (see
+    "Derivation reads the store through the kit").
 - **The storefront composition root owns:** the thin FastAPI routes, as it does for hosted
   settlement's route service, and the mapping from offering mode to contribution.
 - **Each market supplies a contribution per offering mode:**
@@ -724,6 +729,10 @@ must be universal to all markets, and a second market with shape requirements is
   
   Settlement clauses are already market-neutral; the composition root injects their
   compiler.
+- **The contribution interface carries no site ordering** (Slice C review).
+  - A market's own context, such as the VM storefront's home site for its legacy override
+    tier, is supplied when its composition root constructs the contribution.
+  - The kit never treats the first configured site as meaningful.
 - **An override is addressed by site, pool, and offering mode.** This realizes the
   discussion's "shapes per offering mode". A pool serving two modes carries two
   independent overrides, each validated and read by its own market.
@@ -742,10 +751,19 @@ must be universal to all markets, and a second market with shape requirements is
   - A development database that ran it keeps an orphan table that nothing reads.
   - Reusing the table name would leave `CREATE TABLE IF NOT EXISTS` silently keeping the
     older schema there.
-- **Derivation still reads the store directly** (decision 6, "Where the tier is read";
-  retained in review). VM derivation reads the kit's documented table for its own mode.
-  The listings package cannot import the kit, because its buyers install it without
-  storefront dependencies.
+- **Derivation reads the store through the kit** (decision 6, "Where the tier is read";
+  Slice C review).
+  - Derivation stays the one place overrides are read. It loads its own mode's overrides
+    through the kit's reader, over the connection it already holds.
+  - The kit therefore alone knows the table, its columns, and its encoding. A stored field
+    that cannot be decoded is returned marked unreadable, so derivation holds that pool
+    rather than failing the cycle.
+  - `arkhai-vms-listings` names the kit in an optional `overrides` extra, as it names the
+    resource-pool kit in `pools`, and imports it lazily on the projection path. Buyers
+    install neither.
+  - Rejected: an override snapshot injected into derivation. Every structural-key caller
+    would have to supply it, and one that did not would reopen the disagreement between
+    publication and reconciliation that decision 6 prevents.
 - **Core keeps only universal transport.** The core client exposes one generic
   `authenticated_request` on both variants; every override method, model, and status field
   leaves core.
@@ -798,6 +816,24 @@ Decided 2026-09-24. Found while writing a test the review asked for.
   two-GPU projected pool, both listings closed, including the one still feasible. They now
   use the same projection selector as publication. The five older tests that seeded
   local-table listings now configure local-table derivation explicitly.
+- **An operation that changes a site refreshes that site's projection before it reconciles**
+  (decided 2026-09-24, after the Slice C pipeline run).
+  - The admin reservation, the fulfillment-event callbacks, and the failure-action reopen
+    each reconcile inline and report what they closed or reopened.
+  - Reading the storefront's cached projection, they saw it only as fresh as the last poll
+    or explicit refresh, which predates the change they had just made. The pipeline caught
+    it: an admin reservation closed nothing, and the next scenario's reservation, made after
+    an explicit projection refresh, reported the first reservation's closes as its own.
+  - Each now refreshes the cached projection of the one site it changed, both families, in
+    place, then reconciles. The refresh belongs to the invoked operation, so a paused
+    storefront stays paused and every run gives the same answer (`TESTING.md`, "Pause the
+    loop, then advance it explicitly").
+  - A failed refresh is logged, and reconciliation uses the last generation: no worse than
+    before, and never an empty one.
+  - Rejected:
+    - reverting these paths to local tables, which reintroduces the defect above;
+    - dropping inline reconciliation, which would stop a response reporting its own effect
+      and attribute closes to whichever later request reconciles first.
 - **Not in this change:**
   - A time bound on holding. A decommissioned site whose listings are never closed would
     otherwise stay advertised indefinitely, refusing every buyer. See Open Questions.
@@ -1021,9 +1057,33 @@ points and their dispositions, as decided with the maintainer:
 - **Signed list resource `pool-overrides?`.** The code now follows the design: no trailing
   `?` (decision 10).
 - **Docstrings citing delta-only requirements.** Resolved by promotion at closeout.
-- **Derivation reading the store directly.** Retained (decision 10).
+- **Derivation reading the store directly.** Retained (decision 10); superseded by the
+  Slice C review, which moved the read behind the kit's reader.
 - **Moving the whole service to a kit.** Superseded by the maintainer's decision to do so
   now (decision 10).
+
+## Slice C code review (2026-09-24)
+
+The review accepted Slice B's corrections and raised boundary points in Slice C. Its points
+and their dispositions, as decided with the maintainer:
+
+- **VM derivation copied the kit's table layout.** Accepted, as the kit-owned reader behind
+  an optional `overrides` extra (decision 10).
+- **`home_site` in the generic contribution interface.** Accepted. The VM contribution
+  receives it at composition (decision 10).
+- **An unused core-client dependency in the kit.** Accepted and removed (decision 10).
+- **Real-database reconciler tests under `unit/`.** Accepted in part. The cases this
+  change altered in meaning move to an integration module. The file's other
+  database-backed tests are owed the same move the next time the file is touched; the
+  change is too late for that churn.
+- **The `available_compute_slices` docstring still described the old fallback,** although
+  task 15.1 recorded it fixed. Accepted: fixed, and the task record corrected.
+- **Decision 10's reasoning for the direct table read.** Superseded by the reader
+  (decision 10).
+
+The same round's pipeline run found the inline reconciliation defect recorded in decision
+11. The storefront's loops were paused throughout, so no poll or race was involved: the
+reservation's reconciliation read a projection its own reservation had made stale.
 
 ## Open Questions
 

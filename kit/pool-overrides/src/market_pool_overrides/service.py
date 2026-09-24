@@ -111,8 +111,7 @@ class PoolOverrideService:
         projection does not hold (404). A shape no member is feasible for is
         reported, not refused.
         """
-        site_ids = list(self._site_ids())
-        if record.site_id not in site_ids:
+        if record.site_id not in self._site_ids():
             raise PoolOverrideRefused(
                 422, f"site {record.site_id!r} is not a configured capacity site"
             )
@@ -140,9 +139,7 @@ class PoolOverrideService:
                 f"(projection revision {revision})",
             )
 
-        feasibility = contribution.judge_shapes(
-            site_pools, record=record, home_site=site_ids[0]
-        )
+        feasibility = contribution.judge_shapes(site_pools, record=record)
         stored = await self._store.replace(record)
         await self._after_write(record.site_id)
         return {
@@ -223,7 +220,7 @@ class PoolOverrideService:
 
     async def statuses(self) -> list[dict[str, Any]]:
         """Every stored override's address and the one state it is in."""
-        site_ids = list(self._site_ids())
+        site_ids = set(self._site_ids())
         projection = self._projection_source()
         return [
             {

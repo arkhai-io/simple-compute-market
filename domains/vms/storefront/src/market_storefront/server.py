@@ -220,8 +220,15 @@ def build_pool_override_service(*, sqlite_client: Any, capacity_runtime: Any) ->
     loop; status is judged against the source publication derives from. The
     lifespan and the publication test harness compose it identically.
     """
+    def home_site() -> str | None:
+        # The VM storefront's home site is its first configured capacity site.
+        sites = capacity_runtime.site_ids if capacity_runtime is not None else ()
+        return next(iter(sites), None)
+
     contribution = VmPoolOverrideContribution(
-        db_path=sqlite_client.db_path, shape_feasible=vm_shape_feasibility()
+        db_path=sqlite_client.db_path,
+        shape_feasible=vm_shape_feasibility(),
+        home_site=home_site,
     )
     return PoolOverrideService(
         store=SQLitePoolOverrideStore(sqlite_client.db_path),

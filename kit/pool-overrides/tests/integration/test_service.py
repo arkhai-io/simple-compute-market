@@ -52,8 +52,8 @@ class _Contribution:
     def vocabulary_problems(self, record):
         return self.problems
 
-    def judge_shapes(self, site_pools, *, record, home_site):
-        self.judged.append((list(site_pools), record, home_site))
+    def judge_shapes(self, site_pools, *, record):
+        self.judged.append((list(site_pools), record))
         return [ShapeFeasibility(shape_digest=f"d{i}", shape=shape, feasible=self.feasible)
                 for i, shape in enumerate(record.listing_shapes or ())]
 
@@ -167,9 +167,9 @@ async def test_an_accepted_write_is_stored_then_refreshes_its_site_then_wakes(tm
     (stored,) = await world.stored()
     assert (stored["site_id"], stored["listing_shapes"]) == ("site-b", [SHAPE])
     assert response["projection"] == {"revision": 7, "digest": "live-7"}
-    # The market judged the live generation, with the configured home site.
-    pools, record, home_site = world.contribution.judged[0]
-    assert pools == LIVE["resource_pools"] and home_site == "site-a"
+    # The market judged the live generation of the written site.
+    pools, record = world.contribution.judged[0]
+    assert pools == LIVE["resource_pools"] and record.site_id == "site-b"
     assert response["feasibility"][0]["feasible"] is True
 
 

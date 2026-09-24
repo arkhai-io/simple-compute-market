@@ -59,6 +59,10 @@ from market_storefront.controllers.listings_controller import router as listings
 from market_storefront.controllers.negotiate_controller import router as negotiate_router
 from market_storefront.controllers.system_controller import router as system_router
 from market_storefront.middleware.seller_auth import listing_lifecycle_middleware
+from market_storefront.middleware.service_peer_auth import (
+    initialize_service_peer_identities,
+    service_peer_callback_middleware,
+)
 from market_storefront.services import site_projection_cache
 from market_storefront.services.listing_service import ListingService
 from market_storefront.services.system_service import SystemService
@@ -82,6 +86,8 @@ SITE_B = "site-b"
 ADMIN_SIGNER = Ed25519Signer(b"\x71" * 32)
 BUYER_SIGNER = Ed25519Signer(b"\x72" * 32)
 REGISTRY_SIGNER = Ed25519Signer(b"\x73" * 32)
+#: The provisioning service's signer, for fulfillment-event callbacks.
+SERVICE_SIGNER = Ed25519Signer(b"\x74" * 32)
 _ADMINISTRATORS = TrustedIdentitySet(identities=(ADMIN_SIGNER.identity,))
 _PUBLISHERS = TrustedIdentitySet(identities=(TEST_MARKETPLACE_SIGNER.identity,))
 _WALLET = "0x" + "33" * 20
@@ -266,11 +272,15 @@ class HarnessProjectionClient:
     """The poller's view of the harness's pool list, as the site would serve it.
 
     Tests edit the list in place; a refresh re-reads it rather than failing, and
-    ``snapshots`` counts refreshes so a test can assert one happened.
+    ``snapshots`` counts refreshes so a test can assert one happened. With a
+    ``site``, each refresh also writes that fake site's live availability into
+    every member it holds, so a reservation there reaches the storefront exactly
+    when the storefront refreshes the site, and never otherwise.
     """
 
-    def __init__(self, pools: list[dict[str, Any]]) -> None:
+    def __init__(self, pools: list[dict[str, Any]], site: "FakeSite | None" = None) -> None:
         self.pools = pools
+        self.site = site
         self.snapshots = 0
         #: On: a refresh reaches the site and fails, as it would mid-outage.
         self.failing = False
@@ -282,6 +292,12 @@ class HarnessProjectionClient:
         self.snapshots += 1
         if self.failing:
             raise RuntimeError("site projection unavailable")
+        if self.site is not None:
+            for projected in self.pools:
+                for member in projected.get("resources") or []:
+                    resource_id = member.get("physical_resource_id")
+                    if resource_id in self.site.resources:
+                        member["available"] = self.site.available_dimensions(resource_id)
         return await self.version(), self.pools
 
 
@@ -324,6 +340,7 @@ class PublicationApp:
     site_b: FakeSite | None = None
     pools_b: list[dict[str, Any]] | None = None
     projection_b: HarnessProjectionClient | None = None
+    service: StorefrontClient | None = None
 
     def set_settlement_clauses(self, clauses: list[dict[str, Any]]) -> None:
         """Replace `[pricing].settlements`, the storefront-wide durable terms."""
@@ -434,6 +451,20 @@ async def publication_app(
                 lambda: {"operator": _ADMINISTRATORS},
             )
         )
+        # The provisioning service's callbacks authenticate as a service peer
+        # trusted for the home site.
+        stack.enter_context(
+            patch(
+                "market_storefront.middleware.service_peer_auth.get_service_peer_configs",
+                return_value={
+                    "provisioning": (
+                        "service",
+                        SITE,
+                        TrustedIdentitySet(identities=(SERVICE_SIGNER.identity,)),
+                    )
+                },
+            )
+        )
         registry = storefront_config.storefront_domain_registry()
         db = SQLiteClient(db_path=str(tmp_path / "storefront.db"), registry=registry)
         composition = SettlementCompositionDouble(
@@ -445,9 +476,11 @@ async def publication_app(
         # The site's live answer is the same list the storefront's cache holds,
         # until a test gives the site a different generation.
         site.pool_projection = pools
+        projection.site = site
         site_b = FakeSite(deliverable_modes={"vm"}) if second_site else None
         if site_b is not None:
             site_b.pool_projection = pools_b
+            projection_b.site = site_b
         capacity = capacity_runtime_over_sites(
             {SITE: site, **({SITE_B: site_b} if site_b is not None else {})},
             sqlite_client_factory=lambda: db,
@@ -516,6 +549,7 @@ async def publication_app(
             routers = (negotiate_router,)
         try:
             admin_identity.initialize_administrator_identities(db.db_path)
+            initialize_service_peer_identities(db.db_path)
             app = FastAPI()
             for router in (
                 system_router,
@@ -526,6 +560,7 @@ async def publication_app(
             ):
                 app.include_router(router)
             app.middleware("http")(listing_lifecycle_middleware)
+            app.middleware("http")(service_peer_callback_middleware)
             app.middleware("http")(admin_identity.administrator_identity_middleware)
             transport = httpx.ASGITransport(app=app)
             async with StorefrontClient(
@@ -546,7 +581,13 @@ async def publication_app(
                 signer=BUYER_SIGNER,
                 caller_role="buyer",
                 expected_publishers=_PUBLISHERS,
-            ) as buyer:
+            ) as buyer, StorefrontClient(
+                "http://test",
+                transport=transport,
+                signer=SERVICE_SIGNER,
+                caller_role="service",
+                expected_publishers=_PUBLISHERS,
+            ) as service:
                 yield PublicationApp(
                     client,
                     seller,
@@ -560,6 +601,7 @@ async def publication_app(
                     site_b,
                     pools_b if second_site else None,
                     projection_b if second_site else None,
+                    service,
                 )
         finally:
             reset_site_event_cursors()

@@ -429,7 +429,6 @@ name = "arkhai-kit-pool-overrides"
 version = "0.1.0"
 source = { registry = "../../../.dist" }
 dependencies = [
-    { name = "arkhai-core-storefront-client" },
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-site-client" },
     { name = "pydantic" },
@@ -536,6 +535,9 @@ wheels = [
 ]
 
 [package.optional-dependencies]
+overrides = [
+    { name = "arkhai-kit-pool-overrides" },
+]
 pools = [
     { name = "arkhai-kit-resource-pools" },
 ]
@@ -593,7 +595,7 @@ dependencies = [
     { name = "arkhai-kit-site-client" },
     { name = "arkhai-kit-storefront" },
     { name = "arkhai-vms" },
-    { name = "arkhai-vms-listings", extra = ["pools"] },
+    { name = "arkhai-vms-listings", extra = ["overrides", "pools"] },
     { name = "arkhai-vms-negotiation" },
     { name = "arkhai-vms-settlement" },
     { name = "dynaconf" },
@@ -661,7 +663,7 @@ requires-dist = [
     { name = "arkhai-kit-site-client", specifier = ">=0.4.0" },
     { name = "arkhai-kit-storefront", specifier = "==0.1.1" },
     { name = "arkhai-vms", specifier = ">=0.3.0" },
-    { name = "arkhai-vms-listings", extras = ["pools"], specifier = ">=0.1.0" },
+    { name = "arkhai-vms-listings", extras = ["pools", "overrides"], specifier = ">=0.1.0" },
     { name = "arkhai-vms-negotiation", specifier = ">=0.1.0" },
     { name = "arkhai-vms-settlement", specifier = ">=0.1.0" },
     { name = "codespell", marker = "extra == 'lint'", specifier = ">=2.2.0,<3.0.0" },

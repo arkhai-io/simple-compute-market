@@ -21,6 +21,11 @@ dependencies = [
 pools = [
     "arkhai-kit-resource-pools>=0.3.0",
 ]
+# Deriving listings also reads the storefront's own pool overrides, through the
+# pool-override kit's reader. Only the storefront derives listings.
+overrides = [
+    "arkhai-kit-pool-overrides>=0.1.0",
+]
 
 [build-system]
 requires = ["hatchling"]

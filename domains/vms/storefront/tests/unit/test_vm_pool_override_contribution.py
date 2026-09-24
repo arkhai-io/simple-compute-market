@@ -22,7 +22,7 @@ def _problems(**fields) -> list[str]:
         {"site_id": "a", "pool_id": "gpu", "offering_mode": "vm", **fields}
     )
     contribution = VmPoolOverrideContribution(
-        db_path=":memory:", shape_feasible=vm_shape_feasibility()
+        db_path=":memory:", shape_feasible=vm_shape_feasibility(), home_site=lambda: "a"
     )
     return list(contribution.vocabulary_problems(record))
 

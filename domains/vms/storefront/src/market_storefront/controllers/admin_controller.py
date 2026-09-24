@@ -41,6 +41,7 @@ from market_storefront.services.capacity_client import (
     listing_source_projection,
     site_capacity_buckets,
 )
+from market_storefront.services.site_projection_cache import refresh_site_projections
 from market_storefront.services.shape_feasibility import vm_shape_feasibility
 from market_storefront.failure_actions import (
     FulfillmentFailureContext,
@@ -1131,10 +1132,14 @@ class AdminController:
                 f"{capacity_reservation_id!r}: {exc}",
             ) from exc
         closed_listing_ids = (
-            await self._close_oversized_compute_listings() if close_oversized else []
+            await self._close_oversized_compute_listings(site_id)
+            if close_oversized
+            else []
         )
         reopened_listing_ids = (
-            await self._reopen_available_compute_listings() if reopen_available else []
+            await self._reopen_available_compute_listings(site_id)
+            if reopen_available
+            else []
         )
         stage_event(
             "fulfillment",
@@ -1179,7 +1184,13 @@ class AdminController:
             )
             return None
 
-    async def _close_oversized_compute_listings(self) -> list[str]:
+    async def _close_oversized_compute_listings(self, changed_site: str) -> list[str]:
+        """Close the capacity-backed listings ``changed_site``'s change made stale.
+
+        The site's cached projection predates the change this operation just made,
+        so it is refreshed first; reconciling against it unrefreshed would report
+        nothing now and let a later operation report these closes as its own.
+        """
         from domains.vms.listings.reconciler import stale_open_listing_ids
 
 
@@ -1189,6 +1200,7 @@ class AdminController:
         availability = await self._member_availability()
         if availability is None:
             return []
+        await refresh_site_projections(changed_site)
         projection = listing_source_projection()
         closed_listing_ids = stale_open_listing_ids(
             self._db.db_path,
@@ -1210,7 +1222,9 @@ class AdminController:
             )
         return closed_listing_ids
 
-    async def _reopen_available_compute_listings(self) -> list[str]:
+    async def _reopen_available_compute_listings(self, changed_site: str) -> list[str]:
+        """Reopen the capacity-backed listings ``changed_site``'s change made
+        available again, after refreshing that site's cached projection."""
         from domains.vms.listings.reconciler import closed_available_listing_ids
 
 
@@ -1220,6 +1234,7 @@ class AdminController:
         availability = await self._member_availability()
         if availability is None:
             return []
+        await refresh_site_projections(changed_site)
         projection = listing_source_projection()
         reopened_listing_ids = closed_available_listing_ids(
             self._db.db_path,
@@ -1461,7 +1476,7 @@ class AdminController:
                 status_code=409,
                 detail="No available compute VM matched required attributes",
             )
-        closed_listing_ids = await self._close_oversized_compute_listings()
+        closed_listing_ids = await self._close_oversized_compute_listings(binding.site_id)
         # The capacity-delta subscriber can race this inline reconciliation.
         # Include listings that were open when reservation began but that the
         # subscriber closed first, so the response reports the full effect of

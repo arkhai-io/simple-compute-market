@@ -480,7 +480,7 @@ dispositions. Slices A and B are implemented; Slice C changes their override cod
     the baseline.
   - Not run here: the provisioning service and adapters, whose only change this slice is the
     Dockerfile, covered by `e2e-tests`' image-pin guard; and the maintainer's full
-    `make test`.
+    `make test`, which was still running when section 16 was planned.
 
 ## 15. Closeout (whole change)
 
@@ -489,6 +489,9 @@ Per `openspec/README.md#plan-closeout-requirements`.
 - [x] 15.1 `make check-comment-hygiene` passes. A direct read covered the kit modules, the
   VM contribution, the reconciler's hold docstrings, and the projection-selector docstring,
   which now states that an empty map never selects local tables.
+  - **Correction (Slice C review):** `available_compute_slices`' docstring still says
+    "omitted or empty" and "supplied and non-empty" in its earlier paragraphs, contradicting
+    the one added. Reopened; fixed by 16.8 and re-closed by 16.10.
 - [x] 15.2 Import placement: the `capacity_client` imports added to
   `controllers/admin_controller.py` and `failure_actions.py` moved to module level, and both
   suites pass; new kit and storefront modules import at module level.
@@ -505,6 +508,11 @@ Per `openspec/README.md#plan-closeout-requirements`.
 - [x] 15.7 `make check-doc-citations CHANGE=publish-multidimensional-listing-shape` passes.
 - [ ] 15.8 **End-to-end pipeline** on the Slice C fileset. Record the run, its result, and
   the scenarios, including `e2e_listing_shapes` stage 06.
+  - Run on the Slice C fileset (2026-09-24): 121 passed, 2 failed, 6 skipped.
+    `TestComputeDynamicListings.test_02` and `TestFungibleComputeDynamicListings.test_02`
+    failed; the three extra skips are their dependants. The storefront's loops were paused
+    throughout. Cause and fix: decision 11's inline refresh, task 16.5. A re-run is owed
+    after section 16 (16.10).
 - [ ] 15.9 **Promotion** (after code review), for all three slices. Promote to:
   - `openspec/specs/storefront-publication/spec.md`, `openspec/specs/resource-pool-management/spec.md`,
     `openspec/specs/market-composition/spec.md`, and `openspec/specs/site-capacity/spec.md`:
@@ -521,7 +529,8 @@ Per `openspec/README.md#plan-closeout-requirements`.
     - their five status states and why an unloaded site is unknown;
     - the unknown-site hold;
     - the live write check and the targeted post-write refresh;
-    - derivation reading the store directly, as a current limit.
+    - derivation reading overrides through the kit's reader, and the `overrides` extra;
+    - an operation that changes a site's capacity refreshing that site before reconciling.
   - `docs/development/ARCHITECTURE.md`:
     - storefront capacity boundary;
     - an authority-table row for listing shapes;
@@ -544,6 +553,85 @@ Per `openspec/README.md#plan-closeout-requirements`.
     - fail-forward upgrade with the one-time republish and seller-state carry-over.
   - `docs/development/TESTING.md`: a listing-shape and storefront-override coverage split, in
     the style of "Pool Offering-Mode Enforcement", with the kit's library integration suite.
+
+# Slice C review corrections
+
+Planned 2026-09-24 against the Slice C code review's dispositions and the pipeline failure
+(`design.md`, "Slice C code review" and decisions 10 and 11). Every task below amends
+Slice C; no Slice A or B behaviour changes.
+
+**Versions.** No new bumps. The kit (0.1.0), `arkhai-vms-listings` (0.2.0), and the VM
+storefront (0.6.0) were each bumped by this change and are unreleased.
+
+## 16. Kit boundaries, inline refresh, and test jurisdiction
+
+- [x] 16.1 The kit exposes `read_pool_overrides(conn, *, offering_mode)` and
+  `StoredPoolOverride`. A database without the table reads as no overrides, and an
+  undecodable field is kept as raw text with a named problem. The store's docstring now
+  states that the table is the kit's own. Store tests: three reader cases.
+- [x] 16.2 `arkhai-vms-listings` gains an `overrides` extra. `_site_pool_overrides` imports
+  the reader lazily and maps rows through `vm_override_view`; the table name and SQL are
+  gone from the VM package. A row with problems holds its pool and is reported unreadable.
+  - The storefront depends on `arkhai-vms-listings[pools,overrides]`; its lock was
+    hand-edited.
+  - A scratch `uv lock` confirmed the dependency form sorts extras while `requires-dist`
+    keeps their written order. `e2e-tests`' relock produced the same entries.
+  - The buyer installs neither extra; the kit is absent from its environment.
+- [x] 16.3 `judge_shapes(site_pools, *, record)`: the kit uses no site ordering. The VM
+  contribution takes `home_site` at construction, and `server.build_pool_override_service`
+  supplies the capacity runtime's first configured site.
+- [x] 16.4 The kit no longer depends on the core client: `pyproject.toml`, `reinit`, and its
+  lock (relocked). The storefront lock's kit entry was edited by hand, and `e2e-tests` was
+  relocked. `make check-reinit` passes.
+- [x] 16.5 `site_projection_cache.refresh_site_projections(site_id)` refreshes both of one
+  site's families in place and never raises.
+  - `_close_oversized_compute_listings` and `_reopen_available_compute_listings` take the
+    changed site and refresh it first; the reservation route and fulfillment events pass
+    it.
+  - The failure-action release refreshes its binding's site before reopening.
+- [x] 16.6 The harness's projection clients write each fake site's live availability into
+  their members on refresh, and the harness gained a service-peer client for the
+  provisioning callbacks.
+  - `integration/test_pool_overrides_api.py`: a reservation reports its own closes; a later
+    reservation reports only its own; a release callback reopens what it freed.
+  - **Red check:** with the refresh disabled, all three fail; with it, all pass. No lifecycle
+    loop runs in any of them.
+- [x] 16.7 `integration/test_reconciler_projection.py` (5): the two projection-selection
+  tests moved from `unit/test_reconciler.py`; an unknown site's listing is held while an
+  empty known site's is stale; another mode's override does not reach VM derivation; an
+  undecodable override holds its pool.
+  - **Owed:** `unit/test_reconciler.py`'s remaining database-backed tests move to integration
+    the next time that file is touched.
+- [x] 16.8 `available_compute_slices` states one rule: only an omitted or `None` projection
+  selects the local tables, and any mapping selects the projection path. No "fallback"
+  wording remains.
+- [x] 16.9 Validation:
+  - VM storefront: 1084 unit (1 skipped); 250 integration, with the two Alkahest tests
+    deselected for lack of `node`.
+  - Kit: 75. Core client: 35. VM buyer: 196.
+  - `e2e-tests` unit: 237, plus the known pre-existing
+    `test_buyer_deployment_mounts_separate_profile_state_and_credential`. Both affected
+    scenarios collect.
+  - `make dist-ci && make dist-kits` and `make check-reinit` pass.
+  - `openspec validate --all --strict`: 73 passed, 19 failed, the baseline.
+  - Not run here: the maintainer's full `make test` and the pipeline (16.10).
+- [ ] 16.10 **Closeout for section 16.**
+  1. Comment hygiene passes. A direct read covered the kit store and reader, the
+     contribution protocol, `_site_pool_overrides`, `vm_override_view`,
+     `available_compute_slices`, `refresh_site_projections`, the admin reconciliation
+     helpers, and the VM contribution. This re-closes 15.1.
+  2. Import placement: the reader import in `_site_pool_overrides` stays local, with its
+     reason stated (buyers install the package without the kit). The
+     `refresh_site_projections` imports are module-level; both suites pass.
+  3. Documentation compliance: decisions 10 and 11 as revised match the code; the spec
+     delta's reservation scenarios match the tests.
+  4. Narrative compression: done here.
+  5. Roadmap currency: no change.
+  6. Campaign index currency: this change's row names the inline refresh.
+  7. `make check-doc-citations CHANGE=publish-multidimensional-listing-shape` passes.
+  8. **Open:** the pipeline re-run, closing 15.8, with `test_compute_dynamic_listings` and
+     `e2e_listing_shapes` stage 06.
+  9. Promotion stays 15.9's, after code review.
 
 ## Superseded plan
 
@@ -583,6 +671,7 @@ Filled in during implementation. Destinations planned:
 | Overrides have no effect under local-table derivation | Same requirement; `docs/development/DEPLOYMENT_AND_CONFIG.md` |
 | The post-write refresh targets the written site's cache | `openspec/specs/storefront-publication/spec.md` — "Storefront pool overrides are written against the site's live projection"; `openspec/specs/storefront-publication/architecture.md` |
 | Storefront pool overrides are a kit capability addressed by site, pool, and offering mode, with per-market contributions; core holds only universal transport | `openspec/specs/storefront-publication/spec.md` — "Storefront pool overrides are site-scoped and durable"; `openspec/specs/storefront-publication/architecture.md`; `docs/development/ARCHITECTURE.md` kit layers |
+| An operation that changes a site's capacity refreshes that site's projection before reconciling inline | `openspec/specs/storefront-publication/spec.md` — "An operation that changes a site's capacity reconciles against that site's current projection"; `openspec/specs/storefront-publication/architecture.md` |
 | An unknown site's listings are held; projection derivation never falls back to local tables | `openspec/specs/storefront-publication/spec.md` — "A site whose projection is not held holds its listings"; `docs/development/DEPLOYMENT_AND_CONFIG.md` |
 | Signed override resources are unambiguous; percent-encoded as the administrator contract's other resources are | The rule: `openspec/specs/storefront-publication/spec.md` — "Storefront pool overrides are written against the site's live projection". The encoding follows an existing convention and needs no separate promotion; the rejected alternative stays in `design.md` |
 | `listing_shapes` hint and structural validation | `openspec/specs/resource-pool-management/spec.md` |

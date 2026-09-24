@@ -375,22 +375,64 @@ async def test_with_no_site_known_nothing_is_derived_from_local_tables_or_closed
     assert "publish" not in result["counts"] and "close" not in result["counts"]
 
 
-async def test_an_admin_reservation_closes_only_what_the_projection_no_longer_fits(tmp_path):
-    async with publication_app(tmp_path) as world:  # capacity-backed supply
-        world.pools.append(pool("gpu", backing="backed", gpu_count=2))
-        world.site.add_resource("gpu-res", 2, attributes={"gpu_model": "H100", "region": "us-east"})
-        await _cycle(world)
-        by_count = {r["gpu_count"]: i for i, r in (await _open_listings(world)).items()}
+async def _published_backed_pool(world, gpu_count: int) -> dict[int, str]:
+    """A capacity-backed pool whose one member the fake site also holds, published.
 
-        # The site now reports one GPU free, as its projection would after the hold.
-        world.pools[0]["resources"][0]["available"]["gpu_count"] = 1
+    The harness writes the site's live availability into its projection on each
+    refresh, so only an operation that refreshes the site sees its own change.
+    No lifecycle loop runs: every cycle and refresh here is invoked.
+    """
+    world.pools.append(pool("gpu", backing="backed", gpu_count=gpu_count))
+    world.site.add_resource(
+        "gpu-res", gpu_count, attributes={"gpu_model": "H100", "region": "us-east"}
+    )
+    await _cycle(world)
+    return {r["gpu_count"]: i for i, r in (await _open_listings(world)).items()}
+
+
+async def test_a_reservation_reports_the_listings_its_own_change_closed(tmp_path):
+    async with publication_app(tmp_path) as world:  # capacity-backed supply
+        by_count = await _published_backed_pool(world, 2)
+
         reserved = await world.client.admin_reserve_capacity(
             required_attributes={}, listing_id=by_count[1]
         )
 
-        # Only the two-GPU listing no longer fits; the one-GPU listing stays open.
+        # The reservation refreshed its site before reconciling: only the
+        # two-GPU listing no longer fits, and it is reported by this response.
         assert set(reserved.closed_listing_ids) == {by_count[2]}
         assert set(await _open_listings(world)) == {by_count[1]}
+
+
+async def test_a_later_reservation_reports_only_its_own_closes(tmp_path):
+    async with publication_app(tmp_path) as world:
+        by_count = await _published_backed_pool(world, 4)
+
+        first = await world.client.admin_reserve_capacity(
+            required_attributes={}, listing_id=by_count[1]
+        )
+        second = await world.client.admin_reserve_capacity(
+            required_attributes={}, listing_id=by_count[1]
+        )
+
+        assert set(first.closed_listing_ids) == {by_count[4]}
+        assert set(second.closed_listing_ids) == {by_count[3]}
+
+
+async def test_a_release_callback_reopens_what_its_release_made_available(tmp_path):
+    async with publication_app(tmp_path) as world:
+        by_count = await _published_backed_pool(world, 2)
+        reserved = await world.client.admin_reserve_capacity(
+            required_attributes={}, listing_id=by_count[1]
+        )
+        assert set(await _open_listings(world)) == {by_count[1]}
+
+        released = await world.service.notify_capacity_released(
+            reserved.capacity_reservation_id, site_id=SITE
+        )
+
+        assert set(released["reopened_listing_ids"]) == {by_count[2]}
+        assert set(await _open_listings(world)) == {by_count[1], by_count[2]}
 
 
 async def test_under_local_table_derivation_an_override_is_stored_but_inactive(world):

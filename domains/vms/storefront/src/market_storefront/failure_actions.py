@@ -18,6 +18,7 @@ from market_storefront.services.capacity_client import (
     listing_source_projection,
     site_capacity_buckets,
 )
+from market_storefront.services.site_projection_cache import refresh_site_projections
 from market_storefront.services.shape_feasibility import vm_shape_feasibility
 from market_storefront.utils.config import (
     get_evm_wallet_address,
@@ -304,8 +305,10 @@ async def _release_capacity(
         home_site = next(iter(remote_site_clients(runtime.client())), None)
         reopened: list[str] = []
         if home_site is not None:
-            # The same source publication derives from, so a reopen here agrees
-            # with what publication would keep open.
+            # The same source publication derives from, refreshed for the site
+            # this release just changed, so a reopen here agrees with what
+            # publication would keep open and reports this release's own effect.
+            await refresh_site_projections(binding.site_id)
             projection = listing_source_projection()
             reopened = closed_available_listing_ids(
                 db.db_path,

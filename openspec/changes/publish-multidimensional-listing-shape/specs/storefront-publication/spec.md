@@ -367,6 +367,32 @@ projection is held.
 - **WHEN** the unknown site's projection loads
 - **THEN** its listings are reconciled against it as usual
 
+### Requirement: An operation that changes a site's capacity reconciles against that site's current projection
+
+A storefront operation that changes a site's capacity and reconciles listings inline (an
+administrator reservation, a fulfillment event, or a failure action that releases capacity)
+MUST refresh its cached projection of that site before reconciling. It MUST reconcile
+against the same projection publication derives from, never against local tables where
+listings derive from projections. Its response MUST report the listings its own change
+closed or reopened.
+
+The refresh belongs to the operation: it MUST NOT start or advance any background loop. A
+failed refresh MUST NOT fail the operation; reconciliation then uses the last generation
+the storefront holds.
+
+#### Scenario: A reservation makes a larger listing infeasible
+
+- **WHEN** an administrator reserves two of a member's four GPUs while the storefront's
+  loops are paused
+- **THEN** the reservation's response reports the listings whose shapes no longer fit as
+  closed, and keeps open those that still fit
+
+#### Scenario: A later reservation does not report an earlier one's closes
+
+- **WHEN** a second reservation at the same site follows the first
+- **THEN** its response reports only listings its own reservation made infeasible, and none
+  the first reservation already closed
+
 ## MODIFIED Requirements
 
 ### Requirement: A listing's published shape comes from its source declaration

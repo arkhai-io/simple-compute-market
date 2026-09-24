@@ -127,7 +127,8 @@ None.
     operations, and listing key builders; new dependency on `kit/capability-shape`);
   - `domains/vms/listings` (shape resolution, feasibility through the injected site
     predicate, identity fields derived from `DIMENSION_KEYS`; new dependency on
-    `arkhai-vms`);
+    `arkhai-vms`, and an optional `overrides` extra naming `kit/pool-overrides` for the
+    reader derivation loads overrides through);
   - `kit/site-client` (the projection contract requires each member's `resource_type`);
   - the VM storefront:
     - binding envelope version 2 for every listing, and the startup carry-over of seller
@@ -136,8 +137,8 @@ None.
     - admin routes and the identity contract;
     - publication loop and inventory guard wiring;
     - system status and the CLI;
-  - `kit/pool-overrides` (new): the override store, write service, status, signed-resource
-    encoding, and typed client extension;
+  - `kit/pool-overrides` (new): the override store and its reader, write service, status,
+    signed-resource encoding, and typed client extension;
   - `core/storefront-client`: a generic `authenticated_request` on both variants, and no
     market vocabulary;
   - `provisioning/compute/service`, whose exact client pin moves with the client version;
@@ -157,6 +158,8 @@ None.
     removes that path.
   - An unknown site's listings stay open, where they were closed until the site returned; a
     buyer is refused at round zero meanwhile.
+  - An admin reservation, a fulfillment event, or a failure action refreshes the projection
+    of the site it changed before it reconciles, so its response reports its own effect.
 - **Wire:** additive for consumers. The published fields already exist in the listing model
   and the registry schema, and the new pool hint is opaque to consumers that do not read it.
   For producers, the resource-pool projection now requires each member's `resource_type`,

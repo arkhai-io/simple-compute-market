@@ -417,11 +417,6 @@ def _local_pool_pricing(conn: sqlite3.Connection) -> dict[str, sqlite3.Row]:
     }
 
 
-#: The storefront pool override store, owned by the pool-override kit. Its table
-#: is a read contract (``site_id``, ``pool_id``, ``offering_mode``, and JSON
-#: ``listing_shapes``, ``settlements``, and ``terms``) because this package, which
-#: buyers install without storefront dependencies, cannot import the kit.
-POOL_OVERRIDES_TABLE = "pool_overrides"
 VM_OFFERING_MODE = "vm"
 
 #: The VM market's override terms, flattened beside shapes and clauses.
@@ -454,35 +449,27 @@ def _site_pool_overrides(
     because an override's shapes change listing keys: publication and source
     reconciliation must see the same tier or reconciliation would close every
     listing an override shaped. Only the VM offering mode's overrides are VM
-    derivation's; another mode's belong to its own market. A database without
-    the store has no overrides.
+    derivation's; another mode's belong to its own market.
+
+    The store is the pool-override kit's, read through its reader. An override
+    the kit could not decode carries its ``problems``, so derivation holds the
+    pool rather than falling through to a lower tier.
     """
-    has_table = (
-        conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
-            (POOL_OVERRIDES_TABLE,),
-        ).fetchone()
-        is not None
-    )
-    if not has_table:
-        return {}
-    overrides: dict[tuple[str, str], dict[str, Any]] = {}
-    for row in conn.execute(
-        f"SELECT site_id, pool_id, listing_shapes, settlements, terms "
-        f"FROM {POOL_OVERRIDES_TABLE} WHERE offering_mode = ?",
-        (VM_OFFERING_MODE,),
-    ).fetchall():
-        parsed: dict[str, Any] = {}
-        for column in ("listing_shapes", "settlements", "terms"):
-            raw = row[column]
-            # A value that does not parse is kept as text, so shape resolution
-            # reports it unreadable rather than treating it as absent.
-            try:
-                parsed[column] = json.loads(raw) if isinstance(raw, str) else raw
-            except json.JSONDecodeError:
-                parsed[column] = raw
-        overrides[(str(row["site_id"]), str(row["pool_id"]))] = vm_override_view(**parsed)
-    return overrides
+    # Local import: buyers install this package without the pool-override kit,
+    # and only storefront derivation reads overrides.
+    from market_pool_overrides import read_pool_overrides
+
+    return {
+        (stored.site_id, stored.pool_id): {
+            **vm_override_view(
+                listing_shapes=stored.listing_shapes,
+                settlements=stored.settlements,
+                terms=stored.terms,
+            ),
+            "problems": stored.problems,
+        }
+        for stored in read_pool_overrides(conn, offering_mode=VM_OFFERING_MODE)
+    }
 
 
 @dataclass(frozen=True)
@@ -915,6 +902,15 @@ def _projected_pool_rows(
             return []
         for resource_id in malformed_members:
             holds.add(("resource", site_id, resource_id))
+
+    # An override the store could not decode is unreadable, not absent: it holds
+    # the pool rather than letting a lower tier speak for it.
+    if override is not None and override.get("problems"):
+        report.unreadable_shapes[pool_id] = [
+            f"{SHAPE_SOURCE_OVERRIDE}: {problem}" for problem in override["problems"]
+        ]
+        holds.add(("pool", site_id, pool_id))
+        return []
 
     # A stated list the VM vocabulary cannot read holds the pool's listings and
     # never falls back to a lower source's shapes.
@@ -1407,16 +1403,17 @@ def available_compute_slices(
     fully available, which the reserve path corrects authoritatively.
 
     ``home_site`` is the site every returned slice is attributed to when
-    reading local tables (``site_pool_projection`` omitted or empty, the
-    default). This preserves every existing caller's behavior exactly.
+    reading local tables, which only an omitted or ``None``
+    ``site_pool_projection`` selects.
 
     ``site_pool_projection`` is an optional ``site_id -> resource-pool
     projection rows`` mapping (the same shape
     ``site_projection_cache.projection_caches()[site].resource_pools.view().value``
-    already produces). When supplied and non-empty, pool structure comes
-    from the projection for *every* site in it, not just ``home_site``.
+    already produces). Any mapping, even an empty one, selects the projection
+    path: pool structure comes from the projection for *every* site in it, not
+    just ``home_site``, and a configured site absent from it is held (below).
     Shapes and terms then resolve through the storefront's site-scoped
-    overrides, stored in the same database; the legacy override rows, for
+    overrides, read through the pool-override kit; the legacy override rows, for
     ``home_site``'s pools only; each pool's projected hints; and the
     storefront's configured defaults -- see ``_projected_pool_rows``. The
     local-table path applies no site-scoped override: its terms come from its
@@ -1434,7 +1431,7 @@ def available_compute_slices(
     ``site_pool_projection``) and, when supplied, sources a ``fungible``
     pool's per-member availability ceiling instead of a resource-list max
     -- see ``_projected_pool_rows``. Only takes effect on the projection
-    path; the local-table fallback has no ``policy_tags``/bucket source
+    path; the local-table path has no ``policy_tags``/bucket source
     and is unaffected by either parameter.
 
     Every slice is one listing shape: the storefront override's shapes, else
@@ -1468,7 +1465,7 @@ def available_compute_slices(
     override tiers and configured defaults -- see
     `domains.vms.listings.pool_descriptors`. Only takes effect on
     the projection path, the same as ``site_pool_projection``/
-    ``site_capacity_buckets`` above; the local-table fallback has no hint
+    ``site_capacity_buckets`` above; the local-table path has no hint
     source to resolve against.
     """
     held = holds if holds is not None else set()

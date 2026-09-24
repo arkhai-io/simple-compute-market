@@ -522,7 +522,6 @@ name = "arkhai-kit-pool-overrides"
 version = "0.1.0"
 source = { registry = "../.dist" }
 dependencies = [
-    { name = "arkhai-core-storefront-client" },
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-site-client" },
     { name = "pydantic" },
@@ -657,6 +656,9 @@ wheels = [
 ]
 
 [package.optional-dependencies]
+overrides = [
+    { name = "arkhai-kit-pool-overrides" },
+]
 pools = [
     { name = "arkhai-kit-resource-pools" },
 ]
@@ -728,7 +730,7 @@ dependencies = [
     { name = "arkhai-kit-site-client" },
     { name = "arkhai-kit-storefront" },
     { name = "arkhai-vms" },
-    { name = "arkhai-vms-listings", extra = ["pools"] },
+    { name = "arkhai-vms-listings", extra = ["overrides", "pools"] },
     { name = "arkhai-vms-negotiation" },
     { name = "arkhai-vms-settlement" },
     { name = "dynaconf" },

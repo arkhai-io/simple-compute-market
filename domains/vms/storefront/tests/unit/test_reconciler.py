@@ -467,28 +467,6 @@ class TestAvailableComputeSlices:
         assert keys_a and keys_b
         assert keys_a.isdisjoint(keys_b)
 
-    def test_none_projection_selects_the_local_tables(self, db_path):
-        """Only an omitted or ``None`` projection selects the local tables."""
-        _seed_pool(db_path, gpu_count=2)
-        without_arg = _available_vm_slices(db_path, home_site="site-a")
-        with_none = _available_vm_slices(db_path, home_site="site-a", site_pool_projection=None,)
-        assert without_arg == with_none
-        assert without_arg
-
-    def test_an_empty_projection_derives_nothing_and_holds_every_configured_site(
-        self, db_path,
-    ):
-        """No site's projection is known: nothing is read from the local tables,
-        which only configuration selects, and every configured site is held."""
-        _seed_pool(db_path, gpu_count=2)  # local data exists
-        holds: set = set()
-        slices = _available_vm_slices(
-            db_path, home_site="site-a", site_pool_projection={},
-            configured_sites=("site-a", "site-b"), holds=holds,
-        )
-        assert slices == []
-        assert holds == {("site", "site-a", ""), ("site", "site-b", "")}
-
     def test_a_site_mapped_to_an_authoritative_empty_projection_does_not_fall_back(
         self, db_path,
     ):

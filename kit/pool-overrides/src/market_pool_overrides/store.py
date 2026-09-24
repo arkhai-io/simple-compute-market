@@ -1,14 +1,14 @@
-"""The durable pool override store and its migrations.
+"""The durable pool override store, its migrations, and its reader.
 
 One row per override, keyed by site, pool, and offering mode. Pool identifiers
 are site-local, so a key without the site could apply one site's terms to
 another site's identically named pool, and a pool sold in several modes carries
 an independent override per mode.
 
-The table is also a read contract: a market's listing derivation reads its own
-mode's rows directly, inside the derivation every structural-key reader runs, so
-publication and reconciliation always resolve the same shapes. ``listing_shapes``,
-``settlements``, and ``terms`` hold JSON; NULL states nothing for that field.
+The table and its encoding are this kit's own. A market's listing derivation
+loads its mode's overrides through ``read_pool_overrides``, over the connection
+it already holds, inside the derivation every structural-key reader runs, so
+publication and reconciliation always resolve the same shapes.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ import asyncio
 import json
 import sqlite3
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from market_pool_overrides.records import PoolOverrideAddress, PoolOverrideRecord
@@ -59,6 +59,70 @@ def _create_pool_overrides(conn: sqlite3.Connection) -> None:
 def pool_override_migrations() -> tuple[PoolOverrideMigration, ...]:
     """The store's migrations, for a storefront to compose into its own chain."""
     return (PoolOverrideMigration(POOL_OVERRIDES_MIGRATION_ID, _create_pool_overrides),)
+
+
+@dataclass(frozen=True)
+class StoredPoolOverride:
+    """One stored override as a market's derivation reads it.
+
+    ``listing_shapes``, ``settlements``, and ``terms`` are decoded, or ``None``
+    where the override states nothing. A field whose stored value cannot be
+    decoded is kept as its raw text and named in ``problems``: an unreadable
+    override is not an absent one, so a reader holds what it governs rather than
+    falling through to a lower tier.
+    """
+
+    site_id: str
+    pool_id: str
+    offering_mode: str
+    listing_shapes: Any = None
+    settlements: Any = None
+    terms: Any = None
+    problems: tuple[str, ...] = field(default=())
+
+
+def read_pool_overrides(
+    conn: sqlite3.Connection, *, offering_mode: str
+) -> list[StoredPoolOverride]:
+    """Every stored override for ``offering_mode``, over the caller's connection.
+
+    Synchronous, because derivation reads inside its own read-only connection. A
+    database the store's migration has not reached holds no overrides.
+    """
+    exists = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+        (POOL_OVERRIDES_TABLE,),
+    ).fetchone()
+    if exists is None:
+        return []
+    overrides: list[StoredPoolOverride] = []
+    for row in conn.execute(
+        f"SELECT site_id, pool_id, {', '.join(_JSON_COLUMNS)} FROM {POOL_OVERRIDES_TABLE} "
+        "WHERE offering_mode = ? ORDER BY site_id, pool_id",
+        (offering_mode,),
+    ).fetchall():
+        site_id, pool_id, *raw_values = tuple(row)
+        values: dict[str, Any] = {}
+        problems: list[str] = []
+        for column, raw in zip(_JSON_COLUMNS, raw_values):
+            if raw is None:
+                values[column] = None
+                continue
+            try:
+                values[column] = json.loads(raw)
+            except (TypeError, ValueError):
+                values[column] = raw
+                problems.append(f"{column}: the stored value is not JSON")
+        overrides.append(
+            StoredPoolOverride(
+                site_id=str(site_id),
+                pool_id=str(pool_id),
+                offering_mode=offering_mode,
+                problems=tuple(problems),
+                **values,
+            )
+        )
+    return overrides
 
 
 def _row(row: tuple[Any, ...]) -> dict[str, Any]:
@@ -166,5 +230,7 @@ __all__ = [
     "POOL_OVERRIDES_TABLE",
     "PoolOverrideMigration",
     "SQLitePoolOverrideStore",
+    "StoredPoolOverride",
     "pool_override_migrations",
+    "read_pool_overrides",
 ]

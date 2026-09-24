@@ -31,13 +31,14 @@ class PoolOverrideContribution(Protocol):
         site_pools: Sequence[Mapping[str, Any]],
         *,
         record: PoolOverrideRecord,
-        home_site: str,
     ) -> Sequence[ShapeFeasibility]:
         """Each stated shape and whether some member of ``site_pools``, a whole
         site projection, is feasible for it on declared capacity.
 
         Judged exactly as the market's publication would judge the record, so a
-        write's report and the next publication cycle cannot disagree.
+        write's report and the next publication cycle cannot disagree. Context
+        only this market needs is given to the contribution when it is built;
+        nothing here depends on how the storefront orders its sites.
         """
         ...
 
