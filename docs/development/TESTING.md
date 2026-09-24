@@ -361,6 +361,44 @@ site, storefront, and domain adapters for default arguments, `or` fallbacks,
 and attribute-based inference; a passing focused suite alone cannot prove their
 absence.
 
+## Listing Shapes and Storefront Overrides
+
+Listing-shape and override coverage follows the lowest-meaningful-level rule, with
+each package proving only what it owns:
+
+- `kit/capability-shape` unit tests own the family-grouped structure, the
+  schema-driven flattening and its inverse, the canonical digest, and the
+  standard-library-only import boundary. The VM domain's tests own its family
+  schema against `DIMENSION_KEYS` and the default generator.
+- `kit/resource-pools` owns the `listing_shapes` hint's structure, validated
+  identically on every write path; the provisioning service's integration suite
+  proves it is refused at the API and projected verbatim.
+- `kit/pool-overrides` unit tests own record refusals, the signed-resource
+  contract (injectivity, strict queries, no trailing `?`), the status states, and
+  the client extension's requests. Its library integration suite, on real SQLite
+  with the site client and market contribution injected, owns the store, the
+  reader, and the write service's check order, retryable refusals, and
+  store-then-refresh-then-wake sequencing.
+- VM derivation — which shape source a pool resolves, feasibility, identity, and
+  the override tier — is proven against a real database: shape and tier
+  resolution in `domains/vms/storefront/tests/unit/test_reconciler.py`, and the
+  cases the projection-selection and unknown-site rules define in
+  `tests/integration/test_reconciler_projection.py`. That unit module's
+  remaining database-backed cases belong at integration level and move there the
+  next time it changes.
+- Feasibility's agreement with the site ledger is proven against the real ledger
+  in `tests/integration/test_shape_feasibility.py`.
+- The storefront app suite (`tests/integration/test_pool_overrides_api.py` over
+  `tests/publication_app.py`) proves overrides and inline reconciliation through
+  typed clients. Its harness writes each fake site's live availability into the
+  projection only when the storefront refreshes that site, so a test observes a
+  capacity change exactly when an invoked operation would, and no lifecycle loop
+  runs.
+- The `e2e_listing_shapes` scenario proves a stated shape end to end, from pool
+  declaration through discovery, reservation, provisioning, and a storefront
+  override. `test_compute_dynamic_listings` proves each reservation reports its
+  own closes, with the storefront's loops paused throughout.
+
 ## Host Requirement Enforcement
 
 The rule that a declaration naming no host cannot be admitted or placed where

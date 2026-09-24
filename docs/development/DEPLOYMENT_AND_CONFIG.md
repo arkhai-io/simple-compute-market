@@ -274,6 +274,17 @@ by a changed document that declares it, which is imported before the check. The
 API-credits service seeds its own pool with both declarations and applies the same
 check at startup.
 
+A pool entry may also state, in `policy_tags`, the shapes its listings are sold
+in: `listing_shapes` maps an offering mode to a list of family-grouped shapes, as
+in `listing_shapes: {vm: [{gpu: {count: 1, model: H100}, memory: {gib: 32}}]}`.
+Structure is checked wherever the pool is written; whether a shape's families
+exist is judged by the storefront, which reports a shape it cannot read and holds
+that pool's listings. A pool that states no shapes publishes its domain's default
+shapes: for VM, one GPU-only shape per count, per GPU model. A shape is a
+commitment: the reservation holds every quantity it states, and a dimension it
+omits is provisioned from the pool's configured VM defaults, so size those
+defaults for every shape that omits a dimension.
+
 Host inventory is not a definition document, and the digest reconciliation
 described below does not apply to it. The inventory (`inventory_ini`, or the file
 at `inventory_path`) seeds the host registry only when no host is registered yet,
@@ -355,6 +366,11 @@ exactly the effect of the same `PUT /api/v1/capacity/resources/{resource_id}`.
 - **Every declared attribute is published to storefronts.** Attributes are the
   categorical facts claims match (`gpu_model`, `region`); none may repeat a
   declaration field such as `host_id`.
+- **State a region twice: on the pool, which listings advertise, and on its
+  declarations, which reservations match.** A listing's claim requests the
+  region and model it publishes, so a pool whose listings claim a region or model
+  no member declares publishes nothing and is reported per pool; a region stated
+  only on the pool publishes nothing.
 
 `POST /api/v1/capacity/definitions/import` submits a document: it always
 reconciles and records no startup digest. With `validate_only` it reports the
@@ -410,6 +426,40 @@ before provider or settlement mutations resume. After version 2 effects run
 against migrated state, operators recover by rolling forward from current
 identity history and operation journals rather than restoring stale state.
 
+
+## Storefront listing shapes and pool overrides
+
+A VM storefront publishes one listing per shape a pool offers. Beyond a pool's
+own `listing_shapes`, the storefront operator may state its own terms for one
+pool at one site, in one offering mode, through the administrator API or
+`market-storefront pool-override` (`set --file`, `get`, `list`, and `delete`,
+with `--mode` never defaulted). An override states listing shapes, settlement
+clauses, and the market's terms (for VM: `sla`, `min_price`, `token`, and
+`max_duration_seconds`); it cannot state region or capacity backing.
+
+- **A write needs its site reachable.** It is checked against the site's live
+  projection: a pool the site does not project is refused, an unreachable or
+  unverifiable site is refused as retryable, and a shape no member is feasible for
+  is accepted and reported, because it then publishes nothing.
+- **System status reports each override's state:** `applied`, `orphaned` while
+  its pool is absent, `unknown` while its site's projection is not loaded,
+  `site_unconfigured`, or `inactive`. Overrides are stored but have no effect
+  while listings derive from local tables
+  (`capacity.use_site_projection_for_listings = false`).
+- **The legacy per-pool terms** written by the local resource import remain the
+  tier below overrides, for the home site only. System status names each field a
+  legacy row still supplies; an override of that field supersedes it.
+- **A site whose projection is not loaded holds its listings.** They are neither
+  closed nor refreshed until it loads, so a storefront restarting while a site is
+  unreachable does not delist that site. A storefront configured to derive from
+  projections never derives from its local tables instead. A site decommissioned
+  without closing its listings leaves them advertised until an operator closes
+  them.
+
+Upgrading to listing shapes is fail-forward. Every VM listing's identity now
+includes its shape, so the first publication cycle after upgrade closes each
+listing and publishes its successor once; a seller's close and pause carry to the
+successor, and system status reports the carry-over.
 
 ## Settlement consumer configuration and cutover
 

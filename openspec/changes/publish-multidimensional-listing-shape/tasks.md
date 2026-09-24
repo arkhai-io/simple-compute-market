@@ -506,14 +506,39 @@ Per `openspec/README.md#plan-closeout-requirements`.
   rows are unchanged. Goal 4's section names no storefront pool overrides, so it needs no
   edit.
 - [x] 15.7 `make check-doc-citations CHANGE=publish-multidimensional-listing-shape` passes.
-- [ ] 15.8 **End-to-end pipeline** on the Slice C fileset. Record the run, its result, and
+- [x] 15.8 **End-to-end pipeline** on the Slice C fileset. Record the run, its result, and
   the scenarios, including `e2e_listing_shapes` stage 06.
   - Run on the Slice C fileset (2026-09-24): 121 passed, 2 failed, 6 skipped.
     `TestComputeDynamicListings.test_02` and `TestFungibleComputeDynamicListings.test_02`
     failed; the three extra skips are their dependants. The storefront's loops were paused
     throughout. Cause and fix: decision 11's inline refresh, task 16.5. A re-run is owed
     after section 16 (16.10).
-- [ ] 15.9 **Promotion** (after code review), for all three slices. Promote to:
+  - Re-run on the section 16 fileset (2026-09-24): 126 passed, 3 skipped, 264 deselected.
+    The skips are the known ones: the bare-metal deal and two Alice multi-registry stages.
+    - All twelve `test_compute_dynamic_listings` tests passed, including both reservation
+      tests that failed before and the three dependants skipped then.
+    - All twelve `e2e_listing_shapes` stages passed, including stage 06's override write,
+      replacement, `applied` status, and delete.
+- [x] 15.9 **Promotion**, for all three slices, done at the maintainer's direction before a
+  final review that precedes archival.
+  - The four deltas are synced: `storefront-publication` (7 added, 1 modified),
+    `resource-pool-management` (1 added, 1 modified), `market-composition` (1 added), and
+    `site-capacity` (1 modified). The modified blocks keep every rule their predecessors
+    stated.
+  - Evidence entries were added to the three specs that keep an Evidence section.
+    `site-capacity` keeps none, and none was invented.
+  - `storefront-publication/architecture.md` gains "Listing shapes and the storefront's
+    authority", with subsections on pool overrides, unknown sites, and inline
+    reconciliation. `ARCHITECTURE.md`, `DEPLOYMENT_AND_CONFIG.md`, and `TESTING.md` are
+    updated as listed below.
+  - All 7 production docstring citations of a requirement name resolve.
+  - **Found, pre-existing:** 13 anchor-form citations do not resolve, because each omits the
+    `requirement-` prefix its heading's slug carries. Examples are
+    `listing_cardinality_mode.py`'s `#domain-owned-publication-and-hold-hints` and
+    `kit/fulfillment`'s `fulfillment/spec.md` anchors. They are the same before and after
+    this change, which touched none of the citing files; they belong in their own fix.
+  
+  Promoted to:
   - `openspec/specs/storefront-publication/spec.md`, `openspec/specs/resource-pool-management/spec.md`,
     `openspec/specs/market-composition/spec.md`, and `openspec/specs/site-capacity/spec.md`:
     the synced deltas, with evidence entries. Then confirm the requirement names production
@@ -614,8 +639,9 @@ storefront (0.6.0) were each bumped by this change and are unreleased.
     scenarios collect.
   - `make dist-ci && make dist-kits` and `make check-reinit` pass.
   - `openspec validate --all --strict`: 73 passed, 19 failed, the baseline.
-  - Not run here: the maintainer's full `make test` and the pipeline (16.10).
-- [ ] 16.10 **Closeout for section 16.**
+  - Not run here: the maintainer's full `make test`, still running when the pipeline
+    re-run was recorded.
+- [x] 16.10 **Closeout for section 16.**
   1. Comment hygiene passes. A direct read covered the kit store and reader, the
      contribution protocol, `_site_pool_overrides`, `vm_override_view`,
      `available_compute_slices`, `refresh_site_projections`, the admin reconciliation
@@ -629,8 +655,8 @@ storefront (0.6.0) were each bumped by this change and are unreleased.
   5. Roadmap currency: no change.
   6. Campaign index currency: this change's row names the inline refresh.
   7. `make check-doc-citations CHANGE=publish-multidimensional-listing-shape` passes.
-  8. **Open:** the pipeline re-run, closing 15.8, with `test_compute_dynamic_listings` and
-     `e2e_listing_shapes` stage 06.
+  8. The pipeline re-run passed, with `test_compute_dynamic_listings` and
+     `e2e_listing_shapes` stage 06; recorded under 15.8, which it closes.
   9. Promotion stays 15.9's, after code review.
 
 ## Superseded plan
