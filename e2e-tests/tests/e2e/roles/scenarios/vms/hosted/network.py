@@ -709,7 +709,9 @@ class NetworkMarketplacePort:
             capacity_source={
                 "site_id": self._site_id,
                 "resource_id": self._resource_id,
-                "gpu_count": 1,
+                "listing_shape": {
+                    "gpu": {"count": _OFFER["gpu_count"], "model": _OFFER["gpu_model"]},
+                },
             },
             settlements=[
                 {

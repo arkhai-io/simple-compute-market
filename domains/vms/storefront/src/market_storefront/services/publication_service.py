@@ -21,6 +21,7 @@ from market_capacity_publication import (
 )
 from registry_client import ListingRequest, UpdateListingRequest
 
+from market_storefront.services.shape_feasibility import vm_shape_feasibility
 from market_storefront.services.capacity_client import capacity_binding_for_listing
 from market_storefront.utils.config import BASE_URL_OVERRIDE, settings
 
@@ -161,6 +162,7 @@ async def close_stale_compute_listings_after_capacity_change(
         site_pool_projection=site_pool_projection,
         site_capacity_buckets=site_capacity_buckets,
         backed_only=True,
+        shape_feasible=vm_shape_feasibility(),
     )
     bound_items: list[BoundListing] = []
     for listing_id in ids:
@@ -196,6 +198,7 @@ async def reopen_available_compute_listings_after_capacity_change(
         member_availability=member_availability,
         site_pool_projection=site_pool_projection,
         site_capacity_buckets=site_capacity_buckets,
+        shape_feasible=vm_shape_feasibility(),
     )
     candidates: list[PublicationCandidate[Listing]] = []
     for listing_id in ids:

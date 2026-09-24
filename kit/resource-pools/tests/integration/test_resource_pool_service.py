@@ -977,6 +977,75 @@ class TestHoldPreferenceValidationOnIndividualPoolWrites:
         assert "sla" in str(exc_info.value)
 
 
+class TestListingShapesValidationOnEveryWriteSurface:
+    """A malformed `listing_shapes` is refused identically on create, replace,
+    patch, and bulk import, and nothing is stored."""
+
+    MALFORMED = {"listing_shapes": {"vm": []}}
+    VALID = {"listing_shapes": {"vm": [{"gpu": {"count": 1, "model": "H100"}}]}}
+
+    def _create(self, svc, tags):
+        return svc.create_pool(
+            PoolCreate(
+                id="shaped",
+                label="Shaped",
+                provider="ansible",
+                policy_tags=_declared(tags),
+                provider_config=_ANSIBLE_CONFIG,
+            )
+        )
+
+    def test_create_refuses_and_stores_nothing(self, svc):
+        with pytest.raises(PoolValidationError) as refused:
+            self._create(svc, self.MALFORMED)
+        assert "listing_shapes" in str(refused.value)
+        assert svc.list_pools() == []
+
+    def test_create_accepts_well_formed_shapes(self, svc):
+        assert self._create(svc, self.VALID).policy_tags == _declared(self.VALID)
+
+    def test_replace_refuses_and_keeps_stored_metadata(self, svc):
+        self._create(svc, self.VALID)
+        with pytest.raises(PoolValidationError):
+            svc.replace_pool(
+                "shaped",
+                PoolReplace(
+                    label="Shaped",
+                    provider="ansible",
+                    enabled=True,
+                    policy_tags=_declared({"listing_shapes": {"vm": [{"gpu": 1}]}}),
+                    provider_config=_ANSIBLE_CONFIG,
+                ),
+            )
+        assert svc.get_pool("shaped").policy_tags == _declared(self.VALID)
+
+    def test_patch_refuses_and_keeps_stored_metadata(self, svc):
+        self._create(svc, self.VALID)
+        with pytest.raises(PoolValidationError):
+            svc.update_pool("shaped", PoolUpdate(policy_tags=_declared(self.MALFORMED)))
+        assert svc.get_pool("shaped").policy_tags == _declared(self.VALID)
+
+    def test_bulk_import_refuses_with_path_and_code(self, svc):
+        response = svc.validate_pools("""
+pools:
+  - id: default
+    label: Default Pool
+    provider: ansible
+    policy_tags:
+      advertisable_modes: []
+      capacity_backing: backed
+      listing_shapes:
+        vm: []
+    provider_config:
+      playbook_path: playbooks/vm-operations.yaml
+      inventory_group: kvm_hosts
+""")
+        assert response.valid is False
+        assert response.diff is None
+        refused = [p for p in response.problems if p.code == "invalid_listing_shapes"]
+        assert refused and refused[0].path.endswith(".policy_tags.listing_shapes")
+
+
 class _StubPoolConfigHandler:
     def __init__(self, provider: str) -> None:
         self.provider = provider

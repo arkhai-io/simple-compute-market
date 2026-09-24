@@ -1,10 +1,12 @@
 [project]
 name = "arkhai-kit-resource-pools"
-version = "0.3.0"
+version = "0.4.0"
 license = "MIT"
 description = "Provider-neutral resource-pool administration: persistence, YAML reconciliation, and the pool-config handler protocol."
 requires-python = ">=3.12"
 dependencies = [
+    # Shape hints are validated with the shared capability-shape utility.
+    "arkhai-kit-capability-shape>=0.1.0",
     "pydantic>=2.7",
     "sqlalchemy>=2.0",
     "pyyaml>=6.0",
@@ -16,6 +18,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/market_resource_pools"]
+
+[tool.uv]
+find-links = ["../../.dist"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

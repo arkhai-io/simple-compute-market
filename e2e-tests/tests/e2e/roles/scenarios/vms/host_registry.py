@@ -73,6 +73,7 @@ E2E_MULTI_REGISTRY_HOST = "kvm-multi"
 E2E_NON_ERC20_HOST = "kvm-non-erc20"
 E2E_DYNAMIC_HOST = "kvm-dynamic"
 E2E_FUNGIBLE_HOSTS = ("kvm-fungible-a", "kvm-fungible-b")
+E2E_LISTING_SHAPES_HOST = "kvm-shapes"
 
 #: One pool per scenario, for the same reason as one executor per scenario: a
 #: pool's `listing_mode` is resolved per pool, and its structural default flips to
@@ -87,6 +88,7 @@ E2E_DEAL_POOL_ID = "compute-e2e-deal-pool"
 E2E_DEAL_CLI_POOL_ID = "compute-e2e-deal-cli-pool"
 E2E_MULTI_REGISTRY_POOL_ID = "compute-e2e-multi-pool"
 E2E_NON_ERC20_POOL_ID = "compute-e2e-non-erc20-pool"
+E2E_LISTING_SHAPES_POOL_ID = "compute-e2e-listing-shapes-pool"
 
 
 def register_e2e_pool(
@@ -96,8 +98,16 @@ def register_e2e_pool(
     listing_mode: str,
     deliverable_modes: tuple[str, ...] = ("vm",),
     label: str | None = None,
+    listing_shapes: dict[str, list[dict[str, Any]]] | None = None,
+    pricing: dict[str, Any] | None = None,
 ) -> Any:
     """Create the resource pool, idempotently, and return the pool row.
+
+    `listing_shapes`, when given, is the pool's `listing_shapes` hint: per
+    offering mode, the shapes its listings are sold in. Omitted, the pool states
+    none and the storefront publishes its default shapes. `pricing`, when given,
+    is the pool's `pricing` hint, the durable terms a published listing takes
+    ahead of the storefront's configured defaults.
 
     `listing_mode` is a pool policy tag the storefront's publication resolves. It is
     passed explicitly rather than defaulted because the structural fallback —
@@ -128,6 +138,8 @@ def register_e2e_pool(
             "listing_mode": listing_mode,
             DELIVERABLE_MODES_POLICY_TAG: list(deliverable_modes),
             **_backed_declarations(deliverable_modes),
+            **({"listing_shapes": listing_shapes} if listing_shapes is not None else {}),
+            **({"pricing": pricing} if pricing is not None else {}),
         }
         if any(tags.get(k) != v for k, v in wanted.items()):
             provisioning_client.patch_pool(pool_id, PoolUpdate(
@@ -148,6 +160,8 @@ def register_e2e_pool(
             # semantics are a set.
             DELIVERABLE_MODES_POLICY_TAG: list(deliverable_modes),
             **_backed_declarations(deliverable_modes),
+            **({"listing_shapes": listing_shapes} if listing_shapes is not None else {}),
+            **({"pricing": pricing} if pricing is not None else {}),
         },
         provider_config=_default_pool_provider_config(provisioning_client),
     ))
@@ -237,8 +251,12 @@ def declare_e2e_capacity(
     attributes: dict[str, Any],
     pool_id: str,
     sellable_units: int,
+    capacity: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     """Declare one executor's sellable capacity in the site ledger.
+
+    `capacity` declares every dimension; its `gpu_count` must equal
+    `sellable_units`. Omitted, the declaration states the GPU count only.
 
     `sellable_units` has no default on purpose. It must equal what the scenario's
     own seeded resource declares, because that number decides when a slice listing
@@ -265,10 +283,23 @@ def declare_e2e_capacity(
             total_units=sellable_units,
             resource_type="compute.gpu",
             pool_id=pool_id,
-            capacity={"gpu_count": sellable_units},
+            capacity=_declared_capacity(sellable_units, capacity),
             host_id=host_id, attributes={**attributes},
         )
     )
+
+
+def _declared_capacity(
+    sellable_units: int, capacity: dict[str, int] | None
+) -> dict[str, int]:
+    if capacity is None:
+        return {"gpu_count": sellable_units}
+    if capacity.get("gpu_count") != sellable_units:
+        raise ValueError(
+            f"capacity gpu_count {capacity.get('gpu_count')!r} must equal "
+            f"sellable_units {sellable_units}"
+        )
+    return dict(capacity)
 
 
 def provision_e2e_executor(
@@ -283,8 +314,14 @@ def provision_e2e_executor(
     listing_mode: str = "specific_resource",
     deliverable_modes: tuple[str, ...] = ("vm",),
     host_gpu_count: int = E2E_HOST_GPU_COUNT,
+    listing_shapes: dict[str, list[dict[str, Any]]] | None = None,
+    capacity: dict[str, int] | None = None,
+    pricing: dict[str, Any] | None = None,
 ) -> Any:
     """Pool, executor host, and its one capacity declaration, in dependency order.
+
+    `listing_shapes`, `pricing`, and `capacity` are passed to the pool and the
+    declaration; see `register_e2e_pool` and `declare_e2e_capacity`.
 
     `sellable_units` is what the declaration offers and must match the scenario's
     seeded resource; `host_gpu_count` is the hardware the executor has. They are
@@ -299,6 +336,8 @@ def provision_e2e_executor(
         pool_id=pool_id,
         listing_mode=listing_mode,
         deliverable_modes=deliverable_modes,
+        listing_shapes=listing_shapes,
+        pricing=pricing,
     )
     host_row = register_e2e_host(
         provisioning_client, name=host, pool_id=pool_id, gpu_count=host_gpu_count,
@@ -310,6 +349,7 @@ def provision_e2e_executor(
         attributes=attributes,
         pool_id=pool_id,
         sellable_units=sellable_units,
+        capacity=capacity,
     )
     return host_row
 

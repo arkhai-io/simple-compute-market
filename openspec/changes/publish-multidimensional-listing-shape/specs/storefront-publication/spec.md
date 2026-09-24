@@ -96,6 +96,9 @@ window, or a physical-host conflict.
 - A stated shape that no member is feasible for MUST yield no listing and MUST be reported in
   the storefront's system status, naming the site, the pool, the shape, and what was not
   feasible.
+- A default shape that no member is feasible for against declared capacity MUST be reported
+  once per pool, naming the claim attribute that no enabled member declares. A default shape
+  that fails only against current availability MUST NOT be reported.
 - Publication MUST NOT shrink a shape to make it feasible, and MUST NOT substitute another
   source's shapes for a stated list with an infeasible shape.
 - A pool whose shape hint the domain cannot read MUST yield no new listing, MUST be reported,
@@ -123,6 +126,13 @@ match.
 - **WHEN** a capacity-backed shape's GPUs are free on a member but the member's available
   memory is below the shape's
 - **THEN** the shape is not publishable from that member
+
+#### Scenario: A pool's region exists only as a pool hint
+
+- **WHEN** a pool's `region` is stated only in its `region` hint and none of its enabled
+  members declares a `region` attribute
+- **THEN** the pool publishes no listing, and system status reports once for the pool that no
+  member declares the claimed region
 
 #### Scenario: A published listing is refused at reservation
 
@@ -296,7 +306,8 @@ Derivation MUST NOT substitute a value for a quantity a declaration does not car
 declaration that omits the quantity a domain's default shapes are enumerated by MUST yield no
 listing, and the omission MUST be reported to the operator naming the declaration. A
 declaration that declares that quantity as zero MUST yield no listing without a
-report. A declaration whose quantity is malformed MUST be treated as unresolvable:
+report. A declaration whose quantity is malformed, or a projected member that does not state its
+resource kind, MUST be treated as unresolvable and reported:
 it yields no new listing and its existing listings are held. In a fungible pool one
 unresolvable member holds every listing derived from the pool, because which shapes its
 members are feasible for cannot be decided without it; in a specific-resource pool it holds

@@ -3,9 +3,11 @@
 ### Requirement: Family-grouped capability shapes share one flattening contract
 
 A capability shape MUST be expressed in the family-grouped form: a mapping of family name to
-a mapping of field name to a scalar value. One shared utility in the dependency-light core
-package MUST validate that form's structure, flatten a shape into quantities and attributes,
-and compute a canonical digest of a shape.
+a mapping of field name to a scalar value. One shared utility in a foundation kit that imports
+only the standard library MUST validate that form's structure, flatten a shape into
+quantities and attributes, and compute a canonical digest of a shape. The utility is capacity
+vocabulary rather than part of the market core, because only markets that admit capacity
+against declared supply have shapes; the market core MUST NOT carry it.
 
 - **Schema.** Flattening MUST be driven by a schema the owning domain supplies. For each
   family field the schema states whether it is a quantity or an attribute, whether it is

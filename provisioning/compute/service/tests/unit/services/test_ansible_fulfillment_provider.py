@@ -178,6 +178,29 @@ class TestSizingPrecedence:
         assert submitted_params.gpu_provisioned is None
         assert submitted_params.vm_gpu_count is None
 
+    async def test_a_gpu_only_shape_takes_its_other_dimensions_from_pool_defaults(
+        self, provider, job_service,
+    ):
+        """A listing shape that declares only the GPU family commits to nothing
+        else, so its reservation carries only a GPU count: the VM gets that many
+        GPUs, and every dimension the shape omits comes from the pool's defaults,
+        which the site administrator sizes."""
+        resource = _resource(dimensions={"gpu_count": 2})
+        prepared = provider.prepare_create(
+            capacity_reservation_id="alloc-1", request=_request(), resource=resource,
+            pool_config=_pool_config(
+                default_vm_ram=8192, default_vm_vcpus=4, default_vm_disk_size="80G",
+            ),
+        )
+        await provider.dispatch_create(prepared)
+
+        submitted_params: AnsibleJobParams = job_service.submit.await_args.args[0]
+        assert submitted_params.vm_gpu_count == 2
+        assert submitted_params.gpu_provisioned is True
+        assert (submitted_params.vm_ram, submitted_params.vm_vcpus, submitted_params.vm_disk_size) == (
+            8192, 4, "80G",
+        )
+
     async def test_sizing_left_unset_when_neither_dimensions_nor_pool_specify_it(self, provider, job_service):
         request = _request()
         resource = _resource(dimensions={})

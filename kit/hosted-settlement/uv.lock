@@ -35,13 +35,13 @@ wheels = [
 
 [[package]]
 name = "arkhai-core"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_core-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_core-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -80,7 +80,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arkhai-core", specifier = "==0.2.0" },
+    { name = "arkhai-core", specifier = "==0.3.0" },
     { name = "arkhai-hosted-settlement-client", specifier = "==0.4.2" },
     { name = "arkhai-kit-identity", specifier = "==0.3.0" },
     { name = "arkhai-kit-settlement-runtime", specifier = "==0.1.2" },

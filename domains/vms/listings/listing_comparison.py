@@ -28,9 +28,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-# What the resource is, where it is, and how much of it one listing offers. The
-# declared dimensions are listed so that, once publication carries them, they
-# are identity without a change here.
+from arkhai_vms import DIMENSION_KEYS
+
+# What the resource is, where it is, and how much of it one listing offers. Every
+# VM capacity dimension is identity, taken from the domain vocabulary so a new
+# dimension is identity as soon as a listing shape can declare it.
 IDENTITY_FIELDS: tuple[str, ...] = (
     "pool_id",
     "resource_id",
@@ -38,10 +40,7 @@ IDENTITY_FIELDS: tuple[str, ...] = (
     "resource_type",
     "resource_subtype",
     "gpu_model",
-    "gpu_count",
-    "vcpu_count",
-    "ram_gb",
-    "disk_gb",
+    *DIMENSION_KEYS,
     "region",
 )
 

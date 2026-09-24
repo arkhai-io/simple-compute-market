@@ -21,6 +21,7 @@ from typing import Any
 
 from domains.vms.listings.listing_comparison import REFUSE, compare_listing
 from domains.vms.listings.reconciler import (
+    ShapeFeasibility,
     available_compute_slices,
     slice_identity,
     stored_listing_key,
@@ -31,6 +32,7 @@ from market_storefront.services.capacity_client import (
     listing_source_projection,
     site_capacity_buckets,
 )
+from market_storefront.services.shape_feasibility import vm_shape_feasibility
 
 logger = logging.getLogger(__name__)
 
@@ -62,12 +64,7 @@ def _site_only(
 
 
 def _slices_by_key(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    out: dict[str, dict[str, Any]] = {}
-    for row in rows:
-        for field in ("resource_key", "legacy_resource_key"):
-            if row.get(field):
-                out[str(row[field])] = row
-    return out
+    return {str(row["resource_key"]): row for row in rows if row.get("resource_key")}
 
 
 async def _pinned_site_availability(
@@ -90,8 +87,13 @@ async def check_listing_source(
     listing_record: Mapping[str, Any],
     binding: Any,
     capacity_runtime: Any,
+    shape_feasible: ShapeFeasibility | None = None,
 ) -> dict[str, Any]:
     """Return ``declared_match``, the differing fields, and ``available``.
+
+    Both answers use the same shape feasibility publication does: the declared
+    match asks whether the listing's own source is still feasible for its shape
+    on declared capacity, and availability whether it is feasible now.
 
     ``available`` is ``None`` for an unbacked listing, which has no
     availability to consult. A declared mismatch is logged with the fields
@@ -102,6 +104,7 @@ async def check_listing_source(
         listing_record=listing_record,
         binding=binding,
         capacity_runtime=capacity_runtime,
+        shape_feasible=shape_feasible or vm_shape_feasibility(),
     )
     if not result["declared_match"]:
         logger.warning(
@@ -120,10 +123,17 @@ async def _check_listing_source(
     listing_record: Mapping[str, Any],
     binding: Any,
     capacity_runtime: Any,
+    shape_feasible: ShapeFeasibility,
 ) -> dict[str, Any]:
     site_id = binding.site_id
     stored = stored_listing_resource(listing_record)
-    key = stored_listing_key(stored, site_id)
+    # The listing's key comes from its durable binding, never its published fields.
+    recorded = await repository.load_listing_binding(
+        listing_id=str(listing_record.get("listing_id"))
+    )
+    key = stored_listing_key(
+        recorded.source_envelope_json if recorded is not None else None, stored, site_id
+    )
     source_projection = listing_source_projection()
     projection = _site_only(source_projection, site_id)
     if source_projection is not None and projection is None:
@@ -144,6 +154,7 @@ async def _check_listing_source(
             site_pool_projection=projection,
             site_capacity_buckets=buckets,
             declared_range=True,
+            shape_feasible=shape_feasible,
         )
     )
     fresh = declared.get(key) if key is not None else None
@@ -171,6 +182,7 @@ async def _check_listing_source(
         member_availability=await _pinned_site_availability(capacity_runtime, site_id),
         site_pool_projection=projection,
         site_capacity_buckets=buckets,
+        shape_feasible=shape_feasible,
     )
     return {
         "declared_match": True,

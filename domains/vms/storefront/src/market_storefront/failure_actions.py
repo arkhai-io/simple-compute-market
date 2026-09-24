@@ -14,6 +14,7 @@ from domains.vms.listings.reconciler import (
 from market_settlement_runtime import FailurePolicy
 from market_identity import Identity
 
+from market_storefront.services.shape_feasibility import vm_shape_feasibility
 from market_storefront.utils.config import (
     get_evm_wallet_address,
     get_evm_wallet_private_key,
@@ -303,6 +304,7 @@ async def _release_capacity(
                 db.db_path,
                 home_site=home_site,
                 member_availability=await capacity_availability(runtime.client()),
+                shape_feasible=vm_shape_feasibility(),
             )
         for listing_id in reopened:
             await db.update_listing(

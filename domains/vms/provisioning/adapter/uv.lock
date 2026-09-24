@@ -220,14 +220,14 @@ wheels = [
 
 [[package]]
 name = "arkhai-core"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_core-0.2.0-py3-none-any.whl" },
-    { path = "arkhai_core-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_core-0.3.0-py3-none-any.whl" },
+    { path = "arkhai_core-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -241,6 +241,15 @@ dependencies = [
 wheels = [
     { path = "arkhai_core_storefront_client-0.19.1-py3-none-any.whl" },
     { path = "arkhai_core_storefront_client-0.19.1-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-kit-capability-shape"
+version = "0.1.0"
+source = { registry = "../../../../.dist" }
+wheels = [
+    { path = "arkhai_kit_capability_shape-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_kit_capability_shape-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -294,16 +303,17 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-resource-pools"
-version = "0.3.0"
+version = "0.4.0"
 source = { registry = "../../../../.dist" }
 dependencies = [
+    { name = "arkhai-kit-capability-shape" },
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "sqlalchemy" },
 ]
 wheels = [
-    { path = "arkhai_kit_resource_pools-0.3.0-py3-none-any.whl" },
-    { path = "arkhai_kit_resource_pools-0.3.0-py3-none-any.whl" },
+    { path = "arkhai_kit_resource_pools-0.4.0-py3-none-any.whl" },
+    { path = "arkhai_kit_resource_pools-0.4.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -339,15 +349,16 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms"
-version = "0.3.0"
+version = "0.4.0"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
+    { name = "arkhai-kit-capability-shape" },
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_vms-0.3.0-py3-none-any.whl" },
-    { path = "arkhai_vms-0.3.0-py3-none-any.whl" },
+    { path = "arkhai_vms-0.4.0-py3-none-any.whl" },
+    { path = "arkhai_vms-0.4.0-py3-none-any.whl" },
 ]
 
 [[package]]

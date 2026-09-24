@@ -236,7 +236,8 @@ contained pieces of that change's accepted direction:
     "memory": {"gib": 64}, "storage": {"gib": 500}}
    ```
 
-2. **One shared flattening utility** in `market_core`, beside `market_core.query_dsl`. It
+2. **One shared flattening utility** in the standard-library-only foundation kit
+   `kit/capability-shape` (`market_capability_shape`). It
    validates the shape's structure (families holding fields holding scalar values), flattens
    it into quantities and attributes using a schema the domain supplies, and computes a
    canonical digest. It knows no family or field name.
@@ -272,12 +273,38 @@ Why each piece:
   The exception is recorded; when `structured-capacity-requirements` renames the wire, the
   change is two rows of this schema plus the wire rename it already owns. The units already
   agree: `ram_gb` and `disk_gb` are GiB (see Context).
-- **The utility lives in `market_core`, not `kit/site`.** `structured-capacity-requirements`
-  said "probably `kit/site`". `market_core` is dependency-light and importable by the site,
-  the pool kit, storefronts, and domains. The VM listings and negotiation packages
-  deliberately avoid depending on `kit/site`. The CLI query parser set this precedent.
+- **The utility lives in its own foundation kit, not `kit/site` or the market core.**
+  `structured-capacity-requirements` said "probably `kit/site`", which is heavy and which the
+  VM listings and negotiation packages deliberately avoid. The kit imports only the standard
+  library, so buyers (which install `arkhai_vms` without the pool kit), the pool kit, sites,
+  and domains can all depend on it.
+  - *Code review (2026-09-24):* the first implementation put it in `market_core`. The core
+    holds only what is invariant across listing schemas, and a capability shape is not: its
+    flattening exists to yield the quantities a capacity claim requests and the attributes
+    admission matches, which means nothing to a market with no capacity admission, such as a
+    market in unique items, or to API credits, whose purchase is a quota grant. Every
+    consumer is capacity machinery. It moved to `kit/capability-shape`.
+  - No existing kit fits: the listing-publication kit, `kit/capacity-publication`, depends on
+    the storefront role package, so neither the pool kit nor a buyer could depend on it.
+  - The identifier encoding stays in `market_core`: any market joining operator-chosen
+    identifiers into a key needs it, and it knows nothing about capacity.
 - **The digest is taken over the family form.** A later rename then changes no listing key
   and churns nothing.
+- **Correction found in implementation (2026-09-24).** `market_core`, which holds the
+  identifier encoding, is not importable by every domain package. The VM concept packages (`domains/vms/listings`, `negotiation`,
+  `settlement`) are held by an enforced guardrail
+  (`domains/vms/storefront/tests/unit/test_architecture_imports.py`) to import no core
+  package, `market_core` included; none does today. The permanent contract is looser: it
+  forbids only "core composition packages" (`openspec/specs/market-composition/spec.md`,
+  "From-below kit dependencies").
+  - *Decided (design review, 2026-09-24):* the concept packages reach the utility and the
+    encoding only through `arkhai_vms`. The VM vocabulary package already depends on
+    `arkhai-core` and exposes the VM-bound operations: validating, flattening, and digesting
+    a VM shape, and the identifier encoding. The guardrail stands unchanged. It still holds
+    now the utility is a kit: `arkhai_vms` binds the VM schema in one place.
+  - Rejected for now: narrowing the guardrail to admit `market_core`, which loosens a
+    deliberate rule; and moving shape resolution and keys out of the listings package, which
+    separates keys from the reconciler that owns them.
 
 Stays in `structured-capacity-requirements`: the buyer-facing `requirements` object, the
 claim restructure and the `probe` signature, the `offering_mode`/`resource_type` split, the
@@ -321,17 +348,98 @@ remains the final admission boundary.
   can be. Reproducing full admission would need a different site capability and state the
   projection intentionally withholds.
 
+**Parity gate result (task 0.1, 2026-09-24).** Run against the real code on both sides:
+
+- **Method.**
+  - Claims came from `compute_capacity_claim_from_order` applied to shaped
+    `listing_resource` values.
+  - The site side was a real `CapacityLedgerService` composed as the VM provisioner composes
+    it: unit claim keys `("units", "gpu_count")` and mirror dimension `gpu_count`.
+  - Holds were placed so that declared and available capacity differ.
+  - The ledger's answer is the two `resource_satisfies_requirement` calls inside
+    `_find_candidate`, against declared capacity and then capacity less holds.
+  - The projections were the ones the provisioning app serves:
+    `load_capacity_resource_inventory(ledger.list_resources())` through
+    `SiteProjectionService`, plus `capacity_bucket_projection`.
+  - The storefront's answer was `dict_resource_satisfies_claim`, with the storefront's
+    `VM_UNIT_CLAIM_KEYS` and `VM_MIRROR_DIMENSION`, over adapted rows.
+- **The adapter is required.** A projected member names itself `physical_resource_id` and
+  takes its pool from the enclosing row's `resource_pool_id`. A capacity bucket names its pool
+  `resource_pool_id`, its attributes `grouping_attributes`, and no resource. The adapter maps
+  these onto the snapshot-row fields `resource_id`, `pool_id`, `resource_type`,
+  `resource_subtype`, `attributes`, and `available`. A bucket maps to an empty resource ID,
+  which is why buckets stand in only for fungible claims.
+- **Agreement.** The predicate agreed with the ledger's step on every member, for declared
+  and available capacity, across eight claims:
+  - a member declaring `region` and `gpu_model`, with one, two, and four dimensions;
+  - a shape exceeding current GPU availability, and one exceeding current memory
+    availability;
+  - a model the pool lacks;
+  - a specific-resource claim, which drops `pool_id`, and the same claim with a model the
+    member lacks.
+  
+  For fungible claims, "some bucket is feasible" agreed with "some member is available". Full
+  admission (`ledger.probe`) chose a member in exactly the cases both judged feasible.
+- **Region only as a pool hint.** Both refuse. `_split_claim_requirement` makes every
+  non-quantity claim key a required exact attribute, `region` and `pool_id` included, and
+  admission reads attributes from the declaration itself, never from pool policy. Today such
+  a pool publishes listings no reservation can admit. The same holds for a `region` or
+  `gpu_model` taken from the legacy home-site row. Resolved below: such pools publish nothing
+  and are reported per pool.
+- **Disagreement: a projected member without `resource_type`.** The predicate reads an
+  absent type as `""` and refuses every claim; the ledger cannot store one (the column is
+  non-null with default `compute.gpu`), and the provisioning projection fills in the same
+  default. The disagreement therefore arises only from producers that omit the field: the
+  `kit/site-client` contract builder `build_projected_resource`, which sets it to `None`, and
+  the storefront's `fake_site.py` projection and hand-built test members, which omit it.
+  `validate_resource_pool_projection` does not check it, because no consumer read it until
+  now. Resolved below: the projection contract requires it, and a member without it is
+  unresolvable.
+- **Design review of the gate (2026-09-24).** Both questions were answered, and the gate is
+  cleared:
+  - *Missing `resource_type`.* The projection contract requires a non-empty `resource_type`
+    on every member, and its builder, the fake site, and hand-built test members send one.
+    The storefront assumes no default. A member without one is malformed, not incapable, so
+    it is unresolvable and reported, like a malformed GPU count, rather than judged
+    infeasible (see "Holds" below). Rejected: assuming the site's default kind, which puts a
+    site default in the storefront, and skipping the kind check, which would let a member of
+    another kind match.
+  - *Pools no reservation can admit.* A default shape that fails against declared capacity is
+    reported per pool (see below). Rejected: silent delisting, and no longer claiming a
+    hint-sourced region, which would change what admission matches.
+
 **When no member is feasible for a shape:**
 - The shape yields no listing, and the storefront reports it in system status, naming the
   site, pool, shape digest, and what was not feasible.
 - It never shrinks the shape and never falls back to another source's shapes.
 - A listing whose shape becomes infeasible closes through ordinary source reconciliation,
   because its key is no longer derived.
-- A default shape that is not currently feasible is not reported: that is ordinary
-  unavailability. Only declared shapes are reported.
+- A stated shape no member is feasible for is reported per shape.
+- A default shape that fails against **declared** capacity is reported **per pool**, naming
+  the claim attribute no enabled member declares, for example that the claim requires
+  `region` `us-east` and no enabled member declares it.
+  - Default shapes are generated from members' declared counts, so declared infeasibility
+    arises only from a categorical mismatch (region, model, kind), never from load. It is a
+    configuration problem the operator can fix by declaring the attribute on the capacity
+    declarations.
+  - Reporting per pool keeps one mismatch from producing an entry for every GPU count.
+- A default shape that fails only against current availability is not reported: that is
+  ordinary unavailability.
 
-**Holds are unchanged.** A member with an unreadable GPU count holds the listings of its pool
-(fungible) or its own (specific resource), as today.
+**Holds.** A member is unresolvable, and holds the listings of its pool (fungible) or its own
+(specific resource), when:
+- its GPU count is unreadable, as today; or
+- it projects no `resource_type`, which the projection contract requires.
+
+Both are reported in the derivation report. Holding rather than closing matters only if a
+producer breaks the contract, and then holding is the safer failure.
+
+**Local-table derivation.** A storefront that derives capacity-backed listings from its local
+tables rather than site projections has no projected members to judge. Its pools publish the
+default GPU-only shapes for their one model, ranged over local availability, without the
+feasibility predicate, and keyed by shape digest like every other listing. Accepted in design
+review (2026-09-24) as sufficient for a path `pools-9-retire-local-physical-authority`
+removes.
 
 ### 5. Every listing's identity includes its shape
 
@@ -454,8 +562,8 @@ idempotent carry-over step runs at storefront startup, before the lifecycle loop
   structural check: create, replace, patch, and bulk import. The value must be a mapping of
   offering mode to a non-empty list of well-formed family-grouped shapes. This is the same
   treatment the SLA and hold hints get. The pool kit calls the structural validator in
-  `market_core`, gaining a downward dependency on `arkhai-core`, and learns no dimension
-  names.
+  `kit/capability-shape`, gaining a dependency on that foundation kit, and learns no
+  dimension names.
 - **At the storefront.** The VM domain validates its vocabulary during derivation. A pool
   whose `vm` list it cannot read yields no shaped listing and is reported. Its existing
   shaped listings are held rather than closed, because an unreadable declaration is not a
@@ -506,6 +614,11 @@ Provisioning defaults are never published.
   and leases keep their own bindings. Seller closes and pauses carry across (decision 5).
 - **[Mixed-model pools publish differently]** → A correction: each model's listings name
   that model.
+- **[Pools no reservation can admit stop publishing]** → A pool whose `region` exists only as a
+  pool hint or legacy row, or whose members lack the published `gpu_model`, publishes today
+  but is refused at every reservation. After upgrade it publishes nothing, and system status
+  names the undeclared attribute. Intended: those listings advertised what could not be
+  bought. The fix is declaring the attribute on the capacity declarations.
 - **[Shapes can be stated in two places]** → Whole-list replacement makes the effective list
   exactly one source's. System status names each pool's source.
 - **[A deleted override reveals a legacy value]** → Reported in system status whenever a
@@ -539,6 +652,10 @@ storefront rebuilds it from site projections.
    seller-closed and paused version 1 listings (decision 5).
 3. The first publication cycle closes every open version 1 VM listing, since its key is no
    longer derived, and publishes the version 2 successors.
+4. A pool whose listings no reservation could admit publishes no successors, and system
+   status reports the attribute its members do not declare. A seller-closed or paused
+   successor is bound by the carry-over whether or not its shape is feasible; reopening one
+   that is infeasible yields the same report.
 
 Older storefronts ignore the unknown `listing_shapes` tag, as the hint contract requires, and
 older pool kits store it without validation.
@@ -549,7 +666,8 @@ Recorded in each change's own design where it changes that change's plan.
 
 - **`structured-capacity-requirements`.** Decision 3 implements its family-grouped shape
   form, the shared utility, and the VM family schema for listing shapes, places the utility
-  in `market_core`, and records the flat-name exception its rename resolves.
+  in the foundation kit `kit/capability-shape`, and records the flat-name exception its
+  rename resolves.
 - **`pools-9-retire-local-physical-authority`.** The override endpoint its design planned
   over `compute_capacity_pools` is superseded by decision 7. It still retires the legacy
   override tier with its writer.

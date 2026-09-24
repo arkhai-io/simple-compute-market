@@ -37,6 +37,7 @@ from fastapi_utils.cbv import cbv
 from market_identity import RotationRequest
 
 import market_storefront.container as _container
+from market_storefront.services.shape_feasibility import vm_shape_feasibility
 from market_storefront.failure_actions import (
     FulfillmentFailureContext,
     apply_fulfillment_failure_policy,
@@ -1099,6 +1100,7 @@ class AdminController:
             configured_site_count=configured_site_count,
             member_availability=availability,
             backed_only=True,
+            shape_feasible=vm_shape_feasibility(),
         )
         for listing_id in closed_listing_ids:
             await self._db.update_listing(
@@ -1121,6 +1123,7 @@ class AdminController:
             self._db.db_path,
             home_site=home_site,
             member_availability=availability,
+            shape_feasible=vm_shape_feasibility(),
         )
         for listing_id in reopened_listing_ids:
             await self._db.update_listing(

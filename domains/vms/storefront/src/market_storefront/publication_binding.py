@@ -12,7 +12,11 @@ from core_storefront.domain_registry import (
     canonical_source_envelope,
 )
 
-from domains.vms.listings.reconciler import positive_gpu_count
+from domains.vms.listings.listing_shapes import resolve_shape
+from domains.vms.listings.reconciler import (
+    LISTING_SOURCE_KIND,
+    LISTING_SOURCE_SCHEMA_VERSION,
+)
 
 from .domain_runtime import build_vm_storefront_registry
 from .utils.sqlite_client import SQLiteClient
@@ -32,14 +36,9 @@ def prepare_vm_listing_binding(
     resource_id = candidate.get("resource_id")
     if pool_id is None and resource_id is None:
         raise ValueError("VM publication candidate requires pool or resource provenance")
-    gpu_count = positive_gpu_count(candidate.get("gpu_count"))
-    if gpu_count is None:
-        # Every derivation path produces a positive count; a candidate without
-        # one is a programming error, not a 1-GPU slice.
-        raise ValueError(
-            "VM publication candidate requires a positive integer gpu_count, "
-            f"not {candidate.get('gpu_count')!r}"
-        )
+    # Every derivation path produces a shape; a candidate without a valid one
+    # is a programming error, not a default shape to be assumed.
+    listing_shape = resolve_shape(candidate.get("listing_shape")).shape
     capacity_backing = candidate.get("capacity_backing")
     if capacity_backing not in CAPACITY_BACKING_VALUES:
         raise ValueError(
@@ -48,14 +47,16 @@ def prepare_vm_listing_binding(
         )
     registry = build_vm_storefront_registry()
     registration = registry.resolve_mode("vm")
+    # The derivation identity includes the canonical shape, whichever source
+    # produced it, so identity depends only on what is offered.
     source = {
-        "kind": "compute.listing_source",
-        "schema_version": 1,
+        "kind": LISTING_SOURCE_KIND,
+        "schema_version": LISTING_SOURCE_SCHEMA_VERSION,
         "payload": {
             "site_id": site_id,
             "pool_id": str(pool_id) if pool_id is not None else None,
             "resource_id": str(resource_id) if resource_id is not None else None,
-            "gpu_count": gpu_count,
+            "listing_shape": {family: dict(fields) for family, fields in listing_shape.items()},
         },
     }
     return StorefrontListingBinding(

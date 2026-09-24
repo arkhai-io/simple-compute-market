@@ -117,7 +117,7 @@ def test_protected_listing_declares_vm_offering_mode() -> None:
     assert captured["capacity_source"] == {
         "site_id": "default",
         "resource_id": "resource-1",
-        "gpu_count": 1,
+        "listing_shape": {"gpu": {"count": 1, "model": "H100"}},
     }
 
 

@@ -58,7 +58,7 @@ def _record_bound_listing(
             "site_id": site_id,
             "pool_id": pool_id,
             "resource_id": resource_id,
-            "gpu_count": gpu_count,
+            "listing_shape": {"gpu": {"count": gpu_count, "model": "H200"}},
         },
     )
     repository = SQLiteClient(db_path=db_path, registry=_VM_REGISTRY)

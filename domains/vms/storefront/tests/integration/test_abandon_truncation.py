@@ -75,7 +75,7 @@ async def _persist_terminal_negotiation(
             "capacity_backing": "backed",
             "site_id": "default",
             "pool_id": pool_id,
-            "gpu_count": 1,
+            "listing_shape": {"gpu": {"count": 1, "model": "H200"}},
         },
     )
     await db.upsert_listing_with_binding(

@@ -50,6 +50,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal, Mapping, cast
 
+from market_capability_shape import shape_structure_problems
+
 
 DELIVERABLE_MODES_POLICY_TAG = "deliverable_modes"
 ADVERTISABLE_MODES_POLICY_TAG = "advertisable_modes"
@@ -78,6 +80,7 @@ MAX_RESERVATION_HOLD_SECONDS_POLICY_TAG = "max_reservation_hold_seconds"
 REGION_POLICY_TAG = "region"
 SLA_POLICY_TAG = "sla"
 PRICING_POLICY_TAG = "pricing"
+LISTING_SHAPES_POLICY_TAG = "listing_shapes"
 
 
 def _declared_mode_set(policy_tags: Mapping[str, Any], tag: str) -> frozenset[str]:
@@ -339,6 +342,20 @@ def raw_pricing(policy_tags: Mapping[str, Any]) -> Any:
     return policy_tags.get(PRICING_POLICY_TAG)
 
 
+def raw_listing_shapes(policy_tags: Mapping[str, Any], offering_mode: str) -> Any:
+    """The unvalidated shape list a pool states for ``offering_mode``, or None.
+
+    None when the pool states no ``listing_shapes`` at all, when the value is
+    not a mapping, or when it names no list for this mode. The domain selling
+    ``offering_mode`` owns the shape vocabulary and validates each shape; this
+    package checks only structure, at write time (``validate_listing_shapes``).
+    """
+    shapes = policy_tags.get(LISTING_SHAPES_POLICY_TAG)
+    if not isinstance(shapes, Mapping):
+        return None
+    return shapes.get(offering_mode)
+
+
 def max_reservation_hold_seconds(policy_tags: Mapping[str, Any]) -> int | None:
     """The pool's advisory hold-TTL cap, or None if absent or invalid.
 
@@ -436,3 +453,37 @@ def validate_sla_preference(policy_tags: Mapping[str, Any]) -> list[str]:
     if raw < 0:
         return [f"{SLA_POLICY_TAG} must be a nonnegative number"]
     return []
+
+
+def validate_listing_shapes(policy_tags: Mapping[str, Any]) -> list[str]:
+    """Return human-readable problems with a supplied ``listing_shapes`` value.
+
+    Empty list means valid, including "not supplied at all": the hint is
+    optional. A present value must map each offering mode to a non-empty list
+    of structurally well-formed family-grouped capability shapes. Which
+    families and fields exist, and which are required, is the reading domain's
+    to validate, so a well-formed shape naming a field no domain defines is
+    accepted here. An empty list is refused because stopping sales is done by
+    closing listings, not by declaring nothing.
+    """
+    if LISTING_SHAPES_POLICY_TAG not in policy_tags:
+        return []
+    raw = policy_tags[LISTING_SHAPES_POLICY_TAG]
+    tag = LISTING_SHAPES_POLICY_TAG
+    if not isinstance(raw, Mapping):
+        return [f"{tag} must be a mapping of offering mode to a list of shapes"]
+    problems: list[str] = []
+    for mode, shapes in raw.items():
+        if not isinstance(mode, str) or not mode:
+            problems.append(f"{tag} offering modes must be non-empty strings, not {mode!r}")
+            continue
+        if not isinstance(shapes, list) or not shapes:
+            problems.append(f"{tag}.{mode} must be a non-empty list of shapes")
+            continue
+        for index, shape in enumerate(shapes):
+            for problem in shape_structure_problems(shape):
+                location = f"{tag}.{mode}[{index}]"
+                if problem.path:
+                    location += f".{problem.path}"
+                problems.append(f"{location}: {problem.message}")
+    return problems

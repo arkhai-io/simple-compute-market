@@ -36,20 +36,51 @@ from domains.vms.listings.reconciler import (
     _projected_pool_rows as _projected_pool_rows_impl,
     _SiteDerivationReport,
     _projected_resource_usage,
-    available_compute_slices,
-    closed_available_listing_ids,
-    current_available_resource_keys,
+    available_compute_slices as _available_compute_slices,
+    closed_available_listing_ids as _closed_available_listing_ids,
+    current_available_resource_keys as _current_available_resource_keys,
     listing_pool_key,
     listing_resource_key,
+    listing_shape_key,
     open_listing_resource_keys,
     pool_id_for_listing,
     site_id_for_listing,
-    stale_open_listing_ids,
+    stale_open_listing_ids as _stale_open_listing_ids,
 )
+from domains.vms.listings.listing_shapes import resolve_shape
 from market_storefront.domain_runtime import (
     build_vm_storefront_domain,
     build_vm_storefront_registry,
 )
+from market_storefront.services.shape_feasibility import SiteShapeFeasibility
+
+# Every derivation judges shapes with the storefront's real feasibility, built
+# on the site's own predicate, unless a test injects its own.
+_FEASIBILITY = SiteShapeFeasibility()
+
+
+def _judged(function):
+    def call(*args, **kwargs):
+        kwargs.setdefault("shape_feasible", _FEASIBILITY)
+        return function(*args, **kwargs)
+
+    return call
+
+
+available_compute_slices = _judged(_available_compute_slices)
+closed_available_listing_ids = _judged(_closed_available_listing_ids)
+current_available_resource_keys = _judged(_current_available_resource_keys)
+stale_open_listing_ids = _judged(_stale_open_listing_ids)
+
+
+def _gpu_key(site_id: str, *, gpu_count: int, model: str, pool_id=None, resource_id=None) -> str:
+    """The key of a default GPU-only shape."""
+    return listing_shape_key(
+        site_id,
+        shape_digest=resolve_shape({"gpu": {"count": gpu_count, "model": model}}).digest,
+        pool_id=pool_id,
+        resource_id=resource_id,
+    )
 
 
 _VM_DOMAIN = build_vm_storefront_domain()
@@ -106,6 +137,7 @@ def _projected_pool_rows(pool, **kwargs):
     kwargs.setdefault("declaration", declaration)
     kwargs.setdefault("holds", set())
     kwargs.setdefault("report", _SiteDerivationReport())
+    kwargs.setdefault("shape_feasible", _FEASIBILITY)
     return _projected_pool_rows_impl(pool, **kwargs)
 
 
@@ -254,16 +286,20 @@ def _seed_listing_binding(
     pool_id: str | None,
     resource_id: str | None,
     gpu_count: int,
+    gpu_model: str = "H100",
+    schema_version: int = 2,
 ) -> None:
+    """Bind a listing as publication does: version 2 carries the listing's
+    shape; version 1 is how listings were bound before shapes."""
+    payload: dict = {"site_id": site_id, "pool_id": pool_id, "resource_id": resource_id}
+    if schema_version == 1:
+        payload["gpu_count"] = gpu_count
+    else:
+        payload["listing_shape"] = {"gpu": {"count": gpu_count, "model": gpu_model}}
     source = {
         "kind": "compute.listing_source",
-        "schema_version": 1,
-        "payload": {
-            "site_id": site_id,
-            "pool_id": pool_id,
-            "resource_id": resource_id,
-            "gpu_count": gpu_count,
-        },
+        "schema_version": schema_version,
+        "payload": payload,
     }
     binding = StorefrontListingBinding.from_source_envelope(
         listing_id=listing_id,
@@ -311,8 +347,10 @@ def _seed_listing(
     resource_id: str | None = None,
     gpu_count: int = 2,
     site_id: str | None = None,
+    gpu_model: str = "H100",
+    schema_version: int = 2,
 ):
-    listing_resource = {"offering_mode": "vm", "gpu_count": gpu_count}
+    listing_resource = {"offering_mode": "vm", "gpu_count": gpu_count, "gpu_model": gpu_model}
     if pool_id:
         listing_resource["pool_id"] = pool_id
     if resource_id:
@@ -342,6 +380,8 @@ def _seed_listing(
             pool_id=pool_id,
             resource_id=resource_id,
             gpu_count=gpu_count,
+            gpu_model=gpu_model,
+            schema_version=schema_version,
         )
 
 
@@ -402,8 +442,8 @@ class TestAvailableComputeSlices:
     def test_resource_key_is_site_scoped(self, db_path):
         _seed_pool(db_path, gpu_count=1)
         slices = _available_vm_slices(db_path, home_site="site-a")
-        assert slices[0]["resource_key"] == listing_resource_key(
-            "site-a", "resource-1", 1,
+        assert slices[0]["resource_key"] == _gpu_key(
+            "site-a", gpu_count=1, model="H100", resource_id="resource-1",
         )
 
     def test_different_home_site_produces_different_keys_for_identical_data(self, db_path):
@@ -444,9 +484,11 @@ class TestAvailableComputeSlices:
                     "resource_pool_id": "gpu-pool",
                     "resources": [
                         {
-                            "physical_resource_id": "res-1",
+                            "physical_resource_id": "res-1", "resource_type": "compute.gpu",
                             "capacity": {"gpu_count": 8},
-                            "attributes": {"gpu_model": "H100"},
+                            # The local row publishes region us-east; a claim
+                            # matches it against the declaration.
+                            "attributes": {"gpu_model": "H100", "region": "us-east"},
                             "enabled": True,
                         },
                     ],
@@ -479,9 +521,9 @@ class TestAvailableComputeSlices:
                     "resource_pool_id": "gpu-pool",  # same pool_id as the local row
                     "resources": [
                         {
-                            "physical_resource_id": "res-1",
+                            "physical_resource_id": "res-1", "resource_type": "compute.gpu",
                             "capacity": {"gpu_count": 8},
-                            "attributes": {},
+                            "attributes": {"gpu_model": "H100"},
                             "enabled": True,
                         },
                     ],
@@ -505,9 +547,9 @@ class TestAvailableComputeSlices:
                     "resource_pool_id": "unpriced-pool",
                     "resources": [
                         {
-                            "physical_resource_id": "res-1",
+                            "physical_resource_id": "res-1", "resource_type": "compute.gpu",
                             "capacity": {"gpu_count": 4},
-                            "attributes": {},
+                            "attributes": {"gpu_model": "H100"},
                             "enabled": True,
                         },
                     ],
@@ -526,7 +568,7 @@ class TestAvailableComputeSlices:
                     "resource_pool_id": "gpu-pool",
                     "resources": [
                         {
-                            "physical_resource_id": "res-1",
+                            "physical_resource_id": "res-1", "resource_type": "compute.gpu",
                             "capacity": {"gpu_count": 8},
                             "attributes": {},
                             "enabled": False,
@@ -552,16 +594,16 @@ class TestAvailableComputeSlices:
             "site-a": [{
                 "resource_pool_id": "gpu-pool",
                 "resources": [{
-                    "physical_resource_id": "res-1",
+                    "physical_resource_id": "res-1", "resource_type": "compute.gpu",
                     "capacity": {"gpu_count": 8},
-                    "attributes": {"gpu_model": "H100"},
+                    "attributes": {"gpu_model": "H100", "region": "us-east"},
                     "enabled": True,
                 }],
             }],
             "site-b": [{
                 "resource_pool_id": "other-pool",
                 "resources": [{
-                    "physical_resource_id": "res-2",
+                    "physical_resource_id": "res-2", "resource_type": "compute.gpu",
                     "capacity": {"gpu_count": 4},
                     "attributes": {"gpu_model": "A100"},
                     "enabled": True,
@@ -593,7 +635,7 @@ class TestAvailableComputeSlices:
             "site-a": [{
                 "resource_pool_id": "gpu-pool",
                 "resources": [{
-                    "physical_resource_id": "res-1",
+                    "physical_resource_id": "res-1", "resource_type": "compute.gpu",
                     "capacity": {"gpu_count": 4},
                     "attributes": {"gpu_model": "H100"},
                     "enabled": True,
@@ -696,7 +738,7 @@ class TestOpenListingResourceKeys:
         covered = open_listing_resource_keys(
             db_path, home_site="site-a", configured_site_count=1,
         )
-        assert listing_pool_key("site-a", "gpu-pool", 2) in covered
+        assert _gpu_key("site-a", gpu_count=2, model="H100", pool_id="gpu-pool") in covered
 
     def test_unbound_listing_is_excluded_even_with_one_configured_site(
         self, db_path,
@@ -728,7 +770,7 @@ class TestOpenListingResourceKeys:
         covered = open_listing_resource_keys(
             db_path, home_site="site-a", configured_site_count=3,
         )
-        assert listing_pool_key("site-b", "gpu-pool", 2) in covered
+        assert _gpu_key("site-b", gpu_count=2, model="H100", pool_id="gpu-pool") in covered
 
     def test_bound_listing_does_not_require_a_derived_row(self, db_path):
         _seed_listing(
@@ -741,7 +783,7 @@ class TestOpenListingResourceKeys:
         covered = open_listing_resource_keys(
             db_path, home_site="site-a", configured_site_count=1,
         )
-        assert listing_pool_key("site-a", "gpu-pool", 2) in covered
+        assert _gpu_key("site-a", gpu_count=2, model="H100", pool_id="gpu-pool") in covered
 
 # ---------------------------------------------------------------------------
 # stale_open_listing_ids -- unbound listings are never attributed to a site
@@ -1065,7 +1107,7 @@ class TestProjectedResourceUsage:
 
     def test_none_availability_means_fully_available(self):
         usage = _projected_resource_usage(
-            {"physical_resource_id": "res-1", "capacity": {"gpu_count": 8}},
+            {"physical_resource_id": "res-1", "resource_type": "compute.gpu", "capacity": {"gpu_count": 8}},
             site_id="site-a", member_availability=None,
         )
         assert usage.total == 8
@@ -1077,7 +1119,7 @@ class TestProjectedResourceUsage:
         (which is only a fallback for when it's absent)."""
         usage = _projected_resource_usage(
             {
-                "physical_resource_id": "res-1",
+                "physical_resource_id": "res-1", "resource_type": "compute.gpu",
                 "capacity": {"gpu_count": 8},
                 "available": {"gpu_count": 5},
             },
@@ -1093,7 +1135,7 @@ class TestProjectedResourceUsage:
         *different* fallback source happens to be present."""
         usage = _projected_resource_usage(
             {
-                "physical_resource_id": "res-1",
+                "physical_resource_id": "res-1", "resource_type": "compute.gpu",
                 "capacity": {"gpu_count": 8},
                 "available": {"gpu_count": 5},
             },
@@ -1139,7 +1181,7 @@ class TestProjectedResourceUsage:
 
     def test_falls_back_to_member_availability_when_no_available_field(self):
         usage = _projected_resource_usage(
-            {"physical_resource_id": "res-1", "capacity": {"gpu_count": 8}},
+            {"physical_resource_id": "res-1", "resource_type": "compute.gpu", "capacity": {"gpu_count": 8}},
             site_id="site-a",
             member_availability={("site-a", "res-1"): 2},
         )
@@ -1148,7 +1190,7 @@ class TestProjectedResourceUsage:
     def test_gpu_model_read_from_attributes(self):
         usage = _projected_resource_usage(
             {
-                "physical_resource_id": "res-1",
+                "physical_resource_id": "res-1", "resource_type": "compute.gpu",
                 "capacity": {"gpu_count": 1},
                 "attributes": {"gpu_model": "A100"},
             },
@@ -1158,7 +1200,7 @@ class TestProjectedResourceUsage:
 
     def test_gpu_model_none_when_absent(self):
         usage = _projected_resource_usage(
-            {"physical_resource_id": "res-1", "capacity": {"gpu_count": 1}},
+            {"physical_resource_id": "res-1", "resource_type": "compute.gpu", "capacity": {"gpu_count": 1}},
             site_id="site-a", member_availability=None,
         )
         assert usage.gpu_model is None
@@ -1279,7 +1321,7 @@ class TestProjectedPoolRows:
             "resource_pool_id": "gpu-pool",
             "resources": [
                 {
-                    "physical_resource_id": "res-1",
+                    "physical_resource_id": "res-1", "resource_type": "compute.gpu",
                     "capacity": {"gpu_count": 4},
                     "attributes": {"gpu_model": "H100"},
                     "enabled": True,
@@ -1320,7 +1362,7 @@ class TestProjectedPoolRows:
             "resource_pool_id": "unpriced",
             "resources": [
                 {
-                    "physical_resource_id": "res-1",
+                    "physical_resource_id": "res-1", "resource_type": "compute.gpu",
                     "capacity": {"gpu_count": 4},
                     "attributes": {"gpu_model": "A100"},
                     "enabled": True,
@@ -1352,7 +1394,7 @@ class TestProjectedPoolRows:
             "resource_pool_id": "gpu-pool",
             "resources": [
                 {
-                    "physical_resource_id": "res-1",
+                    "physical_resource_id": "res-1", "resource_type": "compute.gpu",
                     "capacity": {"gpu_count": 4},
                     "attributes": {"gpu_model": "H100"},
                     "enabled": True,
@@ -1390,7 +1432,7 @@ class TestProjectedPoolRows:
             "resource_pool_id": "gpu-pool",
             "resources": [
                 {
-                    "physical_resource_id": "res-1",
+                    "physical_resource_id": "res-1", "resource_type": "compute.gpu",
                     "capacity": {"gpu_count": 4},
                     "attributes": {"gpu_model": "H100"},
                     "enabled": True,
@@ -1409,12 +1451,12 @@ class TestProjectedPoolRows:
             "resource_pool_id": "gpu-pool",
             "resources": [
                 {
-                    "physical_resource_id": "res-1",
+                    "physical_resource_id": "res-1", "resource_type": "compute.gpu",
                     "capacity": {"gpu_count": 4},
                     "enabled": True,
                 },
                 {
-                    "physical_resource_id": "res-2",
+                    "physical_resource_id": "res-2", "resource_type": "compute.gpu",
                     "capacity": {"gpu_count": 4},
                     "enabled": True,
                 },
@@ -1432,7 +1474,7 @@ class TestProjectedPoolRows:
             "resource_pool_id": "gpu-pool",
             "resources": [
                 {
-                    "physical_resource_id": "res-1",
+                    "physical_resource_id": "res-1", "resource_type": "compute.gpu",
                     "capacity": {"gpu_count": 4},
                     "enabled": False,
                 },
@@ -1450,7 +1492,7 @@ class TestProjectedPoolRows:
             "resource_pool_id": "gpu-pool",
             "resources": [
                 {
-                    "physical_resource_id": "res-1",
+                    "physical_resource_id": "res-1", "resource_type": "compute.gpu",
                     "capacity": {"gpu_count": 4},
                     "attributes": {"gpu_model": "A100"},
                     "enabled": True,
@@ -1467,7 +1509,7 @@ class TestProjectedPoolRows:
             "resource_pool_id": "gpu-pool",
             "resources": [
                 {
-                    "physical_resource_id": "res-1",
+                    "physical_resource_id": "res-1", "resource_type": "compute.gpu",
                     "capacity": {"gpu_count": 4},
                     "enabled": True,
                 },
@@ -1484,7 +1526,7 @@ class TestProjectedPoolRows:
         rows = _project_vm_pool_rows({
             "resource_pool_id": "gpu-pool",
             "resources": [
-                {"physical_resource_id": "res-1", "capacity": {"gpu_count": 4}, "enabled": True},
+                {"physical_resource_id": "res-1", "resource_type": "compute.gpu", "capacity": {"gpu_count": 4}, "enabled": True},
             ],
             "pool_metadata": {"policy_tags": {"region": "Nevada, US"}},
         },
@@ -1497,7 +1539,7 @@ class TestProjectedPoolRows:
         rows = _project_vm_pool_rows({
             "resource_pool_id": "gpu-pool",
             "resources": [
-                {"physical_resource_id": "res-1", "capacity": {"gpu_count": 4}, "enabled": True},
+                {"physical_resource_id": "res-1", "resource_type": "compute.gpu", "capacity": {"gpu_count": 4}, "enabled": True},
             ],
         },
         site_id="site-a", home_site="site-a",
@@ -1513,7 +1555,7 @@ class TestProjectedPoolRows:
         rows = _project_vm_pool_rows({
             "resource_pool_id": "gpu-pool",
             "resources": [
-                {"physical_resource_id": "res-1", "capacity": {"gpu_count": 4}, "enabled": True},
+                {"physical_resource_id": "res-1", "resource_type": "compute.gpu", "capacity": {"gpu_count": 4}, "enabled": True},
             ],
             "pool_metadata": {"policy_tags": {"sla": 50.0}},
         },
@@ -1526,7 +1568,7 @@ class TestProjectedPoolRows:
         rows = _project_vm_pool_rows({
             "resource_pool_id": "gpu-pool",
             "resources": [
-                {"physical_resource_id": "res-1", "capacity": {"gpu_count": 4}, "enabled": True},
+                {"physical_resource_id": "res-1", "resource_type": "compute.gpu", "capacity": {"gpu_count": 4}, "enabled": True},
             ],
             "pool_metadata": {"policy_tags": {"sla": 95.0}},
         },
@@ -1542,7 +1584,7 @@ class TestProjectedPoolRows:
         rows = _project_vm_pool_rows({
             "resource_pool_id": "gpu-pool",
             "resources": [
-                {"physical_resource_id": "res-1", "capacity": {"gpu_count": 4}, "enabled": True},
+                {"physical_resource_id": "res-1", "resource_type": "compute.gpu", "capacity": {"gpu_count": 4}, "enabled": True},
             ],
             "pool_metadata": {"policy_tags": {"sla": 95.0}},
         },
@@ -1558,7 +1600,7 @@ class TestProjectedPoolRows:
         rows = _project_vm_pool_rows({
             "resource_pool_id": "gpu-pool",
             "resources": [
-                {"physical_resource_id": "res-1", "capacity": {"gpu_count": 4}, "enabled": True},
+                {"physical_resource_id": "res-1", "resource_type": "compute.gpu", "capacity": {"gpu_count": 4}, "enabled": True},
             ],
         },
         site_id="site-a", home_site="site-a",
@@ -1576,7 +1618,7 @@ class TestProjectedPoolRows:
             "resource_pool_id": "gpu-pool",
             "resources": [
                 {
-                    "physical_resource_id": "res-1", "capacity": {"gpu_count": 4},
+                    "physical_resource_id": "res-1", "resource_type": "compute.gpu", "capacity": {"gpu_count": 4},
                     "attributes": {"gpu_model": "H100"}, "enabled": True,
                 },
             ],
@@ -1594,7 +1636,7 @@ class TestProjectedPoolRows:
             "resource_pool_id": "gpu-pool",
             "resources": [
                 {
-                    "physical_resource_id": "res-1", "capacity": {"gpu_count": 4},
+                    "physical_resource_id": "res-1", "resource_type": "compute.gpu", "capacity": {"gpu_count": 4},
                     "attributes": {"gpu_model": "H100"}, "enabled": True,
                 },
             ],
@@ -1612,7 +1654,7 @@ class TestProjectedPoolRows:
             "resource_pool_id": "gpu-pool",
             "resources": [
                 {
-                    "physical_resource_id": "res-1", "capacity": {"gpu_count": 4},
+                    "physical_resource_id": "res-1", "resource_type": "compute.gpu", "capacity": {"gpu_count": 4},
                     "attributes": {"gpu_model": "H100"}, "enabled": True,
                 },
             ],
@@ -1632,7 +1674,7 @@ class TestProjectedPoolRows:
             "resource_pool_id": "gpu-pool",
             "resources": [
                 {
-                    "physical_resource_id": "res-1", "capacity": {"gpu_count": 4},
+                    "physical_resource_id": "res-1", "resource_type": "compute.gpu", "capacity": {"gpu_count": 4},
                     "attributes": {"gpu_model": "H100"}, "enabled": True,
                 },
             ],
@@ -1653,11 +1695,11 @@ class TestProjectedPoolRows:
             "resource_pool_id": "gpu-pool",
             "resources": [
                 {
-                    "physical_resource_id": "res-1", "capacity": {"gpu_count": 8},
+                    "physical_resource_id": "res-1", "resource_type": "compute.gpu", "capacity": {"gpu_count": 8},
                     "attributes": {"gpu_model": "H100"}, "enabled": True,
                 },
                 {
-                    "physical_resource_id": "res-2", "capacity": {"gpu_count": 8},
+                    "physical_resource_id": "res-2", "resource_type": "compute.gpu", "capacity": {"gpu_count": 8},
                     "attributes": {"gpu_model": "A100"}, "enabled": True,
                 },
             ],
@@ -1691,7 +1733,7 @@ class TestProjectedPoolRows:
             "resource_pool_id": "gpu-pool",
             "resources": [
                 {
-                    "physical_resource_id": "res-1",
+                    "physical_resource_id": "res-1", "resource_type": "compute.gpu",
                     "capacity": {"gpu_count": 4},
                     "enabled": True,
                 },
@@ -1710,8 +1752,8 @@ class TestProjectedPoolRows:
         rows = _project_vm_pool_rows({
             "resource_pool_id": "gpu-pool",
             "resources": [
-                {"physical_resource_id": "res-1", "capacity": {"gpu_count": 4}, "enabled": True},
-                {"physical_resource_id": "res-2", "capacity": {"gpu_count": 4}, "enabled": True},
+                {"physical_resource_id": "res-1", "resource_type": "compute.gpu", "capacity": {"gpu_count": 4}, "enabled": True},
+                {"physical_resource_id": "res-2", "resource_type": "compute.gpu", "capacity": {"gpu_count": 4}, "enabled": True},
             ],
             "pool_metadata": {"policy_tags": {"listing_cardinality_mode": "bogus"}},
         },
@@ -1730,7 +1772,7 @@ class TestProjectedPoolRows:
             "resource_pool_id": "gpu-pool",
             "resources": [
                 {
-                    "physical_resource_id": "res-1",
+                    "physical_resource_id": "res-1", "resource_type": "compute.gpu",
                     "capacity": {"gpu_count": 8},
                     "attributes": {"gpu_model": "H100"},
                     "enabled": True,
@@ -1755,21 +1797,21 @@ class TestProjectedPoolRows:
             "resource_pool_id": "gpu-pool",
             "resources": [
                 {
-                    "physical_resource_id": "res-1",
+                    "physical_resource_id": "res-1", "resource_type": "compute.gpu",
                     "capacity": {"gpu_count": 8},
                     "available": {"gpu_count": 8},
                     "attributes": {"gpu_model": "H100"},
                     "enabled": True,
                 },
                 {
-                    "physical_resource_id": "res-2",
+                    "physical_resource_id": "res-2", "resource_type": "compute.gpu",
                     "capacity": {"gpu_count": 8},
                     "available": {"gpu_count": 6},
                     "attributes": {"gpu_model": "H100"},
                     "enabled": True,
                 },
                 {
-                    "physical_resource_id": "res-3",
+                    "physical_resource_id": "res-3", "resource_type": "compute.gpu",
                     "capacity": {"gpu_count": 8},
                     "available": {"gpu_count": 0},
                     "attributes": {"gpu_model": "H100"},
@@ -1798,12 +1840,12 @@ class TestProjectedPoolRows:
             "resource_pool_id": "gpu-pool",
             "resources": [
                 {
-                    "physical_resource_id": "res-1",
+                    "physical_resource_id": "res-1", "resource_type": "compute.gpu",
                     "capacity": {"gpu_count": 8},
                     "enabled": True,
                 },
                 {
-                    "physical_resource_id": "res-2",
+                    "physical_resource_id": "res-2", "resource_type": "compute.gpu",
                     "capacity": {"gpu_count": 8},
                     "enabled": False,
                 },
@@ -1828,13 +1870,13 @@ class TestProjectedPoolRows:
             "resource_pool_id": "gpu-pool",
             "resources": [
                 {
-                    "physical_resource_id": "res-1",
+                    "physical_resource_id": "res-1", "resource_type": "compute.gpu",
                     "capacity": {"gpu_count": 8},
                     "attributes": {"gpu_model": "H100"},
                     "enabled": True,
                 },
                 {
-                    "physical_resource_id": "res-2",
+                    "physical_resource_id": "res-2", "resource_type": "compute.gpu",
                     "capacity": {"gpu_count": 8},
                     "attributes": {"gpu_model": "H100"},
                     "enabled": True,
@@ -1878,7 +1920,7 @@ class TestProjectedPoolRows:
             "resource_pool_id": "gpu-pool",
             "resources": [
                 {
-                    "physical_resource_id": "res-1",
+                    "physical_resource_id": "res-1", "resource_type": "compute.gpu",
                     "capacity": {"gpu_count": 8},
                     "enabled": True,
                 },
@@ -1907,7 +1949,7 @@ class TestProjectedPoolRows:
             "resource_pool_id": "gpu-pool",
             "resources": [
                 {
-                    "physical_resource_id": "res-1",
+                    "physical_resource_id": "res-1", "resource_type": "compute.gpu",
                     "capacity": {"gpu_count": 8},
                     "enabled": True,
                 },
@@ -1928,7 +1970,7 @@ class TestProjectedPoolRows:
             "resource_pool_id": "gpu-pool",
             "resources": [
                 {
-                    "physical_resource_id": "res-1",
+                    "physical_resource_id": "res-1", "resource_type": "compute.gpu",
                     "capacity": {"gpu_count": 4},
                     "available": {"gpu_count": 3},
                     "enabled": True,
@@ -1950,7 +1992,7 @@ class TestProjectedPoolRows:
             "resource_pool_id": "gpu-pool",
             "resources": [
                 {
-                    "physical_resource_id": "res-1",
+                    "physical_resource_id": "res-1", "resource_type": "compute.gpu",
                     "capacity": {"gpu_count": 4},
                     "available": {"gpu_count": 4},
                     "enabled": True,
@@ -1971,7 +2013,7 @@ class TestProjectedPoolRows:
             "resource_pool_id": "gpu-pool",
             "resources": [
                 {
-                    "physical_resource_id": "res-1",
+                    "physical_resource_id": "res-1", "resource_type": "compute.gpu",
                     "capacity": {"gpu_count": 4},
                     "available": {"gpu_count": 4},
                     "enabled": True,
@@ -2034,11 +2076,13 @@ def _declared_pool(
         },
         "resources": [
             {
-                "physical_resource_id": resource_id,
+                "physical_resource_id": resource_id, "resource_type": "compute.gpu",
                 "enabled": True,
                 "capacity": {} if count is None else {"gpu_count": count},
                 "available": {"gpu_count": available},
-                "attributes": {"gpu_model": "H100"},
+                # Claims match region against the declaration itself, so a
+                # reservable member declares the region its pool advertises.
+                "attributes": {"gpu_model": "H100", "region": "us-east"},
             }
             for resource_id, count, available in members
         ],
@@ -2246,7 +2290,7 @@ class TestHeldAndWithdrawnListings:
             == []
         )
 
-    def test_a_stored_listing_without_a_usable_count_is_not_keyed(self, db_path):
+    def test_a_stored_key_comes_from_the_binding_not_the_published_fields(self, db_path):
         _seed_listing(db_path, listing_id="countless", pool_id="pool-b", site_id="site-a")
         conn = sqlite3.connect(db_path)
         try:
@@ -2258,6 +2302,265 @@ class TestHeldAndWithdrawnListings:
         finally:
             conn.close()
 
+        # Flattening need not be invertible, so a key is never rebuilt from what
+        # the listing publishes.
         assert open_listing_resource_keys(
             db_path, home_site="site-a", configured_site_count=1
-        ) == set()
+        ) == {_gpu_key("site-a", gpu_count=2, model="H100", pool_id="pool-b")}
+
+    def test_a_listing_bound_before_shapes_keeps_a_key_no_derivation_produces(
+        self, db_path
+    ):
+        _seed_listing(
+            db_path, listing_id="v1", pool_id="pool-b", site_id="site-a", schema_version=1
+        )
+
+        assert open_listing_resource_keys(
+            db_path, home_site="site-a", configured_site_count=1
+        ) == {listing_pool_key("site-a", "pool-b", 2)}
+
+
+def test_structural_keys_are_byte_identical_to_stored_keys():
+    # Stored listings are found by these exact strings; the shared encoding must
+    # reproduce them byte for byte, including for delimiter-bearing identifiers.
+    assert listing_pool_key("site-a", "b:c", 2) == "pool:6:site-a:3:b:c:gpus:2"
+    assert listing_resource_key("s", "r:1", 1) == "1:s:3:r:1:gpus:1"
+
+
+# ---------------------------------------------------------------------------
+# Listing shapes: sources, feasibility, identity, and reporting
+# ---------------------------------------------------------------------------
+
+
+def _member(
+    resource_id: str,
+    *,
+    capacity: dict,
+    available: dict | None = None,
+    attributes: dict | None = None,
+    resource_type: str | None = "compute.gpu",
+) -> dict:
+    member = {
+        "physical_resource_id": resource_id,
+        "enabled": True,
+        "capacity": capacity,
+        "attributes": {"gpu_model": "H100", "region": "us-east", **(attributes or {})},
+    }
+    if resource_type is not None:
+        member["resource_type"] = resource_type
+    if available is not None:
+        member["available"] = available
+    return member
+
+
+def _shaped_pool(
+    pool_id: str,
+    members: list[dict],
+    *,
+    tags: dict = _BACKED,
+    shapes: list | None = None,
+    cardinality: str = "fungible",
+    region: str = "us-east",
+) -> dict:
+    policy_tags = {**tags, "listing_cardinality_mode": cardinality, "region": region}
+    if shapes is not None:
+        policy_tags["listing_shapes"] = {"vm": shapes}
+    return {
+        "resource_pool_id": pool_id,
+        "pool_metadata": {"enabled": True, "policy_tags": policy_tags},
+        "resources": members,
+    }
+
+
+def _shape_slices(db_path, pools, *, buckets=None, holds=None):
+    return available_compute_slices(
+        db_path,
+        home_site="site-a",
+        site_pool_projection={"site-a": pools},
+        site_capacity_buckets=None if buckets is None else {"site-a": buckets},
+        holds=holds,
+    )
+
+
+def _site_report() -> dict:
+    from domains.vms.listings.reconciler import derivation_reports
+
+    return derivation_reports()["site-a"]
+
+
+_BIG = {"gpu_count": 8, "vcpu_count": 64, "ram_gb": 512, "disk_gb": 2000}
+_SMALL_SHAPE = {"gpu": {"count": 1, "model": "H100"}, "cpu": {"count": 8},
+                "memory": {"gib": 64}, "storage": {"gib": 100}}
+
+
+class TestListingShapes:
+    def test_a_pool_hint_publishes_its_shapes_and_no_default_shapes(self, db_path):
+        pool = _shaped_pool(
+            "gpu", [_member("m1", capacity=_BIG)],
+            shapes=[_SMALL_SHAPE, {"gpu": {"count": 2, "model": "H100"}, "memory": {"gib": 128}}],
+        )
+
+        slices = _shape_slices(db_path, [pool])
+
+        assert len(slices) == 2
+        by_count = {row["gpu_count"]: row for row in slices}
+        assert (by_count[1]["vcpu_count"], by_count[1]["ram_gb"], by_count[1]["disk_gb"]) == (8, 64, 100)
+        # A dimension the shape omits is neither published nor claimed.
+        assert "vcpu_count" not in by_count[2] and "disk_gb" not in by_count[2]
+        assert by_count[2]["ram_gb"] == 128
+        assert {row["shape_source"] for row in slices} == {"pool_hint"}
+
+    def test_a_specific_resource_pool_publishes_per_member_per_feasible_shape(self, db_path):
+        pool = _shaped_pool(
+            "gpu",
+            [_member("big", capacity=_BIG), _member("small", capacity={**_BIG, "ram_gb": 128})],
+            shapes=[{"gpu": {"count": 1, "model": "H100"}, "memory": {"gib": 256}}],
+            cardinality="specific_resource",
+        )
+
+        assert [row["resource_id"] for row in _shape_slices(db_path, [pool])] == ["big"]
+
+    def test_default_shapes_reproduce_gpu_only_listings(self, db_path):
+        pool = _shaped_pool("gpu", [_member("m1", capacity=_BIG)])
+
+        slices = _shape_slices(db_path, [pool])
+
+        assert sorted(row["gpu_count"] for row in slices) == list(range(1, 9))
+        for row in slices:
+            assert row["listing_shape"] == {"gpu": {"count": row["gpu_count"], "model": "H100"}}
+            assert not {"vcpu_count", "ram_gb", "disk_gb"} & set(row)
+            assert (row["pool_id"], row["gpu_model"], row["region"]) == ("gpu", "H100", "us-east")
+
+    def test_a_mixed_model_pool_publishes_per_model(self, db_path):
+        pool = _shaped_pool(
+            "gpu",
+            [
+                _member("h", capacity={"gpu_count": 2}),
+                _member("a", capacity={"gpu_count": 1}, attributes={"gpu_model": "A100"}),
+            ],
+        )
+
+        published = sorted((row["gpu_model"], row["gpu_count"]) for row in _shape_slices(db_path, [pool]))
+
+        assert published == [("A100", 1), ("H100", 1), ("H100", 2)]
+
+    def test_backed_memory_being_taken_makes_a_stated_shape_unpublishable(self, db_path):
+        free = _member("m1", capacity=_BIG, available={**_BIG, "ram_gb": 512})
+        taken = _member("m1", capacity=_BIG, available={**_BIG, "ram_gb": 32})
+
+        assert _shape_slices(db_path, [_shaped_pool("gpu", [free], shapes=[_SMALL_SHAPE])])
+        assert _shape_slices(db_path, [_shaped_pool("gpu", [taken], shapes=[_SMALL_SHAPE])]) == []
+
+    def test_loaded_buckets_decide_availability_for_every_dimension(self, db_path):
+        # The member's own availability says memory is taken, but a loaded bucket
+        # family is authoritative for a fungible pool.
+        pool = _shaped_pool(
+            "gpu", [_member("m1", capacity=_BIG, available={**_BIG, "ram_gb": 0})],
+            shapes=[_SMALL_SHAPE],
+        )
+        bucket = {
+            "resource_pool_id": "gpu",
+            "resource_type": "compute.gpu",
+            "resource_subtype": None,
+            "available": {**_BIG, "ram_gb": 128},
+            "grouping_attributes": {"gpu_model": "H100", "region": "us-east"},
+            "resource_count": 1,
+        }
+
+        assert len(_shape_slices(db_path, [pool], buckets=[bucket])) == 1
+        low = {**bucket, "available": {**_BIG, "ram_gb": 32}}
+        assert _shape_slices(db_path, [pool], buckets=[low]) == []
+        # A loaded family naming no entry for the pool means nothing is free.
+        assert _shape_slices(db_path, [pool], buckets=[]) == []
+
+    def test_unknown_availability_is_judged_on_declared_capacity(self, db_path):
+        pool = _shaped_pool("gpu", [_member("m1", capacity=_BIG)], shapes=[_SMALL_SHAPE])
+
+        assert len(_shape_slices(db_path, [pool])) == 1
+
+    def test_an_infeasible_stated_shape_is_reported_with_no_fallback(self, db_path):
+        too_big = {"gpu": {"count": 16, "model": "H100"}}
+        pool = _shaped_pool("gpu", [_member("m1", capacity=_BIG)], shapes=[too_big])
+
+        assert _shape_slices(db_path, [pool]) == []
+        (finding,) = _site_report()["infeasible_shapes"]["gpu"]
+        assert finding["shape"] == too_big
+        assert finding["not_feasible_against"] == "declared"
+        assert finding["shape_digest"] == resolve_shape(too_big).digest
+
+    def test_an_unreadable_hint_holds_the_pool_with_no_fallback(self, db_path):
+        pool = _shaped_pool(
+            "gpu", [_member("m1", capacity=_BIG)], shapes=[{"tpu": {"count": 1}}]
+        )
+        holds: set = set()
+
+        assert _shape_slices(db_path, [pool], holds=holds) == []
+        assert ("pool", "site-a", "gpu") in holds
+        assert _site_report()["unreadable_shapes"]["gpu"]
+
+    def test_editing_a_shape_changes_its_key(self, db_path):
+        def key(gib):
+            pool = _shaped_pool(
+                "gpu", [_member("m1", capacity=_BIG)],
+                shapes=[{"gpu": {"count": 1, "model": "H100"}, "memory": {"gib": gib}}],
+            )
+            (row,) = _shape_slices(db_path, [pool])
+            return row["resource_key"]
+
+        assert key(64) != key(96)
+
+    def test_stating_a_default_shape_keeps_its_key(self, db_path):
+        members = [_member("m1", capacity={"gpu_count": 1})]
+        (default,) = _shape_slices(db_path, [_shaped_pool("gpu", members)])
+        (stated,) = _shape_slices(
+            db_path,
+            [_shaped_pool("gpu", members, shapes=[{"gpu": {"model": "H100", "count": 1}}])],
+        )
+
+        assert default["resource_key"] == stated["resource_key"]
+        assert default["shape_source"] == "default" and stated["shape_source"] == "pool_hint"
+
+    def test_a_region_only_in_the_pool_hint_publishes_nothing_and_is_reported(self, db_path):
+        pool = _shaped_pool(
+            "gpu",
+            [_member("m1", capacity={"gpu_count": 2}, attributes={"region": None})],
+            region="us-west",
+        )
+
+        assert _shape_slices(db_path, [pool]) == []
+        assert _site_report()["undeclared_attributes"] == {
+            "gpu": {"attribute": "region", "value": "us-west"}
+        }
+
+    def test_a_default_shape_unavailable_only_on_load_is_not_reported(self, db_path):
+        pool = _shaped_pool(
+            "gpu", [_member("m1", capacity={"gpu_count": 2}, available={"gpu_count": 0})]
+        )
+
+        assert _shape_slices(db_path, [pool]) == []
+        report = _site_report()
+        assert report["undeclared_attributes"] == {} and report["infeasible_shapes"] == {}
+
+    def test_a_member_without_resource_type_holds_a_fungible_pool(self, db_path):
+        pool = _shaped_pool(
+            "gpu",
+            [_member("m1", capacity={"gpu_count": 2}),
+             _member("m2", capacity={"gpu_count": 2}, resource_type=None)],
+        )
+        holds: set = set()
+
+        assert _shape_slices(db_path, [pool], holds=holds) == []
+        assert ("pool", "site-a", "gpu") in holds
+        assert _site_report()["members_without_resource_type"] == {"m2": "gpu"}
+
+    def test_a_member_without_resource_type_holds_only_itself_in_a_specific_pool(self, db_path):
+        pool = _shaped_pool(
+            "gpu",
+            [_member("m1", capacity={"gpu_count": 1}),
+             _member("m2", capacity={"gpu_count": 1}, resource_type=None)],
+            cardinality="specific_resource",
+        )
+        holds: set = set()
+
+        assert [row["resource_id"] for row in _shape_slices(db_path, [pool], holds=holds)] == ["m1"]
+        assert holds == {("resource", "site-a", "m2")}

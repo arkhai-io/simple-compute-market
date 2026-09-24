@@ -35,13 +35,13 @@ wheels = [
 
 [[package]]
 name = "arkhai-core"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_core-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_core-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -162,7 +162,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-site-client"
-version = "0.4.0"
+version = "0.5.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-kit-identity" },
@@ -170,7 +170,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_site_client-0.4.0-py3-none-any.whl" },
+    { path = "arkhai_kit_site_client-0.5.0-py3-none-any.whl" },
 ]
 
 [[package]]

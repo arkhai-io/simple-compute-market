@@ -9,6 +9,7 @@ import asyncio
 import logging
 from functools import partial
 
+from market_storefront.services.listing_identity_carryover import carry_over_seller_state
 from market_storefront.lifecycle import (
     CAPACITY_EVENTS_POLLER,
     FULFILLMENT_RESUME,
@@ -359,6 +360,13 @@ async def _startup_tasks(*, registry: Any, domain: MarketDomainContract) -> None
                 "seed_resources",
                 _seed_resources_if_empty,
                 error_message="[STARTUP] Resource seeding failed: %s",
+            ),
+            # Before any lifecycle loop: the first publication cycle would
+            # otherwise publish a pre-shape listing's successor without the
+            # seller's close or pause. Fail-fast, for the same reason.
+            StorefrontStartupStep(
+                "listing_identity_carryover",
+                partial(carry_over_seller_state, sqlite_client),
             ),
             StorefrontStartupStep(
                 "negotiation_watchdog",

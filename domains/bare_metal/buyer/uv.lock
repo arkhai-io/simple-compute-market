@@ -200,14 +200,14 @@ dev = [{ name = "pytest", specifier = ">=8.3.4,<10.0.0" }]
 
 [[package]]
 name = "arkhai-core"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_core-0.2.0-py3-none-any.whl" },
-    { path = "arkhai_core-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_core-0.3.0-py3-none-any.whl" },
+    { path = "arkhai_core-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]

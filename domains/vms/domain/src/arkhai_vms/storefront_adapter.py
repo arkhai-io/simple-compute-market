@@ -13,6 +13,8 @@ from typing import Any
 
 from core_storefront.publication_sources import PublicationSource
 
+from arkhai_vms.capability_shapes import flatten_vm_shape
+
 CandidateCallback = Callable[[str], list[dict[str, Any]]]
 OpenKeysCallback = Callable[[str], set[str]]
 CloseStaleCallback = Callable[[str, str, str | None], list[str]]
@@ -33,30 +35,19 @@ ReopenExistingCallback = Callable[
 ]
 
 
-def vm_listing_resource_key(
-    resource_id: str | None,
-    gpu_count: int,
-) -> str:
-    """Fallback derivation key for one VM GPU slice.
-
-    The count is required: a candidate is always "N GPUs of this resource", and
-    substituting a count for a missing one would key it as a different slice.
-    """
-    if isinstance(gpu_count, bool) or not isinstance(gpu_count, int) or gpu_count <= 0:
-        raise ValueError(f"gpu_count must be a positive integer, not {gpu_count!r}")
-    return f"{resource_id}:gpus:{gpu_count}"
-
-
 def vm_candidate_skip_keys(candidate: dict[str, Any]) -> set[str]:
-    """Return skip keys that identify one VM publication candidate."""
+    """Return skip keys that identify one VM publication candidate.
+
+    A candidate's structural key names its source and its shape digest. It is
+    required: rebuilding one from published fields would key a shaped listing
+    as a GPU-count slice it is not.
+    """
+    resource_key = candidate.get("resource_key")
+    if not resource_key:
+        raise ValueError("VM publication candidate carries no structural key")
     keys: set[str] = set()
-    resource_key = candidate.get("resource_key") or vm_listing_resource_key(
-        candidate.get("resource_id") or candidate.get("pool_id"),
-        candidate.get("gpu_count"),
-    )
     for value in (
         resource_key,
-        candidate.get("legacy_resource_key"),
         candidate.get("resource_id"),
         candidate.get("pool_id"),
     ):
@@ -70,11 +61,20 @@ def vm_listing_resource_for_listing(
     *,
     interruptible: bool = False,
 ) -> dict[str, Any]:
-    """Build the VM-domain listing payload for a publication candidate."""
+    """Build the VM-domain listing payload for a publication candidate.
+
+    A listing publishes every quantity and attribute its shape declares, under
+    the wire names the VM schema maps them to, and no quantity its shape omits:
+    a published quantity is what the capacity claim requests.
+    """
+    shape = candidate.get("listing_shape")
+    if shape is None:
+        raise ValueError("VM publication candidate carries no listing shape")
+    flat = flatten_vm_shape(shape)
     listing_resource = {
         "pool_id": candidate.get("pool_id"),
-        "gpu_model": candidate["gpu_model"],
-        "gpu_count": candidate["gpu_count"],
+        **dict(flat.attributes),
+        **dict(flat.quantities),
         "sla": candidate["sla"],
         "region": candidate["region"],
         "offering_mode": candidate["offering_mode"],

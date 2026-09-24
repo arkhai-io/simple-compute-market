@@ -53,7 +53,8 @@ reinit: ## Force-reinstall verified internal wheels.
 	--upgrade-package arkhai-kit-site-client         --reinstall-package arkhai-kit-site-client \
 	--upgrade-package arkhai-core-registry-client    --reinstall-package arkhai-core-registry-client \
 	--upgrade-package arkhai-kit-contact-exchange --reinstall-package arkhai-kit-contact-exchange \
-	--upgrade-package arkhai-kit-delivery --reinstall-package arkhai-kit-delivery
+	--upgrade-package arkhai-kit-delivery --reinstall-package arkhai-kit-delivery \
+	--upgrade-package arkhai-kit-capability-shape --reinstall-package arkhai-kit-capability-shape
 
 # build deliberately does NOT depend on reinit. reinit drives a host-side
 # `uv sync` that resolves the [rl] extra (incl. torch) across whatever

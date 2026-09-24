@@ -59,7 +59,8 @@ a storefront cannot be the final authority over listings from any other site.
 - **Family-grouped shape vocabulary**, pulled forward from `structured-capacity-requirements`:
   - shapes are declared in the family-grouped form (`gpu: {count, model}`, `cpu`, `memory`,
     `storage`);
-  - they are flattened by one shared, domain-schema-driven utility in `market_core`;
+  - they are flattened by one shared, domain-schema-driven utility in a new
+    standard-library-only foundation kit, `kit/capability-shape`;
   - they are digested over that form, so the later wire rename churns nothing.
 
 ## Capabilities
@@ -103,10 +104,11 @@ None.
 ## Impact
 
 - **Affected code:**
-  - `market_core` (new shared capability-shape utility, and the length-prefixed identifier
-    encoding moved out of the VM reconciler);
+  - `kit/capability-shape` (new foundation kit: the shared capability-shape utility);
+  - `market_core` (the length-prefixed identifier encoding, moved out of the VM
+    reconciler);
   - `kit/resource-pools` (hint key and structural validation; new dependency on
-    `arkhai-core`);
+    `kit/capability-shape`);
   - the VM domain package (family schema);
   - `domains/vms/listings` (shape resolution and the default generator, feasibility through
     the injected site predicate, shape keys, identity fields derived from `DIMENSION_KEYS`;
@@ -146,7 +148,8 @@ None.
     storefront capacity boundary and authority table;
   - the identifiers table's stale "globally unique" `pool_id` row, corrected to the
     site-local slug the resource-pool contract defines;
-  - the shared capability-shape utility in `market_core` in the package layers;
+  - the capability-shape foundation kit in the kit layers, and the identifier encoding in
+    `market_core`;
   - `listing_shapes` in the vocabulary.
 - [x] Existing subsystem specifications:
   - `openspec/specs/storefront-publication/spec.md` and its `architecture.md`;

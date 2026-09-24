@@ -473,6 +473,47 @@ async def test_site_resource_pools_projection_surfaces_region_sla_pricing_policy
 
 
 @pytest.mark.asyncio
+async def test_site_resource_pools_projection_carries_listing_shapes_verbatim(
+    capacity: CapacityApi, client_and_queue,
+):
+    """A pool's `listing_shapes` hint reaches the storefront exactly as stored:
+    policy tags are projected verbatim, and the reading domain interprets them."""
+    from compute_provisioning import PoolCreate
+
+    shapes = {
+        "vm": [
+            {"gpu": {"count": 1, "model": "H200"}, "cpu": {"count": 8},
+             "memory": {"gib": 64}, "storage": {"gib": 200}},
+            {"gpu": {"count": 2, "model": "H200"}},
+        ],
+    }
+    provisioning_client, _ = client_and_queue
+    await provisioning_client.create_pool(
+        PoolCreate(
+            id="shaped",
+            label="Shaped",
+            provider="ansible",
+            policy_tags={
+                "advertisable_modes": [],
+                "capacity_backing": "backed",
+                "listing_shapes": shapes,
+            },
+            provider_config={"playbook_path": "playbooks/vm-operations.yaml"},
+        )
+    )
+
+    # A pool is projected with its members, so it needs one declaration.
+    await capacity.register(
+        "shaped-001", pool_id="shaped", total_units=2, attributes={"gpu_model": "H200"},
+    )
+
+    remote = _site_capacity_client("http://test", transport=ASGITransport(app=app))
+    data = await remote.resource_pool_projection()
+    pool_row = next(row for row in data["resource_pools"] if row["resource_pool_id"] == "shaped")
+    assert pool_row["pool_metadata"]["policy_tags"]["listing_shapes"] == shapes
+
+
+@pytest.mark.asyncio
 async def test_site_resource_pools_projection_declares_every_pool(
     capacity: CapacityApi, client_and_queue,
 ):

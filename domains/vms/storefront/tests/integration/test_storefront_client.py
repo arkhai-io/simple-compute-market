@@ -86,7 +86,7 @@ class TestCreateOrderEndpoint:
             "capacity_source": {
                 "site_id": "site-test",
                 "resource_id": "resource-1",
-                "gpu_count": 1,
+                "listing_shape": {"gpu": {"count": 1, "model": "RTX 4090"}},
             },
             "accepted_escrows": _ACCEPTED_ESCROWS,
         }

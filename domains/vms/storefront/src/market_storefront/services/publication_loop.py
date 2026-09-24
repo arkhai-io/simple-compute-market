@@ -36,6 +36,7 @@ from domains.vms.listings.listing_comparison import (
     refreshed_listing_resource,
 )
 from domains.vms.listings.reconciler import (
+    ShapeFeasibility,
     available_compute_slices,
     open_listing_resource_keys,
     stale_open_listing_ids,
@@ -43,6 +44,7 @@ from domains.vms.listings.reconciler import (
 from market_capacity_publication import BoundListing, ReconciliationPlan
 
 import market_storefront.container as container
+from market_storefront.services.shape_feasibility import vm_shape_feasibility
 from market_storefront.lifecycle import PUBLICATION, gate, idle
 from market_storefront.models.listing_models import VmCreateListingRequest
 from market_storefront.publication_wiring import (
@@ -142,8 +144,10 @@ class VmPublicationCycle:
         storefront_url: str,
         wallet_address: str,
         dry_run: bool,
+        shape_feasible: ShapeFeasibility | None = None,
     ) -> None:
         self._db = sqlite_client
+        self._shape_feasible = shape_feasible or vm_shape_feasibility()
         self._listings = listing_service
         self._capacity = capacity_runtime
         self._registry = registry
@@ -260,6 +264,7 @@ class VmPublicationCycle:
             site_capacity_buckets=self._buckets,
             hint_resolution=pool_hint_resolution_settings(),
             holds=holds,
+            shape_feasible=self._shape_feasible,
         )
         for kind, site_id, source_id in sorted(holds):
             self.report.record("hold", site_id=site_id, **{f"{kind}_id": source_id})
@@ -274,6 +279,7 @@ class VmPublicationCycle:
             site_pool_projection=self._projection,
             site_capacity_buckets=self._buckets,
             backed_only=False,
+            shape_feasible=self._shape_feasible,
         )
         for listing_id in stale:
             self.report.record("close", listing_id=listing_id, reason="source_gone")
@@ -349,7 +355,7 @@ class VmPublicationCycle:
                 "site_id": candidate["site_id"],
                 "pool_id": candidate.get("pool_id"),
                 "resource_id": candidate.get("resource_id"),
-                "gpu_count": candidate["gpu_count"],
+                "listing_shape": candidate["listing_shape"],
             },
             settlements=list(clauses),
             demands=demands_for_publication_clauses(

@@ -62,11 +62,15 @@ class FakeSite:
         total_units: int,
         *,
         attributes: dict | None = None,
+        capacity: dict | None = None,
     ) -> None:
+        """Declare one resource. ``capacity`` declares every dimension; without
+        it the resource declares its GPU count only."""
         self.resources[resource_id] = {
             "resource_id": resource_id,
             "total_units": int(total_units),
             "attributes": dict(attributes or {}),
+            "capacity": dict(capacity) if capacity is not None else None,
             "enabled": True,
         }
 
@@ -87,14 +91,26 @@ class FakeSite:
             }
         )
 
+    def _capacity(self, rid: str) -> dict[str, int]:
+        row = self.resources[rid]
+        return dict(row.get("capacity") or {"gpu_count": row["total_units"]})
+
+    def available_dimensions(self, rid: str) -> dict[str, int]:
+        """Every declared dimension less what live reservations hold, as the
+        site ledger debits each requested dimension."""
+        available = self._capacity(rid)
+        for reservation in self.reservations.values():
+            if reservation["resource_id"] != rid or reservation["state"] not in (
+                "reserved", "provisioning", "leased", "releasing"
+            ):
+                continue
+            held = reservation.get("dimensions") or {"gpu_count": reservation["units"]}
+            for key, amount in held.items():
+                available[key] = available.get(key, 0) - int(amount)
+        return available
+
     def _available(self, rid: str) -> int:
-        held = sum(
-            a["units"]
-            for a in self.reservations.values()
-            if a["resource_id"] == rid
-            and a["state"] in ("reserved", "provisioning", "leased", "releasing")
-        )
-        return self.resources[rid]["total_units"] - held
+        return self.available_dimensions(rid).get("gpu_count", 0)
 
     def _handle(self, request: httpx.Request) -> httpx.Response:
         response = self._dispatch(request)
@@ -175,7 +191,7 @@ class FakeSite:
                             # available_units directly) sees every row as
                             # zero-capacity for ranking purposes, regardless of
                             # this fake's own separate reservation-matching logic.
-                            "available": {"gpu_count": self._available(rid)},
+                            "available": self.available_dimensions(rid),
                             "state": (
                                 "available" if self._available(rid) > 0 else "leased"
                             ),
@@ -200,6 +216,7 @@ class FakeSite:
                 "capacity_reservation_id": capacity_reservation_id,
                 "resource_id": match["resource_id"],
                 "units": match["allocated_gpu_count"],
+                "dimensions": dict(match["dimensions"]),
                 "state": "reserved",
                 "deal_ref": body.get("deal_ref") or {},
             }
@@ -323,6 +340,9 @@ class FakeSite:
         # ledger's _resource_matches skips it.
         dimensions = claim.get("dimensions") or {}
         requested = int(dimensions.get("gpu_count") or claim.get("gpu_count") or 1)
+        requested_dimensions = {
+            str(key): int(value) for key, value in dimensions.items()
+        } or {"gpu_count": requested}
         # resource_type is a special top-level claim key (mirroring real
         # kit/site's _split_claim_requirement), not an arbitrary
         # attribute -- every resource this fake serves is "compute.gpu"
@@ -352,9 +372,15 @@ class FakeSite:
             )
             if mismatched:
                 continue
-            available = self._available(rid)
-            if available < requested:
+            available_dimensions = self.available_dimensions(rid)
+            # Every requested dimension must fit; one the resource does not
+            # declare has nothing available, as the ledger treats it.
+            if any(
+                available_dimensions.get(key, 0) < amount
+                for key, amount in requested_dimensions.items()
+            ):
                 continue
+            available = available_dimensions.get("gpu_count", 0)
             return {
                 "resource_id": rid,
                 "pool_id": None,
@@ -362,6 +388,7 @@ class FakeSite:
                 "host_id": attrs.get("host_id"),
                 "allocated_gpu_count": requested,
                 "available_gpu_count": available,
+                "dimensions": requested_dimensions,
                 "attributes": attrs,
             }
         return None
@@ -463,9 +490,9 @@ def _pool_projection_rows(fake: FakeSite) -> list[dict[str, Any]]:
             },
             "resources": [
                 {
-                    "physical_resource_id": resource_id,
-                    "capacity": {"gpu_count": row["total_units"]},
-                    "available": {"gpu_count": fake._available(resource_id)},
+                    "physical_resource_id": resource_id, "resource_type": "compute.gpu",
+                    "capacity": fake._capacity(resource_id),
+                    "available": fake.available_dimensions(resource_id),
                     "attributes": dict(row["attributes"]),
                     "enabled": bool(row["enabled"]),
                 },

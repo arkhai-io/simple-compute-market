@@ -52,12 +52,22 @@ def _default_publication_derivation_provider() -> dict[str, dict[str, Any]]:
 
     For each site: whether it was read under the compatibility rule for a
     producer predating the pool declarations, which pools and members are
-    unresolvable and held, which members declare no GPU count, and which
-    fungible pools mix kinds.
+    unresolvable and held, which members declare no GPU count or no resource
+    type, which pools state shapes the VM vocabulary cannot read, which stated
+    shapes no member is feasible for, and which pools publish nothing because
+    their listings claim an attribute no member declares.
     """
     from domains.vms.listings.reconciler import derivation_reports
 
     return derivation_reports()
+
+
+def _default_listing_identity_carryover_provider() -> dict[str, Any]:
+    """Which pre-shape listings carried a seller's close or pause, and to which
+    shape-bearing successor: the listing a seller should reopen or resume."""
+    from market_storefront.services.listing_identity_carryover import carryover_report
+
+    return carryover_report()
 
 
 def _default_listing_cardinality_mode_explanation_provider() -> (
@@ -96,6 +106,7 @@ class SystemService:
         publication_derivation_provider: (
             Callable[[], dict[str, dict[str, Any]]] | None
         ) = None,
+        listing_identity_carryover_provider: Callable[[], dict[str, Any]] | None = None,
     ) -> None:
         self._db = sqlite_client
         self._marketplace_signer = marketplace_signer
@@ -109,6 +120,10 @@ class SystemService:
         )
         self._publication_derivation_provider = (
             publication_derivation_provider or _default_publication_derivation_provider
+        )
+        self._listing_identity_carryover_provider = (
+            listing_identity_carryover_provider
+            or _default_listing_identity_carryover_provider
         )
 
     # ------------------------------------------------------------------
@@ -229,6 +244,12 @@ class SystemService:
                 )
             except Exception:
                 result["publication_derivation"] = None
+            try:
+                result["listing_identity_carryover"] = (
+                    self._listing_identity_carryover_provider()
+                )
+            except Exception:
+                result["listing_identity_carryover"] = None
 
         return result
 

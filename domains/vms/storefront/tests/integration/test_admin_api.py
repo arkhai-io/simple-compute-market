@@ -500,7 +500,10 @@ async def _seed_dynamic_listing_pool_rows(
                     "capacity_backing": "backed",
                     "site_id": site_id,
                     "pool_id": "pool-h200-1",
-                    "gpu_count": gpu_count,
+                    # The listing publishes this resource, so its binding names
+                    # it: a stored key is read from the binding.
+                    "resource_id": "pool-h200-1",
+                    "listing_shape": {"gpu": {"count": gpu_count, "model": "H200"}},
                 },
             )
         )
@@ -644,7 +647,7 @@ class TestFulfillmentEvents:
         resource_pools_cache._value = [{
             "resource_pool_id": "pool-h200-1",
             "resources": [{
-                "physical_resource_id": "res-1",
+                "physical_resource_id": "res-1", "resource_type": "compute.gpu",
                 "capacity": {"gpu_count": 8},
                 "available": {"gpu_count": 8},
                 "attributes": {"gpu_model": "H200"},
@@ -989,10 +992,11 @@ class TestRealOrchestrationCacheToReconciliation:
                 "policy_tags": {"deliverable_modes": ["vm"]},
             },
             "resources": [{
-                "physical_resource_id": "pool-h200-1",
+                "physical_resource_id": "pool-h200-1", "resource_type": "compute.gpu",
                 "capacity": {"gpu_count": 4},
                 "available": {"gpu_count": 2},
-                "attributes": {"gpu_model": "H200"},
+                # The listings claim this region; admission matches it here.
+                "attributes": {"gpu_model": "H200", "region": "California, US"},
                 "enabled": True,
             }],
         }]

@@ -26,7 +26,7 @@ _COLLABORATORS = vm_listing_collaborators(
 _CAPACITY_SOURCE = {
     "site_id": "site-test",
     "resource_id": "resource-1",
-    "gpu_count": 1,
+    "listing_shape": {"gpu": {"count": 1, "model": "H200"}},
 }
 
 

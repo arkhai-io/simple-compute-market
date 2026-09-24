@@ -1,12 +1,13 @@
 [project]
 name = "arkhai-vms"
-version = "0.3.0"
+version = "0.4.0"
 license = "MIT"
 description = "Shared VM-domain models and helpers used by Arkhai VM buyer and storefront packages."
 requires-python = ">=3.12,<3.14"
 dependencies = [
     "pydantic>=2",
-    "arkhai-core>=0.2.0",
+    "arkhai-core>=0.3.0",
+    "arkhai-kit-capability-shape>=0.1.0",
 ]
 
 [project.optional-dependencies]

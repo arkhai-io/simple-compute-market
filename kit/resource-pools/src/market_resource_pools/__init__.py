@@ -8,6 +8,7 @@ from .hints import (
     CAPACITY_BACKING_VALUES,
     CAPACITY_UNBACKED,
     DELIVERABLE_MODES_POLICY_TAG,
+    LISTING_SHAPES_POLICY_TAG,
     CapacityBacking,
     MissingPoolDeclarationError,
     PoolDeclarationError,
@@ -16,8 +17,10 @@ from .hints import (
     declared_deliverable_modes,
     pool_declaration_problems,
     pool_delivers_offering_mode,
+    raw_listing_shapes,
     resolve_pool_declarations,
     validate_deliverable_modes,
+    validate_listing_shapes,
     validate_pool_declarations,
 )
 from .host_requirement import HostRequirement, pool_needs_host
@@ -58,6 +61,7 @@ __all__ = [
     "CAPACITY_UNBACKED",
     "DEFAULT_POOL_ID",
     "DELIVERABLE_MODES_POLICY_TAG",
+    "LISTING_SHAPES_POLICY_TAG",
     "CapacityBacking",
     "MissingPoolDeclarationError",
     "PoolDeclarationError",
@@ -66,6 +70,7 @@ __all__ = [
     "declared_deliverable_modes",
     "pool_declaration_problems",
     "pool_delivers_offering_mode",
+    "raw_listing_shapes",
     "resolve_pool_declarations",
     "validate_pool_declarations",
     "pool_needs_host",
@@ -95,4 +100,5 @@ __all__ = [
     "ResourcePool",
     "ResourcePoolService",
     "validate_deliverable_modes",
+    "validate_listing_shapes",
 ]

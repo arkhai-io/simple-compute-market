@@ -44,6 +44,7 @@ from market_settlement_runtime import (
 from market_storefront.models.listing_models import VmCreateListingRequest
 from market_storefront.negotiation_runtime import compute_round_zero_decision
 from market_storefront.publication_binding import prepare_vm_listing_binding
+from arkhai_vms import DIMENSION_KEYS, flatten_vm_shape
 from market_storefront.services.listing_sources import resolve_source_backing
 from market_storefront.settlement_composition import (
     admissible_settlement_clauses,
@@ -523,10 +524,26 @@ class ListingService:
         if (
             capacity_source["pool_id"] != listing_resource.pool_id
             or capacity_source["resource_id"] != listing_resource.resource_id
-            or capacity_source["gpu_count"] != listing_resource.gpu_count
         ):
             raise ValueError(
-                "capacity source identity and gpu_count must match the listing_resource resource"
+                "capacity source identity must match the listing_resource resource"
+            )
+        # A listing publishes exactly its shape: every quantity and attribute the
+        # shape declares, and no quantity it omits.
+        flat = flatten_vm_shape(capacity_source["listing_shape"])
+        published_quantities = {
+            dimension: getattr(listing_resource, dimension, None)
+            for dimension in DIMENSION_KEYS
+        }
+        expected_quantities = {
+            dimension: flat.quantities.get(dimension) for dimension in DIMENSION_KEYS
+        }
+        if (
+            published_quantities != expected_quantities
+            or listing_resource.gpu_model != flat.attributes.get("gpu_model")
+        ):
+            raise ValueError(
+                "listing_resource must publish exactly the capacity source's listing shape"
             )
         source_id = capacity_source["pool_id"] or capacity_source["resource_id"]
         # Backing comes from what the source's site declares now, never from the
