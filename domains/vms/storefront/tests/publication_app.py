@@ -169,6 +169,9 @@ class RecordingRegistries:
     def __init__(self) -> None:
         self.urls = REGISTRY_URLS
         self.sent: list[tuple[str, str, str, dict[str, Any]]] = []
+        # (operation, registry_url) pairs that fail until removed; an update's
+        # operation is the status it sets.
+        self.failing: set[tuple[str, str]] = set()
 
     def __call__(self, *_args: Any, **_kwargs: Any) -> "RecordingRegistries":
         return self
@@ -183,22 +186,26 @@ class RecordingRegistries:
     def _json(request: Any) -> dict[str, Any]:
         return request.to_dict()
 
+    def _result(self, operation: str, url: str) -> dict[str, Any]:
+        if (operation, url) in self.failing:
+            return {"registry_url": url, "success": False, "error": "unreachable"}
+        return {"registry_url": url, "success": True, "response": {"ok": True}}
+
     async def publish_listing_per_registry(self, *, payloads):
+        results = []
         for url, request in payloads.items():
             body = self._json(request)
             self.sent.append(("publish", url, str(body.get("listing_id")), body))
-        return [
-            {"registry_url": url, "success": True, "response": {"ok": True}}
-            for url in payloads
-        ]
+            results.append(self._result("publish", url))
+        return results
 
     async def update_listing_per_registry(self, *, listing_id, payloads):
+        results = []
         for url, request in payloads.items():
-            self.sent.append(("update", url, listing_id, self._json(request)))
-        return [
-            {"registry_url": url, "success": True, "response": {"ok": True}}
-            for url in payloads
-        ]
+            body = self._json(request)
+            self.sent.append(("update", url, listing_id, body))
+            results.append(self._result(str(body.get("status")), url))
+        return results
 
     def to(self, operation: str, listing_id: str) -> list[tuple[str, dict[str, Any]]]:
         """``(registry_url, request)`` for one operation on one listing."""

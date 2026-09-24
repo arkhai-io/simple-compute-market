@@ -1370,9 +1370,32 @@ storefront saying open.
 
 **Decision:** the local transition must succeed before any registry close; on failure
 `close` raises, which a seller's close surfaces as a retryable error. `reconcile`
-records a failed close per listing and continues. No registry-side journal: a registry
-close that fails after a successful local close is already retried by republication
-and reconciliation.
+records a failed close per listing and continues.
+
+**Registries converge on local status.** The first form of this decision said a
+registry close failing after the local close was "already retried by republication
+and reconciliation". Pre-closeout review found no such retry: a closed listing leaves
+every close candidate set, and an unchanged open listing is skipped, so a registry that
+missed a close or a reopen stayed diverged. The durable per-registry records
+(`publications`) already hold what a repair needs, and the local listing is the
+desired state — open means `published`, closed means `unpublished`. So:
+
+- `list_publication_divergence` (core persistence) returns every configured
+  registry's record that disagrees with its open or closed listing;
+- `PublicationRuntime.converge` resends only what local state implies, only to those
+  registries — a close, or the stored listing republished and then reopened — and
+  records the results, so a registry still unreachable stays diverged for the next
+  pass; the reopen's status update is recorded too, which it was not before, or a
+  failed reopen would have looked converged;
+- every kit publication pass converges: the VM loop at the end of each cycle,
+  reported as `converge` actions (previewed by a dry run, with `fail` for any left
+  unrepaired), and API credits at the end of each capacity reconciliation.
+
+Bare metal does not use the kit: its operator command talks to one registry through
+`SyncRegistryClient` and keeps no per-registry records, so there is nothing for a
+repair to read. Decided: its convergence joins
+`bare-metal-publication-reads-pool-declarations`, which already owns bringing
+bare-metal publication up to what VM does.
 
 ### R4–R5. Publication tests run through the real app
 
@@ -1621,7 +1644,8 @@ rewrites the code it sits in, or corrects a statement earlier in this document.
 - **The guard covers every write that could undo a seller's close.** Beyond the
   reopen R1 names, the upsert conflict path refuses to overwrite a seller's close
   (every current caller mints a fresh listing ID, so nothing live changes), and a
-  reconciliation close of an already seller-closed listing keeps `seller`, which
+  reconciliation close of an already seller-closed listing, by update or by
+  upsert, keeps `seller`, which
   would otherwise make the listing reopenable by the next capacity event.
 - **A failed seller close is retryable.** After R3 a local failure propagates from
   the kit's close; the VM close route answers a local database failure with 503

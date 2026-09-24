@@ -29,7 +29,21 @@ An unresolvable pool holds its listings rather than closing them, because an unk
 declaration is not a withdrawn one. A site whose pool projection has not loaded
 derives nothing new and closes nothing.
 
+### Registry convergence reuses the storefront's publication records
+
+VM and API credits converge through `PublicationRuntime.converge`, which reads the
+per-registry `publications` records and resends what each listing's local status
+implies. Bare metal records nothing there today. Recording its registry outcomes in
+the same records lets it use the same divergence query and the same repair rule,
+whether by adopting the kit runtime or by calling the core registry-publication
+helpers the kit uses.
+
 ## Open questions
+
+- **Kit runtime or core helpers for bare-metal convergence.** Adopting
+  `PublicationRuntime` brings convergence as-is but moves bare-metal publication onto
+  the kit's candidate and binding types; calling the core helpers keeps its current
+  shape. The implementation decides and records why.
 
 - **Where the capacity snapshot and the pool projection disagree about a resource's
   pool.** VM reads both from the same projection generation. Bare metal reads the

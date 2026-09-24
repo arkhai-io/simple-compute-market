@@ -162,7 +162,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-core-storefront"
-version = "0.5.0"
+version = "0.6.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -174,7 +174,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_core_storefront-0.5.0-py3-none-any.whl" },
+    { path = "arkhai_core_storefront-0.6.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -268,7 +268,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "alkahest-py", specifier = "==1.1.2" },
-    { name = "arkhai-core-storefront", specifier = ">=0.5.0" },
+    { name = "arkhai-core-storefront", specifier = ">=0.6.0" },
     { name = "arkhai-kit-alkahest" },
 ]
 

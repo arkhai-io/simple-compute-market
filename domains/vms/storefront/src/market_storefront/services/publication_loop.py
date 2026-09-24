@@ -179,6 +179,7 @@ class VmPublicationCycle:
         self._home_site = sites[0] if sites else None
         self._site_count = len(sites)
         if self._home_site is None:
+            await self._converge_registries()
             return self.report.as_dict()
         self._projection = listing_source_projection()
         self._buckets = (
@@ -214,7 +215,31 @@ class VmPublicationCycle:
             close_stale=self._availability is not None,
             skip_open=False,
         )
+        await self._converge_registries()
         return self.report.as_dict()
+
+    async def _converge_registries(self) -> None:
+        """Repair every registry that missed a publish, close, or reopen.
+
+        Runs after derivation so it sees this cycle's own outcomes; a dry run
+        reports what it would resend without sending it.
+        """
+        runtime = self._runtime()
+        divergences = await runtime.publication_divergence()
+        for divergence in divergences:
+            self.report.record(
+                "converge",
+                listing_id=divergence.listing_id,
+                status=divergence.listing_status,
+                registries=list(divergence.registry_urls),
+            )
+        if self.dry_run or not divergences:
+            return
+        result = await runtime.converge(divergences)
+        for listing_id in result["unrepaired"]:
+            self.report.record(
+                "fail", listing_id=listing_id, reason="registry_not_converged"
+            )
 
     # -- source callbacks (worker thread) --------------------------------
 

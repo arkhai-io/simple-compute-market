@@ -57,13 +57,12 @@ Open before completion:
   `evaluate-negotiate` is not yet exercised separately.
 - **6.7, 6.8** — gated on `compose-contact-exchange-across-compute` Sections 1–3
   and 3b.
-- **6.25** — every suite listed passes except two recorded failures that are not
-  this change's: `domains/vms/storefront` integration `test_alkahest.py` needs a
-  local chain the build container cannot start, and `e2e-tests` unit
-  `test_hosted_public_boundary.py` asserts compose content this change does not
-  touch. `make check-reinit` passes. The VM storefront's and `kit/policy`'s
-  `make reinit` cannot resolve their torch index in the build container, so those
-  suites ran against their committed lockfiles.
+- **6.25** — `make test` passes in a full environment, and the latest end-to-end
+  run passes. In the build container, where they run against committed lockfiles
+  because the torch index is unreachable, the only failures are two that are not this
+  change's: `domains/vms/storefront` integration `test_alkahest.py` needs a local
+  chain, and `e2e-tests` unit `test_hosted_public_boundary.py` asserts compose
+  content. `make check-reinit` passes.
 - **7.3–7.9** — documentation compliance, compression, roadmap and index currency,
   promotion, citations, and the end-to-end pipeline. Two things found now bear on
   them. `openspec/specs/registry-discovery/spec.md` places two requirements after
@@ -538,7 +537,10 @@ after each group; each group can be its own fileset.
       connection-level write inside the caller's `BEGIN IMMEDIATE` transaction;
       `update_listing` wraps it and raises `SellerClosedListingError`. It also keeps
       `seller` when reconciliation closes an already seller-closed listing, and the
-      upsert conflict path refuses to overwrite a seller's close. Tests are real-DB
+      upsert conflict path refuses to overwrite a seller's close with another
+      status and keeps `seller` when it writes another close (the second found in
+      pre-closeout review; `test_an_upserted_close_keeps_a_seller_close` fails
+      without it). Tests are real-DB
       library integration, in the new `core/storefront/tests/integration/`
       (`test_listing_closure.py`), which `make test` now runs; 4 of 8 fail without
       the guard.
@@ -742,13 +744,44 @@ after each group; each group can be its own fileset.
       operator-invoked publication command run through the core publication runner
       against a real database, since bare-metal publication has no service route
       to drive.
-- [ ] 8.19 **Version `kit/resource-pools` and `kit/site-client`.** Once every
+- [x] 8.20 **Registries converge on local status (R3, pre-closeout review).**
+      Core: `list_publication_divergence`, and `publish_listing_to_registries`
+      takes an optional target subset. Kit: `publication_divergence`, `converge`,
+      and the reopen's status update recorded. VM: each cycle converges, reported
+      as `converge` (and `fail` if unrepaired). API credits: each capacity
+      reconciliation converges. Tests: core real-DB divergence; kit unit tests for
+      a missed close, a failed reopen (fails without the reopen being recorded),
+      and a still-unreachable registry; VM app-level, one of two registries missing
+      a close and then a reopen, repaired by the next `run-cycle` alone (both fail
+      without convergence); API-credits unit test that every reconciliation ends by
+      converging. The API-credits reconcile tests moved to `tests/integration/`.
+- [x] 8.21 **Bare-metal registry convergence.** Decided: owned by
+      `bare-metal-publication-reads-pool-declarations` (its task 2.4 and a spec
+      requirement), and its index row says so.
+- [x] 8.19 **Version `kit/resource-pools` and `kit/site-client`.** Once every
       Section 8 change is in place and `make test` passes, bump
       `arkhai-kit-resource-pools` for the `site_declarations` addition and
       `arkhai-kit-site-client` for its `fixtures` subpackage, raise `arkhai-vms-listings`' `pools` extra to
       require it, and update every consumer's lock (the VM storefront's by hand, as
       its torch index cannot be reached from the build container), then rerun
       `make check-reinit` and the consumers' suites.
+      Done, widened to every package whose sources this change altered, minor for
+      new or changed API and patch otherwise: `arkhai-core-storefront` 0.6.0,
+      `arkhai-core-storefront-client` 0.19.1, `arkhai-kit-capacity-publication`
+      0.2.0, `arkhai-kit-negotiation-runtime` 0.2.0, `arkhai-kit-resource-pools`
+      0.3.0, `arkhai-kit-site-client` 0.4.0, `arkhai-vms` 0.3.0,
+      `arkhai-vms-storefront` 0.5.0, `arkhai-bare-metal` 0.4.0,
+      `arkhai-bare-metal-storefront` 0.4.0, `arkhai-apicredits-domain` 0.3.0, and
+      `arkhai-apicredits-storefront` 0.4.0. The three VM wheels this change created
+      stay at their first version, 0.1.0; `core/registry`'s filter spec is not in its
+      wheel, so that package is unchanged. Every internal constraint on a bumped
+      package names its new version, plus `arkhai-apicredits-domain>=0.3.0` in the
+      API-credits storefront and `arkhai-core-storefront>=0.6.0` in the VM domain.
+      Locks re-resolved from their committed state upgrading only the bumped
+      packages; the VM storefront's by hand, confirmed with
+      `uv lock --locked --offline`. No lock's package sources changed, and no lock
+      holds an internal version other than the built one. Image version pins follow.
+      The gitignored VM buyer lock needs the same update locally.
 
 ## Plan history
 

@@ -14,6 +14,12 @@ nothing is over-delivered, but buyers can discover a listing that can never sett
 The rule that a listing advertises only a mode its pool authorizes holds for VM and
 not for bare metal.
 
+Bare metal also misses the registry convergence VM and API credits have. Its operator
+command updates its one registry through `SyncRegistryClient` after changing the
+local listing, and keeps no per-registry publication records. A registry update that
+fails after the local change is not resent by a rerun, because the local listing has
+already moved, so the registry stays diverged from the storefront.
+
 ## What Changes
 
 - Bare-metal publication loads each trusted site's resource-pool projection and
@@ -27,6 +33,10 @@ not for bare metal.
   authority does not stand behind; the refusal is reported to the operator.
 - Existing listings whose pool no longer authorizes them close through bare metal's
   source reconciliation as a withdrawn source does.
+- Bare-metal publication records each registry outcome in the storefront's
+  per-registry publication records and converges every registry on its listing's
+  local status on each run, as the VM and API-credit storefronts do through
+  `PublicationRuntime.converge`.
 
 ## Capabilities
 
@@ -37,7 +47,8 @@ None.
 ### Modified Capabilities
 
 - `storefront-publication`: the advertisement rule covers bare-metal listings as well
-  as listings derived from the resource-pool projection.
+  as listings derived from the resource-pool projection, and registry convergence
+  covers bare-metal publication.
 
 ## Non-Goals
 
@@ -51,6 +62,8 @@ None.
   and the storefront's site clients: a resource-pool projection read per trusted site.
 - `domains/bare_metal/src/arkhai_bare_metal/storefront_publication.py` and
   `publication.py`: candidate filtering and holds.
+- `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/publication_cli.py`:
+  registry outcomes recorded and a convergence step per run.
 - `domains/bare_metal/storefront/pyproject.toml`: `arkhai-kit-resource-pools` becomes
   a dependency of the storefront, not of the domain package, which buyers and
   provisioning adapters install without the storefront extra.
@@ -67,6 +80,8 @@ None.
 - The advertisement requirement in `openspec/specs/storefront-publication/spec.md`
   widens from listings derived from the resource-pool projection to every
   compute-family listing derived from a Resource Pool.
+- The registry-convergence requirement names bare-metal publication among the
+  passes that converge.
 
 ## Dependencies
 

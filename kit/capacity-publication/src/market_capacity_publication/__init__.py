@@ -21,6 +21,7 @@ from .publication import (
     PublicationDomainHooks,
     PublicationRepository,
     PublicationRuntime,
+    RegistryDivergence,
     ReconciliationPlan,
 )
 
@@ -43,5 +44,6 @@ __all__ = [
     "PublicationDomainHooks",
     "PublicationRepository",
     "PublicationRuntime",
+    "RegistryDivergence",
     "ReconciliationPlan",
 ]

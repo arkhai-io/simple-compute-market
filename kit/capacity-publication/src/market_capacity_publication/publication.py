@@ -74,6 +74,10 @@ class PublicationRepository(Protocol):
         reopened_by: str | None = None,
     ) -> Any: ...
     async def load_publications(self, *, listing_id: str) -> list[dict[str, Any]]: ...
+    async def load_listing(self, *, listing_id: str) -> dict[str, Any] | None: ...
+    async def list_publication_divergence(
+        self, *, registry_urls: Sequence[str]
+    ) -> list[dict[str, Any]]: ...
     async def upsert_publication(
         self,
         *,
@@ -94,6 +98,15 @@ class PublicationDomainHooks(Protocol[PayloadT]):
     async def binding_for_listing(
         self, listing_id: str
     ) -> PublicationBinding | None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class RegistryDivergence:
+    """A listing whose local status some configured registries do not hold."""
+
+    listing_id: str
+    listing_status: str
+    registry_urls: tuple[str, ...]
 
 
 RegistryClientFactory = Callable[[], Any]
@@ -161,8 +174,8 @@ class PublicationRuntime(Generic[PayloadT]):
         The local close is the durable decision, so a failure there propagates
         before any registry is told: a registry saying closed while the
         storefront still says open is a state neither side can reconcile from.
-        A registry close that fails after the local close succeeded is retried
-        by the next publication and reconciliation pass.
+        A registry that misses the close is recorded as failed and repaired by
+        :meth:`converge`, which every publication pass runs.
         """
         if closed_by not in _CLOSED_BY_VALUES:
             raise ValueError(
@@ -210,13 +223,15 @@ class PublicationRuntime(Generic[PayloadT]):
         if published.get("status") != "published":
             return published
         # Publishing refreshes the payload a registry holds but not its status,
-        # so a listing a registry recorded as closed is reopened explicitly.
+        # so a listing a registry recorded as closed is reopened explicitly. The
+        # result is recorded so a registry that stays closed is seen as diverged.
         reopened = await reopen_listing_in_registries(
             candidate.listing_id,
             enabled=self._enabled,
             registry_client_factory=self._open_registry_client,
             update_listing_request_factory=self._update_listing_request_factory,
             select_target_registries=self._registries_to_target,
+            record_publications=self._record_publications,
         )
         if reopened.get("status") == "error":
             return reopened
@@ -336,6 +351,102 @@ class PublicationRuntime(Generic[PayloadT]):
             listing_id,
             results,
             success_status="unpublished",
+        )
+
+    async def publication_divergence(self) -> tuple[RegistryDivergence, ...]:
+        """Listings some configured registry has not converged on.
+
+        Read from the durable per-registry records: a registry that missed a
+        publish, close, or reopen recorded it as failed, and disagrees with the
+        listing's local status until repaired.
+        """
+        if not self._enabled:
+            return ()
+        rows = await self._repository.list_publication_divergence(
+            registry_urls=self._registry_urls
+        )
+        grouped: dict[tuple[str, str], list[str]] = {}
+        for row in rows:
+            key = (str(row["listing_id"]), str(row["listing_status"]))
+            grouped.setdefault(key, []).append(str(row["registry_url"]))
+        return tuple(
+            RegistryDivergence(listing_id, status, tuple(urls))
+            for (listing_id, status), urls in grouped.items()
+        )
+
+    async def converge(
+        self, divergences: Sequence[RegistryDivergence] | None = None
+    ) -> dict[str, tuple[str, ...]]:
+        """Bring each diverged registry to its listing's local status.
+
+        The local listing is the durable decision, so the repair resends only
+        what it implies, and only to the registries that diverged: a close for a
+        closed listing; for an open one, the stored listing republished and then
+        reopened. Results are recorded as every publication records them, so a
+        registry still unreachable stays diverged for the next pass. Returns the
+        listings ``repaired`` and those still ``unrepaired``.
+        """
+        if divergences is None:
+            divergences = await self.publication_divergence()
+        for divergence in divergences:
+            try:
+                await self._converge_one(divergence)
+            except Exception as exc:
+                logger.warning(
+                    "[REGISTRY] could not converge listing %s at %s: %s",
+                    divergence.listing_id,
+                    ", ".join(divergence.registry_urls),
+                    exc,
+                )
+        remaining = {
+            divergence.listing_id for divergence in await self.publication_divergence()
+        }
+        return {
+            "repaired": tuple(
+                d.listing_id for d in divergences if d.listing_id not in remaining
+            ),
+            "unrepaired": tuple(
+                d.listing_id for d in divergences if d.listing_id in remaining
+            ),
+        }
+
+    async def _converge_one(self, divergence: RegistryDivergence) -> None:
+        targets = frozenset(divergence.registry_urls)
+
+        async def diverged(_listing_id: str, urls: list[str]) -> list[str]:
+            return [url for url in urls if url in targets]
+
+        if divergence.listing_status == "closed":
+            await close_listing_in_registries(
+                divergence.listing_id,
+                enabled=self._enabled,
+                registry_client_factory=self._open_registry_client,
+                update_listing_request_factory=self._update_listing_request_factory,
+                select_target_registries=diverged,
+                record_publications=self._record_closures,
+            )
+            return
+        listing = await self._repository.load_listing(listing_id=divergence.listing_id)
+        if listing is None:
+            return
+        published = await publish_listing_to_registries(
+            listing,
+            enabled=self._enabled,
+            registry_client_factory=self._open_registry_client,
+            listing_request_factory=self._listing_request_factory,
+            storefront_url=self._storefront_url,
+            record_publications=self._record_publications,
+            registry_urls=divergence.registry_urls,
+        )
+        if published.get("status") != "published":
+            return
+        await reopen_listing_in_registries(
+            divergence.listing_id,
+            enabled=self._enabled,
+            registry_client_factory=self._open_registry_client,
+            update_listing_request_factory=self._update_listing_request_factory,
+            select_target_registries=diverged,
+            record_publications=self._record_publications,
         )
 
     async def _record_publications(

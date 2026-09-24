@@ -16,10 +16,15 @@
 - [ ] 2.3 Close existing listings whose pool no longer authorizes them through the
   bare-metal source reconciliation.
 
+- [ ] 2.4 Record each registry outcome in the per-registry publication records and
+  converge every registry on its listing's local status on each run (`design.md`,
+  "Registry convergence reuses the storefront's publication records").
+
 ## 3. Validation
 
 - [ ] 3.1 Tests for each outcome in 2.2 and 2.3, including a held pool whose listings
-  are neither closed nor refreshed.
+  are neither closed nor refreshed, and for 2.4: a registry that misses a close and one
+  left closed by a failed reopen, each repaired by the next run alone.
 - [ ] 3.2 `make test-bare-metal` and `make check-reinit`.
 
 ## 4. Closeout

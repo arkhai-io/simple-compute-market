@@ -54,6 +54,7 @@ def _capacity_reconciler(sqlite_client_factory: SQLiteClientFactory):
     async def reconcile(context: CapacityReconcileContext) -> None:
         from apicredits_storefront.services.publication_service import (
             close_token_listings_after_capacity_change,
+            converge_registries,
             reopen_token_listings_after_capacity_change,
         )
         delta = context.delta
@@ -62,6 +63,7 @@ def _capacity_reconciler(sqlite_client_factory: SQLiteClientFactory):
             await close_token_listings_after_capacity_change(db, dict(context.availability))
         if delta is None or delta.kind == "released" or delta.kind in _MIXED:
             await reopen_token_listings_after_capacity_change(db, dict(context.availability))
+        await converge_registries(db)
     return reconcile
 
 

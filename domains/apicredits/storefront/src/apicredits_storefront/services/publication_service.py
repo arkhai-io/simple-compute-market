@@ -101,6 +101,16 @@ async def close_order(parameters: dict[str, Any] | None = None) -> dict[str, Any
     )
 
 
+async def converge_registries(db: Any) -> dict[str, tuple[str, ...]]:
+    """Repair every registry that missed a publish, close, or reopen.
+
+    Run at the end of each capacity reconciliation, the storefront's recurring
+    publication pass; a registry still unreachable stays recorded as diverged
+    for the next one.
+    """
+    return await build_publication_runtime(db).converge()
+
+
 async def close_token_listings_after_capacity_change(db: Any, availability: dict) -> list[str]:
     rows = await db.list_listings(status="open", limit=200)
     ids = stale_open_credit_listing_ids(rows, availability=availability)

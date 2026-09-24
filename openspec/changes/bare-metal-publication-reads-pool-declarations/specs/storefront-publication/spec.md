@@ -27,3 +27,17 @@ because every bare-metal listing is capacity-backed.
 
 - **WHEN** a candidate's pool declares itself unbacked
 - **THEN** no bare-metal listing is published and the operator is told which pool
+
+### Requirement: Bare-metal publication converges its registry
+
+Bare-metal publication MUST record each registry outcome in the storefront's
+per-registry publication records, and each run MUST resend to any registry whose
+record disagrees with its listing's local status exactly what that status implies: a
+close for a closed listing, and for an open one the stored listing republished and
+reopened.
+
+#### Scenario: A registry that missed a close is repaired by the next run
+
+- **GIVEN** a bare-metal listing closed locally whose registry close failed
+- **WHEN** the operator runs bare-metal publication again
+- **THEN** the close is resent to that registry, and to no other

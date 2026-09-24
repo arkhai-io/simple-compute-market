@@ -15,7 +15,17 @@ from __future__ import annotations
 from typing import Any
 
 ACTIONS = frozenset(
-    {"publish", "refresh", "close", "reopen", "hold", "refuse", "skip", "fail"}
+    {
+        "publish",
+        "refresh",
+        "close",
+        "reopen",
+        "hold",
+        "refuse",
+        "skip",
+        "converge",
+        "fail",
+    }
 )
 
 

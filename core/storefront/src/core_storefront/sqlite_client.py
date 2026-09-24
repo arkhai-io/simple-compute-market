@@ -1283,9 +1283,12 @@ class SQLiteClient:
     ) -> None:
         _require_consistent_closure(status, closed_by)
         # An upsert names no reopener, so it may never overwrite a seller's
-        # close with another status; a seller re-lists through their reopen.
-        if status != "closed" and _stored_closed_by(conn, listing_id) == "seller":
-            raise SellerClosedListingError(listing_id)
+        # close with another status, and a close over a seller's close keeps
+        # the seller's reason; a seller re-lists through their reopen.
+        if _stored_closed_by(conn, listing_id) == "seller":
+            if status != "closed":
+                raise SellerClosedListingError(listing_id)
+            closed_by = "seller"
         seller_scheme, seller_identifier = _principal_columns(seller_principal)
         conn.execute(
             """
@@ -3387,6 +3390,49 @@ class SQLiteClient:
                 return [_publication_row_to_dict(r) for r in rows]
             finally:
                 conn.close()
+
+        return await asyncio.to_thread(_load)
+
+    async def list_publication_divergence(
+        self, *, registry_urls: Sequence[str]
+    ) -> list[dict[str, Any]]:
+        """Registry records that disagree with their listing's local status.
+
+        An open listing should be ``published`` at every registry that records
+        it and a closed one ``unpublished``; any other record there — a failed
+        publish, close, or reopen — is a registry that has not converged. Only
+        the given (configured) registries and open or closed listings are read.
+        Returns ``listing_id``, ``listing_status``, and ``registry_url`` rows
+        ordered by listing and registry.
+        """
+        urls = list(registry_urls)
+        if not urls:
+            return []
+
+        def _load() -> list[dict[str, Any]]:
+            placeholders = ", ".join("?" for _ in urls)
+            conn = sqlite3.connect(self.db_path)
+            try:
+                rows = conn.execute(
+                    f"""
+                    SELECT p.listing_id, l.status, p.registry_url
+                    FROM publications p
+                    JOIN listings l ON l.listing_id = p.listing_id
+                    WHERE p.registry_url IN ({placeholders})
+                      AND (
+                        (l.status = 'open' AND p.status != 'published')
+                        OR (l.status = 'closed' AND p.status != 'unpublished')
+                      )
+                    ORDER BY p.listing_id, p.registry_url
+                    """,
+                    urls,
+                ).fetchall()
+            finally:
+                conn.close()
+            return [
+                {"listing_id": row[0], "listing_status": row[1], "registry_url": row[2]}
+                for row in rows
+            ]
 
         return await asyncio.to_thread(_load)
 

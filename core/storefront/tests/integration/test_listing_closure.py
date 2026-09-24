@@ -60,11 +60,18 @@ def _binding(listing_id: str = "listing-a") -> StorefrontListingBinding:
     )
 
 
-async def _persist(client: SQLiteClient, listing_id: str = "listing-a") -> str:
+async def _persist(
+    client: SQLiteClient,
+    listing_id: str = "listing-a",
+    *,
+    status: str = "open",
+    closed_by: str | None = None,
+) -> str:
     binding = _binding(listing_id)
     await client.upsert_listing_with_binding(
         binding=binding,
-        status="open",
+        status=status,
+        closed_by=closed_by,
         created_at="2026-08-15T00:00:00Z",
         updated_at="2026-08-15T00:00:00Z",
         listing_resource={"resource_type": "compute.gpu", "offering_mode": "vm"},
@@ -177,6 +184,22 @@ async def test_upsert_cannot_overwrite_a_seller_close(client):
     assert (row["status"], row["closed_by"]) == ("closed", "seller")
 
 
+async def test_an_upserted_close_keeps_a_seller_close(client):
+    """A reconciliation close arriving by upsert cannot downgrade the reason,
+    which would let the next reconciliation reopen the listing."""
+    listing_id = await _persist(client)
+    await client.update_listing(listing_id=listing_id, status="closed", closed_by="seller")
+
+    await _persist(client, listing_id, status="closed", closed_by="reconciliation")
+
+    row = await client.load_listing(listing_id=listing_id)
+    assert (row["status"], row["closed_by"]) == ("closed", "seller")
+    with pytest.raises(SellerClosedListingError):
+        await client.update_listing(
+            listing_id=listing_id, status="open", reopened_by="reconciliation"
+        )
+
+
 async def test_connection_level_write_applies_the_same_guard(client):
     listing_id = await _persist(client)
     await client.update_listing(listing_id=listing_id, status="closed", closed_by="seller")
@@ -190,3 +213,44 @@ async def test_connection_level_write_applies_the_same_guard(client):
     finally:
         conn.close()
     assert (await client.load_listing(listing_id=listing_id))["status"] == "closed"
+
+
+async def test_divergence_is_every_configured_record_disagreeing_with_local_status(
+    client,
+):
+    await _persist(client, "open-listing")
+    await _persist(client, "closed-listing")
+    await client.update_listing(
+        listing_id="closed-listing", status="closed", closed_by="seller"
+    )
+    records = {
+        ("open-listing", "https://a.example"): "published",
+        ("open-listing", "https://b.example"): "failed",
+        ("closed-listing", "https://a.example"): "unpublished",
+        ("closed-listing", "https://b.example"): "published",
+        ("closed-listing", "https://retired.example"): "failed",
+    }
+    for (listing_id, registry_url), status in records.items():
+        await client.upsert_publication(
+            listing_id=listing_id,
+            registry_url=registry_url,
+            payload={},
+            status=status,
+        )
+
+    divergence = await client.list_publication_divergence(
+        registry_urls=["https://a.example", "https://b.example"]
+    )
+
+    assert divergence == [
+        {
+            "listing_id": "closed-listing",
+            "listing_status": "closed",
+            "registry_url": "https://b.example",
+        },
+        {
+            "listing_id": "open-listing",
+            "listing_status": "open",
+            "registry_url": "https://b.example",
+        },
+    ]

@@ -267,14 +267,14 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_vms-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_vms-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -325,7 +325,7 @@ requires-dist = [
     { name = "arkhai-kit-identity", specifier = "==0.3.0" },
     { name = "arkhai-kit-policy" },
     { name = "arkhai-kit-settlement-runtime", specifier = "==0.1.2" },
-    { name = "arkhai-vms", specifier = ">=0.2.0" },
+    { name = "arkhai-vms", specifier = ">=0.3.0" },
     { name = "arkhai-vms-listings", specifier = ">=0.1.0" },
     { name = "arkhai-vms-negotiation", specifier = ">=0.1.0" },
     { name = "arkhai-vms-settlement", specifier = ">=0.1.0" },

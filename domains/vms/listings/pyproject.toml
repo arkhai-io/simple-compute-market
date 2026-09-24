@@ -16,7 +16,7 @@ dependencies = [
 # resource-pool kit. Only the storefront derives listings from projections; the
 # buyer uses the listing models and helpers alone, and imports none of it.
 pools = [
-    "arkhai-kit-resource-pools>=0.2.0",
+    "arkhai-kit-resource-pools>=0.3.0",
 ]
 
 [build-system]

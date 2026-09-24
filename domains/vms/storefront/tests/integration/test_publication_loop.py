@@ -594,3 +594,58 @@ async def test_a_reopen_republishes_and_reopens_at_every_registry(registry_world
     assert sorted(url for url, _ in reopens) == sorted(world.registries.urls)
     assert {body["status"] for _, body in reopens} == {"open"}
     assert (await _listing(world, listing_id))["status"] == "open"
+
+
+async def test_a_registry_that_missed_a_close_is_repaired_by_the_next_cycle(
+    registry_world,
+):
+    world = registry_world
+    world.pools.append(pool("broker-a", backing="unbacked"))
+    await _cycle(world)
+    (listing_id,) = await _listings(world)
+    registry_a, registry_b = world.registries.urls
+    world.registries.failing = {("closed", registry_b)}
+
+    world.pools[0] = pool("broker-a", backing="unbacked", enabled=False)
+    first = await _cycle(world)
+
+    assert first["counts"] == {"close": 1, "converge": 1, "fail": 1}
+    world.registries.failing.clear()
+    preview = await _cycle(world, dry_run=True)
+    assert [
+        (a["listing_id"], a["registries"]) for a in preview["actions"]
+    ] == [(listing_id, [registry_b])]
+    world.registries.sent.clear()
+
+    repaired = await _cycle(world)
+
+    assert repaired["counts"] == {"converge": 1}
+    assert [(op, url, body) for op, url, _, body in world.registries.sent] == [
+        ("update", registry_b, {"status": "closed"})
+    ]
+    assert (await _cycle(world))["counts"] == {}
+
+
+async def test_a_registry_left_closed_by_a_failed_reopen_is_repaired_by_the_next_cycle(
+    registry_world,
+):
+    world = registry_world
+    world.pools.append(pool("broker-a", backing="unbacked"))
+    await _cycle(world)
+    (listing_id,) = await _listings(world)
+    world.pools[0] = pool("broker-a", backing="unbacked", enabled=False)
+    await _cycle(world)
+    registry_a, registry_b = world.registries.urls
+    world.registries.failing = {("open", registry_b)}
+
+    world.pools[0] = pool("broker-a", backing="unbacked")
+    assert (await _cycle(world))["counts"] == {"reopen": 1, "converge": 1, "fail": 1}
+    world.registries.failing.clear()
+    world.registries.sent.clear()
+
+    assert (await _cycle(world))["counts"] == {"converge": 1}
+    assert [(op, url) for op, url, _, _ in world.registries.sent] == [
+        ("publish", registry_b),
+        ("update", registry_b),
+    ]
+    assert world.registries.to("update", listing_id)[-1][1] == {"status": "open"}

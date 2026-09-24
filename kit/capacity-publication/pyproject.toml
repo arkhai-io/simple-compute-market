@@ -1,11 +1,11 @@
 [project]
 name = "arkhai-kit-capacity-publication"
-version = "0.1.1"
+version = "0.2.0"
 license = "MIT"
 description = "Schema-opaque capacity projection and storefront publication lifecycle."
 requires-python = ">=3.12,<3.14"
 dependencies = [
-    "arkhai-core-storefront==0.5.0",
+    "arkhai-core-storefront==0.6.0",
     "arkhai-core-registry-client>=0.12.0",
     "arkhai-kit-site-client",
 ]
