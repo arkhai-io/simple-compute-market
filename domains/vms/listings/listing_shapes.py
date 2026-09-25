@@ -8,7 +8,7 @@ whole. A stated list the VM vocabulary cannot read is reported as unreadable
 and never replaced by a lower source, because an unreadable declaration is not
 a withdrawn one.
 
-See openspec/specs/storefront-publication/spec.md, "Every listing is a listing
+See openspec/specs/storefront-publication/spec.md, "Every VM listing is a listing
 shape".
 """
 

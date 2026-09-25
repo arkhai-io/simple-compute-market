@@ -166,7 +166,8 @@ Complete. Rationale for every choice below is in
     requirements added by this change's `storefront-publication` delta ("Every listing is a
     listing shape"; "A listing shape is published only where a source member is feasible
     for it"; "A listing's derivation identity includes its shape"). They resolve when the
-    delta is synced; 9.9 syncs it and verifies them then.
+    delta is synced; 9.9 syncs it and verifies them then. The first and third were later
+    renamed for VM scope (15.9).
   - Import placement: of the two function-level imports Slice A added, the one in
     `listing_shapes.py` stays (buyers install the listings package without the pool kit);
     the system-status provider's moved to module level, verified by importing the
@@ -480,7 +481,7 @@ dispositions. Slices A and B are implemented; Slice C changes their override cod
     the baseline.
   - Not run here: the provisioning service and adapters, whose only change this slice is the
     Dockerfile, covered by `e2e-tests`' image-pin guard; and the maintainer's full
-    `make test`, which was still running when section 16 was planned.
+    `make test`, which later passed on the section 16 code (16.9).
 
 ## 15. Closeout (whole change)
 
@@ -529,8 +530,27 @@ Per `openspec/README.md#plan-closeout-requirements`.
     `site-capacity` keeps none, and none was invented.
   - `storefront-publication/architecture.md` gains "Listing shapes and the storefront's
     authority", with subsections on pool overrides, unknown sites, and inline
-    reconciliation. `ARCHITECTURE.md`, `DEPLOYMENT_AND_CONFIG.md`, and `TESTING.md` are
-    updated as listed below.
+    reconciliation. `ARCHITECTURE.md` and `DEPLOYMENT_AND_CONFIG.md` are updated as listed
+    below.
+  - **Corrected after the closeout review:**
+    - The promoted text claimed listing shapes for every market, although the proposal
+      excludes bare-metal and API-credit publication. The two requirements are renamed
+      "Every VM listing is a listing shape" and "A VM listing's derivation identity
+      includes its shape", in the delta and the permanent spec. Both production citations
+      follow: `listing_shapes.py` and `listing_identity_carryover.py`, docstrings only.
+    - The modified requirement "A listing's published shape comes from its source
+      declaration" again derives every domain's compute shape from its declaration, with a
+      VM listing's being its listing shape.
+    - `architecture.md`, `ARCHITECTURE.md`, and `ROADMAP.md` are scoped to VM. The generic
+      "Listing identity" section is restored to its prior text, and the shape utility and
+      the override kit stay described as market-neutral.
+    - An omitted dimension is described as outside the commitment, supplied by
+      fulfillment from the pool's VM defaults where set, or left to the playbook. It had
+      read as unconditionally provisioned by the site, including in `ROADMAP.md`.
+    - The `TESTING.md` coverage section is withdrawn: it was a feature ledger, not a
+      convention. No repository-wide testing convention changed. Feature coverage is
+      recorded in the owning specs' Evidence sections and this change's validation record,
+      and the owed reconciler-test move stays with 16.7.
   - All 7 production docstring citations of a requirement name resolve.
   - **Found, pre-existing:** 13 anchor-form citations do not resolve, because each omits the
     `requirement-` prefix its heading's slug carries. Examples are
@@ -576,8 +596,8 @@ Per `openspec/README.md#plan-closeout-requirements`.
       deriving from its local tables;
     - sizing pool VM defaults for omitted dimensions;
     - fail-forward upgrade with the one-time republish and seller-state carry-over.
-  - `docs/development/TESTING.md`: a listing-shape and storefront-override coverage split, in
-    the style of "Pool Offering-Mode Enforcement", with the kit's library integration suite.
+  - `docs/development/TESTING.md`: nothing. No repository-wide testing convention changed, so
+    the coverage split first written here was withdrawn after the closeout review.
 
 # Slice C review corrections
 
@@ -639,8 +659,8 @@ storefront (0.6.0) were each bumped by this change and are unreleased.
     scenarios collect.
   - `make dist-ci && make dist-kits` and `make check-reinit` pass.
   - `openspec validate --all --strict`: 73 passed, 19 failed, the baseline.
-  - Not run here: the maintainer's full `make test`, still running when the pipeline
-    re-run was recorded.
+  - The maintainer's full `make test` passed (2026-09-24). No code changed after section 16:
+    the later filesets touched only `tasks.md`, specs, and documentation.
 - [x] 16.10 **Closeout for section 16.**
   1. Comment hygiene passes. A direct read covered the kit store and reader, the
      contribution protocol, `_site_pool_overrides`, `vm_override_view`,
@@ -686,11 +706,11 @@ Filled in during implementation. Destinations planned:
 
 | Accepted decision | Permanent location |
 |---|---|
-| A published dimension is a commitment; every listing is a listing shape from override, hint, or default generator | `openspec/specs/storefront-publication/spec.md` — "Every listing is a listing shape"; rationale in `openspec/specs/storefront-publication/architecture.md` |
+| A published dimension is a commitment; every VM listing is a listing shape from override, hint, or default generator | `openspec/specs/storefront-publication/spec.md` — "Every VM listing is a listing shape"; rationale in `openspec/specs/storefront-publication/architecture.md` |
 | The VM default generator is GPU-only and per model; generators are a seam | Same requirement; `openspec/specs/storefront-publication/architecture.md` |
 | Omitted dimensions are the site's; the administrator sizes the defaults | `openspec/specs/storefront-publication/architecture.md`; `docs/development/DEPLOYMENT_AND_CONFIG.md` |
 | A shape is published only where a member is resource-feasible; reservation remains the admission boundary | `openspec/specs/storefront-publication/spec.md` — "A listing shape is published only where a source member is feasible for it" |
-| Every listing's identity includes its shape digest; seller state carries across the upgrade | `openspec/specs/storefront-publication/spec.md` — "A listing's derivation identity includes its shape" |
+| Every VM listing's identity includes its shape digest; seller state carries across the upgrade | `openspec/specs/storefront-publication/spec.md` — "A VM listing's derivation identity includes its shape" |
 | Site-scoped, durable storefront pool overrides and the legacy tier | `openspec/specs/storefront-publication/spec.md` — "Storefront pool overrides are site-scoped and durable"; `docs/development/DEPLOYMENT_AND_CONFIG.md` |
 | Override writes are checked against the site's live projection | `openspec/specs/storefront-publication/spec.md` — "Storefront pool overrides are written against the site's live projection" |
 | Every stored override reports one of five states; an unloaded site is unknown, not absent | `openspec/specs/storefront-publication/spec.md` — "Storefront pool overrides are site-scoped and durable"; rationale in `openspec/specs/storefront-publication/architecture.md` |

@@ -281,9 +281,11 @@ Structure is checked wherever the pool is written; whether a shape's families
 exist is judged by the storefront, which reports a shape it cannot read and holds
 that pool's listings. A pool that states no shapes publishes its domain's default
 shapes: for VM, one GPU-only shape per count, per GPU model. A shape is a
-commitment: the reservation holds every quantity it states, and a dimension it
-omits is provisioned from the pool's configured VM defaults, so size those
-defaults for every shape that omits a dimension.
+commitment: the reservation holds every quantity it states. A dimension it omits
+is outside the listing's and the reservation's commitment: fulfillment may supply
+it from the pool's configured VM defaults (`default_vm_ram`, `default_vm_vcpus`,
+`default_vm_disk_size`), where set, or leave it to the provisioning playbook.
+Keep enough capacity for every dimension a pool's shapes omit.
 
 Host inventory is not a definition document, and the digest reconciliation
 described below does not apply to it. The inventory (`inventory_ini`, or the file

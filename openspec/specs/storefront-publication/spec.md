@@ -897,13 +897,15 @@ from capacity that is temporarily taken.
 
 ### Requirement: A listing's published shape comes from its source declaration
 
-A listing's published compute shape is its listing shape, and whether that shape is published
-is decided against its source declaration, for capacity-backed and unbacked listings alike.
+A listing's published compute shape is derived from the shape its source declaration carries,
+and a VM listing's is its listing shape; whether it is published is decided against its source
+declaration, for capacity-backed and unbacked listings alike.
 Nothing in publication verifies that shape against hardware, and this requirement makes no
 claim that it does.
 
 Derivation MUST NOT substitute a value for a quantity a declaration does not carry. A
-declaration that omits the quantity a domain's default shapes are enumerated by MUST yield no
+declaration that omits the quantity a domain enumerates listings by (for VM, the quantity its
+default shapes are enumerated by) MUST yield no
 listing, and the omission MUST be reported to the operator naming the declaration. A
 declaration that declares that quantity as zero MUST yield no listing without a
 report. A declaration whose quantity is malformed, or a projected member that does not state its
@@ -1115,15 +1117,15 @@ registry still unreachable stays recorded as diverged for the next pass.
 - **WHEN** the local close of a listing fails
 - **THEN** no registry is told, and a seller's close is reported as retryable with the listing unchanged
 
-### Requirement: Every listing is a listing shape
+### Requirement: Every VM listing is a listing shape
 
-Every listing a domain publishes MUST be a listing shape: a family-grouped capability shape in
-that domain's vocabulary. A pool's shapes MUST come from exactly one source, in this
-precedence:
+Every VM listing MUST be a listing shape: a family-grouped capability shape in the VM
+domain's vocabulary. Bare-metal and API-credit listings are not listing shapes. A pool's VM
+shapes MUST come from exactly one source, in this precedence:
 
 1. The storefront's override for that site and pool, when it states shapes.
 2. Otherwise, the pool's own `listing_shapes` hint for the listing's offering mode.
-3. Otherwise, the domain's default shape generator.
+3. Otherwise, the VM domain's default shape generator.
 
 A stated list MUST replace the lower sources as a whole. How many of a shape a pool can serve
 MUST be derived from its capacity declarations, and MUST NOT be declared or published.
@@ -1262,10 +1264,10 @@ match.
 - **THEN** no new listing is derived from the pool, its existing listings are held, the pool
   does not fall back to the default generator, and system status reports the problem
 
-### Requirement: A listing's derivation identity includes its shape
+### Requirement: A VM listing's derivation identity includes its shape
 
 **Identity.**
-- Every listing's derivation identity MUST include a canonical digest of its shape, taken
+- Every VM listing's derivation identity MUST include a canonical digest of its shape, taken
   over the family-grouped form rather than the flattened field names, whichever source
   produced the shape.
 - Its durable binding MUST record the shape in the current source envelope version.
@@ -1526,7 +1528,7 @@ the storefront holds.
 - Region/SLA hint resolution (including SLA's storefront-wide trust gate) and negotiation-floor pricing-policy precedence: `domains/vms/storefront/tests/unit/test_pool_descriptors.py`, `domains/vms/storefront/tests/unit/test_pricing_resolution.py`, `domains/vms/storefront/tests/unit/test_reconciler.py`, and `domains/vms/storefront/tests/unit/test_cli_publish_helpers.py::TestPoolHintResolutionSettings`.
 - Structured publication defaults/imports and preview-first, typed, backed-up atomic migration with ambiguity refusal: `domains/vms/storefront/tests/unit/test_config_loader.py`, `test_resource_csv_importer.py`, and `test_publication_migration.py`.
 - Complete bare-metal seller composition, immutable listing/thread binding, selected-site lifecycle, result redaction, restart, and contribution wiring: `domains/bare_metal/storefront/tests/test_http_negotiation.py`, `test_persistence.py`, `test_fulfillment_service.py`, `test_site_clients.py`, `test_domain_runtime.py`, and `test_app_composition.py`.
-- Every listing is a listing shape — the override, hint, and default-generator sources, per-model default shapes, and publishing exactly the declared quantities: `domains/vms/storefront/tests/unit/test_reconciler.py` (`TestListingShapes`, `TestStorefrontOverrideTier`), `domains/vms/domain/tests/test_shape_generation.py`, `test_storefront_adapter.py`, and `domains/vms/storefront/tests/integration/test_publication_loop.py`. A shape's declared quantities, not pool defaults, size the VM: `provisioning/compute/service/tests/unit/services/test_ansible_fulfillment_provider.py`.
+- Every VM listing is a listing shape — the override, hint, and default-generator sources, per-model default shapes, and publishing exactly the declared quantities: `domains/vms/storefront/tests/unit/test_reconciler.py` (`TestListingShapes`, `TestStorefrontOverrideTier`), `domains/vms/domain/tests/test_shape_generation.py`, `test_storefront_adapter.py`, and `domains/vms/storefront/tests/integration/test_publication_loop.py`. A shape's declared quantities, not pool defaults, size the VM: `provisioning/compute/service/tests/unit/services/test_ansible_fulfillment_provider.py`.
 - Shape feasibility agrees with the site ledger on declared and available capacity, members, and buckets: `domains/vms/storefront/tests/integration/test_shape_feasibility.py`.
 - Shape-bearing derivation identity and the seller-state carry-over across it, reported through system status: `domains/vms/storefront/tests/integration/test_listing_identity_carryover.py` and `test_publication_loop.py`.
 - Storefront pool overrides — the kit's store, reader, write check, status, and signed-resource contract: `kit/pool-overrides/tests/unit/` and `kit/pool-overrides/tests/integration/`; through the storefront app and its typed clients, including a non-home site, refused writes, commercial terms reaching a listing, and the legacy tier: `domains/vms/storefront/tests/integration/test_pool_overrides_api.py`; the VM vocabulary: `domains/vms/storefront/tests/unit/test_vm_pool_override_contribution.py`; the administrator contract: `domains/vms/storefront/tests/unit/test_identity_dispatch.py`.

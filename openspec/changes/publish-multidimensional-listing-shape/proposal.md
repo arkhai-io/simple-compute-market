@@ -21,7 +21,7 @@ a storefront cannot be the final authority over listings from any other site.
 
 ## What Changes
 
-- **Every listing is a listing shape.** A shape is a family-grouped statement of what one
+- **Every VM listing is a listing shape.** A shape is a family-grouped statement of what one
   listing offers: GPU count and model, and optionally vCPU, memory, and storage. A pool's
   shapes come from exactly one source, in this order:
   1. the storefront's override for that site and pool;
@@ -202,7 +202,7 @@ None.
 
 ### Knowledge to promote
 
-- Every listing is a listing shape, from the storefront's override, the site's hint, or the
+- Every VM listing is a listing shape, from the storefront's override, the site's hint, or the
   domain's default generator. A listing commits to and reserves exactly its declared
   quantities, and how many fit is derived — `openspec/specs/storefront-publication/spec.md`.
 - A shape is published only where a source member is resource-feasible for it; reservation

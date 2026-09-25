@@ -1,14 +1,14 @@
 ## ADDED Requirements
 
-### Requirement: Every listing is a listing shape
+### Requirement: Every VM listing is a listing shape
 
-Every listing a domain publishes MUST be a listing shape: a family-grouped capability shape in
-that domain's vocabulary. A pool's shapes MUST come from exactly one source, in this
-precedence:
+Every VM listing MUST be a listing shape: a family-grouped capability shape in the VM
+domain's vocabulary. Bare-metal and API-credit listings are not listing shapes. A pool's VM
+shapes MUST come from exactly one source, in this precedence:
 
 1. The storefront's override for that site and pool, when it states shapes.
 2. Otherwise, the pool's own `listing_shapes` hint for the listing's offering mode.
-3. Otherwise, the domain's default shape generator.
+3. Otherwise, the VM domain's default shape generator.
 
 A stated list MUST replace the lower sources as a whole. How many of a shape a pool can serve
 MUST be derived from its capacity declarations, and MUST NOT be declared or published.
@@ -147,10 +147,10 @@ match.
 - **THEN** no new listing is derived from the pool, its existing listings are held, the pool
   does not fall back to the default generator, and system status reports the problem
 
-### Requirement: A listing's derivation identity includes its shape
+### Requirement: A VM listing's derivation identity includes its shape
 
 **Identity.**
-- Every listing's derivation identity MUST include a canonical digest of its shape, taken
+- Every VM listing's derivation identity MUST include a canonical digest of its shape, taken
   over the family-grouped form rather than the flattened field names, whichever source
   produced the shape.
 - Its durable binding MUST record the shape in the current source envelope version.
@@ -397,13 +397,15 @@ the storefront holds.
 
 ### Requirement: A listing's published shape comes from its source declaration
 
-A listing's published compute shape is its listing shape, and whether that shape is published
-is decided against its source declaration, for capacity-backed and unbacked listings alike.
+A listing's published compute shape is derived from the shape its source declaration carries,
+and a VM listing's is its listing shape; whether it is published is decided against its source
+declaration, for capacity-backed and unbacked listings alike.
 Nothing in publication verifies that shape against hardware, and this requirement makes no
 claim that it does.
 
 Derivation MUST NOT substitute a value for a quantity a declaration does not carry. A
-declaration that omits the quantity a domain's default shapes are enumerated by MUST yield no
+declaration that omits the quantity a domain enumerates listings by (for VM, the quantity its
+default shapes are enumerated by) MUST yield no
 listing, and the omission MUST be reported to the operator naming the declaration. A
 declaration that declares that quantity as zero MUST yield no listing without a
 report. A declaration whose quantity is malformed, or a projected member that does not state its

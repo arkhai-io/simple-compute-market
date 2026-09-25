@@ -1,6 +1,6 @@
 """Carry a seller's close or pause onto the listing that succeeds a pre-shape listing.
 
-A listing's derivation identity includes its shape, and a listing bound before
+A VM listing's derivation identity includes its shape, and a listing bound before
 shapes (``compute.listing_source`` version 1) has none, so reconciliation never
 derives its key again: while open it closes as stale, and its equivalent default
 shape publishes under a new identity. A seller's close and pause belong to a
@@ -24,7 +24,7 @@ unpaused successor of a paused listing is paused. A successor that reconciliatio
 already closed cannot be made seller-closed by any seller operation; it is
 reported, and stays closed until publication derives its shape again.
 
-See openspec/specs/storefront-publication/spec.md, "A listing's derivation
+See openspec/specs/storefront-publication/spec.md, "A VM listing's derivation
 identity includes its shape".
 """
 
