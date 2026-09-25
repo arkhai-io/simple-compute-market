@@ -19,6 +19,8 @@
 - [ ] 2.4 Record each registry outcome in the per-registry publication records and
   converge every registry on its listing's local status on each run (`design.md`,
   "Registry convergence reuses the storefront's publication records").
+- [ ] 2.5 Publish, reconcile, and converge through `kit/capacity-publication`'s
+  `PublicationRuntime` (`design.md`, "Bare metal adopts the kit publication runtime").
 
 ## 3. Validation
 

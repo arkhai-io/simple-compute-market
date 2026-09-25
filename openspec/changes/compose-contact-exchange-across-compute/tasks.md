@@ -118,7 +118,8 @@ before it has.
 - [ ] 6.5 **System.** Two seller sites publishing unbacked supply to one storefront
       retain distinct origin and source identity, and each introduction reveals its
       own seller's contact. Needs 3b. Transferred from `unbacked-listing-publication`
-      (its 6.8).
+      (its 6.8). The bare-metal counterpart belongs to
+      `unbacked-bare-metal-listings`.
 
 ## 7. Closeout
 

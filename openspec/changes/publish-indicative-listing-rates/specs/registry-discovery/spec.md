@@ -8,6 +8,9 @@ decimal. Range bounds declared under it MUST be parsed as exact decimals, resolv
 listing values MUST be accepted when they are decimal text, and comparison MUST
 NOT pass through a binary floating-point representation at any point.
 
+The type is domain-neutral: it names no market, field, or unit, and any
+specification may declare it for any decimal quantity.
+
 The existing JSON-number value type MUST be left unchanged. Retyping its
 comparison domain would alter the meaning of filters that other deployments'
 specifications already declare, so exact decimal comparison MUST be a distinct
@@ -57,14 +60,21 @@ The dependency MUST be one-directional: a co-required filter supplied on its own
 remains a valid constraint in its own right.
 
 Both the registry and the buyer resource-query compiler MUST resolve
-co-requirements from the active filter specification. Neither MUST encode a
+co-requirements from the active filter specification. Neither may encode a
 specific field's dependency in code, consistent with the requirement that every
 field, operator, type, alias, and missing-value rule is resolved from the
-specification and that no domain field is added.
+specification and that no domain field is added. The registry's refusal is
+authoritative: a buyer that does not understand co-requirements is still refused.
 
 Specification validation MUST reject a co-requirement naming an undeclared filter,
 naming its own declaration, or participating in a cycle. Each is a specification
 defect that would otherwise surface as a query that can never be satisfied.
+
+A filter declaring no co-requirement MUST serialize, in the served specification
+and in the input to its etag, exactly as it would under an engine without this
+capability. The etag signals that the semantics a buyer compiled against have
+changed; an engine upgrade that changes no specification's semantics MUST NOT
+rotate any specification's etag.
 
 #### Scenario: A co-required filter is missing from a query
 
@@ -89,106 +99,42 @@ defect that would otherwise surface as a query that can never be satisfied.
   an undeclared filter, or name their own declaration
 - **THEN** specification validation fails rather than the registry serving it
 
-### Requirement: A listing may publish the seller's asking rate
+#### Scenario: A specification declares no co-requirement
 
-A compute listing MAY publish the rate its seller is asking for the listing's
-advertised shape, as an `asking_rate` object on the published listing resource
-carrying `amount`, `asset`, and `period`. All three MUST be present together, and
-publication MUST be refused when any is absent: an amount alone cannot be read and
-a bound cannot be evaluated against it.
+- **WHEN** a registry whose engine supports co-requirements loads a specification
+  that declares none
+- **THEN** the served specification and its etag are identical to those an engine
+  without the capability produces
 
-`amount` MUST be exact decimal text. A binary floating-point encoding cannot
-represent ordinary decimal prices, and a base-unit integer encoding cannot
-represent a fraction and needs a companion decimals field to be interpreted.
+### Requirement: The compute schema carries a listing's asking rate
 
-`asset` MUST be an opaque, non-empty identifier of the same kind a settlement
-option's published asset already carries. It MUST NOT require an on-chain contract
-address, token decimals, or a chain identity, so a rate quoted in an off-chain
-currency is expressible. No surface may interpret it beyond comparing it for
-equality.
+The compute filter specification MUST describe an optional `asking_rate` object on
+the published listing resource, carrying `amount`, `asset`, and `period`, all
+required when the object is present. `amount` is exact decimal text; `asset` is an
+opaque, non-empty identifier of the same kind a settlement option's published asset
+carries, requiring no contract address, token decimals, or chain identity; `period`
+is the time unit the amount is quoted per, `hour` in this version. The object is a
+sibling of the listing's flattened dimension fields and is not nested under a
+capability family.
 
-`period` MUST be the currently supported time-rate unit, `hour`. A period outside
-that MUST be refused at publication. Accepting a further period is a decision for
-a later version rather than a consequence of a settlement-side change.
+The object is declared in the compute specification, which is data the generic
+registry serves, and not in registry engine code. The registry validates it only
+where it validates the listing shape today — the dry run — and does not refuse it at
+the publish boundary; the storefront that builds the listing is responsible for
+publishing only a complete, valid rate. No registry surface may interpret the asset
+beyond comparing it for equality.
 
-One rate is published per listing, as a single catalogue price for a shape that
-does not vary. It MUST NOT be decomposed per capacity dimension, and it MUST NOT be
-nested under a capability family: it prices the whole listing.
+#### Scenario: A listing is dry-run with a partial asking rate
 
-The published rate is a listing attribute and not a settlement option rate. No
-settlement option, escrow term, or accepted obligation may be constructed from it,
-and an agreed amount remains absent rather than zero until one is negotiated. This
-constrains what the system builds from the number, not how far a buyer should trust
-it: like every published field, an asking rate is a seller assertion, and nothing in
-the marketplace verifies any of them.
-
-#### Scenario: A listing publishes an asking rate
-
-- **WHEN** a seller publishes a listing carrying an asking rate
-- **THEN** the published listing resource carries an `asking_rate` object with its
-  amount, asset, and period
-- **AND** the amount appears as decimal text
-- **AND** no settlement option or obligation carries a value derived from them
-
-#### Scenario: A rate omits its asset or its period
-
-- **WHEN** a listing publishes a rate amount without an asset, or without a period
-- **THEN** publication is refused rather than publishing an amount that cannot be read
-
-#### Scenario: A rate is quoted in an unsupported period
-
-- **WHEN** a listing publishes a rate whose period is not the supported time-rate unit
-- **THEN** publication is refused rather than storing an uninterpretable period
+- **WHEN** a publisher dry-runs a compute listing whose `asking_rate` omits its asset
+  or its period
+- **THEN** the dry run reports the listing invalid, naming the asking rate
 
 #### Scenario: A rate is quoted in an off-chain asset
 
-- **WHEN** a seller publishes an asking rate in an asset that has no contract address, decimals, or chain identity
-- **THEN** the rate publishes with that asset identifier carried opaquely
-
-#### Scenario: A deal is agreed against a listing carrying an asking rate
-
-- **WHEN** a negotiation concludes against a listing publishing an asking rate
-- **THEN** the agreed amount comes from the negotiation
-- **AND** the published asking rate does not constrain or supply it
-
-### Requirement: The asking rate and a mechanism rate are independent carriers
-
-A listing MAY publish an asking rate and also advertise a rate inside a
-settlement carrier — an accepted escrow's rate slots or a settlement option's
-rates. The two MUST be treated as different carriers with different meanings: a
-mechanism rate governs what the runtime constructs for that mechanism, and the
-asking rate governs nothing.
-
-The two MUST NOT be required to agree, and where they disagree neither corrects
-the other. A buyer comparing on the asking rate while negotiating against a
-mechanism rate is the ordinary relationship between a published field and its
-negotiated outcome, and no surface may present one as authoritative for the other.
-
-Neither may be derived from the other, in either direction. A published asking
-rate MUST NOT be written into a settlement option, escrow term, or obligation.
-
-A listing that settles through a mechanism declining scalar participation carries
-no mechanism rate at all. Such a listing MUST still be able to publish an asking
-rate, since comparison before contact is the whole value the marketplace offers
-for supply agreed out of band.
-
-#### Scenario: A listing carries both an asking rate and an escrow rate
-
-- **WHEN** a listing publishes an asking rate and also advertises escrow rate slots
-- **THEN** both appear in the published shape
-- **AND** no settlement option, escrow term, or obligation carries a value derived from the asking rate
-
-#### Scenario: The two published rates disagree
-
-- **WHEN** a listing's published asking rate differs from the rate advertised in its settlement carrier
-- **THEN** publication is not refused on that ground
-- **AND** the mechanism rate remains the only one from which anything is constructed
-
-#### Scenario: A rateless mechanism carries an asking rate
-
-- **WHEN** a listing's only settlement option is under a mechanism that declines scalar participation
-- **THEN** the listing may still publish an asking rate
-- **AND** the option remains rateless
+- **WHEN** a listing publishes an asking rate in an asset that has no contract
+  address, decimals, or chain identity
+- **THEN** the registry stores and serves the asset identifier opaquely
 
 ### Requirement: Rate filters match the period and asset rather than normalizing across them
 
@@ -204,14 +150,12 @@ what is being counted nor per what.
 
 A listing quoting a different period MUST be excluded rather than converted,
 because a period signals the commitment a seller expects: a buyer shopping hourly
-is not asking for supply quoted monthly, and converting one to the other returns
-terms the buyer did not request dressed as a price match.
+is not asking for supply quoted monthly.
 
 A listing quoting a different asset MUST likewise be excluded rather than
 converted. Converting between assets requires an external exchange rate that moves
 continuously, which would make one query's result depend on when it ran and would
-make the registry an authority on relative asset value. Asset comparison MUST
-remain equality only, consistent with every other published asset field.
+make the registry an authority on relative asset value.
 
 A listing publishing no rate MUST be excluded from a rate-bounded query rather than
 matching it, consistent with every other filter over the published listing shape. An

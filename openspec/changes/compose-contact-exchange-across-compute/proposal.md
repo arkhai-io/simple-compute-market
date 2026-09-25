@@ -41,7 +41,9 @@ beyond bare metal as an unowned gap.
   publishes listings from several seller sites through one storefront, so a
   storefront-wide payload would reveal the wrong seller's contact details. The
   payload becomes resolvable from the listing's origin site; a single-origin
-  deployment resolves to the same value it configures today.
+  deployment resolves to the same value it configures today. Resolution lives in
+  the promoted composition, so it applies to bare metal and VM alike rather than
+  being solved once per domain.
 - State normatively that accepted-state interpretation for this mechanism has one
   implementation, and that a composing domain supplies persistence and values
   rather than lifecycle logic.
@@ -117,6 +119,10 @@ None.
   fulfillment declaration names it as not fulfilling through capacity. Per-origin contact resolution is what makes
   Goal 7's multi-seller value claim true, though, so Goal 7 is not complete for
   introductions until it lands — see `design.md`.
+- **Blocks `unbacked-bare-metal-listings`**, which settles unbacked bare-metal
+  introductions through the composition this change promotes and needs the per-origin
+  payload. Bare metal is Goal 7's primary target domain; its unbacked system evidence
+  is owned by that change, and this change's 6.4 and 6.5 remain the VM half.
 - Discharges the remaining half of the recorded open gap for cross-domain
   contact-exchange composition in `docs/development/ROADMAP.md`.
 

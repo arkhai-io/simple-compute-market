@@ -52,7 +52,8 @@ None.
 
 ## Non-Goals
 
-- Unbacked bare-metal listings.
+- Unbacked bare-metal listings, owned by `unbacked-bare-metal-listings`, which lifts
+  this change's refusal of unbacked pools.
 - Making bare-metal publication autonomous; it stays operator-invoked.
 - Changing site admission or any delivery recheck.
 
@@ -87,3 +88,8 @@ None.
 
 Starts after `unbacked-listing-publication`, which moved the declaration reader into
 `kit/resource-pools` and promotes the advertisement requirement this change widens.
+
+Blocks `bare-metal-listing-shapes`, `unbacked-bare-metal-listings`, and the bare-metal
+half of `publish-indicative-listing-rates`, all of which need bare-metal publication to
+read projected pool declarations and policy tags. Bare metal is Goal 7's primary target
+domain, so this change is on that goal's critical path.

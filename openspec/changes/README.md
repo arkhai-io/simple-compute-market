@@ -181,17 +181,31 @@ held is now owned by `repair-storefront-alkahest-configuration` above.
 ```text
 unify-host-identity (archived) ──► capacity-resource-administration (archived) ──► project-capacity-resources-without-hosts (archived) ──┐
 settle-listing-vocabulary (archived) ─────────────────────────────────────┤
-pool-declared-advertisement-and-backing (archived) ─────────────────────────────┴──► unbacked-listing-publication (archived) ──► publish-indicative-listing-rates
-                                                                                         └──► bare-metal-publication-reads-pool-declarations
-contact-payload-retention ──► compose-contact-exchange-across-compute (Sections 1–3, 3b; unbacked-listing system evidence, its 6.4 and 6.5)
+pool-declared-advertisement-and-backing (archived) ─────────────────────────────┴──► unbacked-listing-publication (archived)
+
+bare-metal-publication-reads-pool-declarations ──► bare-metal-listing-shapes ──► unbacked-bare-metal-listings
+contact-payload-retention ──► compose-contact-exchange-across-compute (Sections 1–3, 3b) ──► unbacked-bare-metal-listings
+
+publish-indicative-listing-rates
+  Section 2 (registry engine)         no domain dependency
+  Sections 3–4 (declaration, filters) ◄── bare-metal-listing-shapes
+  unbacked-supply system evidence     ◄── unbacked-bare-metal-listings, compose-contact-exchange-across-compute
 ```
+
+Bare metal is Goal 7's primary target domain, and the goal's critical path runs
+through it: `bare-metal-publication-reads-pool-declarations`, then
+`bare-metal-listing-shapes`, then `unbacked-bare-metal-listings`. Both compute-family
+domains reach the goal through the same kit mechanisms rather than solving it
+separately. `publish-indicative-listing-rates`' registry engine work has no domain
+dependency and may land first.
 
 An unbacked VM listing publishes only settlement options the VM composition does not
 fulfil through capacity, and contact exchange is the first such option. The system
-scenarios for unbacked listings therefore live in
+scenarios for unbacked VM listings therefore live in
 `compose-contact-exchange-across-compute` (its 6.4 and 6.5), transferred from the
 archived `unbacked-listing-publication`, whose implementation and integration
-coverage did not need them.
+coverage did not need them. The bare-metal counterparts belong to
+`unbacked-bare-metal-listings`.
 
 `capacity-resource-administration`, a Goal 7 prerequisite archived 2026-09-21,
 delivered what Goal 7 relies on: digest-gated capacity-definition import, a composition-supplied mirror
@@ -200,7 +214,9 @@ under a live obligation.
 `pools-9-retire-local-physical-authority` depends on that invariant too — its
 two-pool executor-migration path has the same hazard.
 
-Goal 7 owns every change it needs. `publish-indicative-listing-rates` was
+Goal 7 owns every change it needs. Unbacked bare metal was recorded as having no
+owner until `bare-metal-listing-shapes` and `unbacked-bare-metal-listings` were
+opened on 2026-09-25. `publish-indicative-listing-rates` was
 originally graphed behind `capacity-shape-pricing` and transitively behind the
 unstarted `structured-capacity-requirements`; that dependency was removed once it
 was clear those changes price a shape a buyer proposes during negotiation, while a
@@ -225,8 +241,10 @@ advertisement change's subset rule depend on a concept its own dependent owned.
 | [`pool-declared-advertisement-and-backing`](archive/2026-09-22-pool-declared-advertisement-and-backing/) | **archived** 2026-09-22 | Two pool declarations, both required on every pool write: what a pool's listings may advertise, separate from what its provider proves it can deliver; and whether the pool can be admitted against. A backed pool advertises a subset of what it delivers, an unbacked pool delivers nothing, a malformed backing value fails closed, backing is fixed at creation, and every existing pool is migrated to explicit values. A service refuses to start with a pool lacking valid declarations. Supplies one shared resolver for projected declarations. Leaves `deliverable_modes` and every execution recheck untouched. Observable to operators only — no listing behaviour changes until `unbacked-listing-publication` reads the tags |
 | [`project-capacity-resources-without-hosts`](archive/2026-09-22-project-capacity-resources-without-hosts/) | **archived** 2026-09-22 | Builds the resource-pool projection from capacity declarations alone, so a declaration naming no host reaches storefronts instead of succeeding into a void, and generic entries carry no host connection identity. Joins the host only at dispatch, which fails closed on an unregistered host with the static-inventory fallback removed. Providers declare whether delivery needs a host, and admission and scheduling refuse a declaration naming none in such a pool, closing a stranded-assignment defect. Hands disabled-host admission and placement to `pools-6-fair-scheduling-policy`. Also serves Goal 1 |
 | [`unbacked-listing-publication`](archive/2026-09-24-unbacked-listing-publication/) | **archived** 2026-09-24. Its system evidence for unbacked listings moved to `compose-contact-exchange-across-compute` (6.4, 6.5), which first makes it runnable | Backing as an explicit declared listing property: sibling `CapacityBinding` and `UnbackedBinding` types, a binding discriminator distinct from the listing's origin site, pool advertise-authorization separated from execute-authorization, capacity-availability reconciliation scoped to backed listings while source-publication reconciliation applies to all, and an exact backing filter in the compute registry schema, published by VM and bare metal alike. Listing identity is the physical resource offered and terms of sale refresh in place; the seller's inventory guard checks each listing against a fresh derivation of its own source; older producers are detected jointly per site with unresolvable pools held; publication stops using `derived_compute_listings`. Publication runs as a controllable storefront lifecycle loop with terms only from durable sources, a seller's close is durable, and an unbacked listing publishes only settlement options its domain does not fulfil through capacity |
-| [`publish-indicative-listing-rates`](publish-indicative-listing-rates/) | design-complete; unblocked for implementation, since `unbacked-listing-publication`'s backing field and source-publication reconciliation are implemented and promoted | A seller's asking rate for a listing's advertised shape as a frozen three-part object — decimal-text amount, opaque asset, `hour` period — declared at the listing's origin pool, with no storefront default reaching another origin. Filters match the period and asset rather than normalizing across either. Normatively a listing attribute rather than a settlement option rate: nothing is constructed from it. Carries two generic filter-engine primitives it cannot work without: an exact-decimal declared value type and declarative filter co-requirements. Closes Goal 7's comparison gap |
-| [`bare-metal-publication-reads-pool-declarations`](bare-metal-publication-reads-pool-declarations/) | proposed; not planned; starts after `unbacked-listing-publication` | Bare-metal publication resolves each candidate's pool through the kit's site declaration reader: no listing from a pool that does not advertise `bare_metal`, is disabled, or declares itself unbacked, and unresolvable pools held. Brings bare metal under the rule that a listing advertises only a mode its pool authorizes, and records its registry outcomes so every run converges its registry on local status, as VM and API credits do |
+| [`publish-indicative-listing-rates`](publish-indicative-listing-rates/) | design-complete; **blocked** on `bare-metal-publication-reads-pool-declarations` and `bare-metal-listing-shapes`, since bare metal is the primary target domain. Its registry engine work (Section 2) has no domain dependency and may proceed. System evidence for unbacked supply also waits on `unbacked-bare-metal-listings` and `compose-contact-exchange-across-compute` | A seller's asking rate per listing shape as a frozen three-part object — decimal-text amount, opaque asset, `hour` period — declared by the site in a domain-neutral `asking_rates` pool tag keyed by shape, with the storefront's site-scoped override having final authority and no configuration default. Filters match the period and asset rather than normalizing across either. Normatively a listing attribute rather than a settlement option rate: nothing is constructed from it. Carries two domain-neutral filter-engine primitives, neither rotating any existing specification's etag: an exact-decimal declared value type and declarative filter co-requirements. Closes Goal 7's comparison gap |
+| [`bare-metal-publication-reads-pool-declarations`](bare-metal-publication-reads-pool-declarations/) | proposed; not planned; unblocked. On Goal 7's critical path | Bare-metal publication resolves each candidate's pool through the kit's site declaration reader: no listing from a pool that does not advertise `bare_metal` or is disabled, unresolvable pools held, and unbacked pools refused until `unbacked-bare-metal-listings` lifts the refusal. Bare metal publishes, reconciles, and converges through the kit publication runtime, so every run converges its registry on local status, as VM and API credits do |
+| [`bare-metal-listing-shapes`](bare-metal-listing-shapes/) | design phase; not planned; blocked on `bare-metal-publication-reads-pool-declarations` | Each bare-metal listing carries a capability shape matching its Physical Resource, published where the compute schema's dimension filters read it, so bare-metal supply is discoverable by hardware; bare metal joins the site-scoped pool-override store. The key per-shape asking rates are declared against |
+| [`unbacked-bare-metal-listings`](unbacked-bare-metal-listings/) | design phase; not planned; blocked on `bare-metal-publication-reads-pool-declarations`, `bare-metal-listing-shapes`, and `compose-contact-exchange-across-compute` Sections 1–3b | Bare metal publishes unbacked listings from unbacked pools through the same kit runtime, binding, and reconciliation as VM, settling by introduction through the promoted composition. Owns the bare-metal system evidence that unbacked discovery reaches a usable introduction |
 
 ## Lesser goal — POOLS capacity and fulfillment foundation
 
