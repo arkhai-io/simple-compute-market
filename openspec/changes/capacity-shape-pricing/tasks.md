@@ -1,7 +1,8 @@
 # Implementation Tasks
 
-Sections sized to land in roughly a day each. Sections 1–3 are additive and deployable
-alone; Section 4 is the deployment boundary described in `design.md`'s migration plan.
+Sections sized to land in roughly a day each. Every section is additive and deployable
+alone. Section 4 moved to `negotiation-driven-capacity-resize` on 2026-09-25 with the
+multiplier decision; its number is kept so the two plans read the same way.
 
 ## 1. Rate structure and evaluation
 
@@ -9,9 +10,10 @@ alone; Section 4 is the deployment boundary described in `design.md`'s migration
       `RateValue`'s current reach into escrow obligation data and `PER_UNIT_SECONDS`'
       single entry.
 - [ ] 1.2 Define the rate structure as a field of each capability family, not a
-      parallel rate-keyed map. Align the family shape with
-      `structured-capacity-requirements`' accepted vocabulary rather than inventing a
-      third spelling.
+      parallel rate-keyed map, over the family-grouped form `kit/capability-shape`
+      defines and the family names `VM_CAPABILITY_SCHEMA` fixes (`gpu`, `cpu`,
+      `memory`, `storage`). A rate field is not a `ShapeField`: shapes are digested
+      over their families and a rate must not change a listing's shape digest.
 - [ ] 1.3 Implement the aggregation interface — shape plus resolved rate structure to
       price — with linear summation as its only implementation, selected by domain
       configuration.
@@ -29,10 +31,12 @@ alone; Section 4 is the deployment boundary described in `design.md`'s migration
       rates, resolved through the existing storefront-override → pool-hint →
       config-default precedence independently per dimension.
 - [ ] 2.2 Extend `[pricing.defaults.*]` settings and the pool pricing hint beyond the
-      `gpu` family, using the vocabulary `structured-capacity-requirements` settles.
-      If that change has not landed, stop and coordinate rather than choosing a
-      `cpu`/`memory`/`storage` shape independently — its `design.md` records this as a
-      one-directional dependency.
+      `gpu` family, using `VM_CAPABILITY_SCHEMA`'s family names. (Amended 2026-09-25:
+      the vocabulary this task waited on has landed.)
+- [ ] 2.2a Extend `kit/pool-overrides`' VM terms contract with the per-dimension
+      rate fields, so the site-scoped override is the top tier for rates as it is for
+      `min_price`; a rate an override states for a family the schema does not know is
+      refused at write.
 - [ ] 2.3 Make an unresolvable dimension rate produce unpriceable, never zero. Assert
       it directly; priced-at-zero is the dangerous default.
 - [ ] 2.4 Focused tests: mixed-tier resolution across dimensions; absent tier falls
@@ -50,20 +54,11 @@ alone; Section 4 is the deployment boundary described in `design.md`'s migration
 
 ## 4. Negotiation reinterpretation
 
-The deployment boundary. In-flight negotiations carry a multiplier after this section.
-
-- [ ] 4.1 Reinterpret the negotiated reference quantity as a multiplier over the
-      advertised minimum rate structure.
-- [ ] 4.2 Audit every consumer that assumed the negotiated scalar was an amount in an
-      asset's base units. This is an audit, not a rename — `design.md` names it as the
-      contained risk, and the escrow construction path is where a missed consumer would
-      surface as a wrong on-chain amount.
-- [ ] 4.3 Express the seller's floor once as a multiplier bound and confirm it applies
-      to a shape never explicitly priced.
-- [ ] 4.4 Confirm `bisection_middleware` converges unchanged on the reinterpreted
-      quantity, and that a shape change between rounds does not re-anchor bounds.
-- [ ] 4.5 Focused tests: concession comparability across a shape change; floor applied
-      to an unanticipated shape; agreed terms yield one derivable price.
+Moved 2026-09-25 to
+[`negotiation-driven-capacity-resize`](../negotiation-driven-capacity-resize/tasks.md)
+Section 2, where tasks 4.1–4.5 continue under new numbers. The multiplier and the
+revised-terms field are one deployment boundary and belong to the change that defines
+the round payload.
 
 ## 5. Seller feasibility guard
 
@@ -74,14 +69,19 @@ The deployment boundary. In-flight negotiations carry a multiplier after this se
       the listing's own source. What remains here is checking a *buyer-requested*
       shape, once shapes are negotiable, rather than the listing's advertised one.
       Re-verify the guard's state before planning this task.
-- [ ] 5.2 Order the guard before pricing, so a shape the seller will not serve is never
-      quoted.
+      *Re-grounded 2026-09-25:* implement the predicate here, taking a requested shape
+      and the seller's constraints, and wire it into the VM `evaluate_round`
+      composition in `negotiation_runtime.py` ahead of pricing. Until
+      `negotiation-driven-capacity-resize` lets a round carry a shape, the requested
+      shape is the listing's own and the predicate is exercised by unit tests only.
+- [ ] 5.2 Order the guard before pricing inside the VM `evaluate_round` composition,
+      so a shape the seller will not serve is never quoted.
 - [ ] 5.3 Focused tests: quantitative constraint exceeded declines without a quote;
       categorical mismatch declines as today.
 
 ## 6. Validation
 
-- [ ] 6.1 Run the pricing, negotiation policy, `kit/policy` middleware, escrow rate
+- [ ] 6.1 Run the pricing, negotiation policy, `kit/pool-overrides`, escrow rate
       construction, and VM e2e price-assertion suites. Disclose any suite not run.
 - [ ] 6.2 Confirm no consumer reconstructs a total from individual dimension rates —
       the accidental coupling `design.md` names as most likely.
@@ -93,20 +93,22 @@ The deployment boundary. In-flight negotiations carry a multiplier after this se
 Per `openspec/README.md#plan-closeout-requirements`.
 
 - [ ] 7.1 **Comment hygiene.** Run `make check-comment-hygiene`. Read
-      `_place_capacity_hold`'s and `_reject_unsupported_resource_shape_request`'s
-      docstrings directly: both state that seller policy cannot price a shape, which
-      this change makes false. Leaving them is how the next reader concludes the guard
-      is still load-bearing.
+      `_validate_vm_opening`'s surroundings and `pricing_resolution.py`'s module
+      docstring directly: the latter says one price per GPU model, which this change
+      makes false. (The round-0 guard's own retirement is
+      `negotiation-driven-capacity-resize`'s.)
 - [ ] 7.2 **Import placement.** Review imports this change adds or touches.
-- [ ] 7.3 **Documentation compliance.** Confirm the rate-structure and multiplier rules
-      landed in the two specs, `ARCHITECTURE.md`'s negotiation description was updated,
-      and the rejected pricing models stayed in `design.md`.
+- [ ] 7.3 **Documentation compliance.** Confirm the rate-structure and
+      feasibility-before-pricing rules landed in the two specs, `ARCHITECTURE.md`'s
+      pricing description was updated, and the rejected pricing models stayed in
+      `design.md`.
 - [ ] 7.4 **Narrative compression.** Compress completed-task notes to final behavior,
       validation evidence, and promotion destinations.
 - [ ] 7.5 **Roadmap currency.** Update Goal 2's current-state description in
       `docs/development/ROADMAP.md` — specifically the statement that pricing resolves
-      one price per GPU model and that no policy can evaluate a shape counter-offer —
-      and remove this change's gap row.
+      one price per GPU model — and remove this change's gap row. The statement that
+      negotiation has one degree of freedom stays until
+      `negotiation-driven-capacity-resize` lands.
 - [ ] 7.6 **Promotion.** Complete the design-promotion record below.
 - [ ] 7.7 **Campaign index currency** (part seven, added when
       `openspec/README.md#plan-closeout-requirements` was extended from six parts to seven).
@@ -138,8 +140,7 @@ Per `openspec/README.md#plan-closeout-requirements`.
 |---|---|
 | Commercial resolution yields a rate structure evaluable for any admissible shape, per-dimension, unpriceable rather than free when a rate is missing | `openspec/specs/storefront-publication/spec.md` — "Shape-resolvable commercial rates" |
 | Price aggregation is replaceable and no consumer may reconstruct a total | `openspec/specs/storefront-publication/spec.md` — "Price aggregation is replaceable" |
-| The negotiated quantity is a multiplier over a minimum rate structure; a seller floor is expressed once | `openspec/specs/negotiation-protocol/spec.md` — "Rate-multiplier negotiation" |
 | Seller feasibility is evaluated quantitatively and precedes pricing | `openspec/specs/negotiation-protocol/spec.md` — "Seller feasibility precedes pricing" |
-| What a negotiation round negotiates | `docs/development/ARCHITECTURE.md`, "Discovery and negotiation" |
-| Why the negotiated variable had to change, and the two rejected alternatives | This change's `design.md` |
+| Commercial resolution is per-dimension and the override tier is the site-scoped pool override | `docs/development/ARCHITECTURE.md`, "Discovery and negotiation" |
+| The rate lives inside the family it prices; why a parallel rate map was rejected | This change's `design.md` |
 | Why `RateValue` was not widened with a quantity axis | This change's `design.md` |

@@ -1,3 +1,18 @@
+<!-- Archived 2026-09-25 as superseded, without implementation. The premise —
+buyer-negotiated relay coordinates (FRP server address, domain, dashboard credential)
+threaded into the fulfillment request — was foreclosed by
+`relay-vm-access-without-a-dashboard`'s promoted contract: `physical-provisioning`'s
+"Ansible fulfillment adapter" requires that the request's `connectivity` field carry
+no relay configuration and that a relay never be selectable per request, because
+which relay a host dials is a physical fact about that host; `vm-storefront-fulfillment`
+forbids the storefront from holding a relay credential; and the dashboard credential no
+longer exists. The FRP relay itself is unchanged and provisioning-owned: hosts dial the
+seller's relay for management and buyer tunnels, and a buyer receives a port on it. A
+buyer who wants traffic through their own relay runs a client inside the VM they were
+given SSH access to, which needs no negotiated term. The `design.md` open question on
+SSRF exposure from a buyer-named relay target was a second reason not to build this.
+Nothing replaces this change. -->
+
 ## Context
 
 Today, VM connectivity for hosts without a public IP is entirely

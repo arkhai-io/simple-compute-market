@@ -2,7 +2,8 @@
 
 ## Context
 
-Verified by inspection 2026-08-06; re-verify before implementing.
+Verified by inspection 2026-08-06; re-verified 2026-09-25 (see "Re-grounding" at the
+end); re-verify before implementing.
 
 - `kit/policy`'s `NegotiationContext` carries `our_reference_amount: float`.
   `bisection_middleware` converges by moving one scalar between an opening value and a
@@ -23,18 +24,19 @@ Verified by inspection 2026-08-06; re-verify before implementing.
   building seller policy that can price it."
 - `pools-8` already adopted the family-grouped vocabulary for the `gpu` family in
   `[pricing.defaults.gpu.<model>]`, structurally reserving `.cpu`/`.memory`/`.storage`
-  without implementing them. `structured-capacity-requirements`' `design.md` records
-  this as a one-directional dependency: extending beyond `gpu` needs that change's
-  vocabulary settled first.
+  without implementing them. *Superseded 2026-09-25:* the vocabulary is settled by
+  `VM_CAPABILITY_SCHEMA` (`gpu`, `cpu`, `memory`, `storage`), so the dependency on
+  `structured-capacity-requirements` this bullet recorded is met.
 
 ## Goals / Non-Goals
 
-**Goals:** a seller can put a number on any admissible shape; concessions stay
-comparable when shape varies; the aggregator is replaceable without touching
-negotiation.
+**Goals:** a seller can put a number on any admissible shape; the aggregator is
+replaceable without touching negotiation; every existing negotiation prices as
+before.
 
-**Non-Goals:** protocol changes, admissibility, authoritative feasibility, hold
-billing, or any second aggregator implementation.
+**Non-Goals:** protocol changes, the multiplier reinterpretation (moved to
+`negotiation-driven-capacity-resize` 2026-09-25), admissibility, authoritative
+feasibility, hold billing, or any second aggregator implementation.
 
 ## Decisions
 
@@ -48,9 +50,9 @@ the other is representable and meaningless.
 Accepted: the rate is a field of the family, next to what it describes. A GPU family
 carries its model, its count, and its per-card-hour rate together. This is one
 structure with one traversal, it extends to a new family by adding a family rather than
-by editing two places, and it matches the symmetric-nesting direction
-`structured-capacity-requirements` already accepted for requirements and inventory —
-making rates the third user of one shape rather than a fourth vocabulary.
+by editing two places, and it matches the family-grouped capability shape
+`kit/capability-shape` defines for listing shapes and pool overrides — making rates
+a second user of one shape rather than a second vocabulary.
 
 ### `RateValue.per` needs a quantity axis, not just time
 
@@ -72,36 +74,14 @@ by construction.
 Recorded explicitly because option 1 will look simpler to anyone who has not traced
 `RateValue`'s reach into settlement.
 
-### The negotiated variable becomes a rate multiplier
+### The negotiated variable becomes a rate multiplier — moved
 
-This is the change's central decision and the one that is easy to get wrong.
-
-With shape fixed, negotiating an absolute total works: each round moves one number
-toward or away from a bound, and "who conceded" is well defined. With shape variable,
-a total stops being comparable between rounds — a buyer who asks for less RAM and more
-disk and quotes a different total has not obviously conceded, and `bisection_middleware`
-has no axis to bisect.
-
-Three models were considered:
-
-- **Negotiate the absolute total, re-anchoring bounds whenever shape changes.**
-  Rejected: every shape change resets the concession history, so a buyer can escape an
-  unfavorable position by perturbing the shape. It also makes convergence
-  non-terminating in the general case.
-- **Fix the rates and let the buyer choose the shape.** Rejected: price becomes
-  derived and there is nothing left to negotiate — this is configure-and-quote, not a
-  market, and it discards the existing policy machinery entirely.
-- **Accepted: negotiate a multiplier over the listing's minimum rate structure.** The
-  listing advertises minimum rates; the quote for a shape is those rates evaluated
-  against it; the negotiated scalar is the multiplier applied to that structure. Shape
-  and price vary independently, the multiplier remains a single monotone axis, and
-  `bisection_middleware` keeps working with its reference quantity reinterpreted rather
-  than replaced.
-
-A consequence worth stating: a seller's floor is expressed once, as the multiplier's
-lower bound, and applies to every shape automatically. Under absolute-total
-negotiation, a floor has to be recomputed per shape, which is where a shape-perturbation
-attack would have entered.
+Moved 2026-09-25 to `negotiation-driven-capacity-resize`'s `design.md` ("The
+negotiated variable becomes a rate multiplier"), together with the three models it
+weighed and the consequence for the seller's floor. It is that change's central
+decision because it is one deployment boundary with the revised-terms field. This
+change's structures are designed so that the multiplier can be applied to them, and
+nothing here depends on it having been.
 
 ### Independent per-dimension rates are a starting point, and the seam is the aggregator
 
@@ -157,13 +137,6 @@ would silently redefine a catalogue price as a negotiation rate.
 - **[Linear pricing is wrong for real hardware]** → Acknowledged and accepted as a
   starting point. Mitigated by the aggregator seam and by the prohibition on
   reconstructing totals outside it.
-- **[The multiplier is unintuitive to sellers who think in dollars]** → A presentation
-  concern: a quoted price for a concrete shape is still what a seller and buyer see.
-  The multiplier is the internal negotiated quantity, not the operator-facing knob.
-- **[`bisection_middleware`'s reference quantity changes meaning]** → Contained: the
-  middleware bisects a scalar between bounds regardless of that scalar's units. The
-  risk is in every place that assumed the scalar was an amount in an asset's base
-  units, which needs an explicit audit rather than a rename.
 - **[Rate structures resolve partially and produce a price from an incomplete
   structure]** → A dimension with no resolved rate at any tier must make the shape
   unpriceable rather than free. Priced-at-zero is the dangerous default and must be
@@ -179,22 +152,48 @@ would silently redefine a catalogue price as a negotiation rate.
 2. Rate resolution extended per dimension through the existing three tiers.
 3. Listing advertisement of the minimum rate structure, with single-rate listings
    interpreted as a primary-dimension-only structure.
-4. Negotiation reinterpreted: reference quantity becomes the multiplier; audit every
-   consumer that assumed base units.
-5. Seller feasibility guard extended to quantitative per-dimension checks.
+4. Seller feasibility guard extended to quantitative per-dimension checks of a
+   requested shape, ordered before pricing.
 
-Rollback before step 4 is a code revert with no published-state change. After step 4,
-in-flight negotiations carry a multiplier and would need to drain; treat step 4 as the
-deployment boundary.
+Every step is additive; rollback at any point is a code revert with no
+published-state change. The deployment boundary (in-flight negotiations carrying a
+multiplier) moved to `negotiation-driven-capacity-resize` with the reinterpretation.
 
 ## Open Questions
 
-- **Should the multiplier be bounded below at 1.0, or may a seller policy quote under
-  its own advertised minimum?** A below-minimum quote is meaningful for a seller
-  clearing idle capacity, but "minimum" then stops meaning minimum. Deferrable: it is a
-  policy bound, not a structural one, and changes no requirement or task here.
-- **Does the quoted price need to be carried on the wire per round, or is the
-  multiplier plus the shape sufficient for both sides to derive it?** Deferrable until
-  `negotiation-driven-capacity-resize` defines the round payload; deriving is
-  sufficient if both sides resolve identical rates, which holds only while the listing's
-  advertised structure is authoritative for both.
+Both questions this section held — whether the multiplier is bounded below at 1.0,
+and whether the quoted price travels on the wire per round — moved with the
+multiplier to `negotiation-driven-capacity-resize` on 2026-09-25. Nothing here is
+open.
+
+## Re-grounding (2026-09-25)
+
+- **Negotiation is a kit lifecycle.** `kit/negotiation-runtime` owns the round state
+  machine and the VM storefront injects `NegotiationDomainHooks`
+  (`validate_opening`, `evaluate_round`, `reference_amount`,
+  `amount_from_proposal`, `proposal_from_amount`, `place_hold`, …) from
+  `domains/vms/storefront/src/market_storefront/negotiation_runtime.py`.
+  `sync_negotiation.py` and `_reject_unsupported_resource_shape_request` no longer
+  exist; the round-0 shape guard is `_validate_vm_opening`. The feasibility guard
+  this change extends is ordered inside the VM `evaluate_round` composition, ahead
+  of pricing, not in `storefront_round.py`.
+- **The override tier is site-scoped.** `publish-multidimensional-listing-shape`
+  replaced the pool-keyed `compute_capacity_pools` row with `kit/pool-overrides`,
+  keyed by site, pool, and offering mode, whose VM terms (`min_price`, `token`,
+  `max_duration_seconds`, `sla`) are validated by the VM market's contract. A
+  per-dimension rate in the override tier is a widening of that contract
+  (`pools-9-retire-local-physical-authority` retires the legacy row beneath it).
+- **The inventory guard already rechecks every dimension of the listing.**
+  `has_matching_inventory_guard` vetoes a listing whose own source no longer supports
+  it, categorical and quantitative fields alike. What this change adds is a check of
+  a *buyer-requested* shape against the seller's constraints, which has no meaning
+  until `negotiation-driven-capacity-resize` lets a round carry one — so Section 5
+  lands its predicate here and is first exercised there.
+- **The vocabulary landed.** `kit/capability-shape` and `VM_CAPABILITY_SCHEMA` settle
+  the family names; `settle-capacity-claim-vocabulary` (the re-scoped remainder of
+  `structured-capacity-requirements`) owns only wire-name cleanup and is not a
+  dependency.
+- **The multiplier moved.** The decision, its alternatives, and its two open
+  questions now live in `negotiation-driven-capacity-resize`, which shares the
+  deployment boundary with the revised-terms field. This change is additive
+  throughout.

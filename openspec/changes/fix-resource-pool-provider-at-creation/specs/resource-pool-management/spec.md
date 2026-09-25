@@ -9,7 +9,7 @@ existing provider's configuration as part of rejecting it.
 
 A pool's provider is the routing context every member inherits, so swapping it in
 place silently reinterprets which executor the pool's existing inventory belongs
-to — the same class of ambiguity this change removes from the storefront side. The
+to — the same class of ambiguity retiring the storefront's local physical tables removes. The
 supported path for moving inventory to a different executor is to create a second
 pool declaring the intended provider and migrate members across, which leaves both
 routing contexts explicit and every member's provider unambiguous at each point.

@@ -34,6 +34,13 @@ scope ends at the e2e fixtures.
       model change.
 - [ ] 2.3 Add Alice's principal to the development compose identities.
 - [ ] 2.4 Remove the skips and confirm the four stages pass.
+- [ ] 2.5 Move Alice onto projection-backed derivation: seed her inventory
+      through provisioning as Bob's is (stage `02b` stops importing a
+      storefront-local CSV), and remove `storefront.alice.toml`'s
+      `use_site_projection_for_listings = false` opt-out with the comment that
+      explains it. `pools-9-retire-local-physical-authority` deletes the path
+      she is on and depends on this change for that reason; leaving her there
+      would hand that change a broken scenario.
 
 ## 3. Closeout
 

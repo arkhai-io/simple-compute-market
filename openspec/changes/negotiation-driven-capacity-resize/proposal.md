@@ -1,3 +1,12 @@
+<!-- Re-grounded 2026-09-25. The negotiation lifecycle now lives in
+`kit/negotiation-runtime`; the round-0 guard is `_validate_vm_opening`;
+`sync_negotiation.py` and `_reject_unsupported_resource_shape_request` are gone;
+the shipped default places no pre-settlement hold, so `resize_reservation`'s first
+caller is `negotiation-time-capacity-hold` rather than this change. Section 2 is
+now planned and owns the multiplier reinterpretation moved from
+`capacity-shape-pricing`. Older text below is history; "Re-grounding" in
+`design.md` states what is current. -->
+
 ## Why
 
 `docs/development/ARCHITECTURE.md`'s "Capacity reservation" section (added
@@ -57,26 +66,44 @@ work that context implies.
   core vocabulary) is retained in `design.md` for Section 2 planning, and
   is exactly the shape Section 0 above actually implements -- correctly
   scoped to the VM domain, not core.
-- **Section 2+ remains unplanned**, with its placement/vocabulary
-  questions resolved but the field itself deliberately not added until
-  seller negotiation policy exists to evaluate it (out of scope for this
-  change) -- see "Non-Goals" and `design.md`'s "Section 2 resolutions".
-  In
-  particular: whether/when to add an explicit shape-change field to
-  `NegotiateContinueRequest`/`AdvanceRequest`, whether seller/buyer
-  negotiation policy is built to generate or evaluate such a field, and
-  where in that flow `resize_reservation` gets called are all open.
+- **Section 2 (planned 2026-09-25):** a round after the first can carry a
+  revised capacity shape, as a child of `proposal` typed as the existing
+  `ProvisionTerms` envelope; the negotiated quantity becomes a rate
+  multiplier over the listing's advertised minimum rate structure (moved
+  here from `capacity-shape-pricing`, which delivers the structure and
+  its evaluation); the seller's `evaluate_round` composition runs the
+  admissibility check, the authoritative feasibility probe, the seller's
+  commercial feasibility guard, and pricing against the requested shape;
+  and the *agreed* shape, not the listing's, reaches the accepted
+  artifacts, the settlement order, and therefore the capacity claim. The
+  round-0 guard is then retired, since a differing shape is a proposal
+  rather than a defect.
+- **`resize_reservation` is not wired here.** Both storefronts ship
+  `capacity.hold_ttl_seconds = 0`, so no reservation exists before the
+  buyer's escrow settles, and the reservation created at settlement is
+  built from the agreed shape directly. A resize is only meaningful when a
+  hold was placed before the shape was final, which is exactly what
+  `negotiation-time-capacity-hold` introduces; that change owns the first
+  caller. (Until 2026-09-25 this change's title premise was that it would
+  be the first caller.)
 
 ## Non-Goals (for now)
 
-- Building buyer or seller negotiation *policy* that generates, evaluates,
-  or accepts a shape-changing counter-offer. Per repository-owner
-  direction (2026-07-29): schema/guard work now, policy work later, as
-  its own scoped decision. When it is in scope, any nested revised-terms
-  content must be limited to what seller policy can actually reason
-  about and price -- an unexamined field that passes content through
-  unchecked risks a buyer claiming resources (disk, RAM, etc.) the seller
-  never agreed to give away.
+- Building the *pricing* of a shape. `capacity-shape-pricing` delivers the
+  per-dimension rate structure, its evaluation, and the seller's
+  commercial feasibility guard; this change consumes them. (Until
+  2026-09-25 this non-goal excluded all shape-evaluating policy; the
+  policy design has since been done there.) Any nested revised-terms
+  content is limited to what that policy can price -- an unexamined field
+  that passes content through unchecked risks a buyer claiming resources
+  the seller never agreed to give away.
+- Calling `resize_reservation`. Owned by `negotiation-time-capacity-hold`,
+  the change that first places a hold before the shape is final.
+- Deciding which shapes a seller will consider (`capacity-shape-envelope`)
+  or whether the site can currently serve one
+  (`negotiation-capacity-feasibility-probe`). This change calls both
+  where they exist and degrades to "not checked" where a domain composes
+  neither.
 - Storefront-side consumption of pool VM size defaults at negotiation
   round 0. Depends on `pools-8-capacity-projection-and-listing-hints` task
   3.5 (projecting those defaults to the storefront) landing first; that
@@ -86,17 +113,21 @@ work that context implies.
 
 ## Permanent documentation impact
 
-- [x] `docs/development/ARCHITECTURE.md` (already updated, 2026-07-29, ahead of this change's creation -- see "Capacity reservation" and "Discovery and negotiation")
-- [ ] Existing subsystem specification -- pending Section 2+ scope decisions
+- [x] `docs/development/ARCHITECTURE.md` (already updated, 2026-07-29, ahead of this change's creation -- see "Capacity reservation" and "Discovery and negotiation"; the latter changes again when Section 2 lands, to say what a round negotiates)
+- [x] Existing subsystem specification -- `openspec/specs/negotiation-protocol/spec.md` (the delta in `specs/`), and `openspec/specs/vm-storefront-fulfillment/spec.md` for the agreed shape reaching the claim.
 - [ ] No further permanent documentation change for Section 1: the extra-field guard is defensive input validation, not new observable behavior, and does not itself warrant a new normative requirement.
 
 ### Knowledge to promote
 
-- Section 1 shipped no lasting code; its reasoning survives only in this change's own `design.md` (Section 1's "Correction" and Section 2+'s notes), not in-code, since the code it would have annotated was reverted.
-- Further promotion is deferred until Section 2+ scope is decided (see `design.md`).
+- The negotiated quantity is a multiplier over the listing's minimum rate structure, expressed in basis points; a seller floor is expressed once -- `openspec/specs/negotiation-protocol/spec.md`.
+- A round after the first may carry a revised capacity shape as a child of `proposal`, in the family-grouped form, and the agreed shape is what the claim reserves -- `openspec/specs/negotiation-protocol/spec.md`, `openspec/specs/vm-storefront-fulfillment/spec.md`.
+- Section 1 shipped no lasting code; its reasoning survives only in this change's own `design.md`.
 
 ## Dependencies and Related Changes
 
-- Requires `pools-8-capacity-projection-and-listing-hints` task 3.5 before any storefront-side consumption of pool VM size defaults can be built.
-- Builds on `fix-vm-fulfillment-capacity-boundary`'s corrected understanding of scheduled-vs-committed dimensions authority (that change's `design.md`, "Resolution" section) and the `ARCHITECTURE.md` sections it added.
-- Relies on `kit/site`'s existing `resize_reservation` (implemented, unwired).
+- **Depends on `capacity-shape-pricing`** for the rate structure, its evaluation, and the seller's commercial feasibility guard. The multiplier reinterpretation moved from that change to this one on 2026-09-25 so that the additive work lands alone and the deployment boundary is here.
+- Consumes `capacity-shape-envelope` and `negotiation-capacity-feasibility-probe` where a domain composes them; neither blocks this change.
+- Builds on `fix-vm-fulfillment-capacity-boundary`: the committed reservation is authoritative through scheduling and dispatch, so once the claim is built from the agreed shape, fulfillment follows it with no further work here.
+- Hands `resize_reservation`'s first call to `negotiation-time-capacity-hold`.
+- Extends `kit/negotiation-runtime`'s `NegotiationDomainHooks`; every domain that composes the runtime is affected only where it opts into shape negotiation.
+- Storefront-side consumption of pool VM size defaults at round 0 remains a non-goal and is not a dependency.

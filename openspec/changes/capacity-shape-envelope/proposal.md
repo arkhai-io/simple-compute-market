@@ -1,9 +1,12 @@
 ## Why
 
 Once a buyer can request a capacity shape, a seller has to decide which shapes it will
-even consider. Nothing expresses that today: `has_matching_inventory_guard` compares
-`region` and `gpu_model` by equality, and no structure anywhere states that a pool will
-serve between 1 and 8 GPUs, or at most 512 GiB of RAM per reservation.
+even consider. Nothing expresses that today: `has_matching_inventory_guard` checks a
+listing's *own* shape against its source (re-grounded 2026-09-25; it compared `region`
+and `gpu_model` by equality when this was written), and no structure anywhere states
+that a pool will serve between 1 and 8 GPUs, or at most 512 GiB of RAM per
+reservation. A pool's `listing_shapes` hint enumerates the shapes it advertises; it
+does not bound what a buyer may propose.
 
 The constraint is not domain-specific. A per-dimension admissible range is the same
 concept for VM vCPU shares, bare-metal disk, Kubernetes pod memory, and inference

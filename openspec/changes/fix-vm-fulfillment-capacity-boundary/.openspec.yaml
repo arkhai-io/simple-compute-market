@@ -1,0 +1,9 @@
+schema: spec-driven
+created: 2026-08-06
+# This change synchronized its requirements into the permanent specifications
+# directly as each section landed (see its design-promotion record): "Committed
+# dimensions remain authoritative through scheduling" (site-capacity),
+# "Provisioning shape comes from committed capacity" (physical-provisioning),
+# and "Registered requirement delegates" (resource-pool-management) are live.
+# It therefore carries no delta of its own.
+skip_specs: true

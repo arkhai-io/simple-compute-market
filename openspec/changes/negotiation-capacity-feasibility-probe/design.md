@@ -2,10 +2,13 @@
 
 ## Context
 
-Verified by inspection 2026-08-06; re-verify before implementing.
+Verified by inspection 2026-08-06; re-verified 2026-09-25 (see "Re-grounding" at the
+end); re-verify before implementing.
 
-- `_place_capacity_hold` is called only when `decision.action == "accept"`, at three
-  call sites in `sync_negotiation.py`. Nothing consults the site authority earlier.
+- `_place_capacity_hold` is called only on acceptance, through the kit's `place_hold`
+  hook (*re-grounded 2026-09-25*; it was three call sites in the since-removed
+  `sync_negotiation.py`). Nothing consults the site authority earlier, and with the
+  shipped `hold_ttl_seconds = 0` nothing consults it before settlement at all.
 - `kit/site`'s `probe()` runs `_expire_stale_holds`, then the same `_find_candidate`
   used by `reserve()`, and returns the match payload without writing. It is the
   non-consuming twin of the admission path, not an approximation of it.
@@ -120,3 +123,29 @@ lose the early check and fail at acceptance as they do today.
   into a shape recommender, which needs `capacity-shape-envelope`'s range query and a
   negotiation vocabulary for suggestions. Deferrable and better decided once shape
   counter-offers exist.
+
+## Re-grounding (2026-09-25)
+
+- **Negotiation is a kit lifecycle.** `kit/negotiation-runtime` owns the round state
+  machine; the VM storefront injects `NegotiationDomainHooks` from
+  `domains/vms/storefront/src/market_storefront/negotiation_runtime.py`. The probe
+  belongs inside the VM `evaluate_round` composition, ordered after admissibility
+  (`capacity-shape-envelope`) and before the commercial feasibility guard and pricing
+  — the order `negotiation-driven-capacity-resize` fixes for a round carrying a
+  shape. Whether the probe is a distinct hook on `NegotiationDomainHooks` or a step
+  inside the domain's `evaluate_round` is decided in task 1.2: a distinct hook lets
+  the kit report "not checked" uniformly for a domain that composes none, which is
+  what the resize change's contract requires.
+- **The shape being probed.** Until `negotiation-driven-capacity-resize` lets a
+  round carry a shape, the only shape a round has is the listing's own. The probe is
+  still worth running then — a listing whose site has nothing left is the case the
+  advisory snapshot misses — and the claim for it is
+  `compute_capacity_claim_from_order` over the listing record. Once rounds carry
+  shapes, the claim is built from the round's shape through the same function's
+  inputs.
+- **Unbacked listings.** The probe never runs for an `UnbackedBinding`; the binding
+  is on `Acceptance` and on the opening record, so the composition can skip it
+  without a lookup.
+- **Outcome vocabulary.** The distinct-outcome rule this change adds is one of the
+  distinct refusal reasons the resize change's "A round may revise the capacity
+  shape" requirement enumerates; the two deltas are written to agree.

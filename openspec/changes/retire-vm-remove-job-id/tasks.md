@@ -2,13 +2,17 @@
 
 ## 1. Decide the wire disposition first
 
-- [ ] 1.1 Decide and record whether `LeaseResponse.vm_remove_job_id` and the
+- [x] 1.1 Decide and record whether `LeaseResponse.vm_remove_job_id` and the
       lease PATCH body field are removed outright with a client-wheel version
       bump, or deprecated for a window first. Everything in section 3 depends
       on the answer, and making the edits before the decision is what turns a
       contract change into an accident. `release_job_id` is already published
       on both lease endpoints, so no consumer is blocked on the removal
       itself.
+      **Decided 2026-09-25 (repository owner): outright removal with a version
+      bump.** Every API here is pre-1.0; the PATCH body refuses the retired
+      field rather than ignoring it. Alternative and revisit trigger recorded
+      in `design.md`.
 
 ## 2. Retire the ledger mirror
 
@@ -38,10 +42,12 @@
 
 ## 3. Retire the wire field
 
-- [ ] 3.1 Per 1.1's decision, remove or deprecate
-      `LeaseResponse.vm_remove_job_id`, the lease PATCH body field on the VM
-      adapter, `market_storefront`'s `capacity_admin_models` equivalent, and
-      the storefront admin controller that forwards it.
+- [ ] 3.1 Per 1.1's decision, remove `LeaseResponse.vm_remove_job_id`, the
+      lease PATCH body field on the VM adapter, `market_storefront`'s
+      `capacity_admin_models` equivalent, and the storefront admin controller
+      that forwards it. The PATCH body refuses the field with a validation
+      error naming `release_job_id`. Bump the version of every package whose
+      public model changes, `vm_provisioning_operator` first.
 - [ ] 3.2 Check the e2e scenarios' lease assertions. `DealLease.refresh`
       reads `release_job_id` already, so the expectation is no scenario
       change; record that disposition explicitly rather than omitting it.
@@ -74,10 +80,9 @@
       impact.
 - [ ] 5.6 **Campaign index currency.** Update this change's row and its
       campaign's dependency graph in `openspec/changes/README.md`.
-- [ ] 5.7 **Promotion.** Complete the design-promotion record. The column
-      drop and the `release_job_id`-is-canonical rule both want permanent
-      destinations: `openspec/specs/site-capacity/spec.md` is the likely home
-      for the latter.
+- [ ] 5.7 **Promotion.** Complete the design-promotion record below. The
+      delta in `specs/site-capacity/spec.md` carries the rule; confirm at
+      archival that its four scenarios match what landed.
 - [ ] 5.8 **Documentation citations.** Run
       `make check-doc-citations CHANGE=retire-vm-remove-job-id` and resolve every match.
       An unresolvable citation is a blocking defect under `AGENTS.md`'s
@@ -94,3 +99,10 @@
       cannot run for a reason unrelated to this change, record that as an
       explicit blocker naming the cause and the change that owns it, and
       treat the validations it gates as unrun rather than passed.
+
+## Design promotion record
+
+| Accepted decision | Permanent location |
+|---|---|
+| A reservation carries one release handle, `release_job_id`, with no domain-prefixed mirror; both lease contracts publish it under that name | `openspec/specs/site-capacity/spec.md` — "A reservation carries one release handle" |
+| Outright removal rather than a deprecation window, and why | This change's `design.md` |

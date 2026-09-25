@@ -74,6 +74,25 @@ Removing a field from `LeaseResponse` and from the lease PATCH body is a
 breaking change for any consumer outside this repository that reads or sends
 `vm_remove_job_id`. `release_job_id` is the replacement and is already
 published on both lease endpoints, so a consumer can migrate before the
-removal lands. This change owes an explicit decision on whether the removal
-ships with a client-wheel version bump or a deprecation window, recorded
-before the wire edits are made.
+removal lands.
+
+**Decided 2026-09-25: outright removal, with a version bump of the packages
+whose public models change.** Every API in this repository is pre-1.0 and may
+break in this way; no consumer outside the repository is known to read the
+field; and a one-way alias would keep alive the name the proposal calls wrong
+twice over. `design.md` records the alternative and the revisit trigger. The
+PATCH body refuses the retired field rather than ignoring it, so a caller
+still sending it learns at the boundary rather than by a silent no-op.
+
+## Permanent documentation impact
+
+- [ ] `docs/development/ARCHITECTURE.md`
+- [x] Existing subsystem specification — `openspec/specs/site-capacity/spec.md`
+- [ ] New subsystem specification
+- [ ] No permanent documentation change
+
+### Knowledge to promote
+
+- `release_job_id` is the one release handle on a Capacity Reservation and on
+  both lease contracts; no domain-prefixed mirror exists —
+  `openspec/specs/site-capacity/spec.md`.
