@@ -57,7 +57,8 @@ This is how VM publication works, and it is forced by the declaration reader:
 `read_site_declarations` resolves one site generation's pool list, so reading
 declarations already means fetching the projection. Within one generation, a
 resource's pool, that pool's declarations, and the resource's publication view come
-from one document and cannot disagree — which dissolves the question this design
+from one document, and the parser enforces that they agree (below) — which dissolves
+the question this design
 previously left open, whether to join the capacity projection to the resource-pool
 projection.
 
@@ -188,18 +189,75 @@ preserve the second key this decision removes. A drop migration rather than a re
 migration history keeps any existing development database consistent with a fresh
 one.
 
-### Availability closes stay distinguishable from source withdrawal
+### Every resource falls into exactly one classification
 
 A bare-metal listing whose machine is leased closes, and reopens when the machine is
 free. For a capacity-backed listing that is capacity-availability reconciliation, which
-the specification permits for backed listings only. Today it is implemented as source
-staleness: an unavailable resource yields no candidate and its listing looks stale.
+the specification permits for backed listings only. A disabled or removed declaration is
+different: "Source publication and capacity availability reconcile separately" makes it
+source withdrawal, for backed and unbacked listings alike. Today both are implemented as
+source staleness — an unavailable resource yields no candidate and its listing looks
+stale — and the site's view cannot tell them apart, because the provisioning service
+builds the view's `available` as the declaration's `enabled` and whole-resource
+availability together.
 
-Under the runtime the two stay separate: a withdrawn or disabled source and an
-unavailable resource produce distinct plan entries. Behaviour for backed listings is
-unchanged; the separation is what lets `unbacked-bare-metal-listings` apply
-availability to backed listings only, as "Source publication and capacity availability
-reconcile separately" requires.
+So publication does not read enablement from the view. The projected resource that
+contains each view carries the declaration's `enabled` separately, and the parser keeps
+it beside the view. `BareMetalResourceProjection` is unchanged: it is also the
+provisioning service's model for the view it produces, and a new required field there
+would break the producer. Changing the producer so the view's `available` means
+availability alone was the alternative; it changes the site's published view to spare
+the consumer reading a flag it already has.
+
+Every bare-metal resource in a fetched site then falls into exactly one class, and the
+reconciliation plan is built from those disjoint classes:
+
+| Class | Condition | Effect |
+|---|---|---|
+| Candidate | pool admits `bare_metal`; resource enabled; view present and available | published, refreshed, or reopened |
+| Unavailable | pool admits `bare_metal`; resource enabled; view present, not available | its listing closes as `unavailable` |
+| Held | pool's declarations do not resolve | its listing is neither closed nor refreshed |
+| Withdrawn | anything else: resource disabled or absent, view absent, pool not admitting `bare_metal` | its listing closes as `source_gone` |
+
+Disjointness is not only semantic. The runtime refuses a close plan naming one listing
+twice, and without it an unavailable resource would qualify both as a missing candidate
+and as unavailable. Behaviour for backed listings is otherwise unchanged; the separation
+is what lets `unbacked-bare-metal-listings` apply availability to backed listings only.
+
+### The containing pool is authoritative for a resource's pool
+
+Within the resource-pool projection, a site's pools are entries of `resource_pools`,
+each carrying its declarations and its resources, and a resource's bare-metal view
+repeats the pool's identifier so the view is self-contained. Pool membership now decides
+whether a resource may be published, so the two copies must not be allowed to disagree.
+
+The parser takes the pool from the entry that contains the resource, read from that
+entry's `pool_id`. A view carrying a
+pool identifier must name that same pool exactly; otherwise the parser rejects the
+site's whole generation, as it already does when a view names a different Physical
+Resource than its container. For publication a rejected generation is an unknown site:
+its listings are held and the run reports it. Today the parser prefers the view's copy,
+which would let a malformed projection place a resource under a pool that does not
+advertise `bare_metal` while its view names one that does.
+
+### The site's projections name the pool `pool_id`
+
+The pool's identifier is `pool_id` everywhere in this system except the site's two
+projections, whose pool entries (resource-pool projection) and bucket rows
+(capacity-bucket projection) call it `resource_pool_id`. That is two names for one
+concept, against "One name per concept". This change renames the wire field to `pool_id`
+in both projections, and every reader with it.
+
+**One step, no transition.** Producer and consumers change together: the site emits only
+`pool_id`, and every reader reads only `pool_id`. That is safe because one operator deploys
+a storefront together with every site it talks to, so no deployment runs a renamed site
+beside an unrenamed storefront or the reverse. Emitting both spellings and reading either
+was the alternative, and it would add a fallback to every reader and a later step to remove
+it, to protect a mixed deployment that does not occur.
+
+**Revisit trigger:** the first site operated independently of the storefronts that consume
+it — the direction the multi-site roadmap goal takes. From then on, a change to the
+projections' wire format needs a transition both sides can cross.
 
 ### Registry convergence reuses the storefront's publication records
 
@@ -209,12 +267,22 @@ implies. Recording bare-metal registry outcomes in the same records lets bare me
 the same divergence query and the same repair rule, on every run of the publication
 command.
 
-### The health check reads each site's projection
+### The health check reports each site's projection
 
-The storefront's readiness check fetches each trusted site's resource-pool projection
-directly and reports each site's result, so a down site is visible rather than reported
-as `ok` by the aggregate client's best-effort capacity projection. It checks the surface
-publication now depends on.
+The readiness check fetches each trusted site's `resource_pool_projection_version()`
+through that site's own client, so a down site is visible rather than reported as `ok`
+by the aggregate client's best-effort capacity projection. It uses the version endpoint
+rather than the full projection because `/health` is also the image's health check,
+probed every fifteen seconds: the version endpoint still makes the site compute its
+projection, and it returns exactly the revision and digest the status model reports.
+
+The response follows the convention core's `HealthResponse` established.
+`BareMetalHealthResponse` gains `site_projections`, keyed by site and then by projection
+family, using core's `ProjectionFamilyStatus`, with bare-metal publication's one family,
+`resource_pools`. `checks["site_projection"]` stays one summary: `ok` when every site
+answers, `degraded` when some do, and `error` when none do. `checks["fulfillment"]`,
+which today mirrors the site read, follows the same summary. The overall status remains
+`degraded` whenever any check is not `ok`.
 
 ### "Publication candidate" gets one name
 
