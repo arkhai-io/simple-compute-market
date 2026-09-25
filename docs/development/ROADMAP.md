@@ -60,7 +60,7 @@ Reaching hosts and VMs that have no inbound route is not a separate goal. The pr
 
 **Value.** This is the difference between a market that sells fixed SKUs and one that sells capacity. Hardware is heterogeneous and buyer requirements are multi-dimensional; negotiating on GPU count alone forces sellers to pre-partition inventory into fixed shapes and forces buyers to over-buy on every dimension they did not need. Supporting the full shape raises fill rate and utilization revenue on hardware the seller already owns.
 
-**Current state.** The lower layers already carry the full shape. The VM domain defines canonical dimensions for GPU count, vCPU count, RAM, and disk; the site authority admits and matches multidimensionally; scheduling fit-checks every requested dimension and treats the dimensions actually scheduled as authoritative; capacity reservations can be resized by supersede rather than mutation; and the Ansible playbooks create VMs with variable shapes.
+**Current state.** The lower layers already carry the full shape. The VM domain defines canonical dimensions for GPU count, vCPU count, RAM, and disk, and a family-grouped capability shape (`gpu`, `cpu`, `memory`, `storage`) with a shared, schema-driven flattener into those flat names; the offering mode is a required field on the claim wire, distinct from the site's inventory discriminator; the site authority admits and matches multidimensionally; scheduling fit-checks every requested dimension and treats the dimensions actually scheduled as authoritative; capacity reservations can be resized by supersede rather than mutation; and the Ansible playbooks create VMs with variable shapes.
 
 The top of the stack does not. A buyer that names a resource shape disagreeing with the listing's own shape is rejected outright at negotiation round zero, deliberately and loudly, because seller policy has no way to price an alternative shape. Rounds after the first carry only price and escrow terms, with no field for a shape change. Reservation resizing is implemented and has no caller anywhere in the repository.
 
@@ -75,11 +75,14 @@ Pricing is the binding constraint on negotiating the shape. Commercial resolutio
 | No seller can price a shape other than the one advertised, and negotiation has one degree of freedom where two are needed | [`capacity-shape-pricing`](../../openspec/changes/capacity-shape-pricing/) |
 | Nothing expresses which shapes a seller will consider, or what range remains admissible for one dimension given the rest | [`capacity-shape-envelope`](../../openspec/changes/capacity-shape-envelope/) |
 | The authoritative site is not consulted until terms are already agreed, so an unservable shape fails after both parties commit | [`negotiation-capacity-feasibility-probe`](../../openspec/changes/negotiation-capacity-feasibility-probe/) |
-| Buyer-facing requirement shape is flat and ambiguous; the offering mode is conflated with the site-inventory `resource_type` discriminator | [`structured-capacity-requirements`](../../openspec/changes/structured-capacity-requirements/) |
-| No negotiation round after the first can express a shape change, and reservation resizing has no caller | [`negotiation-driven-capacity-resize`](../../openspec/changes/negotiation-driven-capacity-resize/) |
-| Buyer-negotiated VM connectivity terms, currently operator-configured only | [`add-buyer-vm-connectivity-terms`](../../openspec/changes/add-buyer-vm-connectivity-terms/) |
+| The storefront persists the whole capacity claim under a key named for its categorical half, and the VM flat dimension names are a recorded exception to the family-prefixed convention | [`settle-capacity-claim-vocabulary`](../../openspec/changes/settle-capacity-claim-vocabulary/) |
+| No negotiation round after the first can express a shape change, the negotiated quantity is an absolute amount that stops being comparable once shape varies, and the agreed shape does not reach the claim | [`negotiation-driven-capacity-resize`](../../openspec/changes/negotiation-driven-capacity-resize/) |
 
 `negotiation-capacity-feasibility-probe` is a shared prerequisite rather than exclusively this goal's: charging for a held reservation also requires a buyer to learn feasibility before any hold, and therefore any charge, exists. Not every change belongs to a roadmap goal, and this one is listed here because this goal consumes it, not because it is owned by it.
+
+Reservation resizing keeps having no caller within this goal, deliberately: both storefronts place no hold before settlement, so the reservation created at settlement is built from the agreed shape and there is nothing to resize during negotiation. The first caller is Goal 5's `negotiation-time-capacity-hold`, the change that holds capacity before the shape is final.
+
+Buyer-negotiated VM connectivity terms are no longer a gap of this goal. The relay a VM's tunnel uses is a physical fact recorded at the provisioning service and is not selectable per request; a buyer who wants their own relay runs a client inside the VM.
 
 ---
 

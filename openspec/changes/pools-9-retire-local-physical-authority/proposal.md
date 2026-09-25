@@ -232,8 +232,8 @@ listing-derivation surfaces only.
   in `vm_fulfillment_service.py` to `fix-vm-fulfillment-capacity-boundary`,
   which is complete and awaiting archival, so the collision this change
   used to warn about no longer arises.
-- `structured-capacity-requirements` remains the owner of requirement/claim
-  vocabulary; this change introduces none.
+- `settle-capacity-claim-vocabulary` (formerly `structured-capacity-requirements`)
+  remains the owner of requirement/claim vocabulary; this change introduces none.
 
 ## Permanent documentation impact
 

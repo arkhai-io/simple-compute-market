@@ -29,7 +29,12 @@
 
 ## 3. Domain wiring
 
-- [ ] 3.1 Supply the VM domain's dimension vocabulary from its composition root.
+- [ ] 3.1 Supply the VM domain's dimension vocabulary from its composition root,
+      taking it from `VM_CAPABILITY_SCHEMA` rather than restating the dimension
+      names, and call the predicate from the VM publication path (a stated shape a
+      pool does not admit publishes no listing, reported) and from the VM
+      `evaluate_round` composition in `negotiation_runtime.py` once a round can
+      carry a shape.
 - [ ] 3.2 Prove by test that kit contains no VM dimension name after wiring — the
       property that makes this capability reusable by a pod, inference-token, or
       model-training domain.

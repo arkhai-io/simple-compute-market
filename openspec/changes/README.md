@@ -47,20 +47,20 @@ No change owns these yet. Both were found by `project-capacity-resources-without
 ## Roadmap goal — Negotiate full compute capability, not GPU count alone
 
 ```text
-publish-multidimensional-listing-shape (archived) ──┐
-structured-capacity-requirements ────────┴──► capacity-shape-pricing ──► negotiation-driven-capacity-resize §2
-capacity-shape-envelope, negotiation-capacity-feasibility-probe (independent)
+publish-multidimensional-listing-shape (archived) ──► capacity-shape-pricing ──► negotiation-driven-capacity-resize §2
+capacity-shape-envelope, negotiation-capacity-feasibility-probe ────────────────────┘ (consumed by §2; independent otherwise)
+settle-capacity-claim-vocabulary (independent; was structured-capacity-requirements)
+negotiation-driven-capacity-resize §2 ──► negotiation-time-capacity-hold (Goal 5) for resize_reservation's first call
 ```
 
 | Change | Status | Acceptance boundary |
 |---|---|---|
 | [`publish-multidimensional-listing-shape`](archive/2026-09-25-publish-multidimensional-listing-shape/) | **archived** 2026-09-25 | Every VM listing is a listing shape — the storefront's site-scoped override, else the pool's `listing_shapes` hint, else the GPU-only default generator — published and reserved at exactly its declared quantities, and only where a source member is feasible for it; so the registry's dimension filters match stated shapes. Adds site-scoped storefront pool overrides, administered through an authenticated API checked against the site's live projection, as a market-neutral storefront kit (`kit/pool-overrides`) each market joins with its own vocabulary, so the planned container market reuses it; the core storefront client keeps only universal transport. A site whose projection is unknown now holds its listings rather than closing them, and an operation that changes a site's capacity refreshes that site before reconciling inline. Implements the family-grouped shape form, its shared utility (`kit/capability-shape`), and the VM family schema from `structured-capacity-requirements` |
-| [`structured-capacity-requirements`](structured-capacity-requirements/) | design phase; not yet planned | The family-grouped shape form, its shared flattening utility, and the VM family schema are implemented by `publish-multidimensional-listing-shape`; this change keeps the rest. Structured buyer-facing `requirements` shape, `offering_type` separated from the site-inventory `resource_type` discriminator, canonical claim vocabulary. `capacity-shape-pricing` waits on this vocabulary before extending pricing beyond the `gpu` family. Goal 7's published asking rate no longer waits on it (2026-09-09) — a published price for a fixed advertised shape needs no per-dimension vocabulary |
-| [`capacity-shape-pricing`](capacity-shape-pricing/) | active; depends on `publish-multidimensional-listing-shape` and `structured-capacity-requirements`' vocabulary | Per-dimension rates carried inside the family-grouped capability shape, a replaceable price aggregator, and the negotiated quantity becoming a rate multiplier so concessions stay comparable when the shape changes |
+| [`settle-capacity-claim-vocabulary`](settle-capacity-claim-vocabulary/) | planned 2026-09-25; independent. Was `structured-capacity-requirements`, re-scoped and renamed the same day | The remainder of the structured-requirements direction after its shape form (`kit/capability-shape`, `VM_CAPABILITY_SCHEMA`) and `offering_mode` landed elsewhere and its site-side symmetric nesting was invalidated by flat, domain-neutral declarations: rename the storefront's whole-claim `required_attributes` key to `capacity_claim`, decide as a gate whether the VM flat dimension names become family-prefixed (with bare metal's names in view), and promote the claim term table. Nothing waits on it |
+| [`capacity-shape-pricing`](capacity-shape-pricing/) | active; depends on `publish-multidimensional-listing-shape` (archived); additive throughout since 2026-09-25 | Per-dimension rates carried inside the family-grouped capability shape, a replaceable price aggregator, per-dimension resolution through the site-scoped override, pool hint, and configured default, listing advertisement of the minimum rate structure, and a seller feasibility guard ordered before pricing. The multiplier reinterpretation moved to `negotiation-driven-capacity-resize` |
 | [`capacity-shape-envelope`](capacity-shape-envelope/) | active; independent | Kit-level admissibility: whether a whole shape is one the seller will consider, and what range remains admissible for one dimension given the rest, behind an interface shaped for the occupancy-dependent feasible region expected later |
 | [`negotiation-capacity-feasibility-probe`](negotiation-capacity-feasibility-probe/) | active; independent | Verifies a requested shape against the authoritative site before terms are agreed, consuming nothing, reporting unservable distinctly from seller-declined. Shared prerequisite: also required before a held reservation can be billed |
-| [`negotiation-driven-capacity-resize`](negotiation-driven-capacity-resize/) | Sections 0–1 complete; Section 2 unblocked 2026-08-06, not yet planned | Round-0 shape-mismatch guard shipped. Section 2 — a revised-terms field carrying a shape change between rounds, and `resize_reservation`'s first caller — was parked until seller policy could price an alternative shape; `capacity-shape-pricing` now owns that policy |
-| [`add-buyer-vm-connectivity-terms`](add-buyer-vm-connectivity-terms/) | design phase; not yet planned | Buyer-specified, negotiated VM connectivity terms replacing storefront-operator-only configuration; depends on POOLS-7 Section 9's `connectivity` field shape |
+| [`negotiation-driven-capacity-resize`](negotiation-driven-capacity-resize/) | Sections 0–1 complete; Section 2 planned 2026-09-25; depends on `capacity-shape-pricing`; the deployment boundary of the campaign | Round-0 shape-mismatch guard shipped. Section 2: a revised shape carried as a child of `proposal` in the family-grouped form, the negotiated quantity reinterpreted as a rate multiplier in basis points over the advertised minimum (moved here from pricing; amounts stay exact integers), the seller's round evaluated in a fixed order with distinct refusal reasons, the round-0 guard retired, and the agreed shape reaching the accepted artifacts and the claim. `resize_reservation` is not wired here: with no pre-settlement hold there is nothing to resize, so its first caller is `negotiation-time-capacity-hold` |
 
 ### Unowned work left by `publish-multidimensional-listing-shape`
 
@@ -393,11 +393,9 @@ with one key, which is workable while one party operates them all and is not
 workable for a rented machine whose operator supplies its own credential. It
 shares no code with the relay work and either may land first.
 
-`add-buyer-vm-connectivity-terms` is listed under Goal 2, where its negotiation
-impact places it. It populates the same `connectivity` field this campaign
-reshapes, and should follow rather than precede: settling what the field
-contains is cheaper than negotiating a shape that carries a dashboard
-credential no longer in use.
+`add-buyer-vm-connectivity-terms`, which would have negotiated the relay a VM's
+tunnel used, was archived as superseded on 2026-09-25: the contract this campaign
+promoted forbids per-request relay selection. The relay itself is unchanged.
 
 No roadmap goal currently covers this work. Whether one is warranted is a
 closeout decision for the second change rather than an omission here.
@@ -437,6 +435,8 @@ Changes with no campaign; each stands alone.
 | [`deduplicate-dynaconf-bootstrap`](deduplicate-dynaconf-bootstrap/) | active | Parameterized kit/config construction with exact provisioning and e2e parity; storefront loader excluded. Useful precedent for the kit-composition extractions |
 
 ## Archived and superseded
+
+`add-buyer-vm-connectivity-terms` was archived as superseded on 2026-09-25 without implementation. Buyer-negotiated relay coordinates in the fulfillment request are forbidden by the contract `relay-vm-access-without-a-dashboard` promoted (`physical-provisioning`'s "Ansible fulfillment adapter": which relay a host dials is a physical fact, never selectable per request), the storefront may hold no relay credential, and the dashboard credential it would have carried no longer exists. The seller-operated FRP relay remains the buyer's pathway; a buyer wanting their own relay runs a client inside the VM. Its directory is [`archive/2026-09-25-add-buyer-vm-connectivity-terms`](archive/2026-09-25-add-buyer-vm-connectivity-terms/). `structured-capacity-requirements` was re-scoped and renamed to `settle-capacity-claim-vocabulary` the same day; the row above records what landed elsewhere.
 
 `prune-storefront-database` was archived because dead policy tables are already gone and the remaining candidates carry continuation, idempotency, or observability state. `complete-development-documentation` was synchronized and archived after audience-owned documentation became permanent planning governance. `add-storefront-principal-authentication` and `provisioning-result-push-delivery` were superseded on 2026-08-06 by `service-identity-signing` and `replace-polling-with-authenticated-push` respectively.
 

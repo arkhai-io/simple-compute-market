@@ -2,11 +2,15 @@
 
 ## 1. Verify the requested shape during negotiation
 
-- [ ] 1.1 Re-verify `design.md`'s Context findings, particularly that
-      `_place_capacity_hold` is still reached only on `decision.action == "accept"` and
-      that `probe()` still shares `_find_candidate` with `reserve()`.
+- [ ] 1.1 Re-verify `design.md`'s Context and Re-grounding findings, particularly that
+      `_place_capacity_hold` is still reached only through the kit's `place_hold`
+      hook on acceptance and that `probe()` still shares `_find_candidate` with
+      `reserve()`.
 - [ ] 1.2 Call the existing non-consuming probe for the round's requested shape, before
-      the seller commits to terms.
+      the seller commits to terms, from inside the VM `evaluate_round` composition in
+      `negotiation_runtime.py`. **Decide and record** in `design.md` whether the probe
+      is a distinct `NegotiationDomainHooks` member (so the kit reports "not checked"
+      for a domain that composes none) or a step inside the domain's evaluation.
 - [ ] 1.3 Order the check after any available admissibility evaluation, so a shape the
       seller would never sell does not cause a site round trip. Degrade correctly when
       `capacity-shape-envelope` is absent.
@@ -49,7 +53,7 @@ Per `openspec/README.md#plan-closeout-requirements`.
       path's docstrings directly; several describe the site being consulted only at
       acceptance.
 - [ ] 5.2 **Import placement.** Review imports this change adds or touches;
-      `sync_negotiation.py` already uses function-level imports heavily, so check
+      `negotiation_runtime.py` already uses function-level imports heavily, so check
       whether the existing reason applies to any added here.
 - [ ] 5.3 **Documentation compliance.** Confirm the verification rule landed in
       `openspec/specs/negotiation-protocol/spec.md` and that `ARCHITECTURE.md` reflects
