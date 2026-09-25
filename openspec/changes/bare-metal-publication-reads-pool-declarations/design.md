@@ -16,13 +16,14 @@ publication to read projected pool declarations through the same mechanisms as V
 What bare-metal publication does today, from
 `arkhai_bare_metal_storefront.publication_cli`:
 
-- **Candidates come from the site ledger's capacity snapshot.** `_projections` calls
-  the aggregate capacity client's `snapshot()`, keeps rows whose
+- **Candidates come from the site's capacity projection.** `_projections` calls the
+  aggregate capacity client's `snapshot()` — the site's capacity projection, served at
+  `GET /api/v1/capacity/snapshot` — keeps rows whose
   `attributes.bare_metal_publication.enabled` is set, and builds each resource's
   bare-metal view itself, taking `host_id`, `physical_host_id`, and `allocation_mode`
   from that publication attribute and recomputing whole-resource availability.
 - **An unreachable site delists its listings.** The aggregate client omits a site
-  whose snapshot fails. `_projections` seeds every trusted site with an empty list
+  whose capacity projection fetch fails. `_projections` seeds every trusted site with an empty list
   marked complete, under a hard-coded revision, and `stale_open_bare_metal_listing_ids`
   then closes every open listing at the missing site. The next successful run reopens
   them.
@@ -44,12 +45,12 @@ What bare-metal publication does today, from
 
 ## Decisions
 
-### Candidates come from the resource-pool projection, not the capacity snapshot
+### Candidates come from the resource-pool projection, not the capacity projection
 
 Bare-metal publication fetches each trusted site's resource-pool projection
 (`resource_pool_projection()`) and derives one publication candidate per Physical
 Resource carrying a `bare_metal.v2` publication view, from the view the site already
-projects. The capacity-snapshot read and the storefront's own view construction are
+projects. The capacity-projection read and the storefront's own view construction are
 removed.
 
 This is how VM publication works, and it is forced by the declaration reader:
@@ -57,7 +58,8 @@ This is how VM publication works, and it is forced by the declaration reader:
 declarations already means fetching the projection. Within one generation, a
 resource's pool, that pool's declarations, and the resource's publication view come
 from one document and cannot disagree — which dissolves the question this design
-previously left open, whether to join a snapshot to a projection.
+previously left open, whether to join the capacity projection to the resource-pool
+projection.
 
 The site's own view is also the correct one. The provisioning service builds it from
 the capacity declaration — `host_id` from the declaration, `physical_host_id` and
@@ -69,12 +71,12 @@ check. The parser for the site's view, `trusted_bare_metal_projection`, already 
 and has no production caller.
 
 **Availability is not lost.** The projection's inventory is built from the ledger's
-resource list — the same rows `GET /api/v1/capacity/snapshot` filters to enabled
-resources — so each fetched view's `available` flag reflects live ledger state at
+resource list — the same rows the capacity projection filters to enabled resources —
+so each fetched view's `available` flag reflects live ledger state at
 fetch time. Bare metal fetches fresh on every run and caches nothing between runs.
 
-**The capacity snapshot itself stays.** It is the site authority's live availability
-view, not a legacy surface: VM publication, failure actions, the listing source check,
+**The capacity projection itself stays.** It is the site authority's live
+availability view, not a legacy surface: VM publication, failure actions, the listing source check,
 and the admin availability endpoint read it; API-credit listing, fulfillment, and
 negotiation read it; and the storefront's placement ranking reads it per request.
 `pools-9-retire-local-physical-authority` does not touch it. This change removes only
@@ -89,7 +91,7 @@ under "A site whose projection is not held holds its listings", which applies to
 storefront deriving from site projections, and removes the delisting defect above.
 
 Per-site fetches are made directly against each site's client, not through the
-aggregate client, whose best-effort `snapshot()` cannot distinguish a failed site from
+aggregate client, whose best-effort capacity projection cannot distinguish a failed site from
 an empty one.
 
 ### Read the declarations through the kit reader, not a bare-metal copy
@@ -137,9 +139,28 @@ reopens locally before telling any registry, and records every registry outcome.
 removes the registry-first ordering above, including the orphaned registry listing,
 and is stated normatively in the convergence requirement this change modifies.
 
-The cost is moving bare-metal publication onto the kit's candidate and binding types
-and running the command as one asynchronous pass instead of repeated synchronous
-calls, which this change accepts.
+**Adoption follows VM's shape.** The domain contract keeps registering its publication
+source, because "Domain publication capability" requires the core runner to invoke a
+domain source through that contract. What changes is behind the source's callbacks, as
+in VM's publication cycle: a new listing is written locally with its binding and then
+published through the runtime; a refresh or reopen writes locally and then goes through
+the runtime's `publish` or `reopen`; closes go through the runtime's `reconcile`; and
+every run ends with `converge`. The command runs as one asynchronous pass, bridging the
+synchronous core runner the way VM's cycle does, instead of repeated synchronous calls.
+
+**The domain package loses its database access.** Candidate derivation from a
+projection and the listing comparison are pure and stay in `arkhai_bare_metal`; every
+database read and write moves into the storefront package, as VM keeps its cycle in its
+storefront rather than its domain package. The domain package then no longer imports the
+core storefront's SQLite helpers.
+
+**A bare-metal binding's source is its Physical Resource.** The runtime's
+`binding_for_listing` hook builds `CapacityBinding(site_id, "bare_metal",
+physical_resource_id)` from the listing's durable binding, refusing one not recorded as
+backed. VM's helper uses the pool where a listing has one, because a fungible VM listing
+draws from its pool; a bare-metal listing offers one specific Physical Resource, which is
+the source the kit's binding describes for that case. The pool remains part of the
+derivation key through the common binding.
 
 ### Listings are tracked by the common binding, so a pool move is an identity change
 
@@ -159,8 +180,13 @@ authorized by the pool the binding records.
 The core `listing_id_for_derivation_key` is not used; it raises whenever reached (an
 unowned item in the campaign index).
 
-**Deferred.** The table itself is left in place and unread, because schema changes
-are additive and a drop is a contract step. Dropping it has no owner yet.
+The table is dropped by a new storefront migration, with every function that reads or
+writes it. Schema changes are additive by default so a deployed database can cross
+releases; bare metal is not yet deployed as a domain, so there is no deployed database
+for an expand/contract sequence to protect, and leaving an unread table would only
+preserve the second key this decision removes. A drop migration rather than a rewritten
+migration history keeps any existing development database consistent with a fresh
+one.
 
 ### Availability closes stay distinguishable from source withdrawal
 
@@ -187,7 +213,7 @@ command.
 
 The storefront's readiness check fetches each trusted site's resource-pool projection
 directly and reports each site's result, so a down site is visible rather than reported
-as `ok` by the aggregate client's best-effort snapshot. It checks the surface
+as `ok` by the aggregate client's best-effort capacity projection. It checks the surface
 publication now depends on.
 
 ### "Publication candidate" gets one name
@@ -200,39 +226,39 @@ anything is decided about it. The Resource Pools section's "physical settlement
 candidates" is reworded to avoid the collision; a scheduling candidate — a resource
 considered for placement — is a different concept and keeps its ordinary meaning.
 
+### No deployed bare-metal database needs an upgrade path
+
+Bare metal is not yet deployed as a domain, so this change carries no data migration
+and no compatibility path for earlier bare-metal storefront state. This resolves the
+question of listings bound before the common derivation key included the pool: the
+historical-binding migration recorded such listings with a null pool under the domain
+table's key, but no deployed database holds one.
+
+A development database that does hold one converges without special handling. Such a
+listing's key matches no candidate, so it closes as a withdrawn source and its
+Physical Resource's candidate publishes under the common key — a fail-forward that
+carries no seller close or pause across. The domain's existing remedy for storefront
+state it no longer supports, resetting the storefront database as
+`docs/bare-metal-seller-quickstart.md` describes, remains available. Neither a
+fallback to the legacy key nor a carry-over of seller state is built for a population
+that exists only in development.
+
+**Revisit trigger:** bare metal's first deployment. From then on, bare-metal storefront
+schema changes are additive and a table drop is a contract step.
+
 ## Open questions
 
-- **Listings bound before the common key included the pool.** Every bare-metal listing
-  carries a common binding, but not all under the same key. Listings created by the
-  current publication path are bound under the common derivation key, which includes
-  the pool. Listings that predate common bindings were moved under them by
-  `_migrate_common_domain_bindings`, which recorded `pool_id` as null and kept the
-  domain table's key — site and Physical Resource only. Bindings are immutable, so
-  those rows cannot be re-keyed, and a lookup by the common key does not find them.
-  Two ways to proceed:
-  - **Fail forward once**, as VM's upgrade to listing shapes did: on the first run
-    each such listing closes as a withdrawn source and its successor publishes under
-    the common key, with a seller's close and pause carried to the successor so no
-    seller decision is lost. After that, one key describes every listing.
-  - **Fall back to the legacy key on a miss**, read-only: a legacy listing keeps its
-    identity and is reconciled in place. It keeps no recorded pool, so a pool move
-    cannot be detected for it, and the second key this change otherwise removes
-    persists for as long as any such listing does.
-
-  Task 1.1 is the decision gate.
+None.
 
 ## Migration
 
-Listings bound under the common key keep their identities: the first run after upgrade
-finds each and reconciles it in place. Listings bound before the key included the pool
-follow the open question above.
+No deployed bare-metal storefront database exists, so none is migrated. A new
+storefront migration drops `derived_bare_metal_listings`.
 
-Existing listings have no `publications` records. The first run records each registry
-outcome it produces. A listing the run does not change produces no registry call and
-gains no record, and the divergence query reads only recorded outcomes, so it is not
-treated as diverged. The accepted consequence: a registry already out of step with a
-listing at upgrade — a close that failed under the old ordering, say — stays out of step
-until that listing next changes.
-
-A listing whose pool no longer advertises `bare_metal`, or whose Physical Resource moved
-pools, closes on the first run — the intended correction, not a regression.
+In a development database, listings bound under the common key keep their identities
+and are reconciled in place on the first run; listings bound before the key included
+the pool fail forward as described above. Existing listings have no `publications`
+records. The first run records each registry outcome it produces; a listing the run
+does not change gains no record, and the divergence query reads only recorded outcomes,
+so it is not treated as diverged. The accepted consequence: a registry already out of
+step with a listing stays out of step until that listing next changes.

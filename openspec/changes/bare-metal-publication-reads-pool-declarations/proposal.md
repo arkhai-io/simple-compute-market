@@ -4,7 +4,7 @@ A Resource Pool declares which offering modes its listings may advertise, whethe
 is capacity-backed, and whether it is enabled. VM publication reads all three from
 each site's resource-pool projection through `market_resource_pools`'s site
 declaration reader. Bare-metal publication reads none of them. Its candidates come
-from the site ledger's capacity snapshot, gated only by each resource's
+from the site's capacity projection, gated only by each resource's
 `bare_metal_publication.enabled` attribute
 (`arkhai_bare_metal_storefront.publication_cli._projections`).
 
@@ -17,7 +17,7 @@ not for bare metal; the permanent requirement states that exemption explicitly.
 Bare-metal publication also diverges from VM in ways that lose or misstate state:
 
 - **An unreachable site delists its listings.** The aggregate capacity client omits a
-  site whose snapshot fails, the command treats the site as present and empty, and
+  site whose capacity projection fetch fails, the command treats the site as present and empty, and
   every open listing there closes. The next successful run reopens them.
 - **Registries are told first.** A new listing is published to the registry and then
   written locally, and closes go to the registry before the local listing. A registry
@@ -40,7 +40,7 @@ the same mechanisms as VM.
 
 - Derive bare-metal publication candidates from each trusted site's resource-pool
   projection and its `bare_metal.v2` publication views, as VM derives from the same
-  projection. Stop reading the capacity snapshot for publication.
+  projection. Stop reading the capacity projection for publication.
 - Resolve every candidate's pool through `read_site_declarations`, under the same joint
   per-generation rule VM uses. A pool that does not advertise `bare_metal`, or is
   disabled, yields no listing and its existing listings close as a withdrawn source; an
@@ -53,9 +53,11 @@ the same mechanisms as VM.
   `PublicationRuntime`, recording each registry outcome in the storefront's per-registry
   publication records. Every listing is persisted locally, with its binding, before any
   registry is told, and every run converges each registry on its listings' local status.
-- Track listings by the common binding's derivation key and stop using
-  `derived_bare_metal_listings` for publication, so a Physical Resource moved to another
-  pool is an identity change.
+- Track listings by the common binding's derivation key and drop
+  `derived_bare_metal_listings`, so each listing has one key and a Physical Resource
+  moved to another pool is an identity change.
+- Carry no data migration or compatibility path for earlier bare-metal storefront
+  state: bare metal is not yet deployed as a domain.
 - Keep availability-driven closes distinct from source withdrawal.
 - Check each site's projection in the storefront's health check.
 - Define "publication candidate" in `ARCHITECTURE.md`'s "One name per concept".
@@ -80,14 +82,14 @@ None.
 - A capability shape per bare-metal listing, owned by `bare-metal-listing-shapes`.
 - Making bare-metal publication autonomous; it stays operator-invoked.
 - Changing site admission or any delivery recheck.
-- Removing or changing the site's capacity snapshot, which remains the site's live
+- Removing or changing the site's capacity projection, which remains the site's live
   availability view for VM, API credits, and placement ranking.
-- Dropping `derived_bare_metal_listings`; it is left in place and unread.
 
 ## Impact
 
 - `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/`: the publication
-  command, runtime health check, SQLite client status count, and a
+  command, runtime health check, SQLite client status count, a migration dropping
+  `derived_bare_metal_listings`, and a
   `arkhai-kit-resource-pools` and `arkhai-kit-capacity-publication` dependency of the
   storefront rather than of the domain package, which buyers and provisioning adapters
   install without the storefront extra.
@@ -116,7 +118,8 @@ None.
   `openspec/specs/storefront-publication/spec.md`.
 - Registry convergence covers bare-metal publication, and a new listing is recorded
   locally before any registry is told — `openspec/specs/storefront-publication/spec.md`.
-- Why bare metal derives from the projection rather than the capacity snapshot, and why
+- Why bare metal derives from the resource-pool projection rather than the capacity
+  projection, and why
   its listings are tracked by the common binding —
   `openspec/specs/storefront-publication/architecture.md`.
 
