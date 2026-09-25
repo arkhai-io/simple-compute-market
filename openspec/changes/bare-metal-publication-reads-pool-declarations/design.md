@@ -464,9 +464,9 @@ None.
 
 ## Pipeline debugging
 
-The log fetcher still requests `e2e-logs`, but the two-lane workflow uploads
-`e2e-vm-logs` and `e2e-bare-metal-logs`. Fetch each lane independently into its
-own artifact-named directory under the run directory: both contain
+The log fetcher requested `e2e-logs`, but the two-lane workflow uploads
+`e2e-vm-logs` and `e2e-bare-metal-logs`. It now fetches each lane independently
+into its own artifact-named directory under the run directory: both contain
 `compose-logs.txt`, so flattening them would overwrite evidence. Preserve
 `actions.log` and tolerate an unavailable artifact so an early build failure
 still leaves useful diagnostics. Already downloaded lane logs can be reused.

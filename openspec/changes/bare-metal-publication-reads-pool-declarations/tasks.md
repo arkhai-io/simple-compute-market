@@ -553,6 +553,15 @@ Decisions: `design.md`, "End-to-end evidence for bare-metal publication". Closes
       No application Python changed; full local subsystem/typing suites were not rerun.
       Both lanes rebuilt the runtime wheels and images and passed their system scenarios.
 
+- [x] 11.5 **Review of the pipeline debugging.** Kept every change above. Restored
+      `domains/bare_metal/storefront/uv.lock` and `domains/apicredits/storefront/uv.lock`:
+      a regeneration during debugging recorded `arkhai-kit-capacity-publication` 0.2.0,
+      dropped `arkhai-core-storefront-client`, and recorded the API-credit storefront as
+      0.4.0, none of which satisfies the committed projects. The runtime images install
+      pinned wheels rather than these locks, so the passing run could not show it.
+      `uv lock --locked` now passes for both, and a scan finds no lock recording a
+      superseded version of any package this change bumps.
+
 ## 8. Closeout
 
 - [x] 8.1 **Comment hygiene.** Run `make check-comment-hygiene` and resolve every match.
