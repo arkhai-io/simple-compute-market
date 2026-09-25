@@ -14,6 +14,7 @@ import json
 
 import httpx
 import pytest
+from registry_client.models import ValidatePublishRequest
 
 from src.api.filter_spec import compute_etag, get_loaded_spec
 from src.db.models import Listing, OrderStatusEnum
@@ -355,3 +356,49 @@ async def test_set_form_op_mismatch_returns_400(
         resp = await c.get("/listings", params={"gpu_model": "not_in:[H100]"})
     assert resp.status_code == 400
     assert "op=" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_ram_gb_lower_bound_matches_at_and_below_a_shapes_value(
+    registry_client, db_session, maker_publisher
+):
+    # A listing whose shape declares memory publishes it; a default GPU-only
+    # shape publishes none and so is excluded by any memory filter.
+    _make_listing(db_session, maker_publisher, "shaped", gpu_count=1, ram_gb=32)
+    gpu_only = _make_listing(db_session, maker_publisher, "gpu-only", gpu_count=1)
+    gpu_only.listing_resource = {k: v for k, v in gpu_only.listing_resource.items()
+                                 if k != "ram_gb"}
+    db_session.commit()
+
+    async def matching(bound: int) -> list[str]:
+        page = await registry_client.list_listings(ram_gb_min=bound)
+        return [listing.id for listing in page.listings]
+
+    assert await matching(32) == ["shaped"]
+    assert await matching(1) == ["shaped"]
+    assert await matching(33) == []
+
+
+@pytest.mark.asyncio
+async def test_a_shaped_listing_validates_for_publication(registry_client):
+    result = await registry_client.validate_publish_listing(
+        ValidatePublishRequest(
+            listing_id="shaped",
+            storefront_url="http://seller",
+            listing_resource={
+                "pool_id": "gpu", "gpu_model": "H100", "gpu_count": 1,
+                "vcpu_count": 8, "ram_gb": 32, "disk_gb": 100,
+                "region": "us-east", "sla": 99.0, "offering_mode": "vm",
+                "capacity_backing": "backed",
+            },
+            # A published listing offers at least one settlement route.
+            accepted_escrows=[{
+                "chain_name": "anvil",
+                "escrow_address": "0x" + "11" * 20,
+                "literal_fields": {"token": "0x" + "ab" * 20},
+            }],
+            max_duration_seconds=3600,
+        )
+    )
+
+    assert result.valid, result.errors

@@ -10,8 +10,9 @@ field (`min_price`, `token`, `max_duration_seconds`, `accepted_escrows`)
 so a storefront override that only sets one field doesn't block the
 others from falling through to a lower tier:
 
-1. A per-pool storefront override (`compute_capacity_pools`' commercial
-   columns -- the storefront's own local, per-pool pricing record).
+1. The storefront's own per-pool override: the site-scoped override store,
+   else the legacy home-site `compute_capacity_pools` row, merged field by
+   field before this resolver sees it.
 2. A resource-pool-declared pricing hint, keyed by GPU model.
 3. The storefront's own `[pricing]` config default for that model, or
    the flat `default_min_price`/`default_token_address`/... if no

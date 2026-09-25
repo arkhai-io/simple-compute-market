@@ -11,7 +11,8 @@ install: ## Install dependencies using uv
 	@command -v uv >/dev/null 2>&1 || { echo "uv is not installed. Install from https://docs.astral.sh/uv/"; exit 1; }
 	uv sync --dev --find-links $(DIST_DIR)
 
-reinit: ## Force-reinstall internal wheels without bumping versions. Run make dist-* from the monorepo root first.
+reinit: ## Force-reinstall internal wheels without bumping versions. Run make dist-* from the monorepo root first. \
+		--upgrade-package arkhai-kit-capability-shape --reinstall-package arkhai-kit-capability-shape
 # The two client packages are dev-only but are refreshed here for the same
 # reason as the kits: they are built into $(DIST_DIR) without a version bump,
 # so a cached same-version wheel would shadow fresh content and the

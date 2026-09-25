@@ -339,6 +339,8 @@ The `site_resource_pools` projection MAY carry allowlisted, additive pool-level 
 
 A resource-pool row's per-resource `attributes` are the capacity declaration's own declared attributes, except domain view configuration published as a view. An attribute the declaration does not declare MUST be omitted from `attributes`, not published as null.
 
+Every per-resource member MUST carry a non-empty `resource_type`: the resource kind the site records for its declaration, which is the site's default kind when the declaration names none. A consumer judges whether a member can serve a claim by its kind, so a producer MUST NOT omit it or publish it as null, and a consumer MAY treat a member without one as malformed.
+
 #### Scenario: Older producer omits pool metadata
 - **WHEN** a resource-pool projection is produced with no pool-metadata source configured
 - **THEN** every resource-pool row is emitted with the same shape as before pool metadata existed, with no `pool_metadata` key
@@ -358,6 +360,10 @@ A resource-pool row's per-resource `attributes` are the capacity declaration's o
 #### Scenario: An unset host-level attribute is omitted, not published as null
 - **WHEN** a capacity declaration declares no GPU model, whether or not the host it names holds one on its host record
 - **THEN** the corresponding resource-pool row's `attributes` carries no key for it, rather than a null value or the host record's value
+
+#### Scenario: A declaration naming no resource kind is projected with the recorded one
+- **WHEN** a capacity declaration is registered without naming a resource kind
+- **THEN** its projected member carries the kind the site recorded for it, never an absent or null `resource_type`
 
 ### Requirement: Per-site projection load-state visibility
 A storefront MUST report, per configured site and per independent projection family (resource-pool, capacity-bucket), whether that projection has never loaded, is currently loaded, is stale, or is unavailable. This state MUST be visible on the storefront's operator status surface, scoped per site and family — one site's load failure MUST NOT present as broad storefront degradation while other configured sites are healthy. A storefront MUST NOT persist projection generations durably across restart; retry-until-success plus this observable status is the accepted mechanism for a site being unreachable at storefront startup. Any future reader of these caches MUST treat a never-loaded or unavailable state as unknown, not as authoritative zero capacity — the same principle "Site authority is unavailable" already states for the legacy reconciliation path applies equally here.

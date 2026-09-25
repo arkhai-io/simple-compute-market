@@ -131,7 +131,7 @@ def _capacity_reconciler(
                 db.db_path,
                 sqlite_client=db,
                 home_site=home_site,
-                configured_site_count=len(context.projections),
+                configured_sites=[site.site_id for site in context.projections],
                 member_availability=dict(context.availability),
                 site_pool_projection=projection,
                 site_capacity_buckets=buckets,
@@ -150,6 +150,7 @@ def _capacity_reconciler(
                 db.db_path,
                 sqlite_client=db,
                 home_site=home_site,
+                configured_sites=[site.site_id for site in context.projections],
                 member_availability=dict(context.availability),
                 site_pool_projection=projection,
                 site_capacity_buckets=buckets,
@@ -525,18 +526,14 @@ def site_pool_projection() -> dict[str, list[dict[str, Any]]]:
     """Resource-pool projection rows per site, from the storefront's own
     background poller cache (``site_projection_cache``).
 
-    Only sites whose projection has ever loaded contribute -- ``None``
-    (never loaded, or currently unavailable/invalid) is excluded, but a
-    successfully loaded site is included *even when its own rows list is
-    empty* -- an authoritative "this site currently has zero pools"
-    answer, distinct from "this site's answer isn't known yet". Losing
-    that distinction (checking the rows list's truthiness instead of
-    whether it is ``None``) would make a site's genuine zero-pools state
-    indistinguishable from a site that hasn't loaded at all, and
-    `reconciler`'s projection-sourced path would then fall back to
-    stale local tables instead of correctly registering zero capacity --
-    the empty *result* mapping is meaningful too, and is what actually
-    signals "fall back to local data" one level up.
+    Only sites whose cache holds a value contribute, loaded or stale; a site
+    that has never loaded, or whose load failed with no earlier value, is
+    absent. A loaded site is included *even when its rows list is empty*:
+    that is an authoritative "this site has zero pools" answer, distinct from
+    "this site's answer is not known". Derivation holds the listings of every
+    configured site absent here rather than reading it as empty, and an empty
+    mapping derives nothing: it never selects the local tables, which only
+    configuration does.
     """
     from market_storefront.services.site_projection_cache import projection_caches
 

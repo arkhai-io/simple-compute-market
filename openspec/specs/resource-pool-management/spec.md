@@ -186,7 +186,7 @@ The unqualified name MUST belong to the read that omits secrets, so that a calle
 
 ### Requirement: Domain-neutral publication and hold hints
 
-Resource Pool policy metadata MUST support stable domain-neutral keys for `listing_cardinality_mode`, `max_reservation_hold_seconds`, `region`, `sla`, and `pricing` without defining domain-specific cardinality, region, SLA, or pricing values in this shared capability. The key MUST be named for its scope: it carries how many listing candidates a pool yields and how each is independently identified, and a value describing what is offered, how a deal settles, or whether an admission authority backs the listing is out of scope for it. The former `listing_mode` key MUST remain accepted as a deprecated ingestion alias resolving to the same cardinality, because that key is optional and its silent absence resolves to a structural default rather than an error — an unupgraded producer whose alias were rejected would be reclassified rather than refused. The alias is a read-path concession only. Policy tags are projected verbatim, so the spelling an operator stored is the spelling a consumer receives and reconciliation belongs at the reading end; the reader this capability exposes MUST be named for the settled key and MUST resolve either spelling, and no other surface naming this hint may use the deprecated one. Unknown policy tags MUST remain forward-compatible opaque metadata. `pool_id` is a site-local operator slug, never made globally unique; every durable or public reference to a pool keys on `(site_id, pool_id[, resource_id])`, never `pool_id` alone.
+Resource Pool policy metadata MUST support stable domain-neutral keys for `listing_cardinality_mode`, `max_reservation_hold_seconds`, `region`, `sla`, `pricing`, and `listing_shapes` without defining domain-specific cardinality, region, SLA, pricing, or shape values in this shared capability. The key MUST be named for its scope: it carries how many listing candidates a pool yields and how each is independently identified, and a value describing what is offered, how a deal settles, or whether an admission authority backs the listing is out of scope for it. `listing_shapes` carries, per offering mode, the shapes a pool's listings are sold in; it describes what is offered, which is why it is a key of its own rather than a value of the cardinality hint. The former `listing_mode` key MUST remain accepted as a deprecated ingestion alias resolving to the same cardinality, because that key is optional and its silent absence resolves to a structural default rather than an error — an unupgraded producer whose alias were rejected would be reclassified rather than refused. The alias is a read-path concession only. Policy tags are projected verbatim, so the spelling an operator stored is the spelling a consumer receives and reconciliation belongs at the reading end; the reader this capability exposes MUST be named for the settled key and MUST resolve either spelling, and no other surface naming this hint may use the deprecated one. Unknown policy tags MUST remain forward-compatible opaque metadata. `pool_id` is a site-local operator slug, never made globally unique; every durable or public reference to a pool keys on `(site_id, pool_id[, resource_id])`, never `pool_id` alone.
 
 #### Scenario: Domain interprets the cardinality hint
 
@@ -203,6 +203,11 @@ Resource Pool policy metadata MUST support stable domain-neutral keys for `listi
 
 - **WHEN** a storefront version does not recognize one projected policy tag
 - **THEN** it ignores that tag without rejecting the Resource Pool or changing authoritative admission
+
+#### Scenario: Domain interprets the shape hint
+
+- **WHEN** VM publication reads a Resource Pool's `listing_shapes`
+- **THEN** it reads only the list under the `vm` offering mode and interprets its shapes through the VM domain's schema, without that schema being added to this shared package
 
 ### Requirement: Pool-declared offering modes
 
@@ -475,6 +480,32 @@ NOT change any pool's advertising surface or admission behavior.
 - **WHEN** a producer emits `capacity_backing` for some Resource Pools and omits it for another it projects
 - **THEN** the projection is malformed with respect to this requirement, and the omitted pool is not treated as predating the tag
 
+### Requirement: Listing-shape hint validation
+
+A Resource Pool management surface that accepts `listing_shapes` MUST require a mapping from
+offering mode to a non-empty list of structurally well-formed family-grouped capability
+shapes. A well-formed shape is a non-empty mapping of family name to a non-empty mapping of
+field name to a scalar value. The check MUST be the shared structural check the capability
+shape utility provides, and MUST NOT depend on any domain's family or field names. Which
+families and fields are meaningful, and which are required, MUST be validated by the domain
+that reads the hint. Every surface capable of persisting a Resource Pool's `policy_tags` MUST
+apply the same check: the bulk pool-document import path and the individual pool admin API
+(`create`/`replace`/`update`).
+
+#### Scenario: Operator supplies a malformed shape list
+
+- **WHEN** an operator submits `listing_shapes` whose VM list is empty, or whose shape
+  holds a family that is not a mapping, through any pool-write surface
+- **THEN** Resource Pool validation rejects the update without changing the stored policy
+  metadata
+
+#### Scenario: Operator names a field no domain defines
+
+- **WHEN** an operator submits a structurally well-formed shape naming a field the VM domain
+  does not define
+- **THEN** Resource Pool validation accepts it, and the VM storefront reports the pool's
+  shapes as unreadable when it derives listings
+
 ## Evidence
 
 - Domain-neutral hint keys, typed deliverable-mode resolution and membership, advertisement and backing declaration shape, both cross-tag rules, and the strict resolver including absent-versus-malformed discrimination: `kit/resource-pools/tests/unit/test_hints.py`.
@@ -486,6 +517,7 @@ NOT change any pool's advertising surface or admission behavior.
 - Typed administrative API, default-pool invariant, canonical round trip, host assignment, an execution-less pool advertising through a configuration-free provider, and server-side refusal of invalid declarations: `provisioning/compute/service/tests/integration/test_pools_api.py`.
 - Both declarations on every projected pool, each resolving through the shared resolver: `provisioning/compute/service/tests/integration/test_capacity_api.py`.
 - Migration ordering, legacy host backfill, and schema-drift rejection: `provisioning/compute/service/tests/unit/test_database.py`.
+- `listing_shapes` hint structure, validated identically on create, replace, patch, and bulk import: `kit/resource-pools/tests/unit/test_hints.py` and `kit/resource-pools/tests/integration/test_resource_pool_service.py`; refused and projected verbatim by the provisioning service: `provisioning/compute/service/tests/integration/test_pools_api.py` and `test_capacity_api.py`.
 
 ## Scheduling membership and draining
 

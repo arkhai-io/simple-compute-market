@@ -44,6 +44,8 @@ def _request_body(request: httpx.Request):
 def _response_context(request: httpx.Request) -> tuple[str, str]:
     body = _request_body(request)
     path = request.url.path
+    if path == _EXAMPLE_PATH:
+        return _EXAMPLE_OPERATION, _EXAMPLE_RESOURCE
     if request.method == "PATCH":
         return "admin_patch_resource", "resource-1"
     if path.endswith("/identity/rotations"):
@@ -69,7 +71,16 @@ def _response_context(request: httpx.Request) -> tuple[str, str]:
     return "admin_list_negotiations", f"listing-1/negotiations?{query}"
 
 
+# A market-neutral route for the generic transport: the storefront would bind this
+# operation and resource; the client signs exactly what it is given.
+_EXAMPLE_PATH = "/api/v1/admin/example"
+_EXAMPLE_OPERATION = "admin_example"
+_EXAMPLE_RESOURCE = "example/a%2Fb"
+
+
 def _response_body(request: httpx.Request) -> dict:
+    if request.url.path == _EXAMPLE_PATH:
+        return {"method": request.method, "params": dict(request.url.params)}
     if "/identity/" not in request.url.path:
         return {}
     body = _request_body(request)
@@ -505,3 +516,103 @@ def test_administrator_rotation_rejects_wrong_outer_signer():
                 expires_at=2_000,
             )
     assert transport.requests == []
+
+
+def _admin_clients(async_transport, sync_transport):
+    publishers = TrustedIdentitySet(identities=(_PUBLISHER.identity,))
+    return (
+        StorefrontClient(
+            "http://test", signer=_SIGNER, caller_role="admin",
+            expected_publishers=publishers, transport=async_transport,
+        ),
+        SyncStorefrontClient(
+            "http://test", signer=_SIGNER, caller_role="admin",
+            expected_publishers=publishers, transport=sync_transport,
+        ),
+    )
+
+
+def _example(client, method, **kwargs):
+    return client.authenticated_request(
+        method,
+        _EXAMPLE_PATH,
+        role="admin",
+        operation=_EXAMPLE_OPERATION,
+        resource=_EXAMPLE_RESOURCE,
+        **kwargs,
+    )
+
+
+def test_authenticated_requests_are_byte_equivalent_across_variants(monkeypatch):
+    monkeypatch.setattr("storefront_client.auth.time.time", lambda: 1_000)
+    async_transport, sync_transport = _AsyncTransport(), _SyncTransport()
+    async_client, sync_client = _admin_clients(async_transport, sync_transport)
+    body = {"site_id": "a/b", "value": 1}
+
+    async def run() -> None:
+        async with async_client as client:
+            await _example(client, "PUT", body=body, request_id="put-1")
+            await _example(client, "DELETE", params={"id": "a&b"}, request_id="del-1")
+
+    asyncio.run(run())
+    with sync_client as client:
+        _example(client, "PUT", body=body, request_id="put-1")
+        _example(client, "DELETE", params={"id": "a&b"}, request_id="del-1")
+
+    for async_request, sync_request in zip(
+        async_transport.requests, sync_transport.requests, strict=True
+    ):
+        assert async_request.method == sync_request.method
+        assert async_request.url == sync_request.url
+        assert async_request.content == sync_request.content
+        for name in AUTH_HEADERS:
+            assert async_request.headers[name] == sync_request.headers[name]
+
+
+@pytest.mark.parametrize(
+    ("method", "kwargs", "body"),
+    [
+        ("PUT", {"body": {"value": 1}}, {"value": 1}),
+        ("DELETE", {"params": {"id": "x"}}, EMPTY_BODY),
+        ("GET", {"params": {"id": "x"}}, EMPTY_BODY),
+    ],
+)
+def test_an_authenticated_request_signs_exactly_what_it_is_given(
+    monkeypatch, method, kwargs, body
+):
+    monkeypatch.setattr("storefront_client.auth.time.time", lambda: 1_000)
+    transport = _SyncTransport()
+    _, client = _admin_clients(_AsyncTransport(), transport)
+
+    with client:
+        answer = _example(client, method, **kwargs)
+
+    (request,) = transport.requests
+    result = verify_request(
+        _envelope(request, operation=_EXAMPLE_OPERATION, resource=_EXAMPLE_RESOURCE, body=body),
+        body=body,
+        now=1_000,
+        max_skew=0,
+        expected_role="admin",
+        expected_method=method,
+        expected_operation=_EXAMPLE_OPERATION,
+        expected_resource=_EXAMPLE_RESOURCE,
+        expected_principals=TrustedIdentitySet(identities=(_SIGNER.identity,)),
+    )
+    assert result.verified
+    assert answer["method"] == method
+
+
+def test_an_unverifiable_answer_to_an_authenticated_request_raises(monkeypatch):
+    from storefront_client import StorefrontClientError
+
+    monkeypatch.setattr("storefront_client.auth.time.time", lambda: 1_000)
+    # The client expects a publisher the transport does not sign as.
+    client = SyncStorefrontClient(
+        "http://test", signer=_SIGNER, caller_role="admin",
+        expected_publishers=TrustedIdentitySet(identities=(_REPLACEMENT.identity,)),
+        transport=_SyncTransport(),
+    )
+
+    with client, pytest.raises(StorefrontClientError):
+        _example(client, "PUT", body={"value": 1})

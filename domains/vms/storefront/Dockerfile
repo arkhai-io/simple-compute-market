@@ -144,7 +144,7 @@ COPY .dist/ /.dist/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --python /app/.venv/bin/python --no-deps --no-index \
         --find-links /.dist \
-        arkhai-vms-storefront==0.5.0 \
+        arkhai-vms-storefront==0.6.0 \
         arkhai-bare-metal-storefront==0.4.0
 
 # Fail the image build if the immutable hosted client regains a seller command

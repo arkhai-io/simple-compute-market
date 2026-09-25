@@ -18,6 +18,7 @@ from core_storefront.models.system_models import (
     HealthResponse,
     StageEventResponse,
 )
+from market_storefront.models.system_status_models import VmSystemStatusResponse
 from market_storefront.server import is_globally_paused
 
 logger = logging.getLogger(__name__)
@@ -51,13 +52,13 @@ class SystemController:
 
     @router.get(
         "/api/v1/system/status",
-        response_model=HealthResponse,
+        response_model=VmSystemStatusResponse,
         summary="Full diagnostic status (includes registry + pause state)",
     )
-    async def system_status(self) -> HealthResponse:
+    async def system_status(self) -> VmSystemStatusResponse:
         body = await self._svc.get_health(include_registry=True)
         body["paused"] = is_globally_paused()
-        return HealthResponse(**body)
+        return VmSystemStatusResponse(**body)
 
     @router.get(
         "/api/v1/system/events",

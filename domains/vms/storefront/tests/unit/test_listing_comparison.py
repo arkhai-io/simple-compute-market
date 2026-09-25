@@ -101,3 +101,14 @@ def test_a_field_the_source_resolves_differently_still_diverges():
 
     assert comparison.outcome == IDENTITY_DIFFERS
     assert comparison.differing_fields == ("gpu_model",)
+
+
+def test_every_vm_dimension_is_an_identity_field():
+    from arkhai_vms import DIMENSION_KEYS
+
+    from domains.vms.listings.listing_comparison import IDENTITY_FIELDS
+
+    assert set(DIMENSION_KEYS) <= set(IDENTITY_FIELDS)
+    # Identity is what a listing is and where; the dimensions are listed once,
+    # from the domain vocabulary.
+    assert len(IDENTITY_FIELDS) == len(set(IDENTITY_FIELDS))

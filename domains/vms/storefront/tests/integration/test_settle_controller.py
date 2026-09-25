@@ -76,7 +76,7 @@ async def _seed_listing(
                 "capacity_backing": "backed",
                 "site_id": "site-test",
                 "pool_id": resource_id,
-                "gpu_count": 1,
+                "listing_shape": {"gpu": {"count": 1, "model": "H200"}},
             },
         ),
         status="open",

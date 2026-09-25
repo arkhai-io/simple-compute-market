@@ -31,6 +31,7 @@ from domains.vms.listings.resource_csv_importer import (
     upsert_resources_from_csv_content,
 )
 from market_hosted_settlement import HOSTED_SETTLEMENT_MIGRATIONS
+from market_pool_overrides import pool_override_migrations
 from market_settlement_runtime import settlement_migrations
 from market_identity import Identity
 
@@ -83,6 +84,7 @@ class SQLiteClient(CoreSQLiteClient):
         return (
             *settlement_migrations(),
             *HOSTED_SETTLEMENT_MIGRATIONS,
+            *pool_override_migrations(),
             *VM_MIGRATIONS,
         )
 
@@ -795,6 +797,37 @@ class SQLiteClient(CoreSQLiteClient):
                 conn.close()
 
         await asyncio.to_thread(_save)
+
+    async def list_listing_source_envelopes(
+        self, *, offering_mode: str
+    ) -> list[tuple[str, dict[str, Any]]]:
+        """Each bound listing of ``offering_mode`` with its parsed source envelope.
+
+        A binding whose stored envelope is not a JSON object is skipped: it names
+        no source a reader could act on.
+        """
+
+        def _load() -> list[tuple[str, dict[str, Any]]]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                rows = conn.execute(
+                    "SELECT listing_id, source_envelope_json "
+                    "FROM storefront_listing_bindings WHERE offering_mode = ?",
+                    (offering_mode,),
+                ).fetchall()
+            finally:
+                conn.close()
+            out: list[tuple[str, dict[str, Any]]] = []
+            for listing_id, raw in rows:
+                try:
+                    envelope = json.loads(raw or "")
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(envelope, dict):
+                    out.append((str(listing_id), envelope))
+            return out
+
+        return await asyncio.to_thread(_load)
 
     async def get_host(self, *, name: str) -> dict[str, Any] | None:
         """Read a single host row by name."""

@@ -61,9 +61,11 @@ reinit: init-venv
 	--upgrade-package arkhai-apicredits-domain --reinstall-package arkhai-apicredits-domain \
 	--upgrade-package arkhai-bare-metal-storefront --reinstall-package arkhai-bare-metal-storefront \
 	--upgrade-package arkhai-kit-capacity-publication --reinstall-package arkhai-kit-capacity-publication \
+	--upgrade-package arkhai-kit-pool-overrides --reinstall-package arkhai-kit-pool-overrides \
 	--upgrade-package arkhai-kit-contact-exchange --reinstall-package arkhai-kit-contact-exchange \
 	--upgrade-package arkhai-kit-delivery --reinstall-package arkhai-kit-delivery \
-	--upgrade-package arkhai-kit-negotiation-runtime --reinstall-package arkhai-kit-negotiation-runtime
+	--upgrade-package arkhai-kit-negotiation-runtime --reinstall-package arkhai-kit-negotiation-runtime \
+	--upgrade-package arkhai-kit-capability-shape --reinstall-package arkhai-kit-capability-shape
 
 # -----------------------------------------------------------------------
 # Build
@@ -143,7 +145,7 @@ NETWORK ?= simple-market-service_default
 BUYER_MODULE ?= e2e_deal_buyer_cli or e2e_buy
 E2E_MODULE ?= e2e_deal or e2e_deal_buyer_cli or e2e_buy or multi_registry \
               or e2e_compute_dynamic_listings or e2e_alkahest_escrow_codecs \
-              or e2e_credits_deal or e2e_bare_metal_deal
+              or e2e_credits_deal or e2e_bare_metal_deal or e2e_listing_shapes
 
 test-buyer-machine:
 	docker run --rm \

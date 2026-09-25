@@ -51,10 +51,12 @@ def compute_capacity_claim_from_order(
     claim so matching pins to the named resource rather than requiring both
     to match.
 
-    The returned claim also carries a ``dimensions`` map built from
-    ``gpu_count``/``vcpu_count``/``ram_gb``/``disk_gb``. These are the
-    listing's fixed, seller-declared shape, so admission checks that every
-    requested dimension fits rather than checking GPU count alone.
+    The returned claim also carries a ``dimensions`` map holding each of
+    ``gpu_count``/``vcpu_count``/``ram_gb``/``disk_gb`` the listing publishes.
+    A listing publishes exactly the quantities its listing shape declares, so
+    admission checks that every committed dimension fits, and requests none the
+    shape omits: the site provisions an omitted dimension from its own
+    defaults.
 
     Raises ``ValueError`` if the order is missing or yields neither ``pool_id``
     nor ``resource_id`` — an under-specified claim would otherwise silently

@@ -255,6 +255,59 @@ class TestSlaValidationThroughAdminApi:
         }
 
 
+class TestListingShapesValidationThroughAdminApi:
+    """Rejection-path tests: a malformed `listing_shapes` hint is refused by the
+    server's shared validator. They assert status and stored state only."""
+
+    _TAGS = {"advertisable_modes": [], "capacity_backing": "backed"}
+    _SHAPES = {"vm": [{"gpu": {"count": 1, "model": "H100"}, "memory": {"gib": 64}}]}
+
+    async def test_create_pool_with_empty_shape_list_returns_400(self, client_and_queue):
+        client, _ = client_and_queue
+        with pytest.raises(ProvisioningError) as exc_info:
+            await client.create_pool(
+                PoolCreate(
+                    id="shaped",
+                    label="Shaped",
+                    provider="ansible",
+                    policy_tags={**self._TAGS, "listing_shapes": {"vm": []}},
+                    provider_config=_ANSIBLE_CONFIG,
+                )
+            )
+        assert exc_info.value.status_code == 400
+        with pytest.raises(ProvisioningError) as get_exc_info:
+            await client.get_pool("shaped")
+        assert get_exc_info.value.status_code == 404
+
+    async def test_replace_pool_with_malformed_shape_keeps_stored_metadata(
+        self, client_and_queue,
+    ):
+        client, _ = client_and_queue
+        await client.create_pool(
+            PoolCreate(
+                id="shaped",
+                label="Shaped",
+                provider="ansible",
+                policy_tags={**self._TAGS, "listing_shapes": self._SHAPES},
+                provider_config=_ANSIBLE_CONFIG,
+            )
+        )
+        with pytest.raises(ProvisioningError) as exc_info:
+            await client.replace_pool(
+                "shaped",
+                PoolReplace(
+                    label="Shaped",
+                    provider="ansible",
+                    enabled=True,
+                    policy_tags={**self._TAGS, "listing_shapes": {"vm": [{"gpu": 1}]}},
+                    provider_config=_ANSIBLE_CONFIG,
+                ),
+            )
+        assert exc_info.value.status_code == 400
+        fetched = await client.get_pool("shaped")
+        assert fetched.policy_tags == {**self._TAGS, "listing_shapes": self._SHAPES}
+
+
 class TestVmSizeDefaultsThroughAdminApi:
     """Proves `default_vm_*` round-trips through the real typed client,
     the real HTTP API, the real `AnsiblePoolConfigHandler`, and the real

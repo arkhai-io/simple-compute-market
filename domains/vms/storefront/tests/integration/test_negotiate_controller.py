@@ -15,14 +15,11 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from market_identity import Ed25519Signer, TrustedIdentitySet
-from core_storefront.domain_registry import (
-    StorefrontListingBinding,
-    build_storefront_derivation_key,
-)
 from market_capacity_publication import publication_binding
 from market_core.schemas import EscrowProposal, SettlementSelection
 
 import market_storefront.container as _container
+from market_storefront.publication_binding import prepare_vm_listing_binding
 from market_storefront.controllers.negotiate_controller import (
     _proposal_payload,
     router as negotiate_router,
@@ -108,11 +105,12 @@ def _declare_source(
             },
         },
         "resources": [{
-            "physical_resource_id": f"res-{listing_id}",
+            "physical_resource_id": f"res-{listing_id}", "resource_type": "compute.gpu",
             "enabled": True,
             "capacity": {"gpu_count": 8},
             "available": {"gpu_count": available_gpu_count},
-            "attributes": {"gpu_model": gpu_model},
+            # A claim matches region against the declaration itself.
+            "attributes": {"gpu_model": gpu_model, "region": "California, US"},
         }],
     })
 
@@ -155,26 +153,18 @@ async def _upsert_bound_listing(
         available_gpu_count=available_gpu_count,
         capacity_backing=capacity_backing,
     )
-    registration = db.domain_registry.resolve_mode("vm")
     pool_id = f"pool-{listing_id}"
-    binding = StorefrontListingBinding.from_source_envelope(
+    # Bound as publication binds it: the listing's shape and the resource it
+    # publishes, so every reader finds the listing's key in its binding.
+    binding = prepare_vm_listing_binding(
         listing_id=listing_id,
-        site_id="site-test",
-        pool_id=pool_id,
-        binding=registration.binding,
-        derivation_key=build_storefront_derivation_key(
-            site_id="site-test",
-            offering_mode=registration.offering_mode,
-            binding=registration.binding,
-            source_identity={"pool_id": pool_id},
-        ),
-        source_envelope={
-            "kind": "vm.test-listing-source.v1",
-            "schema_version": 1,
-            "payload": {"pool_id": pool_id},
+        candidate={
+            "site_id": "site-test",
+            "pool_id": pool_id,
+            "resource_id": f"res-{listing_id}",
+            "capacity_backing": capacity_backing,
+            "listing_shape": {"gpu": {"count": 1, "model": gpu_model}},
         },
-        last_reconciled_at=datetime.now().isoformat(),
-        capacity_backing=capacity_backing,
     )
     await db.upsert_listing_with_binding(
         binding=binding,

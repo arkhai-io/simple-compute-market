@@ -4,7 +4,12 @@ import sqlite3
 
 import pytest
 
-from domains.vms.listings.reconciler import available_compute_slices, listing_pool_key
+from domains.vms.listings.listing_shapes import resolve_shape
+from domains.vms.listings.reconciler import (
+    available_compute_slices as _available_compute_slices,
+    listing_shape_key,
+)
+from market_storefront.services.shape_feasibility import SiteShapeFeasibility
 from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
 from market_storefront.utils.sqlite_client import SQLiteClient
 
@@ -236,6 +241,17 @@ def test_sqlite_migration_accepts_pre_compute_inventory_schema(tmp_path):
 
 
 
+
+def available_compute_slices(*args, **kwargs):
+    kwargs.setdefault("shape_feasible", SiteShapeFeasibility())
+    return _available_compute_slices(*args, **kwargs)
+
+
+def _pool_shape_key(site_id: str, pool_id: str, gpu_count: int, model: str = "H200") -> str:
+    digest = resolve_shape({"gpu": {"count": gpu_count, "model": model}}).digest
+    return listing_shape_key(site_id, shape_digest=digest, pool_id=pool_id)
+
+
 @pytest.mark.asyncio
 async def test_fungible_pool_derives_one_listing_set_across_members(client):
     await _seed_fungible_compute_pool(client)
@@ -244,7 +260,7 @@ async def test_fungible_pool_derives_one_listing_set_across_members(client):
 
     assert [row["gpu_count"] for row in rows] == [1, 2, 3, 4]
     assert {row["resource_key"] for row in rows} == {
-        listing_pool_key("home-site", "pool-h200-shared", n) for n in (1, 2, 3, 4)
+        _pool_shape_key("home-site", "pool-h200-shared", n) for n in (1, 2, 3, 4)
     }
     assert {row["resource_id"] for row in rows} == {None}
     assert {row["pool_id"] for row in rows} == {"pool-h200-shared"}

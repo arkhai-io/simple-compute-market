@@ -180,6 +180,40 @@ async def load_site_projections(sqlite_client: Any) -> None:
     _caches.update(replacements)
 
 
+async def refresh_site_resource_pools(site_id: str) -> None:
+    """Re-fetch one site's resource-pool projection into its existing cache.
+
+    Refreshes in place, through the cache's own client, and leaves every other
+    site and family alone. A site with no cache yet is left to the poller's
+    first load. A failed fetch is recorded on the cache, as a failed poll is,
+    and never raised.
+    """
+    caches = _caches.get(site_id)
+    if caches is None:
+        return
+    await caches.resource_pools.refresh(force=True)
+
+
+async def refresh_site_projections(site_id: str) -> None:
+    """Re-fetch both of one site's projections into its existing caches.
+
+    For an operation that has just changed the site's capacity and reconciles
+    inline: reconciliation reads these caches, which are otherwise only as fresh
+    as the last poll or explicit refresh. The refresh belongs to that operation,
+    so it runs whether or not the lifecycle loops are held, and starts no loop.
+    A site with no cache yet is left to the poller's first load. A failed fetch
+    is recorded on its cache, which keeps its last generation, and never raised.
+    """
+    caches = _caches.get(site_id)
+    if caches is None:
+        return
+    for cache in (caches.resource_pools, caches.capacity_buckets):
+        try:
+            await cache.refresh(force=True)
+        except Exception:
+            logger.exception("[PROJECTIONS] refreshing site %s failed", site_id)
+
+
 def _resource_pool_identities() -> dict[str, Any]:
     return {
         site: caches.resource_pools.view().identity

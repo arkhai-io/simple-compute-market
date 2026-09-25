@@ -43,6 +43,9 @@ def test_what_the_builders_produce_validates():
         (lambda row: row.pop("pool_metadata"), "metadata"),
         (lambda row: row["resources"][0].pop("capacity"), "capacity"),
         (lambda row: row["resources"][0]["capacity"].update(gpu_count="8"), "capacity"),
+        (lambda row: row["resources"][0].pop("resource_type"), "resource_type"),
+        (lambda row: row["resources"][0].update(resource_type=None), "resource_type"),
+        (lambda row: row["resources"][0].update(resource_type=" "), "resource_type"),
     ],
 )
 def test_a_response_a_consumer_could_not_derive_from_is_refused(damage, message):

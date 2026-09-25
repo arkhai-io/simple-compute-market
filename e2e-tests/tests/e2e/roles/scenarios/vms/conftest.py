@@ -228,13 +228,24 @@ def capacity_source_for(resource: dict[str, Any], *, site_id: str | None = None)
     """Capacity provenance bound to the listing resource being published.
 
     The storefront refuses a listing whose declared source disagrees with its
-    resource on pool, resource, or GPU count, so this is derived from the
-    resource rather than restated alongside it — a hand-written copy is a
-    second place that has to stay in sync.
+    resource on pool or resource, or whose listing shape differs from what the
+    resource publishes, so this is derived from the resource rather than
+    restated alongside it — a hand-written copy is a second place that has to
+    stay in sync.
     """
+    shape: dict[str, dict[str, Any]] = {
+        "gpu": {"count": resource.get("gpu_count", 1), "model": resource["gpu_model"]},
+    }
+    for family, field_name, published in (
+        ("cpu", "count", "vcpu_count"),
+        ("memory", "gib", "ram_gb"),
+        ("storage", "gib", "disk_gb"),
+    ):
+        if resource.get(published) is not None:
+            shape[family] = {field_name: resource[published]}
     source: dict[str, Any] = {
         "site_id": site_id or str(settings.SELLER.get("site_id", "default") or "default"),
-        "gpu_count": resource.get("gpu_count", 1),
+        "listing_shape": shape,
     }
     # Both when the resource declares both: a `specific_resource` member is
     # pool-bound *and* resource-keyed, and the storefront compares the two

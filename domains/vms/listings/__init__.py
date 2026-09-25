@@ -38,10 +38,21 @@ from domains.vms.listings.reconciler import (
     current_available_resource_keys,
     held_gpu_counts,
     held_gpu_counts_by_resource,
+    ShapeFeasibility,
+    declared_shape_feasibility,
+    vm_override_view,
     listing_pool_key,
     listing_resource_key,
+    listing_shape_key,
     open_listing_resource_keys,
     stale_open_listing_ids,
+)
+from domains.vms.listings.listing_shapes import (
+    SHAPE_SOURCE_OVERRIDE,
+    ResolvedShape,
+    ShapeResolution,
+    resolve_shape,
+    resolve_vm_listing_shapes,
 )
 from domains.vms.listings.resources import (
     ComputeGpuResourceAdapter,
@@ -67,6 +78,14 @@ from domains.vms.listings.strategy import (
 )
 
 __all__ = [
+    "SHAPE_SOURCE_OVERRIDE",
+    "declared_shape_feasibility",
+    "vm_override_view",
+    "ResolvedShape",
+    "ShapeFeasibility",
+    "ShapeResolution",
+    "resolve_shape",
+    "resolve_vm_listing_shapes",
     "adapt_db_resource_to_domain_resource",
     "adapt_domain_resource_to_db_resource",
     "allocation_table_exists",
@@ -100,6 +119,7 @@ __all__ = [
     "Listing",
     "listing_pool_key",
     "listing_resource_key",
+    "listing_shape_key",
     "open_listing_resource_keys",
     "parse_resource_from_dict",
     "parse_accepted_escrows_cell",

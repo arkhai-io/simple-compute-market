@@ -116,7 +116,10 @@ async def _persist_bound_listing(db: SQLiteClient, order: dict) -> None:
             "site_id": "site-a",
             "pool_id": "pool-vm",
             "resource_id": listing.listing_resource.resource_id,
-            "gpu_count": listing.listing_resource.gpu_count,
+            "listing_shape": {"gpu": {
+                "count": listing.listing_resource.gpu_count,
+                "model": listing.listing_resource.gpu_model,
+            }},
         },
     )
     await db.upsert_listing_with_binding(

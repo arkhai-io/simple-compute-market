@@ -11,10 +11,12 @@ from sqlalchemy.orm import Session, sessionmaker
 from .hints import (
     CAPACITY_BACKING_POLICY_TAG,
     MAX_RESERVATION_HOLD_SECONDS_POLICY_TAG,
+    LISTING_SHAPES_POLICY_TAG,
     SLA_POLICY_TAG,
     PoolDeclarationProblem,
     pool_declaration_problems,
     validate_hold_preference,
+    validate_listing_shapes,
     validate_pool_declarations,
     validate_sla_preference,
 )
@@ -130,6 +132,7 @@ class ResourcePoolService:
             validate_pool_declarations(policy_tags)
             + validate_hold_preference(policy_tags)
             + validate_sla_preference(policy_tags)
+            + validate_listing_shapes(policy_tags)
         )
         if problems:
             raise PoolValidationError("; ".join(problems))
@@ -509,6 +512,15 @@ class ResourcePoolService:
                             path=f"{base}.policy_tags.{SLA_POLICY_TAG}",
                             code="invalid_sla_preference",
                             message=sla_problem,
+                        )
+                    )
+                    entry_valid = False
+                for shape_problem in validate_listing_shapes(tags):
+                    problems.append(
+                        PoolValidationProblem(
+                            path=f"{base}.policy_tags.{LISTING_SHAPES_POLICY_TAG}",
+                            code="invalid_listing_shapes",
+                            message=shape_problem,
                         )
                     )
                     entry_valid = False

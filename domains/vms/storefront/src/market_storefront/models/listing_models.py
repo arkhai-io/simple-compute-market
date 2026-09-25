@@ -17,7 +17,9 @@ class VmCapacitySource(BaseModel):
     site_id: str = Field(min_length=1)
     pool_id: str | None = Field(default=None, min_length=1)
     resource_id: str | None = Field(default=None, min_length=1)
-    gpu_count: int = Field(default=1, ge=1)
+    listing_shape: dict[str, dict[str, Any]] = Field(
+        description="The family-grouped VM shape the listing is sold in."
+    )
 
     @model_validator(mode="after")
     def require_capacity_identity(self) -> VmCapacitySource:

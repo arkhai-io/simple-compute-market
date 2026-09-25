@@ -16,10 +16,12 @@ from market_storefront.domain_runtime import (
     build_vm_storefront_domain,
     build_vm_storefront_registry,
 )
+from market_storefront.publication_binding import prepare_vm_listing_binding
 from market_storefront.services import site_projection_cache
 from market_storefront.services.listing_source_check import check_listing_source
 from market_storefront.utils.sqlite_client import SQLiteClient
 from tests._settings_overrides import settings_overrides
+from tests.fake_site import TEST_MARKETPLACE_SIGNER
 
 pytestmark = pytest.mark.asyncio
 
@@ -35,11 +37,12 @@ def _pool(pool_id, *, gpu_model="H100", members=(("r1", 4, 4),), tags=_TAGS):
         },
         "resources": [
             {
-                "physical_resource_id": f"{pool_id}-{rid}",
+                "physical_resource_id": f"{pool_id}-{rid}", "resource_type": "compute.gpu",
                 "enabled": True,
                 "capacity": {"gpu_count": count},
                 "available": {"gpu_count": available},
-                "attributes": {"gpu_model": gpu_model},
+                # A claim matches region against the declaration itself.
+                "attributes": {"gpu_model": gpu_model, "region": "us-east"},
             }
             for rid, count, available in members
         ],
@@ -84,6 +87,7 @@ def repository(tmp_path):
 
 def _listing(pool_id="pool-a", gpu_count=2, gpu_model="H100"):
     return {
+        "listing_id": f"{pool_id}-{gpu_model}-{gpu_count}",
         "listing_resource": {
             "offering_mode": "vm",
             "pool_id": pool_id,
@@ -94,7 +98,36 @@ def _listing(pool_id="pool-a", gpu_count=2, gpu_model="H100"):
     }
 
 
+async def _bind(repository, binding, listing):
+    """Store the listing's binding as publication does; the guard reads its key there."""
+    resource = listing["listing_resource"]
+    backing = "unbacked" if isinstance(binding, UnbackedBinding) else "backed"
+    await repository.upsert_listing_with_binding(
+        binding=prepare_vm_listing_binding(
+            listing_id=listing["listing_id"],
+            candidate={
+                "site_id": binding.site_id,
+                "pool_id": resource["pool_id"],
+                "capacity_backing": backing,
+                "listing_shape": {
+                    "gpu": {"count": resource["gpu_count"], "model": resource["gpu_model"]}
+                },
+            },
+        ),
+        status="open",
+        created_at="2026-01-01T00:00:00",
+        updated_at="2026-01-01T00:00:00",
+        listing_resource=dict(resource, capacity_backing=backing, sla=99.0),
+        fulfillment_resource=None,
+        max_duration_seconds=3600,
+        storefront_url="http://seller",
+        seller_principal=TEST_MARKETPLACE_SIGNER.identity,
+    )
+
+
 async def _check(repository, projections, binding, listing, capacity):
+    if await repository.load_listing_binding(listing_id=listing["listing_id"]) is None:
+        await _bind(repository, binding, listing)
     with settings_overrides(**{"capacity.use_site_projection_for_listings": True}), patch.dict(
         site_projection_cache._caches,
         {site: _caches(pools) for site, pools in projections.items()},
@@ -138,8 +171,9 @@ async def test_a_match_only_at_another_site_is_not_a_match(repository):
         capacity,
     )
 
+    # The shape names its model, so another model is another listing's source.
     assert result["declared_match"] is False
-    assert "gpu_model" in result["differing_fields"]
+    assert result["differing_fields"] == ["source"]
     assert capacity.asked == []
 
 

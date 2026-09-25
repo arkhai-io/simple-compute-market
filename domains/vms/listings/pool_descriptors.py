@@ -2,8 +2,8 @@
 
 `kit/resource-pools.hints` owns the key names and generic reads; this
 module owns how the VM domain resolves them against the storefront's own
-local fallback/override data (`compute_capacity_pools.region`/`.sla`,
-the storefront-side override tier -- see `resolve_sla` below).
+own override tier (the site-scoped override store, else the legacy
+home-site `compute_capacity_pools` row -- see `resolve_sla` below).
 
 Region and SLA are treated differently on purpose. Region is a plain fact
 about where hardware sits -- no storefront override makes sense, since a
@@ -22,7 +22,8 @@ from typing import Any, Mapping
 
 def resolve_region(policy_tags: Mapping[str, Any], *, fallback: str | None) -> str | None:
     """The pool's region: its declared hint if present, else ``fallback``
-    (the storefront's local `compute_capacity_pools.region` value).
+    (the legacy home-site `compute_capacity_pools.region` value; region is a
+    physical fact, so no site-scoped override states one).
 
     A non-string or empty hint is treated the same as an absent one --
     region is meant to be human-readable descriptive text, not a value a
@@ -54,8 +55,8 @@ def resolve_sla(
     true), and the storefront's own configured default (lowest).
 
     ``storefront_override`` is the storefront operator's explicit
-    per-pool value (from `compute_capacity_pools.sla`) if one is set,
-    else ``None`` -- callers must pass ``None``, not ``0``, to mean "not
+    per-pool value (the site-scoped override's, else the legacy row's) if one
+    is set, else ``None`` -- callers must pass ``None``, not ``0``, to mean "not
     set," since 0 is itself a meaningful (if extreme) SLA value.
 
     ``accept_pool_declared_sla`` gates the *entire* middle tier, not just

@@ -36,6 +36,7 @@ from domains.vms.listings.listing_comparison import (
     refreshed_listing_resource,
 )
 from domains.vms.listings.reconciler import (
+    ShapeFeasibility,
     available_compute_slices,
     open_listing_resource_keys,
     stale_open_listing_ids,
@@ -43,6 +44,7 @@ from domains.vms.listings.reconciler import (
 from market_capacity_publication import BoundListing, ReconciliationPlan
 
 import market_storefront.container as container
+from market_storefront.services.shape_feasibility import vm_shape_feasibility
 from market_storefront.lifecycle import PUBLICATION, gate, idle
 from market_storefront.models.listing_models import VmCreateListingRequest
 from market_storefront.publication_wiring import (
@@ -142,8 +144,10 @@ class VmPublicationCycle:
         storefront_url: str,
         wallet_address: str,
         dry_run: bool,
+        shape_feasible: ShapeFeasibility | None = None,
     ) -> None:
         self._db = sqlite_client
+        self._shape_feasible = shape_feasible or vm_shape_feasibility()
         self._listings = listing_service
         self._capacity = capacity_runtime
         self._registry = registry
@@ -155,7 +159,7 @@ class VmPublicationCycle:
         self._buckets: Mapping[str, list[dict[str, Any]]] | None = None
         self._availability: Mapping[tuple[str, str], int] | None = None
         self._home_site: str | None = None
-        self._site_count = 0
+        self._sites: tuple[str, ...] = ()
         self._derived: dict[int, Any] = {}
 
     @property
@@ -177,7 +181,7 @@ class VmPublicationCycle:
         self._event_loop = asyncio.get_running_loop()
         sites = list(self._capacity.site_ids)
         self._home_site = sites[0] if sites else None
-        self._site_count = len(sites)
+        self._sites = tuple(sites)
         if self._home_site is None:
             await self._converge_registries()
             return self.report.as_dict()
@@ -247,7 +251,6 @@ class VmPublicationCycle:
         return open_listing_resource_keys(
             db_path,
             home_site=self._home_site or "",
-            configured_site_count=self._site_count,
         )
 
     def _available_candidates(self, db_path: str) -> list[dict[str, Any]]:
@@ -260,20 +263,27 @@ class VmPublicationCycle:
             site_capacity_buckets=self._buckets,
             hint_resolution=pool_hint_resolution_settings(),
             holds=holds,
+            shape_feasible=self._shape_feasible,
+            configured_sites=self._sites,
         )
         for kind, site_id, source_id in sorted(holds):
-            self.report.record("hold", site_id=site_id, **{f"{kind}_id": source_id})
+            if kind == "site":
+                # Unknown, not empty: nothing of this site's is closed or refreshed.
+                self.report.record("hold", site_id=site_id, reason="site_projection_unknown")
+            else:
+                self.report.record("hold", site_id=site_id, **{f"{kind}_id": source_id})
         return candidates
 
     def _close_stale(self, db_path: str, _base_url: str) -> list[str]:
         stale = stale_open_listing_ids(
             db_path,
             home_site=self._home_site or "",
-            configured_site_count=self._site_count,
+            configured_sites=self._sites,
             member_availability=self._availability,
             site_pool_projection=self._projection,
             site_capacity_buckets=self._buckets,
             backed_only=False,
+            shape_feasible=self._shape_feasible,
         )
         for listing_id in stale:
             self.report.record("close", listing_id=listing_id, reason="source_gone")
@@ -349,7 +359,7 @@ class VmPublicationCycle:
                 "site_id": candidate["site_id"],
                 "pool_id": candidate.get("pool_id"),
                 "resource_id": candidate.get("resource_id"),
-                "gpu_count": candidate["gpu_count"],
+                "listing_shape": candidate["listing_shape"],
             },
             settlements=list(clauses),
             demands=demands_for_publication_clauses(

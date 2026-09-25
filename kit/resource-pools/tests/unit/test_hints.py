@@ -551,3 +551,42 @@ class TestResolvePoolDeclarations:
             resolve_pool_declarations(_tags(**{DELIVERABLE_MODES_POLICY_TAG: "vm"}))
 
         assert {p.code for p in exc_info.value.problems} == {INVALID_DELIVERABLE_MODES}
+
+
+class TestListingShapesHint:
+    """Structure only: the reading domain owns the vocabulary."""
+
+    SHAPE = {"gpu": {"count": 1, "model": "H100"}, "memory": {"gib": 64}}
+
+    def test_absent_is_valid(self):
+        assert market_resource_pools.validate_listing_shapes({}) == []
+
+    def test_valid_shapes_are_accepted(self):
+        tags = {"listing_shapes": {"vm": [self.SHAPE, {"gpu": {"count": 2, "model": "H100"}}]}}
+        assert market_resource_pools.validate_listing_shapes(tags) == []
+
+    def test_a_field_no_domain_defines_is_accepted(self):
+        tags = {"listing_shapes": {"vm": [{"gpu": {"count": 1, "flux_capacitor": "yes"}}]}}
+        assert market_resource_pools.validate_listing_shapes(tags) == []
+
+    @pytest.mark.parametrize(
+        ("value", "fragment"),
+        [
+            ([], "must be a mapping"),
+            ({"vm": []}, "listing_shapes.vm must be a non-empty list"),
+            ({"vm": {"gpu": {"count": 1}}}, "listing_shapes.vm must be a non-empty list"),
+            ({"vm": [{"gpu": 1}]}, "listing_shapes.vm[0].gpu"),
+            ({"vm": [{"gpu": {"count": [1]}}]}, "listing_shapes.vm[0].gpu.count"),
+            ({"": [SHAPE]}, "offering modes must be non-empty strings"),
+        ],
+    )
+    def test_malformed_values_are_refused_with_their_location(self, value, fragment):
+        problems = market_resource_pools.validate_listing_shapes({"listing_shapes": value})
+        assert problems and any(fragment in problem for problem in problems), problems
+
+    def test_raw_read_returns_the_mode_list_unvalidated(self):
+        tags = {"listing_shapes": {"vm": [{"anything": {"x": 1}}], "container": [self.SHAPE]}}
+        assert market_resource_pools.raw_listing_shapes(tags, "vm") == [{"anything": {"x": 1}}]
+        assert market_resource_pools.raw_listing_shapes(tags, "bare_metal") is None
+        assert market_resource_pools.raw_listing_shapes({}, "vm") is None
+        assert market_resource_pools.raw_listing_shapes({"listing_shapes": "x"}, "vm") is None

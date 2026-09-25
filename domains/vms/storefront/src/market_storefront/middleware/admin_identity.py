@@ -28,6 +28,11 @@ from core_storefront.identity_lifecycle import (
 )
 from fastapi import Request
 from market_identity import EMPTY_BODY, Identity
+from market_pool_overrides import (
+    POOL_OVERRIDES_PATH,
+    PoolOverrideContractError,
+    pool_override_contract,
+)
 from starlette.responses import JSONResponse, Response
 
 import market_storefront.container as _container
@@ -182,6 +187,20 @@ def _negotiation_list_resource(request: Request, listing_id: str) -> str:
     )
 
 
+def _pool_override_contract(
+    request: Request, *, method: str, body: Any
+) -> AdminRouteContract:
+    """Bind an override route through the pool-override kit's contract, which
+    the kit's client builds its resources with too."""
+    try:
+        contract = pool_override_contract(
+            method, request.query_params.multi_items(), body
+        )
+    except PoolOverrideContractError as exc:
+        raise AuthError(str(exc), status_code=400) from exc
+    return AdminRouteContract(contract.operation, contract.resource, contract.body)
+
+
 def _identity_contract(
     request: Request,
     *,
@@ -255,6 +274,9 @@ def _contract(request: Request, body: Any) -> AdminRouteContract | None:
     matched = exact.get((method, path))
     if matched is not None:
         return AdminRouteContract(*matched, body)
+
+    if path == POOL_OVERRIDES_PATH and method in {"PUT", "GET", "DELETE"}:
+        return _pool_override_contract(request, method=method, body=body)
 
     if method == "GET" and path == "/api/v1/system/status":
         return AdminRouteContract(

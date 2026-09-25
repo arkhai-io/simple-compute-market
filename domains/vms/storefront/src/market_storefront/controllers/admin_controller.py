@@ -37,6 +37,12 @@ from fastapi_utils.cbv import cbv
 from market_identity import RotationRequest
 
 import market_storefront.container as _container
+from market_storefront.services.capacity_client import (
+    listing_source_projection,
+    site_capacity_buckets,
+)
+from market_storefront.services.site_projection_cache import refresh_site_projections
+from market_storefront.services.shape_feasibility import vm_shape_feasibility
 from market_storefront.failure_actions import (
     FulfillmentFailureContext,
     apply_fulfillment_failure_policy,
@@ -68,6 +74,15 @@ from market_storefront.lifecycle import (
     SITE_PROJECTION_POLLER,
 )
 from market_storefront.server import _set_globally_paused, _set_loops_paused
+from market_pool_overrides import (
+    PoolOverrideAddress,
+    PoolOverrideDeleteResponse,
+    PoolOverrideListResponse,
+    PoolOverrideRecord,
+    PoolOverrideRefused,
+    PoolOverrideResponse,
+    PoolOverrideWriteResponse,
+)
 from market_capacity_publication import (
     CapacityBinding,
     CapacityBindingError,
@@ -587,6 +602,87 @@ class AdminController:
         )
         return {"sites": summary}
 
+    # -- storefront pool overrides ------------------------------------------
+    # Site and pool IDs are operator-chosen strings with no character
+    # restriction, so they travel in the body or query, never the path.
+
+    @staticmethod
+    def _pool_overrides() -> Any:
+        service = _container.resolved_pool_override_service
+        if service is None:
+            raise HTTPException(
+                status_code=503, detail="storefront pool overrides are unavailable"
+            )
+        return service
+
+    @router.put(
+        "/pool-overrides",
+        response_model=PoolOverrideWriteResponse,
+        summary="Replace one pool override, checked against the live site (admin)",
+    )
+    async def put_pool_override(
+        self, record: PoolOverrideRecord
+    ) -> PoolOverrideWriteResponse:
+        """Replace the whole override at the record's site, pool, and offering mode.
+
+        Refused with 422 for an unconfigured site, a mode no market serves, or
+        vocabulary or clauses that do not validate; 503 (retryable) when the site
+        cannot answer usably; and 404 when its live projection lacks the pool. A
+        shape no member is feasible for is reported, not refused.
+        """
+        try:
+            result = await self._pool_overrides().replace(record)
+        except PoolOverrideRefused as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+        return PoolOverrideWriteResponse.model_validate(result)
+
+    @router.get(
+        "/pool-overrides",
+        response_model=PoolOverrideResponse | PoolOverrideListResponse,
+        summary="Read one pool override, or list them (admin)",
+    )
+    async def get_pool_overrides(
+        self,
+        site_id: str | None = Query(default=None),  # noqa: B008
+        pool_id: str | None = Query(default=None),  # noqa: B008
+        offering_mode: str | None = Query(default=None),  # noqa: B008
+    ) -> PoolOverrideResponse | PoolOverrideListResponse:
+        """With a site, pool, and offering mode, one override; otherwise a list,
+        optionally narrowed to a site or to one site's pool."""
+        service = self._pool_overrides()
+        if site_id is not None and pool_id is not None and offering_mode is not None:
+            address = PoolOverrideAddress(
+                site_id=site_id, pool_id=pool_id, offering_mode=offering_mode
+            )
+            override = await service.get(address)
+            if override is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"no override for site {site_id!r} pool {pool_id!r} "
+                    f"mode {offering_mode!r}",
+                )
+            return PoolOverrideResponse.model_validate({"override": override})
+        return PoolOverrideListResponse.model_validate(
+            {"overrides": await service.list(site_id=site_id, pool_id=pool_id)}
+        )
+
+    @router.delete(
+        "/pool-overrides",
+        response_model=PoolOverrideDeleteResponse,
+        summary="Delete one pool override; idempotent (admin)",
+    )
+    async def delete_pool_override(
+        self,
+        site_id: str = Query(),  # noqa: B008
+        pool_id: str = Query(),  # noqa: B008
+        offering_mode: str = Query(),  # noqa: B008
+    ) -> PoolOverrideDeleteResponse:
+        address = PoolOverrideAddress(
+            site_id=site_id, pool_id=pool_id, offering_mode=offering_mode
+        )
+        deleted = await self._pool_overrides().delete(address)
+        return PoolOverrideDeleteResponse(**address.model_dump(), deleted=deleted)
+
     @router.post(
         "/portfolio/resources/import",
         response_model=ImportResourcesResponse,
@@ -1036,10 +1132,14 @@ class AdminController:
                 f"{capacity_reservation_id!r}: {exc}",
             ) from exc
         closed_listing_ids = (
-            await self._close_oversized_compute_listings() if close_oversized else []
+            await self._close_oversized_compute_listings(site_id)
+            if close_oversized
+            else []
         )
         reopened_listing_ids = (
-            await self._reopen_available_compute_listings() if reopen_available else []
+            await self._reopen_available_compute_listings(site_id)
+            if reopen_available
+            else []
         )
         stage_event(
             "fulfillment",
@@ -1084,21 +1184,35 @@ class AdminController:
             )
             return None
 
-    async def _close_oversized_compute_listings(self) -> list[str]:
+    async def _close_oversized_compute_listings(self, changed_site: str) -> list[str]:
+        """Close the capacity-backed listings ``changed_site``'s change made stale.
+
+        The site's cached projection predates the change this operation just made,
+        so it is refreshed first; reconciling against it unrefreshed would report
+        nothing now and let a later operation report these closes as its own.
+        """
         from domains.vms.listings.reconciler import stale_open_listing_ids
 
-        home_site, configured_site_count = self._site_topology()
+
+        home_site, _ = self._site_topology()
         if home_site is None:
             return []
         availability = await self._member_availability()
         if availability is None:
             return []
+        await refresh_site_projections(changed_site)
+        projection = listing_source_projection()
         closed_listing_ids = stale_open_listing_ids(
             self._db.db_path,
             home_site=home_site,
-            configured_site_count=configured_site_count,
+            configured_sites=self._runtime().site_ids,
             member_availability=availability,
+            # The same source publication derives from, so reconciliation here
+            # cannot close a listing publication would keep.
+            site_pool_projection=projection,
+            site_capacity_buckets=site_capacity_buckets() if projection is not None else None,
             backed_only=True,
+            shape_feasible=vm_shape_feasibility(),
         )
         for listing_id in closed_listing_ids:
             await self._db.update_listing(
@@ -1108,8 +1222,11 @@ class AdminController:
             )
         return closed_listing_ids
 
-    async def _reopen_available_compute_listings(self) -> list[str]:
+    async def _reopen_available_compute_listings(self, changed_site: str) -> list[str]:
+        """Reopen the capacity-backed listings ``changed_site``'s change made
+        available again, after refreshing that site's cached projection."""
         from domains.vms.listings.reconciler import closed_available_listing_ids
+
 
         home_site, _ = self._site_topology()
         if home_site is None:
@@ -1117,10 +1234,16 @@ class AdminController:
         availability = await self._member_availability()
         if availability is None:
             return []
+        await refresh_site_projections(changed_site)
+        projection = listing_source_projection()
         reopened_listing_ids = closed_available_listing_ids(
             self._db.db_path,
             home_site=home_site,
             member_availability=availability,
+            site_pool_projection=projection,
+            site_capacity_buckets=site_capacity_buckets() if projection is not None else None,
+            shape_feasible=vm_shape_feasibility(),
+            configured_sites=self._runtime().site_ids,
         )
         for listing_id in reopened_listing_ids:
             await self._db.update_listing(
@@ -1353,7 +1476,7 @@ class AdminController:
                 status_code=409,
                 detail="No available compute VM matched required attributes",
             )
-        closed_listing_ids = await self._close_oversized_compute_listings()
+        closed_listing_ids = await self._close_oversized_compute_listings(binding.site_id)
         # The capacity-delta subscriber can race this inline reconciliation.
         # Include listings that were open when reservation began but that the
         # subscriber closed first, so the response reports the full effect of

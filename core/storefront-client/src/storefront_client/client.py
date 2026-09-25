@@ -318,6 +318,26 @@ class _StorefrontClientBase:
         except StorefrontAuthenticationError as exc:
             raise StorefrontClientError(str(exc)) from exc
 
+    def _authenticated_payload(
+        self,
+        method: str,
+        url: str,
+        resp: httpx.Response,
+        signed: SignedRequest,
+    ) -> dict[str, Any]:
+        """Verify a signed JSON object response and raise for its status."""
+        try:
+            payload = resp.json()
+        except ValueError as exc:
+            raise StorefrontClientError(
+                f"{method} {url} returned non-JSON response authentication body"
+            ) from exc
+        self._verify_response(resp, signed, payload)
+        self._raise_for_status(method, url, resp.status_code, resp.text)
+        if not isinstance(payload, dict):
+            raise StorefrontClientError(f"{method} {url} returned non-object JSON")
+        return payload
+
     @staticmethod
     def _raise_for_status(method: str, url: str, status: int, text: str) -> None:
         if status >= 400:
@@ -497,6 +517,45 @@ class StorefrontClient(_StorefrontClientBase):
         if not isinstance(payload, dict):
             raise StorefrontClientError(f"PATCH {url} returned non-object JSON")
         return payload
+
+    async def authenticated_request(
+        self,
+        method: str,
+        path: str,
+        *,
+        role: str,
+        operation: str,
+        resource: str,
+        body: Any = EMPTY_BODY,
+        params: dict[str, Any] | None = None,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Send one signed request and return its verified JSON object.
+
+        Market-neutral transport for routes this client has no typed method for:
+        the caller names the semantic ``operation`` and the exact ``resource`` the
+        storefront binds, and ``body`` is signed exactly as sent. The response
+        must carry a valid publisher signature; a non-2xx status then raises
+        ``StorefrontClientError`` carrying it.
+        """
+        signed = self._signed_request(
+            role=role,
+            method=method,
+            operation=operation,
+            resource=resource,
+            body=body,
+            request_id=request_id,
+        )
+        url = self._url(path)
+        resp = await self._client.request(
+            method.upper(),
+            path,
+            params=params,
+            content=signed.content,
+            headers=signed.headers,
+            timeout=self._timeout,
+        )
+        return self._authenticated_payload(method.upper(), url, resp, signed)
 
     async def _get(self, path: str, *, params: dict | None = None) -> dict:
         url = self._url(path)
@@ -1900,6 +1959,45 @@ class SyncStorefrontClient(_StorefrontClientBase):
         if not isinstance(payload, dict):
             raise StorefrontClientError(f"PATCH {url} returned non-object JSON")
         return payload
+
+    def authenticated_request(
+        self,
+        method: str,
+        path: str,
+        *,
+        role: str,
+        operation: str,
+        resource: str,
+        body: Any = EMPTY_BODY,
+        params: dict[str, Any] | None = None,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Send one signed request and return its verified JSON object.
+
+        Market-neutral transport for routes this client has no typed method for:
+        the caller names the semantic ``operation`` and the exact ``resource`` the
+        storefront binds, and ``body`` is signed exactly as sent. The response
+        must carry a valid publisher signature; a non-2xx status then raises
+        ``StorefrontClientError`` carrying it.
+        """
+        signed = self._signed_request(
+            role=role,
+            method=method,
+            operation=operation,
+            resource=resource,
+            body=body,
+            request_id=request_id,
+        )
+        url = self._url(path)
+        resp = self._client.request(
+            method.upper(),
+            path,
+            params=params,
+            content=signed.content,
+            headers=signed.headers,
+            timeout=self._timeout,
+        )
+        return self._authenticated_payload(method.upper(), url, resp, signed)
 
     def _get(self, path: str, *, params: dict | None = None) -> dict:
         url = self._url(path)

@@ -33,6 +33,7 @@ from core_storefront.site_projections import (
 )
 from fastapi import FastAPI
 from market_config.config_loader import ChainConfig
+from market_capacity_publication.capacity_remote import reset_site_event_cursors
 from market_site_client.fixtures.resource_pools import (
     build_projected_resource,
     build_resource_pool_row,
@@ -48,6 +49,7 @@ from market_storefront.middleware import admin_identity
 # The server module completes the controllers' import cycle, as the admin API
 # tests rely on; importing a controller first leaves it partially initialized.
 import market_storefront.server  # noqa: F401  (import order, see above)
+from market_storefront.server import build_pool_override_service
 import market_storefront.negotiation_runtime as negotiation_runtime
 from market_storefront.controllers.admin_controller import router as admin_router
 from market_storefront.controllers.listings_controller import (
@@ -57,6 +59,10 @@ from market_storefront.controllers.listings_controller import router as listings
 from market_storefront.controllers.negotiate_controller import router as negotiate_router
 from market_storefront.controllers.system_controller import router as system_router
 from market_storefront.middleware.seller_auth import listing_lifecycle_middleware
+from market_storefront.middleware.service_peer_auth import (
+    initialize_service_peer_identities,
+    service_peer_callback_middleware,
+)
 from market_storefront.services import site_projection_cache
 from market_storefront.services.listing_service import ListingService
 from market_storefront.services.system_service import SystemService
@@ -66,14 +72,22 @@ from market_storefront.settlement_composition import (
 from market_storefront.utils import config as storefront_config
 from market_storefront.utils.sqlite_client import SQLiteClient
 from tests._settings_overrides import settings_overrides
-from tests.fake_site import TEST_MARKETPLACE_SIGNER, FakeSite, capacity_runtime_over
+from tests.fake_site import (
+    TEST_MARKETPLACE_SIGNER,
+    FakeSite,
+    capacity_runtime_over_sites,
+)
 
 SITE = "site-a"
+#: The second configured site, composed only when a test asks for it.
+SITE_B = "site-b"
 
 # Development signers and addresses; none is ever used on a public network.
 ADMIN_SIGNER = Ed25519Signer(b"\x71" * 32)
 BUYER_SIGNER = Ed25519Signer(b"\x72" * 32)
 REGISTRY_SIGNER = Ed25519Signer(b"\x73" * 32)
+#: The provisioning service's signer, for fulfillment-event callbacks.
+SERVICE_SIGNER = Ed25519Signer(b"\x74" * 32)
 _ADMINISTRATORS = TrustedIdentitySet(identities=(ADMIN_SIGNER.identity,))
 _PUBLISHERS = TrustedIdentitySet(identities=(TEST_MARKETPLACE_SIGNER.identity,))
 _WALLET = "0x" + "33" * 20
@@ -223,35 +237,73 @@ def pool(
     gpu_model: str = "H100",
     gpu_count: int = 1,
     enabled: bool = True,
+    capacity: dict[str, int] | None = None,
+    available: dict[str, int] | None = None,
     **tags: Any,
 ) -> dict[str, Any]:
     """One projected fungible pool with a single member.
 
+    ``capacity`` declares every dimension of the member; without it the member
+    declares ``gpu_count`` only. ``available`` defaults to the capacity.
+
     Built by the site client's contract fixture, the shape the provisioning
     service's own tests validate its projection against.
     """
+    policy_tags = {"listing_cardinality_mode": "fungible", "region": "us-east", **tags}
     return build_resource_pool_row(
         pool_id,
         capacity_backing=backing,
         enabled=enabled,
-        policy_tags={
-            "listing_cardinality_mode": "fungible",
-            "region": "us-east",
-            **tags,
-        },
+        policy_tags=policy_tags,
         resources=[
             build_projected_resource(
                 f"{pool_id}-res",
-                capacity={"gpu_count": gpu_count},
-                attributes={"gpu_model": gpu_model},
+                capacity=capacity if capacity is not None else {"gpu_count": gpu_count},
+                available=available,
+                # A claim matches region against the declaration itself, so the
+                # member declares the region its pool advertises.
+                attributes={"gpu_model": gpu_model, "region": policy_tags["region"]},
             )
         ],
     )
 
 
-def _projection_caches(pools: list[dict[str, Any]]):
-    resource_pools = ProjectionCache(client=None)
-    resource_pools._value = pools
+class HarnessProjectionClient:
+    """The poller's view of the harness's pool list, as the site would serve it.
+
+    Tests edit the list in place; a refresh re-reads it rather than failing, and
+    ``snapshots`` counts refreshes so a test can assert one happened. With a
+    ``site``, each refresh also writes that fake site's live availability into
+    every member it holds, so a reservation there reaches the storefront exactly
+    when the storefront refreshes the site, and never otherwise.
+    """
+
+    def __init__(self, pools: list[dict[str, Any]], site: "FakeSite | None" = None) -> None:
+        self.pools = pools
+        self.site = site
+        self.snapshots = 0
+        #: On: a refresh reaches the site and fails, as it would mid-outage.
+        self.failing = False
+
+    async def version(self) -> ProjectionIdentity:
+        return ProjectionIdentity(revision=1, digest="publication")
+
+    async def snapshot(self) -> tuple[ProjectionIdentity, list[dict[str, Any]]]:
+        self.snapshots += 1
+        if self.failing:
+            raise RuntimeError("site projection unavailable")
+        if self.site is not None:
+            for projected in self.pools:
+                for member in projected.get("resources") or []:
+                    resource_id = member.get("physical_resource_id")
+                    if resource_id in self.site.resources:
+                        member["available"] = self.site.available_dimensions(resource_id)
+        return await self.version(), self.pools
+
+
+def _projection_caches(client: HarnessProjectionClient):
+    resource_pools = ProjectionCache(client=client)
+    resource_pools._value = client.pools
     resource_pools._state = ProjectionState.loaded
     resource_pools._identity = ProjectionIdentity(revision=1, digest="publication")
     return site_projection_cache.SiteProjectionCaches(
@@ -284,6 +336,11 @@ class PublicationApp:
     site: FakeSite
     buyer: StorefrontClient | None = None
     registries: RecordingRegistries | None = None
+    projection: HarnessProjectionClient | None = None
+    site_b: FakeSite | None = None
+    pools_b: list[dict[str, Any]] | None = None
+    projection_b: HarnessProjectionClient | None = None
+    service: StorefrontClient | None = None
 
     def set_settlement_clauses(self, clauses: list[dict[str, Any]]) -> None:
         """Replace `[pricing].settlements`, the storefront-wide durable terms."""
@@ -299,6 +356,7 @@ async def publication_app(
     mechanism_fulfillment: Mapping[str, bool] | None = None,
     negotiation: bool = False,
     registries: bool = False,
+    second_site: bool = False,
 ) -> AsyncIterator[PublicationApp]:
     """Run the VM storefront app for publication tests.
 
@@ -308,8 +366,17 @@ async def publication_app(
     so a listing the loop published can be negotiated in the same app.
     ``registries`` enables registry publication to two registries, recorded by
     ``RecordingRegistries``; otherwise publication records locally only.
+    ``second_site`` configures ``SITE_B`` after ``SITE``, with its own fake site,
+    pool list, and projection cache; ``SITE`` stays the home site.
     """
     pools: list[dict[str, Any]] = []
+    projection = HarnessProjectionClient(pools)
+    pools_b: list[dict[str, Any]] = []
+    projection_b = HarnessProjectionClient(pools_b)
+    # Each app has a fresh fake site whose events restart at version one, while
+    # the capacity-event cursor is process-wide; a cursor left by an earlier app
+    # would skip this site's first events.
+    reset_site_event_cursors()
     address_config = (
         Path(negotiation_runtime.__file__).resolve().parent
         / "data"
@@ -370,7 +437,10 @@ async def publication_app(
         stack.enter_context(
             patch.dict(
                 site_projection_cache._caches,
-                {SITE: _projection_caches(pools)},
+                {
+                    SITE: _projection_caches(projection),
+                    **({SITE_B: _projection_caches(projection_b)} if second_site else {}),
+                },
                 clear=True,
             )
         )
@@ -381,6 +451,20 @@ async def publication_app(
                 lambda: {"operator": _ADMINISTRATORS},
             )
         )
+        # The provisioning service's callbacks authenticate as a service peer
+        # trusted for the home site.
+        stack.enter_context(
+            patch(
+                "market_storefront.middleware.service_peer_auth.get_service_peer_configs",
+                return_value={
+                    "provisioning": (
+                        "service",
+                        SITE,
+                        TrustedIdentitySet(identities=(SERVICE_SIGNER.identity,)),
+                    )
+                },
+            )
+        )
         registry = storefront_config.storefront_domain_registry()
         db = SQLiteClient(db_path=str(tmp_path / "storefront.db"), registry=registry)
         composition = SettlementCompositionDouble(
@@ -389,9 +473,16 @@ async def publication_app(
             else {"alkahest.v1": True, "fiat.stripe.v1": True}
         )
         site = FakeSite(deliverable_modes={"vm"})
-        capacity = capacity_runtime_over(
-            site,
-            site_name=SITE,
+        # The site's live answer is the same list the storefront's cache holds,
+        # until a test gives the site a different generation.
+        site.pool_projection = pools
+        projection.site = site
+        site_b = FakeSite(deliverable_modes={"vm"}) if second_site else None
+        if site_b is not None:
+            site_b.pool_projection = pools_b
+            projection_b.site = site_b
+        capacity = capacity_runtime_over_sites(
+            {SITE: site, **({SITE_B: site_b} if site_b is not None else {})},
             sqlite_client_factory=lambda: db,
         )
         registration = registry.resolve_mode("vm")
@@ -414,6 +505,7 @@ async def publication_app(
                 "resolved_domain_registry",
                 "resolved_marketplace_signer",
                 "resolved_system_service",
+                "resolved_pool_override_service",
             )
         }
         container.resolved_sqlite_client = db
@@ -423,6 +515,9 @@ async def publication_app(
         container.resolved_marketplace_signer = TEST_MARKETPLACE_SIGNER
         container.resolved_system_service = SystemService(
             sqlite_client=db, marketplace_signer=TEST_MARKETPLACE_SIGNER
+        )
+        container.resolved_pool_override_service = build_pool_override_service(
+            sqlite_client=db, capacity_runtime=capacity
         )
         routers: tuple[Any, ...] = ()
         if negotiation:
@@ -454,6 +549,7 @@ async def publication_app(
             routers = (negotiate_router,)
         try:
             admin_identity.initialize_administrator_identities(db.db_path)
+            initialize_service_peer_identities(db.db_path)
             app = FastAPI()
             for router in (
                 system_router,
@@ -464,6 +560,7 @@ async def publication_app(
             ):
                 app.include_router(router)
             app.middleware("http")(listing_lifecycle_middleware)
+            app.middleware("http")(service_peer_callback_middleware)
             app.middleware("http")(admin_identity.administrator_identity_middleware)
             transport = httpx.ASGITransport(app=app)
             async with StorefrontClient(
@@ -484,7 +581,13 @@ async def publication_app(
                 signer=BUYER_SIGNER,
                 caller_role="buyer",
                 expected_publishers=_PUBLISHERS,
-            ) as buyer:
+            ) as buyer, StorefrontClient(
+                "http://test",
+                transport=transport,
+                signer=SERVICE_SIGNER,
+                caller_role="service",
+                expected_publishers=_PUBLISHERS,
+            ) as service:
                 yield PublicationApp(
                     client,
                     seller,
@@ -494,8 +597,14 @@ async def publication_app(
                     site,
                     buyer if negotiation else None,
                     recording,
+                    projection,
+                    site_b,
+                    pools_b if second_site else None,
+                    projection_b if second_site else None,
+                    service,
                 )
         finally:
+            reset_site_event_cursors()
             thread_store._thread_store = None
             for name, value in previous.items():
                 setattr(container, name, value)

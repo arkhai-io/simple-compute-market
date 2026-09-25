@@ -81,7 +81,10 @@ async def _seed_bound_listing(
                 "capacity_backing": "backed",
                 "site_id": "default",
                 "pool_id": "pool-h200-1",
-                "gpu_count": gpu_count,
+                # The listing publishes this resource, so its binding names it:
+                # a stored key is read from the binding, not the published fields.
+                "resource_id": "pool-h200-1",
+                "listing_shape": {"gpu": {"count": gpu_count, "model": "H200"}},
             },
         ),
         status="open",

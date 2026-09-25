@@ -13,7 +13,9 @@ shape:
 
 Only the fields a consumer depends on are checked: pool identity, enablement, the
 advertisement, backing, and delivery declarations, and each member's identity,
-enablement, capacity, availability, and attributes. A current producer projects
+resource kind, enablement, capacity, availability, and attributes. A storefront
+judges whether a member can serve a listing's claim by its resource kind, so a
+member must state one. A current producer projects
 metadata on every pool; a producer that predates the declarations is a consumer
 concern, read under the older-producer rule, and is not this contract.
 """
@@ -33,12 +35,17 @@ def build_projected_resource(
     available: Mapping[str, int] | None = None,
     attributes: Mapping[str, Any] | None = None,
     enabled: bool = True,
+    resource_type: str = "compute.gpu",
 ) -> dict[str, Any]:
-    """One projected pool member. ``available`` defaults to its capacity."""
+    """One projected pool member. ``available`` defaults to its capacity.
+
+    ``resource_type`` defaults to the kind a site ledger records for a
+    declaration that names none.
+    """
     capacity = dict(capacity if capacity is not None else {"gpu_count": 1})
     return {
         "physical_resource_id": physical_resource_id,
-        "resource_type": None,
+        "resource_type": resource_type,
         "resource_subtype": None,
         "capacity": capacity,
         "available": dict(available if available is not None else capacity),
@@ -136,6 +143,10 @@ def validate_resource_pool_projection(response: Mapping[str, Any]) -> None:
             resource_id = resource.get("physical_resource_id")
             assert isinstance(resource_id, str) and resource_id, (
                 f"pool {pool_id} member without an id: {resource!r}"
+            )
+            resource_type = resource.get("resource_type")
+            assert isinstance(resource_type, str) and resource_type.strip(), (
+                f"member {resource_id} must project its resource_type"
             )
             assert isinstance(resource.get("enabled"), bool), (
                 f"member {resource_id} must project its enablement"

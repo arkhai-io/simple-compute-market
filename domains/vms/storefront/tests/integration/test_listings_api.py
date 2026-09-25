@@ -128,7 +128,7 @@ async def _seed_listing(
                     "site_id": _HOME_SITE,
                     "pool_id": "pool-vm",
                     "resource_id": f"res-{listing_id}",
-                    "gpu_count": 1,
+                    "listing_shape": {"gpu": {"count": 1, "model": "H200"}},
                 },
             ),
             **listing_kwargs,
@@ -539,7 +539,7 @@ _OFFER = {
 _CAPACITY_SOURCE = {
     "site_id": _HOME_SITE,
     "resource_id": _OFFER["resource_id"],
-    "gpu_count": _OFFER["gpu_count"],
+    "listing_shape": {"gpu": {"count": _OFFER["gpu_count"], "model": _OFFER["gpu_model"]}},
 }
 # Stub accepted_escrows for API-contract tests. Address-correctness is the
 # storefront's concern at negotiate time; at listing-create time the
@@ -747,7 +747,7 @@ def _declared_pool_projection_caches(
             },
         },
         "resources": [{
-            "physical_resource_id": resource_id,
+            "physical_resource_id": resource_id, "resource_type": "compute.gpu",
             "enabled": True,
             "capacity": {"gpu_count": 1},
             "attributes": {"gpu_model": "H200", "region": "California, US"},

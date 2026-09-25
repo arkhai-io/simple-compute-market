@@ -28,6 +28,7 @@ from core_storefront.domain_registry import (
 )
 from market_capacity_publication import CapacityRuntime
 from market_negotiation_runtime import NegotiationRuntime
+from market_pool_overrides import PoolOverrideService, SQLitePoolOverrideStore
 from market_storefront_kit import (
     AlkahestChain,
     AlkahestClientPolicy,
@@ -60,6 +61,15 @@ from market_storefront.utils.config import (
 )
 from market_storefront.utils.sqlite_client import get_sqlite_client
 from market_storefront.negotiation_runtime import build_vm_negotiation_runtime
+
+from market_storefront.services.capacity_client import listing_source_projection
+from market_storefront.services.vm_pool_override_contribution import (
+    VmPoolOverrideContribution,
+)
+from market_storefront.services.publication_loop import wake_publication_loop
+from market_storefront.services.publication_terms import compile_publication_clauses
+from market_storefront.services.shape_feasibility import vm_shape_feasibility
+from market_storefront.services.site_projection_cache import refresh_site_resource_pools
 
 logger = logging.getLogger(__name__)
 
@@ -201,6 +211,37 @@ def _build_system_service(**kwargs):
     return SystemService(agent_id=AGENT_ID, **kwargs)
 
 
+def build_pool_override_service(*, sqlite_client: Any, capacity_runtime: Any) -> Any:
+    """Compose the pool-override kit's service over this storefront's effects.
+
+    The VM market contributes the ``vm`` offering mode. A write is checked
+    against the named site through the capacity runtime's signed client,
+    refreshes only that site's resource-pool cache, and wakes the publication
+    loop; status is judged against the source publication derives from. The
+    lifespan and the publication test harness compose it identically.
+    """
+    def home_site() -> str | None:
+        # The VM storefront's home site is its first configured capacity site.
+        sites = capacity_runtime.site_ids if capacity_runtime is not None else ()
+        return next(iter(sites), None)
+
+    contribution = VmPoolOverrideContribution(
+        db_path=sqlite_client.db_path,
+        shape_feasible=vm_shape_feasibility(),
+        home_site=home_site,
+    )
+    return PoolOverrideService(
+        store=SQLitePoolOverrideStore(sqlite_client.db_path),
+        site_ids=lambda: capacity_runtime.site_ids if capacity_runtime is not None else (),
+        site_client=lambda site_id: capacity_runtime.site_client(site_id),
+        contributions={contribution.offering_mode: contribution},
+        compile_clauses=compile_publication_clauses,
+        projection_source=listing_source_projection,
+        refresh_site=refresh_site_resource_pools,
+        wake_publication=wake_publication_loop,
+    )
+
+
 def _build_settlement_composition(
     *,
     domain: MarketDomainContract,
@@ -233,6 +274,7 @@ class VmStorefrontServices:
     negotiation_runtime: NegotiationRuntime
     negotiation_service: Any
     system_service: Any
+    pool_override_service: Any
     settlement_composition: Any
 
 
@@ -290,6 +332,10 @@ def _build_vm_services(
         sqlite_client=sqlite_client,
         marketplace_signer=marketplace_signer,
     )
+    pool_override_service = build_pool_override_service(
+        sqlite_client=sqlite_client,
+        capacity_runtime=capacity_runtime,
+    )
     return VmStorefrontServices(
         registry=registry,
         binding=binding,
@@ -302,6 +348,7 @@ def _build_vm_services(
         negotiation_runtime=negotiation_runtime,
         negotiation_service=negotiation_service,
         system_service=system_service,
+        pool_override_service=pool_override_service,
         settlement_composition=settlement_composition,
     )
 
@@ -328,6 +375,7 @@ async def _start_vm_services(services: VmStorefrontServices) -> None:
         _container.resolved_negotiation_runtime = services.negotiation_runtime
         _container.resolved_negotiation_service = services.negotiation_service
         _container.resolved_system_service = services.system_service
+        _container.resolved_pool_override_service = services.pool_override_service
         _container.resolved_settlement_composition = services.settlement_composition
         logger.info("[STARTUP] Singletons initialized")
         await _run_startup_tasks(
