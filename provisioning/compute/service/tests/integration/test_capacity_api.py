@@ -20,6 +20,9 @@ from market_site_client import (
     SiteCapacityClient,
     SiteCapacityClientError,
 )
+from arkhai_bare_metal.fixtures.publication_view import (
+    validate_bare_metal_publication_view,
+)
 from compute_provisioning import PoolCreate
 from market_resource_pools import read_site_declarations, resolve_pool_declarations
 from market_site_client.fixtures.resource_pools import (
@@ -616,6 +619,67 @@ async def test_the_projection_carries_both_declarations_as_storefronts_read_them
     assert not reading.resolved["broker-unbacked"].backed
     assert reading.resolved["broker-unbacked"].advertises("vm")
     assert reading.resolved["broker-unbacked"].enabled
+
+
+@pytest.mark.asyncio
+async def test_a_bare_metal_view_reaches_the_canonical_client_as_storefronts_read_it(
+    capacity: CapacityApi, client_and_queue,
+):
+    """The producer half of the bare-metal publication view contract, over HTTP.
+
+    A whole-host declaration registered through the operator client reaches the
+    canonical site client carrying a ``bare_metal.v2`` view that meets the
+    bare-metal contract, naming the resource and the pool entry containing it,
+    and a declaration it disabled still carries its enablement beside the view.
+    """
+    provisioning_client, _ = client_and_queue
+    await provisioning_client.create_pool(PoolCreate(
+        id="whole-host",
+        label="Whole host",
+        provider="bare_metal.ansible",
+        policy_tags={
+            "deliverable_modes": ["bare_metal"],
+            "advertisable_modes": ["bare_metal"],
+            "capacity_backing": "backed",
+        },
+        provider_config={},
+    ))
+    for resource_id, enabled in (("bm-1", True), ("bm-2", False)):
+        await capacity.register(
+            resource_id,
+            pool_id="whole-host",
+            host_id=f"{resource_id}-host",
+            total_units=1,
+            enabled=enabled,
+            attributes={
+                "physical_host_id": f"physical-{resource_id}",
+                "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
+                "bare_metal_publication": {
+                    "enabled": True,
+                    "access_methods": ["ssh"],
+                    "capabilities": {},
+                },
+            },
+        )
+
+    remote = _site_capacity_client("http://test", transport=ASGITransport(app=app))
+    projection = await remote.resource_pool_projection()
+
+    validate_resource_pool_projection(projection)
+    (pool,) = [
+        row for row in projection["resource_pools"] if row["pool_id"] == "whole-host"
+    ]
+    members = {member["physical_resource_id"]: member for member in pool["resources"]}
+    for resource_id in ("bm-1", "bm-2"):
+        validate_bare_metal_publication_view(
+            members[resource_id]["publication_views"]["bare_metal.v2"],
+            physical_resource_id=resource_id,
+            pool_id="whole-host",
+        )
+    assert members["bm-1"]["enabled"] is True
+    assert members["bm-1"]["publication_views"]["bare_metal.v2"]["available"] is True
+    assert members["bm-2"]["enabled"] is False
+    assert members["bm-2"]["publication_views"]["bare_metal.v2"]["available"] is False
 
 
 @pytest.mark.asyncio

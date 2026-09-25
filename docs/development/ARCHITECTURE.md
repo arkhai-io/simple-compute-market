@@ -190,8 +190,16 @@ the registry service boundary.
 `arkhai-kit-capacity-publication` owns the storefront-side multi-site capacity
 source, exact site projections, capacity-event reconciliation loop, registry
 fan-out, durable publication result recording, and close-before-reopen
-lifecycle. A domain contribution supplies only schema-opaque candidates and
-codecs plus hooks that resolve each listing's durable capacity binding.
+lifecycle. It also owns how an async storefront drives one publication cycle:
+the driver that runs the synchronous core publication runner in a worker thread
+and returns each source callback to the event loop, the cycle report, and the
+registry convergence every publication pass ends with. A domain contribution
+supplies only schema-opaque candidates and codecs plus hooks that resolve each
+listing's durable capacity binding. Each storefront keeps its domain's cycle
+semantics — which sources it reads, what it derives, closes, and holds — and
+composes them onto that driver; VM publication reads the kit's site projections
+and capacity events, while bare-metal publication fetches each site's
+resource-pool projection itself on every run.
 
 Every capacity-backed candidate carries
 `CapacityBinding(site_id, offering_mode, source_id)`. The site ID comes from

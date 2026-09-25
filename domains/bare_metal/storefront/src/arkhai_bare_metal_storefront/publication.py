@@ -15,19 +15,18 @@ is unknown, not empty, and must hold its listings rather than delist them.
 See openspec/specs/storefront-publication/spec.md, "A site whose projection
 is not held holds its listings".
 
-The shared publication runner in ``core_storefront`` is synchronous, so a run
-drives it in a worker thread and each callback returns to the event loop for
-the storefront's own async persistence and the kit publication runtime.
+The capacity-publication kit's cycle driver runs the synchronous core
+publication runner in a worker thread and returns each callback to the event
+loop for the storefront's own async persistence and the kit publication runtime.
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass, field, replace
+from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any, TypeVar
 
@@ -56,10 +55,15 @@ from core_storefront.publication_runner import (
     REOPEN_UNCHANGED,
     PublicationPayload,
     PublicationSourceSelection,
-    run_publication_cycle,
 )
 from core_storefront.sqlite_client import SellerClosedListingError
-from market_capacity_publication import BoundListing, ReconciliationPlan
+from market_capacity_publication import (
+    BoundListing,
+    PublicationCycleDriver,
+    PublicationCycleReport,
+    ReconciliationPlan,
+    converge_registries,
+)
 from market_identity import Identity
 from market_resource_pools import read_site_declarations
 
@@ -122,28 +126,6 @@ def build_bare_metal_publication_selection(
     )
 
 
-@dataclass
-class BareMetalPublicationReport:
-    """What one run did, and why."""
-
-    actions: list[dict[str, Any]] = field(default_factory=list)
-
-    def record(self, action: str, **details: Any) -> None:
-        self.actions.append({"action": action, **details})
-
-    def of(self, action: str) -> list[dict[str, Any]]:
-        return [item for item in self.actions if item["action"] == action]
-
-    def as_dict(self) -> dict[str, Any]:
-        counts: dict[str, int] = {}
-        for item in self.actions:
-            counts[item["action"]] = counts.get(item["action"], 0) + 1
-        return {
-            "actions": list(self.actions),
-            "counts": dict(sorted(counts.items())),
-        }
-
-
 def _source_of(candidate: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "site_id": candidate.get("site_id"),
@@ -186,26 +168,19 @@ class BareMetalPublicationCycle:
             storefront_url=storefront_url,
         )
         self._hooks = BareMetalPublicationHooks(sqlite_client)
-        self.report = BareMetalPublicationReport()
-        self._event_loop: asyncio.AbstractEventLoop | None = None
+        self.report = PublicationCycleReport()
+        self._driver = PublicationCycleDriver()
         self._classifications: dict[str, BareMetalSiteClassification] = {}
         self._held_pools: set[tuple[str, str]] = set()
         self._candidates: list[dict[str, Any]] = []
         self._pending: dict[int, dict[str, Any]] = {}
 
-    # -- bridging --------------------------------------------------------
-
     def _await(self, awaitable: Awaitable[T]) -> T:
-        assert self._event_loop is not None
-        return asyncio.run_coroutine_threadsafe(
-            awaitable,  # type: ignore[arg-type]
-            self._event_loop,
-        ).result()
+        return self._driver.call(awaitable)
 
     # -- run -------------------------------------------------------------
 
     async def run(self) -> dict[str, Any]:
-        self._event_loop = asyncio.get_running_loop()
         for site_id in sorted(self._site_clients):
             await self._classify_site(site_id)
         selection = build_bare_metal_publication_selection(
@@ -216,8 +191,7 @@ class BareMetalPublicationCycle:
             record_published=self._record_published,
             reopen_existing=self._reopen_existing,
         )
-        result = await asyncio.to_thread(
-            run_publication_cycle,
+        result = await self._driver.run(
             selection.build_sources(),
             db_path=self._db.db_path,
             base_url=self._storefront_url,
@@ -230,7 +204,7 @@ class BareMetalPublicationCycle:
             logger.warning(
                 "bare-metal candidate %s failed: %s", _source_of(candidate), reason
             )
-        await self._converge_registries()
+        await converge_registries(self._runtime, self.report)
         return self.report.as_dict()
 
     async def _classify_site(self, site_id: str) -> None:
@@ -614,24 +588,6 @@ class BareMetalPublicationCycle:
         )
         return result
 
-    async def _converge_registries(self) -> None:
-        """Repair every registry that missed a publish, close, or reopen."""
-        divergences = await self._runtime.publication_divergence()
-        for divergence in divergences:
-            self.report.record(
-                "converge",
-                listing_id=divergence.listing_id,
-                status=divergence.listing_status,
-                registries=list(divergence.registry_urls),
-            )
-        if not divergences:
-            return
-        result = await self._runtime.converge(divergences)
-        for listing_id in result["unrepaired"]:
-            self.report.record(
-                "fail", listing_id=listing_id, reason="registry_not_converged"
-            )
-
 
 def _listing(
     listing_resource: Mapping[str, Any], max_duration_seconds: int | None
@@ -655,6 +611,5 @@ def _persisted_resource(
 
 __all__ = [
     "BareMetalPublicationCycle",
-    "BareMetalPublicationReport",
     "build_bare_metal_publication_selection",
 ]

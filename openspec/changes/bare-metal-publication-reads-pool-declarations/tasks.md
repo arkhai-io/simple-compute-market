@@ -13,13 +13,12 @@ blockchain RPC. The site authority and the registry are this repository's own se
 the publication-cycle tests in Section 6, which replace them with doubles, prove
 orchestration and persistence behaviour and nothing about either service's contract. The
 contract is covered separately: the resource-pool projection and bare-metal view contract
-fixtures are validated against the real producer (6.2, 6.3), and a composition test proves
-the command hands the cycle each site's real client (6.9). No end-to-end lane runs
-bare-metal publication (8.8).
-
-New storefront tests that use a real database go under
-`domains/bare_metal/storefront/tests/integration/`, following the layout rule; the
-storefront's flat test directory is not reorganized otherwise.
+fixtures are validated against the real producer (6.2, 6.3), the projection and its
+bare-metal view reach the canonical site client from the real provisioning service (6.2,
+9.4), and a composition test proves the command hands the cycle each site's real client
+(6.9). The cycle tests are therefore not integration tests under `TESTING.md`, and sit in
+the storefront's flat test directory (9.5). No end-to-end lane runs bare-metal
+publication (8.8).
 
 ## 1. Design
 
@@ -288,7 +287,7 @@ Bare-metal publication (Sections 3–4):
       registry transport.
       **Done:** identity of each site's client, the configured registry factory, and
       fail-closed construction without trusted site clients or registry settings.
-- [x] 6.10 **Integration** `domains/bare_metal/storefront/tests/integration/__init__.py` and
+- [x] 6.10 **Orchestration** (reclassified by 9.5) `domains/bare_metal/storefront/tests/integration/__init__.py` and
       `domains/bare_metal/storefront/tests/integration/test_publication.py` — integration in
       the sense `docs/development/TESTING.md` gives it for code with no application of its
       own: the cycle's public API against a real embedded database, with collaborators it does
@@ -368,6 +367,62 @@ Bare-metal publication (Sections 3–4):
       bucket filter names `resource_pool_id`; name `pool_id`, so that active change is not
       left describing the retired spelling.
 
+## 9. Review follow-ups
+
+Decided with the maintainer after code review; see `design.md`, "Decisions from review".
+
+- [x] 9.1 `domains/bare_metal/storefront/pyproject.toml` — depend on
+      `arkhai-core-storefront-client>=0.20.0`, as the VM storefront does; its `Makefile`
+      `reinit` reinstalls it.
+- [x] 9.2 `SF/api.py` — the three administrator routes authenticate the operation and
+      resource the canonical client signs (`admin_system_status` for `system/status`,
+      `admin_pause` and `admin_resume` for `""`), and pause and resume bind the signed
+      request's own body. The routes previously signed-checked bare-metal-only names
+      against the request path, which the canonical client could not call.
+- [x] 9.3 `domains/bare_metal/storefront/tests/test_http_system.py` — health, pause,
+      status, and resume go through `StorefrontClient` over the in-process transport,
+      inside the app's own lifespan, verifying the storefront's signed responses; one
+      rejection-path request asserts only the status code of an unsigned pause.
+- [x] 9.4 **Integration** `provisioning/compute/service/tests/integration/test_capacity_api.py`
+      — a whole-host pool and two declarations, one disabled, registered through the
+      operator clients reach `SiteCapacityClient.resource_pool_projection()` with views
+      that pass `validate_bare_metal_publication_view` and name their containing pool.
+- [x] 9.5 Move 6.10's cycle tests to `domains/bare_metal/storefront/tests/test_publication_cycle.py`
+      with a docstring stating they are orchestration and persistence evidence, not
+      integration; tombstone `tests/integration/__init__.py` and
+      `tests/integration/test_publication.py`; repoint the evidence lines in
+      `openspec/specs/storefront-publication/spec.md`.
+- [x] 9.6 `SF/runtime.py` and the promotion record — "Per-site projection load-state
+      visibility" is in `openspec/specs/site-capacity/spec.md`.
+- [x] 9.7 `kit/capacity-publication/src/market_capacity_publication/cycle.py` (new) —
+      `PublicationCycleDriver`, `PublicationCycleReport`, and `converge_registries`,
+      exported from the package; unit tests in `kit/capacity-publication/tests/unit/test_cycle.py`.
+      `VS/services/publication_loop.py` and `SF/publication.py` compose onto them and keep
+      only their domain semantics; VM's report keeps its `loop` key.
+- [x] 9.8 Versions: `arkhai-kit-capacity-publication` `0.3.0`; its exact pin moves to
+      `==0.3.0` in the VM, bare-metal, and API-credit storefronts, and
+      `arkhai-apicredits-storefront` takes `0.4.1` for that dependency change, with
+      `domains/apicredits/storefront/Dockerfile`'s pin following. Packages already
+      bumped by this change are not bumped again.
+- [x] 9.9 Locks: `domains/bare_metal/storefront/uv.lock`, `domains/apicredits/storefront/uv.lock`,
+      `e2e-tests/uv.lock`, and `kit/capacity-publication/uv.lock` regenerated offline;
+      `domains/vms/storefront/uv.lock` edited by hand as in 5.3 and still owed a real
+      `uv lock`. A scan finds no lock recording a superseded version of any package this
+      change bumps.
+- [x] 9.10 `docs/development/ARCHITECTURE.md` — the capacity-publication section names the
+      cycle driver as kit-owned and says where each domain's cycle reads its sites;
+      `openspec/specs/storefront-publication/architecture.md` "Registry convergence" says
+      both domains drive their cycles through it.
+- [x] 9.11 Validation: `kit/capacity-publication` 51 passed; bare-metal storefront 145;
+      API-credit storefront 84; `provisioning/compute/service` 938; VM storefront unit
+      1083 passed (1 skipped), integration 250 passed with the two host-dependent
+      `test_alkahest.py` failures as before.
+- [x] 9.12 Re-run `make check-comment-hygiene`, `make check-reinit`, and the scoped
+      `make check-doc-citations` over the follow-ups.
+      **Done:** all pass; the unscoped citation check still reports the 17
+      pre-existing unresolved citations, none in a document this change touched. No
+      function-level import was added.
+
 ## 8. Closeout
 
 - [x] 8.1 **Comment hygiene.** Run `make check-comment-hygiene` and resolve every match.
@@ -385,9 +440,12 @@ Bare-metal publication (Sections 3–4):
       **Done:** no function-level import added. The domain package's two
       storefront-extra local imports are gone with its database access; the
       bare-metal buyer and adapter suites import it without that extra.
-- [x] 8.3 **Documentation compliance.** Re-check the accepted decisions against
+- [ ] 8.3 **Documentation compliance.** Re-check the accepted decisions against
       `openspec/README.md`'s placement table and confirm each landed where Section 7 and the
       promotion record say.
+      **Reopened at review:** the `spec.md` rows below reach their files when this
+      change's deltas sync at archive, which follows code review; until then they
+      are destinations, not landed text. Rechecked at archive.
 - [x] 8.4 **Narrative compression.** Shorten completed-task notes to final behaviour,
       material validation evidence, deferred work, and permanent-documentation destinations.
 - [ ] 8.5 **Roadmap currency.** Remove this change's row from Goal 7's gap table in
@@ -413,12 +471,20 @@ Bare-metal publication (Sections 3–4):
       is blocked on the missing bare-metal publication lane, the next step is implementing a
       valid end-to-end test, which may land in this change; it is deliberately not planned
       here. Until then, treat the validations it gates as unrun rather than passed.
-      **Blocked.** Nothing ran: the implementation sandbox has no container runtime, so
-      no end-to-end stack could start. Independently, no scenario runs
-      `bare-metal-storefront publish`; `test_bare_metal_deal.py` skips without its
-      bare-metal registry, authority, and credential configuration. Per the agreed
-      direction, the next step is designing a valid end-to-end publication test, to be
-      discussed before it is written. Every validation this tier gates is unrun.
+      **Run recorded (supplied by the maintainer):** the end-to-end pipeline
+      passed — 126 passed, 3 skipped, 264 deselected. The VM scenarios exercise the
+      `pool_id` rename across real processes: the provisioning service serves the
+      renamed projections and the VM storefront publishes from them and completes
+      deals, with no projection read failure, unresolvable pool, or held site in the
+      logs. Skipped: `test_bare_metal_complete_deal` (its bare-metal environment is not
+      injected) and multi-registry stages 06b/06c (a static skip: provisioning
+      trusts one storefront principal, which is also why Alice's storefront logs
+      site authentication failures). **Still blocked for bare metal:** no scenario runs
+      `bare-metal-storefront publish`, so bare-metal publication has no end-to-end
+      evidence. The next step is designing a valid end-to-end publication test, to be
+      discussed before it is written; the bare-metal admin routes now accept the
+      canonical client (9.2), which that test needs.
+
 - [ ] 8.9 **Promotion.** Complete the design-promotion record below.
       **In progress:** rows below are current; the record is finalized after code review.
 
@@ -426,18 +492,20 @@ Bare-metal publication (Sections 3–4):
 
 | Accepted decision | Permanent location |
 |---|---|
-| A listing advertises only a mode its pool authorizes, bare metal included | `openspec/specs/storefront-publication/spec.md` |
-| An unbacked pool yields no bare-metal listing | `openspec/specs/storefront-publication/spec.md` |
-| A held site holds bare-metal listings | `openspec/specs/storefront-publication/spec.md` |
-| Registry convergence covers bare metal; a new listing is recorded locally before any registry is told | `openspec/specs/storefront-publication/spec.md` |
-| Projection rows name their pool `pool_id`; the containing pool is authoritative | `openspec/specs/site-capacity/spec.md` |
+| A listing advertises only a mode its pool authorizes, bare metal included | `openspec/specs/storefront-publication/spec.md` (on archive sync of this change's delta) |
+| An unbacked pool yields no bare-metal listing | `openspec/specs/storefront-publication/spec.md` (on archive sync of this change's delta) |
+| A held site holds bare-metal listings | `openspec/specs/storefront-publication/spec.md` (on archive sync of this change's delta) |
+| Registry convergence covers bare metal; a new listing is recorded locally before any registry is told | `openspec/specs/storefront-publication/spec.md` (on archive sync of this change's delta) |
+| Projection rows name their pool `pool_id`; the containing pool is authoritative | `openspec/specs/site-capacity/spec.md` (on archive sync of this change's delta) |
 | Bare metal derives from the resource-pool projection, not the capacity projection | `openspec/specs/storefront-publication/architecture.md#projection-families` |
 | Every bare-metal resource falls into exactly one class; enablement comes from the projected resource | `openspec/specs/storefront-publication/architecture.md#reconciliation` |
 | Bare-metal listings are tracked by the common binding; a pool move is an identity change | `openspec/specs/storefront-publication/architecture.md#listing-identity` |
 | Bare metal publishes through the kit runtime | `docs/development/ARCHITECTURE.md#capacity-publication-and-multi-domain-storefront-composition` |
 | The site's projections name the pool `pool_id` | `docs/development/ARCHITECTURE.md#one-name-per-concept` |
-| Bare-metal listings are bound only by the common binding; `derived_bare_metal_listings` is gone | `openspec/specs/storefront-publication/spec.md` ("Commercial mapping identity", modified by this change's delta) |
-| Bare metal's health reports each site's projection outside every gated check | `openspec/specs/storefront-publication/spec.md` ("Per-site projection load-state visibility", unchanged; bare metal now conforms) |
+| Bare-metal listings are bound only by the common binding; `derived_bare_metal_listings` is gone | `openspec/specs/storefront-publication/spec.md` ("Commercial mapping identity", on archive sync of this change's delta) |
+| Bare metal's health reports each site's projection outside every gated check | `openspec/specs/site-capacity/spec.md` ("Per-site projection load-state visibility", unchanged; bare metal now conforms) |
+| An async storefront drives a publication cycle through the capacity-publication kit's driver, report, and convergence step | `docs/development/ARCHITECTURE.md#capacity-publication-and-multi-domain-storefront-composition`; `openspec/specs/storefront-publication/architecture.md#registry-convergence` |
+| Bare-metal admin routes accept the canonical storefront client's signed contract | Not promoted: aligns bare metal with the existing client contract, and introduces no new rule |
 | "Publication candidate" has one name | `docs/development/ARCHITECTURE.md` (added during design) |
 | No data migration or compatibility path for undeployed bare-metal state | Temporary, not promoted: the repository-wide additive-schema rule in `docs/development/ARCHITECTURE.md` governs from bare metal's first deployment |
 | The rename needs no transition while one operator deploys a storefront with its sites | Temporary, not promoted: its revisit trigger stays in `design.md` |

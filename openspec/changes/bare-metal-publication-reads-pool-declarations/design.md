@@ -337,6 +337,43 @@ that exists only in development.
 **Revisit trigger:** bare metal's first deployment. From then on, bare-metal storefront
 schema changes are additive and a table drop is a contract step.
 
+## Decisions from review
+
+Code review's advice was taken point by point with the maintainer; the `pool_id`
+rename was not reopened.
+
+- **The bare-metal storefront depends on the canonical storefront client**, as the
+  VM storefront does. Its HTTP tests reach it through that client.
+- **Its administrator routes accept the canonical client's signed contract.**
+  Status, pause, and resume checked bare-metal-only operation names against the
+  request path, so the canonical client could not call them, and pause and resume
+  bound the empty-body marker where the client signs `{}`. They now check what the
+  client signs — the operations and resources every storefront uses — and the
+  request's own body. Bare metal is not deployed, so the old names have no caller;
+  an end-to-end publication test will need the canonical client to work.
+- **The cycle tests are orchestration evidence, not integration.** The bare-metal
+  storefront is an application and the site authority and registry are this
+  repository's services, so tests replacing them with doubles are not integration
+  under `TESTING.md`. They stay, labelled for what they prove, in the flat test
+  directory. The contract they cannot prove is covered by the projection and its
+  bare-metal view over the canonical site client against the real provisioning
+  service.
+- **The async cycle driver is extracted into `kit/capacity-publication`.** VM and
+  bare metal each carried the same machinery: running the synchronous core runner
+  in a worker thread, returning callbacks to the event loop, the cycle report, and
+  converge-and-report. It is schema-opaque, so it now has one implementation, and
+  each domain keeps only what its cycle derives, closes, and holds.
+  - *Where:* the kit rather than `core_storefront`. Convergence needs the kit's
+    `PublicationRuntime`, and the kit already owns the storefront publication
+    lifecycle. Placing the runner driver and report in core would have been as
+    sound, but would have bumped `arkhai-core-storefront` and moved its exact pin
+    in the kit and every lock that records it; the kit placement bumps only the
+    kit, and makes `ARCHITECTURE.md`'s description of the kit true as written.
+  - *Versions:* the kit takes `0.3.0` for its new public API. Its exact pin moves in
+    the three storefronts that hold one, and the API-credit storefront, not
+    otherwise changed, takes a patch release for that dependency change. A package
+    this change had already bumped is not bumped again.
+
 ## Decisions made during implementation
 
 Agreed before code was written; none changes an accepted decision above.

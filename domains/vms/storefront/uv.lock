@@ -174,6 +174,7 @@ dependencies = [
     { name = "arkhai-compute-provisioning" },
     { name = "arkhai-core" },
     { name = "arkhai-core-storefront" },
+    { name = "arkhai-core-storefront-client" },
     { name = "arkhai-hosted-settlement-client" },
     { name = "arkhai-kit-alkahest" },
     { name = "arkhai-kit-capacity-publication" },
@@ -302,7 +303,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-capacity-publication"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core-registry-client" },
@@ -310,7 +311,7 @@ dependencies = [
     { name = "arkhai-kit-site-client" },
 ]
 wheels = [
-    { path = "arkhai_kit_capacity_publication-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_kit_capacity_publication-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -651,7 +652,7 @@ requires-dist = [
     { name = "arkhai-core-storefront", specifier = ">=0.6.0" },
     { name = "arkhai-core-storefront-client", specifier = ">=0.20.0" },
     { name = "arkhai-kit-alkahest" },
-    { name = "arkhai-kit-capacity-publication", specifier = "==0.2.0" },
+    { name = "arkhai-kit-capacity-publication", specifier = "==0.3.0" },
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-fulfillment", specifier = ">=0.3.0" },
     { name = "arkhai-kit-hosted-settlement", specifier = "==0.1.4" },

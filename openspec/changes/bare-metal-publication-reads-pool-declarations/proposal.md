@@ -113,6 +113,11 @@ None.
   readers): the `pool_id` rename. Its rollout closes and reopens listings from a site
   while that site and its storefront run different versions, which is accepted. Each changed kit
   takes a SemVer bump, and every lock recording a bumped package is regenerated.
+- `kit/capacity-publication` (0.3.0): the async publication cycle driver, report, and
+  convergence step, extracted from the VM storefront, which the VM and bare-metal
+  cycles now compose onto; the API-credit storefront's pin on it moves (0.4.1).
+- The bare-metal storefront's administrator routes accept the canonical storefront
+  client's signed contract, and the storefront depends on that client.
 - `openspec/specs/site-capacity/spec.md`, `openspec/specs/storefront-publication/spec.md`,
   and `docs/development/ARCHITECTURE.md`.
 

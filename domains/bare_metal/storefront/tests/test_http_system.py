@@ -1,16 +1,11 @@
 from __future__ import annotations
 
-import time
-import uuid
+import httpx
 from fastapi.testclient import TestClient
-from market_identity import (
-    EMPTY_BODY,
-    Eip191Signer,
-    RequestEnvelope,
-    TrustedIdentitySet,
-    canonical_body_hash,
-    sign_request,
-)
+from market_identity import Eip191Signer, TrustedIdentitySet
+
+from storefront_client import StorefrontClient
+from storefront_client.models import HealthResponse
 
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
 from arkhai_bare_metal_storefront.runtime import BareMetalStorefrontRuntime
@@ -46,30 +41,6 @@ def _runtime(path: str) -> BareMetalStorefrontRuntime:
         seller_evm_address="0x3333333333333333333333333333333333333333",
     )
 
-
-def _admin_headers(operation: str, resource: str, *, method: str) -> dict[str, str]:
-    signed = sign_request(
-        signer=ADMIN_SIGNER,
-        envelope=RequestEnvelope(
-            role="admin",
-            principal=ADMIN_SIGNER.identity,
-            method=method,
-            operation=operation,
-            resource=resource,
-            request_id=f"admin-{uuid.uuid4().hex}",
-            timestamp=int(time.time()),
-            body_hash=canonical_body_hash(EMPTY_BODY),
-        ),
-    )
-    return {
-        "X-Market-Signature-Version": signed.protocol,
-        "X-Market-Identity-Scheme": signed.principal.scheme.value,
-        "X-Market-Identity-Identifier": signed.principal.identifier,
-        "X-Market-Role": signed.role,
-        "X-Market-Request-ID": signed.request_id,
-        "X-Market-Timestamp": str(signed.timestamp),
-        "X-Market-Signature": signed.proof.value,
-    }
 
 def test_runtime_repr_does_not_serialize_signer_secret(tmp_path) -> None:
     rendered = repr(_runtime(str(tmp_path / "storefront.db")))
@@ -127,70 +98,69 @@ async def test_listing_routes_return_exact_validated_domain_payload(tmp_path) ->
     assert missing.status_code == 404
 
 
+def _admin_client(app) -> StorefrontClient:
+    """The canonical storefront client as the configured administrator.
+
+    Responses are verified against the storefront's own marketplace signer.
+    """
+    return StorefrontClient(
+        "http://seller",
+        signer=ADMIN_SIGNER,
+        caller_role="admin",
+        expected_publishers=TrustedIdentitySet(identities=(SELLER_SIGNER.identity,)),
+        transport=httpx.ASGITransport(app=app),
+    )
+
+
 async def test_pause_is_admin_authenticated_and_survives_app_restart(tmp_path) -> None:
     path = str(tmp_path / "storefront.db")
-    first_runtime = _runtime(path)
-    first_app = _app(first_runtime)
+    first_app = _app(_runtime(path))
 
+    # Rejection path: an unsigned request is refused before any state changes.
     with TestClient(first_app) as client:
         assert client.post("/api/v1/admin/pause").status_code == 401
-        paused = client.post(
-            "/api/v1/admin/pause",
-            headers=_admin_headers(
-                "pause",
-                "/api/v1/admin/pause",
-                method="POST",
-            ),
-        )
-        assert paused.json() == {"paused": True, "message": "storefront paused"}
+    async with first_app.router.lifespan_context(first_app):
+        async with _admin_client(first_app) as admin:
+            paused = await admin.admin_pause()
+    assert (paused.paused, paused.message) == (True, "storefront paused")
 
-    second_runtime = _runtime(path)
-    second_app = _app(second_runtime)
-    with TestClient(second_app) as client:
-        status = client.get(
-            "/api/v1/system/status",
-            headers=_admin_headers(
-                "system_status",
-                "/api/v1/system/status",
-                method="GET",
-            ),
-        )
-        resumed = client.post(
-            "/api/v1/admin/resume",
-            headers=_admin_headers(
-                "resume",
-                "/api/v1/admin/resume",
-                method="POST",
-            ),
-        )
+    second_app = _app(_runtime(path))
+    async with second_app.router.lifespan_context(second_app):
+        async with _admin_client(second_app) as admin:
+            status = await admin.get_system_status()
+            resumed = await admin.admin_resume()
 
-    assert status.status_code == 200
-    assert status.json()["paused"] is True
-    assert resumed.json()["paused"] is False
+    assert status.paused is True
+    assert resumed.paused is False
+
+
+async def _health(runtime: BareMetalStorefrontRuntime) -> HealthResponse:
+    """Read ``/health`` through the canonical storefront client.
+
+    The app runs its own lifespan, which composes the runtime into the request
+    container, and the client talks to it over the in-process transport.
+    """
+    app = _app(runtime)
+    async with app.router.lifespan_context(app):
+        async with StorefrontClient(
+            "http://seller", transport=httpx.ASGITransport(app=app)
+        ) as client:
+            return await client.get_health()
 
 
 async def test_health_is_truthful_about_uncomposed_authorities(tmp_path) -> None:
-    runtime = _runtime(str(tmp_path / "storefront.db"))
-    app = _app(runtime)
+    health = await _health(_runtime(str(tmp_path / "storefront.db")))
 
-    with TestClient(app) as client:
-        response = client.get("/health")
-
-    assert response.status_code == 200
-    assert response.json() == {
-        "status": "degraded",
-        "checks": {
-            "api": "ok",
-            "database": "ok",
-            "commercial_settlement": "unavailable",
-            "fulfillment": "unavailable",
-        },
-        "paused": False,
-        "principal": SELLER_SIGNER.identity.model_dump(mode="json"),
-        "sites": [],
-        "resource_count": 0,
-        "site_projections": {},
+    assert health.status == "degraded"
+    assert health.checks == {
+        "api": "ok",
+        "database": "ok",
+        "commercial_settlement": "unavailable",
+        "fulfillment": "unavailable",
     }
+    assert health.paused is False
+    assert health.resource_count == 0
+    assert health.site_projections == {}
 
 
 class _Site:
@@ -250,10 +220,9 @@ async def test_every_answering_site_is_reported_loaded(tmp_path) -> None:
         {"site-a": _Site(revision=3), "site-b": _Site(revision=5)},
     )
 
-    with TestClient(_app(runtime)) as client:
-        body = client.get("/health").json()
+    health = await _health(runtime)
 
-    projections = body["site_projections"]
+    projections = health.site_projections
     assert set(projections) == {"site-a", "site-b"}
     site_a = projections["site-a"]["resource_pool"]
     assert (site_a["state"], site_a["revision"], site_a["digest"]) == (
@@ -263,8 +232,8 @@ async def test_every_answering_site_is_reported_loaded(tmp_path) -> None:
     )
     assert site_a["fetched_at"] is not None
     assert projections["site-b"]["resource_pool"]["revision"] == 5
-    assert "site_projection" not in body["checks"]
-    assert body["checks"]["fulfillment"] == "ok"
+    assert "site_projection" not in health.checks
+    assert health.checks["fulfillment"] == "ok"
 
 
 async def test_one_site_unavailable_is_reported_outside_the_health_gate(
@@ -275,27 +244,26 @@ async def test_one_site_unavailable_is_reported_outside_the_health_gate(
     Asserted against ``checks`` directly, the dict the status gates on, so the
     test does not depend on unrelated checks being healthy.
     """
-    healthy = _sited_runtime(
-        str(tmp_path / "healthy.db"),
-        {"site-a": _Site(revision=3), "site-b": _Site(revision=5)},
+    healthy = await _health(
+        _sited_runtime(
+            str(tmp_path / "healthy.db"),
+            {"site-a": _Site(revision=3), "site-b": _Site(revision=5)},
+        )
     )
-    one_down = _sited_runtime(
-        str(tmp_path / "one-down.db"),
-        {
-            "site-a": _Site(revision=3),
-            "site-b": _Site(error=ConnectionError("connection refused")),
-        },
+    one_down = await _health(
+        _sited_runtime(
+            str(tmp_path / "one-down.db"),
+            {
+                "site-a": _Site(revision=3),
+                "site-b": _Site(error=ConnectionError("connection refused")),
+            },
+        )
     )
 
-    with TestClient(_app(healthy)) as client:
-        healthy_body = client.get("/health").json()
-    with TestClient(_app(one_down)) as client:
-        body = client.get("/health").json()
-
-    site_b = body["site_projections"]["site-b"]["resource_pool"]
+    site_b = one_down.site_projections["site-b"]["resource_pool"]
     assert site_b["state"] == "unavailable"
     assert "connection refused" in site_b["last_error"]
-    assert body["site_projections"]["site-a"]["resource_pool"]["state"] == "loaded"
-    assert body["checks"] == healthy_body["checks"]
-    assert body["status"] == healthy_body["status"]
-    assert "site_projections" not in body["checks"]
+    assert one_down.site_projections["site-a"]["resource_pool"]["state"] == "loaded"
+    assert one_down.checks == healthy.checks
+    assert one_down.status == healthy.status
+    assert "site_projections" not in one_down.checks

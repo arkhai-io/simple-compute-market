@@ -194,8 +194,8 @@ class BareMetalStorefrontRuntime:
         Each trusted site's resource-pool projection is reported per site in
         ``site_projections`` and enters no gated check: one site being down
         must not present as the whole storefront being degraded. See
-        openspec/specs/storefront-publication/spec.md, "Per-site projection
-        load-state visibility".
+        openspec/specs/site-capacity/spec.md, "Per-site projection load-state
+        visibility".
         """
 
         def _check_database() -> None:
