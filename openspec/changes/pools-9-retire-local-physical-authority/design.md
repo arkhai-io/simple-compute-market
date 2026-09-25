@@ -226,19 +226,23 @@ than a parallel improvement.
 `ARCHITECTURE.md`'s authority-boundaries table assigns listing, negotiation,
 deal, and seller policy state to the storefront, and resource-pool metadata and
 provider configuration to the resource-pool service. `compute_capacity_pools`'
-commercial columns are therefore correctly storefront-owned, and the admin
-endpoint this change builds is the architecturally right answer rather than a
-workaround for a missing projection field.
+commercial columns are therefore correctly storefront-owned, and a storefront
+write path for per-pool commercial values is the architecturally right answer
+rather than a workaround for a missing projection field.
 
 This bounds the change: Goal 1's terminal state for the storefront is no
-*physical* authority, not no per-pool rows.
+*physical* authority, not no per-pool rows. (2026-09-25: the write path is
+`kit/pool-overrides`, keyed by site; the per-pool rows that survive are the
+site-scoped store's, and the legacy `compute_capacity_pools` columns retire
+with the import that wrote them. See "Re-grounding" below.)
 
 ### Out of scope, recorded so it is not double-claimed
 
 `deal_event_sink.py`'s `offering_mode=str(reservation.get("offering_mode") or "vm")`
-is the implicit VM executor fallback `market-platform-compute-40-multi-domain-proof`
-requires removing. It sits near this change's surfaces; it belongs to that
-change.
+was the implicit VM executor fallback `market-platform-compute-40-multi-domain-proof`
+required removing. **No longer applicable (2026-09-25):** the sink now refuses
+to publish a capacity release without `offering_mode` rather than defaulting
+it. Nothing here or in that change owes it.
 
 ## Publication command changes made by `unbacked-listing-publication` (recorded 2026-09-23)
 
@@ -293,3 +297,147 @@ What remains here:
     configuration.
   - An explicit, preview-first command that names the site is the pattern this
     repository uses for such cutovers.
+
+## Re-grounding (2026-09-25)
+
+Every finding above was re-checked against the tree on 2026-09-25. The
+retirement targets are all still present: the flag and both of its readers,
+`_pool_rows_from_local_tables` and its three feeders, both CSV importers, the
+import route and CLI, the startup seeding step and its settings, the Helm and
+compose wiring, and the seven CSV-dependent test files. What has moved is
+around them.
+
+### The override write path was built elsewhere
+
+`publish-multidimensional-listing-shape` (archived 2026-09-25) delivered the
+per-pool override write path as `kit/pool-overrides`: a durable store keyed by
+`(site_id, pool_id, offering_mode)`, authenticated administrator routes, typed
+clients, and `market-storefront pool-override set/show/list/delete`. Its
+precedence is already normative in `storefront-publication`'s "Storefront pool
+overrides are site-scoped and durable": the site-scoped value wins field by
+field over the home-site legacy record, and system status names each field a
+pool still takes from the legacy record (`legacy_overrides_in_effect`).
+
+So "Why CSV-import removal needs a replacement write path first" is satisfied,
+and the `PUT`/`PATCH` endpoint scoped there and in the former Section 1 is not
+this change's to build. What remains is the tier beneath the store.
+
+### Decision: retire the legacy override tier without carrying values over
+
+The legacy tier is `compute_capacity_pools`' commercial columns, written only
+by `_sync_compute_pool_for_resource` from CSV import and read only by
+`_local_pool_pricing` for home-site pools. Retiring the import leaves it
+write-only-in-the-past, so it retires with the import. The question the
+2026-09-24 addendum left open was whether its values are carried into the
+site-scoped store first.
+
+**Decided: no carry-over.** On upgrade a home-site pool that still took a
+field from a legacy row resolves that field from the pool's own hint, then the
+configured default. The operator re-enters any value they want to keep
+through `pool-override set` before upgrading, and the system-status report
+already tells them exactly which pools and fields those are.
+
+Alternatives considered:
+
+- *A gate in the freeze migration* refusing to run while a legacy row carries
+  a non-null commercial column with no site-scoped override for the same
+  pool, unless explicitly acknowledged. Rejected as machinery for a
+  population the status report already enumerates; the operator guidance in
+  task 5.5 carries the instruction instead.
+- *A preview-first `pool-override import-legacy --site <id>` command*,
+  following the publication-pricing migration precedent. Rejected: it is
+  one-shot code dead the day after it runs, copying a price the operator
+  typed into a CSV once; and two of the eight fields cannot be copied at all
+  (`region`, which the store forbids because it is a physical fact, and
+  `accepted_escrows`, whose only conversion is the clause interpretation the
+  pricing migration already refuses when ambiguous).
+- *Keeping the tier read-only beneath the store* (what task 4.3 said until
+  today). Rejected: the write path is gone so the rows can only decay, the
+  physical/commercial mixed table survives the change whose purpose is
+  removing it, and `_tier()`'s two-level precedence stays forever.
+
+**Revisit trigger:** a seller with many home-site pools reporting that
+re-entry through the CLI is impractical. That would reopen the import-legacy
+command, not the gate.
+
+**Consequence to state in guidance:** `region`'s legacy fallback disappears.
+A home-site pool whose region came from the CSV and whose pool hint declares
+none publishes with no region after the upgrade; such a pool needs `region`
+declared on its hint first. Likewise `accepted_escrows` has no site-scoped
+equivalent other than a `settlements` clause list.
+
+Contract consequences: the "Storefront pool overrides are site-scoped and
+durable" requirement loses its legacy-record paragraph, its `inactive`
+state (which only local-table derivation produced), and its two scenarios
+"An override is deleted over a legacy value" and "Listings derive from local
+tables". OpenSpec refuses a modification that drops scenarios, so the delta in
+`specs/storefront-publication/spec.md` removes the requirement and adds
+"Storefront pool overrides are the only override tier" in its place, with
+every other paragraph and scenario carried forward unchanged.
+
+### A prerequisite this change did not know it had
+
+`domains/vms/storefront/storefront.alice.toml` sets
+`use_site_projection_for_listings = false` with the reason in its comment:
+provisioning trusts one storefront principal, Bob, so Alice never loads a
+projection and would derive no listing at all from one; she derives from local
+tables, where every source is capacity-backed. Section 4 deletes exactly that
+path, and task 5.6's migration of `test_multi_registry.py` to
+projection seeding needs Alice's storefront to be a trusted caller of
+provisioning.
+
+`repair-multi-storefront-scenario` owns letting provisioning serve more than
+one storefront. It is now a blocking dependency of Section 4 and of 5.6 for
+that file. Narrowing the scenario to drop Alice's inventory, or giving her a
+second provisioning service in compose, were both considered and rejected as
+working around a test the repository already intends to repair; the
+substitutability that scenario demonstrates is the property Goal 1 names as
+the value of this consolidation.
+
+### The implicit VM executor fallback is gone
+
+`deal_event_sink.py` now raises `capacity release cannot be published without
+offering_mode`. The non-goal that disclaimed removing it, and the
+"Out of scope" paragraph above, are struck. `market-platform-compute-40-multi-domain-proof`
+still lists the fallback as its own work and is corrected separately.
+
+### `capacity-resource-administration` has landed
+
+Archived 2026-09-21. It delivered digest-gated capacity-definition import and
+a composition-supplied mirror dimension, so multi-dimensional capacity is
+declarable at the site authority and the CSV path is no longer the only
+expression of it. The gate is met; the start trigger for the cutover remains
+a repository-owner judgment, as before.
+
+### Two sections split out
+
+Section 0 (a pool's provider is fixed at creation) is a provisioning-side
+authority rule with no storefront in it, and Sections 2–3 (the
+`compute_allocations` ledger, the always-`None` `reserved_vm_host` threading,
+the orphaned resource admin routes, the legacy half of `release_reservations`,
+and four zero-caller methods) are all independent of the projection cutover.
+Neither had a reason to wait on a start trigger that is undefined by design.
+They are now `fix-resource-pool-provider-at-creation` and
+`remove-dead-storefront-physical-surfaces`; their evidence sections above
+("`compute_allocations` is a dead execution ledger", "Physical identity
+threaded across the service boundary is provably `None`", "Two admin
+endpoints have outlived their only caller", "Dead methods confirmed by
+exhaustive search") remain here as the record of where they were found, and
+are cited by those changes rather than duplicated.
+
+Section 0's provider rule can follow the pattern `_require_backing_unchanged`
+now establishes in `ResourcePoolService` for the immutable backing
+declaration: the same refusal shape, applied to `provider`.
+
+### Smaller drift
+
+- `cli_publish.py` no longer reads the flag or carries `_import_csv`;
+  `listing_sources.py` is the second reader. `unbacked-listing-publication`
+  removed `publish --inventory`, `--settlement`, and `--max-duration-seconds`.
+- The import script is at `domains/vms/storefront/scripts/import_resources_csv.py`.
+- `add-development-roadmap` (archived 2026-09-04) established roadmap
+  currency; task 7.5 no longer needs to condition on it.
+- The delta spec's replacement requirement previously copied the
+  pre-`project-capacity-resources-without-hosts` wording ("host-granular");
+  it now carries the current text ("resource-granular … each pool provider's
+  host requirement") so archival does not regress it.

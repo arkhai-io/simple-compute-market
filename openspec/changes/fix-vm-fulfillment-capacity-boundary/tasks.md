@@ -311,6 +311,11 @@ See `design.md`'s "Design-promotion record" table.
       third occurrence: a new test that has not been run against the
       unpatched tree is not yet evidence.
 
+## 6. Permanent documentation and closeout (continued)
+
+Tasks 6.8–6.11 were appended after Section 10 rather than interleaved into
+Section 6, per `AGENTS.md`'s rule to amend rather than replace planning history.
+
 - [x] 6.8 **Roadmap currency** (added 2026-08-06 by `add-development-roadmap`, which extended `openspec/README.md#plan-closeout-requirements` from five parts to six). Update this change's rows in `docs/development/ROADMAP.md` — it currently appears as an open gap under both Goal 1 (stale physical-placement fields on the current fulfillment path) and Goal 2 (accepted VM shape not reaching the provisioning request) — and record the update in the design-promotion record. Appended rather than folded into 6.6, per `AGENTS.md`'s rule to amend rather than replace implementation history.
       **Done (2026-09-14).** Both rows removed from `docs/development/ROADMAP.md`:
       the goal-1 row under physical-resource authority and the goal-2 row under
@@ -335,22 +340,32 @@ See `design.md`'s "Design-promotion record" table.
       campaign that opened it. Every `](<dir>/)` link in the index was checked
       to resolve to a real directory.
 
-- [ ] 6.10 **Documentation citations.** Run
+- [x] 6.10 **Documentation citations.** Run
       `make check-doc-citations CHANGE=fix-vm-fulfillment-capacity-boundary` and resolve every match.
       An unresolvable citation is a blocking defect under `AGENTS.md`'s
       cross-reference rule, and the target also rejects a citation whose
       target is a *tombstone*: a tombstoned file still exists on disk while
       its content is gone, so a plain existence test cannot fail on a
       rename-to-tombstone.
-- [ ] 6.11 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and
+      **Done (2026-09-25).** Scoped run over this change's three documents:
+      every cited path resolves and none is a tombstone.
+- [x] 6.11 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and
       record the evidence: the run, its result, and the scenarios that
       exercise this change's behaviour. Green unit and integration suites do
       not substitute -- this is the tier that catches a wire contract whose
       two sides disagree, a service that starts cleanly and cannot settle,
       and a configuration gap no in-process test can see. If the pipeline
-      cannot run for a reason unrelated to this change, record that as an
+      cannot run for a reason unrelated to the change, record that as an
       explicit blocker naming the cause and the change that owns it, and
       treat the validations it gates as unrun rather than passed.
+      **Done (2026-09-25), recording the run 6.8 and 6.9 already cited.** The
+      green VM end-to-end run of 2026-09-14 is this change's proof: it is the
+      run on which stages `08b` (fulfillment begins and `create_job_id` is
+      written, 10.6–10.8), `10b` (the releasing lease's handle is published on
+      both lease contracts, Section 8 and 10.5), and the teardown stages
+      `10a`–`11b` went green after the defects Sections 9 and 10 record, each
+      of which had first failed on an earlier run of the same pipeline. The
+      run is the one the campaign index names for this change's completion.
 ### Design-promotion record
 
 | Material decision | Permanent documentation destination |

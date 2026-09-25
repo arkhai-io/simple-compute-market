@@ -35,65 +35,72 @@ problem and missed several adjacent surfaces -- a dead execution ledger, an
 always-`None` physical identity threaded across the storefront/provisioning
 boundary, two admin endpoints with no remaining caller, and the fact that CSV
 retirement is a deployment-contract break rather than only a code deletion.
-Those findings are folded into "What Changes" below; the sweep's evidence is
+Those findings were folded into "What Changes" below; the sweep's evidence is
 recorded in `design.md`. The sweep also produced a hard prerequisite this
 change did not previously have -- see "Dependencies and Related Changes".
+(2026-09-25: the sweep's zero-caller findings now live in
+`remove-dead-storefront-physical-surfaces`; the prerequisite has landed.)
 
 ## What Changes
 
-### Original scope (unchanged)
+**Re-grounded 2026-09-25.** The scope below was re-verified against the current
+tree. Two sections have been moved to their own changes because they land
+independently of the cutover and the cutover's start trigger is undefined by
+design (see "Split out" below); one prerequisite was met by another change
+rather than built here; one non-goal describes a defect that no longer exists;
+and one previously unrecorded dependency was found. The findings and the
+decisions taken are in `design.md`'s "Re-grounding (2026-09-25)".
 
-- Freeze writes to the retiring physical-identity columns, then delete the
-  local-table code path (`_pool_rows_from_local_tables` and everything
-  downstream of it in `domains/vms/listings/reconciler.py`) once
-  `use_site_projection_for_listings` no longer needs a fallback to gate.
-- Delete `use_site_projection_for_listings` itself, once nothing reads it.
+### Retire the local-table listing path
+
+- Delete the local-table code path (`_pool_rows_from_local_tables` and
+  everything downstream of it in `domains/vms/listings/reconciler.py`) and make
+  `available_compute_slices` read the projection unconditionally.
+- Delete `use_site_projection_for_listings` itself, its reads in
+  `capacity_client.py` and `listing_sources.py`, its `settings.toml` entry, and
+  the `storefront.alice.toml` opt-out.
+- Retire `hosts` (all columns), `compute_pool_members` (all columns),
+  `resources`' remaining physical and commercial columns (confirmed dead in
+  the current default code path; task 1.1 re-runs the confirming grep), and
+  `compute_capacity_pools.total_gpu_count`.
+- Retire the **legacy home-site storefront override tier**: the commercial
+  columns of `compute_capacity_pools` (`gpu_model`, `region`, `sla`,
+  `min_price`, `token`, `accepted_escrows`, `settlements`,
+  `max_duration_seconds`), their reader `_local_pool_pricing`, the
+  legacy-fallback arm of `_tier()`, the `legacy_overrides_in_effect` derivation
+  report, and the system-status field that surfaces it. The site-scoped
+  override store `publish-multidimensional-listing-shape` delivered
+  (`kit/pool-overrides`, keyed by site, pool, and offering mode) is the only
+  storefront-override tier afterwards. **No values are carried over** from
+  the legacy rows into the site-scoped store (decision recorded in
+  `design.md`); the operator re-enters any value still in effect through
+  `market-storefront pool-override set` or the authenticated API before
+  upgrading, guided by the system-status report that names each such field.
+- Remove `resource_capacity_validator.py` once its only caller
+  (`upsert_resource`'s removal, below) is gone.
+- Add the freeze-then-redirect migration (stop writing the retiring columns;
+  no `DROP` in this change) and operator-facing documentation that a rollback
+  past this change requires a code rollback, not a config flip.
+- A genuine schema `DROP` of the frozen columns is explicitly **not** this
+  change's own scope — it is a further follow-up, after a full deployment
+  cycle confirms the freeze itself never needed rolling back.
+
+### Retire CSV import and its deployment contract
+
 - Remove CSV import (`domains/vms/listings/host_csv_importer.py`,
   `resource_csv_importer.py`, `SQLiteClient.upsert_hosts_from_csv`/
   `upsert_resources_from_csv*`, the
-  `POST /api/v1/admin/portfolio/resources/import` route) and
-  `SQLiteClient.upsert_resource`/`_sync_compute_pool_for_resource` —
-  **only after** a replacement write path for `compute_capacity_pools`'
-  surviving commercial columns exists (see below; this is not optional
-  scope, CSV import is currently the only way an operator sets or changes
-  pool-level pricing at all).
-- Build the direct pool-commercial-metadata admin endpoint
-  `pools-8`'s own task 6.2 scoped but did not implement (`PUT`/`PATCH`
-  routes in `admin_controller.py` against `compute_capacity_pools`'
-  surviving columns, mirroring `kit/resource-pools`'s own
-  `PoolReplace`/`PoolUpdate` shape) — a prerequisite of the CSV-import
-  removal above, not a separate nice-to-have.
-- Retire `hosts` (all columns), `compute_pool_members` (all columns),
-  `resources`' remaining physical and commercial columns (confirmed dead
-  in the current default code path by `pools-8`, pending one final
-  repo-wide confirming grep at implementation time), and
-  `compute_capacity_pools.total_gpu_count`.
-- Remove `resource_capacity_validator.py` once its only caller
-  (`upsert_resource`'s removal, above) is gone.
-- Migrate the six e2e scenario files that currently seed resources through
-  CSV import to projection/provisioning-service-based seeding:
-  `e2e-tests/tests/e2e/roles/scenarios/vms/test_buy_oneshot_buyer_cli.py`,
-  `test_compute_dynamic_listings.py`, `test_full_deal.py`,
-  `test_full_deal_buyer_cli.py`, `test_multi_registry.py`,
-  `test_non_erc20_settlement.py`.
-- Add the freeze-then-redirect migration (stop writing the retiring
-  columns; no `DROP` in this change) and operator-facing documentation
-  that a rollback past this change requires a code rollback, not a config
-  flip, since it removes the local-table path outright.
-- A genuine schema `DROP` of the frozen columns is explicitly **not** this
-  change's own scope — it is a further follow-up, after a full deployment
-  cycle confirms the freeze itself never needed rolling back, matching
-  every other schema change in the POOLS campaign being additive-only
-  until that confirmation exists.
-
-### Added 2026-08-06 from the Goal 1 sweep
-
+  `POST /api/v1/admin/portfolio/resources/import` route, and
+  `storefront_client.admin_import_resources`) and
+  `SQLiteClient.upsert_resource`/`_sync_compute_pool_for_resource`. The
+  replacement write path for per-pool commercial values that this bullet
+  used to wait on is the site-scoped override store; that prerequisite is
+  met.
 - **Startup CSV seeding stack.** Remove `startup.py`'s `_seed_resources_if_empty`
   and its registered `seed_resources` startup step,
   `SystemService.seed_resources_if_empty`, the `_DEFAULT_CSV_PATH`
   auto-discovery constant, and the `resources_csv_path`/`resources_csv_inline`
-  settings. The original scope named the import *modules* and the import
-  *route* but not the startup path that calls them.
+  settings.
 - **BREAKING (deployment):** retire CSV inventory as an operator deployment
   contract -- `helm/charts/storefront/templates/_helpers.tpl` (two sites),
   `secrets.yaml`'s `resourcesCsvInline`, `values.yaml`'s `--set-file`
@@ -103,55 +110,38 @@ change did not previously have -- see "Dependencies and Related Changes".
   provisioning service first, so this needs migration guidance rather than
   deletion alone.
 - **CLI import surface.** Remove the `market-storefront portfolio import-csv`
-  command with its `cli_portfolio.py` module and `add_typer` registration,
-  `cli_publish.py`'s `_import_csv`, and `scripts/import_resources_csv.py`.
-- **A seventh CSV-dependent test file** beyond the six originally named:
-  `e2e-tests/tests/smoke/test_storefront_smoke.py`, which points operators at
-  the import script in its guidance output.
-- **Remove `resource_count` from the health surface** -- `SystemService.get_health`
-  and the field on both `core_storefront`'s and `storefront_client`'s
-  `HealthResponse`. It counts a table being retired, and an equivalent is
-  recomputable from the projection if one is ever wanted.
-- **Delete four methods with no production caller**: `SQLiteClient.delete_resource`
-  and `ensure_default_resources` (no reference anywhere, including tests),
-  `host_capacity_remaining` (referenced only by its own tests), and the
-  storefront's `list_hosts`.
-- **Retire `compute_allocations`** -- table, update trigger, four indexes, and
-  its migration-added columns. `kit/site`'s `CapacityReservation` states in its
-  own model docstring that it merges this table's shape and that the watchdog
-  now updates the ledger row "instead of PATCHing the storefront's resource
-  table." No production code inserts into it; its only writer is a
-  release-`UPDATE` inside `apply_resource_transition`, and its readers
-  (`held_gpu_counts`, `held_gpu_counts_by_resource`) are exported from
-  `domains/vms/listings` with no caller.
-- **Remove the always-`None` physical-identity plumbing.** `reserved_vm_host`
-  in `vm_fulfillment_service.py` is provably always `None` -- `kit/site` strips
-  `vm_host` at the opaque-reservation boundary -- yet is still threaded through
-  `register_lease`, `schedule_shutdown`, `provision_vm`, `_do_provision`, and
-  `_register_vm_lease_with_settings`. The in-code comment records that it was
-  retained only to avoid a signature change.
-- **Remove the orphaned physical admin surface**:
-  `GET`/`PATCH /api/v1/admin/portfolio/resources/{resource_id}`, their
-  `storefront_client.get_resource`/`patch_resource` methods, and the legacy
-  local-row half of `release_reservations`. None has a production caller, and
-  the documented caller of `patch_resource` -- the provisioning service's
-  `LeaseWatchdog` -- no longer makes that call.
+  command with its `cli_portfolio.py` module and `add_typer` registration, and
+  `domains/vms/storefront/scripts/import_resources_csv.py`.
+  (`cli_publish.py`'s `_import_csv` and `publish --inventory` were already
+  removed by `unbacked-listing-publication`.)
+- Migrate the seven CSV-dependent test files to projection/provisioning-service
+  seeding: `e2e-tests/tests/e2e/roles/scenarios/vms/test_buy_oneshot_buyer_cli.py`,
+  `test_compute_dynamic_listings.py`, `test_full_deal.py`,
+  `test_full_deal_buyer_cli.py`, `test_multi_registry.py`,
+  `test_non_erc20_settlement.py`, and `e2e-tests/tests/smoke/test_storefront_smoke.py`.
+  `test_multi_registry.py` seeds a second storefront (Alice) that provisioning
+  does not trust; migrating it requires `repair-multi-storefront-scenario`
+  (see Dependencies).
+### Split out (2026-09-25)
 
-- Fix a Resource Pool's provider at creation. `ResourcePoolService.replace_pool`
-  currently permits an in-place executor swap — when the supplied provider differs
-  it calls `delete_config` on the old handler, reassigns `pool.provider`, and
-  writes configuration through the new one — which silently reinterprets which
-  executor the pool's existing members belong to. Replace and patch reject a
-  differing provider; moving inventory to another executor is a second pool plus
-  member migration. Provider configuration stays replaceable within the declared
-  provider. **(2026-09-09 addition, arriving from Goal 7's design review: pool-level
-  immutability is what lets an unbacked pool's backing be unchangeable, and the same
-  argument applies to the executor. Landed here rather than in Goal 7 because it is
-  a provisioning-side authority rule this change's campaign already owns, and no
-  operator relies on in-place swap.)** The migration path this creates depends on
-  `capacity-resource-administration`'s drain invariant: a reservation's pool is
-  resolved through the resource's current `pool_id`, so moving a member under a live
-  obligation would rewrite that obligation's authority.
+Two bodies of work that this change accumulated during the 2026-08-06 sweep
+and the 2026-09-09 Goal 7 review land independently of the cutover and now
+have their own changes:
+
+- **[`fix-resource-pool-provider-at-creation`](../fix-resource-pool-provider-at-creation/)**
+  — rejecting an in-place provider swap on `ResourcePoolService.replace_pool`
+  and `update_pool`. A provisioning-side authority rule with no storefront
+  surface in it.
+- **[`remove-dead-storefront-physical-surfaces`](../remove-dead-storefront-physical-surfaces/)**
+  — retiring `compute_allocations`, the always-`None` `reserved_vm_host`
+  plumbing, the orphaned `GET`/`PATCH /api/v1/admin/portfolio/resources/{resource_id}`
+  surface with its client methods, the legacy local-row half of
+  `release_reservations`, the four zero-caller `SQLiteClient` methods, and
+  `resource_count` on the health surface. Every item is zero-caller today and
+  independent of the projection cutover.
+
+This change keeps the cutover, the CSV and deployment-contract retirement,
+the legacy override tier's retirement, and the freeze migration.
 
 ## Capabilities
 
@@ -163,23 +153,27 @@ None.
 
 - `storefront-publication`: the storefront retains no physical-resource, host,
   or physical-allocation authority; projection-backed derivation becomes the
-  only listing-candidate path rather than the default one; per-pool commercial
-  overrides gain an operator write path with upsert semantics.
+  only listing-candidate path rather than the default one; the site-scoped
+  override store is the only storefront-override tier, so the legacy home-site
+  override record, the `inactive` override state, and the local-table
+  scenarios leave the contract.
 
 ## Non-Goals
 
 - Do not `DROP` the frozen columns or tables. Freeze-then-redirect only.
 - Do not change capacity admission, matching, scheduling, or fairness policy.
-- Do not retire `compute_capacity_pools`' commercial columns (`min_price`,
-  `token`, `max_duration_seconds`, `accepted_escrows`, `gpu_model`, `region`,
-  `sla`, `seller_id`, the policy IDs). Commercial state is storefront-owned per
-  `ARCHITECTURE.md`'s authority boundaries; this change retires physical
-  authority, not per-pool rows.
+- Do not build a per-pool commercial override write path. `kit/pool-overrides`
+  is that path; this change retires the legacy tier beneath it and nothing
+  else about storefront-owned commercial state. (Until 2026-09-25 this
+  non-goal read the other way -- the commercial columns were to survive as the
+  override tier. The site-scoped store has replaced them; see `design.md`.)
+- Do not carry legacy override values into the site-scoped store, and do not
+  build a migration command for them. Decided 2026-09-25; `design.md` records
+  the alternatives and the revisit trigger.
 - Do not build the operator path for declaring multi-dimensional capacity --
-  `capacity-resource-administration` owns it and this change depends on it.
-- Do not remove the implicit `"vm"` executor fallback in `deal_event_sink.py`.
-  It sits adjacent to this change's surfaces but belongs to
-  `market-platform-compute-40-multi-domain-proof`'s executor-identity work.
+  `capacity-resource-administration` delivered it (archived 2026-09-21).
+- Do not fix a pool's provider at creation or retire the storefront's dead
+  physical surfaces here; both are split out (see "Split out").
 - Do not migrate the bare-metal storefront, which has no local tables at all.
 
 ## Impact
@@ -187,40 +181,57 @@ None.
 **Expanded 2026-08-06** by the Goal 1 sweep; the original entry named the
 listing-derivation surfaces only.
 
-- Affected code: `domains/vms/listings/` (`reconciler.py`, both CSV importers,
-  `pool_descriptors.py`, `resources.py`),
-  `domains/vms/storefront/src/market_storefront/` (`cli_publish.py`,
-  `cli_portfolio.py`, `startup.py`, `controllers/admin_controller.py`,
-  `services/{capacity_client,system_service,resource_capacity_validator,vm_fulfillment_service}.py`,
-  `utils/{sqlite_client,migrations}.py`, `settings.toml`, `groups/config.py`,
-  `scripts/import_resources_csv.py`), `core/storefront` and
-  `core/storefront-client` health and admin surfaces, and seven test files.
+- Affected code (re-inventoried 2026-09-25): `domains/vms/listings/`
+  (`reconciler.py`, both CSV importers, `pool_descriptors.py`, `resources.py`),
+  `domains/vms/storefront/src/market_storefront/` (`cli_portfolio.py`,
+  `cli.py`'s `portfolio` registration, `startup.py`,
+  `controllers/admin_controller.py`,
+  `services/{capacity_client,listing_sources,system_service,resource_capacity_validator}.py`,
+  `utils/{sqlite_client,migrations}.py`, `settings.toml`, `groups/config.py`),
+  `domains/vms/storefront/storefront.alice.toml`,
+  `domains/vms/storefront/scripts/import_resources_csv.py`, `core/storefront`
+  and `core/storefront-client` health and import surfaces, and seven test
+  files. `vm_fulfillment_service.py` and the admin resource routes moved to
+  `remove-dead-storefront-physical-surfaces`.
 - Affected deployment: Helm chart helpers, secrets, and values; both compose
   files; `docs/seller-quickstart.md`. This is the operator-visible half of the
   change; it needs migration guidance, not deletion alone.
-- Not affected: `kit/resource-pools`, the region/SLA/pricing hint
-  mechanism `pools-8` built (this change consumes it, notably for the new
-  admin endpoint's SLA/pricing override tier, but does not change it),
-  bare-metal (already fully projection-native, never had this local-table
-  concept to begin with).
+- Not affected: `kit/resource-pools` (its provider rule is
+  `fix-resource-pool-provider-at-creation`'s), `kit/pool-overrides` (this
+  change removes the tier beneath it, not the store), the region/SLA/pricing
+  hint mechanism `pools-8` built, and bare metal (already fully
+  projection-native, never had this local-table concept to begin with).
 
 ## Dependencies and Related Changes
 
-- **Depends on `capacity-resource-administration`** (added 2026-08-06).
-  Retiring CSV import removes the only operator-facing path that has ever
-  expressed multi-dimensional capacity, and the provisioning service has no
-  equivalent until that change lands: host inventory carries GPU columns
-  only, and `capacity_inventory._project_host`'s fallback can express nothing
-  else. Starting this change first would silently narrow every seller to
-  GPU-count-only capacity.
-- Depends on `pools-8-capacity-projection-and-listing-hints` having
-  landed (`use_site_projection_for_listings` defaulting `true`, the
-  region/SLA/pricing hint mechanism existing as the fallback the new admin
-  endpoint's absence currently leans on).
-- Coordinate with `fix-vm-fulfillment-capacity-boundary`, which removes the
-  stale `vm_host`-required guard in `fulfill_vm_obligation` while this change
-  removes the parameter threading around it. No ordering dependency either
-  direction, but the two touch adjacent lines in the same file.
+- **Depended on `capacity-resource-administration`** (added 2026-08-06;
+  archived 2026-09-21, so the gate is met). Retiring CSV import removes the
+  only operator-facing path that had ever expressed multi-dimensional
+  capacity; the site authority now declares capacity across every dimension a
+  resource names, through the registration API or a capacity-definitions
+  document.
+- **Depends on `repair-multi-storefront-scenario`** (found 2026-09-25). The
+  two-storefront e2e scenario's second storefront, Alice, sets
+  `use_site_projection_for_listings = false` on purpose: provisioning trusts
+  one storefront principal, so she never loads a projection and derives from
+  her local tables. Retiring that path leaves her with no listing source, and
+  task 5.6 cannot migrate `test_multi_registry.py` to projection seeding
+  until provisioning trusts her. The dependency is on the cutover (Section 4)
+  and the test migration (5.6), not on the freeze or the CSV code removal.
+- Depends on `pools-8-capacity-projection-and-listing-hints` having landed
+  (`use_site_projection_for_listings` defaulting `true`, the region/SLA/pricing
+  hint mechanism existing).
+- Superseded in part by `publish-multidimensional-listing-shape` (archived
+  2026-09-25): its site-scoped override store is the replacement write path
+  this change previously scoped an endpoint for.
+- `unbacked-listing-publication` (archived 2026-09-24) moved VM publication
+  into the storefront lifecycle loop; the loop derives from the same source
+  selection, so retiring the local-table path retires it for the loop too.
+- Split out 2026-09-25: `fix-resource-pool-provider-at-creation` and
+  `remove-dead-storefront-physical-surfaces`. The latter edits adjacent lines
+  in `vm_fulfillment_service.py` to `fix-vm-fulfillment-capacity-boundary`,
+  which is complete and awaiting archival, so the collision this change
+  used to warn about no longer arises.
 - `structured-capacity-requirements` remains the owner of requirement/claim
   vocabulary; this change introduces none.
 
@@ -248,14 +259,16 @@ listing-derivation surfaces only.
   no `DROP`) and its rollback-requires-a-code-rollback consequence, once
   implemented — likely the same `storefront-publication` requirement
   named above, as a further scenario.
-- Whatever the direct pool-commercial-metadata admin endpoint's final
-  shape turns out to be, once built — `openspec/specs/storefront-publication/spec.md`.
-  **Corrected 2026-08-06:** this previously named
-  `openspec/specs/resource-pool-management/spec.md`. That capability's own
-  Purpose scopes it to operator-managed *provisioning* resource pools,
-  provider configuration, and host membership; a storefront-side commercial
-  override table is not part of it, and promoting there would place
-  storefront-owned commercial state inside a provisioning capability.
+- The site-scoped override store is the only storefront-override tier, with
+  no legacy record beneath it and no `inactive` state, and legacy values are
+  not carried over — `openspec/specs/storefront-publication/spec.md`'s
+  "Storefront pool overrides are the only override tier", replacing "Storefront
+  pool overrides are site-scoped and durable". (The
+  endpoint this item used to name was delivered by
+  `publish-multidimensional-listing-shape`; the 2026-08-06 correction that
+  it belongs in `storefront-publication` rather than
+  `resource-pool-management` still holds and is where that change promoted
+  it.)
 - The storefront retains no physical-resource, host, or physical-allocation
   authority, and the local-table derivation path is removed outright rather
   than demoted to a non-default option —
