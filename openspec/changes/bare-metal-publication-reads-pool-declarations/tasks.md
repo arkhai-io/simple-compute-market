@@ -606,7 +606,8 @@ Decisions: `design.md`, "End-to-end evidence for bare-metal publication". Closes
       blocked on it: `bare-metal-listing-shapes` and `bare-metal-mock-provisioned-deal`
       (unblocked), `unbacked-bare-metal-listings` and `publish-indicative-listing-rates`
       (still blocked on `bare-metal-listing-shapes`). Each dependent's own status line and
-      dependency entry agree; `unbacked-bare-metal-listings`' note that this change must
+      dependency entry agree, `publish-indicative-listing-rates`' task preamble and
+      design included; `unbacked-bare-metal-listings`' note that this change must
       archive first now says the requirement it removes is promoted.
 - [x] 8.7 **Documentation citations.** Run
       `make check-doc-citations CHANGE=bare-metal-publication-reads-pool-declarations` and

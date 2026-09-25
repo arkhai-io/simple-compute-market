@@ -1,7 +1,8 @@
 # Tasks — unbacked bare-metal listings
 
 Blocked on `bare-metal-listing-shapes` and `compose-contact-exchange-across-compute`
-Sections 1–3b; `bare-metal-publication-reads-pool-declarations` is complete. Design phase; not yet planned.
+Sections 1–3b; `bare-metal-publication-reads-pool-declarations` is complete. Design
+phase; not yet planned.
 
 ## 1. Design
 
