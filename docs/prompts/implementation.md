@@ -45,6 +45,10 @@ belongs where.
 When returning implementation artifacts, include only updated files in
 a zip in the original directory structure of the provided repository.
 
+Return all files changed since the previous checkpoint even if they have
+already been returned by previous tool uses. The user will explicitly
+ask you to checkpoint filesets.
+
 Represent a file requiring deletion by replacing its entire contents
 with a single-line tombstone comment stating the reason, at the file's
 original path:

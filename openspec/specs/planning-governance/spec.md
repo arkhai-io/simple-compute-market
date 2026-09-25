@@ -178,7 +178,6 @@ step.
 
 - Canonical contributor workflow and capability index: `openspec/README.md`.
 - Artifact-generation context and quality rules: `openspec/config.yaml`.
-- Lossless migration provenance: `openspec/changes/archive/2026-07-13-migrate-planning-to-openspec/migration-ledger.json` and its archived artifacts.
 - Role-owned operational guidance: `docs/buyer-quickstart.md`, `docs/seller-quickstart.md`, `docs/indexer-quickstart.md`, `docs/domain-authoring/README.md`, and `e2e-tests/tests/e2e/roles/README.md`.
 - Repository-wide architecture, operational, and directional separation: `docs/development/ARCHITECTURE.md`, `docs/development/ROADMAP.md`, and `openspec/changes/README.md` — the current system, the goals being pursued, and delivery readiness respectively, each naming the other two's jurisdiction.
 - The single permitted directional roadmap and its no-tasks/no-acceptance-criteria/no-status constraints: `docs/development/ROADMAP.md`.
