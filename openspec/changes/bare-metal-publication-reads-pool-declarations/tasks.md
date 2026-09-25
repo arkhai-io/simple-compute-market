@@ -524,6 +524,24 @@ Decisions: `design.md`, "End-to-end evidence for bare-metal publication". Closes
 - [ ] 10.12 The maintainer runs both lanes in GitHub Actions; record the runs, their
       results, and the scenarios in 8.8.
 
+## 11. Pipeline debugging
+
+- [x] 11.1 Update `scripts/fetch-e2e-logs.py` to fetch both lane artifacts into
+      separate directories; cover distinct contents, a missing lane, repeated
+      fetching, and complete log unavailability in `scripts/tests/test_fetch_e2e_logs.py`.
+- [x] 11.2 Document dispatch and per-run log retrieval in `docs/development/TESTING.md`.
+- [ ] 11.3 Diagnose both Actions lanes, fix observed defects with focused validation,
+      commit and rerun; record actual scenario results in 8.8 and 10.12.
+- [ ] 11.4 Closeout: run focused helper tests, `make check-comment-hygiene`,
+      `make check-reinit`, and scoped documentation citations; review touched imports,
+      documentation placement and task-note compression; record roadmap and campaign
+      dispositions and pipeline evidence. Promote material decisions after code review
+      through Section 8's closeout and design-promotion record.
+      **Helper validation:** 9 focused tests pass; comment hygiene, reinit, and
+      scoped citations pass. No local imports added. Operator instructions promoted
+      to `docs/development/TESTING.md`; no subsystem contract changed. Roadmap and
+      campaign status remain unchanged pending both lanes' results.
+
 ## 8. Closeout
 
 - [x] 8.1 **Comment hygiene.** Run `make check-comment-hygiene` and resolve every match.
