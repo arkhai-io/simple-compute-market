@@ -337,6 +337,56 @@ that exists only in development.
 **Revisit trigger:** bare metal's first deployment. From then on, bare-metal storefront
 schema changes are additive and a table drop is a contract step.
 
+## End-to-end evidence for bare-metal publication
+
+Decided with the maintainer when closeout 8.8 found no lane running bare-metal
+publication.
+
+- **A separate bare-metal lane, not the VM stack.** The pipeline gains a bare-metal
+  stack of its own — one site, the bare-metal storefront, a bare-metal registry, and the
+  dev chain — and GitHub Actions runs it as its own job beside the VM job, so each
+  failure's logs are isolated. The VM stack is not combined with it and does not select
+  its scenarios.
+- **One site, in the mock profile.** The pipeline never has a live host inventory, and
+  publication dispatches no job, so the lane's provisioning service runs its mock
+  profile with an empty development inventory. Its storefront trust pin is the
+  bare-metal storefront's: the lane needs one site, and a site trusting several
+  storefronts is roadmap Goal 1's, not this change's.
+- **Typed clients only.** The scenario declares supply through the site operator's
+  typed clients, steps publication through `StorefrontClient`, and discovers through the
+  registry client. It does not run the `bare-metal-storefront publish` command.
+- **Publication is stepped through the canonical lifecycle control.** The bare-metal
+  storefront answers `POST /api/v1/admin/lifecycle/publication/run-cycle`, signed as the
+  canonical client's `admin_run_lifecycle_cycle` signs it, by running exactly the cycle
+  the command runs and returning its report. Publication stays operator-invoked: it has
+  no timer, so there is nothing to pause, and the command remains. An in-process lock
+  keeps two passes from overlapping; the durable binding's unique derivation key
+  already refuses a duplicate listing if the command and the route race. No dry run is
+  offered.
+- **The scenario:** preconditions (the site's resource-pool projection reported
+  `loaded`); the site operator declares a backed pool advertising `bare_metal` with one
+  whole-host declaration, and a VM-only pool whose declaration carries a bare-metal
+  view; one publication step publishes exactly one listing; the registry and the
+  storefront both return it open, with its offering mode, backing, host, and storefront
+  URL; the pool stops advertising `bare_metal` and the next step closes the listing as
+  `source_gone` at the registry; the pool advertises again and the next step reopens the
+  same listing. Registry convergence after a missed close, and holding an unreachable
+  site, stay with the cycle tests: the pipeline cannot inject a registry fault or stop a
+  service mid-scenario.
+- **Missing configuration fails in the bare-metal lane.** The lane provides its
+  configuration, so a scenario that finds it missing fails rather than skipping — a skip
+  is how bare-metal publication went unexercised until now.
+- **Settlement options on the lane are Alkahest's, on the dev chain.** A backed listing
+  settles without a hosted authority that way; contact exchange is the unbacked case.
+- **Publication deadlines are generated when the stack starts.** The option expiry and
+  fulfillment deadline are absolute timestamps, so committed values would go stale.
+- **A provisioned deal is a separate change.** A mock-provisioned complete deal needs
+  bare-metal results from the mock, pause and step controls for the storefront's
+  negotiation watchdog and settlement-servicing worker, and exercises negotiation,
+  settlement, fulfillment, and teardown paths this change does not touch; its defects
+  would block this change on work outside it. `bare-metal-mock-provisioned-deal` owns
+  it, on this lane.
+
 ## Decisions from review
 
 Code review's advice was taken point by point with the maintainer; the `pool_id`

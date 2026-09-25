@@ -1,6 +1,6 @@
 # Tasks — bare-metal publication reads pool declarations
 
-Implemented. Closeout blocked on 8.8 (no end-to-end lane runs bare-metal publication). On Goal 7's critical path.
+Implemented through Section 9; Section 10, the bare-metal end-to-end lane, is planned. Closeout blocked on 8.8 until that lane runs. On Goal 7's critical path.
 
 Paths below are relative to the repository root. `DM` is
 `domains/bare_metal/src/arkhai_bare_metal/`; `SF` is
@@ -423,6 +423,63 @@ Decided with the maintainer after code review; see `design.md`, "Decisions from 
       pre-existing unresolved citations, none in a document this change touched. No
       function-level import was added.
 
+## 10. Bare-metal end-to-end lane and publication scenario
+
+Decisions: `design.md`, "End-to-end evidence for bare-metal publication". Closes 8.8.
+`E2` is `e2e-tests/`.
+
+- [ ] 10.1 `SF/publication_composition.py` (new) — move `build_publication_cycle` and
+      `publication_payload_builder` out of `SF/publication_cli.py`, which keeps only the
+      command, so the command and the route compose one cycle the same way.
+- [ ] 10.2 `SF/api.py` — `POST /api/v1/admin/lifecycle/publication/run-cycle`,
+      authenticated as the canonical client's `admin_run_lifecycle_cycle` signs it
+      (operation `admin_run_lifecycle_cycle`, resource `publication`, the request's own
+      body), runs one cycle composed from the runtime and the process environment, and
+      returns its report. Any other loop name answers 404; no dry run is offered.
+      `SF/runtime.py` — the runtime carries the cycle's composition as an injectable
+      factory, defaulting to 10.1's, and an `asyncio.Lock` serializing passes within the
+      process.
+- [ ] 10.3 **Integration** `domains/bare_metal/storefront/tests/test_http_publication.py`
+      (new) — `StorefrontClient.admin_run_lifecycle_cycle("publication")` over the
+      in-process transport returns the injected cycle's report; an unsigned request is
+      refused (rejection path, status only); another loop name is 404; two concurrent
+      steps run one after the other.
+- [ ] 10.4 The lane's stack. The production-shaped `compose.bare-metal.yml` is reused
+      unchanged, with `compose.dev.yml` for the dev chain and a new
+      `compose.bare-metal-local.yml` overlay: the site in the mock profile
+      (`ACTIVE_PROFILES=mock`) with an empty development inventory and pool file, the
+      Alkahest address file mounted for the storefront, and the development identity and
+      credential bindings. Development values live under `dev-env/identities/`
+      (bare-metal registry, site, storefront, and administrator identities) and
+      `dev-env/bare-metal/` (inventory, pool file, and an SSH key file the mock never
+      uses), each marked as a development value never to be used on a public network.
+- [ ] 10.5 `Makefile` — `e2e-bare-metal-dev-env` prints the lane's `--env-file` values,
+      generating the option expiry and fulfillment deadline from the current time so
+      they never go stale; the publication clauses name Alkahest on the dev chain.
+- [ ] 10.6 `E2/Makefile` — `test-e2e-vm` is today's `test-e2e`; `test-e2e-bare-metal`
+      brings up 10.4's stack under its own compose project and network and runs
+      `e2e_bare_metal_publication`; `test-e2e` runs both. `e2e_bare_metal_deal` leaves
+      `E2E_MODULE`: it needs a real host, and neither lane selects it.
+- [ ] 10.7 `.github/workflows/e2e.yml` — the `e2e` job becomes `e2e-vm` and
+      `e2e-bare-metal`, each building, running its lane, collecting its compose logs
+      into its own artifact (`e2e-vm-logs`, `e2e-bare-metal-logs`), and tearing down.
+- [ ] 10.8 `E2/config/` — the lane's bare-metal settings: registry URL, authority, and
+      trust pins; the storefront URL and administrator credential; the site's URL,
+      authority pin, and operator credential.
+- [ ] 10.9 **End-to-end** `E2/tests/e2e/roles/scenarios/bare_metal/test_bare_metal_publication.py`
+      (new), marker `e2e_bare_metal_publication` registered with the others. Typed
+      clients only, staged with `require_state`: preconditions; declare supply;
+      publish; discover; withdraw; reinstate (design, "End-to-end evidence for bare-metal
+      publication"). A missing bare-metal setting fails the scenario rather than skipping.
+- [ ] 10.10 `docs/development/TESTING.md` — the two lanes and what each proves; the loop
+      table gains the bare-metal publication step, with no pause because publication has
+      no timer. `docs/bare-metal-seller-quickstart.md` — the operator can step
+      publication through the administrator route as well as the command.
+- [ ] 10.11 Run the storefront suite, `make check-reinit`, `make check-comment-hygiene`,
+      and the scoped citation check.
+- [ ] 10.12 The maintainer runs both lanes in GitHub Actions; record the runs, their
+      results, and the scenarios in 8.8.
+
 ## 8. Closeout
 
 - [x] 8.1 **Comment hygiene.** Run `make check-comment-hygiene` and resolve every match.
@@ -480,10 +537,9 @@ Decided with the maintainer after code review; see `design.md`, "Decisions from 
       injected) and multi-registry stages 06b/06c (a static skip: provisioning
       trusts one storefront principal, which is also why Alice's storefront logs
       site authentication failures). **Still blocked for bare metal:** no scenario runs
-      `bare-metal-storefront publish`, so bare-metal publication has no end-to-end
-      evidence. The next step is designing a valid end-to-end publication test, to be
-      discussed before it is written; the bare-metal admin routes now accept the
-      canonical client (9.2), which that test needs.
+      bare-metal publication, so it has no end-to-end evidence. Section 10 builds the
+      bare-metal lane and its publication scenario; this task completes when 10.12
+      records both lanes passing.
 
 - [ ] 8.9 **Promotion.** Complete the design-promotion record below.
       **In progress:** rows below are current; the record is finalized after code review.
@@ -506,6 +562,8 @@ Decided with the maintainer after code review; see `design.md`, "Decisions from 
 | Bare metal's health reports each site's projection outside every gated check | `openspec/specs/site-capacity/spec.md` ("Per-site projection load-state visibility", unchanged; bare metal now conforms) |
 | An async storefront drives a publication cycle through the capacity-publication kit's driver, report, and convergence step | `docs/development/ARCHITECTURE.md#capacity-publication-and-multi-domain-storefront-composition`; `openspec/specs/storefront-publication/architecture.md#registry-convergence` |
 | Bare-metal admin routes accept the canonical storefront client's signed contract | Not promoted: aligns bare metal with the existing client contract, and introduces no new rule |
+| The pipeline runs a separate bare-metal lane beside the VM lane, and a lane's own scenarios fail rather than skip on missing configuration | `docs/development/TESTING.md` (10.10) |
+| Bare-metal publication can be stepped through the canonical lifecycle control, with no pause because it has no timer | `docs/development/TESTING.md` loop table; `docs/bare-metal-seller-quickstart.md` (10.10) |
 | "Publication candidate" has one name | `docs/development/ARCHITECTURE.md` (added during design) |
 | No data migration or compatibility path for undeployed bare-metal state | Temporary, not promoted: the repository-wide additive-schema rule in `docs/development/ARCHITECTURE.md` governs from bare metal's first deployment |
 | The rename needs no transition while one operator deploys a storefront with its sites | Temporary, not promoted: its revisit trigger stays in `design.md` |

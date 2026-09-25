@@ -118,6 +118,10 @@ None.
   cycles now compose onto; the API-credit storefront's pin on it moves (0.4.1).
 - The bare-metal storefront's administrator routes accept the canonical storefront
   client's signed contract, and the storefront depends on that client.
+- End-to-end: a bare-metal lane beside the VM lane (its own stack, with one mock-profile
+  site, and its own GitHub Actions job), a publication step on the bare-metal
+  storefront's administrator surface, and a publication scenario. A mock-provisioned
+  complete deal is `bare-metal-mock-provisioned-deal`'s.
 - `openspec/specs/site-capacity/spec.md`, `openspec/specs/storefront-publication/spec.md`,
   and `docs/development/ARCHITECTURE.md`.
 
