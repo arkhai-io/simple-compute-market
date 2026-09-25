@@ -1,6 +1,7 @@
 # Tasks — bare-metal publication reads pool declarations
 
-Complete; awaiting archival. Promoted to `site-capacity` and `storefront-publication`; both end-to-end lanes pass. On Goal 7's critical path.
+Archived 2026-09-25 with `--skip-specs`: its deltas were already promoted to
+`site-capacity` and `storefront-publication`. Both end-to-end lanes pass.
 
 Paths below are relative to the repository root. `DM` is
 `domains/bare_metal/src/arkhai_bare_metal/`; `SF` is
@@ -556,14 +557,14 @@ Decisions: `design.md`, "End-to-end evidence for bare-metal publication". Closes
 - [x] 11.5 **Review of the pipeline debugging.** Every change above is kept. The quickstart's
       pool document now names the inert `default` pool, which the service requires of an
       authoritative document and which the lane's fixture already names.
-      **Maintainer-owned locks:** as committed, `domains/bare_metal/storefront/uv.lock` and
-      `domains/apicredits/storefront/uv.lock` still record `arkhai-kit-capacity-publication`
-      0.2.0, the bare-metal lock omits `arkhai-core-storefront-client`, and the API-credit
-      lock records its own version as 0.4.0, so neither satisfies its committed project
-      until re-resolved. A regeneration in the review sandbox wrote a different marker
-      format from the maintainer's toolchain and was declined as churn; the maintainer's
-      local `make test` re-resolves both, and its locks are the ones to commit. The
-      runtime images install pinned wheels, not these locks.
+      **Locks:** a regeneration during debugging left
+      `domains/bare_metal/storefront/uv.lock` and `domains/apicredits/storefront/uv.lock`
+      short of their projects (`arkhai-kit-capacity-publication` 0.2.0, no
+      `arkhai-core-storefront-client`, the API-credit storefront at 0.4.0). The
+      maintainer's `make test`, whose `reinit` re-resolves both, produced the committed
+      locks: they move exactly those entries, `uv lock --locked` passes for both, and no
+      lock in the repository records a superseded version of a package this change
+      bumps.
 
 ## 8. Closeout
 
