@@ -20,3 +20,12 @@ publish only settlement options bare metal does not fulfil through capacity.
 - **WHEN** a negotiation against an unbacked bare-metal listing is accepted
 - **THEN** no capacity is reserved and the deal settles by introduction, revealing the
   contact of the listing's origin seller
+
+## REMOVED Requirements
+
+### Requirement: An unbacked pool yields no bare-metal listing
+
+**Reason**: Bare-metal publication now derives unbacked listings from unbacked pools,
+bound and published as unbacked, so the refusal no longer holds.
+**Migration**: None. Pools previously refused begin yielding unbacked listings on the
+first bare-metal publication run after this change.

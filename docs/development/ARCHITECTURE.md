@@ -406,7 +406,7 @@ A site authority's client-facing surface splits into two separately typed client
 
 ### Resource pools
 
-Resource pools group physical settlement candidates, identify the provider and
+Resource pools group the Physical Resources a settlement may be placed on, identify the provider and
 provider-specific configuration used after selection, and declare the exact set
 of offering modes that configuration can deliver. The declaration belongs to
 the pool rather than each host because provider, playbook, and requirement
@@ -476,7 +476,7 @@ Avoid `SettlementTarget` as a noun. Use `SettlementResource`; method names may u
 
 ### One name per concept
 
-Four concepts sit close enough together to have been conflated, and each has
+Five concepts sit close enough together to have been conflated, and each has
 exactly one name.
 
 | Concept | Name |
@@ -485,6 +485,7 @@ exactly one name.
 | The machine and its connection identity | `host`, identified by `host_id` |
 | The fulfillment implementation selected for a pool | `provider` |
 | The component that validates, submits, and polls an execution action | `executor` |
+| One listing a publication pass could publish, derived from a source declaration before anything is decided about it | `publication candidate` |
 
 The offering mode carries one name on every surface that names it: the capacity
 claim, the Resource Pool's deliverable and advertisable declarations, the durable
@@ -511,7 +512,7 @@ negotiation message either party sends. For a domain using capability-shaped
 publication, what one listing offers, in its family-grouped vocabulary, is its
 **listing shape**; VM publication uses this model, and a pool states its shapes
 in its `listing_shapes` hint. A buyer's family-grouped statement of what it needs
-is a capability shape, not a listing shape. How many listing candidates a pool yields
+is a capability shape, not a listing shape. How many publication candidates a pool yields
 is its `listing_cardinality_mode`, which carries cardinality only — not what is
 offered, how a deal settles, or whether an admission authority backs the listing.
 
@@ -522,6 +523,13 @@ or actions do keep the name, because `executor` carries its action-dispatch sens
 in them — `executor_ref` is the executor's reference and `executor_target` is the
 target of an executor action. The prohibition is on the head noun, not the prefix.
 See [physical provisioning](../../openspec/specs/physical-provisioning/spec.md).
+
+A **publication candidate** is what a storefront's publication pass derives from a
+source declaration — a site's projected pool, Physical Resource, or quota resource —
+before deciding anything: a candidate with no listing is published, one matching an
+existing listing refreshes or reopens it, and an open listing no candidate matches
+closes. It is not a scheduling candidate, a Physical Resource considered for placement
+of an admitted reservation, which is chosen after a deal and never becomes a listing.
 
 ### Identifiers
 
