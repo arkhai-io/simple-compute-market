@@ -365,6 +365,28 @@ Every per-resource member MUST carry a non-empty `resource_type`: the resource k
 - **WHEN** a capacity declaration is registered without naming a resource kind
 - **THEN** its projected member carries the kind the site recorded for it, never an absent or null `resource_type`
 
+### Requirement: Projection rows name their pool `pool_id`
+
+Every pool entry of the resource-pool projection and every bucket row of the
+capacity-bucket projection MUST name its Resource Pool in a `pool_id` field, the name the
+pool's identifier carries on every other surface.
+
+Within the resource-pool projection, a resource's pool is the pool entry that contains it.
+A publication view that repeats the pool's identifier MUST name that same pool, and a
+consumer MUST treat a generation where it does not as invalid, holding what it derives
+from that site rather than closing it.
+
+#### Scenario: A site produces its projections
+
+- **WHEN** a site produces either projection
+- **THEN** each pool entry or bucket row names its pool in `pool_id`
+
+#### Scenario: A publication view names a different pool than its container
+
+- **WHEN** a resource's publication view names a pool other than the pool entry that
+  contains the resource
+- **THEN** the consumer treats the generation as invalid and holds that site's listings
+
 ### Requirement: Per-site projection load-state visibility
 A storefront MUST report, per configured site and per independent projection family (resource-pool, capacity-bucket), whether that projection has never loaded, is currently loaded, is stale, or is unavailable. This state MUST be visible on the storefront's operator status surface, scoped per site and family — one site's load failure MUST NOT present as broad storefront degradation while other configured sites are healthy. A storefront MUST NOT persist projection generations durably across restart; retry-until-success plus this observable status is the accepted mechanism for a site being unreachable at storefront startup. Any future reader of these caches MUST treat a never-loaded or unavailable state as unknown, not as authoritative zero capacity — the same principle "Site authority is unavailable" already states for the legacy reconciliation path applies equally here.
 

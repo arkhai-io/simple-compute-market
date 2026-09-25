@@ -1,7 +1,7 @@
 # Tasks — bare-metal listing shapes
 
-Blocked on `bare-metal-publication-reads-pool-declarations`. Design phase; not yet
-planned.
+Unblocked: `bare-metal-publication-reads-pool-declarations` is complete. Design phase;
+not yet planned.
 
 ## 1. Design
 

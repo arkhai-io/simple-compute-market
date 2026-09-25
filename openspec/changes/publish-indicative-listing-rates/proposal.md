@@ -145,8 +145,8 @@ None.
 
 ## Dependencies and Related Changes
 
-- **Blocked on `bare-metal-publication-reads-pool-declarations`**, without which
-  bare-metal publication reads no pool policy tag.
+- **Depends on `bare-metal-publication-reads-pool-declarations`** (complete), without
+  which bare-metal publication would read no pool policy tag.
 - **Blocked on `bare-metal-listing-shapes`**, which publishes a capability shape per
   bare-metal listing — the key an asking rate is declared against — and joins bare
   metal to the site-scoped override store.

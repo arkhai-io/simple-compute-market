@@ -1,6 +1,6 @@
 # Tasks — bare-metal publication reads pool declarations
 
-Implemented, including both end-to-end lanes passing in GitHub Actions. Post-review specification promotion and final campaign handoff remain open. On Goal 7's critical path.
+Complete; awaiting archival. Promoted to `site-capacity` and `storefront-publication`; both end-to-end lanes pass. On Goal 7's critical path.
 
 Paths below are relative to the repository root. `DM` is
 `domains/bare_metal/src/arkhai_bare_metal/`; `SF` is
@@ -553,14 +553,17 @@ Decisions: `design.md`, "End-to-end evidence for bare-metal publication". Closes
       No application Python changed; full local subsystem/typing suites were not rerun.
       Both lanes rebuilt the runtime wheels and images and passed their system scenarios.
 
-- [x] 11.5 **Review of the pipeline debugging.** Kept every change above. Restored
-      `domains/bare_metal/storefront/uv.lock` and `domains/apicredits/storefront/uv.lock`:
-      a regeneration during debugging recorded `arkhai-kit-capacity-publication` 0.2.0,
-      dropped `arkhai-core-storefront-client`, and recorded the API-credit storefront as
-      0.4.0, none of which satisfies the committed projects. The runtime images install
-      pinned wheels rather than these locks, so the passing run could not show it.
-      `uv lock --locked` now passes for both, and a scan finds no lock recording a
-      superseded version of any package this change bumps.
+- [x] 11.5 **Review of the pipeline debugging.** Every change above is kept. The quickstart's
+      pool document now names the inert `default` pool, which the service requires of an
+      authoritative document and which the lane's fixture already names.
+      **Maintainer-owned locks:** as committed, `domains/bare_metal/storefront/uv.lock` and
+      `domains/apicredits/storefront/uv.lock` still record `arkhai-kit-capacity-publication`
+      0.2.0, the bare-metal lock omits `arkhai-core-storefront-client`, and the API-credit
+      lock records its own version as 0.4.0, so neither satisfies its committed project
+      until re-resolved. A regeneration in the review sandbox wrote a different marker
+      format from the maintainer's toolchain and was declined as churn; the maintainer's
+      local `make test` re-resolves both, and its locks are the ones to commit. The
+      runtime images install pinned wheels, not these locks.
 
 ## 8. Closeout
 
@@ -579,12 +582,16 @@ Decisions: `design.md`, "End-to-end evidence for bare-metal publication". Closes
       **Done:** no function-level import added. The domain package's two
       storefront-extra local imports are gone with its database access; the
       bare-metal buyer and adapter suites import it without that extra.
-- [ ] 8.3 **Documentation compliance.** Re-check the accepted decisions against
+- [x] 8.3 **Documentation compliance.** Re-check the accepted decisions against
       `openspec/README.md`'s placement table and confirm each landed where Section 7 and the
       promotion record say.
-      **Reopened at review:** the `spec.md` rows below reach their files when this
-      change's deltas sync at archive, which follows code review; until then they
-      are destinations, not landed text. Rechecked at archive.
+      **Done:** the accepted requirements are promoted into
+      `openspec/specs/site-capacity/spec.md` and `openspec/specs/storefront-publication/spec.md`,
+      each promoted block identical to its delta and both specs valid under strict
+      validation; no other statement in the specs or their companions still describes
+      the replaced behaviour. Repository-wide decisions are in `ARCHITECTURE.md`,
+      deployment behaviour in `DEPLOYMENT_AND_CONFIG.md`, test lanes in `TESTING.md`, and
+      operator steps in the quickstart; change history stays in this directory.
 - [x] 8.4 **Narrative compression.** Shorten completed-task notes to final behaviour,
       material validation evidence, deferred work, and permanent-documentation destinations.
 - [x] 8.5 **Roadmap currency.** Remove this change's row from Goal 7's gap table in
@@ -592,12 +599,15 @@ Decisions: `design.md`, "End-to-end evidence for bare-metal publication". Closes
       bare-metal publication reads no pool declaration.
       **Done:** Goal 7 describes declaration-backed publication and registry convergence;
       its stale publication gap is removed. Unbacked supply and listing shapes remain open.
-- [ ] 8.6 **Campaign index currency.** Update this change's row and Goal 7's dependency graph
+- [x] 8.6 **Campaign index currency.** Update this change's row and Goal 7's dependency graph
       in `openspec/changes/README.md`, marking `bare-metal-listing-shapes` unblocked.
-      **Partly done:** the campaign row records both lanes passing and review/promotion
-      remaining. Dependency handoff stays pending that review; the graph and downstream
-      status are unchanged deliberately, rather than implying the original deltas have
-      already been promoted.
+      **Done:** this change's row reads complete, awaiting archival; the Goal 7 graph
+      marks it complete and adds `bare-metal-mock-provisioned-deal` beneath it. No longer
+      blocked on it: `bare-metal-listing-shapes` and `bare-metal-mock-provisioned-deal`
+      (unblocked), `unbacked-bare-metal-listings` and `publish-indicative-listing-rates`
+      (still blocked on `bare-metal-listing-shapes`). Each dependent's own status line and
+      dependency entry agree; `unbacked-bare-metal-listings`' note that this change must
+      archive first now says the requirement it removes is promoted.
 - [x] 8.7 **Documentation citations.** Run
       `make check-doc-citations CHANGE=bare-metal-publication-reads-pool-declarations` and
       resolve every match.
@@ -619,24 +629,24 @@ Decisions: `design.md`, "End-to-end evidence for bare-metal publication". Closes
       failed bare metal at Compose assembly, registry volume startup, and pool import,
       respectively; the fixes and rationale are in `design.md`'s pipeline debugging section.
 
-- [ ] 8.9 **Promotion.** Complete the design-promotion record below.
-      **In progress:** rows below are current; the record is finalized after code review.
+- [x] 8.9 **Promotion.** Complete the design-promotion record below.
+      **Done:** the record below is final.
 
 ## Design promotion record
 
 | Accepted decision | Permanent location |
 |---|---|
-| A listing advertises only a mode its pool authorizes, bare metal included | `openspec/specs/storefront-publication/spec.md` (on archive sync of this change's delta) |
-| An unbacked pool yields no bare-metal listing | `openspec/specs/storefront-publication/spec.md` (on archive sync of this change's delta) |
-| A held site holds bare-metal listings | `openspec/specs/storefront-publication/spec.md` (on archive sync of this change's delta) |
-| Registry convergence covers bare metal; a new listing is recorded locally before any registry is told | `openspec/specs/storefront-publication/spec.md` (on archive sync of this change's delta) |
-| Projection rows name their pool `pool_id`; the containing pool is authoritative | `openspec/specs/site-capacity/spec.md` (on archive sync of this change's delta) |
+| A listing advertises only a mode its pool authorizes, bare metal included | `openspec/specs/storefront-publication/spec.md` |
+| An unbacked pool yields no bare-metal listing | `openspec/specs/storefront-publication/spec.md` |
+| A held site holds bare-metal listings | `openspec/specs/storefront-publication/spec.md` |
+| Registry convergence covers bare metal; a new listing is recorded locally before any registry is told | `openspec/specs/storefront-publication/spec.md` |
+| Projection rows name their pool `pool_id`; the containing pool is authoritative | `openspec/specs/site-capacity/spec.md` |
 | Bare metal derives from the resource-pool projection, not the capacity projection | `openspec/specs/storefront-publication/architecture.md#projection-families` |
 | Every bare-metal resource falls into exactly one class; enablement comes from the projected resource | `openspec/specs/storefront-publication/architecture.md#reconciliation` |
 | Bare-metal listings are tracked by the common binding; a pool move is an identity change | `openspec/specs/storefront-publication/architecture.md#listing-identity` |
 | Bare metal publishes through the kit runtime | `docs/development/ARCHITECTURE.md#capacity-publication-and-multi-domain-storefront-composition` |
 | The site's projections name the pool `pool_id` | `docs/development/ARCHITECTURE.md#one-name-per-concept` |
-| Bare-metal listings are bound only by the common binding; `derived_bare_metal_listings` is gone | `openspec/specs/storefront-publication/spec.md` ("Commercial mapping identity", on archive sync of this change's delta) |
+| Bare-metal listings are bound only by the common binding; `derived_bare_metal_listings` is gone | `openspec/specs/storefront-publication/spec.md` ("Commercial mapping identity") |
 | Bare metal's health reports each site's projection outside every gated check | `openspec/specs/site-capacity/spec.md` ("Per-site projection load-state visibility", unchanged; bare metal now conforms) |
 | An async storefront drives a publication cycle through the capacity-publication kit's driver, report, and convergence step | `docs/development/ARCHITECTURE.md#capacity-publication-and-multi-domain-storefront-composition`; `openspec/specs/storefront-publication/architecture.md#registry-convergence` |
 | Bare-metal admin routes accept the canonical storefront client's signed contract | Not promoted: aligns bare metal with the existing client contract, and introduces no new rule |
@@ -648,5 +658,6 @@ Decisions: `design.md`, "End-to-end evidence for bare-metal publication". Closes
 | E2E log retrieval preserves each lane's artifact namespace | `docs/development/TESTING.md` |
 | Bare-metal Compose bindings extend domain services; fresh data volumes are writable by the runtime user | `docs/development/DEPLOYMENT_AND_CONFIG.md` |
 | Development pool definitions include an inert default pool | `dev-env/identities/README.md`; existing pool contract unchanged |
+| An operator's pool document names the inert `default` pool | `docs/bare-metal-seller-quickstart.md` |
 | Goal 7 reflects declaration-backed bare-metal publication | `docs/development/ROADMAP.md` |
-| Pipeline status reflects passing lanes; dependency handoff remains post-review | `openspec/changes/README.md` |
+| This change is complete; its dependents are handed off | `openspec/changes/README.md` (this change's row, the Goal 7 graph, and each dependent's row) |

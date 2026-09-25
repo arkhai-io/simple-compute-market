@@ -60,6 +60,15 @@ the inventory host's `pool_id`; executor connectivity remains service-owned:
 
 ```yaml
 pools:
+  - id: default
+    label: Inert default
+    provider: bare_metal.ansible
+    enabled: true
+    policy_tags:
+      deliverable_modes: []
+      advertisable_modes: []
+      capacity_backing: backed
+    provider_config: {}
   - id: whole-host-california
     label: Whole Host California
     provider: bare_metal.ansible
@@ -71,6 +80,10 @@ pools:
       region: California, US
     provider_config: {}
 ```
+
+The document is authoritative, and the service refuses one that does not name
+the `default` pool. Declaring it with no deliverable or advertisable mode keeps
+it inert: nothing is delivered from it or listed from it.
 
 Every pool must declare `advertisable_modes` — the offering modes its listings
 may name — and `capacity_backing`. A `backed` pool may advertise only modes it

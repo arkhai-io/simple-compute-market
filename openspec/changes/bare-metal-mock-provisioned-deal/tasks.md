@@ -1,7 +1,7 @@
 # Tasks — bare-metal mock-provisioned deal
 
-Design decided; not yet planned. Blocked on `bare-metal-publication-reads-pool-declarations`,
-which builds the bare-metal end-to-end lane this change's scenario runs on.
+Design decided; not yet planned. Unblocked: `bare-metal-publication-reads-pool-declarations`,
+which built the bare-metal end-to-end lane this change's scenario runs on, is complete.
 
 ## 1. Design
 
