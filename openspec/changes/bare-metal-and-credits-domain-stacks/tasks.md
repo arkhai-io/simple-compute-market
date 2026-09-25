@@ -41,6 +41,12 @@ public command contract. Its live execution remains blocked on the installed
 buyer contribution, sibling storefront's authenticated result/access/teardown
 endpoints, selected-site authority, credentials, and real access target.
 
+The end-to-end pipeline runs only in GitHub Actions, with no live host inventory, so
+the 4.1 scenario cannot run there. The bare-metal deal path that runs on every pipeline
+run — mock-provisioned, on the bare-metal lane — is owned by
+`bare-metal-mock-provisioned-deal`; 4.1 remains the real-host evidence the protected
+lane needs.
+
 
 - [x] 4.1 Add the end-to-end scenario: discovery, negotiation, settlement, delivery,
       teardown.
@@ -57,7 +63,10 @@ real whole-host access target. Static scenario/configuration work is not live-de
 evidence. Task 5.3 is intentionally unrun in this delegated lane.
 
 
-- [ ] 5.1 Run both new end-to-end paths against a live service stack. This repository has
+- [ ] 5.1 Run both new end-to-end paths against a live service stack. For bare metal,
+      the mock-provisioned deal from `bare-metal-mock-provisioned-deal` is the path that
+      runs in the pipeline; real access and revocation remain the protected lane's.
+      This repository has
       previously recorded e2e work validated only statically because no stack was
       available; treat a live run as an explicit gate, not a formality.
 - [ ] 5.2 Confirm the goal's completion test: each domain runs a full deal through a

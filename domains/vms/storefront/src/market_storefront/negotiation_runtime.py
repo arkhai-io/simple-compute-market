@@ -626,7 +626,7 @@ def lookup_pool_policy_tags(
             return {}
         pools = caches.resource_pools.view().value or []
         for pool in pools:
-            if str(pool.get("resource_pool_id") or "") == pool_id:
+            if str(pool.get("pool_id") or "") == pool_id:
                 metadata = pool.get("pool_metadata") or {}
                 return dict(metadata.get("policy_tags") or {})
     except Exception:

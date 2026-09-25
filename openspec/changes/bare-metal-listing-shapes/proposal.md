@@ -81,7 +81,7 @@ None.
 
 ## Dependencies
 
-- **Blocked on `bare-metal-publication-reads-pool-declarations`**, which makes
+- **Depends on `bare-metal-publication-reads-pool-declarations`** (complete), which makes
   bare-metal publication read projected pool declarations and policy tags — the
   region hint and the override store's pool resolution both need them.
 - **Blocks `publish-indicative-listing-rates`** for bare metal, and

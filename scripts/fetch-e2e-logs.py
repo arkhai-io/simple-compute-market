@@ -14,7 +14,7 @@ from typing import IO, Any, Sequence
 DEFAULT_WORKFLOW = "e2e.yml"
 DEFAULT_OUTPUT_DIR = Path(".snapshot/e2e-logs")
 RUN_LIST_LIMIT = 100
-LOG_ARTIFACT = "e2e-logs"
+LOG_ARTIFACTS = ("e2e-vm-logs", "e2e-bare-metal-logs")
 COMPOSE_LOG = "compose-logs.txt"
 
 
@@ -129,7 +129,9 @@ def _fetch_actions_log(run_id: str, output_dir: Path) -> bool:
     return True
 
 
-def _fetch_compose_log(run_id: str, output_dir: Path) -> bool:
+def _fetch_compose_log(run_id: str, output_dir: Path, artifact: str) -> bool:
+    # Each lane uploads the same filename, so preserve its artifact namespace.
+    output_dir = output_dir / artifact
     target = output_dir / COMPOSE_LOG
     if target.is_file():
         return True
@@ -142,21 +144,21 @@ def _fetch_compose_log(run_id: str, output_dir: Path) -> bool:
                 "download",
                 run_id,
                 "--name",
-                LOG_ARTIFACT,
+                artifact,
                 "--dir",
                 str(output_dir),
             ]
         )
     except FetchError as exc:
         print(
-            f"WARNING: run {run_id} has no downloadable {LOG_ARTIFACT} artifact: {exc}",
+            f"WARNING: run {run_id} has no downloadable {artifact} artifact: {exc}",
             file=sys.stderr,
         )
         return False
 
     if not target.is_file():
         print(
-            f"WARNING: artifact {LOG_ARTIFACT} did not contain {COMPOSE_LOG}",
+            f"WARNING: artifact {artifact} did not contain {COMPOSE_LOG}",
             file=sys.stderr,
         )
         return False
@@ -183,8 +185,11 @@ def fetch_logs(
     conclusion = _conclusion(selected_run)
 
     actions_log = _fetch_actions_log(selected_run, output_dir)
-    compose_log = _fetch_compose_log(selected_run, output_dir)
-    if not actions_log and not compose_log:
+    compose_logs = [
+        _fetch_compose_log(selected_run, output_dir, artifact)
+        for artifact in LOG_ARTIFACTS
+    ]
+    if not actions_log and not any(compose_logs):
         raise FetchError(
             f"no logs could be fetched for E2E workflow run {selected_run}"
         )

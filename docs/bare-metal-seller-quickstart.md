@@ -60,6 +60,15 @@ the inventory host's `pool_id`; executor connectivity remains service-owned:
 
 ```yaml
 pools:
+  - id: default
+    label: Inert default
+    provider: bare_metal.ansible
+    enabled: true
+    policy_tags:
+      deliverable_modes: []
+      advertisable_modes: []
+      capacity_backing: backed
+    provider_config: {}
   - id: whole-host-california
     label: Whole Host California
     provider: bare_metal.ansible
@@ -71,6 +80,10 @@ pools:
       region: California, US
     provider_config: {}
 ```
+
+The document is authoritative, and the service refuses one that does not name
+the `default` pool. Declaring it with no deliverable or advertisable mode keeps
+it inert: nothing is delivered from it or listed from it.
 
 Every pool must declare `advertisable_modes` — the offering modes its listings
 may name — and `capacity_backing`. A `backed` pool may advertise only modes it
@@ -200,10 +213,46 @@ independently idempotent and must complete before publication.
 
 The stack persists registry, Redis, provisioning, and storefront state in
 separate named volumes. Do not treat an HTTP 200 alone as deal readiness:
-inspect the storefront health projection and stop if database, selected-site
-capacity, fulfillment, or the configured settlement mechanism is unavailable.
+inspect the storefront health projection and stop if database, fulfillment, or
+the configured settlement mechanism is unavailable. Each configured site is
+reported separately under `site_projections`, with its resource-pool projection
+`loaded` (with its revision and digest) or `unavailable` (with the error). A site
+that is down is reported there and does not mark the whole storefront degraded.
 
-The dedicated image includes the bare-metal publication command. Run one authenticated publication round with `bare-metal-storefront publish` after all configured sites report a fresh complete signed projection. It publishes independent typed settlement options and closes stale open listings through the common publication runner; it does not manufacture availability or substitute a different site/resource.
+The dedicated image includes the bare-metal publication command. Run one
+authenticated publication round with `bare-metal-storefront publish`, or ask the
+running storefront for one as its administrator: `POST
+/api/v1/admin/lifecycle/publication/run-cycle`, which the canonical storefront
+client calls as `admin_run_lifecycle_cycle("publication")`. Both run the same
+round and return the same report, and the storefront runs one round at a time.
+Each round:
+
+- Reads every configured site's resource-pool projection through that site's
+  own trusted client, and derives one listing per Physical Resource from the
+  bare-metal view the site projects for it.
+- Lists a resource only if its pool advertises `bare_metal`, is enabled, and is
+  capacity-backed, as the Resource Pool document above declares. A pool that
+  declares itself unbacked yields no bare-metal listing, and the round reports
+  it by name.
+- Closes a listing whose capacity declaration is disabled, or whose pool stops
+  advertising `bare_metal` or is disabled.
+- Closes a listing whose machine is leased, and reopens it once the machine is
+  free again.
+- Treats a Physical Resource moved to another pool as a new listing: the old
+  one closes and a new one is published under the new pool.
+- Leaves a listing its seller closed as it is.
+- Holds, without closing or refreshing, the listings of a site that cannot be
+  reached or whose projection is malformed, and of a pool whose declarations do
+  not resolve. The round reports each one; every other site is reconciled as
+  usual.
+- Writes every new listing locally before any registry is told of it, records
+  each registry's answer, and resends to any registry that missed a publish,
+  close, or reopen. A later round repairs a registry that was unreachable.
+
+The round prints a report of every publish, refresh, reopen, close (with its
+reason), hold, refusal, and registry repair. It publishes independent typed
+settlement options; it does not manufacture availability or substitute a
+different site or resource.
 
 `BARE_METAL_STOREFRONT_EVM_ADDRESS` is required only when Alkahest is enabled. Hosted-only startup leaves it empty and constructs no wallet, RPC, chain, or Alkahest client. The shared settlement JSON is mounted read-only and contains public authority/account/trust/release settings only. The runtime registers the ready mechanisms, the shared hosted route service, and bare-owned lifecycle callbacks; a disabled or unready mechanism is omitted rather than represented by a fake adapter.
 

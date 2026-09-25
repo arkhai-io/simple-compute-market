@@ -597,9 +597,9 @@ follows.
 - **VM** publishes listing shapes from resource-pool projections, joins the
   site-scoped override store, and refreshes terms in place today. It needs nothing
   from another change to publish an asking rate.
-- **Bare metal** needs three things it lacks:
+- **Bare metal** needs three things, the first of which is now in place:
   - it must read its pools' projected declarations —
-    `bare-metal-publication-reads-pool-declarations`;
+    `bare-metal-publication-reads-pool-declarations`, complete;
   - it must publish a capability shape per listing, since the shape is the rate's
     key, and must join the site-scoped override store for the storefront tier —
     `bare-metal-listing-shapes`. That change also makes bare-metal listings visible

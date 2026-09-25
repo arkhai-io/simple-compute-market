@@ -26,7 +26,7 @@ from market_pool_overrides import (
 )
 
 SHAPE = {"gpu": {"count": 1, "model": "H100"}}
-LIVE = {"revision": 7, "digest": "live-7", "resource_pools": [{"resource_pool_id": "gpu"}]}
+LIVE = {"revision": 7, "digest": "live-7", "resource_pools": [{"pool_id": "gpu"}]}
 
 
 class _Site:
@@ -150,7 +150,7 @@ async def test_a_site_that_cannot_answer_usably_is_refused_as_retryable(tmp_path
 
 
 async def test_a_pool_the_live_projection_lacks_is_refused_and_nothing_is_stored(tmp_path):
-    world = _World(tmp_path / "db", answer={**LIVE, "resource_pools": [{"resource_pool_id": "x"}]})
+    world = _World(tmp_path / "db", answer={**LIVE, "resource_pools": [{"pool_id": "x"}]})
 
     refusal = await _refused(world, _record())
 
@@ -195,7 +195,7 @@ async def test_a_delete_wakes_publication_without_a_site_call(tmp_path):
 
 
 async def test_statuses_name_each_override_and_its_state(tmp_path):
-    world = _World(tmp_path / "db", projection={"site-a": [{"resource_pool_id": "gpu"}]})
+    world = _World(tmp_path / "db", projection={"site-a": [{"pool_id": "gpu"}]})
     await world.service.replace(_record())
     await world.service.replace(_record(site_id="site-b"))
 

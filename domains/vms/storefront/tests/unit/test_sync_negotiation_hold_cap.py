@@ -123,7 +123,7 @@ class TestLookupPoolPolicyTags:
         _patch_caches(monkeypatch, {
             "site-a": _FakeSiteCaches([
                 {
-                    "resource_pool_id": "gpu-pool",
+                    "pool_id": "gpu-pool",
                     "resources": [],
                     "pool_metadata": {
                         "policy_tags": {
@@ -176,7 +176,7 @@ class TestLookupPoolPolicyTags:
         _patch_caches(monkeypatch, {
             "site-a": _FakeSiteCaches([
                 {
-                    "resource_pool_id": "a-different-pool",
+                    "pool_id": "a-different-pool",
                     "resources": [],
                     "pool_metadata": {
                         "policy_tags": {"deliverable_modes": ["vm"]},
@@ -197,7 +197,7 @@ class TestLookupPoolPolicyTags:
         )
         _patch_caches(monkeypatch, {
             "site-a": _FakeSiteCaches([
-                {"resource_pool_id": "gpu-pool", "resources": []},
+                {"pool_id": "gpu-pool", "resources": []},
             ]),
         })
         assert lookup_pool_policy_tags(_Client(db_path), "listing-1") == {}
@@ -218,7 +218,7 @@ class TestLookupPoolPolicyTags:
         _patch_caches(monkeypatch, {
             "site-a": _FakeSiteCaches([
                 {
-                    "resource_pool_id": "gpu-pool",
+                    "pool_id": "gpu-pool",
                     "resources": [],
                     "pool_metadata": {
                         "policy_tags": {

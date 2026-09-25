@@ -157,7 +157,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-bare-metal"
-version = "0.4.0"
+version = "0.5.0"
 source = { editable = "../../" }
 dependencies = [
     { name = "arkhai-core" },
@@ -249,7 +249,7 @@ dev = [
 
 [[package]]
 name = "arkhai-compute-provisioning-service"
-version = "0.3.1"
+version = "0.4.0"
 source = { editable = "../../../../provisioning/compute/service" }
 dependencies = [
     { name = "aiohttp" },
@@ -286,7 +286,7 @@ requires-dist = [
     { name = "arkhai-kit-fulfillment", specifier = ">=0.3.0" },
     { name = "arkhai-kit-identity", specifier = "==0.3.0" },
     { name = "arkhai-kit-resource-pools", specifier = ">=0.3.0" },
-    { name = "arkhai-kit-site", specifier = ">=0.4.0" },
+    { name = "arkhai-kit-site", specifier = ">=0.5.0" },
     { name = "arkhai-vms-provisioning-adapter", marker = "extra == 'adapters'", specifier = ">=0.3.0" },
     { name = "cachetools", specifier = ">=5.3" },
     { name = "cryptography", specifier = ">=42.0" },
@@ -307,8 +307,9 @@ provides-extras = ["adapters"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "arkhai-bare-metal", specifier = ">=0.5.0" },
     { name = "arkhai-bare-metal-provisioning-adapter", specifier = ">=0.2.0" },
-    { name = "arkhai-kit-site-client", specifier = ">=0.4.0" },
+    { name = "arkhai-kit-site-client", specifier = ">=0.6.0" },
     { name = "arkhai-vms-provisioning-adapter", specifier = ">=0.3.0" },
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-asyncio", specifier = ">=0.23" },
@@ -405,7 +406,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-resource-pools"
-version = "0.4.0"
+version = "0.5.0"
 source = { editable = "../../../../kit/resource-pools" }
 dependencies = [
     { name = "arkhai-kit-capability-shape" },
@@ -440,7 +441,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-site"
-version = "0.4.0"
+version = "0.5.0"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-identity" },
@@ -451,7 +452,7 @@ dependencies = [
     { name = "sqlalchemy" },
 ]
 wheels = [
-    { path = "arkhai_kit_site-0.4.0-py3-none-any.whl" },
+    { path = "arkhai_kit_site-0.5.0-py3-none-any.whl" },
 ]
 
 [[package]]

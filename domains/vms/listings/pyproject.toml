@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-vms-listings"
-version = "0.2.0"
+version = "0.3.0"
 license = "MIT"
 description = "VM listing derivation, pricing resolution, and reconciliation, shared by the VM storefront and buyer."
 requires-python = ">=3.12,<3.14"
@@ -19,12 +19,12 @@ dependencies = [
 # resource-pool kit. Only the storefront derives listings from projections; the
 # buyer uses the listing models and helpers alone, and imports none of it.
 pools = [
-    "arkhai-kit-resource-pools>=0.3.0",
+    "arkhai-kit-resource-pools>=0.5.0",
 ]
 # Deriving listings also reads the storefront's own pool overrides, through the
 # pool-override kit's reader. Only the storefront derives listings.
 overrides = [
-    "arkhai-kit-pool-overrides>=0.1.0",
+    "arkhai-kit-pool-overrides>=0.2.0",
 ]
 
 [build-system]

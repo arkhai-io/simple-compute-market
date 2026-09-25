@@ -30,7 +30,7 @@ _TAGS = {"deliverable_modes": ["vm"], "advertisable_modes": ["vm"], "capacity_ba
 
 def _pool(pool_id, *, gpu_model="H100", members=(("r1", 4, 4),), tags=_TAGS):
     return {
-        "resource_pool_id": pool_id,
+        "pool_id": pool_id,
         "pool_metadata": {
             "enabled": True,
             "policy_tags": {**tags, "listing_cardinality_mode": "fungible", "region": "us-east"},

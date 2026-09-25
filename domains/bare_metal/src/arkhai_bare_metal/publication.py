@@ -1,77 +1,51 @@
-"""Bare-metal listing derivation from trusted per-resource projections."""
+"""Bare-metal listing derivation from a site's resource-pool projection."""
 
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from .projections import BareMetalResourceProjection, TrustedBareMetalProjection
+from .projections import (
+    BareMetalResourceProjection,
+    TrustedBareMetalProjection,
+    TrustedBareMetalResource,
+)
 from .schema import BareMetalListing
 
 BARE_METAL_PUBLICATION_VIEW = "bare_metal.v2"
 
 
-def _length_prefixed(value: str) -> str:
-    """Encode a field so its boundary is unambiguous regardless of its
-    own content -- ``site_id``/``physical_resource_id`` are operator-
-    chosen strings with no character restrictions (``physical_resource_id``
-    is a bare ``pydantic`` ``str`` field, ``min_length=1`` only), so naive
-    delimiter-joining these fields is not collision-free:
-    ``site_id="a", physical_resource_id="b:c"`` and
-    ``site_id="a:b", physical_resource_id="c"`` would otherwise produce
-    an identical key. A decimal length prefix followed by exactly that
-    many characters fixes each field's boundary exactly, independent of
-    its contents, making the overall key injective (different inputs
-    always produce different keys). Kept local to this module rather
-    than shared with the VM domain's equivalent -- domains do not
-    depend on each other for this.
-    """
-    return f"{len(value)}:{value}"
-
-
-def bare_metal_listing_key(
-    *,
-    site_id: str,
-    physical_resource_id: str,
-) -> str:
-    """Return the site-scoped derivation key for one Physical Resource."""
-    if not site_id.strip():
-        raise ValueError("site_id must be non-empty")
-    if not physical_resource_id.strip():
-        raise ValueError("physical_resource_id must be non-empty")
-    return (
-        f"bare-metal:{_length_prefixed(site_id)}"
-        f":{_length_prefixed(physical_resource_id)}"
-    )
-
-
 def trusted_bare_metal_projection(
     *,
     site_id: str,
-    revision: int,
-    digest: str,
-    resource_pools: Iterable[Mapping[str, Any]],
-    complete: bool,
-    stale: bool = False,
+    projection: Mapping[str, Any],
 ) -> TrustedBareMetalProjection:
-    """Interpret one trusted site's complete resource-pool generation.
+    """Interpret one trusted site's resource-pool projection generation.
 
-    The caller supplies ``site_id`` from local trusted configuration. Remote
-    resource rows provide no routing authority. A malformed enabled view fails
-    the complete generation rather than being silently skipped.
+    ``projection`` is the site's response: its ``revision``, ``digest``, and
+    ``resource_pools``. The caller supplies ``site_id`` from local trusted
+    configuration; remote rows provide no routing authority.
+
+    Listings derive from the view the site builds from each capacity
+    declaration, the one admission accounts against, never from a view a
+    storefront assembles from publication attributes, which could name a
+    different machine than the one admission would reserve.
+
+    Every resource carrying a bare-metal view is kept with its containing pool
+    entry's ``pool_id`` and its own declared ``enabled``. The containing entry
+    is authoritative for the resource's pool, so a view repeating a different
+    pool, or naming a different Physical Resource than its container, refuses
+    the whole generation, as does any malformed view: a consumer then holds
+    what it derived from the site rather than guessing which copy is right.
     """
-    if not complete:
-        return TrustedBareMetalProjection(
-            site_id=site_id,
-            revision=revision,
-            digest=digest,
-            complete=False,
-            stale=stale,
-            resources=[],
-        )
+    raw_pools = projection.get("resource_pools")
+    if not isinstance(raw_pools, list):
+        raise ValueError("resource-pool projection must carry a resource_pools list")
 
-    resources: list[BareMetalResourceProjection] = []
-    for pool in resource_pools:
+    resources: list[TrustedBareMetalResource] = []
+    for pool in raw_pools:
+        if not isinstance(pool, Mapping):
+            raise ValueError("resource-pool entry must be a mapping")
         raw_resources = pool.get("resources") or []
         if not isinstance(raw_resources, list):
             raise ValueError("resource-pool resources must be a list")
@@ -84,32 +58,34 @@ def trusted_bare_metal_projection(
             raw_view = views.get(BARE_METAL_PUBLICATION_VIEW)
             if raw_view is None:
                 continue
-            view = BareMetalResourceProjection.model_validate(
-                {
-                    **raw_view,
-                    "pool_id": (
-                        raw_view.get("pool_id")
-                        or pool.get("resource_pool_id")
-                        or raw_resource.get("pool_id")
-                    ),
-                }
-            )
-            projected_id = str(
-                raw_resource.get("physical_resource_id") or "",
-            )
-            if view.physical_resource_id != projected_id:
+            if not isinstance(raw_view, Mapping):
+                raise ValueError("bare-metal view must be a mapping")
+            pool_id = pool.get("pool_id")
+            if not isinstance(pool_id, str) or not pool_id.strip():
+                raise ValueError("a bare-metal view's containing pool names no pool_id")
+            enabled = raw_resource.get("enabled")
+            if not isinstance(enabled, bool):
+                raise ValueError("a projected resource must declare its enablement")
+            view = BareMetalResourceProjection.model_validate(raw_view)
+            if view.physical_resource_id != str(
+                raw_resource.get("physical_resource_id") or ""
+            ):
                 raise ValueError(
                     "bare-metal view physical_resource_id conflicts with "
                     "the containing site projection",
                 )
-            resources.append(view)
+            resources.append(
+                TrustedBareMetalResource(
+                    pool_id=pool_id,
+                    enabled=enabled,
+                    view=view,
+                )
+            )
 
     return TrustedBareMetalProjection(
         site_id=site_id,
-        revision=revision,
-        digest=digest,
-        complete=True,
-        stale=stale,
+        revision=projection.get("revision"),
+        digest=projection.get("digest"),
         resources=resources,
     )
 

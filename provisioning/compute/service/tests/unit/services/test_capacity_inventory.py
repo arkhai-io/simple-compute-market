@@ -16,7 +16,11 @@ from compute_provisioning_service.services.capacity_inventory import (
     load_capacity_pool_metadata,
     load_capacity_resource_inventory,
 )
+from arkhai_bare_metal.fixtures.publication_view import (
+    validate_bare_metal_publication_view,
+)
 from market_resource_pools import ResourcePool
+from market_site.projections import resource_pool_projection
 
 
 def _declaration(**overrides):
@@ -234,6 +238,36 @@ def test_the_bare_metal_view_becomes_unavailable_when_any_dimension_is_held():
     view = projected["publication_views"]["bare_metal.v2"]
     assert view["capacity"] == projected["capacity"]
     assert view["available"] is False
+
+
+def test_every_bare_metal_view_meets_its_consumers_contract():
+    """Each view the site projects is one a bare-metal storefront accepts: it
+    names the resource and the pool entry that contain it, as the site's
+    resource-pool projection groups them."""
+    declarations = [
+        *SPECIFIC_RESOURCE_DECLARATIONS,
+        _bare_metal_declaration(resource_id="physical-resource-3", enabled=False),
+        _bare_metal_declaration(
+            resource_id="physical-resource-4",
+            available={"gpu_count": 0, "ram_gb": 0},
+        ),
+    ]
+
+    pools = resource_pool_projection(load_capacity_resource_inventory(declarations))
+
+    validated = 0
+    for pool in pools:
+        for resource in pool["resources"]:
+            view = (resource.get("publication_views") or {}).get("bare_metal.v2")
+            if view is None:
+                continue
+            validate_bare_metal_publication_view(
+                view,
+                physical_resource_id=resource["physical_resource_id"],
+                pool_id=pool["pool_id"],
+            )
+            validated += 1
+    assert validated == 3
 
 
 def test_the_bare_metal_view_is_unavailable_for_a_disabled_declaration():

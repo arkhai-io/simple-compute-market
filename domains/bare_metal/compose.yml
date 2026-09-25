@@ -2,7 +2,9 @@
 #
 # This stack runs the dedicated wheel-only storefront, one compute-family
 # registry, and the ordinary selected-site provisioning authority. It never
-# enables the provisioning test controller or substitutes mock fulfillment.
+# enables the provisioning test controller or substitutes mock fulfillment;
+# only the end-to-end lane's development overlay, compose.bare-metal-local.yml,
+# does.
 # Deployment-specific principals and signer credentials are supplied by the
 # root compose.bare-metal.yml wrapper.
 

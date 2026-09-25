@@ -70,6 +70,11 @@ selected-site lease-release result, and then proves the previously working SSH
 access no longer works. Whole-host release is therefore not modeled as VM
 destruction, and neither scenario reads a provisioning authority directly.
 
+That SSH proof needs a real host, which the end-to-end pipeline never has. The
+bare-metal deal that runs in the pipeline is mock-provisioned and owned by
+`bare-metal-mock-provisioned-deal`; it observes teardown as far as the site's
+returned capacity, and the SSH proof stays the protected lane's.
+
 ## Risks / Trade-offs
 
 - **[Scenarios are copied per domain rather than fixtures generalized]** → The main risk,

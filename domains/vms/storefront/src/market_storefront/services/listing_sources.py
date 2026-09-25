@@ -44,7 +44,7 @@ def _pool_for_source(
     resource_id: str | None,
 ) -> str | None:
     for pool in pools:
-        candidate = str(pool.get("resource_pool_id") or "")
+        candidate = str(pool.get("pool_id") or "")
         if pool_id is not None:
             if candidate == pool_id:
                 return candidate

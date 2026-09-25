@@ -155,32 +155,35 @@ wheels = [
 
 [[package]]
 name = "arkhai-bare-metal"
-version = "0.4.0"
+version = "0.5.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_bare_metal-0.4.0-py3-none-any.whl" },
+    { path = "arkhai_bare_metal-0.5.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-bare-metal-storefront"
-version = "0.4.0"
+version = "0.5.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-bare-metal" },
     { name = "arkhai-compute-provisioning" },
     { name = "arkhai-core" },
     { name = "arkhai-core-storefront" },
+    { name = "arkhai-core-storefront-client" },
     { name = "arkhai-hosted-settlement-client" },
     { name = "arkhai-kit-alkahest" },
+    { name = "arkhai-kit-capacity-publication" },
     { name = "arkhai-kit-contact-exchange" },
     { name = "arkhai-kit-delivery" },
     { name = "arkhai-kit-hosted-settlement" },
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-policy" },
+    { name = "arkhai-kit-resource-pools" },
     { name = "arkhai-kit-settlement-runtime" },
     { name = "arkhai-kit-site-client" },
     { name = "arkhai-kit-storefront" },
@@ -189,7 +192,7 @@ dependencies = [
     { name = "uvicorn" },
 ]
 wheels = [
-    { path = "arkhai_bare_metal_storefront-0.4.0-py3-none-any.whl" },
+    { path = "arkhai_bare_metal_storefront-0.5.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -300,7 +303,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-capacity-publication"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core-registry-client" },
@@ -308,7 +311,7 @@ dependencies = [
     { name = "arkhai-kit-site-client" },
 ]
 wheels = [
-    { path = "arkhai_kit_capacity_publication-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_kit_capacity_publication-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -426,7 +429,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-pool-overrides"
-version = "0.1.0"
+version = "0.2.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-identity" },
@@ -434,12 +437,12 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_pool_overrides-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_kit_pool_overrides-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-resource-pools"
-version = "0.4.0"
+version = "0.5.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-capability-shape" },
@@ -448,7 +451,7 @@ dependencies = [
     { name = "sqlalchemy" },
 ]
 wheels = [
-    { path = "arkhai_kit_resource_pools-0.4.0-py3-none-any.whl" },
+    { path = "arkhai_kit_resource_pools-0.5.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -466,7 +469,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-site"
-version = "0.4.0"
+version = "0.5.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-identity" },
@@ -477,12 +480,12 @@ dependencies = [
     { name = "sqlalchemy" },
 ]
 wheels = [
-    { path = "arkhai_kit_site-0.4.0-py3-none-any.whl" },
+    { path = "arkhai_kit_site-0.5.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-site-client"
-version = "0.5.0"
+version = "0.6.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-identity" },
@@ -490,7 +493,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_site_client-0.5.0-py3-none-any.whl" },
+    { path = "arkhai_kit_site_client-0.6.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -521,7 +524,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms-listings"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-alkahest" },
@@ -531,7 +534,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_vms_listings-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_vms_listings-0.3.0-py3-none-any.whl" },
 ]
 
 [package.optional-dependencies]
@@ -569,7 +572,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms-storefront"
-version = "0.6.0"
+version = "0.7.0"
 source = { editable = "." }
 dependencies = [
     { name = "alkahest-py" },
@@ -641,29 +644,29 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "alkahest-py", specifier = "==1.1.2" },
-    { name = "arkhai-bare-metal", specifier = ">=0.4.0" },
-    { name = "arkhai-bare-metal-storefront", specifier = "==0.4.0" },
+    { name = "arkhai-bare-metal", specifier = ">=0.5.0" },
+    { name = "arkhai-bare-metal-storefront", specifier = "==0.5.0" },
     { name = "arkhai-compute-provisioning", specifier = ">=0.6.1" },
     { name = "arkhai-core", specifier = ">=0.2.0" },
     { name = "arkhai-core-registry-client", specifier = ">=0.12.0" },
     { name = "arkhai-core-storefront", specifier = ">=0.6.0" },
     { name = "arkhai-core-storefront-client", specifier = ">=0.20.0" },
     { name = "arkhai-kit-alkahest" },
-    { name = "arkhai-kit-capacity-publication", specifier = "==0.2.0" },
+    { name = "arkhai-kit-capacity-publication", specifier = "==0.3.0" },
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-fulfillment", specifier = ">=0.3.0" },
     { name = "arkhai-kit-hosted-settlement", specifier = "==0.1.4" },
     { name = "arkhai-kit-identity", specifier = "==0.3.0" },
     { name = "arkhai-kit-negotiation-runtime", specifier = "==0.2.0" },
     { name = "arkhai-kit-policy" },
-    { name = "arkhai-kit-pool-overrides", specifier = "==0.1.0" },
-    { name = "arkhai-kit-resource-pools", specifier = ">=0.3.0" },
+    { name = "arkhai-kit-pool-overrides", specifier = "==0.2.0" },
+    { name = "arkhai-kit-resource-pools", specifier = ">=0.5.0" },
     { name = "arkhai-kit-settlement-runtime", specifier = ">=0.1.0" },
     { name = "arkhai-kit-site", specifier = ">=0.4.0" },
-    { name = "arkhai-kit-site-client", specifier = ">=0.4.0" },
+    { name = "arkhai-kit-site-client", specifier = ">=0.6.0" },
     { name = "arkhai-kit-storefront", specifier = "==0.1.1" },
     { name = "arkhai-vms", specifier = ">=0.3.0" },
-    { name = "arkhai-vms-listings", extras = ["pools", "overrides"], specifier = ">=0.1.0" },
+    { name = "arkhai-vms-listings", extras = ["pools", "overrides"], specifier = ">=0.3.0" },
     { name = "arkhai-vms-negotiation", specifier = ">=0.1.0" },
     { name = "arkhai-vms-settlement", specifier = ">=0.1.0" },
     { name = "codespell", marker = "extra == 'lint'", specifier = ">=2.2.0,<3.0.0" },

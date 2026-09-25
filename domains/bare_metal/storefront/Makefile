@@ -17,8 +17,10 @@ reinit: ## Upgrade and reinstall changed internal wheel dependencies
 		--upgrade-package arkhai-bare-metal    --reinstall-package arkhai-bare-metal \
 		--upgrade-package arkhai-core          --reinstall-package arkhai-core \
 		--upgrade-package arkhai-core-storefront --reinstall-package arkhai-core-storefront \
+		--upgrade-package arkhai-core-storefront-client --reinstall-package arkhai-core-storefront-client \
 		--upgrade-package arkhai-compute-provisioning --reinstall-package arkhai-compute-provisioning \
 		--upgrade-package arkhai-kit-alkahest   --reinstall-package arkhai-kit-alkahest \
+		--upgrade-package arkhai-kit-capacity-publication --reinstall-package arkhai-kit-capacity-publication \
 		--upgrade-package arkhai-kit-contact-exchange --reinstall-package arkhai-kit-contact-exchange \
 		--upgrade-package arkhai-kit-identity  --reinstall-package arkhai-kit-identity \
 		--upgrade-package arkhai-kit-policy     --reinstall-package arkhai-kit-policy \

@@ -7,11 +7,11 @@ reconciliation closed when their source supports them again. It never touches a
 listing its seller closed. See openspec/specs/storefront-publication/spec.md,
 "Publication runs as a controllable storefront lifecycle loop".
 
-The shared publication runner in ``core_storefront`` is synchronous, so a cycle
-runs it in a worker thread and each callback returns to the event loop for the
-storefront's own async services. A dry run drives exactly the same callbacks,
-which record what they would do instead of doing it, so a preview and a run
-cannot disagree about what a cycle means.
+The capacity-publication kit's cycle driver runs the synchronous core
+publication runner in a worker thread and returns each callback to the event
+loop for the storefront's own async services. A dry run drives exactly the same
+callbacks, which record what they would do instead of doing it, so a preview
+and a run cannot disagree about what a cycle means.
 """
 
 from __future__ import annotations
@@ -19,13 +19,11 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass, field
 from typing import Any, TypeVar
 
 from core_storefront.publication_runner import (
     REOPEN_UNCHANGED,
     PublicationPayload,
-    run_publication_cycle,
 )
 from domains.vms.listings.listing_comparison import (
     REFRESH_IN_PLACE,
@@ -41,7 +39,13 @@ from domains.vms.listings.reconciler import (
     open_listing_resource_keys,
     stale_open_listing_ids,
 )
-from market_capacity_publication import BoundListing, ReconciliationPlan
+from market_capacity_publication import (
+    BoundListing,
+    PublicationCycleDriver,
+    PublicationCycleReport,
+    ReconciliationPlan,
+    converge_registries,
+)
 
 import market_storefront.container as container
 from market_storefront.services.shape_feasibility import vm_shape_feasibility
@@ -95,28 +99,6 @@ def wake_publication_loop() -> None:
     _WAKE.set()
 
 
-@dataclass
-class PublicationCycleReport:
-    """What one cycle did, or in a dry run would do, and why."""
-
-    dry_run: bool
-    actions: list[dict[str, Any]] = field(default_factory=list)
-
-    def record(self, action: str, **details: Any) -> None:
-        self.actions.append({"action": action, **details})
-
-    def as_dict(self) -> dict[str, Any]:
-        counts: dict[str, int] = {}
-        for item in self.actions:
-            counts[item["action"]] = counts.get(item["action"], 0) + 1
-        return {
-            "loop": "publication",
-            "dry_run": self.dry_run,
-            "actions": list(self.actions),
-            "counts": dict(sorted(counts.items())),
-        }
-
-
 def _source_of(candidate: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "site_id": candidate.get("site_id"),
@@ -154,7 +136,7 @@ class VmPublicationCycle:
         self._storefront_url = storefront_url
         self._wallet_address = wallet_address
         self.report = PublicationCycleReport(dry_run=dry_run)
-        self._event_loop: asyncio.AbstractEventLoop | None = None
+        self._driver = PublicationCycleDriver()
         self._projection: Mapping[str, list[dict[str, Any]]] | None = None
         self._buckets: Mapping[str, list[dict[str, Any]]] | None = None
         self._availability: Mapping[tuple[str, str], int] | None = None
@@ -166,25 +148,18 @@ class VmPublicationCycle:
     def dry_run(self) -> bool:
         return self.report.dry_run
 
-    # -- bridging --------------------------------------------------------
-
     def _await(self, awaitable: Awaitable[T]) -> T:
-        assert self._event_loop is not None
-        return asyncio.run_coroutine_threadsafe(
-            awaitable,  # type: ignore[arg-type]
-            self._event_loop,
-        ).result()
+        return self._driver.call(awaitable)
 
     # -- cycle -----------------------------------------------------------
 
     async def run(self) -> dict[str, Any]:
-        self._event_loop = asyncio.get_running_loop()
         sites = list(self._capacity.site_ids)
         self._home_site = sites[0] if sites else None
         self._sites = tuple(sites)
         if self._home_site is None:
             await self._converge_registries()
-            return self.report.as_dict()
+            return self._report()
         self._projection = listing_source_projection()
         self._buckets = (
             site_capacity_buckets() if self._projection is not None else None
@@ -209,8 +184,7 @@ class VmPublicationCycle:
                 reopen_existing=self._reopen_existing,
             ),
         )
-        await asyncio.to_thread(
-            run_publication_cycle,
+        await self._driver.run(
             selection.build_sources(),
             db_path=self._db.db_path,
             base_url=self._storefront_url,
@@ -220,7 +194,7 @@ class VmPublicationCycle:
             skip_open=False,
         )
         await self._converge_registries()
-        return self.report.as_dict()
+        return self._report()
 
     async def _converge_registries(self) -> None:
         """Repair every registry that missed a publish, close, or reopen.
@@ -228,22 +202,10 @@ class VmPublicationCycle:
         Runs after derivation so it sees this cycle's own outcomes; a dry run
         reports what it would resend without sending it.
         """
-        runtime = self._runtime()
-        divergences = await runtime.publication_divergence()
-        for divergence in divergences:
-            self.report.record(
-                "converge",
-                listing_id=divergence.listing_id,
-                status=divergence.listing_status,
-                registries=list(divergence.registry_urls),
-            )
-        if self.dry_run or not divergences:
-            return
-        result = await runtime.converge(divergences)
-        for listing_id in result["unrepaired"]:
-            self.report.record(
-                "fail", listing_id=listing_id, reason="registry_not_converged"
-            )
+        await converge_registries(self._runtime(), self.report)
+
+    def _report(self) -> dict[str, Any]:
+        return {"loop": "publication", **self.report.as_dict()}
 
     # -- source callbacks (worker thread) --------------------------------
 
@@ -545,7 +507,6 @@ async def publication_loop(
 
 
 __all__ = [
-    "PublicationCycleReport",
     "VmPublicationCycle",
     "publication_loop",
     "run_publication_cycle_once",

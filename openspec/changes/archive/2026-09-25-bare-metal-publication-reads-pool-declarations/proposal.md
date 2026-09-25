@@ -58,8 +58,17 @@ the same mechanisms as VM.
   moved to another pool is an identity change.
 - Carry no data migration or compatibility path for earlier bare-metal storefront
   state: bare metal is not yet deployed as a domain.
-- Keep availability-driven closes distinct from source withdrawal.
-- Check each site's projection in the storefront's health check.
+- Classify every bare-metal resource into exactly one of candidate, unavailable, held,
+  or withdrawn, reading the declaration's `enabled` from the projected resource rather
+  than the view, so an availability close is never a source withdrawal.
+- Take a resource's pool from the projection entry that contains it, and reject a site's
+  generation whose bare-metal view names a different pool.
+- Rename the site projections' `resource_pool_id` to `pool_id`, the name the pool's
+  identifier has everywhere else, in both the resource-pool and capacity-bucket
+  projections, changing the site and every reader together, since one operator deploys a
+  storefront with the sites it talks to.
+- Report each site's projection in the storefront's health response, per site and outside
+  every gated check, as VM's health does.
 - Define "publication candidate" in `ARCHITECTURE.md`'s "One name per concept".
 
 ## Capabilities
@@ -70,6 +79,8 @@ None.
 
 ### Modified Capabilities
 
+- `site-capacity`: projection rows name their pool `pool_id`, and within the
+  resource-pool projection a resource's pool is the entry that contains it.
 - `storefront-publication`: the advertisement requirement covers bare-metal listings,
   with its exemption removed; an unbacked pool yields no bare-metal listing; a held
   site holds bare-metal listings; registry convergence covers bare-metal publication,
@@ -96,7 +107,23 @@ None.
 - `domains/bare_metal/src/arkhai_bare_metal/`: candidate derivation from the projection
   view, and retirement of the storefront-side view construction and domain-table
   tracking.
-- `openspec/specs/storefront-publication/spec.md` and `docs/development/ARCHITECTURE.md`.
+- `kit/site` and the compute provisioning service (projection producer and server),
+  `kit/site-client` (projection contract fixtures), `kit/resource-pools` (the declaration
+  reader), `kit/pool-overrides`, `arkhai-vms-listings` and the VM storefront (projection
+  readers): the `pool_id` rename. Its rollout closes and reopens listings from a site
+  while that site and its storefront run different versions, which is accepted. Each changed kit
+  takes a SemVer bump, and every lock recording a bumped package is regenerated.
+- `kit/capacity-publication` (0.3.0): the async publication cycle driver, report, and
+  convergence step, extracted from the VM storefront, which the VM and bare-metal
+  cycles now compose onto; the API-credit storefront's pin on it moves (0.4.1).
+- The bare-metal storefront's administrator routes accept the canonical storefront
+  client's signed contract, and the storefront depends on that client.
+- End-to-end: a bare-metal lane beside the VM lane (its own stack, with one mock-profile
+  site, and its own GitHub Actions job), a publication step on the bare-metal
+  storefront's administrator surface, and a publication scenario. A mock-provisioned
+  complete deal is `bare-metal-mock-provisioned-deal`'s.
+- `openspec/specs/site-capacity/spec.md`, `openspec/specs/storefront-publication/spec.md`,
+  and `docs/development/ARCHITECTURE.md`.
 
 ## Permanent documentation impact
 
@@ -104,7 +131,8 @@ None.
       concept", added during design because it defines a term already in use; and the
       capacity-publication section's description of bare-metal publication, re-confirmed
       at implementation.
-- [x] Existing subsystem specification — `openspec/specs/storefront-publication/spec.md`.
+- [x] Existing subsystem specification — `openspec/specs/storefront-publication/spec.md`,
+      `openspec/specs/site-capacity/spec.md`.
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 
@@ -118,6 +146,8 @@ None.
   `openspec/specs/storefront-publication/spec.md`.
 - Registry convergence covers bare-metal publication, and a new listing is recorded
   locally before any registry is told — `openspec/specs/storefront-publication/spec.md`.
+- Projection rows name their pool `pool_id`, and the containing entry is a resource's
+  pool — `openspec/specs/site-capacity/spec.md`.
 - Why bare metal derives from the resource-pool projection rather than the capacity
   projection, and why
   its listings are tracked by the common binding —

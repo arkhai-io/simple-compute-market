@@ -72,10 +72,10 @@ None.
 
 ## Dependencies
 
-- **Blocked on `bare-metal-publication-reads-pool-declarations`**, for projected pool
-  declarations and the kit publication runtime. That change adds the requirement that an
-  unbacked pool yields no bare-metal listing, and this change's delta removes it, so that
-  change must be archived first.
+- **Depends on `bare-metal-publication-reads-pool-declarations`** (complete), for
+  projected pool declarations and the kit publication runtime. That change added the
+  requirement that an unbacked pool yields no bare-metal listing, now promoted into
+  `openspec/specs/storefront-publication/spec.md`; this change's delta removes it.
 - **Blocked on `bare-metal-listing-shapes`**, so an unbacked bare-metal listing is
   discoverable by the compute schema's dimension filters.
 - **Blocked on `compose-contact-exchange-across-compute`** Sections 1–3b, for the

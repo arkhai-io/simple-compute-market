@@ -190,8 +190,16 @@ the registry service boundary.
 `arkhai-kit-capacity-publication` owns the storefront-side multi-site capacity
 source, exact site projections, capacity-event reconciliation loop, registry
 fan-out, durable publication result recording, and close-before-reopen
-lifecycle. A domain contribution supplies only schema-opaque candidates and
-codecs plus hooks that resolve each listing's durable capacity binding.
+lifecycle. It also owns how an async storefront drives one publication cycle:
+the driver that runs the synchronous core publication runner in a worker thread
+and returns each source callback to the event loop, the cycle report, and the
+registry convergence every publication pass ends with. A domain contribution
+supplies only schema-opaque candidates and codecs plus hooks that resolve each
+listing's durable capacity binding. Each storefront keeps its domain's cycle
+semantics — which sources it reads, what it derives, closes, and holds — and
+composes them onto that driver; VM publication reads the kit's site projections
+and capacity events, while bare-metal publication fetches each site's
+resource-pool projection itself on every run.
 
 Every capacity-backed candidate carries
 `CapacityBinding(site_id, offering_mode, source_id)`. The site ID comes from
@@ -204,9 +212,11 @@ and applies only where a pool was selected. Publication,
 reservation, commit, release, and restart recovery reload and compare that
 exact binding. An unknown site, missing mode, changed binding, or incomplete
 candidate fails closed; the runtime never invents a home site, scans other
-authorities after restart, or defaults an offering mode. VM and API-credit
-contributions inject their candidate derivation and binding codecs into this
-same runtime. The kit imports no VM, API-credit, bare-metal, provider, or
+authorities after restart, or defaults an offering mode. VM, API-credit, and
+bare-metal contributions inject their candidate derivation and binding codecs
+into this same runtime, so each publishes, reconciles, and converges its
+registries through one implementation. A bare-metal binding's source is the
+Physical Resource the listing sells. The kit imports no VM, API-credit, bare-metal, provider, or
 deployed-service package.
 
 The storefront role is one domain-neutral compute-family shell. At startup it
@@ -489,7 +499,8 @@ exactly one name.
 
 The offering mode carries one name on every surface that names it: the capacity
 claim, the Resource Pool's deliverable and advertisable declarations, the durable
-listing binding, and the published listing. It is a separate axis from the
+listing binding, and the published listing. So does the pool's identifier,
+`pool_id`, including in the site's resource-pool and capacity-bucket projections. It is a separate axis from the
 site-inventory `resource_kind`/`resource_type` discriminator, and naming it
 consistently does not merge the two.
 

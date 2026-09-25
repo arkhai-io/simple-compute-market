@@ -1,12 +1,12 @@
 # Tasks — publish indicative listing rates
 
 **Blocked.** Section 2 has no domain dependency and may proceed. Sections 3–4 wait
-on `bare-metal-publication-reads-pool-declarations` and `bare-metal-listing-shapes`,
-because bare metal is Goal 7's primary target domain and cannot read an asking rate
-until its publication reads pool declarations and publishes a capability shape per
-listing. The unbacked-supply system validations (7.11–7.13) additionally wait on
-`unbacked-bare-metal-listings` for bare metal and `compose-contact-exchange-across-compute`
-for VM.
+on `bare-metal-listing-shapes`, because bare metal is Goal 7's primary target domain
+and cannot read an asking rate until it publishes a capability shape per listing;
+`bare-metal-publication-reads-pool-declarations`, which made its publication read
+pool declarations, is complete. The unbacked-supply system validations (7.11–7.13)
+additionally wait on `unbacked-bare-metal-listings` for bare metal and
+`compose-contact-exchange-across-compute` for VM.
 
 This task list is a baseline carried from the design phase. It is rewritten during
 planning, which names the exact files each accepted decision touches.

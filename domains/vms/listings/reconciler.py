@@ -606,7 +606,7 @@ def _fungible_availability_from_buckets(
     saw_matching_entry = False
     saw_usable_entry = False
     for bucket in capacity_buckets:
-        if str(bucket.get("resource_pool_id") or "") != pool_id:
+        if str(bucket.get("pool_id") or "") != pool_id:
             continue
         saw_matching_entry = True
         bucket_available = _bucket_gpu_count(bucket)
@@ -842,7 +842,7 @@ def _projected_pool_rows(
     feasible for (``feasible_shapes``). A listing's terms are those of its
     shape's model.
     """
-    pool_id = str(pool.get("resource_pool_id") or "").strip()
+    pool_id = str(pool.get("pool_id") or "").strip()
     if not pool_id:
         return []
     # A listing may advertise only a mode its pool declares advertisable,
@@ -989,7 +989,7 @@ def _projected_pool_rows(
         else [
             bucket
             for bucket in capacity_buckets
-            if str(bucket.get("resource_pool_id") or "") == pool_id
+            if str(bucket.get("pool_id") or "") == pool_id
         ]
     )
 
@@ -1247,7 +1247,7 @@ def _pool_rows_from_projection(
             else None
         )
         for pool in pools:
-            pool_id = str(pool.get("resource_pool_id") or "").strip()
+            pool_id = str(pool.get("pool_id") or "").strip()
             declaration = declarations.resolved.get(pool_id)
             if declaration is None:
                 continue

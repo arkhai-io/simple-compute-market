@@ -17,7 +17,7 @@ MODULE ?= contracts
 # CLI instead; this variable is for local development only.
 DIST_DIR ?= ../.dist
 
-.PHONY: build venv test test-e2e hosted-preflight hosted-start hosted-restart hosted-clean hosted-stripe-test hosted-stripe-test-stop
+.PHONY: build venv test test-e2e test-e2e-vm test-e2e-bare-metal e2e-vm-down hosted-preflight hosted-start hosted-restart hosted-clean hosted-stripe-test hosted-stripe-test-stop
 
 # -----------------------------------------------------------------------
 # Setup
@@ -145,7 +145,10 @@ NETWORK ?= simple-market-service_default
 BUYER_MODULE ?= e2e_deal_buyer_cli or e2e_buy
 E2E_MODULE ?= e2e_deal or e2e_deal_buyer_cli or e2e_buy or multi_registry \
               or e2e_compute_dynamic_listings or e2e_alkahest_escrow_codecs \
-              or e2e_credits_deal or e2e_bare_metal_deal or e2e_listing_shapes
+              or e2e_credits_deal or e2e_listing_shapes
+# The bare-metal lane's scenarios. `e2e_bare_metal_deal` is in neither lane: it
+# needs a real whole host to SSH into, which the pipeline never has.
+E2E_BARE_METAL_MODULE ?= e2e_bare_metal_publication
 
 test-buyer-machine:
 	docker run --rm \
@@ -193,7 +196,15 @@ E2E_IDENTITY_ENV ?= $(CURDIR)/../.e2e-identities.env
 # file redefine an imported service. See compose.local-identities.yml.
 E2E_COMPOSE_FILES := -f docker-compose.yml -f compose.local-identities.yml
 
-test-e2e:
+# Both lanes, one after the other. Each lane's stack runs its own `anvil`
+# container under that fixed name, so the VM stack is taken down before the
+# bare-metal stack comes up. CI runs the lanes as separate jobs instead.
+test-e2e: test-e2e-vm e2e-vm-down test-e2e-bare-metal
+
+e2e-vm-down:
+	cd .. && docker compose --env-file "$(E2E_IDENTITY_ENV)" $(E2E_COMPOSE_FILES) down -v --remove-orphans
+
+test-e2e-vm:
 	@# Every signer, wallet, buyer-path, and bearer-token value in the compose
 	@# files is guarded with a required-variable form, so *any* compose
 	@# subcommand that reads the config -- down as much as up -- refuses to run
@@ -231,3 +242,36 @@ test-e2e:
 		  exit 1; \
 		}
 	$(MAKE) test-buyer-machine BUYER_MODULE="$(E2E_MODULE)"
+
+# -----------------------------------------------------------------------
+# Bare-metal lane
+# -----------------------------------------------------------------------
+# One mock-profile site, the bare-metal storefront, its registry, and the dev
+# chain, as a compose project of its own so its network and volumes never mix
+# with the VM stack's. Every value comes from `make e2e-bare-metal-dev-env`,
+# which generates the publication deadlines at each run; see
+# compose.bare-metal-local.yml.
+E2E_BARE_METAL_ENV ?= $(CURDIR)/../.e2e-bare-metal.env
+E2E_BARE_METAL_PROJECT := simple-market-bare-metal
+E2E_BARE_METAL_COMPOSE := -p $(E2E_BARE_METAL_PROJECT) \
+	-f compose.bare-metal.yml -f compose.dev.yml -f compose.bare-metal-local.yml
+
+test-e2e-bare-metal:
+	cd .. && $(MAKE) -s --no-print-directory e2e-bare-metal-dev-env > "$(E2E_BARE_METAL_ENV)"
+	cd .. && docker compose --env-file "$(E2E_BARE_METAL_ENV)" $(E2E_BARE_METAL_COMPOSE) down -v --remove-orphans
+	cd .. && $(MAKE) build-dev
+	@# As in test-e2e-vm: on failure, print each container's own output here,
+	@# in the failing step, rather than only in the uploaded artifact.
+	cd .. && docker compose --env-file "$(E2E_BARE_METAL_ENV)" $(E2E_BARE_METAL_COMPOSE) up -d --wait \
+		|| { \
+		  echo "::group::compose ps"; \
+		  docker compose --env-file "$(E2E_BARE_METAL_ENV)" $(E2E_BARE_METAL_COMPOSE) ps -a; \
+		  echo "::endgroup::"; \
+		  for svc in $$(docker compose --env-file "$(E2E_BARE_METAL_ENV)" $(E2E_BARE_METAL_COMPOSE) ps -a --services); do \
+		    echo "::group::logs $$svc"; \
+		    docker compose --env-file "$(E2E_BARE_METAL_ENV)" $(E2E_BARE_METAL_COMPOSE) logs --no-color --tail=120 "$$svc" || true; \
+		    echo "::endgroup::"; \
+		  done; \
+		  exit 1; \
+		}
+	$(MAKE) test-buyer-machine NETWORK=$(E2E_BARE_METAL_PROJECT)_default BUYER_MODULE="$(E2E_BARE_METAL_MODULE)"

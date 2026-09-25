@@ -1,0 +1,14 @@
+# Development fixture, not for a real site. Authoritative imports require the
+# default pool; it offers nothing. Scenarios declare their own pools through the
+# operator API. Startup reconciles this document only when it changes, so those
+# pools survive restarts.
+pools:
+  - id: default
+    label: Inert development default
+    provider: bare_metal.ansible
+    enabled: true
+    policy_tags:
+      deliverable_modes: []
+      advertisable_modes: []
+      capacity_backing: backed
+    provider_config: {}

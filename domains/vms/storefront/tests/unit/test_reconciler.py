@@ -130,7 +130,7 @@ def _projected_pool_rows(pool, **kwargs):
     """
     from market_resource_pools import ResolvedPool, read_site_declarations
 
-    pool_id = str(pool.get("resource_pool_id") or "").strip()
+    pool_id = str(pool.get("pool_id") or "").strip()
     declaration = read_site_declarations([pool]).resolved.get(pool_id) or ResolvedPool(
         "backed", frozenset(), True
     )
@@ -486,7 +486,7 @@ class TestAvailableComputeSlices:
         projection = {
             "site-a": [
                 {
-                    "resource_pool_id": "gpu-pool",
+                    "pool_id": "gpu-pool",
                     "resources": [
                         {
                             "physical_resource_id": "res-1", "resource_type": "compute.gpu",
@@ -523,7 +523,7 @@ class TestAvailableComputeSlices:
         projection = {
             "site-b": [  # not home_site
                 {
-                    "resource_pool_id": "gpu-pool",  # same pool_id as the local row
+                    "pool_id": "gpu-pool",  # same pool_id as the local row
                     "resources": [
                         {
                             "physical_resource_id": "res-1", "resource_type": "compute.gpu",
@@ -549,7 +549,7 @@ class TestAvailableComputeSlices:
         projection = {
             "site-a": [
                 {
-                    "resource_pool_id": "unpriced-pool",
+                    "pool_id": "unpriced-pool",
                     "resources": [
                         {
                             "physical_resource_id": "res-1", "resource_type": "compute.gpu",
@@ -570,7 +570,7 @@ class TestAvailableComputeSlices:
         projection = {
             "site-a": [
                 {
-                    "resource_pool_id": "gpu-pool",
+                    "pool_id": "gpu-pool",
                     "resources": [
                         {
                             "physical_resource_id": "res-1", "resource_type": "compute.gpu",
@@ -597,7 +597,7 @@ class TestAvailableComputeSlices:
         _seed_pool(db_path, pool_id="gpu-pool", gpu_count=4)
         projection = {
             "site-a": [{
-                "resource_pool_id": "gpu-pool",
+                "pool_id": "gpu-pool",
                 "resources": [{
                     "physical_resource_id": "res-1", "resource_type": "compute.gpu",
                     "capacity": {"gpu_count": 8},
@@ -606,7 +606,7 @@ class TestAvailableComputeSlices:
                 }],
             }],
             "site-b": [{
-                "resource_pool_id": "other-pool",
+                "pool_id": "other-pool",
                 "resources": [{
                     "physical_resource_id": "res-2", "resource_type": "compute.gpu",
                     "capacity": {"gpu_count": 4},
@@ -638,7 +638,7 @@ class TestAvailableComputeSlices:
         prove nothing about the tiers that actually vary."""
         projection = {
             "site-a": [{
-                "resource_pool_id": "gpu-pool",
+                "pool_id": "gpu-pool",
                 "resources": [{
                     "physical_resource_id": "res-1", "resource_type": "compute.gpu",
                     "capacity": {"gpu_count": 4},
@@ -1220,14 +1220,14 @@ class TestFungibleAvailabilityFromBuckets:
 
     def test_loaded_family_with_no_matching_pool_is_trusted_zero(self):
         buckets = [
-            {"resource_pool_id": "other-pool", "available": {"gpu_count": 9}, "resource_count": 2},
+            {"pool_id": "other-pool", "available": {"gpu_count": 9}, "resource_count": 2},
         ]
         assert _fungible_availability_from_buckets("gpu-pool", buckets) == (0, 0)
 
     def test_matching_readable_bucket_is_used(self):
         buckets = [
             {
-                "resource_pool_id": "gpu-pool",
+                "pool_id": "gpu-pool",
                 "available": {"gpu_count": 6},
                 "resource_count": 2,
                 "grouping_attributes": {"gpu_model": "H100"},
@@ -1237,8 +1237,8 @@ class TestFungibleAvailabilityFromBuckets:
 
     def test_max_across_multiple_matching_buckets_not_sum(self):
         buckets = [
-            {"resource_pool_id": "gpu-pool", "available": {"gpu_count": 2}, "resource_count": 1},
-            {"resource_pool_id": "gpu-pool", "available": {"gpu_count": 6}, "resource_count": 1},
+            {"pool_id": "gpu-pool", "available": {"gpu_count": 2}, "resource_count": 1},
+            {"pool_id": "gpu-pool", "available": {"gpu_count": 6}, "resource_count": 1},
         ]
         max_available, total_available = _fungible_availability_from_buckets(
             "gpu-pool", buckets,
@@ -1251,14 +1251,14 @@ class TestFungibleAvailabilityFromBuckets:
         `available` (empty dict, no `gpu_count` key) -- not the same as
         a confirmed absence, must fall back rather than read as zero."""
         buckets = [
-            {"resource_pool_id": "gpu-pool", "available": {}, "resource_count": 1},
+            {"pool_id": "gpu-pool", "available": {}, "resource_count": 1},
         ]
         assert _fungible_availability_from_buckets("gpu-pool", buckets) is None
 
     def test_one_readable_and_one_unreadable_matching_bucket_uses_the_readable_one(self):
         buckets = [
-            {"resource_pool_id": "gpu-pool", "available": {}, "resource_count": 1},
-            {"resource_pool_id": "gpu-pool", "available": {"gpu_count": 4}, "resource_count": 1},
+            {"pool_id": "gpu-pool", "available": {}, "resource_count": 1},
+            {"pool_id": "gpu-pool", "available": {"gpu_count": 4}, "resource_count": 1},
         ]
         assert _fungible_availability_from_buckets("gpu-pool", buckets) == (4, 4)
 
@@ -1285,7 +1285,7 @@ class TestProjectedPoolRows:
     def test_pool_without_vm_deliverable_mode_is_excluded(self):
         rows = _projected_pool_rows(
             {
-                "resource_pool_id": "pool-1",
+                "pool_id": "pool-1",
                 "resources": [],
                 "pool_metadata": {
                     "policy_tags": {"deliverable_modes": ["bare_metal"]}
@@ -1305,7 +1305,7 @@ class TestProjectedPoolRows:
         even when a same-named local row exists -- but the pool still
         publishes, priceless, since a missing storefront-override tier is
         not a reason to suppress the pool entirely."""
-        rows = _project_vm_pool_rows({"resource_pool_id": "gpu-pool", "resources": [
+        rows = _project_vm_pool_rows({"pool_id": "gpu-pool", "resources": [
             {
                 "physical_resource_id": "res-1", "resource_type": "compute.gpu",
                 "capacity": {"gpu_count": 1}, "attributes": {"gpu_model": "H100"},
@@ -1324,7 +1324,7 @@ class TestProjectedPoolRows:
         storefront has never locally priced still publishes with real
         commercial terms, sourced entirely from its own projected hint."""
         rows = _project_vm_pool_rows({
-            "resource_pool_id": "gpu-pool",
+            "pool_id": "gpu-pool",
             "resources": [
                 {
                     "physical_resource_id": "res-1", "resource_type": "compute.gpu",
@@ -1355,7 +1355,7 @@ class TestProjectedPoolRows:
         assert _term(rows[0], "token") == "0xhint"
 
     def test_home_site_pool_with_no_local_row_publishes_priceless_by_default(self):
-        rows = _project_vm_pool_rows({"resource_pool_id": "unpriced", "resources": [
+        rows = _project_vm_pool_rows({"pool_id": "unpriced", "resources": [
             {
                 "physical_resource_id": "res-1", "resource_type": "compute.gpu",
                 "capacity": {"gpu_count": 1}, "attributes": {"gpu_model": "H100"},
@@ -1371,7 +1371,7 @@ class TestProjectedPoolRows:
 
     def test_home_site_pool_with_no_local_row_publishes_from_config_default(self):
         rows = _project_vm_pool_rows({
-            "resource_pool_id": "unpriced",
+            "pool_id": "unpriced",
             "resources": [
                 {
                     "physical_resource_id": "res-1", "resource_type": "compute.gpu",
@@ -1394,7 +1394,7 @@ class TestProjectedPoolRows:
     def test_home_site_pool_with_local_row_still_uses_it_as_the_override(self):
         """The corrected behavior doesn't disturb the ordinary case: a
         real local row still wins as the top-precedence override."""
-        rows = _project_vm_pool_rows({"resource_pool_id": "gpu-pool", "resources": [
+        rows = _project_vm_pool_rows({"pool_id": "gpu-pool", "resources": [
             {
                 "physical_resource_id": "res-1", "resource_type": "compute.gpu",
                 "capacity": {"gpu_count": 1}, "attributes": {"gpu_model": "H100"},
@@ -1409,7 +1409,7 @@ class TestProjectedPoolRows:
 
     def test_builds_one_fungible_row_for_home_site_pool_with_pricing(self):
         rows = _project_vm_pool_rows({
-            "resource_pool_id": "gpu-pool",
+            "pool_id": "gpu-pool",
             "resources": [
                 {
                     "physical_resource_id": "res-1", "resource_type": "compute.gpu",
@@ -1447,7 +1447,7 @@ class TestProjectedPoolRows:
         resource's identity would silently break the moment a
         projection without `pool_metadata` reaches this function."""
         rows = _project_vm_pool_rows({
-            "resource_pool_id": "gpu-pool",
+            "pool_id": "gpu-pool",
             "resources": [
                 {
                     "physical_resource_id": "res-1", "resource_type": "compute.gpu",
@@ -1466,7 +1466,7 @@ class TestProjectedPoolRows:
 
     def test_multi_member_pool_defaults_to_fungible_without_a_tag(self):
         rows = _project_vm_pool_rows({
-            "resource_pool_id": "gpu-pool",
+            "pool_id": "gpu-pool",
             "resources": [
                 {
                     "physical_resource_id": "res-1", "resource_type": "compute.gpu",
@@ -1489,7 +1489,7 @@ class TestProjectedPoolRows:
 
     def test_disabled_resources_are_excluded(self):
         rows = _project_vm_pool_rows({
-            "resource_pool_id": "gpu-pool",
+            "pool_id": "gpu-pool",
             "resources": [
                 {
                     "physical_resource_id": "res-1", "resource_type": "compute.gpu",
@@ -1507,7 +1507,7 @@ class TestProjectedPoolRows:
 
     def test_the_listing_model_is_the_members_never_the_legacy_rows(self):
         rows = _project_vm_pool_rows({
-            "resource_pool_id": "gpu-pool",
+            "pool_id": "gpu-pool",
             "resources": [
                 {
                     "physical_resource_id": "res-1", "resource_type": "compute.gpu",
@@ -1527,7 +1527,7 @@ class TestProjectedPoolRows:
         """A shape names a model only from a declaration; the legacy row's
         model would advertise hardware no member declares."""
         rows = _project_vm_pool_rows({
-            "resource_pool_id": "gpu-pool",
+            "pool_id": "gpu-pool",
             "resources": [
                 {
                     "physical_resource_id": "res-1", "resource_type": "compute.gpu",
@@ -1546,7 +1546,7 @@ class TestProjectedPoolRows:
 
     def test_region_hint_overrides_local_pricing_fallback(self):
         rows = _project_vm_pool_rows({
-            "resource_pool_id": "gpu-pool",
+            "pool_id": "gpu-pool",
             "resources": [
                 {"physical_resource_id": "res-1", "resource_type": "compute.gpu", "capacity": {"gpu_count": 4}, "enabled": True},
             ],
@@ -1559,7 +1559,7 @@ class TestProjectedPoolRows:
 
     def test_region_falls_back_to_local_pricing_without_a_hint(self):
         rows = _project_vm_pool_rows({
-            "resource_pool_id": "gpu-pool",
+            "pool_id": "gpu-pool",
             "resources": [
                 {"physical_resource_id": "res-1", "resource_type": "compute.gpu", "capacity": {"gpu_count": 4}, "enabled": True},
             ],
@@ -1575,7 +1575,7 @@ class TestProjectedPoolRows:
         override, taking precedence over any pool-declared hint
         regardless of the (default-closed) trust gate."""
         rows = _project_vm_pool_rows({
-            "resource_pool_id": "gpu-pool",
+            "pool_id": "gpu-pool",
             "resources": [
                 {"physical_resource_id": "res-1", "resource_type": "compute.gpu", "capacity": {"gpu_count": 4}, "enabled": True},
             ],
@@ -1588,7 +1588,7 @@ class TestProjectedPoolRows:
 
     def test_sla_pool_hint_used_when_no_local_override_and_gate_open(self):
         rows = _project_vm_pool_rows({
-            "resource_pool_id": "gpu-pool",
+            "pool_id": "gpu-pool",
             "resources": [
                 {"physical_resource_id": "res-1", "resource_type": "compute.gpu", "capacity": {"gpu_count": 4}, "enabled": True},
             ],
@@ -1604,7 +1604,7 @@ class TestProjectedPoolRows:
 
     def test_sla_pool_hint_ignored_when_gate_closed_even_with_no_override(self):
         rows = _project_vm_pool_rows({
-            "resource_pool_id": "gpu-pool",
+            "pool_id": "gpu-pool",
             "resources": [
                 {"physical_resource_id": "res-1", "resource_type": "compute.gpu", "capacity": {"gpu_count": 4}, "enabled": True},
             ],
@@ -1620,7 +1620,7 @@ class TestProjectedPoolRows:
 
     def test_sla_falls_back_to_config_default_with_no_override_or_hint(self):
         rows = _project_vm_pool_rows({
-            "resource_pool_id": "gpu-pool",
+            "pool_id": "gpu-pool",
             "resources": [
                 {"physical_resource_id": "res-1", "resource_type": "compute.gpu", "capacity": {"gpu_count": 4}, "enabled": True},
             ],
@@ -1637,7 +1637,7 @@ class TestProjectedPoolRows:
 
     def test_pricing_storefront_override_wins_over_pool_hint(self):
         rows = _project_vm_pool_rows({
-            "resource_pool_id": "gpu-pool",
+            "pool_id": "gpu-pool",
             "resources": [
                 {
                     "physical_resource_id": "res-1", "resource_type": "compute.gpu", "capacity": {"gpu_count": 4},
@@ -1655,7 +1655,7 @@ class TestProjectedPoolRows:
 
     def test_pricing_pool_hint_used_when_no_storefront_override(self):
         rows = _project_vm_pool_rows({
-            "resource_pool_id": "gpu-pool",
+            "pool_id": "gpu-pool",
             "resources": [
                 {
                     "physical_resource_id": "res-1", "resource_type": "compute.gpu", "capacity": {"gpu_count": 4},
@@ -1673,7 +1673,7 @@ class TestProjectedPoolRows:
 
     def test_pricing_falls_back_to_per_model_config_default(self):
         rows = _project_vm_pool_rows({
-            "resource_pool_id": "gpu-pool",
+            "pool_id": "gpu-pool",
             "resources": [
                 {
                     "physical_resource_id": "res-1", "resource_type": "compute.gpu", "capacity": {"gpu_count": 4},
@@ -1693,7 +1693,7 @@ class TestProjectedPoolRows:
 
     def test_pricing_falls_back_to_flat_config_default_as_last_resort(self):
         rows = _project_vm_pool_rows({
-            "resource_pool_id": "gpu-pool",
+            "pool_id": "gpu-pool",
             "resources": [
                 {
                     "physical_resource_id": "res-1", "resource_type": "compute.gpu", "capacity": {"gpu_count": 4},
@@ -1714,7 +1714,7 @@ class TestProjectedPoolRows:
         independently -- proving pricing resolution is per-row, not
         computed once for the whole pool."""
         rows = _project_vm_pool_rows({
-            "resource_pool_id": "gpu-pool",
+            "pool_id": "gpu-pool",
             "resources": [
                 {
                     "physical_resource_id": "res-1", "resource_type": "compute.gpu", "capacity": {"gpu_count": 8},
@@ -1752,7 +1752,7 @@ class TestProjectedPoolRows:
         -- an unrecognized explicit value falls back to *that* default,
         not a hardcoded constant."""
         rows = _project_vm_pool_rows({
-            "resource_pool_id": "gpu-pool",
+            "pool_id": "gpu-pool",
             "resources": [
                 {
                     "physical_resource_id": "res-1", "resource_type": "compute.gpu",
@@ -1772,7 +1772,7 @@ class TestProjectedPoolRows:
 
     def test_unrecognized_cardinality_mode_falls_back_to_fungible_for_multi_member(self):
         rows = _project_vm_pool_rows({
-            "resource_pool_id": "gpu-pool",
+            "pool_id": "gpu-pool",
             "resources": [
                 {"physical_resource_id": "res-1", "resource_type": "compute.gpu", "capacity": {"gpu_count": 4}, "enabled": True},
                 {"physical_resource_id": "res-2", "resource_type": "compute.gpu", "capacity": {"gpu_count": 4}, "enabled": True},
@@ -1791,7 +1791,7 @@ class TestProjectedPoolRows:
 
     def test_specific_resource_single_member_yields_one_resource_keyed_row(self):
         rows = _project_vm_pool_rows({
-            "resource_pool_id": "gpu-pool",
+            "pool_id": "gpu-pool",
             "resources": [
                 {
                     "physical_resource_id": "res-1", "resource_type": "compute.gpu",
@@ -1816,7 +1816,7 @@ class TestProjectedPoolRows:
         one independently identified row per member, not collapse to a
         single aggregate the way fungible mode does."""
         rows = _project_vm_pool_rows({
-            "resource_pool_id": "gpu-pool",
+            "pool_id": "gpu-pool",
             "resources": [
                 {
                     "physical_resource_id": "res-1", "resource_type": "compute.gpu",
@@ -1859,7 +1859,7 @@ class TestProjectedPoolRows:
 
     def test_specific_resource_disabled_member_excluded(self):
         rows = _project_vm_pool_rows({
-            "resource_pool_id": "gpu-pool",
+            "pool_id": "gpu-pool",
             "resources": [
                 {
                     "physical_resource_id": "res-1", "resource_type": "compute.gpu",
@@ -1889,7 +1889,7 @@ class TestProjectedPoolRows:
         (i.e. a single member's) availability, not a sum across buckets,
         and must come from the bucket data when it's usable."""
         rows = _project_vm_pool_rows({
-            "resource_pool_id": "gpu-pool",
+            "pool_id": "gpu-pool",
             "resources": [
                 {
                     "physical_resource_id": "res-1", "resource_type": "compute.gpu",
@@ -1910,13 +1910,13 @@ class TestProjectedPoolRows:
         member_availability=None,
         capacity_buckets=[
             {
-                "resource_pool_id": "gpu-pool",
+                "pool_id": "gpu-pool",
                 "available": {"gpu_count": 2},
                 "resource_count": 1,
                 "grouping_attributes": {"gpu_model": "H100"},
             },
             {
-                "resource_pool_id": "gpu-pool",
+                "pool_id": "gpu-pool",
                 "available": {"gpu_count": 6},
                 "resource_count": 1,
                 "grouping_attributes": {"gpu_model": "H100"},
@@ -1939,7 +1939,7 @@ class TestProjectedPoolRows:
         here would let two independently-polled projection generations
         silently contradict each other."""
         rows = _project_vm_pool_rows({
-            "resource_pool_id": "gpu-pool",
+            "pool_id": "gpu-pool",
             "resources": [
                 {
                     "physical_resource_id": "res-1", "resource_type": "compute.gpu",
@@ -1954,7 +1954,7 @@ class TestProjectedPoolRows:
         member_availability=None,
         capacity_buckets=[
             {
-                "resource_pool_id": "other-pool",
+                "pool_id": "other-pool",
                 "available": {"gpu_count": 99},
                 "resource_count": 5,
             },
@@ -1968,7 +1968,7 @@ class TestProjectedPoolRows:
         currently has no enabled resources at all. Must be trusted the
         same way a per-pool absence is, not treated as unknown."""
         rows = _project_vm_pool_rows({
-            "resource_pool_id": "gpu-pool",
+            "pool_id": "gpu-pool",
             "resources": [
                 {
                     "physical_resource_id": "res-1", "resource_type": "compute.gpu",
@@ -1989,7 +1989,7 @@ class TestProjectedPoolRows:
         """No site_capacity_buckets supplied at all (None) -- must not
         publish zero capacity, must use the pre-existing computation."""
         rows = _project_vm_pool_rows({
-            "resource_pool_id": "gpu-pool",
+            "pool_id": "gpu-pool",
             "resources": [
                 {
                     "physical_resource_id": "res-1", "resource_type": "compute.gpu",
@@ -2011,7 +2011,7 @@ class TestProjectedPoolRows:
         must not be read as an authoritative zero -- falls back to the
         resource-list computation instead."""
         rows = _project_vm_pool_rows({
-            "resource_pool_id": "gpu-pool",
+            "pool_id": "gpu-pool",
             "resources": [
                 {
                     "physical_resource_id": "res-1", "resource_type": "compute.gpu",
@@ -2026,13 +2026,13 @@ class TestProjectedPoolRows:
         local_pricing={"gpu-pool": self._pricing_row()},
         member_availability=None,
         capacity_buckets=[
-            {"resource_pool_id": "gpu-pool", "available": {}, "resource_count": 1},
+            {"pool_id": "gpu-pool", "available": {}, "resource_count": 1},
         ],)
         assert rows[0]["max_member_available_gpu_count"] == 4
 
     def test_fungible_trusts_a_genuine_zero_from_buckets(self):
         rows = _project_vm_pool_rows({
-            "resource_pool_id": "gpu-pool",
+            "pool_id": "gpu-pool",
             "resources": [
                 {
                     "physical_resource_id": "res-1", "resource_type": "compute.gpu",
@@ -2048,7 +2048,7 @@ class TestProjectedPoolRows:
         member_availability=None,
         capacity_buckets=[
             {
-                "resource_pool_id": "gpu-pool",
+                "pool_id": "gpu-pool",
                 "available": {"gpu_count": 0},
                 "resource_count": 1,
             },
@@ -2087,7 +2087,7 @@ def _declared_pool(
 ) -> dict:
     """One projected pool; each member is (resource_id, gpu_count, available)."""
     return {
-        "resource_pool_id": pool_id,
+        "pool_id": pool_id,
         "pool_metadata": {
             "enabled": enabled,
             "policy_tags": {
@@ -2388,7 +2388,7 @@ def _shaped_pool(
     if shapes is not None:
         policy_tags["listing_shapes"] = {"vm": shapes}
     return {
-        "resource_pool_id": pool_id,
+        "pool_id": pool_id,
         "pool_metadata": {"enabled": True, "policy_tags": policy_tags},
         "resources": members,
     }
@@ -2481,7 +2481,7 @@ class TestListingShapes:
             shapes=[_SMALL_SHAPE],
         )
         bucket = {
-            "resource_pool_id": "gpu",
+            "pool_id": "gpu",
             "resource_type": "compute.gpu",
             "resource_subtype": None,
             "available": {**_BIG, "ram_gb": 128},

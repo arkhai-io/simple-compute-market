@@ -1,10 +1,13 @@
 # Bare-metal marketplace wrapper. All values below are public identity/trust
 # pins or references to role-scoped credential files. No secret has a fallback.
-include:
-  - domains/bare_metal/compose.yml
+# Extend individual services so role bindings merge with their topology.
+# An include imports complete resources and cannot redefine them here.
 
 services:
   bare-metal-registry:
+    extends:
+      file: domains/bare_metal/compose.yml
+      service: bare-metal-registry
     environment:
       - DATABASE_URL=sqlite:////app/data/indexer.db
       - REGISTRY_AUTHORITY_ID=${BARE_METAL_REGISTRY_AUTHORITY_ID:?set registry authority id}
@@ -17,19 +20,32 @@ services:
     volumes:
       - ${BARE_METAL_REGISTRY_IDENTITY_CREDENTIAL_FILE:?set registry signer credential file}:/run/secrets/arkhai/registry-identity/credential:ro
 
+  bare-metal-redis:
+    extends:
+      file: domains/bare_metal/compose.yml
+      service: bare-metal-redis
+
   bare-metal-provisioning:
+    extends:
+      file: domains/bare_metal/compose.yml
+      service: bare-metal-provisioning
+    # The provisioning service reads these through its settings loader, which
+    # would parse a hex identifier as a number; `@str` keeps each one a string.
     env_file:
       - ${BARE_METAL_PROVISIONING_IDENTITY_ENV_FILE:?set provisioning signer credential environment file}
     environment:
       - PROVISIONING_IDENTITY__SCHEME=${BARE_METAL_PROVISIONING_IDENTITY_SCHEME:?set provisioning identity scheme}
-      - PROVISIONING_IDENTITY__IDENTIFIER=${BARE_METAL_PROVISIONING_IDENTITY_IDENTIFIER:?set canonical provisioning principal}
+      - PROVISIONING_IDENTITY__IDENTIFIER=@str ${BARE_METAL_PROVISIONING_IDENTITY_IDENTIFIER:?set canonical provisioning principal}
       - PROVISIONING_STOREFRONT_IDENTITY__SCHEME=${BARE_METAL_STOREFRONT_IDENTITY_SCHEME:?set storefront identity scheme}
-      - PROVISIONING_STOREFRONT_IDENTITY__IDENTIFIER=${BARE_METAL_STOREFRONT_IDENTITY_IDENTIFIER:?set canonical storefront principal}
+      - PROVISIONING_STOREFRONT_IDENTITY__IDENTIFIER=@str ${BARE_METAL_STOREFRONT_IDENTITY_IDENTIFIER:?set canonical storefront principal}
       - PROVISIONING_STOREFRONT_SITE_ID=${BARE_METAL_SITE_ID:?set exact selected site id}
       - PROVISIONING_ADMIN_IDENTITY__SCHEME=${BARE_METAL_PROVISIONING_ADMIN_IDENTITY_SCHEME:?set provisioning admin scheme}
-      - PROVISIONING_ADMIN_IDENTITY__IDENTIFIER=${BARE_METAL_PROVISIONING_ADMIN_IDENTITY_IDENTIFIER:?set canonical provisioning admin principal}
+      - PROVISIONING_ADMIN_IDENTITY__IDENTIFIER=@str ${BARE_METAL_PROVISIONING_ADMIN_IDENTITY_IDENTIFIER:?set canonical provisioning admin principal}
 
   bare-metal-storefront:
+    extends:
+      file: domains/bare_metal/compose.yml
+      service: bare-metal-storefront
     env_file:
       - ${BARE_METAL_STOREFRONT_IDENTITY_ENV_FILE:?set storefront signer credential environment file}
     environment:
@@ -64,4 +80,8 @@ services:
       - bare-metal-buyer-state:/var/lib/arkhai
 
 volumes:
+  bare-metal-registry-data:
+  bare-metal-redis-data:
+  bare-metal-provisioning-data:
+  bare-metal-storefront-data:
   bare-metal-buyer-state:

@@ -12,9 +12,9 @@ openspec/specs/storefront-publication/spec.md, "A listing shape is published
 only where a source member is feasible for it".
 
 The projection names things differently from the predicate's snapshot row: a
-member is ``physical_resource_id`` under its pool's ``resource_pool_id``, and a
-capacity bucket names its pool ``resource_pool_id`` and its attributes
-``grouping_attributes``. The adapters below map them; nothing else is inferred.
+member is ``physical_resource_id`` under its pool entry's ``pool_id``, and a
+capacity bucket names its attributes ``grouping_attributes``. The adapters
+below map them; nothing else is inferred.
 In particular a member that states no ``resource_type`` is not given one, and
 reconciliation holds it before it reaches this check.
 """
@@ -69,7 +69,7 @@ def bucket_snapshot_row(bucket: Mapping[str, Any]) -> dict[str, Any]:
     """
     return {
         "resource_id": "",
-        "pool_id": str(bucket.get("resource_pool_id") or ""),
+        "pool_id": str(bucket.get("pool_id") or ""),
         "resource_type": bucket.get("resource_type"),
         "resource_subtype": bucket.get("resource_subtype"),
         "attributes": dict(bucket.get("grouping_attributes") or {}),

@@ -69,7 +69,7 @@ def _mock_multi_registry(urls: list[str], results: list[PublishResult]):
 def vm_pool_projection():
     resource_pools = ProjectionCache(client=None)
     resource_pools._value = [{
-        "resource_pool_id": "pool-vm",
+        "pool_id": "pool-vm",
         "pool_metadata": {
             "policy_tags": {"deliverable_modes": ["vm"]},
         },

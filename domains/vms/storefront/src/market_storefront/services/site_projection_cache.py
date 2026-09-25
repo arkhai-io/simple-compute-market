@@ -115,7 +115,7 @@ def listing_cardinality_mode_explanations() -> dict[str, dict[str, str]]:
             continue
         site_explanations: dict[str, str] = {}
         for pool in pools:
-            pool_id = str(pool.get("resource_pool_id") or "")
+            pool_id = str(pool.get("pool_id") or "")
             if not pool_id:
                 continue
             policy_tags = (pool.get("pool_metadata") or {}).get("policy_tags") or {}

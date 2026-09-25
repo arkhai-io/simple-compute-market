@@ -155,6 +155,7 @@ drives transitions instead of waiting for a timer:
 | Lease watchdog | `POST /api/v1/system/lease-watchdog/pause` | `POST /api/v1/system/check-leases` |
 | Fulfillment convergence | `POST /api/v1/system/fulfillment-convergence/pause` | `POST /api/v1/system/fulfillment-convergence/advance-cycle` |
 | VM storefront loops (`publication`, `capacity-events`, `site-projections`, `settlement-servicing`, `fulfillment-resume`) | `POST /api/v1/admin/lifecycle/pause`, which holds them all | `POST /api/v1/admin/lifecycle/<loop>/run-cycle`, previewed by `.../<loop>/dry-run` |
+| Bare-metal storefront publication | none: publication has no timer, and each pass is operator-invoked | `POST /api/v1/admin/lifecycle/publication/run-cycle`, the same pass the `bare-metal-storefront publish` command runs |
 
 The VM storefront's loops hold no claim between cycles, so their `run-cycle`
 is a step: it runs exactly the cycle the timer runs, whether or not the
@@ -238,6 +239,34 @@ The e2e test pod cannot import service internals — it uses typed
 clients, explicit test controllers, and stage/event APIs over HTTP, the
 same "no raw calls" discipline integration tests follow. Design new
 observability seams for e2e-visible behavior accordingly.
+
+The pipeline runs two lanes, as separate jobs so each failure's logs stand
+alone:
+
+- **VM lane** (`make -C e2e-tests test-e2e-vm`): the VM and API-credit markets
+  on one dev chain, with the VM site in the provisioning mock profile.
+- **Bare-metal lane** (`make -C e2e-tests test-e2e-bare-metal`): one site in the
+  provisioning mock profile, trusting the bare-metal storefront, a bare-metal
+  registry, and the dev chain. Its publication scenario declares pools and
+  whole-host capacity through the site's operator clients, steps publication,
+  and follows one listing through discovery, withdrawal, and reinstatement at
+  the registry.
+
+`make -C e2e-tests test-e2e` runs both in turn. A lane provides its own
+configuration, so a scenario that finds a lane setting missing fails rather
+than skipping. The release-qualified bare-metal deal needs a real whole host to
+reach and revoke access on, which the pipeline never has, so neither lane
+selects it; a mock-profile site proves the services compose, not real delivery.
+
+To run both lanes in GitHub Actions, push the current branch and run
+`make run-e2e` with an authenticated `gh` CLI on PATH. Then run
+`make fetch-e2e-logs E2E_RUN_ID=<run-id>` to wait for that run and download its
+diagnostics. Omitting the ID selects the current branch's latest run among the
+100 most recent workflow runs. Logs live under `.snapshot/e2e-logs/<run-id>/`:
+`actions.log`, `e2e-vm-logs/compose-logs.txt`, and
+`e2e-bare-metal-logs/compose-logs.txt`. `E2E_LOG_DIR` overrides the root directory.
+An unavailable artifact is reported without discarding other logs. A successful
+fetch means diagnostics were retrieved; it does not mean the tests passed.
 
 ## Coverage Contract Between Levels
 

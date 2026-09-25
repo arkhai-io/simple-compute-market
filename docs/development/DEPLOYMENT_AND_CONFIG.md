@@ -165,6 +165,13 @@ authorities:
 - `compose.bare-metal.yml` composes the dedicated bare-metal storefront with a
   compute-family registry and the selected-site provisioning authority.
 
+The bare-metal wrapper extends each service from `domains/bare_metal/compose.yml`
+to merge role bindings with the domain topology, and declares the named volumes
+those services use. Service extension preserves the domain file's relative mount
+paths. An `include` cannot be used to import a service and redefine it in the same
+wrapper. The e2e lane adds `compose.dev.yml` and `compose.bare-metal-local.yml`
+with `-f` for its dev chain and provisioning mock profile.
+
 Storefront images install their distributions from the staged `.dist`
 wheelhouse; runtime images do not resolve editable sibling source. API-credit
 and bare-metal SQLite/queue/registry stores occupy separate named volumes.
@@ -193,6 +200,11 @@ persistence ownership"). A SQLite-backed, single-writer service uses
 single-writer model does not tolerate the overlapping old/new pod
 window a `RollingUpdate` strategy would otherwise produce against a
 shared volume.
+
+Registry and compute-provisioning runtime images create `/app/data` owned by
+their non-root `appuser`. Fresh Compose named volumes inherit that ownership,
+so SQLite can create its database without a root startup process. Bind mounts
+and existing volumes must already provide write access to the runtime user.
 
 ### Combined compute-family storefront
 

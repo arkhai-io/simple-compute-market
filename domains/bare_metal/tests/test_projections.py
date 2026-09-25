@@ -6,6 +6,7 @@ from pydantic import ValidationError
 from arkhai_bare_metal import (
     BareMetalResourceProjection,
     TrustedBareMetalProjection,
+    TrustedBareMetalResource,
 )
 
 
@@ -57,48 +58,35 @@ def test_resource_projection_rejects_incomplete_private_or_conflicting_data(
         BareMetalResourceProjection.model_validate(_resource(**overrides))
 
 
+def _trusted(resource=None, *, pool_id="pool-1", enabled=True):
+    return TrustedBareMetalResource(
+        pool_id=pool_id,
+        enabled=enabled,
+        view=BareMetalResourceProjection.model_validate(resource or _resource()),
+    )
+
+
 def test_trusted_projection_injects_site_generation_provenance():
     generation = TrustedBareMetalProjection(
         site_id="site-a",
         revision=7,
         digest="sha256-generation",
-        complete=True,
-        resources=[_resource()],
+        resources=[_trusted()],
     )
 
     assert generation.site_id == "site-a"
-    assert generation.resources[0].host_id == "executor-machine-1"
+    assert generation.resources[0].view.host_id == "executor-machine-1"
 
 
-def test_authoritative_empty_generation_is_distinct_from_unavailable_generation():
-    authoritative_empty = TrustedBareMetalProjection(
+def test_authoritative_empty_generation_is_valid():
+    generation = TrustedBareMetalProjection(
         site_id="site-a",
         revision=8,
         digest="empty-generation",
-        complete=True,
-        resources=[],
-    )
-    unavailable = TrustedBareMetalProjection(
-        site_id="site-a",
-        revision=0,
-        digest="unavailable",
-        complete=False,
         resources=[],
     )
 
-    assert authoritative_empty.complete is True
-    assert unavailable.complete is False
-
-
-def test_incomplete_generation_cannot_expose_resources():
-    with pytest.raises(ValidationError, match="incomplete generations"):
-        TrustedBareMetalProjection(
-            site_id="site-a",
-            revision=1,
-            digest="partial",
-            complete=False,
-            resources=[_resource()],
-        )
+    assert generation.resources == []
 
 
 def test_resource_identity_is_unique_within_trusted_site():
@@ -107,6 +95,16 @@ def test_resource_identity_is_unique_within_trusted_site():
             site_id="site-a",
             revision=1,
             digest="duplicate",
-            complete=True,
-            resources=[_resource(), _resource(host_id="other-machine")],
+            resources=[_trusted(), _trusted(_resource(host_id="other-machine"))],
         )
+
+
+def test_a_view_naming_another_pool_than_its_container_is_refused():
+    with pytest.raises(ValidationError, match="containing pool"):
+        _trusted(_resource(pool_id="pool-2"), pool_id="pool-1")
+
+
+def test_a_view_naming_no_pool_takes_its_containers():
+    trusted = _trusted(_resource(pool_id=None), pool_id="pool-1")
+
+    assert trusted.pool_id == "pool-1"

@@ -143,6 +143,7 @@ celerybeat.pid
 # at live in dev-env/identities and are tracked.
 .e2e-buyer/
 .e2e-identities.env
+.e2e-bare-metal.env
 .venv
 env/
 venv/

@@ -15,6 +15,11 @@ from .capacity import (
     publication_binding,
     remote_site_clients,
 )
+from .cycle import (
+    PublicationCycleDriver,
+    PublicationCycleReport,
+    converge_registries,
+)
 from .publication import (
     BoundListing,
     PublicationCandidate,
@@ -36,11 +41,14 @@ __all__ = [
     "CapacityReconciler",
     "CapacityRuntime",
     "CapacitySite",
+    "converge_registries",
     "PublicationBinding",
     "publication_binding",
     "UnbackedBinding",
     "remote_site_clients",
     "PublicationCandidate",
+    "PublicationCycleDriver",
+    "PublicationCycleReport",
     "PublicationDomainHooks",
     "PublicationRepository",
     "PublicationRuntime",

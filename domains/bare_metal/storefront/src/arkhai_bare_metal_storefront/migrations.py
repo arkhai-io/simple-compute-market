@@ -396,6 +396,18 @@ def _migrate_common_domain_bindings(conn: sqlite3.Connection) -> None:
     conn.execute("DROP TABLE bare_metal_agreement_payloads")
 
 
+def _drop_derived_publication_tracking(conn: sqlite3.Connection) -> None:
+    """Retire the domain table that tracked each listing under a second key.
+
+    A bare-metal listing is tracked only by its common binding's derivation
+    key, which includes its pool, so a Physical Resource moved to another pool
+    is an identity change rather than a refresh under a stale binding.
+    """
+    conn.execute("DROP INDEX IF EXISTS idx_derived_bare_metal_site_resource")
+    conn.execute("DROP INDEX IF EXISTS idx_derived_bare_metal_status")
+    conn.execute("DROP TABLE IF EXISTS derived_bare_metal_listings")
+
+
 class RetiredListingKindError(RuntimeError):
     """The database holds state this storefront can no longer decode."""
 
@@ -462,5 +474,9 @@ BARE_METAL_STOREFRONT_MIGRATIONS = (
     Migration(
         id="bare-metal-storefront-0008-hosted-physical-lifecycle",
         apply=_add_hosted_physical_lifecycle,
+    ),
+    Migration(
+        id="bare-metal-storefront-0010-drop-derived-publications",
+        apply=_drop_derived_publication_tracking,
     ),
 )

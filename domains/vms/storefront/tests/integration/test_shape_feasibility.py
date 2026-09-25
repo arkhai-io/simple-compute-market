@@ -87,7 +87,7 @@ def _member(ledger, resource_id):
     for pool in resource_pool_projection(ledger.list_resources()):
         for member in pool["resources"]:
             if member["physical_resource_id"] == resource_id:
-                return pool["resource_pool_id"], member
+                return pool["pool_id"], member
     raise AssertionError(resource_id)
 
 
@@ -154,7 +154,7 @@ def test_a_capacity_bucket_stands_in_for_its_fungible_members(
 ):
     buckets = [
         bucket for bucket in capacity_bucket_projection(held.list_resources())
-        if bucket["resource_pool_id"] == listing["pool_id"]
+        if bucket["pool_id"] == listing["pool_id"]
     ]
 
     assert any(

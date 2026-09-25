@@ -1,167 +1,47 @@
-"""Bare-metal publication source composed over trusted site generations."""
+"""Bare-metal publication source composed from storefront-owned callbacks.
+
+The domain owns what a candidate is and which key identifies it; the
+storefront owns every read and write of its own state, so each callback that
+touches the database is supplied by the concrete storefront.
+"""
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from typing import Any
 
 from core_storefront.publication_sources import PublicationSource
 
-from .projections import TrustedBareMetalProjection
-from .storefront_publication import (
-    bare_metal_listing_candidates,
-    close_stale_bare_metal_listings,
-    open_bare_metal_listing_keys,
-    record_derived_bare_metal_listing,
-    reopen_derived_bare_metal_listing_if_present,
-)
-
-ProjectionSnapshot = Callable[
-    [],
-    Iterable[TrustedBareMetalProjection] | None,
-]
-CloseListing = Callable[[str, str], dict[str, Any]]
-PublishExistingListing = Callable[..., dict[str, Any]]
-
-
-def _complete_projections(
-    projection_snapshot: ProjectionSnapshot,
-) -> list[TrustedBareMetalProjection]:
-    snapshot = projection_snapshot()
-    if snapshot is None:
-        return []
-    return list(snapshot)
-
-
-def available_bare_metal_listing_candidates(
-    db_path: str,
-    *,
-    projection_snapshot: ProjectionSnapshot,
-) -> list[dict[str, Any]]:
-    """Return candidates from retained complete trusted generations."""
-    del db_path
-    return bare_metal_listing_candidates(
-        _complete_projections(projection_snapshot),
-    )
-
-
-def close_stale_bare_metal_publications(
-    *,
-    db_path: str,
-    base_url: str,
-    projection_snapshot: ProjectionSnapshot,
-    close_listing: CloseListing,
-) -> list[str]:
-    """Close stale listings only where a complete generation is available."""
-    return close_stale_bare_metal_listings(
-        db_path=db_path,
-        projections=_complete_projections(projection_snapshot),
-        close_listing=lambda listing_id: close_listing(
-            base_url,
-            listing_id,
-        ),
-    )
+OpenKeysCallback = Callable[[str], set[str]]
+CloseStaleCallback = Callable[[str, str], list[str]]
+CandidateCallback = Callable[[str], list[dict[str, Any]]]
+RecordPublishedCallback = Callable[[str, dict[str, Any], str], None]
+ReopenExistingCallback = Callable[..., dict[str, Any] | None]
 
 
 def bare_metal_candidate_skip_keys(candidate: dict[str, Any]) -> set[str]:
-    """Return the one authority-scoped key identifying a candidate."""
+    """Return the one key identifying a candidate: its common derivation key."""
     return {str(candidate["derivation_key"])}
-
-
-def record_published_bare_metal_listing(
-    db_path: str,
-    candidate: dict[str, Any],
-    listing_id: str,
-) -> None:
-    """Record publication provenance for a newly created listing."""
-    record_derived_bare_metal_listing(
-        db_path,
-        listing_id=listing_id,
-        candidate=candidate,
-    )
-
-
-def reopen_bare_metal_listing_adapter(
-    db_path: str,
-    base_url: str,
-    candidate: dict[str, Any],
-    listing_resource: dict[str, Any],
-    accepted_escrows: list[dict[str, Any]],
-    demands: list[dict[str, Any]],
-    max_duration_seconds: int | None,
-    *,
-    publish_existing_listing: PublishExistingListing,
-    close_listing: CloseListing,
-    settlement_options: list[dict[str, Any]] | None = None,
-    publication_clauses: list[dict[str, Any]] | None = None,
-) -> dict[str, Any] | None:
-    """Reconcile a tracked listing through caller-supplied publication."""
-    return reopen_derived_bare_metal_listing_if_present(
-        db_path=db_path,
-        base_url=base_url,
-        candidate=candidate,
-        listing_resource=listing_resource,
-        accepted_escrows=accepted_escrows,
-        demands=demands,
-        max_duration_seconds=max_duration_seconds,
-        publish_existing_listing=publish_existing_listing,
-        close_listing=close_listing,
-        settlement_options=settlement_options,
-        publication_clauses=publication_clauses,
-    )
 
 
 def bare_metal_publication_adapter(
     *,
-    projection_snapshot: ProjectionSnapshot,
-    close_listing: CloseListing,
-    publish_existing_listing: PublishExistingListing,
+    open_keys: OpenKeysCallback,
+    close_stale: CloseStaleCallback,
+    available_candidates: CandidateCallback,
+    record_published: RecordPublishedCallback,
+    reopen_existing: ReopenExistingCallback,
 ) -> PublicationSource:
-    """Build the source selected by the concrete bare-metal storefront."""
-
-    def reopen_existing(
-        db_path: str,
-        base_url: str,
-        candidate: dict[str, Any],
-        listing_resource: dict[str, Any],
-        accepted_escrows: list[dict[str, Any]],
-        demands: list[dict[str, Any]],
-        max_duration_seconds: int | None,
-        *,
-        settlement_options: list[dict[str, Any]] | None = None,
-        publication_clauses: list[dict[str, Any]] | None = None,
-    ) -> dict[str, Any] | None:
-        return reopen_bare_metal_listing_adapter(
-            db_path,
-            base_url,
-            candidate,
-            listing_resource,
-            accepted_escrows,
-            demands,
-            max_duration_seconds,
-            publish_existing_listing=publish_existing_listing,
-            close_listing=close_listing,
-            settlement_options=settlement_options,
-            publication_clauses=publication_clauses,
-        )
-
+    """Build the bare-metal publication source for a concrete storefront."""
     return PublicationSource(
         name="bare_metal",
-        open_keys=open_bare_metal_listing_keys,
-        close_stale=lambda db_path, base_url: close_stale_bare_metal_publications(
-            db_path=db_path,
-            base_url=base_url,
-            projection_snapshot=projection_snapshot,
-            close_listing=close_listing,
-        ),
-        available_candidates=lambda db_path: available_bare_metal_listing_candidates(
-            db_path,
-            projection_snapshot=projection_snapshot,
-        ),
+        open_keys=open_keys,
+        close_stale=close_stale,
+        available_candidates=available_candidates,
         skip_keys=bare_metal_candidate_skip_keys,
         listing_resource=lambda candidate: dict(candidate["listing_resource"]),
         pricing_resource=lambda _candidate, listing_resource: listing_resource,
-        record_published=record_published_bare_metal_listing,
+        record_published=record_published,
         reopen_existing=reopen_existing,
-        reopen_error_label="reopen derived bare-metal listing",
+        reopen_error_label="reconcile bare-metal listing",
     )

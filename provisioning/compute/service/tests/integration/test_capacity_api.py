@@ -20,6 +20,9 @@ from market_site_client import (
     SiteCapacityClient,
     SiteCapacityClientError,
 )
+from arkhai_bare_metal.fixtures.publication_view import (
+    validate_bare_metal_publication_view,
+)
 from compute_provisioning import PoolCreate
 from market_resource_pools import read_site_declarations, resolve_pool_declarations
 from market_site_client.fixtures.resource_pools import (
@@ -386,7 +389,7 @@ async def test_site_resource_pools_projection_surfaces_pool_metadata(
     remote = _site_capacity_client("http://test", transport=ASGITransport(app=app))
     data = await remote.resource_pool_projection()
     rows = data["resource_pools"]
-    pool_row = next(row for row in rows if row["resource_pool_id"] == "hetzner-eu")
+    pool_row = next(row for row in rows if row["pool_id"] == "hetzner-eu")
 
     assert pool_row["pool_metadata"]["label"] == "Hetzner EU"
     assert pool_row["pool_metadata"]["enabled"] is True
@@ -461,7 +464,7 @@ async def test_site_resource_pools_projection_surfaces_region_sla_pricing_policy
     remote = _site_capacity_client("http://test", transport=ASGITransport(app=app))
     data = await remote.resource_pool_projection()
     rows = data["resource_pools"]
-    pool_row = next(row for row in rows if row["resource_pool_id"] == "hetzner-eu")
+    pool_row = next(row for row in rows if row["pool_id"] == "hetzner-eu")
 
     assert pool_row["pool_metadata"]["policy_tags"] == {
         "advertisable_modes": [],
@@ -509,7 +512,7 @@ async def test_site_resource_pools_projection_carries_listing_shapes_verbatim(
 
     remote = _site_capacity_client("http://test", transport=ASGITransport(app=app))
     data = await remote.resource_pool_projection()
-    pool_row = next(row for row in data["resource_pools"] if row["resource_pool_id"] == "shaped")
+    pool_row = next(row for row in data["resource_pools"] if row["pool_id"] == "shaped")
     assert pool_row["pool_metadata"]["policy_tags"]["listing_shapes"] == shapes
 
 
@@ -546,7 +549,7 @@ async def test_site_resource_pools_projection_declares_every_pool(
     rows = (await remote.resource_pool_projection())["resource_pools"]
 
     resolved = {
-        row["resource_pool_id"]: resolve_pool_declarations(
+        row["pool_id"]: resolve_pool_declarations(
             row["pool_metadata"]["policy_tags"]
         )
         for row in rows
@@ -619,6 +622,67 @@ async def test_the_projection_carries_both_declarations_as_storefronts_read_them
 
 
 @pytest.mark.asyncio
+async def test_a_bare_metal_view_reaches_the_canonical_client_as_storefronts_read_it(
+    capacity: CapacityApi, client_and_queue,
+):
+    """The producer half of the bare-metal publication view contract, over HTTP.
+
+    A whole-host declaration registered through the operator client reaches the
+    canonical site client carrying a ``bare_metal.v2`` view that meets the
+    bare-metal contract, naming the resource and the pool entry containing it,
+    and a declaration it disabled still carries its enablement beside the view.
+    """
+    provisioning_client, _ = client_and_queue
+    await provisioning_client.create_pool(PoolCreate(
+        id="whole-host",
+        label="Whole host",
+        provider="bare_metal.ansible",
+        policy_tags={
+            "deliverable_modes": ["bare_metal"],
+            "advertisable_modes": ["bare_metal"],
+            "capacity_backing": "backed",
+        },
+        provider_config={},
+    ))
+    for resource_id, enabled in (("bm-1", True), ("bm-2", False)):
+        await capacity.register(
+            resource_id,
+            pool_id="whole-host",
+            host_id=f"{resource_id}-host",
+            total_units=1,
+            enabled=enabled,
+            attributes={
+                "physical_host_id": f"physical-{resource_id}",
+                "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
+                "bare_metal_publication": {
+                    "enabled": True,
+                    "access_methods": ["ssh"],
+                    "capabilities": {},
+                },
+            },
+        )
+
+    remote = _site_capacity_client("http://test", transport=ASGITransport(app=app))
+    projection = await remote.resource_pool_projection()
+
+    validate_resource_pool_projection(projection)
+    (pool,) = [
+        row for row in projection["resource_pools"] if row["pool_id"] == "whole-host"
+    ]
+    members = {member["physical_resource_id"]: member for member in pool["resources"]}
+    for resource_id in ("bm-1", "bm-2"):
+        validate_bare_metal_publication_view(
+            members[resource_id]["publication_views"]["bare_metal.v2"],
+            physical_resource_id=resource_id,
+            pool_id="whole-host",
+        )
+    assert members["bm-1"]["enabled"] is True
+    assert members["bm-1"]["publication_views"]["bare_metal.v2"]["available"] is True
+    assert members["bm-2"]["enabled"] is False
+    assert members["bm-2"]["publication_views"]["bare_metal.v2"]["available"] is False
+
+
+@pytest.mark.asyncio
 async def test_site_resource_pools_projection_omits_pool_views_with_no_defaults(
     capacity: CapacityApi,
 ):
@@ -647,7 +711,7 @@ async def test_site_resource_pools_projection_omits_pool_views_with_no_defaults(
     remote = _site_capacity_client("http://test", transport=ASGITransport(app=app))
     data = await remote.resource_pool_projection()
     rows = data["resource_pools"]
-    default_row = next(row for row in rows if row["resource_pool_id"] == "default")
+    default_row = next(row for row in rows if row["pool_id"] == "default")
 
     assert "pool_views" not in default_row["pool_metadata"]
 
@@ -711,7 +775,7 @@ async def test_site_capacity_buckets_projection_through_the_real_client(
 
     and that the response has the exact shape reconciler.py's
     `_fungible_availability_from_buckets` actually consumes
-    (`resource_pool_id`, `available.gpu_count`, `resource_count`,
+    (`pool_id`, `available.gpu_count`, `resource_count`,
     `grouping_attributes`).
     """
     from market_site_client import SiteCapacityClient
@@ -737,7 +801,7 @@ async def test_site_capacity_buckets_projection_through_the_real_client(
     remote = _site_capacity_client("http://test", transport=ASGITransport(app=app))
     data = await remote.capacity_bucket_projection()
     buckets = [
-        b for b in data["capacity_buckets"] if b.get("resource_pool_id") == "hetzner-eu"
+        b for b in data["capacity_buckets"] if b.get("pool_id") == "hetzner-eu"
     ]
 
     # Two freshly-registered resources with different capacity (hence

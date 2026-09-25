@@ -658,7 +658,7 @@ class TestFulfillmentEvents:
         # abundant capacity -- fresh, loaded, not stale.
         resource_pools_cache: ProjectionCache = ProjectionCache(client=None)
         resource_pools_cache._value = [{
-            "resource_pool_id": "pool-h200-1",
+            "pool_id": "pool-h200-1",
             "resources": [{
                 "physical_resource_id": "res-1", "resource_type": "compute.gpu",
                 "capacity": {"gpu_count": 8},
@@ -1004,7 +1004,7 @@ class TestRealOrchestrationCacheToReconciliation:
         # live snapshot: 2 of the pool's 4 GPUs are authoritatively available.
         resource_pools_cache: ProjectionCache = ProjectionCache(client=None)
         resource_pools_cache._value = [{
-            "resource_pool_id": "pool-h200-1",
+            "pool_id": "pool-h200-1",
             "pool_metadata": {
                 "policy_tags": {"deliverable_modes": ["vm"]},
             },

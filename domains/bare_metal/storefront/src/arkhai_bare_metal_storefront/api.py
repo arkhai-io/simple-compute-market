@@ -28,6 +28,7 @@ from market_contact_exchange import (
 )
 from market_contact_exchange import MECHANISM as CONTACT_MECHANISM
 from market_identity import EMPTY_BODY, Identity
+from pydantic_core import to_jsonable_python
 from market_storefront_kit import get_storefront_container
 from market_settlement_runtime import (
     HostedSettlementRouteError,
@@ -45,6 +46,7 @@ from .models import (
 )
 from .fulfillment_service import BareMetalFulfillmentError
 from .negotiation_service import NegotiationRequestError
+from .publication_composition import compose_publication_cycle
 from .runtime import BareMetalStorefrontRuntime
 from .settlement_service import SettlementRequestError
 from .hosted_routes import build_bare_metal_hosted_route_service
@@ -129,15 +131,35 @@ async def _admin(
     request: Request,
     runtime: BareMetalStorefrontRuntime,
     operation: str,
+    resource: str,
+    body: Any = EMPTY_BODY,
 ) -> Identity:
+    """Authenticate an administrator for one route's exact signed contract.
+
+    ``operation`` and ``resource`` are the ones the canonical storefront client
+    signs for the route, the same on every storefront, so one administrator
+    client works against any of them.
+    """
     return await _principal(
         request=request,
         runtime=runtime,
         operation=operation,
-        resource=request.url.path,
+        resource=resource,
         expected_role="admin",
         allowed_principals=runtime.admin_principals.identities,
+        body=body,
     )
+
+
+async def _request_body(request: Request) -> Any:
+    """The JSON body a signed request carried, or the empty-body marker."""
+    raw = await request.body()
+    if not raw:
+        return EMPTY_BODY
+    try:
+        return json.loads(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="request body must be JSON") from exc
 
 
 async def _authorize_hosted_request(
@@ -772,14 +794,25 @@ async def health(request: Request) -> BareMetalHealthResponse:
 @router.get("/api/v1/system/status", response_model=BareMetalHealthResponse)
 async def system_status(request: Request) -> BareMetalHealthResponse:
     runtime = _runtime(request)
-    await _admin(request=request, runtime=runtime, operation="system_status")
+    await _admin(
+        request=request,
+        runtime=runtime,
+        operation="admin_system_status",
+        resource="system/status",
+    )
     return BareMetalHealthResponse.model_validate(await runtime.health())
 
 
 @router.post("/api/v1/admin/pause", response_model=AdminPauseResponse)
 async def pause(request: Request) -> AdminPauseResponse:
     runtime = _runtime(request)
-    await _admin(request=request, runtime=runtime, operation="pause")
+    await _admin(
+        request=request,
+        runtime=runtime,
+        operation="admin_pause",
+        resource="",
+        body=await _request_body(request),
+    )
     await runtime.db.set_global_paused(paused=True)
     return AdminPauseResponse(paused=True, message="storefront paused")
 
@@ -787,6 +820,44 @@ async def pause(request: Request) -> AdminPauseResponse:
 @router.post("/api/v1/admin/resume", response_model=AdminPauseResponse)
 async def resume(request: Request) -> AdminPauseResponse:
     runtime = _runtime(request)
-    await _admin(request=request, runtime=runtime, operation="resume")
+    await _admin(
+        request=request,
+        runtime=runtime,
+        operation="admin_resume",
+        resource="",
+        body=await _request_body(request),
+    )
     await runtime.db.set_global_paused(paused=False)
     return AdminPauseResponse(paused=False, message="storefront resumed")
+
+
+# The one lifecycle loop this storefront steps. Publication has no timer, so it
+# is stepped rather than paused: each step is one operator-invoked pass.
+PUBLICATION_LOOP = "publication"
+
+
+@router.post("/api/v1/admin/lifecycle/{loop}/run-cycle")
+async def run_lifecycle_cycle(loop: str, request: Request) -> dict[str, Any]:
+    """Run one pass of a lifecycle loop and return what it reports.
+
+    The publication pass is exactly the one the publication command runs,
+    composed the same way. Passes are serialized within this process.
+    """
+    runtime = _runtime(request)
+    await _admin(
+        request=request,
+        runtime=runtime,
+        operation="admin_run_lifecycle_cycle",
+        resource=loop,
+        body=await _request_body(request),
+    )
+    if loop != PUBLICATION_LOOP:
+        raise HTTPException(status_code=404, detail=f"no lifecycle loop {loop!r}")
+    factory = runtime.publication_cycle_factory or compose_publication_cycle
+    async with runtime.publication_lock:
+        try:
+            cycle = factory(runtime)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        report = await cycle.run()
+    return to_jsonable_python(report)

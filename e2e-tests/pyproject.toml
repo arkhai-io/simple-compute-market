@@ -36,7 +36,7 @@ dependencies = [
     "arkhai-core-registry-client>=0.12.0",
     "arkhai-kit-alkahest>=0.1.0",
     "arkhai-kit-site-client>=0.4.0",
-	"arkhai-vms-storefront>=0.6.0",
+	"arkhai-vms-storefront>=0.7.0",
     "arkhai-vms-provisioning-operator-client>=0.4.0",
     # The buyer's `market` CLI, run as a subprocess by the buyer-machine
     # e2e (tests/e2e/roles/buyer_cli.py). Installed so the binary is on
@@ -99,6 +99,7 @@ markers = [
     "multi_registry: Multi-registry publish + discovery e2e scenario (stops at negotiation start)",
     "e2e_credits_deal: Full API-credits deal driven by `market credits buy` — discover, negotiate a new key, settle, consume to 402, top up the existing key, consume again",
     "e2e_bare_metal_deal: Full installed-plugin whole-host deal — discovery, negotiation, settlement, SSH access, teardown, and access revocation",
+    "e2e_bare_metal_publication: Bare-metal lane — publication from pool declarations, discovery, withdrawal, and reinstatement against a mock-profile site",
     "e2e_alkahest_escrow_codecs: Real Alkahest escrow codec create/read scenario",
     "e2e_non_erc20_settlement: Full settlement path for scalar non-ERC20 Alkahest escrow variants",
     "e2e_hosted_stripe_test: Protected Stripe test-mode hosted settlement compatibility evidence",

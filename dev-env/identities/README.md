@@ -147,3 +147,27 @@ every caller holding it could do everything.
 Note the storefront's own principal is **eip191**, not ed25519: it signs with
 `ARKHAI_IDENTITY_CREDENTIAL` from `api-credits.identity.env`, and the
 authority's trust set names it with an explicit scheme for that reason.
+
+## The bare-metal lane
+
+The bare-metal end-to-end lane (`make -C e2e-tests test-e2e-bare-metal`) is a
+separate stack on its own dev chain, so it reuses the committed credentials
+above rather than adding more. `make e2e-bare-metal-dev-env` binds them, and the
+lane's settings in `e2e-tests/config/config-docker.yml` pin the same identifiers:
+
+| File | Anvil account | Bare-metal role |
+|---|---|---|
+| `registry-a.eip191` | 3 (`0x90f79bf6…`) | `bare-metal-registry`, authority `bare-metal-registry` |
+| `provisioning.identity.env` | 0 (`0xf39fd6e5…`) | the site authority, `bare-metal-provisioning` |
+| `bob.identity.env` | 2 (`0x3c44cddd…`) | the bare-metal storefront's principal and seller wallet |
+| `provisioning-admin.eip191` | 5 (`0x9965507d…`) | the site's administrator |
+| `storefront-bob-admin.eip191` | 6 (`0x976ea740…`) | the bare-metal storefront's administrator |
+| `buyer.eip191` | 1 (`0x70997970…`) | the buyer |
+
+The names are the VM stack's; the roles are the same kind in both stacks, which
+is what makes the reuse safe. `dev-env/bare-metal/` holds the lane's other
+development files — an empty host inventory, a pool document containing only the
+required `default` pool with no deliverable or advertisable modes (scenarios
+declare their own pools against the provisioning mock profile), and placeholders
+for files the stack requires but the lane never uses — each explaining itself
+inline.

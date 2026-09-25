@@ -78,3 +78,32 @@ registry_b:
   api_url: "http://registry-b:8080"
   authority_id: "registry-b"
   identifier: "0x15d34aaf54267db7d7c367839aaf71a00a2c6a65"
+
+# The bare-metal end-to-end lane (`make test-e2e-bare-metal`): one mock-profile
+# site, the bare-metal storefront, its registry, and the dev chain, with the
+# development identities `make e2e-bare-metal-dev-env` binds. Every credential
+# here is a well-known Anvil development key; see dev-env/identities/README.md,
+# "The bare-metal lane". Kept apart from `bare_metal`, which configures the
+# real-host deal scenario.
+bare_metal_lane:
+  storefront_url: "http://bare-metal-storefront:8000"
+  # The storefront's principal: it signs the storefront's responses, and the
+  # site binds its seller role to it.
+  storefront_scheme:     "eip191"
+  storefront_identifier: "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
+  storefront_credential: "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
+  storefront_admin_scheme:     "eip191"
+  storefront_admin_credential: "0x92db14e403b83dfe3df233f83dfa3a0d7096f21ca9b0d6d6b8d88b2b4ec1564e"
+  registry_url:          "http://bare-metal-registry:8080"
+  registry_authority_id: "bare-metal-registry"
+  registry_scheme:       "eip191"
+  registry_identifier:   "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
+  site_url:  "http://bare-metal-provisioning:8081"
+  site_id:   "bare-metal-e2e"
+  site_authority_scheme:     "eip191"
+  site_authority_identifier: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+  site_admin_scheme:     "eip191"
+  site_admin_credential: "0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba"
+  buyer_scheme:     "eip191"
+  buyer_credential: "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
+

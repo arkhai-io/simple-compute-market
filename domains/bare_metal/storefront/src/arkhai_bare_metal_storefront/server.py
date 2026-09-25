@@ -9,11 +9,8 @@ from importlib import import_module
 from typing import Any
 
 from core_storefront.app_composition import StorefrontAppConfig
+from core_storefront.domain_registry import StorefrontDomainRegistry
 from core_storefront.escrow_identity import backfill_escrow_obligation_records
-from core_storefront.domain_registry import (
-    StorefrontDomainRegistry,
-    StorefrontDomainRegistration,
-)
 from core_storefront.stage_log import set_stage_event_db_path, stage_event
 from market_core import MarketDomainContract
 from market_storefront_kit import (
@@ -28,6 +25,7 @@ from market_storefront_kit import (
 from .api import router as http_router
 from .domain_runtime import get_market_domain_contract
 from .runtime import BareMetalStorefrontRuntime, build_runtime_from_environment
+from .storefront_registry import build_bare_metal_storefront_registry
 from .response_auth import authenticate_response
 
 
@@ -67,23 +65,6 @@ async def _start_runtime(runtime: BareMetalStorefrontRuntime) -> None:
         )
     if runtime.settlement_worker is not None:
         asyncio.create_task(runtime.settlement_worker.run())
-
-
-def build_bare_metal_storefront_registry(
-    *,
-    domain: MarketDomainContract,
-) -> StorefrontDomainRegistry:
-    """Build the explicit one-registration bare-metal storefront registry."""
-
-    return StorefrontDomainRegistry(
-        (
-            StorefrontDomainRegistration(
-                offering_mode="bare_metal",
-                contract=domain,
-                contribution_id="bare_metal",
-            ),
-        )
-    )
 
 
 def build_bare_metal_storefront_app(

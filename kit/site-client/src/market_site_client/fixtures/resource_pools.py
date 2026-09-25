@@ -36,14 +36,18 @@ def build_projected_resource(
     attributes: Mapping[str, Any] | None = None,
     enabled: bool = True,
     resource_type: str = "compute.gpu",
+    publication_views: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """One projected pool member. ``available`` defaults to its capacity.
 
     ``resource_type`` defaults to the kind a site ledger records for a
-    declaration that names none.
+    declaration that names none. ``publication_views`` maps a view name to the
+    domain-owned view the site projects for the member; each view's own shape
+    is that domain's contract, not this one. A member with no views projects
+    none, as a site does.
     """
     capacity = dict(capacity if capacity is not None else {"gpu_count": 1})
-    return {
+    resource: dict[str, Any] = {
         "physical_resource_id": physical_resource_id,
         "resource_type": resource_type,
         "resource_subtype": None,
@@ -52,6 +56,11 @@ def build_projected_resource(
         "attributes": dict(attributes or {}),
         "enabled": enabled,
     }
+    if publication_views is not None:
+        resource["publication_views"] = {
+            str(name): dict(view) for name, view in publication_views.items()
+        }
+    return resource
 
 
 def build_resource_pool_row(
@@ -72,7 +81,7 @@ def build_resource_pool_row(
     if deliverable_modes is None:
         deliverable_modes = advertisable_modes if capacity_backing == "backed" else ()
     return {
-        "resource_pool_id": pool_id,
+        "pool_id": pool_id,
         "resources": [
             dict(resource)
             for resource in (
@@ -123,7 +132,7 @@ def validate_resource_pool_projection(response: Mapping[str, Any]) -> None:
     rows = response.get("resource_pools")
     assert isinstance(rows, list), "response must carry a resource_pools list"
     for row in rows:
-        pool_id = row.get("resource_pool_id")
+        pool_id = row.get("pool_id")
         assert isinstance(pool_id, str) and pool_id, f"pool without an id: {row!r}"
         metadata = row.get("pool_metadata")
         assert isinstance(metadata, Mapping), f"pool {pool_id} projects no metadata"

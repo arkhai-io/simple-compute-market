@@ -57,7 +57,7 @@ HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT ?=
 HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE ?=
 HOSTED_STRIPE_TEST_EVIDENCE ?= $(DIST_DIR)/hosted-stripe-test-evidence.json
 
-.PHONY: e2e-dev-identities e2e-dev-identities-env check-hosted-client-pin fix-hosted-client-pin review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-compute-provisioning test-provisioning test-provisioning-iac test-registry test-storefront test-bare-metal test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning dist-compute-provisioning-service dist-kits verify-hosted-release dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-reinit
+.PHONY: e2e-dev-identities e2e-dev-identities-env e2e-bare-metal-dev-env check-hosted-client-pin fix-hosted-client-pin review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-compute-provisioning test-provisioning test-provisioning-iac test-registry test-storefront test-bare-metal test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning dist-compute-provisioning-service dist-kits verify-hosted-release dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-reinit
 .PHONY: build-hosted-producer
 .PHONY: test-release-tooling test-deployment-packaging prepare-hosted-compose prepare-hosted-compose-local hosted-preflight hosted-preflight-local hosted-stripe-test-local hosted-compose-up hosted-compose-restart hosted-compose-clean hosted-stripe-test hosted-stripe-test-stop
 .PHONY: dist-arkhai-core-registry
@@ -529,6 +529,69 @@ e2e-dev-identities-env: ## Print VAR=value lines for `docker compose --env-file`
 	@# from this one constant.
 	@echo 'VMS_REGISTRY_ADMIN_API_KEY=$(E2E_REGISTRY_ADMIN_KEY)'
 	@echo 'VMS_REGISTRY_BOOTSTRAP_API_KEY=$(E2E_REGISTRY_BOOTSTRAP_KEY)'
+
+# ---------------------------------------------------------------------------
+# e2e-bare-metal-dev-env — the bare-metal end-to-end lane's `--env-file`
+# values: compose.bare-metal.yml, compose.dev.yml, and
+# compose.bare-metal-local.yml guard every one with `${VAR:?...}`.
+#
+# The lane is a separate stack on its own dev chain, so it reuses the committed
+# Anvil development credentials under the assignments recorded in
+# dev-env/identities/README.md ("The bare-metal lane"). The option expiry and
+# fulfillment deadline are absolute instants, so they are generated a week
+# ahead at each run rather than committed, where they would go stale.
+# ---------------------------------------------------------------------------
+E2E_BARE_METAL_DIR := $(CURDIR)/dev-env/bare-metal
+E2E_BARE_METAL_REGISTRY_ID := 0x90f79bf6eb2c4f870365e785982e1f101e93b906
+E2E_BARE_METAL_SITE_AUTHORITY_ID := 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266
+E2E_BARE_METAL_STOREFRONT_ID := 0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc
+E2E_BARE_METAL_STOREFRONT_ADMIN_ID := 0x976ea74026e726554db657fa54763abd0c3a0aa9
+E2E_BARE_METAL_SITE_ADMIN_ID := 0x9965507d1a55bcc2695c58ba16fb37d819b0a4dc
+E2E_BARE_METAL_SITE_ID := bare-metal-e2e
+# The dev chain's test ERC-20, as the VM lane's Alkahest clauses name it.
+E2E_BARE_METAL_ALKAHEST_ASSET := 0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0
+
+e2e-bare-metal-dev-env: ## Print VAR=value lines for the bare-metal lane's `docker compose --env-file`
+	@echo 'BARE_METAL_REGISTRY_AUTHORITY_ID=bare-metal-registry'
+	@echo 'BARE_METAL_REGISTRY_AUTHORITY_SCHEME=eip191'
+	@echo 'BARE_METAL_REGISTRY_AUTHORITY_IDENTIFIER=$(E2E_BARE_METAL_REGISTRY_ID)'
+	@echo 'BARE_METAL_REGISTRY_PUBLIC_URL=http://bare-metal-registry:8080'
+	@echo 'BARE_METAL_REGISTRY_DISPLAY_NAME=Local Bare Metal Compute Registry'
+	@echo 'BARE_METAL_OPERATOR_IDENTITY=Arkhai local development'
+	@echo 'BARE_METAL_REGISTRY_IDENTITY_CREDENTIAL_FILE=$(E2E_IDENTITY_DIR)/registry-a.eip191'
+	@echo 'BARE_METAL_REGISTRY_PRINCIPALS_JSON=[{"scheme":"eip191","identifier":"$(E2E_BARE_METAL_REGISTRY_ID)"}]'
+	@echo 'BARE_METAL_PROVISIONING_IDENTITY_ENV_FILE=$(E2E_IDENTITY_DIR)/provisioning.identity.env'
+	@echo 'BARE_METAL_PROVISIONING_IDENTITY_SCHEME=eip191'
+	@echo 'BARE_METAL_PROVISIONING_IDENTITY_IDENTIFIER=$(E2E_BARE_METAL_SITE_AUTHORITY_ID)'
+	@echo 'BARE_METAL_PROVISIONING_ADMIN_IDENTITY_SCHEME=eip191'
+	@echo 'BARE_METAL_PROVISIONING_ADMIN_IDENTITY_IDENTIFIER=$(E2E_BARE_METAL_SITE_ADMIN_ID)'
+	@echo 'BARE_METAL_PROVISIONING_INVENTORY_FILE=$(E2E_BARE_METAL_DIR)/hosts.ini'
+	@echo 'BARE_METAL_POOL_DEFINITIONS_FILE=$(E2E_BARE_METAL_DIR)/resource-pools.yaml'
+	@echo 'BARE_METAL_PROVISIONING_SSH_PRIVATE_KEY_FILE=$(E2E_BARE_METAL_DIR)/ssh-key-placeholder'
+	@echo 'BARE_METAL_SITE_ID=$(E2E_BARE_METAL_SITE_ID)'
+	@echo 'BARE_METAL_STOREFRONT_IDENTITY_ENV_FILE=$(E2E_IDENTITY_DIR)/bob.identity.env'
+	@echo 'BARE_METAL_STOREFRONT_IDENTITY_SCHEME=eip191'
+	@echo 'BARE_METAL_STOREFRONT_IDENTITY_IDENTIFIER=$(E2E_BARE_METAL_STOREFRONT_ID)'
+	@echo 'BARE_METAL_STOREFRONT_ADMIN_IDENTITIES_JSON=[{"scheme":"eip191","identifier":"$(E2E_BARE_METAL_STOREFRONT_ADMIN_ID)"}]'
+	@echo 'BARE_METAL_STOREFRONT_PUBLIC_URL=http://bare-metal-storefront:8000'
+	@echo 'BARE_METAL_STOREFRONT_EVM_ADDRESS=0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC'
+	@# Anvil account 2's published development key, as bob.identity.env holds it.
+	@echo 'BARE_METAL_STOREFRONT_EVM_PRIVATE_KEY=0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a'
+	@echo 'BARE_METAL_STOREFRONT_SITES_JSON=[{"site_id":"$(E2E_BARE_METAL_SITE_ID)","authority_url":"http://bare-metal-provisioning:8081","authority_principal":{"scheme":"eip191","identifier":"$(E2E_BARE_METAL_SITE_AUTHORITY_ID)"}}]'
+	@echo 'BARE_METAL_STOREFRONT_SITE_PLACEMENT=fill_first'
+	@echo 'BARE_METAL_STOREFRONT_REGISTRY_URL=http://bare-metal-registry:8080'
+	@echo 'BARE_METAL_STOREFRONT_SETTLEMENT_JSON={"schema_version":1,"priority":["alkahest.v1"],"alkahest":{"enabled":true,"address_config_path":"/app/alkahest_anvil_addresses.json","oracle_gated":false,"trusted_oracle_addresses":[],"interruptible":false,"interruptible_oracle_addresses":[]}}'
+	@echo 'BARE_METAL_STOREFRONT_CHAINS_JSON={"anvil":{"rpc_url":"ws://anvil:8545","alkahest_address_config_path":"/app/alkahest_anvil_addresses.json"}}'
+	@echo 'BARE_METAL_PUBLICATION_CLAUSES_JSON=[{"mechanism":"alkahest.v1","asset":"$(E2E_BARE_METAL_ALKAHEST_ASSET)","rate":"100","per":"hour","mechanism_input":{"chain":"anvil","escrow_kind":"erc20_escrow_obligation_default"}}]'
+	@echo 'BARE_METAL_FUNDING_DEADLINES_JSON={}'
+	@echo "BARE_METAL_OPTION_EXPIRES_AT=$$(python3 -c 'import datetime as d; print((d.datetime.now(d.timezone.utc)+d.timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ"))')"
+	@echo "BARE_METAL_FULFILLMENT_DEADLINE=$$(python3 -c 'import datetime as d; print((d.datetime.now(d.timezone.utc)+d.timedelta(days=8)).strftime("%Y-%m-%dT%H:%M:%SZ"))')"
+	@echo 'BARE_METAL_MAX_DURATION_SECONDS=86400'
+	@# The buyer service is in the `buyer` profile and the lane never starts it,
+	@# but compose still requires its variables.
+	@echo 'BARE_METAL_BUYER_IMAGE=arkhai:e2e-tests'
+	@echo 'BARE_METAL_BUYER_IDENTITY_ENV_FILE=$(E2E_BARE_METAL_DIR)/buyer.identity.env'
+	@echo 'BARE_METAL_BUYER_CONFIG_FILE=$(E2E_BARE_METAL_DIR)/buyer.toml'
 
 build-dev: build build-dev-env build-test-image
 
