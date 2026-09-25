@@ -1,134 +1,59 @@
+"""The publication source the storefront composes from its own callbacks."""
+
 from __future__ import annotations
 
-import sqlite3
+from unittest.mock import MagicMock
 
-from arkhai_bare_metal import (
-    BareMetalResourceProjection,
-    TrustedBareMetalProjection,
-)
 from arkhai_bare_metal.storefront_adapter import (
-    available_bare_metal_listing_candidates,
     bare_metal_candidate_skip_keys,
     bare_metal_publication_adapter,
 )
-from arkhai_bare_metal.storefront_publication import (
-    bare_metal_listing_candidates,
-    record_derived_bare_metal_listing,
-)
-from arkhai_bare_metal.publication import bare_metal_listing_key
 
 
-def _projection(*, complete=True, resources=True):
-    projected = []
-    if complete and resources:
-        projected = [
-            BareMetalResourceProjection(
-                physical_resource_id="resource-1",
-                physical_host_id="physical-host-1",
-                host_id="machine-1",
-                available=True,
-                allocation_mode="exclusive",
-                access_methods=["ssh"],
-                capacity={"gpu_count": 8},
-            ),
-        ]
-    return TrustedBareMetalProjection(
-        site_id="site-a",
-        revision=1,
-        digest="generation-1",
-        complete=complete,
-        resources=projected,
-    )
+def _source(**overrides):
+    callbacks = {
+        "open_keys": MagicMock(return_value={"k1"}),
+        "close_stale": MagicMock(return_value=["listing-1"]),
+        "available_candidates": MagicMock(return_value=[]),
+        "record_published": MagicMock(return_value=None),
+        "reopen_existing": MagicMock(return_value=None),
+    }
+    callbacks.update(overrides)
+    return bare_metal_publication_adapter(**callbacks), callbacks
 
 
-def test_adapter_returns_exact_projection_candidate():
-    source = bare_metal_publication_adapter(
-        projection_snapshot=lambda: [_projection()],
-        close_listing=lambda *_args: {"status": "closed"},
-        publish_existing_listing=lambda **kwargs: kwargs,
-    )
-
-    candidates = source.available_candidates("unused.db")
+def test_every_database_callback_is_the_storefronts_own():
+    source, callbacks = _source()
 
     assert source.name == "bare_metal"
-    assert len(candidates) == 1
-    assert candidates[0]["site_id"] == "site-a"
-    assert candidates[0]["physical_resource_id"] == "resource-1"
-    assert source.listing_resource(candidates[0]) == candidates[0]["listing_resource"]
-    assert bare_metal_candidate_skip_keys(candidates[0]) == {
-        bare_metal_listing_key(site_id="site-a", physical_resource_id="resource-1"),
+    for name in (
+        "open_keys",
+        "close_stale",
+        "available_candidates",
+        "record_published",
+        "reopen_existing",
+    ):
+        assert getattr(source, name) is callbacks[name]
+
+
+def test_a_candidate_is_skipped_by_its_common_derivation_key_alone():
+    candidate = {
+        "derivation_key": "storefront-derivation.v1:abc",
+        "site_id": "site-a",
+        "physical_resource_id": "resource-1",
+    }
+
+    assert bare_metal_candidate_skip_keys(candidate) == {
+        "storefront-derivation.v1:abc"
     }
 
 
-def test_unavailable_projection_snapshot_publishes_nothing():
-    assert available_bare_metal_listing_candidates(
-        "unused.db",
-        projection_snapshot=lambda: None,
-    ) == []
-    assert available_bare_metal_listing_candidates(
-        "unused.db",
-        projection_snapshot=lambda: [_projection(complete=False)],
-    ) == []
+def test_listing_resource_is_a_copy_of_the_candidates():
+    source, _ = _source()
+    candidate = {"derivation_key": "k", "listing_resource": {"kind": "bare_metal.v2"}}
 
+    resource = source.listing_resource(candidate)
+    resource["offering_mode"] = "bare_metal"
 
-def test_authoritative_empty_projection_closes_tracked_listing(tmp_path):
-    path = str(tmp_path / "storefront.db")
-    conn = sqlite3.connect(path)
-    try:
-        conn.executescript(
-            """
-            CREATE TABLE listings (
-              listing_id TEXT PRIMARY KEY,
-              status TEXT NOT NULL,
-              closed_by TEXT,
-              updated_at TEXT
-            );
-            CREATE TABLE derived_bare_metal_listings (
-              listing_id TEXT PRIMARY KEY,
-              site_id TEXT NOT NULL,
-              physical_resource_id TEXT NOT NULL,
-              host_id TEXT NOT NULL,
-              physical_host_id TEXT NOT NULL,
-              status TEXT NOT NULL,
-              derivation_key TEXT NOT NULL UNIQUE,
-              last_reconciled_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            );
-            INSERT INTO listings(listing_id, status)
-            VALUES ('listing-1', 'open');
-            """,
-        )
-        conn.commit()
-    finally:
-        conn.close()
-    candidate = bare_metal_listing_candidates([_projection()])[0]
-    record_derived_bare_metal_listing(
-        path,
-        listing_id="listing-1",
-        candidate=candidate,
-    )
-    calls = []
-    source = bare_metal_publication_adapter(
-        projection_snapshot=lambda: [_projection(resources=False)],
-        close_listing=lambda base_url, listing_id: (
-            calls.append((base_url, listing_id))
-            or {"status": "closed"}
-        ),
-        publish_existing_listing=lambda **kwargs: kwargs,
-    )
-
-    closed = source.close_stale(path, "https://seller")
-
-    assert closed == ["listing-1"]
-    assert calls == [("https://seller", "listing-1")]
-    # The local listings row is closed in the same pass as the derived
-    # row -- the storefront's own view can't outlive the projection that
-    # justified it.
-    conn = sqlite3.connect(path)
-    try:
-        row = conn.execute(
-            "SELECT status, updated_at FROM listings WHERE listing_id = 'listing-1'"
-        ).fetchone()
-    finally:
-        conn.close()
-    assert row[0] == "closed"
-    assert row[1]
+    assert candidate["listing_resource"] == {"kind": "bare_metal.v2"}
+    assert source.pricing_resource(candidate, resource) is resource

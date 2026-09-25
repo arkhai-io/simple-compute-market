@@ -30,7 +30,7 @@ class _FakeRemote:
         self.snapshot_calls += 1
         if self._fails:
             raise ConnectionError(f"{key} unreachable")
-        return {"revision": 1, "digest": "d1", key: [{"resource_pool_id": "pool-1"}]}
+        return {"revision": 1, "digest": "d1", key: [{"pool_id": "pool-1"}]}
 
     async def resource_pool_projection_version(self) -> dict[str, Any]:
         return await self._projection_version("resource_pools")
@@ -134,7 +134,7 @@ class TestProjectionStatusSummary:
 class _PayloadRemote:
     """A `_FakeRemote`-shaped stand-in that returns a caller-supplied
     resource-pool payload, for tests that need specific `pool_metadata`
-    content rather than `_FakeRemote`'s fixed `[{"resource_pool_id": "pool-1"}]`.
+    content rather than `_FakeRemote`'s fixed `[{"pool_id": "pool-1"}]`.
     """
 
     def __init__(self, resource_pools: list[dict[str, Any]]) -> None:
@@ -162,9 +162,9 @@ class TestListingCardinalityModeExplanations:
 
     async def test_no_explanation_for_a_recognized_or_absent_cardinality_mode(self):
         remote = _PayloadRemote([
-            {"resource_pool_id": "gpu-pool-a", "resources": []},
+            {"pool_id": "gpu-pool-a", "resources": []},
             {
-                "resource_pool_id": "gpu-pool-b", "resources": [],
+                "pool_id": "gpu-pool-b", "resources": [],
                 "pool_metadata": {"policy_tags": {"listing_cardinality_mode": "specific_resource"}},
             },
         ])
@@ -175,7 +175,7 @@ class TestListingCardinalityModeExplanations:
     async def test_explanation_for_an_unrecognized_cardinality_mode(self):
         remote = _PayloadRemote([
             {
-                "resource_pool_id": "gpu-pool",
+                "pool_id": "gpu-pool",
                 "resources": [],
                 "pool_metadata": {"policy_tags": {"listing_cardinality_mode": "bogus"}},
             },
@@ -194,7 +194,7 @@ class TestListingCardinalityModeExplanations:
         the pool must not be reclassified to the structural default."""
         remote = _PayloadRemote([
             {
-                "resource_pool_id": "legacy-pool",
+                "pool_id": "legacy-pool",
                 "resources": [],
                 "pool_metadata": {
                     "policy_tags": {"listing_mode": "specific_resource"},
@@ -212,7 +212,7 @@ class TestListingCardinalityModeExplanations:
     async def test_both_notices_reported_for_a_bad_value_under_the_old_key(self):
         remote = _PayloadRemote([
             {
-                "resource_pool_id": "legacy-bad-pool",
+                "pool_id": "legacy-bad-pool",
                 "resources": [],
                 "pool_metadata": {"policy_tags": {"listing_mode": "bogus"}},
             },
@@ -226,10 +226,10 @@ class TestListingCardinalityModeExplanations:
         assert "listing_cardinality_mode" in notice
 
     async def test_one_sites_explanations_do_not_affect_another(self):
-        clean = _PayloadRemote([{"resource_pool_id": "clean-pool", "resources": []}])
+        clean = _PayloadRemote([{"pool_id": "clean-pool", "resources": []}])
         bad = _PayloadRemote([
             {
-                "resource_pool_id": "bad-pool", "resources": [],
+                "pool_id": "bad-pool", "resources": [],
                 "pool_metadata": {"policy_tags": {"listing_cardinality_mode": "bogus"}},
             },
         ])

@@ -444,7 +444,7 @@ class TestSitePoolProjection:
     def test_includes_a_site_with_a_loaded_value(self):
         fake_cache = MagicMock()
         fake_cache.resource_pools.view.return_value.value = [
-            {"resource_pool_id": "gpu-pool", "resources": []},
+            {"pool_id": "gpu-pool", "resources": []},
         ]
         with patch(
             "market_storefront.services.site_projection_cache.projection_caches",
@@ -452,7 +452,7 @@ class TestSitePoolProjection:
         ):
             result = cc.site_pool_projection()
         assert result == {
-            "site-a": [{"resource_pool_id": "gpu-pool", "resources": []}],
+            "site-a": [{"pool_id": "gpu-pool", "resources": []}],
         }
 
     def test_excludes_a_site_with_no_cached_value(self):
@@ -492,7 +492,7 @@ class TestSitePoolProjection:
 
     def test_multiple_sites_only_loaded_ones_included(self):
         loaded = MagicMock()
-        loaded.resource_pools.view.return_value.value = [{"resource_pool_id": "p"}]
+        loaded.resource_pools.view.return_value.value = [{"pool_id": "p"}]
         unloaded = MagicMock()
         unloaded.resource_pools.view.return_value.value = None
         with patch(
@@ -546,7 +546,7 @@ class TestSiteCapacityBuckets:
         fake_cache = MagicMock()
         fake_cache.capacity_buckets.view.return_value.value = [
             {
-                "resource_pool_id": "gpu-pool",
+                "pool_id": "gpu-pool",
                 "available": {"gpu_count": 4},
                 "resource_count": 1,
             },
@@ -559,7 +559,7 @@ class TestSiteCapacityBuckets:
         assert result == {
             "site-a": [
                 {
-                    "resource_pool_id": "gpu-pool",
+                    "pool_id": "gpu-pool",
                     "available": {"gpu_count": 4},
                     "resource_count": 1,
                 },
@@ -595,10 +595,10 @@ class TestReconcileListingsUsesCachedProjectionWhenEnabled:
 
         from market_storefront.services import site_projection_cache as spc
 
-        pool_rows = [{"resource_pool_id": "gpu-pool", "resources": []}]
+        pool_rows = [{"pool_id": "gpu-pool", "resources": []}]
         bucket_rows = [
             {
-                "resource_pool_id": "gpu-pool",
+                "pool_id": "gpu-pool",
                 "available": {"gpu_count": 4},
                 "resource_count": 1,
             }
@@ -694,7 +694,7 @@ class TestReconcileListingsUsesCachedProjectionWhenEnabled:
 
         resource_pools_cache: ProjectionCache = ProjectionCache(client=None)
         resource_pools_cache._value = [
-            {"resource_pool_id": "gpu-pool", "resources": []}
+            {"pool_id": "gpu-pool", "resources": []}
         ]
         resource_pools_cache._state = ProjectionState.loaded
         resource_pools_cache._identity = ProjectionIdentity(revision=1, digest="abc")

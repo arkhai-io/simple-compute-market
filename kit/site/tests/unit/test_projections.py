@@ -34,13 +34,28 @@ def _resources():
     ]
 
 
+def test_both_projections_name_the_pool_pool_id():
+    """The pool's identifier carries one name on every surface, the site's
+    projections included."""
+    pools = resource_pool_projection(_resources())
+    buckets = capacity_bucket_projection(_resources())
+
+    assert [row["pool_id"] for row in pools] == ["pool-1"]
+    assert {row["pool_id"] for row in buckets} == {"pool-1"}
+    # No second spelling of the pool's identifier rides alongside.
+    assert all(
+        [key for key in row if key.endswith("pool_id")] == ["pool_id"]
+        for row in [*pools, *buckets]
+    )
+
+
 def test_canonical_digest_ignores_mapping_order():
     assert canonical_digest([{"b": 2, "a": 1}]) == canonical_digest([{"a": 1, "b": 2}])
 
 
 def test_resource_pool_projection_preserves_individual_inventory():
     rows = resource_pool_projection(_resources())
-    assert rows[0]["resource_pool_id"] == "pool-1"
+    assert rows[0]["pool_id"] == "pool-1"
     assert [r["physical_resource_id"] for r in rows[0]["resources"]] == ["host-a", "host-b"]
     assert rows[0]["resources"][0]["available"] == {
         "gpu_count": 8,
@@ -162,7 +177,7 @@ def test_pool_absent_from_directory_has_no_pool_metadata_key():
     rows = resource_pool_projection(
         resources, pool_metadata={"pool-1": {"label": "Pool One", "enabled": True}},
     )
-    by_pool = {row["resource_pool_id"]: row for row in rows}
+    by_pool = {row["pool_id"]: row for row in rows}
     assert by_pool["pool-1"]["pool_metadata"] == {"label": "Pool One", "enabled": True}
     assert "pool_metadata" not in by_pool["pool-2"]
 

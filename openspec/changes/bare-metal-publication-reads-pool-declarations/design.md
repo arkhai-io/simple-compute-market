@@ -337,6 +337,40 @@ that exists only in development.
 **Revisit trigger:** bare metal's first deployment. From then on, bare-metal storefront
 schema changes are additive and a table drop is a contract step.
 
+## Decisions made during implementation
+
+Agreed before code was written; none changes an accepted decision above.
+
+- **The trusted generation carries a resource, not a bare view.**
+  `TrustedBareMetalResource(pool_id, enabled, view)` holds each resource beside its
+  containing pool and declared enablement. The generation drops `complete` and
+  `stale`: a site that could not be read has no generation, which is what holding it
+  needs.
+- **What else refuses a generation.** A bare-metal view under a pool entry naming no
+  `pool_id`, or a projected resource without a boolean `enabled`. A pool entry
+  without a `pool_id` and without bare-metal views is ignored, not refused.
+- **Holds are pool-level too.** An open listing whose binding names an unresolvable
+  `(site, pool)` is held even when its resource no longer carries a view, so "a
+  pool whose declarations do not resolve holds the listings derived from it" holds
+  for every listing bound to that pool.
+- **Close reasons live in the report.** `ReconciliationPlan` carries no reason and
+  needs none: every close is a reconciliation close, and a backed listing closed for
+  either reason reopens when its resource is a candidate again. The distinction is
+  made before the plan, by classification.
+- **The command owns no registry transport.** The kit runtime opens and closes a
+  `MultiRegistryClient` per operation; the command hands it a factory for the one
+  configured registry.
+- **A reopen no longer clears `paused`.** Nothing in bare metal pauses one listing,
+  so going through the kit's reopen, which leaves `paused` alone, is not observable.
+
+**Consequence noted at implementation: more term refreshes.** Hosted options embed
+the projection revision and digest a candidate came from. That is now the site's
+whole resource-pool generation, so any change at a site, a VM resource included,
+refreshes every open bare-metal listing there on the next run. Previously the digest
+covered only the site's bare-metal resources, so the same refresh followed any
+bare-metal change. Narrowing it would mean a per-resource digest in the hosted
+option facts, a hosted-contract change outside this change.
+
 ## Open questions
 
 None.

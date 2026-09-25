@@ -140,7 +140,7 @@ async def _seed_listing(
 def _vm_pool_projection_caches():
     resource_pools = ProjectionCache(client=None)
     resource_pools._value = [{
-        "resource_pool_id": "pool-vm",
+        "pool_id": "pool-vm",
         "pool_metadata": {
             "policy_tags": {"deliverable_modes": ["vm"]},
         },
@@ -737,7 +737,7 @@ def _declared_pool_projection_caches(
     """A site projection whose pool declares both declarations explicitly."""
     resource_pools = ProjectionCache(client=None)
     resource_pools._value = [{
-        "resource_pool_id": "pool-vm",
+        "pool_id": "pool-vm",
         "pool_metadata": {
             "enabled": True,
             "policy_tags": {

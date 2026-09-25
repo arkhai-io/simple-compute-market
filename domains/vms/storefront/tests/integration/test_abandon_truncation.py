@@ -43,7 +43,7 @@ def _pool_projection_caches(pool_id: str) -> site_projection_cache.SiteProjectio
     resource_pools = ProjectionCache(client=None)
     resource_pools._value = [
         {
-            "resource_pool_id": pool_id,
+            "pool_id": pool_id,
             "pool_metadata": {
                 "policy_tags": {"deliverable_modes": ["vm"]},
             },

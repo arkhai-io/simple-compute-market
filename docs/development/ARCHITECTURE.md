@@ -204,9 +204,11 @@ and applies only where a pool was selected. Publication,
 reservation, commit, release, and restart recovery reload and compare that
 exact binding. An unknown site, missing mode, changed binding, or incomplete
 candidate fails closed; the runtime never invents a home site, scans other
-authorities after restart, or defaults an offering mode. VM and API-credit
-contributions inject their candidate derivation and binding codecs into this
-same runtime. The kit imports no VM, API-credit, bare-metal, provider, or
+authorities after restart, or defaults an offering mode. VM, API-credit, and
+bare-metal contributions inject their candidate derivation and binding codecs
+into this same runtime, so each publishes, reconciles, and converges its
+registries through one implementation. A bare-metal binding's source is the
+Physical Resource the listing sells. The kit imports no VM, API-credit, bare-metal, provider, or
 deployed-service package.
 
 The storefront role is one domain-neutral compute-family shell. At startup it
@@ -489,7 +491,8 @@ exactly one name.
 
 The offering mode carries one name on every surface that names it: the capacity
 claim, the Resource Pool's deliverable and advertisable declarations, the durable
-listing binding, and the published listing. It is a separate axis from the
+listing binding, and the published listing. So does the pool's identifier,
+`pool_id`, including in the site's resource-pool and capacity-bucket projections. It is a separate axis from the
 site-inventory `resource_kind`/`resource_type` discriminator, and naming it
 consistently does not merge the two.
 

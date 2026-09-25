@@ -386,7 +386,7 @@ async def test_site_resource_pools_projection_surfaces_pool_metadata(
     remote = _site_capacity_client("http://test", transport=ASGITransport(app=app))
     data = await remote.resource_pool_projection()
     rows = data["resource_pools"]
-    pool_row = next(row for row in rows if row["resource_pool_id"] == "hetzner-eu")
+    pool_row = next(row for row in rows if row["pool_id"] == "hetzner-eu")
 
     assert pool_row["pool_metadata"]["label"] == "Hetzner EU"
     assert pool_row["pool_metadata"]["enabled"] is True
@@ -461,7 +461,7 @@ async def test_site_resource_pools_projection_surfaces_region_sla_pricing_policy
     remote = _site_capacity_client("http://test", transport=ASGITransport(app=app))
     data = await remote.resource_pool_projection()
     rows = data["resource_pools"]
-    pool_row = next(row for row in rows if row["resource_pool_id"] == "hetzner-eu")
+    pool_row = next(row for row in rows if row["pool_id"] == "hetzner-eu")
 
     assert pool_row["pool_metadata"]["policy_tags"] == {
         "advertisable_modes": [],
@@ -509,7 +509,7 @@ async def test_site_resource_pools_projection_carries_listing_shapes_verbatim(
 
     remote = _site_capacity_client("http://test", transport=ASGITransport(app=app))
     data = await remote.resource_pool_projection()
-    pool_row = next(row for row in data["resource_pools"] if row["resource_pool_id"] == "shaped")
+    pool_row = next(row for row in data["resource_pools"] if row["pool_id"] == "shaped")
     assert pool_row["pool_metadata"]["policy_tags"]["listing_shapes"] == shapes
 
 
@@ -546,7 +546,7 @@ async def test_site_resource_pools_projection_declares_every_pool(
     rows = (await remote.resource_pool_projection())["resource_pools"]
 
     resolved = {
-        row["resource_pool_id"]: resolve_pool_declarations(
+        row["pool_id"]: resolve_pool_declarations(
             row["pool_metadata"]["policy_tags"]
         )
         for row in rows
@@ -647,7 +647,7 @@ async def test_site_resource_pools_projection_omits_pool_views_with_no_defaults(
     remote = _site_capacity_client("http://test", transport=ASGITransport(app=app))
     data = await remote.resource_pool_projection()
     rows = data["resource_pools"]
-    default_row = next(row for row in rows if row["resource_pool_id"] == "default")
+    default_row = next(row for row in rows if row["pool_id"] == "default")
 
     assert "pool_views" not in default_row["pool_metadata"]
 
@@ -711,7 +711,7 @@ async def test_site_capacity_buckets_projection_through_the_real_client(
 
     and that the response has the exact shape reconciler.py's
     `_fungible_availability_from_buckets` actually consumes
-    (`resource_pool_id`, `available.gpu_count`, `resource_count`,
+    (`pool_id`, `available.gpu_count`, `resource_count`,
     `grouping_attributes`).
     """
     from market_site_client import SiteCapacityClient
@@ -737,7 +737,7 @@ async def test_site_capacity_buckets_projection_through_the_real_client(
     remote = _site_capacity_client("http://test", transport=ASGITransport(app=app))
     data = await remote.capacity_bucket_projection()
     buckets = [
-        b for b in data["capacity_buckets"] if b.get("resource_pool_id") == "hetzner-eu"
+        b for b in data["capacity_buckets"] if b.get("pool_id") == "hetzner-eu"
     ]
 
     # Two freshly-registered resources with different capacity (hence

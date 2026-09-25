@@ -94,7 +94,7 @@ def _declare_source(
     capacity_backing: str = "backed",
 ) -> None:
     _SITE_POOLS.append({
-        "resource_pool_id": f"pool-{listing_id}",
+        "pool_id": f"pool-{listing_id}",
         "pool_metadata": {
             "enabled": True,
             "policy_tags": {

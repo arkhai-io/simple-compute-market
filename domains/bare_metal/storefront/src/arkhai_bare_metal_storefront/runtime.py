@@ -9,9 +9,11 @@ import os
 import sqlite3
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any
 
 from core_storefront.identity_config import IdentityConfig, resolve_storefront_signer
+from core_storefront.models.system_models import ProjectionFamilyStatus
 from market_identity import Identity, IdentityScheme, Signer, TrustedIdentitySet
 from market_alkahest import create_alkahest_registration
 from market_core import MarketDomainContract, validate_domain_contract
@@ -87,6 +89,9 @@ async def _publish_portable_evidence_reference(
 
 
 logger = logging.getLogger(__name__)
+
+# The family name VM's health reports a site's resource-pool projection under.
+RESOURCE_POOL_PROJECTION_FAMILY = "resource_pool"
 
 
 @dataclass(frozen=True)
@@ -184,7 +189,14 @@ class BareMetalStorefrontRuntime:
         )
 
     async def health(self) -> dict[str, object]:
-        """Report composed authorities without implying fulfillment readiness."""
+        """Report composed authorities without implying fulfillment readiness.
+
+        Each trusted site's resource-pool projection is reported per site in
+        ``site_projections`` and enters no gated check: one site being down
+        must not present as the whole storefront being degraded. See
+        openspec/specs/storefront-publication/spec.md, "Per-site projection
+        load-state visibility".
+        """
 
         def _check_database() -> None:
             conn = sqlite3.connect(self.db.db_path)
@@ -201,8 +213,9 @@ class BareMetalStorefrontRuntime:
                 if self.settlement_composition is not None or self.chain_clients
                 else "unavailable"
             ),
-            "site_projection": "unavailable",
-            "fulfillment": "unavailable",
+            "fulfillment": (
+                "ok" if self.fulfillment_client is not None else "unavailable"
+            ),
         }
         try:
             await asyncio.to_thread(_check_database)
@@ -212,17 +225,6 @@ class BareMetalStorefrontRuntime:
             checks["database"] = "error"
             paused = None
             resource_count = None
-        if self.capacity_client is not None:
-            try:
-                await self.capacity_client.snapshot()
-            except Exception:
-                checks["site_projection"] = "error"
-                checks["fulfillment"] = "error"
-            else:
-                checks["site_projection"] = "ok"
-                checks["fulfillment"] = (
-                    "ok" if self.fulfillment_client is not None else "unavailable"
-                )
         return {
             "status": (
                 "ok" if all(value == "ok" for value in checks.values()) else "degraded"
@@ -232,7 +234,44 @@ class BareMetalStorefrontRuntime:
             "principal": self.seller_principal.model_dump(mode="json"),
             "sites": [binding.diagnostic() for binding in self.site_bindings],
             "resource_count": resource_count,
+            "site_projections": await self._site_projections(),
         }
+
+    async def _site_projections(self) -> dict[str, dict[str, dict[str, object]]]:
+        """Each trusted site's resource-pool projection as fetched just now.
+
+        Only the version is fetched: the health route is also the image's
+        health probe, and the version carries exactly the revision and digest
+        reported. Nothing is cached between calls, so a site is either
+        ``loaded`` or ``unavailable``.
+        """
+        if self.capacity_client is None:
+            return {}
+
+        async def _one(site_id: str) -> tuple[str, dict[str, object]]:
+            try:
+                version = await self.capacity_client.site(
+                    site_id
+                ).resource_pool_projection_version()
+            except Exception as exc:
+                status = ProjectionFamilyStatus(
+                    state="unavailable", last_error=str(exc)
+                )
+            else:
+                status = ProjectionFamilyStatus(
+                    state="loaded",
+                    revision=version.get("revision"),
+                    digest=version.get("digest"),
+                    fetched_at=datetime.now(timezone.utc).isoformat(),
+                )
+            return site_id, {
+                RESOURCE_POOL_PROJECTION_FAMILY: status.model_dump(mode="json")
+            }
+
+        results = await asyncio.gather(
+            *(_one(binding.site_id) for binding in self.site_bindings)
+        )
+        return dict(results)
 
 
 def _build_chain_clients_from_environment() -> tuple[

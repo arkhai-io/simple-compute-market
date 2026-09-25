@@ -1,11 +1,11 @@
 [project]
 name = "arkhai-bare-metal-storefront"
-version = "0.4.0"
+version = "0.5.0"
 license = "MIT"
 description = "Seller-side storefront composition for the Arkhai bare-metal domain."
 requires-python = ">=3.12,<3.14"
 dependencies = [
-    "arkhai-bare-metal>=0.4.0",
+    "arkhai-bare-metal>=0.5.0",
     "arkhai-kit-delivery==0.1.0",
     "arkhai-kit-contact-exchange==0.1.2",
     "arkhai-compute-provisioning>=0.6.1",
@@ -16,7 +16,9 @@ dependencies = [
     "arkhai-kit-policy",
     "arkhai-kit-identity==0.3.0",
     "arkhai-kit-hosted-settlement==0.1.4",
-    "arkhai-kit-site-client>=0.4.0",
+    "arkhai-kit-site-client>=0.6.0",
+    "arkhai-kit-capacity-publication==0.2.0",
+    "arkhai-kit-resource-pools>=0.5.0",
     "arkhai-kit-settlement-runtime>=0.1.0",
     "arkhai-kit-storefront==0.1.1",
     "fastapi~=0.115.8",

@@ -1,12 +1,12 @@
 [project]
 name = "arkhai-compute-provisioning-service"
-version = "0.3.1"
+version = "0.4.0"
 license = "MIT"
 description = "Deployable cross-domain compute provisioning service"
 requires-python = ">=3.12"
 dependencies = [
     "arkhai-kit-config",
-    "arkhai-kit-site>=0.4.0",
+    "arkhai-kit-site>=0.5.0",
     "arkhai-kit-resource-pools>=0.3.0",
     "arkhai-kit-fulfillment>=0.3.0",
     "arkhai-compute-provisioning>=0.7.0",
@@ -56,7 +56,10 @@ asyncio_mode = "auto"
 dev = [
     "arkhai-vms-provisioning-adapter>=0.3.0",
     "arkhai-bare-metal-provisioning-adapter>=0.2.0",
-    "arkhai-kit-site-client>=0.4.0",
+    # The bare-metal view's contract fixture, which the producer test validates
+    # its projected views against.
+    "arkhai-bare-metal>=0.5.0",
+    "arkhai-kit-site-client>=0.6.0",
     "pytest>=9.0.2",
     "pytest-asyncio>=0.23",
 ]

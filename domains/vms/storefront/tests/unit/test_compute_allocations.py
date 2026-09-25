@@ -58,21 +58,6 @@ async def _seed_fungible_compute_pool(client: SQLiteClient) -> None:
         )
 
 
-def test_vm_schema_does_not_create_bare_metal_listing_tables(client):
-    conn = sqlite3.connect(client.db_path)
-    try:
-        row = conn.execute(
-            "SELECT 1 FROM sqlite_master "
-            "WHERE type = 'table' AND name = 'derived_bare_metal_listings'"
-        ).fetchone()
-    finally:
-        conn.close()
-
-    assert row is None
-
-
-
-
 def test_sqlite_schema_includes_compute_allocation_correlation_fields(client):
     conn = sqlite3.connect(client.db_path)
     try:

@@ -21,6 +21,8 @@ BARE_METAL_MIGRATION_IDS = (
     "bare-metal-storefront-0006-common-domain-bindings",
     "bare-metal-storefront-0007-selected-site-immutability",
     "bare-metal-storefront-0008-hosted-physical-lifecycle",
+    "bare-metal-storefront-0009-refuse-retired-listing-kind",
+    "bare-metal-storefront-0010-drop-derived-publications",
 )
 MIGRATION_IDS = (*SETTLEMENT_MIGRATION_IDS, *BARE_METAL_MIGRATION_IDS)
 
@@ -57,12 +59,6 @@ async def test_bare_metal_migration_upgrades_existing_core_database(tmp_path) ->
             f"WHERE id IN ({placeholders}) ORDER BY id",
             MIGRATION_IDS,
         ).fetchall()
-        derived_columns = {
-            row[1]
-            for row in conn.execute(
-                "PRAGMA table_info(derived_bare_metal_listings)",
-            )
-        }
         listing = conn.execute(
             "SELECT listing_id FROM listings WHERE listing_id = ?",
             ("listing-existing",),
@@ -78,18 +74,40 @@ async def test_bare_metal_migration_upgrades_existing_core_database(tmp_path) ->
     assert {"settlement_obligations", "settlement_operations"} <= tables
     assert "bare_metal_hosted_lifecycle" in tables
     assert applied == [(migration_id,) for migration_id in sorted(MIGRATION_IDS)]
-    assert {
-        "site_id",
-        "physical_resource_id",
-        "host_id",
-        "physical_host_id",
-        "derivation_key",
-    } <= derived_columns
+    assert "derived_bare_metal_listings" not in tables
     assert listing == ("listing-existing",)
     assert operator_state == (1, 0)
 
 
-def test_publication_migration_closes_unscoped_tracking_rows(tmp_path) -> None:
+def _tables_and_indexes(path) -> set[str]:
+    conn = sqlite3.connect(path)
+    try:
+        return {
+            str(row[0])
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type IN ('table', 'index')"
+            )
+        }
+    finally:
+        conn.close()
+
+
+def test_the_migration_sequence_leaves_no_second_listing_key(tmp_path) -> None:
+    """Listings are tracked only by the common binding's derivation key."""
+    path = tmp_path / "storefront.db"
+
+    SQLiteClient(str(path))
+
+    names = _tables_and_indexes(path)
+    assert "derived_bare_metal_listings" not in names
+    assert not {name for name in names if name.startswith("idx_derived_bare_metal")}
+
+
+def test_a_populated_tracking_table_is_dropped_after_its_rows_are_bound(
+    tmp_path,
+) -> None:
+    """A database 0002 populated keeps each listing's common binding, which
+    0006 wrote from the tracking row, and loses the tracking table."""
     path = tmp_path / "storefront.db"
     CoreSQLiteClient(str(path))
     conn = sqlite3.connect(path)
@@ -98,17 +116,30 @@ def test_publication_migration_closes_unscoped_tracking_rows(tmp_path) -> None:
             """
             CREATE TABLE derived_bare_metal_listings (
               listing_id TEXT PRIMARY KEY,
+              site_id TEXT NOT NULL,
+              physical_resource_id TEXT NOT NULL,
               host_id TEXT NOT NULL,
               physical_host_id TEXT NOT NULL,
               status TEXT NOT NULL,
               derivation_key TEXT NOT NULL UNIQUE,
               last_reconciled_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
-            INSERT INTO derived_bare_metal_listings(
-              listing_id, host_id, physical_host_id, status, derivation_key
+            INSERT INTO listings(
+              listing_id, status, created_at, updated_at, listing_resource,
+              storefront_url, seller_scheme, seller_identifier
             ) VALUES (
-              'listing-old', 'machine-old', 'host-old', 'open',
-              'bare-metal:machine-old'
+              'listing-old', 'open', 'now', 'now',
+              '{"kind": "bare_metal.v2", "capacity_backing": "backed",
+                "host_id": "machine-old", "physical_host_id": "host-old",
+                "access_methods": ["ssh"]}',
+              'http://seller:8000', 'ed25519', 'seller'
+            );
+            INSERT INTO derived_bare_metal_listings(
+              listing_id, site_id, physical_resource_id, host_id,
+              physical_host_id, status, derivation_key
+            ) VALUES (
+              'listing-old', 'site-a', 'resource-old', 'machine-old',
+              'host-old', 'open', 'bare-metal:6:site-a:12:resource-old'
             );
             """,
         )
@@ -118,16 +149,16 @@ def test_publication_migration_closes_unscoped_tracking_rows(tmp_path) -> None:
 
     SQLiteClient(str(path))
 
+    assert "derived_bare_metal_listings" not in _tables_and_indexes(path)
     conn = sqlite3.connect(path)
     try:
-        row = conn.execute(
-            "SELECT site_id, physical_resource_id, status "
-            "FROM derived_bare_metal_listings WHERE listing_id = 'listing-old'",
+        binding = conn.execute(
+            "SELECT site_id, pool_id, physical_resource_id, offering_mode "
+            "FROM storefront_listing_bindings WHERE listing_id = 'listing-old'"
         ).fetchone()
     finally:
         conn.close()
-
-    assert row == (None, None, "closed")
+    assert binding == ("site-a", None, "resource-old", "bare_metal")
 
 
 def test_a_database_written_under_the_retired_listing_kind_is_refused(tmp_path) -> None:
@@ -171,10 +202,10 @@ def test_a_fresh_database_passes_the_retired_kind_check(tmp_path) -> None:
             "SELECT 1 FROM schema_migrations "
             "WHERE id='bare-metal-storefront-0009-refuse-retired-listing-kind'"
         ).fetchone() == (1,)
-        columns = {
-            row[1]
-            for row in conn.execute("PRAGMA table_info(derived_bare_metal_listings)")
-        }
-        assert "host_id" in columns and "machine_id" not in columns
+        # The retired schema is gone and nothing replaced it with a table
+        # the refusal would have to recognize.
+        assert conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE name='derived_bare_metal_listings'"
+        ).fetchone() is None
     finally:
         conn.close()

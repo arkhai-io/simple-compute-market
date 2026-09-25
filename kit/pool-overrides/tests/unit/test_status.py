@@ -21,11 +21,11 @@ from market_pool_overrides import (
         # Local-table derivation applies no override, whatever its site.
         ("site-zz", None, OVERRIDE_INACTIVE),
         ("site-zz", {"site-a": []}, OVERRIDE_SITE_UNCONFIGURED),
-        ("site-b", {"site-a": [{"resource_pool_id": "gpu"}]}, OVERRIDE_UNKNOWN),
-        ("site-a", {"site-a": [{"resource_pool_id": "other"}]}, OVERRIDE_ORPHANED),
+        ("site-b", {"site-a": [{"pool_id": "gpu"}]}, OVERRIDE_UNKNOWN),
+        ("site-a", {"site-a": [{"pool_id": "other"}]}, OVERRIDE_ORPHANED),
         # An authoritative empty generation is an answer: the pool is absent.
         ("site-a", {"site-a": []}, OVERRIDE_ORPHANED),
-        ("site-a", {"site-a": [{"resource_pool_id": "gpu"}]}, OVERRIDE_APPLIED),
+        ("site-a", {"site-a": [{"pool_id": "gpu"}]}, OVERRIDE_APPLIED),
     ],
 )
 def test_an_override_is_in_exactly_one_state(site_id, projection, state):

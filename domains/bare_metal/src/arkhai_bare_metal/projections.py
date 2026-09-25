@@ -79,24 +79,56 @@ class BareMetalResourceProjection(BaseModel):
         return self
 
 
+class TrustedBareMetalResource(BaseModel):
+    """One Physical Resource's bare-metal view as its containing pool entry places it.
+
+    ``pool_id`` is the containing pool entry's, which is authoritative for the
+    resource's pool: a view repeating a different pool is refused. ``enabled``
+    is the capacity declaration's own enablement, read from the projected
+    resource rather than the view, because the view's ``available`` folds
+    enablement and whole-resource availability together and publication must
+    tell a withdrawn declaration from a leased machine.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    pool_id: str = Field(min_length=1)
+    enabled: bool
+    view: BareMetalResourceProjection
+
+    @model_validator(mode="after")
+    def _validate_containment(self) -> "TrustedBareMetalResource":
+        if not self.pool_id.strip():
+            raise ValueError("pool_id must be non-empty")
+        if self.view.pool_id is not None and self.view.pool_id != self.pool_id:
+            raise ValueError(
+                "bare-metal view pool_id conflicts with its containing pool"
+            )
+        return self
+
+    @property
+    def physical_resource_id(self) -> str:
+        return self.view.physical_resource_id
+
+
 class TrustedBareMetalProjection(BaseModel):
-    """One configured site's retained projection-generation view."""
+    """One configured site's accepted resource-pool projection generation.
+
+    A site whose projection could not be fetched, or whose generation was
+    refused, has no value of this type: it is unknown, not empty.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     site_id: str = Field(min_length=1)
     revision: int = Field(ge=0)
     digest: str = Field(min_length=1)
-    complete: bool
-    stale: bool = False
-    resources: list[BareMetalResourceProjection] = Field(default_factory=list)
+    resources: list[TrustedBareMetalResource] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _validate_generation(self) -> "TrustedBareMetalProjection":
         if not self.site_id.strip():
             raise ValueError("site_id must be non-empty")
-        if not self.complete and self.resources:
-            raise ValueError("incomplete generations must not expose resources")
         resource_ids = [item.physical_resource_id for item in self.resources]
         if len(resource_ids) != len(set(resource_ids)):
             raise ValueError("physical_resource_id must be unique within a site")

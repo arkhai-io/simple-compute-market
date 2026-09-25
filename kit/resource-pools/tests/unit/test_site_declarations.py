@@ -12,7 +12,7 @@ def _pool(pool_id: str, *, enabled: bool | None = True, **tags) -> dict:
     metadata: dict = {"policy_tags": {"deliverable_modes": ["vm"], **tags}}
     if enabled is not None:
         metadata["enabled"] = enabled
-    return {"resource_pool_id": pool_id, "pool_metadata": metadata, "resources": []}
+    return {"pool_id": pool_id, "pool_metadata": metadata, "resources": []}
 
 
 _DECLARED = {"advertisable_modes": ["vm"], "capacity_backing": "backed"}

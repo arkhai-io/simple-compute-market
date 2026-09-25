@@ -540,7 +540,7 @@ def _pool_projection_rows(fake: FakeSite) -> list[dict[str, Any]]:
     """Project each fake resource as its exact one-member VM pool."""
     return [
         {
-            "resource_pool_id": resource_id,
+            "pool_id": resource_id,
             "pool_metadata": {
                 "policy_tags": {
                     "deliverable_modes": sorted(fake.deliverable_modes),

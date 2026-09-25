@@ -65,7 +65,7 @@ def override_state(
     pools = projection.get(site_id)
     if pools is None:
         return OVERRIDE_UNKNOWN
-    if any(str(pool.get("resource_pool_id") or "") == pool_id for pool in pools):
+    if any(str(pool.get("pool_id") or "") == pool_id for pool in pools):
         return OVERRIDE_APPLIED
     return OVERRIDE_ORPHANED
 
@@ -131,7 +131,7 @@ class PoolOverrideService:
 
         revision, digest, site_pools = await self._live_projection(record.site_id)
         if not any(
-            str(pool.get("resource_pool_id") or "") == record.pool_id for pool in site_pools
+            str(pool.get("pool_id") or "") == record.pool_id for pool in site_pools
         ):
             raise PoolOverrideRefused(
                 404,

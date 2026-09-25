@@ -12,6 +12,7 @@ from arkhai_bare_metal import (
     BareMetalLeaseReadyResult,
     BareMetalReceipt,
 )
+from core_storefront.models.system_models import ProjectionFamilyStatus
 from market_identity import Identity
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -110,6 +111,9 @@ class BareMetalHealthResponse(BaseModel):
     principal: Identity
     sites: list[dict[str, object]] = Field(default_factory=list)
     resource_count: int | None = None
+    # Reported per site and outside ``checks``: one site's projection being
+    # unavailable is not a storefront-wide degradation.
+    site_projections: dict[str, dict[str, ProjectionFamilyStatus]] | None = None
 
 
 class BareMetalFulfillRequest(BaseModel):

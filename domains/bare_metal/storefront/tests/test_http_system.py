@@ -18,6 +18,7 @@ from arkhai_bare_metal_storefront.server import (
     build_bare_metal_storefront_app,
     build_bare_metal_storefront_registry,
 )
+from arkhai_bare_metal_storefront.site_clients import BareMetalSiteBinding
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 
 
@@ -182,11 +183,119 @@ async def test_health_is_truthful_about_uncomposed_authorities(tmp_path) -> None
             "api": "ok",
             "database": "ok",
             "commercial_settlement": "unavailable",
-            "site_projection": "unavailable",
             "fulfillment": "unavailable",
         },
         "paused": False,
         "principal": SELLER_SIGNER.identity.model_dump(mode="json"),
         "sites": [],
         "resource_count": 0,
+        "site_projections": {},
     }
+
+
+class _Site:
+    """A site authority's typed client, answering the projection version."""
+
+    def __init__(self, *, revision: int = 0, error: Exception | None = None) -> None:
+        self._revision = revision
+        self._error = error
+
+    async def resource_pool_projection_version(self) -> dict[str, object]:
+        if self._error is not None:
+            raise self._error
+        return {"revision": self._revision, "digest": f"digest-{self._revision}"}
+
+    async def snapshot(self) -> list[dict[str, object]]:
+        raise AssertionError("health must not read the aggregate capacity projection")
+
+
+class _Sites:
+    def __init__(self, sites: dict[str, _Site]) -> None:
+        self._sites = sites
+
+    def site(self, site_id: str) -> _Site:
+        return self._sites[site_id]
+
+    async def snapshot(self) -> list[dict[str, object]]:
+        raise AssertionError("health must not read the aggregate capacity projection")
+
+
+def _sited_runtime(path: str, sites: dict[str, _Site]) -> BareMetalStorefrontRuntime:
+    runtime = _runtime(path)
+    return BareMetalStorefrontRuntime(
+        db=runtime.db,
+        domain=runtime.domain,
+        seller_principal=runtime.seller_principal,
+        admin_principals=runtime.admin_principals,
+        storefront_url=runtime.storefront_url,
+        marketplace_signer=SELLER_SIGNER,
+        seller_evm_address=runtime.seller_evm_address,
+        site_bindings=tuple(
+            BareMetalSiteBinding(
+                site_id=site_id,
+                # A development identity; never used on any public network.
+                authority_principal=ADMIN_SIGNER.identity,
+                authority_url=f"http://{site_id}:8000",
+            )
+            for site_id in sites
+        ),
+        capacity_client=_Sites(sites),
+        fulfillment_client=object(),
+    )
+
+
+async def test_every_answering_site_is_reported_loaded(tmp_path) -> None:
+    runtime = _sited_runtime(
+        str(tmp_path / "storefront.db"),
+        {"site-a": _Site(revision=3), "site-b": _Site(revision=5)},
+    )
+
+    with TestClient(_app(runtime)) as client:
+        body = client.get("/health").json()
+
+    projections = body["site_projections"]
+    assert set(projections) == {"site-a", "site-b"}
+    site_a = projections["site-a"]["resource_pool"]
+    assert (site_a["state"], site_a["revision"], site_a["digest"]) == (
+        "loaded",
+        3,
+        "digest-3",
+    )
+    assert site_a["fetched_at"] is not None
+    assert projections["site-b"]["resource_pool"]["revision"] == 5
+    assert "site_projection" not in body["checks"]
+    assert body["checks"]["fulfillment"] == "ok"
+
+
+async def test_one_site_unavailable_is_reported_outside_the_health_gate(
+    tmp_path,
+) -> None:
+    """One site being down is reported for that site and changes no gated check.
+
+    Asserted against ``checks`` directly, the dict the status gates on, so the
+    test does not depend on unrelated checks being healthy.
+    """
+    healthy = _sited_runtime(
+        str(tmp_path / "healthy.db"),
+        {"site-a": _Site(revision=3), "site-b": _Site(revision=5)},
+    )
+    one_down = _sited_runtime(
+        str(tmp_path / "one-down.db"),
+        {
+            "site-a": _Site(revision=3),
+            "site-b": _Site(error=ConnectionError("connection refused")),
+        },
+    )
+
+    with TestClient(_app(healthy)) as client:
+        healthy_body = client.get("/health").json()
+    with TestClient(_app(one_down)) as client:
+        body = client.get("/health").json()
+
+    site_b = body["site_projections"]["site-b"]["resource_pool"]
+    assert site_b["state"] == "unavailable"
+    assert "connection refused" in site_b["last_error"]
+    assert body["site_projections"]["site-a"]["resource_pool"]["state"] == "loaded"
+    assert body["checks"] == healthy_body["checks"]
+    assert body["status"] == healthy_body["status"]
+    assert "site_projections" not in body["checks"]

@@ -69,7 +69,7 @@ class SiteDeclarations:
 
 
 def _pool_id(pool: Mapping[str, Any]) -> str:
-    return str(pool.get("resource_pool_id") or "").strip()
+    return str(pool.get("pool_id") or "").strip()
 
 
 def _policy_tags(pool: Mapping[str, Any]) -> Mapping[str, Any]:

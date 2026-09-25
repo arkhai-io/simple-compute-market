@@ -5,11 +5,12 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from datetime import datetime, timezone
 from typing import Any, TypeVar
 
 from arkhai_bare_metal import (
+    BARE_METAL_OFFERING_MODE,
     BareMetalAcceptedHostedBinding,
     BareMetalAccessResult,
     BareMetalLeaseReadyEvidence,
@@ -19,6 +20,7 @@ from arkhai_bare_metal import (
     BareMetalMessage,
     BareMetalReceipt,
     BareMetalTerms,
+    bare_metal_source_identity,
     derive_bare_metal_fulfillment_identity,
 )
 from core_storefront.sqlite_client import SQLiteClient as CoreSQLiteClient
@@ -156,22 +158,87 @@ class SQLiteClient(CoreSQLiteClient):
         await asyncio.to_thread(_save)
 
     async def count_open_bare_metal_resources(self) -> int:
-        """Count open specific-resource publications for operator status."""
+        """Count open, unpaused bare-metal listings for operator status."""
 
         def _count() -> int:
             conn = sqlite3.connect(self.db_path)
             try:
                 row = conn.execute(
-                    "SELECT COUNT(*) FROM derived_bare_metal_listings d "
-                    "JOIN listings l ON l.listing_id = d.listing_id "
-                    "WHERE d.status = 'open' AND l.status = 'open' "
+                    "SELECT COUNT(*) FROM storefront_listing_bindings b "
+                    "JOIN listings l ON l.listing_id = b.listing_id "
+                    "WHERE b.offering_mode = ? AND l.status = 'open' "
                     "AND COALESCE(l.paused, 0) = 0",
+                    (BARE_METAL_OFFERING_MODE,),
                 ).fetchone()
                 return int(row[0])
             finally:
                 conn.close()
 
         return await asyncio.to_thread(_count)
+
+    async def list_open_bare_metal_listing_bindings(
+        self,
+        *,
+        site_ids: Collection[str],
+    ) -> tuple[StorefrontListingBinding, ...]:
+        """The bindings of open bare-metal listings originating at these sites."""
+        sites = tuple(sorted(set(site_ids)))
+        if not sites:
+            return ()
+
+        def _load() -> tuple[StorefrontListingBinding, ...]:
+            placeholders = ", ".join("?" for _ in sites)
+            with sqlite3.connect(self.db_path) as conn:
+                rows = conn.execute(
+                    f"""
+                    SELECT b.listing_id, b.site_id, b.pool_id,
+                           b.physical_resource_id, b.offering_mode,
+                           b.domain_identity, b.contract_major, b.contract_minor,
+                           b.derivation_key, b.source_envelope_json,
+                           b.last_reconciled_at, b.capacity_backing
+                    FROM storefront_listing_bindings b
+                    JOIN listings l ON l.listing_id = b.listing_id
+                    WHERE b.offering_mode = ? AND l.status = 'open'
+                      AND b.site_id IN ({placeholders})
+                    ORDER BY b.listing_id
+                    """,
+                    (BARE_METAL_OFFERING_MODE, *sites),
+                ).fetchall()
+            return tuple(self._listing_binding_from_row(row) for row in rows)
+
+        return await asyncio.to_thread(_load)
+
+    def _bare_metal_domain_binding(self) -> StorefrontDomainBinding:
+        return StorefrontDomainBinding(
+            offering_mode=BARE_METAL_OFFERING_MODE,
+            domain_identity=self._market_domain.identity,
+            contract_major=self._market_domain.contract_version.major,
+            contract_minor=self._market_domain.contract_version.minor,
+        )
+
+    def bare_metal_derivation_key(
+        self,
+        *,
+        site_id: str,
+        pool_id: str,
+        physical_resource_id: str,
+    ) -> str:
+        """The common derivation key a bare-metal listing is bound under.
+
+        Publication looks a candidate's listing up by this key and
+        :meth:`upsert_bare_metal_listing` binds a new listing under it, so the
+        two cannot disagree.
+        """
+        domain_binding = self._bare_metal_domain_binding()
+        return build_storefront_derivation_key(
+            site_id=site_id,
+            offering_mode=domain_binding.offering_mode,
+            binding=domain_binding,
+            source_identity=bare_metal_source_identity(
+                pool_id=pool_id,
+                physical_resource_id=physical_resource_id,
+            ),
+        )
 
     async def persist_bare_metal_opening(
         self,
@@ -356,12 +423,7 @@ class SQLiteClient(CoreSQLiteClient):
         physical_resource_id: str,
     ) -> None:
         normalized = self._market_domain.codecs.listing(listing)
-        domain_binding = StorefrontDomainBinding(
-            offering_mode="bare_metal",
-            domain_identity=self._market_domain.identity,
-            contract_major=self._market_domain.contract_version.major,
-            contract_minor=self._market_domain.contract_version.minor,
-        )
+        domain_binding = self._bare_metal_domain_binding()
         source_envelope = {
             "kind": "bare_metal.resource-projection.v1",
             "schema_version": 1,
@@ -377,14 +439,10 @@ class SQLiteClient(CoreSQLiteClient):
             pool_id=pool_id,
             physical_resource_id=physical_resource_id,
             binding=domain_binding,
-            derivation_key=build_storefront_derivation_key(
+            derivation_key=self.bare_metal_derivation_key(
                 site_id=site_id,
-                offering_mode="bare_metal",
-                binding=domain_binding,
-                source_identity={
-                    "pool_id": pool_id,
-                    "physical_resource_id": physical_resource_id,
-                },
+                pool_id=pool_id,
+                physical_resource_id=physical_resource_id,
             ),
             source_envelope=source_envelope,
             last_reconciled_at=updated_at,
