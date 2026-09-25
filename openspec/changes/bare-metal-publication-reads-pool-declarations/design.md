@@ -472,6 +472,16 @@ own artifact-named directory under the run directory: both contain
 still leaves useful diagnostics. Already downloaded lane logs can be reused.
 The operator instructions belong in `docs/development/TESTING.md`.
 
+The first Actions run rejected the bare-metal wrapper because it both included
+the domain topology and redefined its services. Use per-service `extends` in
+`compose.bare-metal.yml` and declare its named volumes there. This preserves the
+single-file operator invocation and domain-relative mounts without copying the
+service definitions. Splitting bindings into a separate required `-f` overlay
+would also work, but would change every operator invocation. Validate the actual
+Compose render, including mount paths and mock-profile overrides; text searches
+alone missed this conflict. Permanent explanation belongs in
+`docs/development/DEPLOYMENT_AND_CONFIG.md`.
+
 ## Migration
 
 No deployed bare-metal storefront database exists, so none is migrated. A new

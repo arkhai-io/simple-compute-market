@@ -165,6 +165,13 @@ authorities:
 - `compose.bare-metal.yml` composes the dedicated bare-metal storefront with a
   compute-family registry and the selected-site provisioning authority.
 
+The bare-metal wrapper extends each service from `domains/bare_metal/compose.yml`
+to merge role bindings with the domain topology, and declares the named volumes
+those services use. Service extension preserves the domain file's relative mount
+paths. An `include` cannot be used to import a service and redefine it in the same
+wrapper. The e2e lane adds `compose.dev.yml` and `compose.bare-metal-local.yml`
+with `-f` for its dev chain and provisioning mock profile.
+
 Storefront images install their distributions from the staged `.dist`
 wheelhouse; runtime images do not resolve editable sibling source. API-credit
 and bare-metal SQLite/queue/registry stores occupy separate named volumes.

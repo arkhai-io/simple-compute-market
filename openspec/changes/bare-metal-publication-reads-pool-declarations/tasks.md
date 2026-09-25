@@ -532,6 +532,14 @@ Decisions: `design.md`, "End-to-end evidence for bare-metal publication". Closes
 - [x] 11.2 Document dispatch and per-run log retrieval in `docs/development/TESTING.md`.
 - [ ] 11.3 Diagnose both Actions lanes, fix observed defects with focused validation,
       commit and rerun; record actual scenario results in 8.8 and 10.12.
+      First defect: replace conflicting include/redefinitions in
+      `compose.bare-metal.yml` with service extension; add a real Compose render
+      regression in `scripts/tests/test_bare_metal_compose.py`, and document the
+      composition in `docs/development/DEPLOYMENT_AND_CONFIG.md`.
+      **Fixed:** Compose v2.39.4 reproduces the original conflict and renders both
+      corrected stacks. The local v5.5.1 renderer produces identical resolved
+      settings before and after the fix. Helper and render tests: 11 passed;
+      comment hygiene, reinit, and scoped citations pass.
 - [ ] 11.4 Closeout: run focused helper tests, `make check-comment-hygiene`,
       `make check-reinit`, and scoped documentation citations; review touched imports,
       documentation placement and task-note compression; record roadmap and campaign
