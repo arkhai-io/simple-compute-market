@@ -540,6 +540,10 @@ Decisions: `design.md`, "End-to-end evidence for bare-metal publication". Closes
       corrected stacks. The local v5.5.1 renderer produces identical resolved
       settings before and after the fix. Helper and render tests: 11 passed;
       comment hygiene, reinit, and scoped citations pass.
+      Next defect: create appuser-owned `/app/data` in `core/registry/Dockerfile`
+      and `provisioning/compute/service/Dockerfile` so fresh named volumes allow
+      SQLite startup. Validate image builds and actual volume startup in Actions;
+      document the image responsibility in the deployment persistence guidance.
 - [ ] 11.4 Closeout: run focused helper tests, `make check-comment-hygiene`,
       `make check-reinit`, and scoped documentation citations; review touched imports,
       documentation placement and task-note compression; record roadmap and campaign

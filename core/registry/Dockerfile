@@ -42,7 +42,8 @@ FROM --platform=linux/amd64 python:${PYTHON_VERSION}-slim AS runtime
 
 WORKDIR /app
 RUN useradd --create-home --uid 1000 --shell /bin/bash appuser && \
-    chown appuser:appuser /app
+    mkdir -p /app/data && \
+    chown appuser:appuser /app /app/data
 
 COPY --from=builder --chown=appuser:appuser /app/.venv ./.venv
 COPY --from=builder --chown=appuser:appuser /app/src ./src

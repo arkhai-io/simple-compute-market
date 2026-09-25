@@ -482,6 +482,15 @@ Compose render, including mount paths and mock-profile overrides; text searches
 alone missed this conflict. Permanent explanation belongs in
 `docs/development/DEPLOYMENT_AND_CONFIG.md`.
 
+After composition succeeded, the registry could not open its SQLite database
+on a fresh named volume. The registry image never created `/app/data`, and the
+provisioning image created it as root. Both runtime images must create that
+mount point owned by `appuser`, allowing Docker's fresh-volume initialization
+to retain writable ownership. Running services as root or adding a privileged
+startup ownership repair is unnecessary. The persistence guidance in
+`docs/development/DEPLOYMENT_AND_CONFIG.md` records this image responsibility;
+the Actions stack startup is the validation boundary.
+
 ## Migration
 
 No deployed bare-metal storefront database exists, so none is migrated. A new

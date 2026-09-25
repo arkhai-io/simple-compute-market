@@ -130,7 +130,7 @@ COPY --from=builder --chown=appuser:appuser /home/appuser/ansible-venv /home/app
 COPY --from=builder --chown=appuser:appuser /app/.venv ./.venv
 COPY --from=builder --chown=appuser:appuser /home/appuser/.ansible /home/appuser/.ansible
 
-RUN mkdir -p /app/data
+RUN mkdir -p /app/data && chown appuser:appuser /app/data
 COPY --chown=appuser:appuser domains/vms/provisioning/iac /opt/domains/vms/provisioning/iac
 
 ENV PATH="/app/.venv/bin:/home/appuser/ansible-venv/bin:$PATH"

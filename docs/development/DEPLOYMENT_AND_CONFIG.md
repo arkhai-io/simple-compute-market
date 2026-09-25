@@ -201,6 +201,11 @@ single-writer model does not tolerate the overlapping old/new pod
 window a `RollingUpdate` strategy would otherwise produce against a
 shared volume.
 
+Registry and compute-provisioning runtime images create `/app/data` owned by
+their non-root `appuser`. Fresh Compose named volumes inherit that ownership,
+so SQLite can create its database without a root startup process. Bind mounts
+and existing volumes must already provide write access to the runtime user.
+
 ### Combined compute-family storefront
 
 The storefront image installs the shared `arkhai-core-storefront` shell plus
