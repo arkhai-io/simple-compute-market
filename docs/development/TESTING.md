@@ -258,6 +258,16 @@ than skipping. The release-qualified bare-metal deal needs a real whole host to
 reach and revoke access on, which the pipeline never has, so neither lane
 selects it; a mock-profile site proves the services compose, not real delivery.
 
+To run both lanes in GitHub Actions, push the current branch and run
+`make run-e2e` with an authenticated `gh` CLI on PATH. Then run
+`make fetch-e2e-logs E2E_RUN_ID=<run-id>` to wait for that run and download its
+diagnostics. Omitting the ID selects the current branch's latest run among the
+100 most recent workflow runs. Logs live under `.snapshot/e2e-logs/<run-id>/`:
+`actions.log`, `e2e-vm-logs/compose-logs.txt`, and
+`e2e-bare-metal-logs/compose-logs.txt`. `E2E_LOG_DIR` overrides the root directory.
+An unavailable artifact is reported without discarding other logs. A successful
+fetch means diagnostics were retrieved; it does not mean the tests passed.
+
 ## Coverage Contract Between Levels
 
 Each level has a defined jurisdiction. Duplicating coverage across

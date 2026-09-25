@@ -462,6 +462,43 @@ option facts, a hosted-contract change outside this change.
 
 None.
 
+## Pipeline debugging
+
+The log fetcher still requests `e2e-logs`, but the two-lane workflow uploads
+`e2e-vm-logs` and `e2e-bare-metal-logs`. Fetch each lane independently into its
+own artifact-named directory under the run directory: both contain
+`compose-logs.txt`, so flattening them would overwrite evidence. Preserve
+`actions.log` and tolerate an unavailable artifact so an early build failure
+still leaves useful diagnostics. Already downloaded lane logs can be reused.
+The operator instructions belong in `docs/development/TESTING.md`.
+
+The first Actions run rejected the bare-metal wrapper because it both included
+the domain topology and redefined its services. Use per-service `extends` in
+`compose.bare-metal.yml` and declare its named volumes there. This preserves the
+single-file operator invocation and domain-relative mounts without copying the
+service definitions. Splitting bindings into a separate required `-f` overlay
+would also work, but would change every operator invocation. Validate the actual
+Compose render, including mount paths and mock-profile overrides; text searches
+alone missed this conflict. Permanent explanation belongs in
+`docs/development/DEPLOYMENT_AND_CONFIG.md`.
+
+After composition succeeded, the registry could not open its SQLite database
+on a fresh named volume. The registry image never created `/app/data`, and the
+provisioning image created it as root. Both runtime images must create that
+mount point owned by `appuser`, allowing Docker's fresh-volume initialization
+to retain writable ownership. Running services as root or adding a privileged
+startup ownership repair is unnecessary. The persistence guidance in
+`docs/development/DEPLOYMENT_AND_CONFIG.md` records this image responsibility;
+the Actions stack startup is the validation boundary.
+
+The next startup reached pool import, which correctly refused an empty
+authoritative document: it must name `default`. The development fixture now
+declares that backed pool explicitly with empty deliverable and advertisable
+mode sets. It supplies no candidates; the scenario continues creating its own
+pools through the operator API. This aligns the fixture with the existing pool
+contract rather than weakening startup validation. The fixture inventory is
+described in `dev-env/identities/README.md`.
+
 ## Migration
 
 No deployed bare-metal storefront database exists, so none is migrated. A new

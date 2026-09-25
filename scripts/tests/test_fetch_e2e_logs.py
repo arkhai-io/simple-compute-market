@@ -29,6 +29,7 @@ class FakeRunner:
         fail_watch: bool = False,
         fail_actions_log: bool = False,
         fail_artifact: bool = False,
+        missing_artifacts: tuple[str, ...] = (),
     ) -> None:
         self.runs = (
             runs
@@ -38,6 +39,7 @@ class FakeRunner:
         self.fail_watch = fail_watch
         self.fail_actions_log = fail_actions_log
         self.fail_artifact = fail_artifact
+        self.missing_artifacts = missing_artifacts
         self.commands: list[list[str]] = []
 
     def __call__(
@@ -71,12 +73,14 @@ class FakeRunner:
             stdout.write("actions log\n")
             return subprocess.CompletedProcess(args, 0, "", "")
         if args[:3] == ["gh", "run", "download"]:
-            if self.fail_artifact:
+            artifact = args[args.index("--name") + 1]
+            if self.fail_artifact or artifact in self.missing_artifacts:
                 raise subprocess.CalledProcessError(
                     1, args, stderr="artifact unavailable"
                 )
             output_dir = Path(args[args.index("--dir") + 1])
-            (output_dir / fetcher.COMPOSE_LOG).write_text("compose log\n", "utf-8")
+            output_dir.mkdir(parents=True, exist_ok=True)
+            (output_dir / fetcher.COMPOSE_LOG).write_text(f"{artifact}\n", "utf-8")
             return subprocess.CompletedProcess(args, 0, "", "")
         raise AssertionError(f"unexpected command: {args}")
 
@@ -96,7 +100,8 @@ def test_latest_current_branch_run_is_waited_for_and_downloaded(
 
     run_dir = tmp_path / "42"
     assert (run_dir / "actions.log").read_text("utf-8") == "actions log\n"
-    assert (run_dir / fetcher.COMPOSE_LOG).read_text("utf-8") == "compose log\n"
+    for artifact in ("e2e-vm-logs", "e2e-bare-metal-logs"):
+        assert (run_dir / artifact / "compose-logs.txt").read_text("utf-8") == f"{artifact}\n"
     assert ["gh", "run", "watch", "42"] in runner.commands
 
 
@@ -148,3 +153,37 @@ def test_make_target_delegates_to_python_helper() -> None:
 
     assert "$(CURDIR)/scripts/fetch-e2e-logs.py" in target
     assert "gh run" not in target
+
+
+@pytest.mark.parametrize("missing", ["e2e-vm-logs", "e2e-bare-metal-logs"])
+def test_one_missing_lane_preserves_other_lane_without_actions_log(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, missing: str
+) -> None:
+    runner = FakeRunner(fail_actions_log=True, missing_artifacts=(missing,))
+    monkeypatch.setattr(fetcher.subprocess, "run", runner)
+
+    assert fetcher.main(["--output-dir", str(tmp_path), "--run-id", "77"]) == 0
+    for artifact in ("e2e-vm-logs", "e2e-bare-metal-logs"):
+        assert (tmp_path / "77" / artifact / "compose-logs.txt").is_file() == (artifact != missing)
+
+
+def test_repeated_fetch_reuses_each_lane_log(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runner = FakeRunner()
+    monkeypatch.setattr(fetcher.subprocess, "run", runner)
+    args = ["--output-dir", str(tmp_path), "--run-id", "77"]
+    assert fetcher.main(args) == 0
+    runner.commands.clear()
+    assert fetcher.main(args) == 0
+    assert not any(command[:3] == ["gh", "run", "download"] for command in runner.commands)
+
+
+def test_no_available_logs_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    runner = FakeRunner(fail_actions_log=True, fail_artifact=True)
+    monkeypatch.setattr(fetcher.subprocess, "run", runner)
+
+    assert fetcher.main(["--output-dir", str(tmp_path), "--run-id", "77"]) == 1
+    assert "no logs could be fetched" in capsys.readouterr().err

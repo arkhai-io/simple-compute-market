@@ -1,6 +1,6 @@
 # Tasks — bare-metal publication reads pool declarations
 
-Implemented, Section 10 included. Closeout blocked on 8.8 until both end-to-end lanes run in GitHub Actions (10.12). On Goal 7's critical path.
+Implemented, including both end-to-end lanes passing in GitHub Actions. Post-review specification promotion and final campaign handoff remain open. On Goal 7's critical path.
 
 Paths below are relative to the repository root. `DM` is
 `domains/bare_metal/src/arkhai_bare_metal/`; `SF` is
@@ -17,8 +17,7 @@ fixtures are validated against the real producer (6.2, 6.3), the projection and 
 bare-metal view reach the canonical site client from the real provisioning service (6.2,
 9.4), and a composition test proves the command hands the cycle each site's real client
 (6.9). The cycle tests are therefore not integration tests under `TESTING.md`, and sit in
-the storefront's flat test directory (9.5). No end-to-end lane runs bare-metal
-publication (8.8).
+the storefront's flat test directory (9.5). The bare-metal end-to-end lane proves publication across deployed services (8.8).
 
 ## 1. Design
 
@@ -521,8 +520,38 @@ Decisions: `design.md`, "End-to-end evidence for bare-metal publication". Closes
       check still reports the 17 pre-existing citations. **Not run here:** no container
       runtime is available, so neither lane has been brought up; 10.12 is the only
       evidence the stack starts.
-- [ ] 10.12 The maintainer runs both lanes in GitHub Actions; record the runs, their
+- [x] 10.12 The maintainer runs both lanes in GitHub Actions; record the runs, their
       results, and the scenarios in 8.8.
+
+## 11. Pipeline debugging
+
+- [x] 11.1 Update `scripts/fetch-e2e-logs.py` to fetch both lane artifacts into
+      separate directories; cover distinct contents, a missing lane, repeated
+      fetching, and complete log unavailability in `scripts/tests/test_fetch_e2e_logs.py`.
+- [x] 11.2 Document dispatch and per-run log retrieval in `docs/development/TESTING.md`.
+- [x] 11.3 Diagnose both Actions lanes, fix observed defects with focused validation,
+      commit and rerun; record actual scenario results in 8.8 and 10.12.
+      **Implemented:** service extension in `compose.bare-metal.yml`, appuser-owned
+      data mount points in the registry and provisioning Dockerfiles, and the required
+      inert default pool in `dev-env/bare-metal/resource-pools.yaml`. Durable explanations
+      are in deployment guidance and `dev-env/identities/README.md`.
+      **Focused evidence:** 11 helper/render tests and 6 existing stack tests pass.
+      Compose v2.39.4 rejects the original wrapper and accepts both corrected stacks;
+      v5.5.1 renders identical resolved settings before and after. The real pool service
+      and bare-metal handler, installed from freshly built wheels, reject the empty
+      document and import the corrected fixture idempotently against SQLite.
+- [x] 11.4 Closeout: run focused helper tests, `make check-comment-hygiene`,
+      `make check-reinit`, and scoped documentation citations; review touched imports,
+      documentation placement and task-note compression; record roadmap and campaign
+      dispositions and pipeline evidence. Promote material decisions after code review
+      through Section 8's closeout and design-promotion record.
+      **Done:** focused evidence is above; comment hygiene, reinit, scoped citations,
+      and strict OpenSpec validation pass. No local imports added; touched comments
+      describe current invariants. Notes compressed and operator guidance promoted.
+      Goal 7's current state and the campaign row reflect the passing pipeline;
+      dependency handoff and original spec promotion remain post-review (8.3, 8.6, 8.9).
+      No application Python changed; full local subsystem/typing suites were not rerun.
+      Both lanes rebuilt the runtime wheels and images and passed their system scenarios.
 
 ## 8. Closeout
 
@@ -549,41 +578,37 @@ Decisions: `design.md`, "End-to-end evidence for bare-metal publication". Closes
       are destinations, not landed text. Rechecked at archive.
 - [x] 8.4 **Narrative compression.** Shorten completed-task notes to final behaviour,
       material validation evidence, deferred work, and permanent-documentation destinations.
-- [ ] 8.5 **Roadmap currency.** Remove this change's row from Goal 7's gap table in
+- [x] 8.5 **Roadmap currency.** Remove this change's row from Goal 7's gap table in
       `docs/development/ROADMAP.md` and update the current-state sentence that says
       bare-metal publication reads no pool declaration.
-      **Deferred to completion:** roadmap currency is owed when the change is complete,
-      and it is not while 8.8 is blocked. The Goal 7 row and current-state sentence stay
-      until then.
+      **Done:** Goal 7 describes declaration-backed publication and registry convergence;
+      its stale publication gap is removed. Unbacked supply and listing shapes remain open.
 - [ ] 8.6 **Campaign index currency.** Update this change's row and Goal 7's dependency graph
       in `openspec/changes/README.md`, marking `bare-metal-listing-shapes` unblocked.
-      **Partly done:** this change's row now reads implemented with closeout blocked on
-      8.8. The dependency graph and `bare-metal-listing-shapes`'s status are unchanged
-      until the change completes.
+      **Partly done:** the campaign row records both lanes passing and review/promotion
+      remaining. Dependency handoff stays pending that review; the graph and downstream
+      status are unchanged deliberately, rather than implying the original deltas have
+      already been promoted.
 - [x] 8.7 **Documentation citations.** Run
       `make check-doc-citations CHANGE=bare-metal-publication-reads-pool-declarations` and
       resolve every match.
       **Done:** scoped run passes. Unscoped still reports the 17 pre-existing
       unresolved citations, none in a document this change touched.
-- [ ] 8.8 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and record the
-      run, its result, and the scenarios exercising this change. No end-to-end scenario runs
-      `bare-metal-storefront publish` today, and `e2e_bare_metal_deal` skips unless its
-      bare-metal environment is configured; record which ran and which skipped. If closeout
-      is blocked on the missing bare-metal publication lane, the next step is implementing a
-      valid end-to-end test, which may land in this change; it is deliberately not planned
-      here. Until then, treat the validations it gates as unrun rather than passed.
-      **Run recorded (supplied by the maintainer):** the end-to-end pipeline
-      passed — 126 passed, 3 skipped, 264 deselected. The VM scenarios exercise the
-      `pool_id` rename across real processes: the provisioning service serves the
-      renamed projections and the VM storefront publishes from them and completes
-      deals, with no projection read failure, unresolvable pool, or held site in the
-      logs. Skipped: `test_bare_metal_complete_deal` (its bare-metal environment is not
-      injected) and multi-registry stages 06b/06c (a static skip: provisioning
-      trusts one storefront principal, which is also why Alice's storefront logs
-      site authentication failures). **Still blocked for bare metal:** no scenario runs
-      bare-metal publication, so it has no end-to-end evidence. Section 10 builds the
-      bare-metal lane and its publication scenario; this task completes when 10.12
-      records both lanes passing.
+- [x] 8.8 **End-to-end pipeline.** Both lanes passed in
+      [Actions run 36148752453](https://github.com/arkhai-io/simple-compute-market/actions/runs/36148752453)
+      at commit `5b4cab0b3e5dd1fb3b4be7dc1318584ccac50e37`.
+      Bare metal: **6 passed, 393 deselected**, covering site projection readiness,
+      pool/capacity declaration, advertised-only publication, registry/storefront
+      discovery, withdrawal, and reopening the same listing. VM/API credits:
+      **126 passed, 2 skipped, 271 deselected**, exercising the renamed projections
+      through deployed services and deal lifecycles. The two skips are multi-registry
+      stages 06b/06c, whose second storefront lacks the site's trust binding.
+      The real-host bare-metal complete-deal scenario is not selected by either lane;
+      these results prove publication, not real host access or teardown.
+      `make fetch-e2e-logs E2E_RUN_ID=36148752453` retrieved Actions and both lane artifacts.
+      Earlier runs `36146483810`, `36147365244`, and `36147978720` each passed VM and
+      failed bare metal at Compose assembly, registry volume startup, and pool import,
+      respectively; the fixes and rationale are in `design.md`'s pipeline debugging section.
 
 - [ ] 8.9 **Promotion.** Complete the design-promotion record below.
       **In progress:** rows below are current; the record is finalized after code review.
@@ -611,3 +636,8 @@ Decisions: `design.md`, "End-to-end evidence for bare-metal publication". Closes
 | "Publication candidate" has one name | `docs/development/ARCHITECTURE.md` (added during design) |
 | No data migration or compatibility path for undeployed bare-metal state | Temporary, not promoted: the repository-wide additive-schema rule in `docs/development/ARCHITECTURE.md` governs from bare metal's first deployment |
 | The rename needs no transition while one operator deploys a storefront with its sites | Temporary, not promoted: its revisit trigger stays in `design.md` |
+| E2E log retrieval preserves each lane's artifact namespace | `docs/development/TESTING.md` |
+| Bare-metal Compose bindings extend domain services; fresh data volumes are writable by the runtime user | `docs/development/DEPLOYMENT_AND_CONFIG.md` |
+| Development pool definitions include an inert default pool | `dev-env/identities/README.md`; existing pool contract unchanged |
+| Goal 7 reflects declaration-backed bare-metal publication | `docs/development/ROADMAP.md` |
+| Pipeline status reflects passing lanes; dependency handoff remains post-review | `openspec/changes/README.md` |
