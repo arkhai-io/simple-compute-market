@@ -43,20 +43,33 @@ No change owns these yet. Both were found by `project-capacity-resources-without
 ## Roadmap goal — Negotiate full compute capability, not GPU count alone
 
 ```text
-publish-multidimensional-listing-shape ──┐
+publish-multidimensional-listing-shape (archived) ──┐
 structured-capacity-requirements ────────┴──► capacity-shape-pricing ──► negotiation-driven-capacity-resize §2
 capacity-shape-envelope, negotiation-capacity-feasibility-probe (independent)
 ```
 
 | Change | Status | Acceptance boundary |
 |---|---|---|
-| [`publish-multidimensional-listing-shape`](publish-multidimensional-listing-shape/) | implemented, end-to-end verified, and promoted; awaiting final review before archival | Every VM listing is a listing shape — the storefront's site-scoped override, else the pool's `listing_shapes` hint, else the GPU-only default generator — published and reserved at exactly its declared quantities, and only where a source member is feasible for it; so the registry's dimension filters match stated shapes. Adds site-scoped storefront pool overrides, administered through an authenticated API checked against the site's live projection, as a market-neutral storefront kit (`kit/pool-overrides`) each market joins with its own vocabulary, so the planned container market reuses it; the core storefront client keeps only universal transport. A site whose projection is unknown now holds its listings rather than closing them, and an operation that changes a site's capacity refreshes that site before reconciling inline. Implements the family-grouped shape form, its shared utility (`kit/capability-shape`), and the VM family schema from `structured-capacity-requirements` |
+| [`publish-multidimensional-listing-shape`](archive/2026-09-25-publish-multidimensional-listing-shape/) | **archived** 2026-09-25 | Every VM listing is a listing shape — the storefront's site-scoped override, else the pool's `listing_shapes` hint, else the GPU-only default generator — published and reserved at exactly its declared quantities, and only where a source member is feasible for it; so the registry's dimension filters match stated shapes. Adds site-scoped storefront pool overrides, administered through an authenticated API checked against the site's live projection, as a market-neutral storefront kit (`kit/pool-overrides`) each market joins with its own vocabulary, so the planned container market reuses it; the core storefront client keeps only universal transport. A site whose projection is unknown now holds its listings rather than closing them, and an operation that changes a site's capacity refreshes that site before reconciling inline. Implements the family-grouped shape form, its shared utility (`kit/capability-shape`), and the VM family schema from `structured-capacity-requirements` |
 | [`structured-capacity-requirements`](structured-capacity-requirements/) | design phase; not yet planned | The family-grouped shape form, its shared flattening utility, and the VM family schema are implemented by `publish-multidimensional-listing-shape`; this change keeps the rest. Structured buyer-facing `requirements` shape, `offering_type` separated from the site-inventory `resource_type` discriminator, canonical claim vocabulary. `capacity-shape-pricing` waits on this vocabulary before extending pricing beyond the `gpu` family. Goal 7's published asking rate no longer waits on it (2026-09-09) — a published price for a fixed advertised shape needs no per-dimension vocabulary |
 | [`capacity-shape-pricing`](capacity-shape-pricing/) | active; depends on `publish-multidimensional-listing-shape` and `structured-capacity-requirements`' vocabulary | Per-dimension rates carried inside the family-grouped capability shape, a replaceable price aggregator, and the negotiated quantity becoming a rate multiplier so concessions stay comparable when the shape changes |
 | [`capacity-shape-envelope`](capacity-shape-envelope/) | active; independent | Kit-level admissibility: whether a whole shape is one the seller will consider, and what range remains admissible for one dimension given the rest, behind an interface shaped for the occupancy-dependent feasible region expected later |
 | [`negotiation-capacity-feasibility-probe`](negotiation-capacity-feasibility-probe/) | active; independent | Verifies a requested shape against the authoritative site before terms are agreed, consuming nothing, reporting unservable distinctly from seller-declined. Shared prerequisite: also required before a held reservation can be billed |
 | [`negotiation-driven-capacity-resize`](negotiation-driven-capacity-resize/) | Sections 0–1 complete; Section 2 unblocked 2026-08-06, not yet planned | Round-0 shape-mismatch guard shipped. Section 2 — a revised-terms field carrying a shape change between rounds, and `resize_reservation`'s first caller — was parked until seller policy could price an alternative shape; `capacity-shape-pricing` now owns that policy |
 | [`add-buyer-vm-connectivity-terms`](add-buyer-vm-connectivity-terms/) | design phase; not yet planned | Buyer-specified, negotiated VM connectivity terms replacing storefront-operator-only configuration; depends on POOLS-7 Section 9's `connectivity` field shape |
+
+### Unowned work left by `publish-multidimensional-listing-shape`
+
+No change owns these yet. The first three are the archived design's open questions.
+
+| Item | Origin |
+|---|---|
+| A time bound on holding an unknown site's listings, so a site decommissioned without closing them stops advertising unbookable capacity | Decision 11; deferred at the maintainer's direction |
+| The admin projection refresh rebuilds every site's cache and discards last-known generations, so pressing it during an outage turns a stale site unknown |
+| How a shape generator is assigned to a pool; the generator seam exists, with the VM default as its one implementation |
+| `domains/vms/storefront/tests/unit/test_reconciler.py`'s database-backed cases belong at integration level and move there when the file is next changed | Slice C review, partly accepted |
+| Thirteen anchor-form spec citations (in `listing_cardinality_mode.py`, `legacy_backfill.py`, `kit/site`'s ledger, and seven `kit/fulfillment` modules) omit the `requirement-` prefix their headings' slugs carry, so none resolves |
+| `core_storefront`'s `SQLiteClient.listing_id_for_derivation_key` calls an undefined `self._connect()`, so it raises whenever reached |
 
 ## Roadmap goal — One storefront serving several compute-family domains
 
