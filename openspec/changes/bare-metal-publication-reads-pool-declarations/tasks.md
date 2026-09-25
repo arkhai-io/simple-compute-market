@@ -1,6 +1,6 @@
 # Tasks — bare-metal publication reads pool declarations
 
-Implemented through Section 9; Section 10, the bare-metal end-to-end lane, is planned. Closeout blocked on 8.8 until that lane runs. On Goal 7's critical path.
+Implemented, Section 10 included. Closeout blocked on 8.8 until both end-to-end lanes run in GitHub Actions (10.12). On Goal 7's critical path.
 
 Paths below are relative to the repository root. `DM` is
 `domains/bare_metal/src/arkhai_bare_metal/`; `SF` is
@@ -428,10 +428,13 @@ Decided with the maintainer after code review; see `design.md`, "Decisions from 
 Decisions: `design.md`, "End-to-end evidence for bare-metal publication". Closes 8.8.
 `E2` is `e2e-tests/`.
 
-- [ ] 10.1 `SF/publication_composition.py` (new) — move `build_publication_cycle` and
+- [x] 10.1 `SF/publication_composition.py` (new) — move `build_publication_cycle` and
       `publication_payload_builder` out of `SF/publication_cli.py`, which keeps only the
       command, so the command and the route compose one cycle the same way.
-- [ ] 10.2 `SF/api.py` — `POST /api/v1/admin/lifecycle/publication/run-cycle`,
+      **Done.** The storefront registry builder also moved, from `SF/server.py` to
+      `SF/storefront_registry.py`, so the composition module and the route can use it
+      without importing the server; `server` re-imports it for existing callers.
+- [x] 10.2 `SF/api.py` — `POST /api/v1/admin/lifecycle/publication/run-cycle`,
       authenticated as the canonical client's `admin_run_lifecycle_cycle` signs it
       (operation `admin_run_lifecycle_cycle`, resource `publication`, the request's own
       body), runs one cycle composed from the runtime and the process environment, and
@@ -439,12 +442,16 @@ Decisions: `design.md`, "End-to-end evidence for bare-metal publication". Closes
       `SF/runtime.py` — the runtime carries the cycle's composition as an injectable
       factory, defaulting to 10.1's, and an `asyncio.Lock` serializing passes within the
       process.
-- [ ] 10.3 **Integration** `domains/bare_metal/storefront/tests/test_http_publication.py`
+      **Done.** A configuration the step cannot compose from answers 503.
+- [x] 10.3 **Integration** `domains/bare_metal/storefront/tests/test_http_publication.py`
       (new) — `StorefrontClient.admin_run_lifecycle_cycle("publication")` over the
       in-process transport returns the injected cycle's report; an unsigned request is
       refused (rejection path, status only); another loop name is 404; two concurrent
       steps run one after the other.
-- [ ] 10.4 The lane's stack. The production-shaped `compose.bare-metal.yml` is reused
+      **Done, in `domains/bare_metal/storefront/tests/test_http_system.py`** beside
+      pause and status, reusing its app and client helpers rather than copying them
+      into a new file.
+- [x] 10.4 The lane's stack. The production-shaped `compose.bare-metal.yml` is reused
       unchanged, with `compose.dev.yml` for the dev chain and a new
       `compose.bare-metal-local.yml` overlay: the site in the mock profile
       (`ACTIVE_PROFILES=mock`) with an empty development inventory and pool file, the
@@ -453,30 +460,67 @@ Decisions: `design.md`, "End-to-end evidence for bare-metal publication". Closes
       (bare-metal registry, site, storefront, and administrator identities) and
       `dev-env/bare-metal/` (inventory, pool file, and an SSH key file the mock never
       uses), each marked as a development value never to be used on a public network.
-- [ ] 10.5 `Makefile` — `e2e-bare-metal-dev-env` prints the lane's `--env-file` values,
+      **Done, reusing committed credentials:** the lane is a separate stack on its
+      own chain, so it binds the committed Anvil development credentials under the
+      assignments `dev-env/identities/README.md` records ("The bare-metal lane"); no
+      new credential file was added. `dev-env/bare-metal/` also holds commented
+      placeholders for the buyer service's identity and configuration, which compose
+      requires though the lane never starts that service. **Defect fixed:**
+      `compose.bare-metal.yml` passed the site's three identifiers to the provisioning
+      settings loader without `@str`, which reads a hex `eip191` identifier as a
+      number; the VM stack's overlay already prefixes them. Every bare-metal
+      deployment with `eip191` identities would have misread them. The base stack's
+      header now says only the lane overlay enables the mock.
+- [x] 10.5 `Makefile` — `e2e-bare-metal-dev-env` prints the lane's `--env-file` values,
       generating the option expiry and fulfillment deadline from the current time so
       they never go stale; the publication clauses name Alkahest on the dev chain.
-- [ ] 10.6 `E2/Makefile` — `test-e2e-vm` is today's `test-e2e`; `test-e2e-bare-metal`
+      **Done.** A check confirmed it supplies every `${VAR:?}` the four compose files
+      require, and that every JSON value parses; the fulfillment deadline is a day
+      after the option expiry.
+- [x] 10.6 `E2/Makefile` — `test-e2e-vm` is today's `test-e2e`; `test-e2e-bare-metal`
       brings up 10.4's stack under its own compose project and network and runs
       `e2e_bare_metal_publication`; `test-e2e` runs both. `e2e_bare_metal_deal` leaves
       `E2E_MODULE`: it needs a real host, and neither lane selects it.
-- [ ] 10.7 `.github/workflows/e2e.yml` — the `e2e` job becomes `e2e-vm` and
+      **Done.** `test-e2e` takes the VM stack down before the bare-metal stack comes up,
+      since both run a container named `anvil`. `.gitignore` covers the generated
+      `.e2e-bare-metal.env`.
+- [x] 10.7 `.github/workflows/e2e.yml` — the `e2e` job becomes `e2e-vm` and
       `e2e-bare-metal`, each building, running its lane, collecting its compose logs
       into its own artifact (`e2e-vm-logs`, `e2e-bare-metal-logs`), and tearing down.
-- [ ] 10.8 `E2/config/` — the lane's bare-metal settings: registry URL, authority, and
+      **Done.** The bare-metal job's log collection and teardown reuse the env file
+      the run wrote, since its deadlines are generated.
+- [x] 10.8 `E2/config/` — the lane's bare-metal settings: registry URL, authority, and
       trust pins; the storefront URL and administrator credential; the site's URL,
       authority pin, and operator credential.
-- [ ] 10.9 **End-to-end** `E2/tests/e2e/roles/scenarios/bare_metal/test_bare_metal_publication.py`
+      **Done,** under `bare_metal_lane` rather than `bare_metal`, which configures the
+      parked real-host scenario and whose keys would otherwise start satisfying it.
+      Each credential was checked to derive the identifier the stack pins for it.
+- [x] 10.9 **End-to-end** `E2/tests/e2e/roles/scenarios/bare_metal/test_bare_metal_publication.py`
       (new), marker `e2e_bare_metal_publication` registered with the others. Typed
       clients only, staged with `require_state`: preconditions; declare supply;
       publish; discover; withdraw; reinstate (design, "End-to-end evidence for bare-metal
       publication"). A missing bare-metal setting fails the scenario rather than skipping.
-- [ ] 10.10 `docs/development/TESTING.md` — the two lanes and what each proves; the loop
+      **Done.** The negative case is a whole-host pool that delivers bare metal and
+      advertises nothing, rather than a VM-only pool: it exercises the same
+      classification without needing a VM provider configuration. Withdrawal and
+      reinstatement go through the operator client's `patch_pool`. Fixtures in
+      `E2/tests/e2e/roles/scenarios/bare_metal/conftest.py` fail on a missing lane
+      setting. Collected (6 tests) in the e2e project; the VM lane's marker expression
+      now collects 128, one fewer than the recorded VM run's 129 — the parked
+      real-host scenario.
+- [x] 10.10 `docs/development/TESTING.md` — the two lanes and what each proves; the loop
       table gains the bare-metal publication step, with no pause because publication has
       no timer. `docs/bare-metal-seller-quickstart.md` — the operator can step
       publication through the administrator route as well as the command.
-- [ ] 10.11 Run the storefront suite, `make check-reinit`, `make check-comment-hygiene`,
+      **Done.**
+- [x] 10.11 Run the storefront suite, `make check-reinit`, `make check-comment-hygiene`,
       and the scoped citation check.
+      **Done:** bare-metal storefront 149 passed; VM storefront unit 1083 passed (1
+      skipped) against the rebuilt bare-metal storefront wheel; `make check-reinit`,
+      `make check-comment-hygiene`, and the scoped citation check pass; the unscoped
+      check still reports the 17 pre-existing citations. **Not run here:** no container
+      runtime is available, so neither lane has been brought up; 10.12 is the only
+      evidence the stack starts.
 - [ ] 10.12 The maintainer runs both lanes in GitHub Actions; record the runs, their
       results, and the scenarios in 8.8.
 

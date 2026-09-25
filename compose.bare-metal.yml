@@ -18,16 +18,18 @@ services:
       - ${BARE_METAL_REGISTRY_IDENTITY_CREDENTIAL_FILE:?set registry signer credential file}:/run/secrets/arkhai/registry-identity/credential:ro
 
   bare-metal-provisioning:
+    # The provisioning service reads these through its settings loader, which
+    # would parse a hex identifier as a number; `@str` keeps each one a string.
     env_file:
       - ${BARE_METAL_PROVISIONING_IDENTITY_ENV_FILE:?set provisioning signer credential environment file}
     environment:
       - PROVISIONING_IDENTITY__SCHEME=${BARE_METAL_PROVISIONING_IDENTITY_SCHEME:?set provisioning identity scheme}
-      - PROVISIONING_IDENTITY__IDENTIFIER=${BARE_METAL_PROVISIONING_IDENTITY_IDENTIFIER:?set canonical provisioning principal}
+      - PROVISIONING_IDENTITY__IDENTIFIER=@str ${BARE_METAL_PROVISIONING_IDENTITY_IDENTIFIER:?set canonical provisioning principal}
       - PROVISIONING_STOREFRONT_IDENTITY__SCHEME=${BARE_METAL_STOREFRONT_IDENTITY_SCHEME:?set storefront identity scheme}
-      - PROVISIONING_STOREFRONT_IDENTITY__IDENTIFIER=${BARE_METAL_STOREFRONT_IDENTITY_IDENTIFIER:?set canonical storefront principal}
+      - PROVISIONING_STOREFRONT_IDENTITY__IDENTIFIER=@str ${BARE_METAL_STOREFRONT_IDENTITY_IDENTIFIER:?set canonical storefront principal}
       - PROVISIONING_STOREFRONT_SITE_ID=${BARE_METAL_SITE_ID:?set exact selected site id}
       - PROVISIONING_ADMIN_IDENTITY__SCHEME=${BARE_METAL_PROVISIONING_ADMIN_IDENTITY_SCHEME:?set provisioning admin scheme}
-      - PROVISIONING_ADMIN_IDENTITY__IDENTIFIER=${BARE_METAL_PROVISIONING_ADMIN_IDENTITY_IDENTIFIER:?set canonical provisioning admin principal}
+      - PROVISIONING_ADMIN_IDENTITY__IDENTIFIER=@str ${BARE_METAL_PROVISIONING_ADMIN_IDENTITY_IDENTIFIER:?set canonical provisioning admin principal}
 
   bare-metal-storefront:
     env_file:

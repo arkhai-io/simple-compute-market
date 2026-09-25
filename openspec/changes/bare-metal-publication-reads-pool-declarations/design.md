@@ -365,8 +365,8 @@ publication.
   offered.
 - **The scenario:** preconditions (the site's resource-pool projection reported
   `loaded`); the site operator declares a backed pool advertising `bare_metal` with one
-  whole-host declaration, and a VM-only pool whose declaration carries a bare-metal
-  view; one publication step publishes exactly one listing; the registry and the
+  whole-host declaration, and a whole-host pool that delivers bare metal but advertises
+  nothing, whose declaration also carries a bare-metal view; one publication step publishes exactly one listing; the registry and the
   storefront both return it open, with its offering mode, backing, host, and storefront
   URL; the pool stops advertising `bare_metal` and the next step closes the listing as
   `source_gone` at the registry; the pool advertises again and the next step reopens the

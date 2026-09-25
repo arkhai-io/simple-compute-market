@@ -207,7 +207,12 @@ reported separately under `site_projections`, with its resource-pool projection
 that is down is reported there and does not mark the whole storefront degraded.
 
 The dedicated image includes the bare-metal publication command. Run one
-authenticated publication round with `bare-metal-storefront publish`. Each round:
+authenticated publication round with `bare-metal-storefront publish`, or ask the
+running storefront for one as its administrator: `POST
+/api/v1/admin/lifecycle/publication/run-cycle`, which the canonical storefront
+client calls as `admin_run_lifecycle_cycle("publication")`. Both run the same
+round and return the same report, and the storefront runs one round at a time.
+Each round:
 
 - Reads every configured site's resource-pool projection through that site's
   own trusted client, and derives one listing per Physical Resource from the

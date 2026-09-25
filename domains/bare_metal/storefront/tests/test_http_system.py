@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import asyncio
+import dataclasses
+
 import httpx
+import pytest
 from fastapi.testclient import TestClient
 from market_identity import Eip191Signer, TrustedIdentitySet
 
 from storefront_client import StorefrontClient
+from storefront_client.client import StorefrontClientError
 from storefront_client.models import HealthResponse
 
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
@@ -267,3 +272,92 @@ async def test_one_site_unavailable_is_reported_outside_the_health_gate(
     assert one_down.checks == healthy.checks
     assert one_down.status == healthy.status
     assert "site_projections" not in one_down.checks
+
+
+class _RecordingCycle:
+    """Stands in for one publication pass, recording when it runs."""
+
+    def __init__(self, log: list[str], name: str, gate: asyncio.Event | None) -> None:
+        self._log = log
+        self._name = name
+        self._gate = gate
+
+    async def run(self) -> dict[str, object]:
+        self._log.append(f"start {self._name}")
+        if self._gate is not None:
+            await self._gate.wait()
+        self._log.append(f"end {self._name}")
+        return {"dry_run": False, "actions": [{"action": "publish"}], "counts": {"publish": 1}}
+
+
+def _stepped_runtime(path: str, log: list[str], gate: asyncio.Event | None = None):
+    runtime = _runtime(path)
+    names = iter(("first", "second", "third"))
+    return dataclasses.replace(
+        runtime,
+        publication_cycle_factory=lambda _runtime: _RecordingCycle(
+            log, next(names), gate
+        ),
+    )
+
+
+async def test_the_publication_step_runs_one_pass_and_returns_its_report(tmp_path) -> None:
+    log: list[str] = []
+    app = _app(_stepped_runtime(str(tmp_path / "storefront.db"), log))
+
+    async with app.router.lifespan_context(app):
+        async with _admin_client(app) as admin:
+            report = await admin.admin_run_lifecycle_cycle("publication")
+
+    assert report == {
+        "dry_run": False,
+        "actions": [{"action": "publish"}],
+        "counts": {"publish": 1},
+    }
+    assert log == ["start first", "end first"]
+
+
+async def test_the_publication_step_refuses_an_unsigned_request(tmp_path) -> None:
+    log: list[str] = []
+    app = _app(_stepped_runtime(str(tmp_path / "storefront.db"), log))
+
+    # Rejection path: an unsigned request is refused before any pass runs.
+    with TestClient(app) as client:
+        response = client.post("/api/v1/admin/lifecycle/publication/run-cycle")
+
+    assert response.status_code == 401
+    assert log == []
+
+
+async def test_a_loop_the_storefront_does_not_run_is_not_found(tmp_path) -> None:
+    log: list[str] = []
+    app = _app(_stepped_runtime(str(tmp_path / "storefront.db"), log))
+
+    async with app.router.lifespan_context(app):
+        async with _admin_client(app) as admin:
+            with pytest.raises(StorefrontClientError) as refused:
+                await admin.admin_run_lifecycle_cycle("capacity-events")
+
+    assert refused.value.status_code == 404
+    assert log == []
+
+
+async def test_concurrent_publication_steps_run_one_after_the_other(tmp_path) -> None:
+    log: list[str] = []
+    gate = asyncio.Event()
+    app = _app(_stepped_runtime(str(tmp_path / "storefront.db"), log, gate))
+
+    async with app.router.lifespan_context(app):
+        async with _admin_client(app) as admin:
+            first = asyncio.create_task(admin.admin_run_lifecycle_cycle("publication"))
+            second = asyncio.create_task(admin.admin_run_lifecycle_cycle("publication"))
+            while not log:
+                await asyncio.sleep(0)
+            # Give the second request every chance to start a pass of its own.
+            for _ in range(50):
+                await asyncio.sleep(0)
+            assert log == ["start first"]
+            gate.set()
+            await asyncio.gather(first, second)
+
+    assert log == ["start first", "end first", "start second", "end second"]

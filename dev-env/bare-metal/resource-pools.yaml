@@ -1,0 +1,5 @@
+# Development pool document for the bare-metal end-to-end lane: deliberately
+# empty. The scenario declares its pools through the provisioning operator API,
+# and a start reconciles this document only when it changes, so those pools
+# survive. Not for any real site.
+pools: []

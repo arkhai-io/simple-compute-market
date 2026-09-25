@@ -127,6 +127,17 @@ class BareMetalStorefrontRuntime:
     escrow_verifier: Callable[..., Awaitable[int]] = field(
         default_factory=lambda: create_alkahest_registration().settlement_verifier
     )
+    # Composes one publication cycle for the administrator's publication step;
+    # None composes it from the process environment as the command does.
+    publication_cycle_factory: Callable[["BareMetalStorefrontRuntime"], Any] | None = (
+        field(default=None, repr=False)
+    )
+    # One publication pass at a time within this process. A pass racing the
+    # command in another process is refused by the durable binding's unique
+    # derivation key instead.
+    publication_lock: asyncio.Lock = field(
+        default_factory=asyncio.Lock, repr=False, compare=False
+    )
     settlement_repository: SettlementSQLiteRepository = field(init=False, repr=False)
     settlement_clients: Mapping[str, Any] = field(init=False, repr=False)
     settlement_runtime: SettlementRuntime = field(init=False, repr=False)
