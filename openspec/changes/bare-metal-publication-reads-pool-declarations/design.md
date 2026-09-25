@@ -491,6 +491,14 @@ startup ownership repair is unnecessary. The persistence guidance in
 `docs/development/DEPLOYMENT_AND_CONFIG.md` records this image responsibility;
 the Actions stack startup is the validation boundary.
 
+The next startup reached pool import, which correctly refused an empty
+authoritative document: it must name `default`. The development fixture now
+declares that backed pool explicitly with empty deliverable and advertisable
+mode sets. It supplies no candidates; the scenario continues creating its own
+pools through the operator API. This aligns the fixture with the existing pool
+contract rather than weakening startup validation. The fixture inventory is
+described in `dev-env/identities/README.md`.
+
 ## Migration
 
 No deployed bare-metal storefront database exists, so none is migrated. A new

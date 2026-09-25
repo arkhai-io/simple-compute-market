@@ -544,6 +544,10 @@ Decisions: `design.md`, "End-to-end evidence for bare-metal publication". Closes
       and `provisioning/compute/service/Dockerfile` so fresh named volumes allow
       SQLite startup. Validate image builds and actual volume startup in Actions;
       document the image responsibility in the deployment persistence guidance.
+      **Volume startup verified:** the next run starts the registry and reaches
+      provisioning pool import. Correct `dev-env/bare-metal/resource-pools.yaml`
+      to include the required inert default pool and update its inventory note in
+      `dev-env/identities/README.md`; rerun the actual startup and scenarios.
 - [ ] 11.4 Closeout: run focused helper tests, `make check-comment-hygiene`,
       `make check-reinit`, and scoped documentation citations; review touched imports,
       documentation placement and task-note compression; record roadmap and campaign
