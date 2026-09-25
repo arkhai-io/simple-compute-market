@@ -44,11 +44,31 @@ reader together. Lands before Section 3, whose parser reads the renamed field.
 - [ ] 2.3 `kit/site-client/src/market_site_client/fixtures/resource_pools.py` — the
       canonical builders emit `pool_id`, and `validate_resource_pool_projection` requires it.
 - [ ] 2.4 Versions, per `docs/development/RELEASING.md`'s SemVer policy, each an
-      incompatible wire or read change at 0.x: `kit/site/pyproject.toml` `0.5.0`,
-      `kit/site-client/pyproject.toml` `0.6.0`, `kit/resource-pools/pyproject.toml` `0.5.0`,
-      `kit/pool-overrides/pyproject.toml` `0.2.0`. Raise
-      `domains/vms/storefront/pyproject.toml` to `arkhai-kit-resource-pools>=0.5.0` and
-      `arkhai-kit-pool-overrides==0.2.0`.
+      incompatible wire or read change at 0.x:
+      - producers: `kit/site/pyproject.toml` `0.5.0`;
+        `provisioning/compute/service/pyproject.toml` `0.4.0`, which serves the projection,
+        with `provisioning/compute/service/Dockerfile`'s pin following;
+      - readers: `kit/resource-pools/pyproject.toml` `0.5.0`,
+        `kit/pool-overrides/pyproject.toml` `0.2.0`, `domains/vms/listings/pyproject.toml`
+        (`arkhai-vms-listings`, which ships `domains/vms/listings/reconciler.py`) `0.3.0`, and
+        `domains/vms/storefront/pyproject.toml` `0.7.0`, with
+        `domains/vms/storefront/Dockerfile`'s `arkhai-vms-storefront` pin following;
+      - fixtures: `kit/site-client/pyproject.toml` `0.6.0`.
+- [ ] 2.5 Raise the floors of every released package that serves or reads the field, or whose
+      tests build it through the fixture, so no released combination pairs a renamed side with
+      an unrenamed one:
+      - `provisioning/compute/service/pyproject.toml`: `arkhai-kit-site>=0.5.0`,
+        `arkhai-kit-site-client>=0.6.0`;
+      - `domains/vms/listings/pyproject.toml`: `arkhai-kit-resource-pools>=0.5.0`,
+        `arkhai-kit-pool-overrides>=0.2.0`;
+      - `domains/vms/storefront/pyproject.toml`: `arkhai-kit-resource-pools>=0.5.0`,
+        `arkhai-kit-pool-overrides==0.2.0`, `arkhai-kit-site-client>=0.6.0`,
+        `arkhai-vms-listings[pools,overrides]>=0.3.0`;
+      - `e2e-tests/pyproject.toml`: `arkhai-vms-storefront>=0.7.0`.
+      Packages that depend on a bumped package without reading the field —
+      `kit/fulfillment`, `provisioning/compute`, `domains/apicredits/service`,
+      `domains/apicredits/storefront`, and the VM buyer, settlement, and negotiation packages —
+      keep their constraints; only their locks move (5.3).
 
 ## 3. Domain package: pure derivation, no database
 
@@ -139,15 +159,17 @@ resource-pool projection", "Every resource falls into exactly one classification
       dropping `derived_bare_metal_listings` and its two indexes. Leave 0002, 0006, and
       0009 in place (decision "Listings are tracked by the common binding").
 - [ ] 4.6 `SF/runtime.py` and `SF/models.py` — decision "The health check reports each
-      site's projection": fetch each site's `resource_pool_projection_version()` through its
-      own client; add `site_projections: dict[str, dict[str, ProjectionFamilyStatus]] |
-      None` to `BareMetalHealthResponse`, reusing core's `ProjectionFamilyStatus` under the
-      `resource_pools` family; set `checks["site_projection"]` and
-      `checks["fulfillment"]` to `ok` when every site answers, `degraded` when some do, and
-      `error` when none do.
+      site's projection, as VM's does": fetch each site's
+      `resource_pool_projection_version()` through its own client; add
+      `site_projections: dict[str, dict[str, ProjectionFamilyStatus]] | None` to
+      `BareMetalHealthResponse`, reusing core's `ProjectionFamilyStatus` under the family
+      name `resource_pool`, `loaded` or `unavailable` per site; remove
+      `checks["site_projection"]`; and make `checks["fulfillment"]` report only whether a
+      fulfillment client is composed. No site's projection state enters a gated check.
 - [ ] 4.7 `domains/bare_metal/storefront/pyproject.toml` — version `0.5.0`; depend on
-      `arkhai-bare-metal>=0.5.0`, `arkhai-kit-capacity-publication==0.2.0`, and
-      `arkhai-kit-resource-pools>=0.5.0`, which the storefront now imports directly.
+      `arkhai-bare-metal>=0.5.0`, `arkhai-kit-capacity-publication==0.2.0`,
+      `arkhai-kit-resource-pools>=0.5.0`, which the storefront now imports directly, and
+      `arkhai-kit-site-client>=0.6.0`, whose fixtures its tests build from.
       `domains/bare_metal/storefront/Makefile` — add `arkhai-kit-capacity-publication` to
       `reinit`. `domains/bare_metal/storefront/Dockerfile` — pin
       `arkhai-bare-metal-storefront==0.5.0`.
@@ -165,12 +187,14 @@ resource-pool projection", "Every resource falls into exactly one classification
       change bumps: `domains/apicredits/service/uv.lock`,
       `domains/apicredits/storefront/uv.lock`, `domains/bare_metal/uv.lock`,
       `domains/bare_metal/buyer/uv.lock`, `domains/bare_metal/provisioning/adapter/uv.lock`,
-      `domains/bare_metal/storefront/uv.lock`, `domains/vms/provisioning/adapter/uv.lock`,
-      `domains/vms/provisioning/client/uv.lock`, `domains/vms/storefront/uv.lock`,
-      `e2e-tests/uv.lock`, `kit/capacity-publication/uv.lock`, `kit/fulfillment/uv.lock`,
+      `domains/bare_metal/storefront/uv.lock`, `domains/vms/buyer/uv.lock`,
+      `domains/vms/provisioning/adapter/uv.lock`, `domains/vms/provisioning/client/uv.lock`,
+      `domains/vms/storefront/uv.lock`, `e2e-tests/uv.lock`,
+      `kit/capacity-publication/uv.lock`, `kit/fulfillment/uv.lock`,
       `kit/pool-overrides/uv.lock`, `kit/resource-pools/uv.lock`, `kit/site-client/uv.lock`,
       `kit/site/uv.lock`, `provisioning/compute/service/uv.lock`, and
-      `provisioning/compute/uv.lock`.
+      `provisioning/compute/uv.lock`. Re-run the search that produced this list after the
+      bumps, in case a lock not listed here records a bumped package.
 
 ## 6. Tests
 
@@ -224,8 +248,10 @@ Bare-metal publication (Sections 3–4):
       `runtime.capacity_client.site(site_id)` returns, asserted by identity, and closes its
       registry transport.
 - [ ] 6.10 **Integration** `domains/bare_metal/storefront/tests/integration/__init__.py` and
-      `domains/bare_metal/storefront/tests/integration/test_publication.py` — the cycle over
-      a real storefront database, per-site client doubles returning projections built from
+      `domains/bare_metal/storefront/tests/integration/test_publication.py` — integration in
+      the sense `docs/development/TESTING.md` gives it for code with no application of its
+      own: the cycle's public API against a real embedded database, with collaborators it does
+      not own injected. The cycle over a real storefront database, per-site client doubles returning projections built from
       the contract fixtures, and a recording registry client. Replaces
       `domains/bare_metal/storefront/tests/test_publication.py`, which is tombstoned; its
       module-attribute patching gives way to constructor injection. Scenarios:
@@ -251,11 +277,13 @@ Bare-metal publication (Sections 3–4):
       migration sequence leaves no `derived_bare_metal_listings`, including on a database
       0002 populated; keep both retired-kind tests.
 - [ ] 6.12 **Integration** `domains/bare_metal/storefront/tests/test_http_system.py` — every
-      site answering reports `ok`; one of two failing reports `degraded` with that site's
-      status in `site_projections`; all failing reports `error`.
+      site answering reports each as `loaded` in `site_projections`; one of two failing reports
+      that site as `unavailable` there while no gated check changes, following VM's
+      `test_one_site_unavailable_is_reported_outside_the_health_gate`; `checks` carries no
+      `site_projection` entry.
 - [ ] 6.13 Run the suites of every changed package — `make test-kits`,
-      `make test-bare-metal`, `make test-storefront`, the VM storefront suite, and
-      `make test-provisioning` — then `make check-reinit`, resolving every gap.
+      `make test-bare-metal`, `make test-storefront`, the VM storefront suite, the
+      `arkhai-vms-listings` suite, and `make test-provisioning` — then `make check-reinit`, resolving every gap.
 
 ## 7. Permanent documentation and cross-change text
 

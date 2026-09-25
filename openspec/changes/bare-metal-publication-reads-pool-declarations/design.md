@@ -248,16 +248,31 @@ projections, whose pool entries (resource-pool projection) and bucket rows
 concept, against "One name per concept". This change renames the wire field to `pool_id`
 in both projections, and every reader with it.
 
-**One step, no transition.** Producer and consumers change together: the site emits only
-`pool_id`, and every reader reads only `pool_id`. That is safe because one operator deploys
-a storefront together with every site it talks to, so no deployment runs a renamed site
-beside an unrenamed storefront or the reverse. Emitting both spellings and reading either
-was the alternative, and it would add a fallback to every reader and a later step to remove
-it, to protect a mixed deployment that does not occur.
+**One step, no transition.** The site emits only `pool_id`, and every reader reads only
+`pool_id`. `openspec/specs/deployment-state/architecture.md`'s compatibility posture asks a
+non-additive change for an explicit plan naming the period in which old and new readers
+and writers coexist. This is that plan, and it deliberately has no expand phase.
+
+- **The coexistence period** is a rollout: from the first site or storefront upgraded to the
+  last. One operator deploys a storefront together with every site it talks to, so the
+  period ends when that operator's rollout ends. The rollout itself is not atomic, because
+  the provisioning service and each storefront are separate deployments.
+- **What happens during it:** a storefront and a site on different versions do not share a
+  pool field, so the storefront reads a loaded projection with no named pools. Its
+  publication treats that site's pools as withdrawn and closes their listings; once both
+  sides match, reconciliation reopens them under their original identities. A seller's close
+  is untouched, and a pool-override write against a mismatched site is refused as naming no
+  projected pool. The result is registry churn and a brief buyer-visible delisting, which is
+  accepted. An operator who wants to avoid it can pause the VM storefront's lifecycle loops
+  (`POST /api/v1/admin/lifecycle/pause`) and hold bare-metal publication for the rollout.
+- **Rejected: emitting both spellings and reading either.** It removes the churn, but it adds
+  a fallback to every reader and a later change to remove it, to shorten a window the
+  maintainer accepts.
 
 **Revisit trigger:** the first site operated independently of the storefronts that consume
-it — the direction the multi-site roadmap goal takes. From then on, a change to the
-projections' wire format needs a transition both sides can cross.
+it — the direction the multi-site roadmap goal takes. From then on the coexistence period
+has no end any one operator controls, and a change to the projections' wire format needs
+an expand phase.
 
 ### Registry convergence reuses the storefront's publication records
 
@@ -267,22 +282,30 @@ implies. Recording bare-metal registry outcomes in the same records lets bare me
 the same divergence query and the same repair rule, on every run of the publication
 command.
 
-### The health check reports each site's projection
+### The health check reports each site's projection, as VM's does
 
-The readiness check fetches each trusted site's `resource_pool_projection_version()`
-through that site's own client, so a down site is visible rather than reported as `ok`
-by the aggregate client's best-effort capacity projection. It uses the version endpoint
-rather than the full projection because `/health` is also the image's health check,
-probed every fifteen seconds: the version endpoint still makes the site compute its
-projection, and it returns exactly the revision and digest the status model reports.
+The permanent requirement "Per-site projection load-state visibility" makes each site's
+projection state visible per site and forbids one site's failure from presenting as broad
+storefront degradation while other sites are healthy. VM's health follows it: per-site state
+appears only in `site_projections`, and nothing about a site's projection enters the gated
+`checks`. Bare metal does the same.
 
-The response follows the convention core's `HealthResponse` established.
-`BareMetalHealthResponse` gains `site_projections`, keyed by site and then by projection
-family, using core's `ProjectionFamilyStatus`, with bare-metal publication's one family,
-`resource_pools`. `checks["site_projection"]` stays one summary: `ok` when every site
-answers, `degraded` when some do, and `error` when none do. `checks["fulfillment"]`,
-which today mirrors the site read, follows the same summary. The overall status remains
-`degraded` whenever any check is not `ok`.
+- The readiness check fetches each trusted site's `resource_pool_projection_version()`
+  through that site's own client — the version endpoint rather than the full projection,
+  because `/health` is also the image's health check, probed every fifteen seconds, and the
+  version endpoint returns exactly the revision and digest the status reports.
+- `BareMetalHealthResponse` gains `site_projections`, keyed by site and then by projection
+  family, using core's `ProjectionFamilyStatus` under the family name VM uses,
+  `resource_pool`. A site that answers is `loaded`, with its revision, digest, and fetch
+  time; one that does not is `unavailable`, with its error. Bare metal keeps no projection
+  cache, so the other states VM reports do not arise.
+- `checks` loses its `site_projection` entry. `checks["fulfillment"]`, which today mirrors
+  the aggregate site read, reports only whether a fulfillment client is composed. A down
+  site is visible in `site_projections` and changes no gated check.
+
+Rejected: a summary check that is `degraded` when some sites are down. It would present one
+site's failure as storefront-wide degradation, which the permanent requirement forbids and
+VM's own test asserts against.
 
 ### "Publication candidate" gets one name
 

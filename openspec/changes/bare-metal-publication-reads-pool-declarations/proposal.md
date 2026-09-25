@@ -67,8 +67,8 @@ the same mechanisms as VM.
   identifier has everywhere else, in both the resource-pool and capacity-bucket
   projections, changing the site and every reader together, since one operator deploys a
   storefront with the sites it talks to.
-- Report each site's projection in the storefront's health response, with a summary
-  that distinguishes some sites unreachable from all of them.
+- Report each site's projection in the storefront's health response, per site and outside
+  every gated check, as VM's health does.
 - Define "publication candidate" in `ARCHITECTURE.md`'s "One name per concept".
 
 ## Capabilities
@@ -107,9 +107,11 @@ None.
 - `domains/bare_metal/src/arkhai_bare_metal/`: candidate derivation from the projection
   view, and retirement of the storefront-side view construction and domain-table
   tracking.
-- `kit/site` (projection producer), `kit/site-client` (projection contract fixtures),
-  `kit/resource-pools` (the declaration reader), `kit/pool-overrides`, and the VM
-  storefront's projection readers: the `pool_id` rename. Each changed kit
+- `kit/site` and the compute provisioning service (projection producer and server),
+  `kit/site-client` (projection contract fixtures), `kit/resource-pools` (the declaration
+  reader), `kit/pool-overrides`, `arkhai-vms-listings` and the VM storefront (projection
+  readers): the `pool_id` rename. Its rollout closes and reopens listings from a site
+  while that site and its storefront run different versions, which is accepted. Each changed kit
   takes a SemVer bump, and every lock recording a bumped package is regenerated.
 - `openspec/specs/site-capacity/spec.md`, `openspec/specs/storefront-publication/spec.md`,
   and `docs/development/ARCHITECTURE.md`.
