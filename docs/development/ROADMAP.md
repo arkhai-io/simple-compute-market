@@ -159,8 +159,12 @@ its own negotiate and listing routes beside the negotiation kit. `kit/policy`,
 `kit/identity`, `kit/fulfillment`, `kit/config`, and `kit/alkahest` likewise
 carry no domain vocabulary.
 
-The remaining Goal 4 work is that last composition and the end-to-end deal
-proof per domain.
+Beneath the extracted runtimes each storefront still duplicates its shell — a
+route set over the same core models, executable assembly, health, and timer
+loops — its seller listing lifecycle and restart-safe fulfillment convergence,
+its authentication middleware, and a persistence client beside core's. Those are
+the next wave of extraction; each follows the rule that an extracted concern
+leaves no domain-local copy.
 
 Settlement assigns stable identity to every accepted-plan obligation, journals
 materialize/status/check/collect/reclaim attempts, persists opaque mechanism
@@ -180,6 +184,9 @@ The domain layer's own structure is better than the duplication suggests. All th
 | Open gap | Owned by |
 |---|---|
 | The bare-metal storefront negotiates through a domain-local service and routes rather than the negotiation kit every other domain composes | [`bare-metal-and-credits-domain-stacks`](../../openspec/changes/bare-metal-and-credits-domain-stacks/) |
+| Every storefront carries its own route set, executable assembly, health service, and timer loops | [`kit-owned-storefront-shell`](../../openspec/changes/kit-owned-storefront-shell/) |
+| Every storefront reimplements the seller listing lifecycle and restart-safe fulfillment convergence; VM keeps its own per-site projection cache | [`kit-owned-listing-and-fulfillment-lifecycles`](../../openspec/changes/kit-owned-listing-and-fulfillment-lifecycles/) |
+| Every storefront carries its own authentication middleware and a persistence client whose boundary with core's is unstated | [`kit-owned-storefront-auth-and-persistence`](../../openspec/changes/kit-owned-storefront-auth-and-persistence/) |
 | No bare-metal deal runs in the pipeline: the only complete-deal scenario needs a real host and a hosted authority | [`bare-metal-mock-provisioned-deal`](../../openspec/changes/bare-metal-mock-provisioned-deal/) |
 | Provider-authentic API-credit hosted evidence still requires the exact signed producer release, protected Stripe inputs, and deployed resolver; bare-metal still requires live selected-site provisioning and access/teardown proof | [`add-api-credits-hosted-settlement`](../../openspec/changes/add-api-credits-hosted-settlement/), [`add-bare-metal-hosted-settlement`](../../openspec/changes/add-bare-metal-hosted-settlement/) |
 
@@ -231,7 +238,7 @@ Nothing else about a hold has changed. A reservation carries no rate, no funding
 | Open gap | Owned by |
 |---|---|
 | Holds bypass reservation idempotency; expiry scans all held rows on every operation; terminal reservations accumulate without bound | [`capacity-reservation-lifecycle-hardening`](../../openspec/changes/capacity-reservation-lifecycle-hardening/) |
-| Holding capacity is free, so exclusivity cannot be granted before payment without exposing the denial vector | [`billable-capacity-reservations`](../../openspec/changes/billable-capacity-reservations/) |
+| Holding capacity is free, so exclusivity cannot be granted before payment without exposing the denial vector; no posted hold rate exists beside the lease rate | [`billable-capacity-reservations`](../../openspec/changes/billable-capacity-reservations/) |
 | Capacity is not held while a buyer is negotiating for it, so two buyers can negotiate the same capacity to completion | [`negotiation-time-capacity-hold`](../../openspec/changes/negotiation-time-capacity-hold/) |
 | The shipped default granted unfunded exclusivity, and framed the safe value as a performance trade | [`default-no-pre-settlement-capacity-hold`](../../openspec/changes/default-no-pre-settlement-capacity-hold/) |
 

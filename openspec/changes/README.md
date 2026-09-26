@@ -105,6 +105,10 @@ kit-storefront-composition-seam
       └──► kit-owned-capacity-and-publication ────┴──► bare-metal-and-credits-domain-stacks ──► compute-40 (Goal 3)
 bare-metal-mock-provisioned-deal ──────────────────────┘ (pipeline deal evidence)
 
+Next wave (design phase):
+kit-owned-storefront-shell ──┬──► kit-owned-listing-and-fulfillment-lifecycles
+                             └──► kit-owned-storefront-auth-and-persistence
+
 kit-owned-settlement-runtime archived 2026-08-10
 ```
 
@@ -113,21 +117,26 @@ kit-owned-settlement-runtime archived 2026-08-10
 | [`kit-storefront-composition-seam`](kit-storefront-composition-seam/) | implemented and promoted; validation and closeout remain | Defines where kit-owned storefront runtime sits and proves it with the two smallest duplicated concerns, composing all three domains. Establishes the rule that an extracted concern leaves no domain-local copy |
 | [`kit-owned-negotiation-runtime`](kit-owned-negotiation-runtime/) | implemented and promoted for VM and API credits; validation and closeout remain | Extracts the synchronous negotiation runtime; VM and API credits inject domain hooks and retain no lifecycle copy. Bare metal's composition onto it is `bare-metal-and-credits-domain-stacks` 4a |
 | [`kit-owned-capacity-and-publication`](kit-owned-capacity-and-publication/) | implemented and promoted for all three domains; validation and closeout remain | Extracts the storefront capacity client and publication runtime; all three storefronts compose them |
+| [`kit-owned-storefront-shell`](kit-owned-storefront-shell/) | design phase; not planned; depends on the seam and the three runtime kits | Extracts what every storefront still duplicates beneath the runtimes: the route set over the core models, executable assembly, health, and the timer-loop lifecycle with one pause and one step control. A domain contributes codecs, hooks, extra routes, and timings, not a controller or a server. First of the next wave; the other two land as contributions to it |
+| [`kit-owned-listing-and-fulfillment-lifecycles`](kit-owned-listing-and-fulfillment-lifecycles/) | design phase; not planned; depends on the shell | Extracts the seller listing lifecycle over the common binding (close, pause, reopen, successor carry-over) and restart-safe fulfillment convergence (obligation resumption, terminal-state driving, executor-result reconciliation), and replaces the VM per-site projection cache with the capacity kit's state |
+| [`kit-owned-storefront-auth-and-persistence`](kit-owned-storefront-auth-and-persistence/) | design phase; not planned; depends on the shell | One core- or kit-owned v2 authentication middleware set applied by the shell, and a stated persistence boundary: core owns market state, a domain's client holds only its own tables |
 | [`bare-metal-and-credits-domain-stacks`](bare-metal-and-credits-domain-stacks/) | active; owns all remaining "bare metal on the kit" work (Section 4a); the stack and both deal scenarios exist; `bare-metal-mock-provisioned-deal` supplies the pipeline deal | Bare metal composed onto the kit negotiation runtime with its parallel negotiation and listing routes removed, API-credits recomposition onto kit, per-domain end-to-end deal paths, and the bare-metal buyer requirements it verifies (clean wheel, independent authorities, package boundary, negotiation ownership). Delivers the goal's completion test |
 
 ## Roadmap goal — Make capacity exclusivity compensated
 
 ```text
 default-no-pre-settlement-capacity-hold (interim posture, reversed by billing)
-capacity-reservation-lifecycle-hardening ──► billable-capacity-reservations ──► negotiation-time-capacity-hold
+capacity-reservation-lifecycle-hardening ──┬──► billable-capacity-reservations ──► negotiation-time-capacity-hold
+capacity-shape-pricing (Goal 2) ───────────┘                                                   ▲
+negotiation-driven-capacity-resize §2 (Goal 2) ── shape in a round; resize_reservation's first caller ┘ (Section 3 only)
 ```
 
 | Change | Status | Acceptance boundary |
 |---|---|---|
 | [`default-no-pre-settlement-capacity-hold`](default-no-pre-settlement-capacity-hold/) | active; configuration applied 2026-08-06, validation outstanding | Ships `capacity.hold_ttl_seconds = 0` for both storefronts, closing a denial vector by denying the capability. Reversed by `billable-capacity-reservations` once holding is charged |
 | [`capacity-reservation-lifecycle-hardening`](capacity-reservation-lifecycle-hardening/) | active; no blocking dependency | Fixes three reservation-row defects: holds placed during negotiation bypass the idempotency guard, expiry scans all held rows on every ledger operation, and terminal reservations accumulate without bound |
-| [`billable-capacity-reservations`](billable-capacity-reservations/) | active; depends on `capacity-shape-pricing` and `capacity-reservation-lifecycle-hardening` | A hold carries a burn rate from the commercial rate structure; maximum duration derives from committed funds rather than a configured TTL; held time is charged as a serviced obligation with the remainder returned |
-| [`negotiation-time-capacity-hold`](negotiation-time-capacity-hold/) | active; depends on `billable-capacity-reservations` and `capacity-reservation-lifecycle-hardening` | Moves the hold from terms acceptance to the counterparty's first differing-terms proposal, one superseded reservation per negotiation, released on abandonment. Inquiry stays unheld and unfunded |
+| [`billable-capacity-reservations`](billable-capacity-reservations/) | active; depends on `capacity-shape-pricing` and `capacity-reservation-lifecycle-hardening` | A hold carries a burn rate from a posted, seller-set hold rate in the lease rate's form and tiers, defaulting to the lease rate and untouched by the negotiated multiplier; maximum duration derives from committed funds rather than a configured TTL; held time is charged as a serviced obligation with the remainder returned |
+| [`negotiation-time-capacity-hold`](negotiation-time-capacity-hold/) | active; depends on `billable-capacity-reservations` and `capacity-reservation-lifecycle-hardening`; its shape-change section on `negotiation-driven-capacity-resize` | Moves the hold from terms acceptance to the counterparty's first differing-terms proposal through the kit's hooks, adds a release hook the kit and watchdog call on terminal states, keeps one superseded reservation per negotiation, and is `resize_reservation`'s first caller. Inquiry stays unheld and unfunded |
 
 ## Roadmap goal — Make the settlement mechanism a composed choice
 

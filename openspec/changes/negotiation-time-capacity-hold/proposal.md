@@ -54,7 +54,7 @@ None.
   problem.
 - Do not add the round payload that carries a shape change —
   `negotiation-driven-capacity-resize` owns it. This change supersedes the reservation
-  when the requested shape changes, by whatever mechanism carries it.
+  when the requested shape changes, and that section waits on that payload.
 - Do not change what settlement does with a held reservation; commit is unchanged.
 - Do not remove the non-consuming feasibility verification. It stays, and remains the
   only capacity interaction before a counter-offer.
@@ -62,10 +62,12 @@ None.
 
 ## Impact
 
-- Affected code: `domains/vms/storefront/src/market_storefront/utils/sync_negotiation.py`
-  (hold placement moves from the three acceptance call sites to the first counter-offer,
-  and gains a release path on negotiation end), and the negotiation thread's record of
-  its reservation.
+- Affected code: `kit/negotiation-runtime`'s `NegotiationDomainHooks` and runtime
+  (placement called on a differing-terms proposal; a release hook called on terminal
+  transitions), `kit/storefront`'s negotiation watchdog (calls the release hook on
+  abandonment), the VM storefront's `negotiation_runtime.py` (`_place_capacity_hold`
+  and its release counterpart), the negotiation thread's record of its reservation,
+  and `resize_reservation`'s first caller.
 - Affected behavior: hold population grows from accepted-but-unsettled deals to
   negotiations past their first counter-offer. This is the reason both prerequisites
   exist.
@@ -89,14 +91,14 @@ None.
 
 ## Dependencies and Related Changes
 
-- **Depends on `billable-capacity-reservations`.** Without it this change is the
-  uncompensated-exclusion problem, not a fix for it.
-- **Depends on `capacity-reservation-lifecycle-hardening`.** It supplies the
-  pre-settlement idempotency key this change's holds need (no escrow exists at
-  counter-offer time), and the bounded expiry that a larger hold population requires.
-- Complements `negotiation-capacity-feasibility-probe`, which keeps inquiry answerable
-  without a hold. The two together are the full "fail early" story: verify at inquiry,
-  hold at commitment.
-- Interacts with `negotiation-driven-capacity-resize`, whose shape-change payload is
-  what triggers a supersede here. Neither blocks the other; if that change has not
-  landed, the requested shape cannot change and no supersede occurs.
+- Depends on `billable-capacity-reservations`: moving holds earlier without billing
+  them is the uncompensated-exclusion problem that change exists to prevent, and its
+  posted hold rate is what prices a hold at placement, before any terms exist.
+- Depends on `capacity-reservation-lifecycle-hardening` for the pre-settlement
+  idempotency key and bounded expiry a larger hold population needs.
+- Section 3 (supersede on shape change) depends on `negotiation-driven-capacity-resize`,
+  which lets a round carry a revised shape and hands `resize_reservation`'s first call
+  here. Sections 1, 2, and 4 do not.
+- Widens `kit/negotiation-runtime`'s hook contract (placement point, release hook)
+  and `kit/storefront`'s watchdog; every domain that composes the runtime implements
+  the release hook, as a no-op where it holds nothing.

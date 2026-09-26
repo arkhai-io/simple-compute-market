@@ -34,8 +34,10 @@ where a deal should fail if it is going to fail.
 
 ## What Changes
 
-- Give a capacity reservation a burn rate, derived from the shape it holds through the
-  same rate structure that prices the shape commercially.
+- Give a capacity reservation a burn rate: a posted, seller-set hold rate structure in
+  the same family-grouped form and resolution tiers as the lease rate, defaulting to
+  the lease rate where none is stated, evaluated against the held shape. The hold rate
+  is not negotiated and the negotiated lease multiplier does not apply to it.
 - Require funds committed against that rate before a hold is placed, and derive the
   hold's maximum duration from the committed amount and the burn rate rather than from a
   configured TTL. The pool's advisory hold cap becomes a ceiling on the derived value
@@ -70,7 +72,8 @@ None.
 - Do not build a standing buyer account that outlives one negotiation. It is a
   gas-efficiency improvement over per-negotiation commitment, not a correctness
   requirement, and is a deferred follow-on.
-- Do not define the rate structure — `capacity-shape-pricing` owns it. This change
+- Do not define the rate structure's form or resolution tiers — `capacity-shape-pricing`
+  owns them; this change adds a hold rate beside the lease rate in each. This change
   consumes it.
 - Do not change what capacity is admitted, how it is matched, or how it is scheduled.
 - Do not introduce identity-based rate limiting or per-identity hold caps. The pricing
@@ -101,17 +104,22 @@ None.
 
 ### Knowledge to promote
 
-- A reservation carries a burn rate; its maximum duration is derived from committed
-  funds and that rate — `openspec/specs/site-capacity/spec.md`.
+- A reservation carries a burn rate from a posted hold rate that defaults to the lease
+  rate; its maximum duration is derived from committed funds and that rate —
+  `openspec/specs/site-capacity/spec.md`.
+- Why the hold rate is posted rather than negotiated, and separate rather than a
+  multiple of the lease rate — this change's `design.md`.
 - Held capacity is charged as an obligation with the unconsumed remainder returned —
   `openspec/specs/settlement-servicing/spec.md`.
 - Why exclusivity is priced rather than rate-limited — this change's `design.md`.
 
 ## Dependencies and Related Changes
 
-- Depends on `capacity-shape-pricing` for the rate structure a burn rate is derived
-  from, and on its requirement that price aggregation be reachable outside the
-  negotiation path.
+- Depends on `capacity-shape-pricing` for the rate structure's form, its three
+  resolution tiers (including `kit/pool-overrides`' VM terms contract), and its
+  requirement that price aggregation be reachable outside the negotiation path.
+- Follows `negotiation-driven-capacity-resize`'s exactness rule for every derived
+  amount; the negotiated multiplier it introduces prices the lease, not the hold.
 - Depends on `capacity-reservation-lifecycle-hardening`, whose bounded expiry and
   generalized idempotency are what make a larger population of billed holds tractable.
 - Prerequisite for `negotiation-time-capacity-hold`. Moving holds earlier without
@@ -120,9 +128,9 @@ None.
 - Reverses `default-no-pre-settlement-capacity-hold`. Restoring a non-zero
   `hold_ttl_seconds` default is part of this change's own work, once holding capacity
   costs the holder something; that change's spec permits the restoration explicitly.
-- Reuses `add-settlement-plan-shapes`' per-obligation lifecycle. That change's interval
-  escrows are generated from an accepted total, which does not exist before agreement,
-  so the generation rule differs — see `design.md`.
+- Reuses `kit/settlement-runtime`'s per-obligation lifecycle. Its interval escrows are
+  generated from an accepted total, which does not exist before agreement, so the
+  generation rule differs — see `design.md`.
 - A standing buyer account outliving one negotiation is a deferred follow-on with no
   change opened; it reduces chain writes and changes nothing about this change's
   contracts.

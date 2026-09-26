@@ -2,24 +2,32 @@
 
 ## Context
 
-Verified by inspection 2026-08-06; re-verify before implementing.
+Verified against the tree at planning time; re-verify before implementing.
 
-- `_place_capacity_hold` runs only on `decision.action == "accept"`. Its TTL comes from
-  `settings.capacity.hold_ttl_seconds` (default 900), capped by the pool's
-  `max_reservation_hold_seconds` policy tag through `capped_hold_seconds`.
+- Hold placement is `kit/negotiation-runtime`'s `place_hold` hook, implemented for
+  the VM domain by `_place_capacity_hold` in `negotiation_runtime.py`. It runs on
+  acceptance, reads `settings.capacity.hold_ttl_seconds` (shipped default 0, so it
+  returns without holding; the local end-to-end profiles set 900), and caps the TTL
+  by the pool's `max_reservation_hold_seconds` policy tag through
+  `capped_hold_seconds`.
 - `CapacityReservation` carries `hold_expires_at` and no rate, price, or funding
   reference.
 - `resize_reservation` supersedes rather than mutating: it releases and re-reserves in
-  one transaction and mints a new `capacity_reservation_id`.
-- `SettlementObligation` is mechanism-neutral and already carries `maker`, `claimant`,
-  `amount`, `asset`, `expiration_unix`, `conditions`, `mechanism`, and `params`, with
-  the docstring noting a penalty bond as seller-posts/buyer-claims — the mirror of what
-  is needed here.
-- `add-settlement-plan-shapes` builds durable per-obligation identity, materialization,
-  condition, collection, reclaim, attempt, and receipt state, and generates interval
-  escrows "deterministically from accepted total/duration/schedule."
-- `kit/alkahest` has no standing-account abstraction; "account" means an EOA throughout.
-  `chain_probe` is an `eth_getCode` startup validator, not a balance read.
+  one transaction and mints a new `capacity_reservation_id`. Its first caller is
+  `negotiation-time-capacity-hold`.
+- `kit/settlement-runtime` owns the durable per-obligation lifecycle: identity,
+  materialization, condition, collection, reclaim, attempt, and receipt state, with a
+  mechanism-neutral `SettlementObligation` (`maker`, `claimant`, `amount`, `asset`,
+  `expiration_unix`, `conditions`, `mechanism`, `params`). Interval escrows are
+  generated deterministically from an accepted total, duration, and schedule.
+- `capacity-shape-pricing` gives each listing a per-dimension minimum rate structure
+  in the family-grouped capability shape, resolved through the site-scoped pool
+  override, the pool hint, and the configured default, with evaluation callable
+  outside the negotiation path. `negotiation-driven-capacity-resize` makes the
+  negotiated quantity a multiplier over that structure in basis points, with every
+  derived amount an exact integer.
+- `kit/alkahest` has no standing-account abstraction; "account" means an EOA
+  throughout. `chain_probe` is an `eth_getCode` startup validator, not a balance read.
 - There is no rate limiting anywhere in the storefront.
 
 ## Goals / Non-Goals
@@ -28,8 +36,9 @@ Verified by inspection 2026-08-06; re-verify before implementing.
 than identity; a hold's duration is bounded by what the holder funded; a shape change
 reprices.
 
-**Non-Goals:** hold placement point, standing accounts, rate structure definition,
-admission semantics, identity-based limits.
+**Non-Goals:** hold placement point, standing accounts, the rate structure's form and
+resolution tiers, negotiating the hold rate, admission semantics, identity-based
+limits.
 
 ## Decisions
 
@@ -64,21 +73,39 @@ Stated as a decision because the inverse — treating the funded amount as a cap
 configured TTL — reads as equivalent and is not: it lets a hold expire with funds
 remaining, which silently overcharges relative to the service delivered.
 
-### The burn rate comes from the commercial rate structure, not a separate hold price
+### The hold rate is a posted, seller-set rate, defaulting to the lease rate
 
-A second price for the same capacity would drift from the first and would need its own
-resolution, configuration, and override tiers. The burn rate is the same rate structure
-`capacity-shape-pricing` resolves, evaluated against the held shape. That change's
-requirement that price aggregation be reachable outside the negotiation path is what
-makes this possible without duplicating the resolver.
+A seller prices exclusivity and consumption separately. The hold rate is a second rate
+structure in the same family-grouped form as the lease rate, resolved through the same
+three tiers (site-scoped pool override, pool hint, configured default), and where a
+tier states no hold rate the lease rate at that tier applies. The burn rate of a
+reservation is the hold rate structure evaluated against the held shape, in the same
+exact-integer arithmetic the lease price uses.
 
-A consequence worth surfacing: holding capacity and consuming it are then priced from
-one structure, so a seller who raises rates raises both together and cannot accidentally
-make holding cheaper than using.
+The hold rate is posted, not negotiated. Nothing in the negotiation carries it and the
+negotiated multiplier does not apply to it: the multiplier prices the lease from
+settlement, and a hold's burn rate is known the moment it is placed, which is what
+lets a hold be priced before any terms exist.
+
+Alternatives:
+
+- *One structure for both* — the hold burns at the lease rate. Rejected: a seller
+  cannot then price exclusivity differently from consumption, which is the normal
+  case (holding idle capacity costs the seller opportunity, not power and cooling).
+  Kept as the default so a seller who states nothing gets a coherent price.
+- *A fixed multiple of the lease rate.* Rejected: it ties two prices with different
+  economics to one knob, and a seller who wants a flat hold price across shapes cannot
+  express it.
+- *A separate override and configuration surface for the hold rate.* Rejected: two
+  resolution paths drift. Reusing the lease rate's tiers and vocabulary means one
+  override record, one hint mechanism, one default section, each with a hold field
+  beside the lease field.
+- *Negotiating the hold rate.* Not planned. A negotiation-time hold must be priced at
+  placement, before terms exist; a posted price is the only kind that can be.
 
 ### Charging reuses the obligation lifecycle but not the interval generation rule
 
-`add-settlement-plan-shapes` builds exactly the durable machinery a hold charge needs —
+`kit/settlement-runtime` owns exactly the durable machinery a hold charge needs —
 per-obligation identity, materialization, collection, reclaim, receipts, and
 resumability. What does not transfer is how obligations are generated: interval escrows
 come from an accepted total, duration, and schedule, and before agreement there is no
@@ -154,5 +181,5 @@ deployment boundary.
   returned.
 - **Does a seller who declines to honor a hold owe anything beyond forgoing the
   charge?** A penalty bond is the existing vocabulary for it, and
-  `add-settlement-plan-shapes` is already building seller-funded bonds. Deferrable and
-  better decided once hold charging is real.
+  the settlement runtime already models seller-funded bonds. Deferrable and better
+  decided once hold charging is real.

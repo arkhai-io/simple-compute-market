@@ -6,8 +6,9 @@ hold population before expiry and idempotency are ready for it.
 
 ## 1. Negotiation-scoped reservation identity
 
-- [ ] 1.1 Re-verify `design.md`'s Context findings, particularly that hold placement is
-      still guarded by `decision.action == "accept"` at three call sites and that
+- [ ] 1.1 Re-verify `design.md`'s Context, particularly that hold placement is still
+      the acceptance-only `place_hold` hook, that the hooks still have no release
+      counterpart, that the watchdog is still `kit/storefront`'s, and that
       `resize_reservation` still has no caller.
 - [ ] 1.2 Record the negotiation's reservation identity on the negotiation thread so the
       supersede and release paths can find it.
@@ -22,7 +23,10 @@ The behavioral boundary.
 - [ ] 2.1 Define "proposes terms differing from the offering's own" precisely enough to
       be testable. A restated-terms counter-offer must not qualify — `design.md` records
       that treating it as genuine reopens inquiry-time holding through the back door.
-- [ ] 2.2 Place the hold at that point instead of at terms acceptance.
+- [ ] 2.2 Place the hold at that point instead of at terms acceptance: the kit calls
+      `place_hold` when it evaluates a differing-terms proposal, with the posted hold
+      rate as the burn rate; the VM implementation is `_place_capacity_hold` over the
+      proposal's shape rather than the listing record.
 - [ ] 2.3 Keep the acceptance path idempotent, so a negotiation reaching agreement
       without ever counter-offering still holds capacity before settlement.
 - [ ] 2.4 Confirm inquiry and non-consuming feasibility verification hold nothing and
@@ -32,6 +36,9 @@ The behavioral boundary.
       still holds before settlement.
 
 ## 3. Supersede on shape change
+
+Depends on `negotiation-driven-capacity-resize`, which lets a round carry a revised
+shape.
 
 - [ ] 3.1 Supersede the negotiation's reservation when the requested shape changes,
       giving `resize_reservation` its first caller.
@@ -44,11 +51,13 @@ The behavioral boundary.
 
 ## 4. Release on terminal negotiation state
 
-- [ ] 4.1 Release the reservation when a negotiation reaches a terminal state without
-      agreement.
-- [ ] 4.2 Cover the watchdog's abandonment path explicitly. It matters more than the
-      explicit terminal paths, because a crashed counterparty is exactly the case that
-      would otherwise hold capacity for its full bound.
+- [ ] 4.1 Add a release hook to `NegotiationDomainHooks`, called by the kit on every
+      terminal transition without agreement; release the reservation there. A domain
+      that holds nothing implements it as a no-op.
+- [ ] 4.2 Cover the watchdog's abandonment path explicitly: `kit/storefront`'s
+      negotiation watchdog calls the release hook when it marks a thread abandoned.
+      It matters more than the explicit terminal paths, because a crashed counterparty
+      is exactly the case that would otherwise hold capacity for its full bound.
 - [ ] 4.3 Carry the existing reservation into settlement on success rather than
       reserving again.
 - [ ] 4.4 Focused tests: failed negotiation releases; abandoned negotiation releases;

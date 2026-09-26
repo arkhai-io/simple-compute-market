@@ -2,10 +2,12 @@
 
 ### Requirement: Reservations carry a burn rate and a funded bound
 
-A capacity reservation MUST carry a burn rate derived from the shape it holds, resolved
-from the same commercial rate structure that prices that shape for consumption rather
-than from a separately configured hold price. A reservation's maximum hold duration MUST
-be derived from the funds committed against it and that burn rate. Configured hold
+A capacity reservation MUST carry a burn rate: a posted hold rate structure, stated by
+the seller in the same form and resolved through the same tiers as the lease rate and
+defaulting to the lease rate at any tier that states none, evaluated against the held
+shape in exact integer arithmetic. The hold rate MUST NOT be negotiated and a negotiated
+lease multiplier MUST NOT apply to it. A reservation's maximum hold duration MUST be
+derived from the funds committed against it and that burn rate. Configured hold
 durations and pool hold-duration policy MUST act as ceilings on the derived value rather
 than as its source, so a hold never outlives its funding and never expires with
 committed funds unconsumed.
@@ -28,11 +30,23 @@ committed funds unconsumed.
   permits
 - **THEN** the ceiling governs, and the excess commitment is not consumed
 
-#### Scenario: Holding and consuming are priced from one structure
+#### Scenario: A seller states a hold rate
 
-- **WHEN** a seller changes the rate for a capacity dimension
-- **THEN** the burn rate for holding that capacity changes with it, and holding cannot
-  become cheaper than consuming through independent configuration
+- **WHEN** a hold rate is stated for a capacity dimension at any resolution tier
+- **THEN** the burn rate for holding that dimension uses it, and a change to the lease
+  rate at that tier leaves it unchanged
+
+#### Scenario: No hold rate is stated
+
+- **WHEN** no tier states a hold rate for a capacity dimension
+- **THEN** the burn rate uses the lease rate resolved for that dimension, and changes
+  with it
+
+#### Scenario: A negotiated multiplier does not reach the hold
+
+- **WHEN** a negotiation concludes at a multiplier other than 1.0× and its reservation
+  is held before or after agreement
+- **THEN** the reservation's burn rate is unchanged by the multiplier
 
 ### Requirement: Superseding a reservation reprices it
 

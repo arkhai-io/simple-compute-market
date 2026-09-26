@@ -5,7 +5,7 @@
 Verified by inspection 2026-08-06; re-verify before implementing.
 
 - `reserve()` reads `escrow_uid = deal.get("escrow_uid")` and skips its dedupe branch
-  entirely when the key is absent. `_place_capacity_hold` never supplies it.
+  entirely when the key is absent. `_place_capacity_hold` (the VM implementation of the kit's `place_hold` hook) never supplies it.
 - `_expire_stale_holds` queries `state == reserved AND hold_expires_at IS NOT NULL`,
   materializes every match, and evaluates `parse_utc(...) > now` per row in Python.
 - `hold_expires_at` is written as `datetime.now(timezone.utc) + timedelta(...)` rendered
