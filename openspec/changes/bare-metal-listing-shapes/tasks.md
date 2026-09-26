@@ -560,6 +560,26 @@ Per `openspec/README.md#plan-closeout-requirements`.
         bare-metal declaration carries its hardware in `capacity` and `attributes`
         with `units: 1`.
 
+## 13. E2E debugging
+
+- [x] 13.1 Rebuild internal wheels and update
+      `domains/bare_metal/storefront/uv.lock` and
+      `domains/vms/storefront/uv.lock` to the current storefront-client wheel.
+      Validate with `make check-internal-locks` and frozen dependency installation.
+      Both pass. Bare-metal storefront: 174 passed. VM storefront: 1333 passed,
+      one skipped; two Alkahest integration tests cannot start the local chain
+      runtime. Baseline E2E run 36251858600 failed in both lanes on the missing
+      storefront-client 0.20.0 wheel.
+- [ ] 13.2 Run both lanes using `make run-e2e`, retrieve diagnostics with
+      `make fetch-e2e-logs`, and fix observed failures with focused validation.
+      Record the successful run and scenario evidence here.
+- [ ] 13.3 Close out the debugging fileset: comment hygiene, touched import
+      placement, documentation compliance and narrative compression, roadmap and
+      campaign-index disposition, documentation citations, passing E2E evidence,
+      and design promotion per section 12; run `make check-reinit`. Packaging-only
+      corrections restore the existing architecture contract and need no new
+      promotion or change-completion claim.
+
 ## Design promotion record
 
 | Accepted decision | Permanent location |
