@@ -11,7 +11,7 @@ dependencies = [
     "arkhai-compute-provisioning>=0.6.1",
     "arkhai-core>=0.2.0",
     "arkhai-core-storefront>=0.6.0",
-    "arkhai-core-storefront-client>=0.20.0",
+    "arkhai-core-storefront-client>=0.21.0",
     "arkhai-hosted-settlement-client==0.4.2",
     "arkhai-kit-alkahest",
     "arkhai-kit-policy",

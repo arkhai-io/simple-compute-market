@@ -375,6 +375,17 @@ named by the seam they prove.
   commitment model. `ARCHITECTURE.md`'s "Storefront capacity boundary" carries the
   same sentence and is scoped the same way at promotion.
 
+## Decisions taken during implementation review
+
+- **Negotiation routes verify the body the caller sent.** A signature is
+  checked against the request's own body, never a re-serialized model, which may
+  drop an explicit `null` a conforming client signed.
+- **Negotiation reads are the administrator's.** A listing's threads carry buyer
+  principals and agreed terms. Bare metal served them anonymously and unsigned; it
+  now serves them only through the administrator's signed contract, as VM does and
+  as the canonical client expects. The list's query is bound into the signed
+  resource, and any other or repeated parameter is refused.
+
 ## Open questions
 
 None.

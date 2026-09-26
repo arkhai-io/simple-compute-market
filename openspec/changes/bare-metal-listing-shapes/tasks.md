@@ -1,7 +1,9 @@
 # Tasks — bare-metal listing shapes
 
-Unblocked: `bare-metal-publication-reads-pool-declarations` is complete. Implemented through
-section 11; awaiting pre-closeout review. Section 12 follows review. Design review moved the pool-override work to
+Unblocked: `bare-metal-publication-reads-pool-declarations` is complete. Sections 2, 4–8, 10.1–10.2,
+10.4, and 11.1–11.3 are implemented. Open: 9.1–9.2 (VM storefront and VM buyer
+relocks), 10.3 (typing, unrun), 11.4 (closeout-conditional), the review
+follow-ups below, and section 12. Design review moved the pool-override work to
 `publish-indicative-listing-rates` (its section 3b). Sections 3 and 7 below are kept
 only as markers of that move.
 
@@ -256,9 +258,14 @@ function the storefront calls".
       A mismatch or absence is refused with 409 `listing no longer matches its
       declaration`; an unreachable or unverified site with 503.
 - [x] 6.4 Tests:
-      - `tests/test_fulfillment_service.py` and `tests/test_hosted_lifecycle.py`: the
-        claim carries `gpu_model` from the listing, and a changed declaration model
-        is refused by a site double enforcing equality.
+      - `tests/test_fulfillment_service.py`: the claim carries `gpu_model` from the
+        trusted listing, and a context naming none reserves nothing. Its capacity
+        double records and accepts every claim, so it proves construction only.
+      - `tests/test_claims.py`: the claim run through `kit/site`'s exported matcher
+        `dict_resource_satisfies_claim`. The site admits the published machine, and
+        refuses once the declared model changes or the unit is taken. Hardware
+        quantities are not requested. This ties the claim's spelling to the site's
+        admission semantics.
       - `tests/test_http_negotiation.py` and `tests/test_http_settlement.py`: each
         guard outcome on both opening paths.
       - `domains/bare_metal/tests/test_inventory_guard.py` (new): every outcome of the
@@ -406,6 +413,76 @@ Decision: planning's "`bare-metal list --resource`".
 - **Lock hygiene:** relocks that recorded absolute wheel paths were restored to
   each project's committed relative path, and `uv lock --check` passes for each.
 
+## Review follow-ups (post-implementation review)
+
+- [x] R.1 Correct 6.4's evidence note, which overstated what the capacity doubles
+      prove, and add the site-matcher contract tests in `tests/test_claims.py`.
+- [x] R.2 Correct this file's status line.
+- [x] R.3 Stale internal pins. Bumping `arkhai-kit-capability-shape` and
+      `arkhai-vms` left eight consumer locks pinning wheels a clean `.dist` no
+      longer holds; this failed both e2e lanes at setup. `uv lock` keeps a pin that
+      still satisfies its constraint, so each consumer must be relocked with
+      `--upgrade-package`.
+      - Relocked here: `domains/apicredits/service`,
+        `domains/vms/provisioning/client`, `kit/fulfillment`, `kit/resource-pools`,
+        `kit/site`, and `provisioning/compute`. Their suites pass: 34, 255, 222,
+        176, and 131; the client has no tests.
+      - Added `make check-internal-locks` (`scripts/check_internal_locks.py`),
+        which fails on any lock pinning an internal wheel version the tree does not
+        build.
+- [ ] R.4 Relock `domains/vms/buyer` and `domains/vms/storefront` with
+      `--upgrade-package` for `arkhai-vms`, `arkhai-kit-capability-shape`,
+      `arkhai-bare-metal`, `arkhai-bare-metal-storefront`, and (for the storefront)
+      `arkhai-core-storefront-client`, where the PyTorch
+      index is reachable. `make check-internal-locks` must pass.
+- [ ] R.5 Move the raw-HTTP tests this change touched onto typed clients over the
+      in-process app, keeping raw calls only for rejection paths.
+      - `test_http_negotiation.py`: done. Every opening, refusal, and thread read
+        goes through `negotiate_new`, `list_negotiations`, or `get_negotiation`,
+        including the hosted opening (R.7). The unsigned request and the ambiguous
+        nested-and-direct selection stay raw as rejection paths.
+      - `test_http_system.py`: done. The listing reads go through `get_listing` and
+        `list_listings`. The unsigned pause and run-cycle requests stay raw as
+        rejection paths.
+      - The conversion surfaced and fixed two production defects:
+        - The negotiate-new, negotiate-continue, and settle routes verified
+          signatures against a re-serialized model, so the canonical client's
+          explicit `null`s failed. They now verify the body the caller sent.
+        - The negotiation read routes were unauthenticated and unsigned. They now
+          require the administrator's signed contract (`admin_list_negotiations`
+          with the query bound into the resource, and `admin_get_negotiation`),
+          matching the canonical client and VM.
+      - Open, blocked on a placement decision:
+        - `test_http_settlement.py`: the settle routes have canonical methods; the
+          fulfillment routes' typed client is `BareMetalFulfillmentTransport`, in
+          `arkhai-bare-metal-buyer`.
+        - `test_http_introductions.py` and `test_introduction_delivery.py`: the
+          introduction routes' typed calls live in `core_buyer`.
+        Neither is a dependency of the storefront's tests.
+- [x] R.7 The canonical client's `negotiate_new` gains `selection_only`. It is set
+      explicitly, never inferred, so existing callers send what they sent before.
+      It opens with a `settlement_selection` and a proposal carrying only `fields`,
+      as a hosted or introduction buyer does, and refuses any escrow parameter
+      stated beside it.
+      - Both clients build the proposal through one shared helper, so they cannot
+        drift.
+      - `arkhai-core-storefront-client` is 0.21.0, and the provisioning service's
+        exact pin moves with it.
+      - Evidence: `core/storefront-client` 43 passed, including byte-identical async
+        and sync selection-only requests, each refused escrow parameter, and the
+        unchanged escrow form. The bare-metal hosted opening passes through the
+        canonical client.
+      - Consumers relocked: `domains/bare_metal/provisioning/adapter` (2 passed),
+        `domains/vms/provisioning/adapter` (39), `provisioning/compute/service`
+        (666 + 272), and `e2e-tests` (unit 237 passed, plus the unrelated compose
+        failure). `domains/vms/storefront` also needs
+        `--upgrade-package arkhai-core-storefront-client` in R.4.
+- Evidence: `domains/bare_metal/storefront`, 174 passed. `make check-reinit`
+  passes. `make check-internal-locks` flags only the R.4 VM locks.
+- Reviewer prerequisite: running a package's `make test` from a fresh checkout
+  needs `make dist-ci`, and for the bare-metal storefront also
+  `make -C kit dist-hosted-settlement`, which `dist-ci` excludes.
+
 ## 12. Closeout
 
 Per `openspec/README.md#plan-closeout-requirements`.
@@ -495,6 +572,7 @@ Per `openspec/README.md#plan-closeout-requirements`.
 | One whole unit held exclusively; the claim carries shape attributes | `openspec/specs/storefront-publication/spec.md`; `docs/development/ARCHITECTURE.md#storefront-capacity-boundary` |
 | Opening recheck of shape and region, as a domain function over classification | `openspec/specs/storefront-publication/spec.md`; rationale in its `architecture.md` |
 | The VM commitment rule is scoped to VM listings | `openspec/specs/storefront-publication/spec.md` (MODIFIED "Every VM listing is a listing shape"); `docs/development/ARCHITECTURE.md#storefront-capacity-boundary` |
+| Bare-metal negotiation reads require the administrator's signed contract; negotiation routes verify the body the caller sent | `openspec/specs/storefront-publication/spec.md` ("Scheme-neutral storefront authorization") |
 | Pool-override work moved to `publish-indicative-listing-rates` | Superseded here; owned by that change's design and tasks |
 | Payload kind unchanged; listing model names the schema's flat fields | Temporary: change history only (no permanent rule beyond the spec's published fields) |
 | Roadmap and campaign index | Filled in at 12.5 and 12.6 |

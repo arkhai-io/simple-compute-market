@@ -268,7 +268,7 @@ requires-dist = [
     { name = "aiohttp", specifier = ">=3.9" },
     { name = "arkhai-bare-metal-provisioning-adapter", marker = "extra == 'adapters'", specifier = ">=0.2.0" },
     { name = "arkhai-compute-provisioning", specifier = ">=0.7.0" },
-    { name = "arkhai-core-storefront-client", specifier = "==0.20.0" },
+    { name = "arkhai-core-storefront-client", specifier = "==0.21.0" },
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-fulfillment", specifier = ">=0.3.0" },
     { name = "arkhai-kit-identity", specifier = "==0.3.0" },
@@ -316,15 +316,15 @@ wheels = [
 
 [[package]]
 name = "arkhai-core-storefront-client"
-version = "0.20.0"
+version = "0.21.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-identity" },
     { name = "httpx" },
 ]
 wheels = [
-    { path = "arkhai_core_storefront_client-0.20.0-py3-none-any.whl" },
-    { path = "arkhai_core_storefront_client-0.20.0-py3-none-any.whl" },
+    { path = "arkhai_core_storefront_client-0.21.0-py3-none-any.whl" },
+    { path = "arkhai_core_storefront_client-0.21.0-py3-none-any.whl" },
 ]
 
 [[package]]

@@ -6,8 +6,10 @@ from datetime import datetime, timedelta, timezone
 import uuid
 from dataclasses import replace
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
+from storefront_client import StorefrontClient, StorefrontClientError
 from market_core.schemas import (
     RateValue,
     SettlementOption,
@@ -300,39 +302,70 @@ def _opening(*, payload: dict | None = None) -> dict:
     }
 
 
+def _typed(app, signer, role: str) -> StorefrontClient:
+    """The canonical storefront client over the in-process app.
+
+    Responses are verified against the storefront's own marketplace signer.
+    """
+    return StorefrontClient(
+        "http://seller",
+        signer=signer,
+        caller_role=role,
+        expected_publishers=TrustedIdentitySet(identities=(SELLER_SIGNER.identity,)),
+        transport=httpx.ASGITransport(app=app),
+    )
+
+
+async def _negotiate(client: StorefrontClient, *, payload: dict | None = None) -> dict:
+    """Open on the seeded Alkahest listing through the typed client."""
+    opening = _opening(payload=payload)
+    return await client.negotiate_new(
+        listing_id=opening["listing_id"],
+        initial_amount=100,
+        provision_terms=opening["provision_terms"],
+        token=TOKEN,
+        chain_name="anvil",
+        escrow_address=ESCROW,
+        proposal_fields={"token": TOKEN},
+    )
+
+
+async def _negotiate_hosted(client: StorefrontClient, opening: dict) -> dict:
+    """Open on the seeded hosted listing with an exact selection and no escrow."""
+    return await client.negotiate_new(
+        listing_id=opening["listing_id"],
+        initial_amount=None,
+        provision_terms=opening["provision_terms"],
+        proposal_fields=opening["proposal"]["fields"],
+        settlement_selection=opening["proposal"]["settlement_selection"],
+        selection_only=True,
+    )
+
+
 async def test_signed_opening_accepts_and_persists_domain_artifacts(tmp_path) -> None:
     runtime = _runtime(str(tmp_path / "storefront.db"))
     await _insert_listing(runtime)
-    opening = _opening()
-    opening.pop("buyer_agent_url")
     app = _app(runtime)
 
-    with TestClient(app) as client:
-        response = client.post(
-            "/api/v1/negotiate/new",
-            json=opening,
-            headers=_headers("negotiate_new", "listing-1", opening),
-        )
-        negotiation_id = response.json()["negotiation_id"]
-        listing_threads = client.get(
-            "/api/v1/listings/listing-1/negotiations",
-        )
-        detail = client.get(
-            f"/api/v1/listings/listing-1/negotiations/{negotiation_id}",
-        )
+    async with app.router.lifespan_context(app):
+        async with _typed(app, BUYER_SIGNER, "buyer") as buyer:
+            payload = await _negotiate(buyer)
+        negotiation_id = payload["negotiation_id"]
+        async with _typed(app, ADMIN_SIGNER, "admin") as admin:
+            listing_threads = await admin.list_negotiations("listing-1")
+            detail = await admin.get_negotiation("listing-1", negotiation_id)
 
-    assert response.status_code == 200
-    assert response.json()["action"] == "accept"
-    assert response.json()["accepted_provision_terms"] == _opening()["provision_terms"]
-    assert response.json()["settlement_plan"] == {
+    assert payload["action"] == "accept"
+    assert payload["accepted_provision_terms"] == _opening()["provision_terms"]
+    assert payload["settlement_plan"] == {
         "buyer_principal": BUYER_SIGNER.identity.model_dump(mode="json"),
         "seller_principal": SELLER_SIGNER.identity.model_dump(mode="json"),
         "obligations": [],
         "service_terms": {},
     }
-    assert listing_threads.json()["count"] == 1
-    assert detail.json()["terminal_state"] == "success"
-    assert detail.json()["round_count"] == 2
+    assert listing_threads.count == 1
+    assert detail.terminal_state == "success"
+    assert detail.round_count == 2
     assert (
         await runtime.db.load_bare_metal_message(
             negotiation_id=negotiation_id,
@@ -359,15 +392,11 @@ async def test_hosted_only_opening_derives_exact_plan_and_first_binding(
     option = await _insert_hosted_listing(runtime)
     opening = _hosted_opening(option)
 
-    with TestClient(_app(runtime)) as client:
-        response = client.post(
-            "/api/v1/negotiate/new",
-            json=opening,
-            headers=_headers("negotiate_new", "hosted-listing", opening),
-        )
+    app = _app(runtime)
+    async with app.router.lifespan_context(app):
+        async with _typed(app, BUYER_SIGNER, "buyer") as buyer:
+            payload = await _negotiate_hosted(buyer, opening)
 
-    assert response.status_code == 200
-    payload = response.json()
     assert payload["action"] == "accept"
     assert payload["accepted_escrow_proposal"] is None
     assert (
@@ -419,31 +448,25 @@ async def test_hosted_opening_rejects_mutated_and_ambiguous_selection(
         option_id=option.option_id,
         expiration_unix=int(facts.funding_deadline.timestamp()) + 1,
     )
-    mutated_opening = _hosted_opening(option, selection=mutated)
+    app = _app(runtime)
+
+    async with app.router.lifespan_context(app):
+        async with _typed(app, BUYER_SIGNER, "buyer") as buyer:
+            with pytest.raises(StorefrontClientError) as refused:
+                await _negotiate_hosted(buyer, _hosted_opening(option, selection=mutated))
+    assert refused.value.status_code == 400
+
+    # Rejection path: a selection stated both inside the proposal and beside it
+    # is one the typed client cannot construct, so the server's refusal of it is
+    # checked with a hand-built request, on its status only.
     ambiguous_opening = _hosted_opening(option)
     ambiguous_opening["settlement_selection"] = mutated.model_dump(mode="json")
-
-    with TestClient(_app(runtime)) as client:
-        mutated_response = client.post(
-            "/api/v1/negotiate/new",
-            json=mutated_opening,
-            headers=_headers(
-                "negotiate_new",
-                "hosted-listing",
-                mutated_opening,
-            ),
-        )
+    with TestClient(app) as client:
         ambiguous_response = client.post(
             "/api/v1/negotiate/new",
             json=ambiguous_opening,
-            headers=_headers(
-                "negotiate_new",
-                "hosted-listing",
-                ambiguous_opening,
-            ),
+            headers=_headers("negotiate_new", "hosted-listing", ambiguous_opening),
         )
-
-    assert mutated_response.status_code == 400
     assert ambiguous_response.status_code == 400
 
 
@@ -451,27 +474,29 @@ async def test_auth_and_domain_failures_write_no_thread(tmp_path) -> None:
     runtime = _runtime(str(tmp_path / "storefront.db"))
     await _insert_listing(runtime)
     app = _app(runtime)
-    invalid = _opening(
-        payload={
-            "duration_seconds": 3600,
-            "access_method": "ssh",
-            "ssh_public_key": "ssh-ed25519 buyer-key",
-            "access_ref": {"url": "https://buyer.invalid"},
-        },
-    )
 
+    # Rejection path: an unsigned request is one the typed client never sends.
     with TestClient(app) as client:
         unsigned = client.post("/api/v1/negotiate/new", json=_opening())
-        rejected = client.post(
-            "/api/v1/negotiate/new",
-            json=invalid,
-            headers=_headers("negotiate_new", "listing-1", invalid),
-        )
-        threads = client.get("/api/v1/listings/listing-1/negotiations")
-
     assert unsigned.status_code == 401
-    assert rejected.status_code == 400
-    assert threads.json()["count"] == 0
+
+    async with app.router.lifespan_context(app):
+        async with _typed(app, BUYER_SIGNER, "buyer") as buyer:
+            with pytest.raises(StorefrontClientError) as rejected:
+                await _negotiate(
+                    buyer,
+                    payload={
+                        "duration_seconds": 3600,
+                        "access_method": "ssh",
+                        "ssh_public_key": "ssh-ed25519 buyer-key",
+                        "access_ref": {"url": "https://buyer.invalid"},
+                    },
+                )
+        async with _typed(app, ADMIN_SIGNER, "admin") as admin:
+            threads = await admin.list_negotiations("listing-1")
+
+    assert rejected.value.status_code == 400
+    assert threads.count == 0
 
 
 async def test_durable_pause_blocks_new_negotiation(tmp_path) -> None:
@@ -480,15 +505,12 @@ async def test_durable_pause_blocks_new_negotiation(tmp_path) -> None:
     await runtime.db.set_global_paused(paused=True)
     app = _app(runtime)
 
-    with TestClient(app) as client:
-        opening = _opening()
-        response = client.post(
-            "/api/v1/negotiate/new",
-            json=opening,
-            headers=_headers("negotiate_new", "listing-1", opening),
-        )
+    async with app.router.lifespan_context(app):
+        async with _typed(app, BUYER_SIGNER, "buyer") as buyer:
+            with pytest.raises(StorefrontClientError) as refused:
+                await _negotiate(buyer)
 
-    assert response.status_code == 503
+    assert refused.value.status_code == 503
 
 
 async def test_a_refused_caller_can_verify_the_refusal(tmp_path) -> None:
@@ -562,20 +584,23 @@ async def test_a_caller_with_no_request_identity_is_refused_unsigned(tmp_path) -
 
 
 async def _open_against(tmp_path, site: SourceSite):
-    """Open a negotiation on the seeded listing, its site answering ``site``."""
+    """Open a negotiation on the seeded listing, its site answering ``site``.
+
+    Returns the refusal the typed client raised, the thread count the
+    administrator then reads, and the site double.
+    """
     runtime = replace(
         _runtime(str(tmp_path / "storefront.db")), capacity_client=SourceSites(site)
     )
     await _insert_listing(runtime)
-    opening = _opening()
-    with TestClient(_app(runtime)) as client:
-        response = client.post(
-            "/api/v1/negotiate/new",
-            json=opening,
-            headers=_headers("negotiate_new", "listing-1", opening),
-        )
-        threads = client.get("/api/v1/listings/listing-1/negotiations")
-    return response, threads.json()["count"], site
+    app = _app(runtime)
+    async with app.router.lifespan_context(app):
+        async with _typed(app, BUYER_SIGNER, "buyer") as buyer:
+            with pytest.raises(StorefrontClientError) as refused:
+                await _negotiate(buyer)
+        async with _typed(app, ADMIN_SIGNER, "admin") as admin:
+            threads = await admin.list_negotiations("listing-1")
+    return refused.value, threads.count, site
 
 
 @pytest.mark.parametrize(
@@ -593,34 +618,52 @@ async def _open_against(tmp_path, site: SourceSite):
 async def test_an_opening_on_a_listing_its_source_no_longer_supports_is_refused(
     tmp_path, projection
 ) -> None:
-    response, threads, site = await _open_against(tmp_path, SourceSite(projection))
+    refused, threads, site = await _open_against(tmp_path, SourceSite(projection))
 
-    assert response.status_code == 409
-    assert "no longer matches its declaration" in response.json()["detail"]
+    assert refused.status_code == 409
+    assert "no longer matches its declaration" in str(refused)
     assert threads == 0
     assert site.calls == 1
 
 
 async def test_an_opening_whose_site_cannot_answer_is_refused_as_retryable(tmp_path) -> None:
-    response, threads, _ = await _open_against(
+    refused, threads, _ = await _open_against(
         tmp_path, SourceSite(error=ConnectionError("site unreachable"))
     )
 
-    assert response.status_code == 503
-    assert "site-a" in response.json()["detail"]
+    assert refused.status_code == 503
+    assert "site-a" in str(refused)
     assert threads == 0
 
 
 async def test_an_opening_with_no_site_authority_is_refused_as_retryable(tmp_path) -> None:
     runtime = replace(_runtime(str(tmp_path / "storefront.db")), capacity_client=None)
     await _insert_listing(runtime)
-    opening = _opening()
+    app = _app(runtime)
 
-    with TestClient(_app(runtime)) as client:
-        response = client.post(
-            "/api/v1/negotiate/new",
-            json=opening,
-            headers=_headers("negotiate_new", "listing-1", opening),
-        )
+    async with app.router.lifespan_context(app):
+        async with _typed(app, BUYER_SIGNER, "buyer") as buyer:
+            with pytest.raises(StorefrontClientError) as refused:
+                await _negotiate(buyer)
 
-    assert response.status_code == 503
+    assert refused.value.status_code == 503
+
+
+async def test_a_hosted_opening_on_a_listing_its_source_no_longer_supports_is_refused(
+    tmp_path,
+) -> None:
+    """The guard runs before the Alkahest and hosted paths branch."""
+    runtime = replace(
+        _runtime(str(tmp_path / "storefront.db")),
+        capacity_client=SourceSites(SourceSite(listing_source_projection(gpu_model="B200"))),
+    )
+    option = await _insert_hosted_listing(runtime)
+    app = _app(runtime)
+
+    async with app.router.lifespan_context(app):
+        async with _typed(app, BUYER_SIGNER, "buyer") as buyer:
+            with pytest.raises(StorefrontClientError) as refused:
+                await _negotiate_hosted(buyer, _hosted_opening(option))
+
+    assert refused.value.status_code == 409
+    assert "no longer matches its declaration" in str(refused.value)

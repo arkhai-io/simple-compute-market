@@ -1,10 +1,12 @@
 """Schema-opaque HTTP routes owned by the bare-metal composition."""
 
 from __future__ import annotations
+
 import base64
 
 from collections.abc import Mapping
 import json
+from urllib.parse import quote, urlencode
 from typing import Annotated, Any
 
 from core_storefront.auth import AuthError, authenticate_request
@@ -151,8 +153,46 @@ async def _admin(
     )
 
 
+# The query parameters a negotiation list may carry. Each is bound into the
+# signed resource, so any other parameter, or a repeated one, could change what
+# is returned without changing what was signed, and is refused.
+_NEGOTIATION_LIST_QUERY = frozenset(
+    {"limit", "offset", "buyer_identifier", "buyer_scheme", "terminal_state"}
+)
+
+
+def _negotiation_list_resource(request: Request, listing_id: str) -> str:
+    """The signed resource of a negotiation list, rebuilt from its query.
+
+    The canonical storefront client builds the same string: the listing, then
+    the sorted, percent-encoded query with ``limit`` and ``offset`` defaulted.
+    """
+    query = request.query_params
+    if not set(query.keys()) <= _NEGOTIATION_LIST_QUERY or any(
+        len(query.getlist(name)) != 1 for name in query.keys()
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="negotiation query contains an unauthenticated alias",
+        )
+    values = {"limit": query.get("limit", "50"), "offset": query.get("offset", "0")}
+    for name in ("buyer_identifier", "buyer_scheme", "terminal_state"):
+        value = query.get(name)
+        if value is not None:
+            values[name] = value
+    return f"{listing_id}/negotiations?" + urlencode(
+        sorted(values.items()), quote_via=quote, safe=""
+    )
+
+
 async def _request_body(request: Request) -> Any:
-    """The JSON body a signed request carried, or the empty-body marker."""
+    """The JSON body a signed request carried, or the empty-body marker.
+
+    A request is verified against exactly the body its caller sent, never a
+    re-serialization of the parsed model: a parsed model may drop an explicit
+    ``null`` or a defaulted field, and a signature over the caller's body would
+    then fail for a conforming client.
+    """
     raw = await request.body()
     if not raw:
         return EMPTY_BODY
@@ -394,7 +434,7 @@ async def negotiate_new(
             runtime=runtime,
             operation="negotiate_new",
             resource=body.listing_id,
-            body=body.model_dump(mode="json", exclude_none=True, exclude_unset=True),
+            body=await _request_body(request),
             expected_principal=body.buyer_principal,
         )
         return await runtime.negotiation_service().open(
@@ -420,7 +460,7 @@ async def negotiate_continue(
         runtime=runtime,
         operation="negotiate_continue",
         resource=negotiation_id,
-        body=body.model_dump(mode="json", exclude_none=True, exclude_unset=True),
+        body=await _request_body(request),
         expected_principal=body.buyer_principal,
     )
     thread = await runtime.db.load_negotiation_thread_row(
@@ -451,7 +491,18 @@ async def list_negotiations(
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> NegotiationListResponse:
+    """A listing's negotiation threads, for the storefront's administrator.
+
+    Threads carry buyer principals and agreed terms, so they are read only
+    through the administrator's signed contract, whose response is signed.
+    """
     runtime = _runtime(request)
+    await _admin(
+        request=request,
+        runtime=runtime,
+        operation="admin_list_negotiations",
+        resource=_negotiation_list_resource(request, listing_id),
+    )
     if (buyer_scheme is None) != (buyer_identifier is None):
         raise HTTPException(
             status_code=422,
@@ -492,7 +543,15 @@ async def get_negotiation(
     negotiation_id: str,
     request: Request,
 ) -> NegotiationDetailResponse:
-    detail = await _runtime(request).db.load_negotiation_detail(
+    """One negotiation thread, for the storefront's administrator."""
+    runtime = _runtime(request)
+    await _admin(
+        request=request,
+        runtime=runtime,
+        operation="admin_get_negotiation",
+        resource=f"{listing_id}/negotiations/{negotiation_id}",
+    )
+    detail = await runtime.db.load_negotiation_detail(
         listing_id=listing_id,
         neg_id=negotiation_id,
     )
@@ -517,7 +576,7 @@ async def settle(
             runtime=runtime,
             operation="settle_escrow",
             resource=escrow_uid,
-            body=body.model_dump(mode="json", exclude_none=True, exclude_unset=True),
+            body=await _request_body(request),
             expected_principal=body.buyer_principal,
         )
         return await runtime.settlement_service().verify(

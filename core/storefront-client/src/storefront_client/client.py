@@ -149,6 +149,71 @@ def _build_listings_params(
     return params
 
 
+def _negotiate_new_proposal(
+    *,
+    initial_amount: int | None,
+    proposal_fields: dict[str, Any] | None,
+    token: str,
+    chain_name: str,
+    escrow_address: str,
+    escrow_expiration_unix: int | None,
+    literal_fields: dict[str, Any] | None,
+    rates: list[dict[str, Any]] | None,
+    demands: list[dict[str, Any]] | None,
+    settlement_selection: dict[str, Any] | None,
+    selection_only: bool,
+) -> dict[str, Any]:
+    """The opening proposal ``negotiate_new`` sends.
+
+    An escrow opening carries an Alkahest escrow carrier: chain, escrow address,
+    fields, literal fields, and expiry, with development defaults for any the
+    caller omits. A selection-only opening carries only ``fields`` beside its
+    ``settlement_selection``: a hosted or introduction mechanism has no escrow,
+    and a storefront may refuse a proposal that mixes the two carriers. Stating
+    an escrow parameter in a selection-only opening is refused here rather than
+    silently dropped.
+    """
+    fields = dict(proposal_fields or {})
+    if initial_amount is not None:
+        fields.setdefault("amount", str(initial_amount))
+    if selection_only:
+        if settlement_selection is None:
+            raise ValueError("a selection-only opening requires settlement_selection")
+        stated = [
+            name
+            for name, value in (
+                ("token", token),
+                ("chain_name", chain_name),
+                ("escrow_address", escrow_address),
+                ("escrow_expiration_unix", escrow_expiration_unix),
+                ("literal_fields", literal_fields),
+                ("rates", rates),
+                ("demands", demands),
+            )
+            if value not in (None, "")
+        ]
+        if stated:
+            raise ValueError(
+                "a selection-only opening carries no escrow; remove " + ", ".join(stated)
+            )
+        return {"fields": fields}
+    literals = dict(literal_fields or {})
+    if token or literal_fields is None:
+        literals.setdefault("token", token or ("0x" + "0" * 40))
+    proposal: dict[str, Any] = {
+        "chain_name": chain_name or "anvil",
+        "escrow_address": escrow_address or ("0x" + "0" * 40),
+        "fields": fields,
+        "literal_fields": literals,
+        "expiration_unix": escrow_expiration_unix or (int(time.time()) + 3600),
+    }
+    if rates is not None:
+        proposal["rates"] = rates
+    if demands is not None:
+        proposal["demands"] = demands
+    return proposal
+
+
 def _query_resource(prefix: str, params: dict[str, Any]) -> str:
     pairs = sorted((key, str(value)) for key, value in params.items())
     query = urllib.parse.urlencode(
@@ -1558,6 +1623,7 @@ class StorefrontClient(_StorefrontClientBase):
         rates: list[dict[str, Any]] | None = None,
         demands: list[dict[str, Any]] | None = None,
         settlement_selection: dict[str, Any] | None = None,
+        selection_only: bool = False,
         request_id: str | None = None,
     ) -> dict:
         """POST /api/v1/negotiate/new through the buyer v2 contract.
@@ -1567,25 +1633,22 @@ class StorefrontClient(_StorefrontClientBase):
         interprets a domain payload. ``initial_amount`` is the absolute opening
         amount for scalar escrows; amountless exact escrows can pass
         ``initial_amount=None`` with explicit ``literal_fields`` / ``rates``.
+        ``selection_only=True`` opens with a ``settlement_selection`` and no
+        escrow carrier, as a hosted or introduction buyer does.
         """
-        exp_unix = escrow_expiration_unix or (int(time.time()) + 3600)
-        fields = dict(proposal_fields or {})
-        if initial_amount is not None:
-            fields.setdefault("amount", str(initial_amount))
-        literals = dict(literal_fields or {})
-        if token or literal_fields is None:
-            literals.setdefault("token", token or ("0x" + "0" * 40))
-        proposal = {
-            "chain_name": chain_name or "anvil",
-            "escrow_address": escrow_address or ("0x" + "0" * 40),
-            "fields": fields,
-            "literal_fields": literals,
-            "expiration_unix": exp_unix,
-        }
-        if rates is not None:
-            proposal["rates"] = rates
-        if demands is not None:
-            proposal["demands"] = demands
+        proposal = _negotiate_new_proposal(
+            initial_amount=initial_amount,
+            proposal_fields=proposal_fields,
+            token=token,
+            chain_name=chain_name,
+            escrow_address=escrow_address,
+            escrow_expiration_unix=escrow_expiration_unix,
+            literal_fields=literal_fields,
+            rates=rates,
+            demands=demands,
+            settlement_selection=settlement_selection,
+            selection_only=selection_only,
+        )
         body = {
             "listing_id": listing_id,
             "buyer_principal": self._principal_body(),
@@ -2976,31 +3039,29 @@ class SyncStorefrontClient(_StorefrontClientBase):
         rates: list[dict[str, Any]] | None = None,
         demands: list[dict[str, Any]] | None = None,
         settlement_selection: dict[str, Any] | None = None,
+        selection_only: bool = False,
         request_id: str | None = None,
     ) -> dict:
         """POST /api/v1/negotiate/new through the buyer v2 contract.
 
         ``provision_terms`` is the required versioned domain envelope. The
         shared client validates its generic shape without interpreting payload.
+        ``selection_only=True`` opens with a ``settlement_selection`` and no
+        escrow carrier, as a hosted or introduction buyer does.
         """
-        exp_unix = escrow_expiration_unix or (int(time.time()) + 3600)
-        fields = dict(proposal_fields or {})
-        if initial_amount is not None:
-            fields.setdefault("amount", str(initial_amount))
-        literals = dict(literal_fields or {})
-        if token or literal_fields is None:
-            literals.setdefault("token", token or ("0x" + "0" * 40))
-        proposal = {
-            "chain_name": chain_name or "anvil",
-            "escrow_address": escrow_address or ("0x" + "0" * 40),
-            "fields": fields,
-            "literal_fields": literals,
-            "expiration_unix": exp_unix,
-        }
-        if rates is not None:
-            proposal["rates"] = rates
-        if demands is not None:
-            proposal["demands"] = demands
+        proposal = _negotiate_new_proposal(
+            initial_amount=initial_amount,
+            proposal_fields=proposal_fields,
+            token=token,
+            chain_name=chain_name,
+            escrow_address=escrow_address,
+            escrow_expiration_unix=escrow_expiration_unix,
+            literal_fields=literal_fields,
+            rates=rates,
+            demands=demands,
+            settlement_selection=settlement_selection,
+            selection_only=selection_only,
+        )
         body = {
             "listing_id": listing_id,
             "buyer_principal": self._principal_body(),

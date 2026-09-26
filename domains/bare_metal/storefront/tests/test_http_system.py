@@ -83,13 +83,16 @@ async def test_listing_routes_return_exact_validated_domain_payload(tmp_path) ->
     await _insert_listing(runtime)
     app = _app(runtime)
 
-    with TestClient(app) as client:
-        response = client.get("/api/v1/listings/listing-1")
-        listing_list = client.get("/api/v1/listings")
-        missing = client.get("/api/v1/listings/missing")
+    async with app.router.lifespan_context(app):
+        async with StorefrontClient(
+            "http://seller", transport=httpx.ASGITransport(app=app)
+        ) as public:
+            listing = await public.get_listing("listing-1")
+            listing_list = await public.list_listings()
+            with pytest.raises(StorefrontClientError) as missing:
+                await public.get_listing("missing")
 
-    assert response.status_code == 200
-    assert response.json()["listing_resource"] == {
+    assert listing.listing_resource == {
         "capacity_backing": "backed",
         **LISTING_HARDWARE,
         "kind": "bare_metal.v2",
@@ -99,10 +102,9 @@ async def test_listing_routes_return_exact_validated_domain_payload(tmp_path) ->
         "access_methods": ["ssh"],
         "max_duration_seconds": 7200,
     }
-    assert listing_list.status_code == 200
-    assert listing_list.json()["count"] == 1
-    assert listing_list.json()["listings"][0]["listing_id"] == "listing-1"
-    assert missing.status_code == 404
+    assert listing_list.count == 1
+    assert listing_list.listings[0].listing_id == "listing-1"
+    assert missing.value.status_code == 404
 
 
 def _admin_client(app) -> StorefrontClient:
