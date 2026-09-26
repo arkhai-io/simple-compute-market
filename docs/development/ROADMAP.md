@@ -308,6 +308,99 @@ Two consequences of this posture are accepted rather than solved. Nothing keeps 
 
 ---
 
+## Goal 8 — Sell metered inference as its own market domain
+
+**Value.** Model inference is the market Goal 4 named as the test of kit
+composition — "an inference-token domain … becomes codecs, a contract, and
+configuration rather than a fork of the VM storefront." It is also the market
+with the most obvious external analogue: a registry serving inference listings
+is, structurally, a model catalogue like OpenRouter's, with the catalogue
+separated from payment, routing, and the provider relationship. A seller with a
+GPU keeps the machine, serves a model, and sells API calls against it to many
+buyers at once; a buyer compares sellers per model on context length,
+quantization, and price per token, buys credits through any settlement
+mechanism the marketplace supports, and receives a bearer credential for an
+OpenAI-compatible endpoint. The domain supplies the shapes a buyer compares on
+— a model card, a rate card, a usage record — which the API-credits listing does
+not carry; what a storefront sells and charges stays the storefront's, and
+whether listings are comparable across sellers is the registry operator's to
+enforce. That vocabulary gap is why it is a domain rather than a field.
+
+**Current state.** Nothing supports it. There is no `inference` domain
+identity, registry schema identity, filter specification, or offering mode, and
+no usage vocabulary anywhere in the repository. The nearest thing is API
+credits, which sells prepaid finite units for a named service and consumes one
+configured fixed amount per admitted request; its architecture companion records
+that variable-cost metering is not established. The vLLM API-credits cookbook
+sells a model server behind that domain today, which demonstrates the gap: a
+listing naming `service_name: vllm-chat` cannot be compared with another
+seller's because nothing on it names the model, its context, its quantization,
+or its price per token.
+
+What is reusable is real and specific. The settlement runtime, the negotiation
+runtime, the storefront shell, the capacity/publication kit, and the registry
+are domain-neutral and need nothing. The credits authority's consumption route
+already accepts a variable amount with an idempotency key, though every caller
+passes one. Issuance — the immutable request with its digest, the deterministic
+fulfillment identity, the client, the rollback, the signed evidence — is generic
+to any market that delivers a bearer credential and is currently namespaced to
+API credits, with its schema strings inside the digests. What is not reusable
+is the consumption rule itself: API credits charges a fixed amount before the
+request; inference must reserve a worst-case charge, run the request, and settle
+from measured usage, because the cost is unknown until the response is complete
+and a single request can exceed a key's balance.
+
+The campaign therefore proceeds in a fixed order: define the vocabulary; compose
+a stack by copying the API-credits roles and prove one deal at a flat charge per
+request; extract what two working consumers show to be shared, with the
+API-credits digests pinned byte-for-byte first; replace the flat charge with
+hold-then-settle metering; package the seller path thinly; qualify the market.
+Extraction is deliberately not first, because its boundary is not knowable from
+one consumer. See [`openspec/changes/README.md`](../../openspec/changes/README.md)
+for readiness.
+
+| Open gap | Owned by |
+|---|---|
+| No inference vocabulary: domain identity, model-card listing, rate card, provision intent, usage record and charge derivation, usage evidence, registry filter specification | [`add-inference-domain-contract`](../../openspec/changes/add-inference-domain-contract/) |
+| No inference roles: storefront, authority, gateway, buyer plugin, local stack, development identities, or end-to-end deal | [`compose-inference-domain-stack`](../../openspec/changes/compose-inference-domain-stack/) |
+| Bearer-credential issuance and evidence are namespaced to API credits and will be duplicated by the inference stack; the authority mirrors the digest function | [`extract-access-issuance-kit`](../../openspec/changes/extract-access-issuance-kit/) |
+| No admission hold, no post-response settlement from measured usage, no streaming usage capture, no cancellation or disconnect handling, no usage retention | [`meter-inference-usage`](../../openspec/changes/meter-inference-usage/) |
+| Becoming a seller requires a repository checkout, hand-written configuration, and manual identity generation, and a hand-assembled stack drifts as soon as its pinned versions move | [`package-inference-seller`](../../openspec/changes/package-inference-seller/) |
+| No multi-seller, concurrency, cancellation, lifecycle, late-usage, buyer-profile, or cross-language evidence; the per-domain deal path is not release-qualified | [`qualify-inference-market`](../../openspec/changes/qualify-inference-market/) |
+
+Three shapes are anticipated and unowned, by a scope decision of 2026-09-16
+that confined this campaign to the marketplace repository: an Arkhai-hosted
+inference registry beside the compute one (the API-credits registry's Helm
+alias is the pattern, so the change is small when opened); webapp integration
+of inference alongside API credits; and a hosted fiat option for inference
+listings, which depends on hosted-route work owned outside this repository.
+External rating and billing platforms were evaluated during planning and are
+deliberately kept at the usage-record seam as optional seller-side adapters —
+the authority remains the only synchronous admission decision.
+
+Two further shapes are anticipated with recorded triggers rather than owned. An
+unbacked inference listing: backing is a declared property of every pool and
+listing since
+[`unbacked-listing-publication`](../../openspec/changes/archive/2026-09-24-unbacked-listing-publication/)
+was archived on 2026-09-24, and version-1 inference listings carry the backed
+value — quota as a sales cap, not capacity — so admitting the unbacked value is
+an inference filter-specification bump when a seller needs it, since a model
+server's supply is not finite the way a GPU is. And a monetary `asking_rate` per
+million tokens, once
+[`publish-indicative-listing-rates`](../../openspec/changes/publish-indicative-listing-rates/)
+— now unblocked — promotes the exact-decimal filter value type and declarative
+co-requirements. Until then inference compares on integer credit rates and the
+settlement asset.
+
+**Completion test.** Two independent sellers list the same model at different
+rate cards; a buyer discovers both on an inference registry, buys credits from
+one through the ordinary CLI, calls the OpenAI-compatible endpoint including a
+cancelled stream, is charged the derived amount and no more, exhausts the key,
+tops it up, and calls again — with the API-credits domain's behavior, digests,
+and data unchanged throughout.
+
+---
+
 ## Buyer identity lifecycle status
 
 Buyer marketplace identity is now a core-owned durable profile rather than
