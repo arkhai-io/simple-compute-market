@@ -82,7 +82,7 @@ Pricing is the binding constraint on negotiating the shape. Commercial resolutio
 
 Reservation resizing keeps having no caller within this goal, deliberately: both storefronts place no hold before settlement, so the reservation created at settlement is built from the agreed shape and there is nothing to resize during negotiation. The first caller is Goal 5's `negotiation-time-capacity-hold`, the change that holds capacity before the shape is final.
 
-Buyer-negotiated VM connectivity terms are no longer a gap of this goal. The relay a VM's tunnel uses is a physical fact recorded at the provisioning service and is not selectable per request; a buyer who wants their own relay runs a client inside the VM.
+Buyer-negotiated VM connectivity terms are no longer a gap of this goal. The relay a VM's tunnel uses is a physical fact recorded at the provisioning service and is not selectable per request, and the tunnel client runs on the host with one relay for every rented VM. The seller's relay is the bootstrap path to every VM; a buyer who wants their own relay reaches the VM through its relay port once and starts a client inside the guest. Avoiding the seller relay entirely would be guest-side first-boot configuration, a "Reach hosts" concern rather than a negotiation one.
 
 ---
 
@@ -107,14 +107,17 @@ storefront-to-site clients pin mapped work to one trusted authority with no
 cross-site fallback. The registry catalogue can now receive the public
 `listing_resource.offering_mode` projected from the frozen binding.
 
-Goal 3's shared storefront boundary is therefore implemented and promoted.
-Complete product acceptance still depends on the domain producers and topology
-proof below; the shell deliberately does not fake their missing behavior.
+Goal 3's shared storefront boundary is therefore implemented and promoted. The
+bare-metal producer has landed too: an installable buyer contribution, a seller
+composition that starts through the shared shell and composes kit publication, a
+compose stack and its own end-to-end lane, and a real-host deal scenario. Complete
+product acceptance still depends on bare metal negotiating through the kit runtime
+rather than its own service, and on the topology proof below; the shell deliberately
+does not fake either.
 
 | Open gap | Owned by |
 |---|---|
-| Bare metal has no runnable buyer package or admitted registry identity | [`bare-metal-buyer-domain`](../../openspec/changes/bare-metal-buyer-domain/) |
-| The bare-metal seller contribution still owes its real selected-site fulfillment/result/teardown hook | [`market-platform-bare-metal-10-storefront-composition`](../../openspec/changes/market-platform-bare-metal-10-storefront-composition/) |
+| The bare-metal contribution negotiates through a domain-local service and its own negotiate and listing routes beside the shared shell, rather than through the kit negotiation runtime every other domain composes | [`bare-metal-and-credits-domain-stacks`](../../openspec/changes/bare-metal-and-credits-domain-stacks/) (Goal 4, Section 4a) |
 | One-process VM/bare-metal behavior across more than one authority needs live selected-authority, cross-mode, execution-dispatch, teardown, and capacity-restoration evidence | [`market-platform-compute-40-multi-domain-proof`](../../openspec/changes/market-platform-compute-40-multi-domain-proof/) |
 
 ---

@@ -69,6 +69,11 @@ The check records exact promoted headings, package APIs, and focused evidence in
   Registry, binding, migration, and exact-site shell work proceeds, while the
   one-process live bare-metal proof remains a parent-run prerequisite. No fake,
   no-op, payload inference, or default substitutes for that producer.
+  *2026-09-26:* the producer's work is in this tree. The contribution registers
+  through the shared shell and composes kit publication, but still carries a
+  domain-local negotiation service and its own negotiate and listing routes;
+  composing those onto the kit is `bare-metal-and-credits-domain-stacks` Section
+  4a, and this change no longer gates on it.
 - The canonical public discriminator was already
   `listing_resource.offering_mode`; this change persists its exact value in
   `StorefrontDomainBinding` and rejects any normalized-public disagreement.
@@ -292,3 +297,15 @@ No test uses sleeps for recovery, raw HTTP where a canonical client exists, rout
 | Process-global contract getters, one-element/default selection, payload-kind routing, cross-site accepted-record fan-out, and parallel VM/bare-metal shared control flow | superseded | Replaced by the permanent registry/binding requirements above |
 | A no-op bare-metal fulfillment hook or VM-shaped compatibility adapter | rejected | Explicit blocker in `test-compatibility` and the Goal 3 gap table |
 | Change-local implementation/debugging commentary | temporary | Retained only in this checked design/tasks history until validation and archive |
+
+## Delta rebase (2026-09-26)
+
+The "Commercial mapping identity" modification in `specs/storefront-publication/spec.md`
+was rewritten on the current permanent text rather than the 2026-08 text it originally
+replaced: `unbacked-listing-publication` and `bare-metal-publication-reads-pool-declarations`
+have since made the common binding the only mapping, dropped both domain-owned tables,
+and added three scenarios. What this change still adds is the offering mode and exact
+domain identity in the derivation key and the "One pool exposes two offering modes"
+scenario; everything else in the block is the current text carried forward. The
+"Role-owned executable composition" modification likewise regained the two scenarios
+the permanent spec had gained.

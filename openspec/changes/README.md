@@ -78,35 +78,46 @@ No change owns these yet. The first three are the archived design's open questio
 ## Roadmap goal — One storefront serving several compute-family domains
 
 ```text
-storefront-domain-parameterization ──► multi-domain-storefront-composition ────┐
-market-platform-bare-metal-10 ─────────────────────────────────────────────────┼──► compute-40
-bare-metal-buyer-domain ───────────────────────────────────────────────────────┘
+storefront-domain-parameterization (complete) ──► multi-domain-storefront-composition (shell landed; closeout) ──┐
+bare-metal-and-credits-domain-stacks §4a (bare metal on the kit; Goal 4) ─────────────────────────────────────────┼──► compute-40
+bare-metal-mock-provisioned-deal (pipeline bare-metal deal) ──────────────────────────────────────────────────────┘
+
+market-platform-bare-metal-10 and bare-metal-buyer-domain archived 2026-09-26 (delivered; verification migrated)
 ```
 
 | Change | Status | Acceptance boundary |
 |---|---|---|
-| [`market-platform-bare-metal-10-storefront-composition`](market-platform-bare-metal-10-storefront-composition/) | active; production fulfillment tasks depend on POOLS-7 | Independently deployable bare-metal seller composition with trusted multi-site bindings. Its one-contract-per-process scope fence was struck 2026-08-06 as superseded |
-| [`storefront-domain-parameterization`](storefront-domain-parameterization/) | active; no blocking dependency | Composes the VM storefront around an injected market-domain contract, matching the bare-metal runtime's existing shape. Behavior-preserving refactor |
-| [`multi-domain-storefront-composition`](multi-domain-storefront-composition/) | active; depends on `storefront-domain-parameterization`; its `pool-declared-offering-modes` prerequisite archived 2026-09-04 | Hosts several compute-family contracts in one storefront process, resolving each record's contract from the listing's recorded offering mode |
-| [`bare-metal-buyer-domain`](bare-metal-buyer-domain/) | active; sequenced with `multi-domain-storefront-composition` | Adds the missing bare-metal buyer package and widens the registry's declared schema identity to scope the compute family, so one catalogue serves both form factors |
-| [`market-platform-compute-40-multi-domain-proof`](market-platform-compute-40-multi-domain-proof/) | blocked on its prerequisites | Deterministic proof of one multi-domain storefront against two provisioning authorities. Rewritten 2026-08-06: most of its implementation work has shipped, and many-to-many storefront-to-authority ownership was removed from scope rather than deferred |
+| [`storefront-domain-parameterization`](storefront-domain-parameterization/) | complete but for closeout (5.7–5.9) and two evidence notes; row corrected 2026-09-26, it had said "active" | Composes the VM storefront around an injected market-domain contract, matching the bare-metal runtime's existing shape. Behavior-preserving refactor |
+| [`multi-domain-storefront-composition`](multi-domain-storefront-composition/) | shell implemented and promoted; validation (Section 9) and closeout (Section 10) remain. Its six external-producer gates were struck or moved 2026-09-26: the producer's contribution is merged | Hosts several compute-family contracts in one storefront process, resolving each record's contract from the listing's recorded offering mode. Bare metal composing the kit negotiation runtime inside that shell is `bare-metal-and-credits-domain-stacks` 4a |
+| [`market-platform-compute-40-multi-domain-proof`](market-platform-compute-40-multi-domain-proof/) | blocked on `multi-domain-storefront-composition`'s closeout, `bare-metal-and-credits-domain-stacks` 4a, and `bare-metal-mock-provisioned-deal`; prerequisite 2.4 confirmed 2026-09-26 | Deterministic proof of one multi-domain storefront against two provisioning authorities. Rewritten 2026-08-06: most of its implementation work has shipped, and many-to-many storefront-to-authority ownership was removed from scope rather than deferred |
+
+`market-platform-bare-metal-10-storefront-composition` and `bare-metal-buyer-domain`
+were archived 2026-09-26. The seller composition and the buyer package they planned
+were delivered by the parallel bare-metal producer this repository merged; their
+requirements were checked against the permanent specifications and the survivors
+migrated, with verification tasks, to `bare-metal-and-credits-domain-stacks` and
+`bare-metal-mock-provisioned-deal` (disposition table in the former's `design.md`).
+Goal 3's remaining gap — bare metal negotiating through the kit runtime rather than
+its own service — is therefore Goal 4 work; Goal 3 completes when `compute-40` proves
+the two-authority topology on it.
 
 ## Roadmap goal — Make a domain a composition of kit
 
 ```text
 kit-storefront-composition-seam
       ├──► kit-owned-negotiation-runtime ─────────┐
-      └──► kit-owned-capacity-and-publication ────┴──► bare-metal-and-credits-domain-stacks
+      └──► kit-owned-capacity-and-publication ────┴──► bare-metal-and-credits-domain-stacks ──► compute-40 (Goal 3)
+bare-metal-mock-provisioned-deal ──────────────────────┘ (pipeline deal evidence)
 
 kit-owned-settlement-runtime archived 2026-08-10
 ```
 
 | Change | Status | Acceptance boundary |
 |---|---|---|
-| [`kit-storefront-composition-seam`](kit-storefront-composition-seam/) | active; depends on `storefront-domain-parameterization` | Defines where kit-owned storefront runtime sits and proves it with the two smallest duplicated concerns, composing all three domains. Establishes the rule that an extracted concern leaves no domain-local copy |
+| [`kit-storefront-composition-seam`](kit-storefront-composition-seam/) | active; its dependency `storefront-domain-parameterization` is complete | Defines where kit-owned storefront runtime sits and proves it with the two smallest duplicated concerns, composing all three domains. Establishes the rule that an extracted concern leaves no domain-local copy |
 | [`kit-owned-negotiation-runtime`](kit-owned-negotiation-runtime/) | active; depends on the seam | Extracts the synchronous negotiation runtime. Largest of the extractions; collides with in-flight Goal 2 and Goal 5 negotiation work |
 | [`kit-owned-capacity-and-publication`](kit-owned-capacity-and-publication/) | active; depends on the seam | Extracts the storefront capacity client and publication runtime; the capacity client's size gap needs per-capability judgment rather than a whole-file move |
-| [`bare-metal-and-credits-domain-stacks`](bare-metal-and-credits-domain-stacks/) | active; depends on the two remaining extractions and on `bare-metal-buyer-domain`; the settlement-runtime extraction archived 2026-08-10 | A bare-metal deployable stack, per-domain end-to-end deal paths, and API-credits recomposition onto kit. Delivers the goal's completion test |
+| [`bare-metal-and-credits-domain-stacks`](bare-metal-and-credits-domain-stacks/) | active; re-grounded 2026-09-26. Owns all remaining "bare metal on the kit" work (Section 4a, moved from `multi-domain-storefront-composition`) and the verification migrated from the two archived bare-metal changes; the stack and both deal scenarios exist; `bare-metal-mock-provisioned-deal` supplies the pipeline deal | Bare metal composed onto the kit negotiation runtime with its parallel negotiation and listing routes removed, API-credits recomposition onto kit, per-domain end-to-end deal paths, and the migrated bare-metal buyer requirements (clean wheel, independent authorities, package boundary, negotiation ownership). Delivers the goal's completion test |
 
 ## Roadmap goal — Make capacity exclusivity compensated
 
@@ -397,7 +408,11 @@ shares no code with the relay work and either may land first.
 
 `add-buyer-vm-connectivity-terms`, which would have negotiated the relay a VM's
 tunnel used, was archived as superseded on 2026-09-25: the contract this campaign
-promoted forbids per-request relay selection. The relay itself is unchanged.
+promoted forbids per-request relay selection, and the host-side VM tunnel client it
+built has one `serverAddr` for every rented VM. The relay itself is unchanged and is
+the bootstrap path to every VM. A buyer-supplied first-boot configuration starting a
+guest-side tunnel client would be the fresh change if a buyer ever needs to avoid the
+seller relay's port; it belongs here if opened.
 
 No roadmap goal currently covers this work. Whether one is warranted is a
 closeout decision for the second change rather than an omission here.
@@ -438,7 +453,9 @@ Changes with no campaign; each stands alone.
 
 ## Archived and superseded
 
-`add-buyer-vm-connectivity-terms` was archived as superseded on 2026-09-25 without implementation. Buyer-negotiated relay coordinates in the fulfillment request are forbidden by the contract `relay-vm-access-without-a-dashboard` promoted (`physical-provisioning`'s "Ansible fulfillment adapter": which relay a host dials is a physical fact, never selectable per request), the storefront may hold no relay credential, and the dashboard credential it would have carried no longer exists. The seller-operated FRP relay remains the buyer's pathway; a buyer wanting their own relay runs a client inside the VM. Its directory is [`archive/2026-09-25-add-buyer-vm-connectivity-terms`](archive/2026-09-25-add-buyer-vm-connectivity-terms/). `structured-capacity-requirements` was re-scoped and renamed to `settle-capacity-claim-vocabulary` the same day; the row above records what landed elsewhere.
+`bare-metal-buyer-domain` and `market-platform-bare-metal-10-storefront-composition` were archived on 2026-09-26 as delivered rather than superseded: the parallel bare-metal producer this repository merged built the buyer package and the seller composition they planned. Their draft requirements were dispositioned one by one — promoted under another heading, dropped as process text, or migrated with a verification task to `bare-metal-and-credits-domain-stacks` and `bare-metal-mock-provisioned-deal` — in [`bare-metal-and-credits-domain-stacks/design.md`](bare-metal-and-credits-domain-stacks/design.md). Their directories are [`archive/2026-09-26-bare-metal-buyer-domain`](archive/2026-09-26-bare-metal-buyer-domain/) and [`archive/2026-09-26-market-platform-bare-metal-10-storefront-composition`](archive/2026-09-26-market-platform-bare-metal-10-storefront-composition/).
+
+`add-buyer-vm-connectivity-terms` was archived as superseded on 2026-09-25 without implementation. Buyer-negotiated relay coordinates in the fulfillment request are forbidden by the contract `relay-vm-access-without-a-dashboard` promoted (`physical-provisioning`'s "Ansible fulfillment adapter": which relay a host dials is a physical fact, never selectable per request), and the mechanism it built has no per-VM relay choice to expose: the buyer-facing tunnel client runs on the host with one `serverAddr` for every rented VM, not in the guest as this change assumed. The seller-operated relay is the bootstrap path to every VM; a buyer wanting their own relay reaches the VM through its relay port once and starts a client inside the guest. A version that avoids the seller relay entirely would be a buyer-supplied first-boot configuration starting a guest-side client — a fresh change under the "Reach hosts" lesser goal, not this one. Its directory is [`archive/2026-09-25-add-buyer-vm-connectivity-terms`](archive/2026-09-25-add-buyer-vm-connectivity-terms/). `structured-capacity-requirements` was re-scoped and renamed to `settle-capacity-claim-vocabulary` the same day; the row above records what landed elsewhere.
 
 `prune-storefront-database` was archived because dead policy tables are already gone and the remaining candidates carry continuation, idempotency, or observability state. `complete-development-documentation` was synchronized and archived after audience-owned documentation became permanent planning governance. `add-storefront-principal-authentication` and `provisioning-result-push-delivery` were superseded on 2026-08-06 by `service-identity-signing` and `replace-polling-with-authenticated-push` respectively.
 

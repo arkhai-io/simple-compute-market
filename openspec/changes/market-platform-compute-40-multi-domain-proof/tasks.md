@@ -18,13 +18,17 @@ is superseded. The original task list is in Git history.
 
 - [ ] 2.1 Confirm `multi-domain-storefront-composition` has landed; the storefront under
       test is one process hosting both compute contracts.
-- [ ] 2.2 Confirm the bare-metal deal path exists end to end —
-      `market-platform-bare-metal-10-storefront-composition` for the seller side and
-      `bare-metal-buyer-domain` for the buyer side.
+- [ ] 2.2 Confirm the bare-metal deal path exists end to end. (Amended 2026-09-26: the
+      seller composition and the buyer package are delivered and the changes that
+      planned them archived; the gate is now `bare-metal-and-credits-domain-stacks`
+      4a — bare metal negotiating through the kit runtime inside the shared shell —
+      and `bare-metal-mock-provisioned-deal`'s pipeline deal.)
 - [ ] 2.3 Confirm `pools-7-storefront-fulfillment-cutover`'s selected-site scheduling,
       durable fulfillment, pull result, restart recovery, and teardown are accepted.
-- [ ] 2.4 Confirm `pool-declared-offering-modes` has removed both implicit executor
+- [x] 2.4 Confirm `pool-declared-offering-modes` has removed both implicit executor
       fallbacks and landed the legacy-row policy this change no longer owns.
+      **Confirmed 2026-09-26:** archived 2026-09-04; `deal_event_sink` raises
+      `capacity release cannot be published without offering_mode`.
 - [ ] 2.5 Record exact wheel and image versions and the deterministic backend controls
       the topology uses.
 

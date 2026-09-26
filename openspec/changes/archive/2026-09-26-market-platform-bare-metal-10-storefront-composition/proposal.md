@@ -1,3 +1,25 @@
+<!-- Archived 2026-09-26. Implemented: the bare-metal storefront composition starts
+through the shared `StorefrontAppConfig`, contributes `bare_metal` through
+`market.storefront_contributions`, binds trusted selected sites, fulfills, recovers, and
+tears down through the selected site (tasks 1–4 and 7.1–7.4 checked; the hosted-settlement
+change records the lifecycle as present and promoted). Its six delta requirements were
+checked against the permanent specifications: "Independently deployable bare-metal
+seller role" and "Complete bare-metal seller lifecycle" are promoted under their own
+headings; "Deployable bare-metal storefront composition" under "Role-owned executable
+composition" and the seller-role requirement; "Trusted bare-metal resource projections"
+under `site-capacity`'s "Physical inventory and grouped capacity are separate
+projections"; "Trusted selected-site routing" under `storefront-publication`'s
+"Site-pinned claim routing" and "Trusted listing mappings route to one site"; and
+"Truthful pre-fulfillment seller protocol" is superseded by fulfillment having been
+composed, except its pause-survives-restart scenario, which moved to
+`bare-metal-mock-provisioned-deal`. The verification this change still owed was moved
+rather than kept as a verification-only change: 4.6's integration cases to
+`bare-metal-mock-provisioned-deal` Section 3; 5.4, 5.5, 6.1, and 6.3 to
+`bare-metal-and-credits-domain-stacks` (3.4, 3.5, 5.4); 6.2 is that change's 5.1; 6.4 is
+recorded in `market-platform-compute-40-multi-domain-proof` 2.2. The dedicated-versus-
+shared image decision 5.2 asked for is answered by the tree: a dedicated
+`domains/bare_metal/storefront/Dockerfile` and Helm chart exist. -->
+
 ## Why
 
 Bare metal already has deterministic domain codecs, publication semantics, and a compute-provisioning adapter, but it has no runnable seller storefront that can negotiate, settle, fulfill, and recover a bare-metal agreement. Compute-40 cannot prove VM and bare-metal storefronts against shared provisioning authorities until bare metal has an equivalent composition root.

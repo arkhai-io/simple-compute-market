@@ -1,3 +1,21 @@
+<!-- Archived 2026-09-26 with 0 of 41 tasks checked: the package this change planned
+was delivered by the parallel bare-metal producer this repository merged
+(`domains/bare_metal/buyer/`, `market.buyer_domains` entry point, the `market
+bare-metal` command namespace, composition tests, `dist-bare-metal-buyer`), the
+registry's compute-family schema identity by `settle-listing-vocabulary`, and the
+real-host deal scenario by `bare-metal-and-credits-domain-stacks` 4.1. Its 17 draft
+requirements were not lost: each was checked against the permanent specifications and
+either found already promoted under another heading, dropped as process text, or
+migrated with a verification task into the change that builds or proves the behavior
+— `bare-metal-and-credits-domain-stacks` (negotiation ownership and resume, clean
+wheel, no invented seller topology, package boundary) and
+`bare-metal-mock-provisioned-deal` (exact demand, strict result/evidence decoding,
+idempotent teardown, restart recovery). The disposition table is in
+`bare-metal-and-credits-domain-stacks/design.md`, "Migrated requirements
+(2026-09-26)". The prerequisite-matrix gates in Section 1 and the "Implementation is
+gated by accepted producer contracts" requirement described a producer that no longer
+exists as a separate track. -->
+
 ## 1. Prove and freeze every prerequisite
 
 - [ ] 1.1 Build the prerequisite matrix in `openspec/changes/bare-metal-buyer-domain/design.md` from permanent headings, installed wheel metadata/public symbols, focused producer tests, and integration evidence for: `add-persistent-buyer-profiles`; `storefront-domain-parameterization`; `multi-domain-storefront-composition` plus pool-declared offering modes; `market-platform-bare-metal-10-storefront-composition`; `pools-7-storefront-fulfillment-cutover`; common Alkahest selection/recovery; and `consume-expanded-stripe-funding`. Treat active-change status, checked tasks, source-only modules, injected fake ports, and `fulfillment_available=false` as failed evidence.

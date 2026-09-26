@@ -1,17 +1,11 @@
 ## MODIFIED Requirements
 
 ### Requirement: Commercial mapping identity
-A storefront MUST retain one common derived-listing mapping between an authoritative site/pool/Physical Resource projection and each published listing, keyed by `listing_id`. The mapping MUST record the operator-configured trusted site, optional pool and resource identities, immutable offering-mode/domain binding, a collision-safe derivation key, and a versioned domain-owned source reference when additional reconciliation data is required. Pricing, settlement terms, and seller policy MUST remain on the generic listing record; domain-specific VM or bare-metal commercial mapping tables MUST NOT remain as parallel authorities after migration.
-
-Each derivation key MUST include the owning `site_id`, offering mode, exact domain identity/version, and the pool or Physical Resource identity at the granularity published by that mode. The encoding MUST be unambiguous for arbitrary operator-chosen identifier text.
-
-#### Scenario: One pool exposes two offering modes
-- **WHEN** one trusted pool can publish VM slices and a bare-metal whole-host offer from the same physical inventory
-- **THEN** the resulting mappings and listing identities are distinct by offering mode/domain binding and neither publication overwrites the other
+A VM or bare-metal listing's commercial mapping between an authoritative capacity identity and the published listing MUST be its immutable common listing binding. VM and bare-metal publication, reconciliation, close, and reopen MUST NOT read or write a domain-owned mapping table (`derived_compute_listings`, `derived_bare_metal_listings`); a closed listing is found again by its candidate's derivation key in the common binding. A bare-metal listing's derivation key MUST include its pool, so a Physical Resource moved to another pool derives a new listing and its old listing closes as a withdrawn source. Pricing, settlement terms, and seller policy MUST continue to live on the generic `listings` table, addressed by `listing_id` — no mapping carries commercial fields of its own. Each derivation key MUST include the owning `site_id`, since a pool or resource identifier is only unique within one site, never globally, and MUST include the offering mode and exact domain identity/version, since one pool may publish under more than one offering mode. A derivation key MUST be collision-resistant by construction against any values its constituent fields (`site_id`, `pool_id`, `resource_id`) may take — these are operator-chosen strings with no character restrictions, so a naive delimiter-joined encoding is not sufficient.
 
 #### Scenario: Two sites name a pool identically
 - **WHEN** two different sites each have a pool sharing the same operator-chosen `pool_id`
-- **THEN** their derived-listing mapping rows have distinct derivation keys and neither row's mapping is silently overwritten by the other's
+- **THEN** their listing bindings have distinct derivation keys and neither binding is silently overwritten by the other's
 
 #### Scenario: An operator-chosen identifier contains a delimiter character
 - **WHEN** a `site_id`, `pool_id`, or `resource_id` value contains a character that would otherwise separate fields in a naively joined key
@@ -19,7 +13,20 @@ Each derivation key MUST include the owning `site_id`, offering mode, exact doma
 
 #### Scenario: Two specific-resource candidates share a pool
 - **WHEN** a multi-member pool publishes more than one `specific_resource` candidate, each naming a different physical resource
-- **THEN** each candidate's derivation key is resource-keyed and distinct, and recording one candidate's mapping does not overwrite another's
+- **THEN** each candidate's derivation key is resource-keyed and distinct, and binding one candidate does not overwrite another's
+
+#### Scenario: A closed listing's slice becomes publishable again
+- **WHEN** a closed VM listing's candidate is derived again with the same derivation identity
+- **THEN** the listing bound under that derivation key reopens, rather than a new listing being bound under a colliding key
+
+#### Scenario: A Physical Resource moves to another pool
+- **GIVEN** an open bare-metal listing bound under a Physical Resource's pool
+- **WHEN** the site projects that Physical Resource under a different pool that admits bare metal, and the operator runs bare-metal publication
+- **THEN** the listing closes as a withdrawn source and a new listing publishes under the new pool's binding
+
+#### Scenario: One pool exposes two offering modes
+- **WHEN** one trusted pool can publish VM slices and a bare-metal whole-host offer from the same physical inventory
+- **THEN** the resulting bindings and listing identities are distinct by offering mode/domain binding and neither publication overwrites the other
 
 ## ADDED Requirements
 

@@ -20,3 +20,27 @@ requires a real access target, that remains a separate protected lane.
 - **WHEN** release acceptance requires observing real access and its revocation
 - **THEN** the mock-provisioned deal does not satisfy it, and the protected lane's
   requirement stands
+
+### Requirement: A bare-metal deal survives restart at its durable boundaries
+
+The pipeline's bare-metal deal MUST restart the storefront after settlement commit and
+after teardown acceptance and prove that the buyer, on resume, retrieves the same
+operation without a second obligation, mechanism selection, or physical teardown, and
+that duplicate polling and result reads are idempotent. An authenticated operator pause
+MUST survive a storefront restart, refusing new negotiations until an authenticated
+resume.
+
+#### Scenario: Process stops after settlement commit
+
+- **WHEN** the settlement authority committed the recorded operation but the buyer did not receive its response
+- **THEN** resume retrieves the same operation and continues without a second obligation or mechanism selection
+
+#### Scenario: Process stops after teardown acceptance
+
+- **WHEN** teardown was accepted before the response was lost
+- **THEN** recovery observes or resumes the same teardown, and the site reports capacity released once
+
+#### Scenario: Storefront is paused and restarted
+
+- **WHEN** an authenticated operator pauses the storefront and its process restarts
+- **THEN** the paused state remains active and new negotiations are refused until an authenticated resume operation

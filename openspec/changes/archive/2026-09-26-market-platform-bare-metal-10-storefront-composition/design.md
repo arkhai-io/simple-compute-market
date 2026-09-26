@@ -1,3 +1,25 @@
+<!-- Archived 2026-09-26. Implemented: the bare-metal storefront composition starts
+through the shared `StorefrontAppConfig`, contributes `bare_metal` through
+`market.storefront_contributions`, binds trusted selected sites, fulfills, recovers, and
+tears down through the selected site (tasks 1–4 and 7.1–7.4 checked; the hosted-settlement
+change records the lifecycle as present and promoted). Its six delta requirements were
+checked against the permanent specifications: "Independently deployable bare-metal
+seller role" and "Complete bare-metal seller lifecycle" are promoted under their own
+headings; "Deployable bare-metal storefront composition" under "Role-owned executable
+composition" and the seller-role requirement; "Trusted bare-metal resource projections"
+under `site-capacity`'s "Physical inventory and grouped capacity are separate
+projections"; "Trusted selected-site routing" under `storefront-publication`'s
+"Site-pinned claim routing" and "Trusted listing mappings route to one site"; and
+"Truthful pre-fulfillment seller protocol" is superseded by fulfillment having been
+composed, except its pause-survives-restart scenario, which moved to
+`bare-metal-mock-provisioned-deal`. The verification this change still owed was moved
+rather than kept as a verification-only change: 4.6's integration cases to
+`bare-metal-mock-provisioned-deal` Section 3; 5.4, 5.5, 6.1, and 6.3 to
+`bare-metal-and-credits-domain-stacks` (3.4, 3.5, 5.4); 6.2 is that change's 5.1; 6.4 is
+recorded in `market-platform-compute-40-multi-domain-proof` 2.2. The dedicated-versus-
+shared image decision 5.2 asked for is answered by the tree: a dedicated
+`domains/bare_metal/storefront/Dockerfile` and Helm chart exist. -->
+
 ## Context
 
 The bare-metal domain currently provides versioned listing, message, terms, materialization, receipt, and result codecs; a publication source; and a compute-provisioning adapter. The VM and API-credit domains additionally have runnable storefront packages that inject complete seller hooks into the core storefront role. The core application builder accepts one `MarketDomainContract`, so a bare-metal publication plugin is not equivalent to a complete bare-metal seller application.

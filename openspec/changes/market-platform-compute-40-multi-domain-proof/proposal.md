@@ -99,13 +99,24 @@ None.
 
 ## Dependencies and Related Changes
 
-- Depends on `multi-domain-storefront-composition` for the storefront under test, and on
-  `market-platform-bare-metal-10-storefront-composition` and `bare-metal-buyer-domain`
-  for a complete bare-metal deal path.
-- Depends on `pools-7-storefront-fulfillment-cutover` for durable selected-site
-  scheduling, fulfillment status and result, restart recovery, and teardown.
-- Depends on `pool-declared-offering-modes` for explicit executor identity and the legacy
-  -row policy this change no longer owns.
+- Depends on `multi-domain-storefront-composition` for the storefront under test. Its
+  shell is implemented and promoted; validation and closeout remain (re-grounded
+  2026-09-26).
+- Depends on `bare-metal-and-credits-domain-stacks` for bare metal composed onto the
+  kit negotiation runtime (its Section 4a) and for the generalized fixtures. Until
+  then the bare-metal contribution runs a domain-local negotiation service beside the
+  shared shell, which is not the one-process composition this change proves. (Until
+  2026-09-26 this bullet named `market-platform-bare-metal-10-storefront-composition`
+  and `bare-metal-buyer-domain`; both are archived, the seller composition and the
+  buyer package delivered.)
+- Depends on `bare-metal-mock-provisioned-deal` for the bare-metal adapter's own mock
+  and the storefront's pause/step controls, without which a deterministic two-authority
+  bare-metal lifecycle cannot run in the pipeline.
+- Depended on `pools-7-storefront-fulfillment-cutover` (archived) for durable
+  selected-site scheduling, fulfillment status and result, restart recovery, and
+  teardown, and on `pool-declared-offering-modes` (archived 2026-09-04) for explicit
+  executor identity; both gates are met, and the two implicit `"vm"` fallbacks are
+  gone (`deal_event_sink` refuses a release without `offering_mode`).
 - Complements `bare-metal-and-credits-domain-stacks`, which proves a complete deal per
   domain at one authority. This change adds the multi-authority dimension and should
   reuse its fixtures rather than build a parallel harness.

@@ -54,7 +54,14 @@ None.
 ### Modified Capabilities
 
 - `test-compatibility`: a deployable domain's deal path runs on every end-to-end run
-  against mock provisioning, distinctly from any protected real-host evidence.
+  against mock provisioning, distinctly from any protected real-host evidence; a
+  bare-metal deal survives a storefront restart after settlement commit and after
+  teardown acceptance.
+- `buyer-orchestration` (added 2026-09-26, migrated from the archived
+  `bare-metal-buyer-domain`): the bare-metal demand is exact and buyer-bounded, public
+  result and evidence are decoded strictly, and teardown is authenticated and
+  idempotent — the buyer-side properties the deal scenario is the natural place to
+  prove, since it is the only bare-metal deal that runs on every pipeline run.
 
 ## Non-Goals
 
@@ -64,7 +71,9 @@ None.
 - Multiple sites, or a site trusting several storefronts (roadmap Goal 1).
 - Changing bare-metal negotiation, settlement, or fulfillment behaviour. Defects the
   scenario surfaces in those are bare-metal findings, recorded against their owning
-  change rather than absorbed here.
+  change rather than absorbed here. Composing bare metal onto the kit negotiation
+  runtime is `bare-metal-and-credits-domain-stacks`'; the scenario here must pass
+  before and after that composition.
 
 ## Impact
 
@@ -80,7 +89,8 @@ None.
 ## Permanent documentation impact
 
 - [ ] `docs/development/ARCHITECTURE.md`
-- [x] Existing subsystem specification — `openspec/specs/test-compatibility/spec.md`.
+- [x] Existing subsystem specification — `openspec/specs/test-compatibility/spec.md`
+      and `openspec/specs/buyer-orchestration/spec.md`.
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 
@@ -91,6 +101,9 @@ None.
   `openspec/specs/test-compatibility/spec.md`.
 - The bare-metal storefront's loops follow the pause-and-step convention —
   `docs/development/TESTING.md`'s loop table.
+- The bare-metal demand is exact and buyer-bounded; public result and evidence decode
+  strictly; teardown is authenticated and idempotent —
+  `openspec/specs/buyer-orchestration/spec.md`.
 
 ## Dependencies
 
@@ -99,3 +112,10 @@ end-to-end lane, splits the pipeline into VM and bare-metal jobs, and adds the
 publication step. Supplies the bare-metal deal-path evidence
 `bare-metal-and-credits-domain-stacks` requires for Goal 4, short of real access, which
 stays with the protected lane.
+
+Owns, since 2026-09-26, the buyer-side deal requirements migrated from the archived
+`bare-metal-buyer-domain` (its demand, result/evidence, and teardown requirements) and
+the integration cases `market-platform-bare-metal-10-storefront-composition` 4.6 left
+open (restart, duplicate call, failure, result security, exactly-once release), as
+Section 3 of `tasks.md`. `bare-metal-and-credits-domain-stacks`' `design.md` records
+where every requirement of both archived changes went.

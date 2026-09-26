@@ -1,17 +1,27 @@
 <!-- Archived 2026-09-25 as superseded, without implementation. The premise —
 buyer-negotiated relay coordinates (FRP server address, domain, dashboard credential)
 threaded into the fulfillment request — was foreclosed by
-`relay-vm-access-without-a-dashboard`'s promoted contract: `physical-provisioning`'s
-"Ansible fulfillment adapter" requires that the request's `connectivity` field carry
-no relay configuration and that a relay never be selectable per request, because
-which relay a host dials is a physical fact about that host; `vm-storefront-fulfillment`
-forbids the storefront from holding a relay credential; and the dashboard credential no
-longer exists. The FRP relay itself is unchanged and provisioning-owned: hosts dial the
-seller's relay for management and buyer tunnels, and a buyer receives a port on it. A
-buyer who wants traffic through their own relay runs a client inside the VM they were
-given SSH access to, which needs no negotiated term. The `design.md` open question on
-SSRF exposure from a buyer-named relay target was a second reason not to build this.
-Nothing replaces this change. -->
+`relay-vm-access-without-a-dashboard`'s promoted contract and by the mechanism it
+built. Contract: `physical-provisioning`'s "Ansible fulfillment adapter" requires that
+the request's `connectivity` field carry no relay configuration and that a relay never
+be selectable per request, because which relay a host dials is a physical fact about
+that host; `vm-storefront-fulfillment` forbids the storefront from holding a relay
+credential; and the dashboard credential no longer exists. Mechanism: the
+buyer-facing tunnel client runs on the *host* (`/etc/frp/frpc-vms.toml`, one process
+with one `serverAddr` carrying one proxy per rented VM), not in the guest, so there
+is no per-VM relay choice to expose — this design's assumption that "the provisioned
+VM connects out to the buyer's FRP server" describes a client that does not exist.
+The seller's relay is the bootstrap path for every VM: it is the only route to a host
+with no inbound port, and a buyer receives a port on it in the fulfillment result. A
+buyer who wants their own relay reaches the VM through that port once and starts a
+client inside the guest, which has outbound connectivity. If a buyer ever needs to
+avoid the seller relay's port entirely, the shape of that work is a buyer-supplied
+first-boot configuration (cloud-init user data or a guest agent) that starts a tunnel
+client inside the VM at creation — a guest-side concern, more general than FRP, not
+touching the host's relay or port lease — and it should be opened fresh under the
+"Reach hosts" lesser goal rather than built on this change's mechanism. The SSRF
+question this design raised applies there too: a guest dialing a buyer-named address
+is the point; a storefront dialing one during negotiation is not. -->
 
 ## Why
 

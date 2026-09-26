@@ -1,3 +1,21 @@
+<!-- Archived 2026-09-26 with 0 of 41 tasks checked: the package this change planned
+was delivered by the parallel bare-metal producer this repository merged
+(`domains/bare_metal/buyer/`, `market.buyer_domains` entry point, the `market
+bare-metal` command namespace, composition tests, `dist-bare-metal-buyer`), the
+registry's compute-family schema identity by `settle-listing-vocabulary`, and the
+real-host deal scenario by `bare-metal-and-credits-domain-stacks` 4.1. Its 17 draft
+requirements were not lost: each was checked against the permanent specifications and
+either found already promoted under another heading, dropped as process text, or
+migrated with a verification task into the change that builds or proves the behavior
+— `bare-metal-and-credits-domain-stacks` (negotiation ownership and resume, clean
+wheel, no invented seller topology, package boundary) and
+`bare-metal-mock-provisioned-deal` (exact demand, strict result/evidence decoding,
+idempotent teardown, restart recovery). The disposition table is in
+`bare-metal-and-credits-domain-stacks/design.md`, "Migrated requirements
+(2026-09-26)". The prerequisite-matrix gates in Section 1 and the "Implementation is
+gated by accepted producer contracts" requirement described a producer that no longer
+exists as a separate track. -->
+
 ## Context
 
 See `proposal.md` for motivation. The current code establishes several useful seams but not a buyer:

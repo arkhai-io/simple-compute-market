@@ -22,9 +22,12 @@ Verified by inspection 2026-08-06; re-verify before implementing.
   `bare_metal_adapter_bundle` into one service through `compose_adapter_bundles`.
 - Two implicit `"vm"` executor fallbacks exist — the ledger's inference from a `vm_host`
   attribute, and `deal_event_sink`'s `or "vm"`. Both are removed by
-  `pool-declared-offering-modes`.
+  `pool-declared-offering-modes`. (*2026-09-26:* confirmed removed; the sink now
+  refuses a capacity release without `offering_mode`.)
 - No end-to-end scenario references bare metal or API credits, and none exercises more
-  than one authority. Every proven deal path is a single-site VM deal.
+  than one authority. Every proven deal path is a single-site VM deal. (*2026-09-26:*
+  `scenarios/bare_metal/` and the API-credits path exist; none exercises more than
+  one authority, which remains this change's dimension.)
 
 ## Goals / Non-Goals
 
