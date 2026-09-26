@@ -389,7 +389,7 @@ Decision: planning's "`bare-metal list --resource`".
     and run `make -C domains test-storefront test-vms-buyer` before closeout.
   - Typing: only `core/` configures a type check, so none ran for the touched
     packages.
-  - The end-to-end lanes (12.8).
+  - End-to-end evidence was subsequently obtained; see sections 12.8 and 13.
 - **Deviations from the plan:**
   - **One guard call.** `open()` runs the guard once, before the Alkahest and
     hosted paths branch, rather than at two call sites.
@@ -528,7 +528,7 @@ Per `openspec/README.md#plan-closeout-requirements`.
       `make check-doc-citations CHANGE=bare-metal-listing-shapes` and resolve every
       match, then run it unscoped to confirm no permanent document this change touched
       cites a missing path.
-- [ ] 12.8 **End-to-end pipeline.** Run both lanes (`make run-e2e`, then
+- [x] 12.8 **End-to-end pipeline.** Run both lanes (`make run-e2e`, then
       `make fetch-e2e-logs`). Record:
       - the run ID and result;
       - that the bare-metal lane's publication scenario exercised discovery by
@@ -536,6 +536,7 @@ Per `openspec/README.md#plan-closeout-requirements`.
       - that the VM lane's `test_listing_shapes.py` passed on the re-exported schema.
       A pipeline blocked for an unrelated reason is recorded as a blocker naming its
       cause and owning change, and its validations are unrun.
+      Evidence: run 36252825190 passed both lanes at commit 42b364ba; see section 13.
 - [ ] 12.9 **Promotion.** Complete the design-promotion record below and promote:
       - `openspec/specs/storefront-publication/spec.md`: the ADDED requirements and the
         MODIFIED requirement, plus the Evidence list entries for 4–6 and 8.
@@ -560,6 +561,35 @@ Per `openspec/README.md#plan-closeout-requirements`.
         bare-metal declaration carries its hardware in `capacity` and `attributes`
         with `units: 1`.
 
+## 13. E2E debugging
+
+- [x] 13.1 Rebuild internal wheels and update
+      `domains/bare_metal/storefront/uv.lock` and
+      `domains/vms/storefront/uv.lock` to the current storefront-client wheel.
+      Validate with `make check-internal-locks` and frozen dependency installation.
+      Both pass. Bare-metal storefront: 174 passed. VM storefront: 1333 passed,
+      one skipped; two Alkahest integration tests cannot start the local chain
+      runtime. Baseline E2E run 36251858600 failed in both lanes on the missing
+      storefront-client 0.20.0 wheel.
+- [x] 13.2 Run both lanes using `make run-e2e`, retrieve diagnostics with
+      `make fetch-e2e-logs`, and fix observed failures with focused validation.
+      Use the registry list client's `id` field in
+      `e2e-tests/tests/e2e/roles/scenarios/bare_metal/test_bare_metal_publication.py`
+      without changing its positive or negative hardware-filter assertions.
+      [Run 36252825190](https://github.com/arkhai-io/simple-compute-market/actions/runs/36252825190)
+      passed both lanes at commit `42b364ba`: bare-metal 8 passed; VM 126 passed,
+      2 existing multi-storefront negotiation skips. Bare-metal exercised hardware
+      discovery, withdrawal/reinstatement, and the region hold; VM exercised
+      `test_listing_shapes.py`, including discovery, purchase, reservation
+      commitment, and overrides. Both Actions and Compose logs were retrieved.
+- [x] 13.3 Debugging closeout: internal-lock, reinit, comment-hygiene, scoped
+      documentation-citation, and strict OpenSpec validation checks pass.
+      No imports changed. Documentation and narrative were reviewed; these lock
+      and test-client corrections restore existing contracts and introduce no
+      permanent behavior or design requiring promotion. Roadmap and campaign
+      status remain unchanged because other feature closeout work remains open.
+      E2E evidence is recorded above; this does not mark the full change complete.
+
 ## Design promotion record
 
 | Accepted decision | Permanent location |
@@ -576,3 +606,4 @@ Per `openspec/README.md#plan-closeout-requirements`.
 | Pool-override work moved to `publish-indicative-listing-rates` | Superseded here; owned by that change's design and tasks |
 | Payload kind unchanged; listing model names the schema's flat fields | Temporary: change history only (no permanent rule beyond the spec's published fields) |
 | Roadmap and campaign index | Filled in at 12.5 and 12.6 |
+| E2E lock and test-client corrections | Existing wheel contract in `docs/development/ARCHITECTURE.md#build-packaging-and-initialization`; no new permanent design. Roadmap and campaign status unchanged. |

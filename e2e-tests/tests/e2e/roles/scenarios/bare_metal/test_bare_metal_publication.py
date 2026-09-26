@@ -212,7 +212,7 @@ class TestStage03b_DiscoverByHardware:
             response = bare_metal_registry.list_listings(
                 offering_mode=BARE_METAL, etag=compiled.etag, **compiled.as_params()
             )
-            return {listing.listing_id for listing in response.listings}
+            return {listing.id for listing in response.listings}
 
         assert state.listing_id in found(f"gpu_model={GPU_MODEL} gpu_count>=8 region={REGION}")
         assert state.listing_id not in found(f"gpu_model={GPU_MODEL} gpu_count>=9")

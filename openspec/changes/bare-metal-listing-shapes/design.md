@@ -389,3 +389,20 @@ named by the seam they prove.
 ## Open questions
 
 None.
+
+## E2E debug follow-up
+
+The branch still pins storefront-client 0.20.0 in both storefront locks after
+the client moved to 0.21.0. Re-resolve those consumers with a targeted package
+upgrade against freshly built internal wheels. Retaining old wheels would hide
+the clean-build failure; broad dependency upgrades would add unrelated changes.
+This restores the existing wheel packaging contract in
+`docs/development/ARCHITECTURE.md#build-packaging-and-initialization` and requires
+no new permanent design. Further fixes depend on failures observed through
+`make run-e2e` and `make fetch-e2e-logs`.
+
+The next run reached the bare-metal scenarios: seven passed, and hardware
+discovery failed because the scenario read `ListingSummary.listing_id`.
+The registry list client exposes `id`; the detail client exposes `listing_id`.
+Use the existing list model in the scenario without changing either API. The
+positive and negative hardware-filter assertions remain the validation boundary.
