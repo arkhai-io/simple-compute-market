@@ -2,8 +2,8 @@
 
 The storefront-side capacity client and the publication runtime are duplicated across
 the VM and API-credits storefronts — `capacity_client` at 556 against 217 lines and
-`publication_service` at 215 against 193 — and absent from bare metal, which therefore
-neither reserves capacity nor publishes listings.
+`publication_service` at 215 against 193 — and, before this change, absent from bare
+metal, which could therefore neither reserve capacity nor publish listings.
 
 Publication is close to identical between the two copies, which makes it the clearer
 extraction. The capacity client is the more interesting one: the size gap suggests part
@@ -20,7 +20,7 @@ and a domain that lacked it gains it by composition.
   configuration, and its domain-specific semantics.
 - Compose all three domains onto the kit implementation and remove every domain-local
   copy in this change.
-- Give bare metal these concerns, which it does not have today.
+- Give bare metal these concerns by composition: its storefront reserves through `market_site_client` and publishes through `market_capacity_publication`.
 - Record, per concern, where the existing implementations already diverged and which
   behavior was chosen — silently adopting one is how an extraction becomes a behavior
   change.

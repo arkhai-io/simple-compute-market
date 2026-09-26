@@ -151,14 +151,16 @@ reconciliation, registry fan-out, publication result recording, and
 close/reopen mechanics over injected schema-opaque candidate and binding hooks.
 VM and API-credit storefronts compose those runtimes rather than maintaining
 local copies; pool-declared offering mode and persisted selected-site binding
-remain authoritative through publication and recovery. Bare metal consumes the
-same seams without a domain-specific fallback, but truthfully remains
-fulfillment-unavailable. `kit/policy`, `kit/identity`, `kit/fulfillment`,
-`kit/config`, and `kit/alkahest` likewise carry no domain vocabulary.
+remain authoritative through publication and recovery. Bare metal composes the
+same capacity and publication seams, the shared watchdog and chain factory, and
+selected-site fulfillment, result, and teardown, and has a deployable stack with
+its own end-to-end lane; it still carries a domain-local negotiation service and
+its own negotiate and listing routes beside the negotiation kit. `kit/policy`,
+`kit/identity`, `kit/fulfillment`, `kit/config`, and `kit/alkahest` likewise
+carry no domain vocabulary.
 
-The remaining Goal 4 work is deployable multi-domain adoption and end-to-end
-deal proof rather than another domain-local copy of these extracted
-lifecycles.
+The remaining Goal 4 work is that last composition and the end-to-end deal
+proof per domain.
 
 Settlement assigns stable identity to every accepted-plan obligation, journals
 materialize/status/check/collect/reclaim attempts, persists opaque mechanism
@@ -177,6 +179,8 @@ The domain layer's own structure is better than the duplication suggests. All th
 
 | Open gap | Owned by |
 |---|---|
+| The bare-metal storefront negotiates through a domain-local service and routes rather than the negotiation kit every other domain composes | [`bare-metal-and-credits-domain-stacks`](../../openspec/changes/bare-metal-and-credits-domain-stacks/) |
+| No bare-metal deal runs in the pipeline: the only complete-deal scenario needs a real host and a hosted authority | [`bare-metal-mock-provisioned-deal`](../../openspec/changes/bare-metal-mock-provisioned-deal/) |
 | Provider-authentic API-credit hosted evidence still requires the exact signed producer release, protected Stripe inputs, and deployed resolver; bare-metal still requires live selected-site provisioning and access/teardown proof | [`add-api-credits-hosted-settlement`](../../openspec/changes/add-api-credits-hosted-settlement/), [`add-bare-metal-hosted-settlement`](../../openspec/changes/add-bare-metal-hosted-settlement/) |
 
 **Design promotion (2026-08-15).** `kit-storefront-composition-seam`,

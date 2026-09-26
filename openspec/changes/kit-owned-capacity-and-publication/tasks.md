@@ -22,11 +22,15 @@
 
 ## 3. Compose every domain
 
-- [ ] 3.1 Compose all three domains onto the kit implementation.
+- [x] 3.1 Compose all three domains onto the kit implementation. All three storefronts
+      import `market_site_client` and `market_capacity_publication`; bare metal's
+      publication runs through `publication_composition.py` over the kit cycle driver.
 - [x] 3.2 Remove every domain-local copy **in this change**. Domain packages now
   contain only configuration, codecs, and injected binding/reconciliation hooks.
-- [ ] 3.3 Give bare metal the concerns it does not have today, and treat gaps its suites
-      then expose as findings about bare metal rather than about the extraction.
+- [x] 3.3 Give bare metal the concerns it does not have today, and treat gaps its suites
+      then expose as findings about bare metal rather than about the extraction. Bare
+      metal reserves through the site client and publishes, reconciles, and converges
+      through the kit publication runtime on its own end-to-end lane.
 
 ## 4. Packaging follow-through
 

@@ -7,7 +7,7 @@ Verified 2026-08-06; re-verify before implementing.
 - Storefront implementation sizes: `market_storefront` 60 files / 14,408 lines;
   `apicredits_storefront` 33 files / 3,786 lines; `arkhai_bare_metal_storefront` 14
   files / 1,930 lines.
-- API credits reimplements eight VM storefront concerns; bare metal has none of them.
+- API credits reimplements eight VM storefront concerns; bare metal carries none of the two this change extracts and composes both from `kit/storefront`.
 - Kit packages carry almost no domain vocabulary already: `kit/policy`, `kit/identity`,
   `kit/fulfillment`, `kit/config`, and `kit/alkahest` have none at all. The layering
   discipline holds where kit has been used; the problem is the concerns that never

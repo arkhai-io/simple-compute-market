@@ -54,11 +54,13 @@ adopting VM payload semantics.
 
 ### Bare-metal consumption
 
-Bare metal still has no caller in this change's starting checkout. The kit API
-therefore exposes opening and continuation resolvers plus one complete opaque
-domain hook set; the bare-metal storefront composition track can supply its own
-codecs and policy without importing VM or API-credit code. VM and API credits
-are the concrete migrations in this changeset.
+The kit API exposes opening and continuation resolvers plus one complete opaque
+domain hook set, so a domain supplies its own codecs and policy without importing
+VM or API-credit code. VM and API credits are the concrete migrations in this
+change. The bare-metal storefront carries a domain-local negotiation service and
+its own negotiate routes beside the kit; composing it onto these hooks is
+`bare-metal-and-credits-domain-stacks`' Section 4a, which is why this change's
+acceptance boundary is the VM and API-credit compositions.
 
 ## Risks / Trade-offs
 
@@ -76,7 +78,7 @@ are the concrete migrations in this changeset.
 ## Migration Plan
 
 Extract the mechanism, compose every existing VM and API-credit caller, remove
-both copies, expose the complete seam for the bare-metal composition track, then
+both copies, expose the complete seam for bare metal's composition, then
 complete packaging. Rollback is a code revert; no persisted state or wire
 surface changes.
 

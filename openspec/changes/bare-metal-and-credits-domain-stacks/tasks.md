@@ -11,10 +11,8 @@
 
 ## 2. Recompose API credits
 
-Implementation dependency: tasks 2.1-2.2 wait for the final committed interfaces
-from `kit-storefront-composition-seam`, `kit-owned-negotiation-runtime`, and
-`kit-owned-capacity-and-publication`. This change will consume those modules and
-remove the API-credit copies; it will not recreate an absent extraction locally.
+The three extraction changes record the API-credit copies they removed; 2.1 and 2.2
+confirm nothing remains rather than repeat that work.
 
 
 - [ ] 2.1 Remove every remaining local implementation of a concern the kit extractions
