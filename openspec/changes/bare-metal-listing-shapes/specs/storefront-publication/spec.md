@@ -158,9 +158,9 @@ A bare-metal storefront's command line MUST offer the same replace, read, list, 
 operations through its administrator API, with the offering mode never defaulted, and MUST
 NOT read or write its database to do so.
 
-A bare-metal storefront holds, for each site, the last resource-pool projection generation a
-publication run accepted, and its override status MUST be judged against that generation. A
-site with no accepted generation since the storefront started is `unknown`.
+A bare-metal storefront MUST record durably, for each site, the last resource-pool projection
+generation a publication run accepted, whichever process ran it, and its override status MUST
+be judged against that generation. A site with no recorded generation is `unknown`.
 
 #### Scenario: A bare-metal override is written
 
@@ -181,10 +181,17 @@ site with no accepted generation since the storefront started is `unknown`.
 - **THEN** the command sends it through the administrator API, which checks it against
   the site's live projection, and prints the stored override
 
+#### Scenario: Publication runs from the command
+
+- **WHEN** an operator runs `bare-metal-storefront publish` in its own process and the run
+  accepts a site's generation holding the override's pool
+- **THEN** the running storefront reports the override as applied
+
 #### Scenario: Status before the first run
 
 - **WHEN** a bare-metal storefront reports override status before any publication run has
-  accepted a generation for the override's site
+  accepted a generation for the override's site, including after a restart that follows
+  no run
 - **THEN** the override is reported as unknown
 
 ## MODIFIED Requirements

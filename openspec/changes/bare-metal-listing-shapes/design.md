@@ -264,10 +264,10 @@ kit": the logic moves out of VM rather than being copied, and the binding stays 
 each storefront until the shell owns it.
 
 Status for bare metal is judged against the last generation each site's publication
-run accepted, which the runtime keeps in memory. A site with no accepted generation
-since startup is `unknown`. This is the store's existing meaning for a site whose
-projection is not held, so nothing is called `orphaned` on an answer the storefront
-does not have.
+run accepted. The storefront records that generation durably (see "Decisions taken
+while planning"). A site with no accepted generation is `unknown`. This is the store's
+existing meaning for a site whose projection is not held, so nothing is called
+`orphaned` on an answer the storefront does not have.
 
 After an accepted write, bare metal has no cache to refresh and no loop to wake. The
 write takes effect at the next operator-invoked publication run. The shared
@@ -331,6 +331,94 @@ The bare-metal publication-view fixture moves `gpu_model` out of the view's
 `capabilities` into the containing resource's declared `attributes`, and declares
 `units: 1` beside hardware quantities. Tests then exercise the path a site actually
 serves.
+
+## Decisions taken while planning
+
+Planning named every file each decision touches. Doing so settled the following
+points, which the decisions above left to implementation or got wrong.
+
+### The last accepted generation is recorded durably, not in memory
+
+The earlier text kept each site's last accepted generation in the server's memory.
+That misses the ordinary path. `bare-metal-storefront publish` runs in its own
+process, so a server would report every override `unknown` until someone happened to
+step publication through the administrator route, and again after every restart.
+
+Every publication run therefore writes, per site whose generation it accepted:
+
+- `site_id`;
+- the generation's `revision` and `digest`;
+- the projected pool IDs;
+- the time it was accepted.
+
+These go into a bare-metal storefront table in the same run. Override status reads
+that table. A run that holds a site as unknown writes nothing for it, so the last
+accepted generation stands.
+
+### The payload kind stays `bare_metal.v2`
+
+`BARE_METAL_SCHEMA_KIND` is shared by every bare-metal payload: listings, messages,
+terms, materializations, receipts, and access results. Bumping it for a listing-only
+change would churn all of them and the evidence built on them. Nothing is deployed,
+so no stored or published listing needs a new kind to be told apart.
+
+`BareMetalListing` gains required fields, and the kind is unchanged.
+
+### `BareMetalListing` names the schema's flat fields explicitly
+
+The listing model declares:
+
+- `gpu_count` and `gpu_model`, required;
+- `vcpu_count`, `ram_gb`, and `disk_gb`, optional;
+- `region`, required.
+
+It does not accept arbitrary extra fields. A test asserts that the model's shape
+fields equal `COMPUTE_CAPABILITY_SCHEMA`'s flat names. The schema's single home, and
+the spelling gate's later rename, then cannot drift from the listing silently.
+
+### The binding's source envelope gains a version
+
+The binding's source envelope moves to `bare_metal.resource-projection.v1` schema
+version 2, carrying `shape_digest`. Readers accept version 1 only as an old key that
+matches no candidate, which is what closes it.
+
+### Reconciliation matches bindings by resource before key
+
+A resource whose declaration is unresolvable has no shape, and so no key.
+Reconciliation therefore finds each open binding's resource by its recorded site,
+pool, and Physical Resource first:
+
+1. **Held.** A held resource, or a held pool, leaves the binding untouched.
+2. **Candidate.** A candidate whose key equals the binding's is left to publication.
+3. **Unavailable.** An unavailable resource whose key equals the binding's closes for
+   availability.
+4. **Anything else.** A different key (a changed shape, or a version 1 envelope), or a
+   withdrawn resource, closes as `source_gone`.
+
+### The bare-metal buyer gains `list --resource`
+
+"A buyer filtering by GPU model finds a bare-metal listing" is only true for this
+repository's bare-metal buyer if it can filter. Today `bare-metal list` takes none.
+
+It gains `--resource`, compiled through
+`registry_client.query.compile_resource_query` against the registry's filter
+specification, as the VM buyer does. This is the shared query grammar, not a new one.
+
+### The combined compute-family shell registers no bare-metal override contribution
+
+The VM storefront image installs the bare-metal contribution for its shared shell, but
+it does not run bare-metal publication. Registering a `bare_metal` override
+contribution there would accept overrides that nothing applies. The shell keeps
+refusing `bare_metal` override writes as a mode no market serves, until it publishes
+bare metal.
+
+It still needs version pins raised for the new bare-metal storefront wheel.
+
+### Bare-metal storefront tests keep their flat layout
+
+`domains/bare_metal/storefront/tests/` is not split into `unit/` and `integration/`.
+Restructuring it is outside this change, so new tests join the flat directory,
+named by the seam they prove.
 
 ## Open questions
 
