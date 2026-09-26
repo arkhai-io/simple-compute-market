@@ -264,7 +264,7 @@ What deliberately remains: the `escrows` table and the `/api/v1/settle/{escrow_u
 |---|---|
 | The retention window exists as a requirement with no implementation: no configured window, no deletion path, no disclosure to either party | [`contact-payload-retention`](../../openspec/changes/contact-payload-retention/) |
 | Contact exchange is composed on bare metal only, and its accepted-state interpretation lives in that domain rather than having one implementation | [`compose-contact-exchange-across-compute`](../../openspec/changes/compose-contact-exchange-across-compute/) |
-| A second delivery event producer (a settled charge, a completed escrow) | Unowned — needs a new change; background in [`add-introduction-delivery-sinks`](../../openspec/changes/archive/2026-08-19-add-introduction-delivery-sinks/) |
+| A second delivery event producer (a settled charge, a completed escrow) | Unowned — needs a new change. Delivery sinks are event-driven and non-authoritative: a sink consumes a durable delivery event and re-delivery reads the persisted reveal, so a second producer adds an event source, not a second delivery path |
 
 Delivery beyond bare metal is no longer a separate gap: it follows composition and is in that change's scope.
 
