@@ -73,8 +73,9 @@ worker, and `kit/storefront`'s `sweep_stale_negotiations` /
       past the window and returns a count, reusing the Section 1 primitive and the
       1.5 query.
 - [ ] 3.2 Add a background loop over that function on a configurable interval,
-      composed at the same startup seam the negotiation watchdog uses in both
-      domains.
+      composed at the same startup seam `kit/storefront`'s negotiation watchdog
+      uses in both domains, holdable and steppable under the pause-and-step
+      convention `docs/development/TESTING.md` requires of every loop.
 - [ ] 3.3 Add an admin API method invoking deletion for a single introduction on
       request, calling the same primitive. This serves an out-of-schedule request
       the sweep cannot.

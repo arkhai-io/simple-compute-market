@@ -93,7 +93,9 @@ timer-driven worker — and `kit/storefront`'s negotiation watchdog is the shape
 follow: `sweep_stale_negotiations` performs one cycle and returns a count, and
 `run_negotiation_watchdog` loops over it after an initial delay. Both composing
 storefronts already start that watchdog unconditionally from configuration, so the
-scheduling seam and its configuration pattern exist.
+scheduling seam and its configuration pattern exist. Like every other loop, the
+sweep is holdable and steppable under the pause-and-step convention, so an
+end-to-end scenario can advance it deterministically.
 
 ### Deletion preserves the obligation record
 

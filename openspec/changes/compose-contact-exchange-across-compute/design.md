@@ -15,8 +15,9 @@ mostly not about that domain.
 
 ## Goals / Non-Goals
 
-**Goals.** One implementation of accepted-state interpretation. A second and third
-composing domain. Delivery available wherever the mechanism composes.
+**Goals.** One implementation of accepted-state interpretation. A second composing
+domain (VM), with API credits recorded as out of scope. Delivery available wherever the
+mechanism composes.
 
 **Non-Goals.** No change to the mechanism's registration, option shape, reveal
 surface, or configuration. No persistence dependency in the mechanism kit. No
