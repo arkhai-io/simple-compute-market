@@ -123,13 +123,20 @@ and bare metal gains environment-supplied timeout and interval values.
 
 Rollback is a code revert per step; no persisted state or wire surface changes.
 
+### One kit package per concern cluster
+
+The storefront runtime is four packages — `kit/storefront` (assembly, watchdog,
+Alkahest clients), `kit/negotiation-runtime`, `kit/settlement-runtime`, and
+`kit/capacity-publication` — rather than one. A package per concern cluster keeps
+dependency edges narrow: a domain that has no settlement mechanism does not import
+the settlement runtime, and the composition root names exactly the clusters it
+composes.
+
 ## Open Questions
 
-- **Should the kit-owned runtime be one package or several?** One package per concern
-  cluster keeps dependency edges narrow; one package for the storefront runtime keeps
-  the composition root simple. Deferrable: the first two concerns do not force it, and
-  the answer will be clearer after the negotiation extraction.
-- **Does the VM storefront's size hide concerns worth extracting that the other domains
-  never implemented?** `site_projection_cache`, `multi_registry_client`, `refund`, and
-  `token_transfer` exist only in VM. Deferrable — they may be genuinely VM-specific, and
-  deciding needs a second consumer to compare against.
+None. Whether the VM storefront's size hid concerns worth extracting is answered:
+`multi_registry_client`, `refund`, and `token_transfer` are core-owned;
+`site_projection_cache` and the shell, lifecycle, authentication, and persistence
+residue every storefront duplicates are the next extraction wave
+(`kit-owned-storefront-shell`, `kit-owned-listing-and-fulfillment-lifecycles`,
+`kit-owned-storefront-auth-and-persistence`).
