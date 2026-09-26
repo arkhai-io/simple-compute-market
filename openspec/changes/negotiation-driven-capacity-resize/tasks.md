@@ -23,17 +23,14 @@ replace implementation history," not because any of it remains active.
 - [x] 1.6 Correction (repository-owner review, 2026-07-29): fixed the overclaiming docstrings/design record -- the guard protects top-level fields only, not content nested inside `proposal`; a future revised-terms field is a child of `proposal`, typed as the existing `ProvisionTerms` opaque envelope, never new core-level vocabulary. **This correction's substance (placement + core-vocabulary reasoning) remains valid and is retained in `design.md` for Section 2 planning even though the code it corrected is gone.**
 - [x] 1.7 Full revert (repository-owner direction, 2026-07-29): `model_config = {"extra": "forbid"}` removed from both models; both restored to their pre-Section-1 form; regression test file deleted. `core_storefront` is unchanged from before this change opened.
 
-## 2. Negotiate the capacity shape (planned 2026-09-25)
+## 2. Negotiate the capacity shape
 
-The 2026-08-06 notes that stood here are preserved in `design.md` ("Section 2+"
-and "Section 2 resolutions"); `design.md`'s "Re-grounding (2026-09-25)" records the
-decisions this plan follows. Depends on `capacity-shape-pricing` Sections 1–3 and 5.
-Tasks 2.7–2.11 are the multiplier reinterpretation moved from that change's
-Section 4 (its 4.1–4.5); they are the deployment boundary.
+Depends on `capacity-shape-pricing` Sections 1–3 and 5. Section 2b is the
+deployment boundary.
 
 ### 2a. The revised-terms field
 
-- [ ] 2.1 Re-verify `design.md`'s re-grounding findings against the tree: the hook
+- [ ] 2.1 Re-verify `design.md`'s Context against the tree: the hook
       names in `NegotiationDomainHooks`, that continue/advance carry a typed
       `proposal`, that `hold_ttl_seconds` still defaults to 0, and that
       `build_vm_accepted_artifacts` still derives the order from the listing record.
@@ -57,7 +54,7 @@ Section 4 (its 4.1–4.5); they are the deployment boundary.
       round without a revised shape is evaluated against the previously agreed
       shape.
 
-### 2b. The multiplier (moved from `capacity-shape-pricing` Section 4)
+### 2b. The multiplier
 
 - [ ] 2.7 Reinterpret the negotiated reference quantity as a multiplier in basis
       points over the advertised minimum rate structure, through the
@@ -101,7 +98,7 @@ Per `openspec/README.md#plan-closeout-requirements`. This change's implementatio
 
 - [ ] 3.1 **Comment hygiene.** Run `make check-comment-hygiene`, then direct-read the comments and docstrings this change touches for the fuzzier provenance-narration rule the target cannot catch mechanically.
 - [ ] 3.2 **Import placement.** Review every import this change adds or touches and move it to module level where safe; retain a local import only against an observed circular import or a documented lazy-load reason, verified against the real suite.
-- [ ] 3.3 **Documentation compliance.** Re-check this change's accepted decisions against `openspec/README.md`'s placement rules. Its delta specs were added 2026-09-25; confirm every material decision in `design.md`'s re-grounding has a permanent destination or an explicit temporary, superseded, or rejected classification.
+- [ ] 3.3 **Documentation compliance.** Re-check this change's accepted decisions against `openspec/README.md`'s placement rules; confirm every material decision in `design.md` has a permanent destination or an explicit temporary, superseded, or rejected classification.
 - [ ] 3.4 **Narrative compression.** Compress completed-task notes to final behavior, material validation evidence, unresolved or deferred work, and permanent-documentation destinations, moving durable rationale into `design.md` first.
 - [ ] 3.5 **Roadmap currency.** Update the “Negotiate full compute capability, not GPU count alone” goal's current-state description and gap-to-change mapping in `docs/development/ROADMAP.md`, and name that update in the design-promotion record.
 - [ ] 3.6 **Campaign index currency.** Update this change's row, and its campaign's dependency graph, in `openspec/changes/README.md` to match its state at completion, or record the disposition here if its status and campaign placement are both unchanged.
@@ -122,14 +119,3 @@ Per `openspec/README.md#plan-closeout-requirements`. This change's implementatio
       cannot run for a reason unrelated to this change, record that as an
       explicit blocker naming the cause and the change that owns it, and
       treat the validations it gates as unrun rather than passed.
-
-## Design promotion record
-
-| Accepted decision | Permanent location |
-|---|---|
-| The negotiated quantity is a multiplier in basis points over the listing's minimum rate structure; a seller floor is expressed once; amounts stay exact integers | `openspec/specs/negotiation-protocol/spec.md` — "Rate-multiplier negotiation" |
-| A round after the first may carry a revised capacity shape as a child of `proposal`; each refusal reason is distinct | `openspec/specs/negotiation-protocol/spec.md` — "A round may revise the capacity shape" |
-| The agreed shape, not the listing's, is what the claim reserves | `openspec/specs/vm-storefront-fulfillment/spec.md` — "The agreed shape is reserved" |
-| `resize_reservation`'s first caller is the change that first holds capacity before the shape is final | `negotiation-time-capacity-hold`'s design; recorded here as a handoff |
-| Why the negotiated variable had to change, and the two rejected models | This change's `design.md` |
-| Why the multiplier is basis points and why amounts never pass through a float | This change's `design.md`; the exactness rule itself is `ARCHITECTURE.md`'s settlement vocabulary if not already stated there |

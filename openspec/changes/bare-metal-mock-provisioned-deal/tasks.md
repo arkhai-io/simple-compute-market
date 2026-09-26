@@ -19,13 +19,11 @@ which built the bare-metal end-to-end lane this change's scenario runs on, is co
       and integration suites, and the permanent documentation destinations. Include
       Section 3's migrated requirements in the plan.
 
-## 3. Migrated deal requirements (added 2026-09-26; plan against in 1.5)
+## 3. Buyer-side deal requirements
 
-Verification of requirements migrated from `bare-metal-buyer-domain` and
-`market-platform-bare-metal-10-storefront-composition` when those were archived. Each
-is a scenario assertion in the mock-provisioned deal or a focused test beside it, and
-each has a delta in `specs/buyer-orchestration/spec.md` or
-`specs/test-compatibility/spec.md`.
+Each is a scenario assertion in the mock-provisioned deal or a focused test beside
+it, and each has a delta in `specs/buyer-orchestration/spec.md` or
+`specs/test-compatibility/spec.md`. Planned in 1.5.
 
 - [ ] 3.1 **Demand is exact and buyer-bounded.** `market bare-metal buy` with a
       private key, an `access_ref`, or any site/pool/resource/host/executor/price/
@@ -54,8 +52,7 @@ each has a delta in `specs/buyer-orchestration/spec.md` or
       result reads are idempotent.
 - [ ] 3.6 **Pause survives restart.** An authenticated pause remains active across a
       storefront restart and new negotiations are refused until an authenticated
-      resume. (From `bare-metal-10`'s pre-fulfillment protocol requirement, the only
-      part of it that outlived fulfillment being composed.)
+      resume.
 
 ## 2. Closeout
 

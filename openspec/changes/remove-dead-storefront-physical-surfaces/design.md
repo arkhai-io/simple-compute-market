@@ -1,13 +1,48 @@
 # Design
 
-The evidence that each surface is dead was gathered by the 2026-08-06 Goal 1
-sweep and is recorded, with the docstrings it contradicts, in
-`pools-9-retire-local-physical-authority`'s `design.md` under "Goal 1 sweep
-findings (2026-08-06)": the sections "`compute_allocations` is a dead execution
-ledger", "Physical identity threaded across the service boundary is provably
-`None`", "Two admin endpoints have outlived their only caller", and "Dead
-methods confirmed by exhaustive search". It is not duplicated here. Task 1.1
-re-runs every confirming search before anything is deleted.
+## Context
+
+Verified against the tree at planning time; task 1.1 re-runs every search
+before anything is deleted.
+
+**`compute_allocations` is a dead execution ledger.** `kit/site`'s
+`CapacityReservation` is the authoritative allocation record. The storefront's
+table has no production `INSERT`; the only production write is the
+release-`UPDATE` in `SQLiteClient.apply_resource_transition`, reached through
+an attribute-path special case for `$.allocation_id` and
+`$.compute_allocation_id`. Its readers, `held_gpu_counts` and
+`held_gpu_counts_by_resource`, are exported from `domains/vms/listings` and
+called by nothing. The only `INSERT` in the repository is in
+`test_cli_publish_helpers.py`.
+
+**Physical identity crosses the service boundary as `None`.** `kit/site`
+strips `vm_host` from the reservation it returns, so `reserved.get("vm_host")`
+in `vm_fulfillment_service.py` is always `None`. The value is nonetheless
+threaded through `register_lease`, `schedule_shutdown`, `provision_vm`,
+`_do_provision`, and `_register_vm_lease_with_settings`; the code comment
+records that it was kept only to avoid a signature change. The provisioning
+adapter's own `vm_host` is the execution target and is unrelated.
+
+**Two admin routes have no caller.** `GET`/`PATCH
+/api/v1/admin/portfolio/resources/{resource_id}` and the clients'
+`get_resource`/`patch_resource` have no production caller. `PATCH`'s
+docstring describes a provisioning-service `LeaseWatchdog` call that does not
+exist; the provisioning service's only reverse call is the `capacity_released`
+event, which `release_reservations` handles through `_release_site_ledger_holds`.
+
+**`release_reservations` has a legacy half.** Beside the authoritative
+`_release_site_ledger_holds`, a loop normalizes local `resources` rows that
+the projection no longer feeds. Its docstring describes the storefront as
+clearing bookkeeping "via the provisioning service's LeaseWatchdog".
+
+**Four `SQLiteClient` methods have no caller.** `delete_resource` and
+`ensure_default_resources` have zero references, tests included.
+`host_capacity_remaining` is referenced only by `tests/unit/test_hosts.py`.
+`list_hosts` has no production caller; every other `list_hosts` in the
+repository belongs to the provisioning adapter's host service or its client.
+
+**`resource_count` counts a retiring table.** `SystemService.get_health`
+exposes it on both `HealthResponse` models.
 
 ## Decisions
 
@@ -22,13 +57,12 @@ gains nothing yet.
 
 Both admin resource routes are pre-1.0 and have no caller in the repository.
 A deprecation window would keep alive a `PATCH` whose docstring describes a
-provisioning-service call that no longer exists, which is how these surfaces
-outlived their callers in the first place.
+call that does not exist, which is how these surfaces outlived their callers.
 
 ### No delta specification
 
-The requirement this work serves already exists in draft in
-`pools-9-retire-local-physical-authority` and describes the terminal state,
-which this change reaches only in part. Two changes adding overlapping
-requirements to the same specification would leave archival to reconcile them;
-one owns the requirement and the other removes dead code toward it.
+The requirement this work serves is `pools-9-retire-local-physical-authority`'s
+and describes the terminal state, which this change reaches only in part. Two
+changes adding overlapping requirements to one specification would leave
+archival to reconcile them; one owns the requirement and the other removes dead
+code toward it.

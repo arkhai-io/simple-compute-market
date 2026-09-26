@@ -16,6 +16,28 @@ idempotent teardown, restart recovery). The disposition table is in
 gated by accepted producer contracts" requirement described a producer that no longer
 exists as a separate track. -->
 
+## Disposition of draft requirements
+
+| Draft requirement | Disposition |
+|---|---|
+| Bare-metal buyer commands use the generic role | Generic parts are `buyer-orchestration`'s "Plugin-composed buyer CLI" and "Domain-provided buyer integration"; the provisioning-route refusal scenario → `bare-metal-mock-provisioned-deal`, `buyer-orchestration` delta |
+| Bare-metal demand is exact and buyer-bounded | → `bare-metal-mock-provisioned-deal`, `buyer-orchestration` delta |
+| Bare-metal settlement choice and recovery are immutable | Already promoted: "Bare-metal buyers preserve accepted hosted authority", "Buyer recovery binds public principal", "Hosted buyer action handling" |
+| Public lease result and private access retrieval are separate | Core scenario already promoted ("Accepted buyer retrieves SSH coordinates"); strict-decoding scenarios → `bare-metal-mock-provisioned-deal`, `buyer-orchestration` delta |
+| Buyer teardown is authenticated and idempotent | → `bare-metal-mock-provisioned-deal`, `buyer-orchestration` delta |
+| Bare-metal negotiation preserves demand and authority ownership | → `bare-metal-and-credits-domain-stacks`, `negotiation-protocol` delta |
+| Bare-metal negotiation resume is transcript-exact | → `bare-metal-and-credits-domain-stacks`, `negotiation-protocol` delta (one scenario; the rest is `buyer-orchestration`'s generic resume rule) |
+| Bare-metal buyer ships as a clean wheel contribution | → `bare-metal-and-credits-domain-stacks`, `deployment-state` delta |
+| Buyer configuration separates public routing, profile identity, access input, and mechanism secrets | Already promoted: "Buyer configuration references profiles without secrets", "Bare-metal hosted roles remain independently secret-scoped" |
+| Buyer deployment does not invent a seller topology | → `bare-metal-and-credits-domain-stacks`, `deployment-state` delta |
+| Bare-metal buyer is an independently installable domain plugin | Already promoted generically: "Plugin-composed buyer CLI", "Shipped domains are loaded", "Unsupported contract version is installed" |
+| Bare-metal buyer dependencies point downward and across public clients only | → `bare-metal-and-credits-domain-stacks`, `test-compatibility` delta |
+| Implementation is gated by accepted producer contracts | Dropped: process text about a producer track that no longer exists |
+| Bare-metal buyer passes shared and domain-focused conformance | Shared suite is "Shared domain conformance suite"; strict decoding → `bare-metal-mock-provisioned-deal`; package boundary → `bare-metal-and-credits-domain-stacks` |
+| Recovery matrix proves exact profile, agreement, and operation reuse | Profile rotation is "Buyer recovery binds public principal"; restart-after-settlement and restart-after-teardown → `bare-metal-mock-provisioned-deal`, `test-compatibility` delta |
+| Installed-artifact end-to-end evidence uses real whole-host effects | The protected lane: `bare-metal-and-credits-domain-stacks` 4.1 and `add-bare-metal-hosted-settlement`'s release-qualified evidence; credential isolation is "Bare-metal hosted evidence is attributed by layer" |
+| Prerequisite evidence fails closed | Dropped: process text |
+
 ## Why
 
 The marketplace has a versioned bare-metal schema, publication code, and executor components, but it has no installable buyer domain, so a real buyer cannot discover, negotiate, settle, recover, retrieve trusted whole-host access, or request teardown through the core `market` role. The buyer boundary must be fixed before hosted bare-metal settlement or the multi-domain topology proof can treat a script, direct provisioner call, or test-only client as a buyer.

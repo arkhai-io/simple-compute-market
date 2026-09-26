@@ -143,10 +143,9 @@ None.
 
 ## Non-Goals
 
-- Do not make connectivity terms buyer-specified or negotiated. That was
-  `add-buyer-vm-connectivity-terms`; this change's promoted contract — no relay
-  configuration in the request, no per-request relay selection — superseded it,
-  and it was archived 2026-09-25. What remains of the field is opaque metadata.
+- Do not make connectivity terms buyer-specified or negotiated. The request
+  carries no relay configuration and a relay is never selectable per request;
+  what remains of the field is opaque metadata.
 - Do not write, own, or configure the host's management tunnel. It is
   established when the host is prepared, outside this repository. This change
   only stops the VM path from writing the file that tunnel lives in.
@@ -211,9 +210,8 @@ is rewritten as part of this change rather than left to contradict the code.
 
 - `add-host-ssh-port` — needed to register a host reached through a management
   tunnel. Independent code; either order.
-- `add-buyer-vm-connectivity-terms` — planned to populate this same field from
-  negotiated terms. Archived as superseded 2026-09-25: settling the field's
-  contents here left nothing negotiable in it.
+- `add-buyer-vm-connectivity-terms` (archived, superseded): settling the
+  field's contents here left nothing negotiable in it.
 - The relay itself, its port windows, its token, and the host management
   tunnel are deployment concerns outside this repository. The windows this
   change reads from configuration are chosen there, not here.

@@ -39,8 +39,7 @@ scope ends at the e2e fixtures.
       storefront-local CSV), and remove `storefront.alice.toml`'s
       `use_site_projection_for_listings = false` opt-out with the comment that
       explains it. `pools-9-retire-local-physical-authority` deletes the path
-      she is on and depends on this change for that reason; leaving her there
-      would hand that change a broken scenario.
+      she is on and depends on this change for that reason.
 
 ## 3. Closeout
 

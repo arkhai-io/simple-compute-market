@@ -1,7 +1,7 @@
 # Tasks
 
-Task numbers continue from Section 0 of `pools-9-retire-local-physical-authority`,
-where this work was planned on 2026-08-06 and split out on 2026-09-25.
+Section 0 keeps the numbering it has in `pools-9-retire-local-physical-authority`,
+which points here.
 
 ## 0. Fix a pool's executor at creation
 

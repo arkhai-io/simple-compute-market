@@ -20,6 +20,19 @@ recorded in `market-platform-compute-40-multi-domain-proof` 2.2. The dedicated-v
 shared image decision 5.2 asked for is answered by the tree: a dedicated
 `domains/bare_metal/storefront/Dockerfile` and Helm chart exist. -->
 
+## Disposition of delta requirements
+
+| Delta requirement | Disposition |
+|---|---|
+| Independently deployable bare-metal seller role | Promoted under its own heading in `deployment-state` |
+| Complete bare-metal seller lifecycle | Promoted under its own heading in `storefront-publication` |
+| Deployable bare-metal storefront composition | Promoted under "Role-owned executable composition" ("Seller loads the bare-metal contribution in a shared shell") and the seller-role requirement; the shared-provisioner scenario is `market-platform-compute-40-multi-domain-proof`'s |
+| Truthful pre-fulfillment seller protocol | Superseded by fulfillment being composed; its pause-survives-restart scenario → `bare-metal-mock-provisioned-deal`, `test-compatibility` delta |
+| Trusted bare-metal resource projections | Promoted as `site-capacity`'s "Physical inventory and grouped capacity are separate projections" |
+| Trusted selected-site routing | Promoted as `storefront-publication`'s "Site-pinned claim routing" and "Trusted listing mappings route to one site" |
+
+Open verification: 4.6 → `bare-metal-mock-provisioned-deal` Section 3; 5.4, 5.5, 6.1, 6.3 → `bare-metal-and-credits-domain-stacks` 3.4, 3.5, 5.4; 6.2 → that change's 5.1; 6.4 → `market-platform-compute-40-multi-domain-proof` 2.2.
+
 ## Why
 
 Bare metal already has deterministic domain codecs, publication semantics, and a compute-provisioning adapter, but it has no runnable seller storefront that can negotiate, settle, fulfill, and recover a bare-metal agreement. Compute-40 cannot prove VM and bare-metal storefronts against shared provisioning authorities until bare metal has an equivalent composition root.

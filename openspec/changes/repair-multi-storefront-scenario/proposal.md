@@ -43,15 +43,13 @@ Until this lands, the suite reports four skips where it previously reported four
 silent absences. That is strictly more informative and is the only change to
 current behaviour.
 
-One further consequence, found 2026-09-25: Alice's storefront derives its
-listings from local tables (`storefront.alice.toml` sets
-`use_site_projection_for_listings = false`) precisely because provisioning does
-not trust her and she can load no projection. `pools-9-retire-local-physical-authority`
-deletes that path, so its cutover and its migration of `test_multi_registry.py`
-to provisioning-seeded inventory now depend on this change. When 2.2–2.4 land,
-Alice's inventory should be seeded through provisioning like Bob's and her
-opt-out removed, rather than leaving her on a path that is about to be
-retired.
+Alice's storefront derives its listings from local tables
+(`storefront.alice.toml` sets `use_site_projection_for_listings = false`)
+because provisioning does not trust her and she can load no projection.
+`pools-9-retire-local-physical-authority` deletes that path, so its cutover and
+its migration of `test_multi_registry.py` to provisioning-seeded inventory
+depend on this change. Once provisioning trusts Alice, her inventory is seeded
+through provisioning like Bob's and the opt-out goes.
 
 When it lands, a storefront becomes substitutable in practice: the property
 `docs/development/ROADMAP.md` Goal 1 names as the value of consolidating

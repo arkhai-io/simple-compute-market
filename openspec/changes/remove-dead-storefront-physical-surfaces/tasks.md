@@ -1,16 +1,15 @@
 # Tasks
 
-Task numbers continue from Sections 2 and 3 of
-`pools-9-retire-local-physical-authority`, planned 2026-08-06 and split out
-2026-09-25. Section 1 is this change's own re-verification.
+Sections 2 and 3 keep the numbering they have in
+`pools-9-retire-local-physical-authority`, which points here.
 
 ## 1. Re-confirm
 
-- [ ] 1.1 Re-run the confirming searches recorded in
-      `pools-9-retire-local-physical-authority`'s `design.md`: `compute_allocations`'
-      lack of any production `INSERT`, the four zero-caller methods, the two
-      admin routes' lack of any production caller, and that `reserved.get("vm_host")`
-      is always `None` at the opaque-reservation boundary. Record drift here.
+- [ ] 1.1 Re-run the confirming searches `design.md`'s Context records:
+      `compute_allocations`' lack of any production `INSERT`, the four
+      zero-caller methods, the two admin routes' lack of any production caller,
+      and that `reserved.get("vm_host")` is always `None` at the
+      opaque-reservation boundary. Record drift in `design.md`.
 
 ## 2. Retire `compute_allocations`
 
@@ -52,10 +51,8 @@ All zero-caller. Independent of each other.
       `_do_provision`, and `_register_vm_lease_with_settings`. Leave
       `vm_host` inside the provisioning adapter untouched — it is the real
       execution target there.
-- [ ] 3.6 Amended 2026-09-25: the collision check with
-      `fix-vm-fulfillment-capacity-boundary` is moot; that change is complete.
-      Instead, confirm its committed-claim reads in `fulfill_vm_obligation`
-      are untouched by 3.5.
+- [ ] 3.6 Confirm `fulfill_vm_obligation`'s committed-claim reads are untouched
+      by 3.5.
 - [ ] 3.7 Run the storefront and `core/storefront-client` suites plus the
       client parity contract test.
 
@@ -92,4 +89,4 @@ Per `openspec/README.md#plan-closeout-requirements`.
 | Accepted decision | Permanent location |
 |---|---|
 | The storefront holds no physical-allocation ledger and no physical resource administration surface | Reached in part here; the requirement is `pools-9-retire-local-physical-authority`'s "Storefront holds no physical-resource authority" |
-| Why each surface was dead | `pools-9-retire-local-physical-authority`'s `design.md`, "Goal 1 sweep findings (2026-08-06)" |
+| Why each surface was dead | This change's `design.md`; no permanent home once the surfaces are gone |

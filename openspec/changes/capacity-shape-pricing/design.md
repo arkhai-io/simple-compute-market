@@ -2,31 +2,34 @@
 
 ## Context
 
-Verified by inspection 2026-08-06; re-verified 2026-09-25 (see "Re-grounding" at the
-end); re-verify before implementing.
+Verified against the tree at planning time; re-verify before implementing.
 
-- `kit/policy`'s `NegotiationContext` carries `our_reference_amount: float`.
-  `bisection_middleware` converges by moving one scalar between an opening value and a
-  bound. `listed_price_middleware` and the escrow-kind dispatch operate on the same
-  quantity. The negotiated variable is one number.
+- Negotiation is a kit lifecycle. `kit/negotiation-runtime` owns the round state
+  machine; the VM storefront injects `NegotiationDomainHooks` (`validate_opening`,
+  `evaluate_round`, `reference_amount`, `amount_from_proposal`,
+  `proposal_from_amount`, `place_hold`, …) from
+  `domains/vms/storefront/src/market_storefront/negotiation_runtime.py`. The
+  round-0 shape guard is `_validate_vm_opening`.
+- `kit/policy`'s `NegotiationContext` carries `our_reference_amount` as one
+  integer. `bisection_middleware` converges by moving one scalar between an
+  opening value and a bound; `listed_price_middleware` and the escrow-kind
+  dispatch operate on the same quantity. The negotiated variable is one number.
 - `kit/alkahest`'s `RateValue` carries `field`, `per`, and `value`, and
-  `PER_UNIT_SECONDS` maps only `{"hour": 3600}`. `per` expresses time and nothing else
-  today.
-- `domains/vms/listings/pricing_resolution.py` resolves one `min_price` per GPU model
-  through storefront override → pool hint → config default.
-- *Superseded by `unbacked-listing-publication` (2026-09-23), which rechecks every
-  published source-derived field against the listing's own source; see that change's
-  design. As originally recorded:* `domains/vms/negotiation/policies.py`'s
-  `has_matching_inventory_guard` compares
-  `region` and `gpu_model` by equality. It does not check `gpu_count`.
-- `_place_capacity_hold`'s docstring states the current arrangement is intentional and
-  names its precondition: do not thread a negotiated shape through "without first
-  building seller policy that can price it."
-- `pools-8` already adopted the family-grouped vocabulary for the `gpu` family in
-  `[pricing.defaults.gpu.<model>]`, structurally reserving `.cpu`/`.memory`/`.storage`
-  without implementing them. *Superseded 2026-09-25:* the vocabulary is settled by
-  `VM_CAPABILITY_SCHEMA` (`gpu`, `cpu`, `memory`, `storage`), so the dependency on
-  `structured-capacity-requirements` this bullet recorded is met.
+  `PER_UNIT_SECONDS` maps only `{"hour": 3600}`. `per` expresses time and nothing
+  else.
+- `domains/vms/listings/pricing_resolution.py` resolves one `min_price` per GPU
+  model through the site-scoped storefront override (`kit/pool-overrides`, keyed
+  by site, pool, and offering mode; its VM terms `min_price`, `token`,
+  `max_duration_seconds`, and `sla` are validated by the VM market's contract),
+  then the pool hint, then the configured default. `[pricing.defaults.gpu.<model>]`
+  is the only family the defaults implement.
+- `has_matching_inventory_guard` in `domains/vms/negotiation/policies.py`
+  rechecks every published source-derived field of a listing against the
+  listing's own source, categorical and quantitative alike. It has no notion of
+  a buyer-requested shape because no round can carry one.
+- `kit/capability-shape` defines the family-grouped capability shape and its
+  schema-driven flattening; `VM_CAPABILITY_SCHEMA` fixes the VM families `gpu`,
+  `cpu`, `memory`, `storage`. Listing shapes are digested over their families.
 
 ## Goals / Non-Goals
 
@@ -34,9 +37,9 @@ end); re-verify before implementing.
 replaceable without touching negotiation; every existing negotiation prices as
 before.
 
-**Non-Goals:** protocol changes, the multiplier reinterpretation (moved to
-`negotiation-driven-capacity-resize` 2026-09-25), admissibility, authoritative
-feasibility, hold billing, or any second aggregator implementation.
+**Non-Goals:** protocol changes and the multiplier reinterpretation
+(`negotiation-driven-capacity-resize`), admissibility, authoritative feasibility,
+hold billing, or any second aggregator implementation.
 
 ## Decisions
 
@@ -74,14 +77,24 @@ by construction.
 Recorded explicitly because option 1 will look simpler to anyone who has not traced
 `RateValue`'s reach into settlement.
 
-### The negotiated variable becomes a rate multiplier — moved
+### The negotiated variable is unchanged here
 
-Moved 2026-09-25 to `negotiation-driven-capacity-resize`'s `design.md` ("The
-negotiated variable becomes a rate multiplier"), together with the three models it
-weighed and the consequence for the seller's floor. It is that change's central
-decision because it is one deployment boundary with the revised-terms field. This
-change's structures are designed so that the multiplier can be applied to them, and
-nothing here depends on it having been.
+This change advertises and evaluates a rate structure; it does not change what a
+round negotiates. Making the negotiated quantity a multiplier over the advertised
+minimum is one deployment boundary with the field that lets a round carry a shape,
+so both belong to `negotiation-driven-capacity-resize`. The structures here are
+designed so the multiplier can be applied to them, and nothing here depends on it
+having been: after this change every existing negotiation prices exactly as before.
+
+### The feasibility guard checks a requested shape, ordered before pricing
+
+`has_matching_inventory_guard` answers "is this listing still what it says". The
+predicate this change adds answers "will the seller serve this shape", taking a
+requested shape and the seller's constraints, and runs inside the VM
+`evaluate_round` composition ahead of pricing so a shape the seller will not serve
+is never quoted. Until a round can carry a shape the requested shape is the
+listing's own, so the predicate is exercised by unit tests here and first by a
+counter-offer in `negotiation-driven-capacity-resize`.
 
 ### Independent per-dimension rates are a starting point, and the seam is the aggregator
 
@@ -156,44 +169,9 @@ would silently redefine a catalogue price as a negotiation rate.
    requested shape, ordered before pricing.
 
 Every step is additive; rollback at any point is a code revert with no
-published-state change. The deployment boundary (in-flight negotiations carrying a
-multiplier) moved to `negotiation-driven-capacity-resize` with the reinterpretation.
+published-state change.
 
 ## Open Questions
 
-Both questions this section held — whether the multiplier is bounded below at 1.0,
-and whether the quoted price travels on the wire per round — moved with the
-multiplier to `negotiation-driven-capacity-resize` on 2026-09-25. Nothing here is
-open.
-
-## Re-grounding (2026-09-25)
-
-- **Negotiation is a kit lifecycle.** `kit/negotiation-runtime` owns the round state
-  machine and the VM storefront injects `NegotiationDomainHooks`
-  (`validate_opening`, `evaluate_round`, `reference_amount`,
-  `amount_from_proposal`, `proposal_from_amount`, `place_hold`, …) from
-  `domains/vms/storefront/src/market_storefront/negotiation_runtime.py`.
-  `sync_negotiation.py` and `_reject_unsupported_resource_shape_request` no longer
-  exist; the round-0 shape guard is `_validate_vm_opening`. The feasibility guard
-  this change extends is ordered inside the VM `evaluate_round` composition, ahead
-  of pricing, not in `storefront_round.py`.
-- **The override tier is site-scoped.** `publish-multidimensional-listing-shape`
-  replaced the pool-keyed `compute_capacity_pools` row with `kit/pool-overrides`,
-  keyed by site, pool, and offering mode, whose VM terms (`min_price`, `token`,
-  `max_duration_seconds`, `sla`) are validated by the VM market's contract. A
-  per-dimension rate in the override tier is a widening of that contract
-  (`pools-9-retire-local-physical-authority` retires the legacy row beneath it).
-- **The inventory guard already rechecks every dimension of the listing.**
-  `has_matching_inventory_guard` vetoes a listing whose own source no longer supports
-  it, categorical and quantitative fields alike. What this change adds is a check of
-  a *buyer-requested* shape against the seller's constraints, which has no meaning
-  until `negotiation-driven-capacity-resize` lets a round carry one — so Section 5
-  lands its predicate here and is first exercised there.
-- **The vocabulary landed.** `kit/capability-shape` and `VM_CAPABILITY_SCHEMA` settle
-  the family names; `settle-capacity-claim-vocabulary` (the re-scoped remainder of
-  `structured-capacity-requirements`) owns only wire-name cleanup and is not a
-  dependency.
-- **The multiplier moved.** The decision, its alternatives, and its two open
-  questions now live in `negotiation-driven-capacity-resize`, which shares the
-  deployment boundary with the revised-terms field. This change is additive
-  throughout.
+None. Whether the multiplier is bounded below at 1.0 and whether the quoted price
+travels on the wire are `negotiation-driven-capacity-resize`'s questions.

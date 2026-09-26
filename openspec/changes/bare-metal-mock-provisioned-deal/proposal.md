@@ -57,11 +57,10 @@ None.
   against mock provisioning, distinctly from any protected real-host evidence; a
   bare-metal deal survives a storefront restart after settlement commit and after
   teardown acceptance.
-- `buyer-orchestration` (added 2026-09-26, migrated from the archived
-  `bare-metal-buyer-domain`): the bare-metal demand is exact and buyer-bounded, public
+- `buyer-orchestration`: the bare-metal demand is exact and buyer-bounded, public
   result and evidence are decoded strictly, and teardown is authenticated and
-  idempotent — the buyer-side properties the deal scenario is the natural place to
-  prove, since it is the only bare-metal deal that runs on every pipeline run.
+  idempotent — the buyer-side properties this scenario is the natural place to prove,
+  since it is the only bare-metal deal that runs on every pipeline run.
 
 ## Non-Goals
 
@@ -113,9 +112,6 @@ publication step. Supplies the bare-metal deal-path evidence
 `bare-metal-and-credits-domain-stacks` requires for Goal 4, short of real access, which
 stays with the protected lane.
 
-Owns, since 2026-09-26, the buyer-side deal requirements migrated from the archived
-`bare-metal-buyer-domain` (its demand, result/evidence, and teardown requirements) and
-the integration cases `market-platform-bare-metal-10-storefront-composition` 4.6 left
-open (restart, duplicate call, failure, result security, exactly-once release), as
-Section 3 of `tasks.md`. `bare-metal-and-credits-domain-stacks`' `design.md` records
-where every requirement of both archived changes went.
+Owns the buyer-side deal requirements the scenario proves (Section 3 of
+`tasks.md`): exact demand, strict result and evidence decoding, idempotent teardown,
+and restart recovery at the deal's durable boundaries.

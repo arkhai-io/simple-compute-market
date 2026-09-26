@@ -76,13 +76,12 @@ breaking change for any consumer outside this repository that reads or sends
 published on both lease endpoints, so a consumer can migrate before the
 removal lands.
 
-**Decided 2026-09-25: outright removal, with a version bump of the packages
-whose public models change.** Every API in this repository is pre-1.0 and may
-break in this way; no consumer outside the repository is known to read the
-field; and a one-way alias would keep alive the name the proposal calls wrong
-twice over. `design.md` records the alternative and the revisit trigger. The
-PATCH body refuses the retired field rather than ignoring it, so a caller
-still sending it learns at the boundary rather than by a silent no-op.
+The field is removed outright, with a version bump of the packages whose
+public models change. Every API in this repository is pre-1.0 and may break in
+this way, and no consumer outside the repository reads the field. The PATCH
+body refuses the retired field rather than ignoring it, so a caller still
+sending it learns at the boundary rather than by a silent no-op. `design.md`
+records the alternative and its revisit trigger.
 
 ## Permanent documentation impact
 

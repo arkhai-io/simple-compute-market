@@ -9,10 +9,9 @@
       contract change into an accident. `release_job_id` is already published
       on both lease endpoints, so no consumer is blocked on the removal
       itself.
-      **Decided 2026-09-25 (repository owner): outright removal with a version
-      bump.** Every API here is pre-1.0; the PATCH body refuses the retired
-      field rather than ignoring it. Alternative and revisit trigger recorded
-      in `design.md`.
+      **Decided: outright removal with a version bump.** Every API here is
+      pre-1.0; the PATCH body refuses the retired field rather than ignoring it.
+      Alternative and revisit trigger recorded in `design.md`.
 
 ## 2. Retire the ledger mirror
 

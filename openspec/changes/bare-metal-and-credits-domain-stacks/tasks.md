@@ -30,20 +30,18 @@ remove the API-credit copies; it will not recreate an absent extraction locally.
 
 - [x] 3.1 Add the stack definition, following the topology conventions
       `domains/vms/compose.yml` and `domains/apicredits/compose.yml` already use.
-      **Delivered** (recorded 2026-09-26): `domains/bare_metal/compose.yml`,
-      `compose.bare-metal.yml`, and `compose.bare-metal-local.yml` with
-      `dev-env/bare-metal/`, standing up the bare-metal end-to-end lane
-      `bare-metal-publication-reads-pool-declarations` runs on.
+      Delivered: `domains/bare_metal/compose.yml`, `compose.bare-metal.yml`, and
+      `compose.bare-metal-local.yml` with `dev-env/bare-metal/`, standing up the
+      bare-metal end-to-end lane.
 - [ ] 3.2 Write it so the deployment shape can change — standalone service or a second
       contract inside a shared storefront process — without rewriting the scenarios.
 - [ ] 3.3 Update `docs/bare-metal-seller-quickstart.md` with standing the stack up.
 - [ ] 3.4 Confirm the Helm render tests (`helm/charts/bare-metal-storefront/tests/`)
       prove VM-only, bare-metal-only, and combined seller profiles contain no waits or
       references to disabled storefront roles, and add the missing profile if one is.
-      (From `market-platform-bare-metal-10-storefront-composition` 5.4.)
 - [ ] 3.5 Add operator configuration examples exposing separately composed VM and
       bare-metal roles through explicit URLs or gateway paths without sharing writable
-      state. (From `market-platform-bare-metal-10-storefront-composition` 5.5.)
+      state.
 
 ## 4. Bare-metal deal path
 
@@ -66,11 +64,9 @@ lane needs.
 - [x] 4.3 Decide and record whether bare-metal teardown semantics differ from VM's, since
       whole-machine release is not VM destruction.
 
-## 4a. Bare metal on the kit (moved here 2026-09-26)
+## 4a. Bare metal on the kit
 
-These were `multi-domain-storefront-composition`'s external-producer gates 1.3, 3.7,
-5.3, 5.5, 7.2, and 7.3. The contribution they waited on is merged; what remains is
-composition. `design.md`'s "What bare metal still copies" names the files.
+`design.md`'s Context names the files that reimplement what the kit owns.
 
 - [ ] 4a.1 Re-verify that `negotiation_service.py`, `negotiation.py`, the
       `/api/v1/negotiate/*` and listing routes in `api.py`, and their thread
@@ -99,11 +95,10 @@ composition. `design.md`'s "What bare metal still copies" names the files.
       demand field; terms mismatch refusal; the bare-metal e2e lane's negotiation
       stages pass unchanged through the shared routes.
 
-## 4b. Migrated seller and buyer requirements (verification)
+## 4b. Bare-metal buyer requirements (verification)
 
-Each task verifies a requirement migrated from an archived change against the
-delivered packages, and each has a delta in `specs/`. `design.md`'s "Migrated
-requirements" table records the source.
+Each task verifies one requirement against the delivered packages and has a delta
+in `specs/`; `design.md`'s "Requirement ownership" says why these are here.
 
 - [ ] 4b.1 **Opening carries only buyer-owned demand.** Verified by 4a.2's refusal
       tests and one e2e stage proposing an `access_ref`; both parties derive identical
@@ -148,7 +143,6 @@ evidence. Task 5.3 is intentionally unrun in this delegated lane.
 - [ ] 5.4 Run the bare-metal domain, publication, storefront unit/integration, shared
       core storefront, compute contract, and site capacity suites, and rebuild the
       affected wheels/images with packaging, import-boundary, and migration checks.
-      (From `market-platform-bare-metal-10-storefront-composition` 6.1 and 6.3.)
 
 ## 6. Closeout
 
@@ -200,4 +194,4 @@ Per `openspec/README.md#plan-closeout-requirements`.
 | A bare-metal opening carries only buyer-owned demand; resume is transcript-exact | `openspec/specs/negotiation-protocol/spec.md` — "Bare-metal negotiation preserves demand and authority ownership" |
 | The bare-metal buyer ships as a clean wheel and addresses independently configured authorities | `openspec/specs/deployment-state/spec.md` — "Bare-metal buyer ships as a clean wheel contribution" |
 | The bare-metal buyer wheel's dependencies point downward and across public clients only | `openspec/specs/test-compatibility/spec.md` — "Bare-metal buyer dependencies point downward" |
-| Composing bare metal onto the kit is composition, not extraction; where each archived bare-metal requirement went | This change's `design.md` |
+| Composing bare metal onto the kit is composition, not extraction; how bare-metal requirements are split with the mock-provisioned deal | This change's `design.md` |

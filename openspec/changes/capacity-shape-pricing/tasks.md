@@ -1,8 +1,7 @@
 # Implementation Tasks
 
 Sections sized to land in roughly a day each. Every section is additive and deployable
-alone. Section 4 moved to `negotiation-driven-capacity-resize` on 2026-09-25 with the
-multiplier decision; its number is kept so the two plans read the same way.
+alone. Section 4 is `negotiation-driven-capacity-resize`'s; its number is kept.
 
 ## 1. Rate structure and evaluation
 
@@ -31,8 +30,7 @@ multiplier decision; its number is kept so the two plans read the same way.
       rates, resolved through the existing storefront-override → pool-hint →
       config-default precedence independently per dimension.
 - [ ] 2.2 Extend `[pricing.defaults.*]` settings and the pool pricing hint beyond the
-      `gpu` family, using `VM_CAPABILITY_SCHEMA`'s family names. (Amended 2026-09-25:
-      the vocabulary this task waited on has landed.)
+      `gpu` family, using `VM_CAPABILITY_SCHEMA`'s family names.
 - [ ] 2.2a Extend `kit/pool-overrides`' VM terms contract with the per-dimension
       rate fields, so the site-scoped override is the top tier for rates as it is for
       `min_price`; a rate an override states for a family the schema does not know is
@@ -54,11 +52,8 @@ multiplier decision; its number is kept so the two plans read the same way.
 
 ## 4. Negotiation reinterpretation
 
-Moved 2026-09-25 to
-[`negotiation-driven-capacity-resize`](../negotiation-driven-capacity-resize/tasks.md)
-Section 2, where tasks 4.1–4.5 continue under new numbers. The multiplier and the
-revised-terms field are one deployment boundary and belong to the change that defines
-the round payload.
+Owned by [`negotiation-driven-capacity-resize`](../negotiation-driven-capacity-resize/tasks.md)
+Section 2b: the multiplier and the revised-terms field are one deployment boundary.
 
 ## 5. Seller feasibility guard
 
@@ -68,12 +63,11 @@ the round payload.
       every published source-derived field — categorical and quantitative — against
       the listing's own source. What remains here is checking a *buyer-requested*
       shape, once shapes are negotiable, rather than the listing's advertised one.
-      Re-verify the guard's state before planning this task.
-      *Re-grounded 2026-09-25:* implement the predicate here, taking a requested shape
-      and the seller's constraints, and wire it into the VM `evaluate_round`
-      composition in `negotiation_runtime.py` ahead of pricing. Until
-      `negotiation-driven-capacity-resize` lets a round carry a shape, the requested
-      shape is the listing's own and the predicate is exercised by unit tests only.
+      Implement the predicate here, taking a requested shape and the seller's
+      constraints, and wire it into the VM `evaluate_round` composition in
+      `negotiation_runtime.py` ahead of pricing. Until a round can carry a shape the
+      requested shape is the listing's own and the predicate is exercised by unit
+      tests only.
 - [ ] 5.2 Order the guard before pricing inside the VM `evaluate_round` composition,
       so a shape the seller will not serve is never quoted.
 - [ ] 5.3 Focused tests: quantitative constraint exceeded declines without a quote;

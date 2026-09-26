@@ -14,27 +14,24 @@ the VM adapter's lease PATCH body, and on `market_storefront`'s
 `fix-vm-fulfillment-capacity-boundary`, task 10.5) was withdrawn: it was a
 public-model change, not a column drop.
 
-Both lease endpoints now publish `release_job_id`, so nothing a caller could
-learn from the mirror is unavailable without it. Re-confirmed 2026-09-25: the
-ledger still writes the mirror and the three fallbacks are still present.
+Both lease endpoints publish `release_job_id`, so nothing a caller could learn
+from the mirror is unavailable without it.
 
 ## Decisions
 
 ### Outright removal with a version bump
 
-Decided 2026-09-25. The field is removed from `LeaseResponse`, the lease
-PATCH body, and the storefront's admin models in one step, and the packages
-whose public models change (`vm_provisioning_operator` at least; the VM
-adapter and the storefront if their published models are versioned
-separately) take a version bump.
+The field is removed from `LeaseResponse`, the lease PATCH body, and the
+storefront's admin models in one step, and the packages whose public models
+change (`vm_provisioning_operator` at least; the VM adapter and the storefront
+if their published models are versioned separately) take a version bump.
 
-The alternative was the one-way alias `settle-listing-vocabulary` used for
-the deprecated `listing_mode` cardinality name: accept the old field for a
-window while publishing only the new one. Rejected here because every API in
-the repository is pre-1.0 and is allowed to break, no consumer outside the
-repository is known to read the field, and the alias would keep the wrong
-name — it last stored a fulfillment id, not a VM-removal job id — on a table
-bare-metal pools share.
+The alternative is a one-way alias, as the deprecated `listing_mode`
+cardinality name has: accept the old field for a window while publishing only
+the new one. Rejected because every API in the repository is pre-1.0 and is
+allowed to break, no consumer outside the repository reads the field, and the
+alias would keep the wrong name — it last stored a fulfillment id, not a
+VM-removal job id — on a table bare-metal pools share.
 
 **Revisit trigger:** a consumer outside the repository reporting that it reads
 `vm_remove_job_id` from a lease. That reopens the alias, applied to the

@@ -20,14 +20,11 @@ Verified by inspection 2026-08-06; re-verify before implementing.
   physical accounting" is normative.
 - `compute_provisioning_service.container` composes `vm_adapter_bundle` and
   `bare_metal_adapter_bundle` into one service through `compose_adapter_bundles`.
-- Two implicit `"vm"` executor fallbacks exist — the ledger's inference from a `vm_host`
-  attribute, and `deal_event_sink`'s `or "vm"`. Both are removed by
-  `pool-declared-offering-modes`. (*2026-09-26:* confirmed removed; the sink now
-  refuses a capacity release without `offering_mode`.)
-- No end-to-end scenario references bare metal or API credits, and none exercises more
-  than one authority. Every proven deal path is a single-site VM deal. (*2026-09-26:*
-  `scenarios/bare_metal/` and the API-credits path exist; none exercises more than
-  one authority, which remains this change's dimension.)
+- No implicit `"vm"` executor fallback remains: the ledger no longer infers an
+  executor from a `vm_host` attribute, and `deal_event_sink` refuses a capacity
+  release without `offering_mode`.
+- Bare-metal and API-credits deal scenarios exist; none exercises more than one
+  authority, which is this change's dimension.
 
 ## Goals / Non-Goals
 

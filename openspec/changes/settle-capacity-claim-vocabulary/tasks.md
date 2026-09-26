@@ -1,7 +1,5 @@
 # Tasks
 
-Planned 2026-09-25, on the re-scoped remainder of `structured-capacity-requirements`.
-
 ## 1. Rename the storefront claim key
 
 - [ ] 1.1 Re-verify the surfaces `proposal.md` names still carry the

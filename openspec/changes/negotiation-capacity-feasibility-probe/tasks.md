@@ -2,7 +2,7 @@
 
 ## 1. Verify the requested shape during negotiation
 
-- [ ] 1.1 Re-verify `design.md`'s Context and Re-grounding findings, particularly that
+- [ ] 1.1 Re-verify `design.md`'s Context, particularly that
       `_place_capacity_hold` is still reached only through the kit's `place_hold`
       hook on acceptance and that `probe()` still shares `_find_candidate` with
       `reserve()`.

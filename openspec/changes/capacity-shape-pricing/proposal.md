@@ -39,25 +39,23 @@ and it is the prerequisite the two negotiation changes are parked on.
 - Advertise the listing's minimum rate structure, and keep evaluation callable
   outside the negotiation path so a quote for any admissible shape can be produced
   by anyone holding the structure and the shape.
-- Extend the seller's feasibility guard to a quantitative check across every
-  dimension of a *buyer-requested* shape, ordered before pricing, so a shape the
-  seller will not serve is never quoted. (Until 2026-09-25 this bullet described the
-  guard as categorical-only; `unbacked-listing-publication` already made it recheck
-  every source-derived field of the listing's own shape.)
+- Add a seller feasibility check of a *buyer-requested* shape across every
+  dimension, ordered before pricing, so a shape the seller will not serve is never
+  quoted. (The existing inventory guard rechecks the listing's own shape against
+  its source; it has no notion of a requested shape.)
 - Resolve rates through the same three-tier precedence `pools-8` established for
   per-GPU-model pricing — the site-scoped storefront pool override, the pool hint,
   the configured default — extended beyond the `gpu` family. The override tier is
   `kit/pool-overrides`' VM terms contract, which gains the per-dimension rate
   fields.
 
-**Moved 2026-09-25 to `negotiation-driven-capacity-resize`:** changing what is
-negotiated. The negotiated variable becoming a rate multiplier over the listing
-minimum, the reinterpretation of the kit's amount hooks, and the audit of every
-consumer that assumed an absolute amount are one deployment boundary with the
-revised-terms field that carries a shape change between rounds, so they belong to
-the change that defines that round payload. This change stays additive: after it
-lands, every listing advertises a rate structure and every existing negotiation
-prices exactly as before.
+This change does not change what is negotiated. Making the negotiated variable a
+rate multiplier over the listing minimum, reinterpreting the kit's amount hooks,
+and auditing every consumer that assumed an absolute amount are one deployment
+boundary with the revised-terms field that carries a shape change between rounds,
+so they belong to `negotiation-driven-capacity-resize`. After this change lands,
+every listing advertises a rate structure and every existing negotiation prices
+exactly as before.
 
 ## Capabilities
 
@@ -71,8 +69,7 @@ None.
   structure resolvable to a price for any admissible shape, rather than one price per
   GPU model; rates resolve through the existing three-tier precedence per dimension.
 - `negotiation-protocol`: a seller policy evaluates a requested shape's feasibility
-  before pricing it. (The rate-multiplier requirement this change carried until
-  2026-09-25 moved to `negotiation-driven-capacity-resize`.)
+  before pricing it.
 
 ## Non-Goals
 
@@ -93,7 +90,7 @@ None.
 
 ## Impact
 
-- Affected code (re-inventoried 2026-09-25): `domains/vms/listings/pricing_resolution.py`
+- Affected code: `domains/vms/listings/pricing_resolution.py`
   and `listing_shapes.py`, `domains/vms/negotiation/policies.py` (the inventory
   guard), `kit/alkahest`'s `RateValue` handling, `kit/pool-overrides`' VM terms
   contract (the override tier), the storefront's `[pricing.defaults.*]` settings
@@ -122,20 +119,17 @@ None.
 - A seller policy evaluates feasibility before pricing —
   `openspec/specs/negotiation-protocol/spec.md`.
 - Why the rate lives inside the family it prices, and why evaluation goes through a
-  replaceable aggregator — this change's `design.md`. (The multiplier rationale moved
-  with the decision to `negotiation-driven-capacity-resize`.)
+  replaceable aggregator — this change's `design.md`.
 
 ## Dependencies and Related Changes
 
-- Depends on `publish-multidimensional-listing-shape` (archived 2026-09-25): a rate
-  per dimension is only meaningful for dimensions a listing publishes, and that change
+- Depends on `publish-multidimensional-listing-shape` (archived): a rate per
+  dimension is only meaningful for dimensions a listing publishes, and that change
   delivered the listing shape, `kit/capability-shape`, and the site-scoped pool
-  override store this change's override tier is.
-- No longer depends on `structured-capacity-requirements` (2026-09-25). The
-  family-grouped vocabulary the rate structure nests inside is `VM_CAPABILITY_SCHEMA`;
-  the remainder of that change is now `settle-capacity-claim-vocabulary`, a wire-name
-  cleanup this change does not wait on. `[pricing.defaults.<family>]` follows the
-  schema's family names (`gpu`, `cpu`, `memory`, `storage`).
+  override store this change's override tier is. `[pricing.defaults.<family>]`
+  follows `VM_CAPABILITY_SCHEMA`'s family names (`gpu`, `cpu`, `memory`, `storage`).
+- Independent of `settle-capacity-claim-vocabulary`, whose wire-name cleanup this
+  change does not wait on.
 - Unblocks `negotiation-driven-capacity-resize`, which owns the multiplier
   reinterpretation, the revised-terms field, and the resize wiring, and consumes this
   change's rate structure and evaluation.

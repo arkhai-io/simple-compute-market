@@ -9,18 +9,11 @@ one request. A member admitted as VM-deliverable becomes bare-metal-deliverable
 without any check that the host, the reservation, or the obligation it backs can
 survive that.
 
-The same argument that made a pool's backing declaration immutable at creation
-(`pool-declared-advertisement-and-backing`, archived 2026-09-22) applies to its
-provider: both are the routing context every member inherits, and both change what
-an existing reservation's authority means. `ResourcePoolService` already refuses a
+A pool's backing declaration is immutable at creation for the same reason:
+both are the routing context every member inherits, and both change what an
+existing reservation's authority means. `ResourcePoolService` already refuses a
 backing change through `_require_backing_unchanged`; the provider has no such
 guard.
-
-This was Section 0 of `pools-9-retire-local-physical-authority`, added there on
-2026-09-09 from Goal 7's design review because that campaign owned the
-provisioning-side authority rules. It was split out on 2026-09-25: it is a
-provisioning-side rule with no storefront surface, it lands independently of the
-storefront cutover, and that cutover's start trigger is undefined by design.
 
 ## What Changes
 
@@ -30,10 +23,9 @@ storefront cutover, and that cutover's start trigger is undefined by design.
 - Provider configuration stays replaceable and patchable within the declared
   provider.
 - Moving inventory to another executor is a second pool declaring the intended
-  provider plus member migration. That path depends on
-  `capacity-resource-administration`'s drain invariant (archived 2026-09-21): a
-  reservation's pool is resolved through the resource's current `pool_id`, so a
-  member may not move under a live obligation.
+  provider plus member migration. The drain invariant already forbids a member
+  from leaving a pool under a live obligation, which is what makes that path
+  safe.
 
 ## Capabilities
 
@@ -58,7 +50,7 @@ None.
 - `kit/resource-pools`' `ResourcePoolService.replace_pool` and `update_pool`,
   and the pool administration routes and canonical client that reach them.
 - No wire shape changes; a request that previously succeeded by swapping the
-  provider now fails with the same refusal shape a backing change produces.
+  provider fails with the same refusal shape a backing change produces.
 - No fixture or e2e setup is known to rely on an in-place swap; task 0.5
   confirms.
 
@@ -78,9 +70,8 @@ None.
 
 ## Dependencies and Related Changes
 
-- Split out of `pools-9-retire-local-physical-authority` on 2026-09-25, whose
-  `design.md` records the origin. No ordering dependency in either direction.
-- Depends on `capacity-resource-administration`'s drain invariant, already
-  landed, for the migration path this rule makes the only one.
-- Follows the refusal pattern `pool-declared-advertisement-and-backing`
-  established for the immutable backing declaration.
+- Depends on the drain invariant `capacity-resource-administration` (archived)
+  established, for the migration path this rule makes the only one.
+- Follows the refusal pattern the immutable backing declaration established in
+  `ResourcePoolService`.
+- Independent of `pools-9-retire-local-physical-authority`; either order.

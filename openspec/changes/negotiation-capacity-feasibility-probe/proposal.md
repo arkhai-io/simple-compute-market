@@ -12,8 +12,8 @@ both parties have committed, which is the worst point to discover it.
 `kit/site` already has the primitive: `probe()` runs the same matching logic as
 `reserve()` and consumes nothing. `SiteCapacityClient.probe` and the aggregate client
 expose it, and `vm_job_spec_service` already calls it in the fulfillment path. Nothing
-calls it during negotiation, which now runs as `kit/negotiation-runtime`'s lifecycle
-with the VM domain's hooks injected (re-grounded 2026-09-25).
+calls it during negotiation, which runs as `kit/negotiation-runtime`'s lifecycle
+with the VM domain's hooks injected.
 
 This change is a shared prerequisite. Multidimensional shape negotiation needs it to
 distinguish a shape the seller will not sell from one the site cannot currently serve,
@@ -64,7 +64,7 @@ None.
 
 ## Impact
 
-- Affected code (re-inventoried 2026-09-25): `kit/negotiation-runtime`'s
+- Affected code: `kit/negotiation-runtime`'s
   `NegotiationDomainHooks` if the probe is a distinct hook,
   `domains/vms/storefront/src/market_storefront/negotiation_runtime.py` (the VM
   `evaluate_round` composition), `domains/vms/negotiation/policies.py` (outcome

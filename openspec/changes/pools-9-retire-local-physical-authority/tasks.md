@@ -1,100 +1,65 @@
 # Tasks
 
-## Status: planned 2026-08-06; re-grounded 2026-09-25
+## Status: planned
 
-Re-grounded against the current tree on 2026-09-25 (see `design.md`'s
-"Re-grounding (2026-09-25)"). Section 0 moved to
-`fix-resource-pool-provider-at-creation`; Sections 2 and 3 moved to
-`remove-dead-storefront-physical-surfaces`; Section 1's endpoint tasks were
-struck because `publish-multidimensional-listing-shape` delivered the write
-path; Section 4 gained the legacy-tier retirement and a dependency on
-`repair-multi-storefront-scenario`. Section numbers are kept so the
-2026-08-06 plan and this one read the same way.
+Section numbering is kept from the original plan. Section 0 is
+`fix-resource-pool-provider-at-creation`'s; Sections 2 and 3 are
+`remove-dead-storefront-physical-surfaces`'; Section 1's endpoint tasks are
+struck because `kit/pool-overrides` is the write path. Resolved planning
+questions, kept as record:
 
-This change's original `tasks.md` was a discuss-phase stub listing four
-questions owed before a plan could be written. Three are now resolved; the
-fourth remains open by design. Preserved here rather than deleted, per
-`AGENTS.md`'s rule to amend rather than replace planning history:
-
-1. **Re-confirm `resources`' commercial columns are dead in the default code
-   path** — resolved 2026-08-06. They are read only by
-   `_project_legacy_resource_row`, reached only through
-   `_pool_rows_from_legacy_resources`, which `_pool_rows_from_local_tables`
-   selects only when `compute_capacity_pools` or `compute_pool_members` does
-   not exist. Migrations create both unconditionally, so no migrated
-   deployment reaches it. Task 1.1 re-runs this check at implementation time.
-2. **Re-confirm the CSV-dependent test files** — resolved 2026-08-06. The six
-   named scenario files are still accurate, and a seventh was found:
-   `e2e-tests/tests/smoke/test_storefront_smoke.py`.
-3. **Does the pool-commercial-metadata endpoint need pool creation?** —
-   resolved 2026-08-06 (repository owner). Neither creation nor edit-only: an
-   upsert of an override row against a pool that already exists in the
-   projection. See `design.md`'s "The open scope question from this document
-   is now answered."
-4. **The trigger for starting this change** — still open, deliberately. What
-   is new is a hard technical gate that did not previously exist: this change
-   now depends on `capacity-resource-administration`. That gate is necessary,
-   not sufficient; the deployment-bake judgment `pools-8` declined to specify
-   remains a repository-owner decision. (2026-09-25: the gate is met, that
-   change archived 2026-09-21. A second gate was found the same day:
-   `repair-multi-storefront-scenario`, for Section 4 and task 5.6.)
+1. `resources`' commercial columns are dead in the default code path: read only
+   by `_project_legacy_resource_row`, reached only when `compute_capacity_pools`
+   or `compute_pool_members` is absent, which no migrated deployment is. Task
+   1.1 re-runs the check.
+2. Seven test files depend on CSV import (six VM scenarios plus
+   `e2e-tests/tests/smoke/test_storefront_smoke.py`).
+3. Per-pool commercial values are an upsert against a pool that exists in the
+   projection; the site-scoped store is that upsert.
+4. The start trigger for the cutover remains a repository-owner decision.
+   Technical gates: `capacity-resource-administration` (met) and
+   `repair-multi-storefront-scenario` (Section 4 and task 5.6).
 
 Sections are ordered so every removal is preceded by its replacement, and
-sized to land independently in roughly a day each. Section 1 is a
-re-verification pass. Section 4 is the point of no config-flip return.
+sized to land independently in roughly a day each. Section 4 is the point of
+no config-flip return.
 
 ## 0. Fix a pool's executor at creation
 
-Moved 2026-09-25 to
-[`fix-resource-pool-provider-at-creation`](../fix-resource-pool-provider-at-creation/tasks.md),
-where tasks 0.1–0.6 continue under the same numbers. A provisioning-side
-authority rule with no dependency on this cutover.
+Owned by [`fix-resource-pool-provider-at-creation`](../fix-resource-pool-provider-at-creation/tasks.md),
+tasks 0.1–0.6 under the same numbers.
 
 ## 1. Re-ground
 
-Struck 2026-09-25: tasks 1.2–1.5, which built the `PUT`/`PATCH` override
-endpoint, its client methods, and their tests. `publish-multidimensional-listing-shape`
-delivered that write path as `kit/pool-overrides` with its own routes, clients,
-CLI, and precedence contract; nothing here is owed for it. The section title
-and 1.1 keep their numbers.
+Tasks 1.2–1.5 are struck: `kit/pool-overrides` is the per-pool override write
+path, with its own routes, clients, CLI, and precedence contract.
 
-- [ ] 1.1 Re-run the confirming searches this change's `design.md` records,
-      rather than trusting its 2026-08-06 findings: the legacy-resources
-      fallback's reachability and the CSV-dependent test file set. (The
-      zero-caller methods and `compute_allocations` are
-      `remove-dead-storefront-physical-surfaces`' to re-confirm.) Record drift
-      in `design.md`.
+- [ ] 1.1 Re-run the confirming searches `design.md`'s Context records: the
+      legacy-resources fallback's reachability and the CSV-dependent test file
+      set. Record drift in `design.md`.
 - [x] ~~1.2 Add `PUT`/`PATCH` admin routes against `compute_capacity_pools`'
-      surviving commercial columns.~~ Struck 2026-09-25: delivered as
-      `kit/pool-overrides`' site-scoped routes.
+      surviving commercial columns.~~ Struck: `kit/pool-overrides`' routes.
 - [x] ~~1.3 Confirm the absent-override-row path needs no new handling.~~
-      Struck 2026-09-25: normative in "Storefront pool overrides are
-      site-scoped and durable"'s per-field fall-through.
+      Struck: per-field fall-through is normative for the store.
 - [x] ~~1.4 Add the corresponding client methods to both storefront clients.~~
-      Struck 2026-09-25: delivered with the store's typed clients.
-- [x] ~~1.5 Focused tests for the endpoint.~~ Struck 2026-09-25: delivered
-      with the store.
+      Struck: the store's typed clients.
+- [x] ~~1.5 Focused tests for the endpoint.~~ Struck: delivered with the store.
 
 ## 2. Retire `compute_allocations`
 
-Moved 2026-09-25 to
-[`remove-dead-storefront-physical-surfaces`](../remove-dead-storefront-physical-surfaces/tasks.md),
-where tasks 2.1–2.5 continue under the same numbers. Independent of the
-projection cutover.
+Owned by [`remove-dead-storefront-physical-surfaces`](../remove-dead-storefront-physical-surfaces/tasks.md),
+tasks 2.1–2.5 under the same numbers.
 
 ## 3. Remove dead physical surfaces
 
-Moved 2026-09-25 to the same change, tasks 3.1–3.7 under the same numbers.
-Task 3.6's collision warning with `fix-vm-fulfillment-capacity-boundary` is
-moot: that change is complete and awaiting archival.
+Owned by the same change, tasks 3.1–3.7 under the same numbers.
 
 ## 4. Retire the local-table listing path
 
-The cutover. Depends on Section 1, on `capacity-resource-administration`
-(landed 2026-09-21), and on `repair-multi-storefront-scenario`: the
-two-storefront scenario's second storefront derives from local tables because
-provisioning does not trust it, and deleting that path before provisioning
-can trust two principals leaves her with no listing source.
+The cutover. Depends on Section 1 and on `repair-multi-storefront-scenario`:
+the two-storefront scenario's second storefront derives from local tables
+because provisioning does not trust it, and deleting that path before
+provisioning can trust two principals leaves it with no listing source.
 
 - [ ] 4.1 Delete `_pool_rows_from_local_tables`, `_pool_rows_from_capacity_pools`,
       `_pool_rows_from_legacy_resources`, `_project_legacy_resource_row`, and
@@ -103,16 +68,13 @@ can trust two principals leaves her with no listing source.
 - [ ] 4.2 Delete `use_site_projection_for_listings` and its reads in
       `capacity_client.py` and `listing_sources.py`, plus its `settings.toml`
       entry, the `storefront.alice.toml` opt-out, and the config-loader tests.
-      (Amended 2026-09-25: `cli_publish.py` no longer reads it.)
 - [ ] 4.3 Retire the legacy home-site override tier: delete
       `_local_pool_pricing`, the legacy arm of `_tier()` and the `region`
       legacy fallback beside it, the `legacy_overrides_in_effect` derivation
       report, and its system-status field; drop the `inactive` override
       state and its local-table judgment from the pool-override status
       provider. No values are carried into the site-scoped store (decision in
-      `design.md`). (Rewritten 2026-09-25; it previously said to keep
-      `_local_pool_pricing` as the surviving override tier, which
-      `kit/pool-overrides` has replaced.)
+      `design.md`).
 - [ ] 4.3a Focused tests: a home-site pool with a legacy row and no
       site-scoped override resolves each commercial field from the pool hint
       then the configured default; system status no longer reports a legacy
@@ -145,8 +107,6 @@ can trust two principals leaves her with no listing source.
 - [ ] 5.3 Remove the CLI surface: `cli_portfolio.py` and its `add_typer`
       registration in `cli.py`, and
       `domains/vms/storefront/scripts/import_resources_csv.py`.
-      (Amended 2026-09-25: `cli_publish.py`'s `_import_csv` was removed by
-      `unbacked-listing-publication`.)
 - [ ] 5.4 Remove the deployment wiring: Helm `_helpers.tpl` (both sites),
       `secrets.yaml`'s `resourcesCsvInline`, `values.yaml`'s `--set-file`
       guidance, `compose/seller.yml`'s mount and `SELLER_RESOURCES_CSV`, and
@@ -166,9 +126,9 @@ can trust two principals leaves her with no listing source.
 - [ ] 5.6 Migrate the seven CSV-dependent test files to
       projection/provisioning-service seeding: the six VM scenario files
       named in `proposal.md` plus `e2e-tests/tests/smoke/test_storefront_smoke.py`.
-      `test_multi_registry.py`'s Alice stages (02b, 06b, 06c) wait on
-      `repair-multi-storefront-scenario`; once provisioning trusts her
-      principal, her inventory is seeded through provisioning like Bob's and
+      `test_multi_registry.py`'s second-storefront stages (02b, 06b, 06c) wait
+      on `repair-multi-storefront-scenario`; once provisioning trusts that
+      principal, its inventory is seeded through provisioning and
       `storefront.alice.toml`'s opt-out goes with the flag in 4.2.
 
 ## 6. Freeze migration and validation
@@ -202,14 +162,12 @@ Per `openspec/README.md#plan-closeout-requirements`.
       `openspec/README.md`'s placement rules. Confirm the legacy tier's
       retirement landed as the replacement of `storefront-publication`'s
       site-scoped override requirement and nowhere in
-      `resource-pool-management` — see this change's `design.md` correction.
+      `resource-pool-management` — see `design.md`, "Commercial rows are
+      storefront-owned".
 - [ ] 7.4 **Narrative compression.** Compress completed-task notes to final
-      behavior, validation evidence, and promotion destinations; keep the
-      sweep findings in `design.md`.
+      behavior, validation evidence, and promotion destinations.
 - [ ] 7.5 **Roadmap currency.** Update Goal 1's current-state description and
-      gap mapping in `docs/development/ROADMAP.md`. (Amended 2026-09-25:
-      `add-development-roadmap` landed 2026-09-04; the condition it carried
-      is gone.)
+      gap mapping in `docs/development/ROADMAP.md`.
 - [ ] 7.6 **Promotion.** Complete the design-promotion record below. Widen
       `openspec/specs/storefront-publication/spec.md`'s rule that an unbacked
       listing is derived only from the site projection to every listing, and correct
@@ -254,4 +212,4 @@ Per `openspec/README.md#plan-closeout-requirements`.
 | The site-scoped store is the only storefront-override tier; the legacy home-site record retires with the import that wrote it, and its values are not carried over | `openspec/specs/storefront-publication/spec.md` — "Storefront pool overrides are the only override tier", replacing "Storefront pool overrides are site-scoped and durable" |
 | Why no carry-over: the status report already enumerates the population, and two of the eight legacy fields cannot be copied | This change's `design.md`, "Decision: retire the legacy override tier without carrying values over" |
 | Freeze-then-redirect, and that rollback past the cutover is a code rollback | `openspec/specs/storefront-publication/spec.md`, as a scenario on the modified projection requirement |
-| Why `region`/`sla` were kept in 2026-08 (commercial override tier, not a missing projection field), and why the tier now retires (its write path is gone and the site-scoped store replaced it) | This change's `design.md` |
+| Why the legacy tier retires with the import (its only writer) rather than surviving as a lower override tier | This change's `design.md` |
