@@ -573,6 +573,11 @@ Per `openspec/README.md#plan-closeout-requirements`.
 - [ ] 13.2 Run both lanes using `make run-e2e`, retrieve diagnostics with
       `make fetch-e2e-logs`, and fix observed failures with focused validation.
       Record the successful run and scenario evidence here.
+      Run 36252298868 reached bare-metal publication: seven passed, hardware
+      discovery failed on the scenario's use of `ListingSummary.listing_id`.
+      Correct its identifier access in
+      `e2e-tests/tests/e2e/roles/scenarios/bare_metal/test_bare_metal_publication.py`
+      to the client's `id` field and validate through the same E2E assertions.
 - [ ] 13.3 Close out the debugging fileset: comment hygiene, touched import
       placement, documentation compliance and narrative compression, roadmap and
       campaign-index disposition, documentation citations, passing E2E evidence,
