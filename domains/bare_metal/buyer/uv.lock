@@ -138,20 +138,22 @@ wheels = [
 
 [[package]]
 name = "arkhai-bare-metal"
-version = "0.5.0"
+version = "0.6.0"
 source = { registry = "../../../.dist" }
 dependencies = [
+    { name = "arkhai-compute" },
     { name = "arkhai-core" },
+    { name = "arkhai-kit-capability-shape" },
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_bare_metal-0.5.0-py3-none-any.whl" },
-    { path = "arkhai_bare_metal-0.5.0-py3-none-any.whl" },
+    { path = "arkhai_bare_metal-0.6.0-py3-none-any.whl" },
+    { path = "arkhai_bare_metal-0.6.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-bare-metal-buyer"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-bare-metal" },
@@ -178,7 +180,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arkhai-bare-metal", specifier = ">=0.4.0" },
+    { name = "arkhai-bare-metal", specifier = ">=0.6.0" },
     { name = "arkhai-core", specifier = ">=0.2.0" },
     { name = "arkhai-core-buyer", specifier = "==0.3.2" },
     { name = "arkhai-core-registry-client", specifier = "==0.12.0" },
@@ -197,6 +199,18 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=8.3.4,<10.0.0" }]
+
+[[package]]
+name = "arkhai-compute"
+version = "0.1.0"
+source = { registry = "../../../.dist" }
+dependencies = [
+    { name = "arkhai-kit-capability-shape" },
+]
+wheels = [
+    { path = "arkhai_compute-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_compute-0.1.0-py3-none-any.whl" },
+]
 
 [[package]]
 name = "arkhai-core"
@@ -272,6 +286,15 @@ dependencies = [
 wheels = [
     { path = "arkhai_kit_alkahest-0.2.1-py3-none-any.whl" },
     { path = "arkhai_kit_alkahest-0.2.1-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-kit-capability-shape"
+version = "0.2.0"
+source = { registry = "../../../.dist" }
+wheels = [
+    { path = "arkhai_kit_capability_shape-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_kit_capability_shape-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]

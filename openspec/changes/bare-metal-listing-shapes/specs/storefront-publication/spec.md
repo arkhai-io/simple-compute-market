@@ -138,62 +138,6 @@ It MUST refuse as retryable when the site cannot be reached or does not verify.
   declares fewer GPUs than it published
 - **THEN** the opening is refused with a declared-match reason
 
-### Requirement: Bare metal joins the site-scoped pool-override store
-
-A bare-metal storefront MUST contribute a market vocabulary for the `bare_metal` offering
-mode to the site-scoped pool-override store, and MUST serve the same authenticated
-administrator operations, through the same signed-resource contract, as every storefront
-that serves overrides.
-
-The bare-metal vocabulary is:
-
-- settlement clauses;
-- the terms `min_duration_seconds` and `max_duration_seconds`.
-
-A bare-metal override MUST NOT state listing shapes. An override's settlement clauses
-replace the storefront's configured publication clauses for that site's pool, and its
-duration bounds replace the configured bounds.
-
-A bare-metal storefront's command line MUST offer the same replace, read, list, and delete
-operations through its administrator API, with the offering mode never defaulted, and MUST
-NOT read or write its database to do so.
-
-A bare-metal storefront MUST record durably, for each site, the last resource-pool projection
-generation a publication run accepted, whichever process ran it, and its override status MUST
-be judged against that generation. A site with no recorded generation is `unknown`.
-
-#### Scenario: A bare-metal override is written
-
-- **WHEN** an operator writes an override for a pool at a configured site in the
-  `bare_metal` offering mode
-- **THEN** bare metal validates it, and it applies only to that site's pool's bare-metal
-  listings
-
-#### Scenario: A bare-metal override states a shape
-
-- **WHEN** an operator writes a `bare_metal` override that states listing shapes
-- **THEN** the write is refused without contacting the site
-
-#### Scenario: An operator writes a bare-metal override from the command line
-
-- **WHEN** an operator runs the bare-metal storefront's override command with a record for
-  the `bare_metal` mode
-- **THEN** the command sends it through the administrator API, which checks it against
-  the site's live projection, and prints the stored override
-
-#### Scenario: Publication runs from the command
-
-- **WHEN** an operator runs `bare-metal-storefront publish` in its own process and the run
-  accepts a site's generation holding the override's pool
-- **THEN** the running storefront reports the override as applied
-
-#### Scenario: Status before the first run
-
-- **WHEN** a bare-metal storefront reports override status before any publication run has
-  accepted a generation for the override's site, including after a restart that follows
-  no run
-- **THEN** the override is reported as unknown
-
 ## MODIFIED Requirements
 
 ### Requirement: Every VM listing is a listing shape
@@ -214,15 +158,18 @@ MUST be derived from its capacity declarations, and MUST NOT be declared or publ
 **The VM default.** The VM domain's default generator MUST yield, for each GPU model among a
 pool's enabled members, one shape per GPU count from one to the largest declared GPU count
 among that model's members. Each such shape MUST declare the GPU family only. Every VM shape
-MUST name a GPU count and a GPU model. A fungible pool MUST publish one listing per feasible
-shape. A specific-resource pool MUST publish one listing per member per shape that member is
-feasible for.
+MUST name a GPU count and a GPU model. A fungible VM pool MUST publish one listing per
+feasible shape. A specific-resource VM pool MUST publish one listing per member per shape that
+member is feasible for.
 
-**Commitment.** A listing MUST publish every quantity and attribute its shape declares,
+**Commitment.** A VM listing MUST publish every quantity and attribute its shape declares,
 flattened through the domain's schema, and MUST NOT publish a quantity its shape does not
-declare. The capacity claim built from a listing MUST request exactly its shape's quantities.
-A listing commits only to what its shape declares. For a dimension its shape omits it makes
-no commitment, and what is provisioned for that dimension is the site's to decide.
+declare. The capacity claim built from a VM listing MUST request exactly its shape's
+quantities. A VM listing commits only to what its shape declares. For a dimension its shape
+omits it makes no commitment, and what is provisioned for that dimension is the site's to
+decide. A bare-metal listing commits differently: it sells one whole unit held exclusively,
+and its shape describes what that unit contains (see "A bare-metal listing sells one whole
+unit").
 
 #### Scenario: A site declares shapes for a pool
 
@@ -264,64 +211,3 @@ no commitment, and what is provisioned for that dimension is the site's to decid
 - **THEN** the storefront publishes one listing for that shape, and successive reservations
   against it each reserve one GPU and the shape's other quantities until the member cannot
   admit another
-
-### Requirement: Storefront pool overrides are written against the site's live projection
-
-A storefront MUST expose authenticated administrator operations to replace, read, list, and
-delete a pool override. They MUST address the site, pool, and offering mode in the request
-body or query rather than the path, and MUST bind them into the signed resource with an
-unambiguous encoding. Replacement MUST replace the whole record. Deletion MUST be idempotent.
-
-Before accepting a replacement, the storefront MUST refuse:
-
-- a site it has not configured;
-- a structurally invalid record, including a shape outside the domain's vocabulary.
-
-It MUST then fetch that site's resource-pool projection live through the site's
-authenticated client, not from its cache:
-
-- a pool absent from the live projection MUST be refused;
-- an unreachable site, or a response that does not verify, MUST be refused as retryable,
-  with a reason distinct from an absent pool;
-- a pool present in the live projection MUST be accepted even when its declarations are
-  unresolvable.
-
-A shape no member of the live projection is feasible for MUST NOT cause refusal. The
-response MUST report feasibility per shape against that live projection and identify the projection generation it
-used. After accepting a write, a storefront that caches site projections MUST cause its
-cached projection of that site to refresh, without writing the live result into the cache
-itself, and a storefront that runs a publication loop MUST cause it to run. A failed refresh
-MUST NOT fail the accepted write. A storefront whose publication is operator-invoked applies
-an accepted write at its next publication run.
-
-#### Scenario: The pool is unknown to the site
-
-- **WHEN** an administrator writes an override for a pool the site's live projection does
-  not contain, while the storefront's cached projection still lists it
-- **THEN** the write is refused and nothing is stored
-
-#### Scenario: The site is unreachable
-
-- **WHEN** an administrator writes an override while the named site cannot be reached
-- **THEN** the write is refused as retryable, naming the site as unavailable rather than the
-  pool as unknown
-
-#### Scenario: An override's shape is feasible nowhere
-
-- **WHEN** an administrator writes an override whose only shape no member of the live
-  projection is feasible for
-- **THEN** the override is stored, the response reports the shape as infeasible, and
-  the next publication cycle publishes no listing for it
-
-#### Scenario: A shape outside the vocabulary
-
-- **WHEN** an administrator writes an override whose shape names a family or field the
-  domain does not define
-- **THEN** the write is refused without contacting the site
-
-#### Scenario: A bare-metal override is accepted between runs
-
-- **WHEN** an administrator writes an override for a bare-metal pool while no publication
-  run is in progress
-- **THEN** the write is stored and reported without starting a run, and the next
-  operator-invoked run publishes under it

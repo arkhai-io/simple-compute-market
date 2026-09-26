@@ -28,7 +28,8 @@ reinit:
 	--upgrade-package arkhai-vms-negotiation --reinstall-package arkhai-vms-negotiation \
 	--upgrade-package arkhai-vms-settlement  --reinstall-package arkhai-vms-settlement \
 	--upgrade-package arkhai-kit-delivery --reinstall-package arkhai-kit-delivery \
-	--upgrade-package arkhai-kit-capability-shape --reinstall-package arkhai-kit-capability-shape
+	--upgrade-package arkhai-kit-capability-shape --reinstall-package arkhai-kit-capability-shape \
+	--upgrade-package arkhai-compute --reinstall-package arkhai-compute
 
 test: reinit
 	uv run --find-links $(DIST_DIR) pytest tests -q

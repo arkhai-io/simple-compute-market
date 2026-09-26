@@ -100,6 +100,45 @@ compute field.
       into a settlement carrier. Confirm a listing carrying both publishes without
       either being reconciled against the other.
 
+## 3b. Bare metal joins the site-scoped override store
+
+Baseline from `bare-metal-listing-shapes`' design review, which moved this work here;
+see "Bare metal joins the site-scoped override store" in `design.md`. Rewritten with
+exact files at planning.
+
+- [ ] 3b.1 `kit/pool-overrides`:
+      - add the framework-free `PoolOverrideRouteService` (`replace`, `read`,
+        `delete`);
+      - make `refresh_site` and `wake_publication` optional;
+      - bump the version;
+      - add unit tests over a service double, and integration tests against the real
+        store, including a storefront with no cache and no loop.
+- [ ] 3b.2 VM storefront: reduce the three override handlers in `admin_controller.py`
+      to bindings over the route service. VM's existing override integration,
+      identity-dispatch, client-parity, and CLI tests must pass unchanged.
+- [ ] 3b.3 Bare-metal storefront:
+      - the `bare_metal` contribution and its terms model;
+      - the kit's override migration and the accepted-generation table;
+      - every publication run records each accepted generation;
+      - override status in system status;
+      - three admin routes bound through `_admin`;
+      - clause and duration precedence in `publication_composition.py`, holding a
+        pool whose override is unreadable.
+- [ ] 3b.4 Bare-metal `pool-override` command over the kit's typed client, as recorded
+      in `design.md`.
+- [ ] 3b.5 Integration through the typed clients:
+      - replace, read, list, and delete;
+      - refusals of shapes, unknown terms, an unconfigured site, an unreachable
+        site, and an unknown pool;
+      - status `unknown` before any run, `applied` after a run from the command,
+        `orphaned`, and `site_unconfigured`;
+      - an override's clauses and durations reaching a refreshed listing.
+      A VM storefront test shows the combined shell still refuses a `bare_metal`
+      write.
+- [ ] 3b.6 End-to-end: the bare-metal publication scenario writes an override through
+      the kit client, steps publication, and observes the refreshed term at the
+      registry.
+
 ## 4. Filters and the compute schema
 
 Blocked on Section 2.

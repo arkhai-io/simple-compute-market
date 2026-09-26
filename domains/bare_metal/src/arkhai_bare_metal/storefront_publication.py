@@ -8,8 +8,10 @@ class, and a storefront builds its reconciliation from those disjoint classes:
   reopened;
 - **unavailable** — as a candidate, but the machine is not wholly available
   (leased, say): its listing closes for availability and reopens when free;
-- **held** — its pool's declarations do not resolve: its listing is neither
-  closed nor refreshed, since an unknown declaration is not a withdrawn one;
+- **held** — its pool's declarations do not resolve, its pool states no
+  region, or its own declaration does not read as a shape: its listing is
+  neither closed nor refreshed, since an unknown declaration is not a
+  withdrawn one;
 - **withdrawn** — anything else, a disabled declaration or a pool that does
   not admit bare metal: its listing closes as a withdrawn source.
 
@@ -28,8 +30,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from arkhai_compute import COMPUTE_CAPABILITY_SCHEMA
+from market_capability_shape import FieldKind, shape_digest
+
 from .projections import TrustedBareMetalProjection, TrustedBareMetalResource
 from .publication import available_bare_metal_listings
+from .shapes import BareMetalShapeError, derive_bare_metal_shape
 
 # How a storefront's reading of a pool's declarations admits bare metal.
 POOL_ADMITTED = "admitted"
@@ -44,12 +50,20 @@ WITHDRAWN = "withdrawn"
 
 @dataclass(frozen=True)
 class ClassifiedBareMetalResource:
-    """One Physical Resource's class, with the source identity it carries."""
+    """One Physical Resource's class, with the source identity it carries.
+
+    ``shape_digest`` is ``None`` exactly when the resource's declaration does
+    not read as a shape, in which case ``problems`` names why and the resource
+    is held.
+    """
 
     classification: str
     site_id: str
     pool_id: str
     physical_resource_id: str
+    shape_digest: str | None = None
+    problems: tuple[str, ...] = ()
+    publication_capabilities_ignored: bool = False
 
 
 @dataclass(frozen=True)
@@ -66,23 +80,36 @@ class BareMetalSiteClassification:
         )
 
 
-def bare_metal_source_identity(*, pool_id: str, physical_resource_id: str) -> dict[str, str]:
+def bare_metal_source_identity(
+    *, pool_id: str, physical_resource_id: str, shape_digest: str
+) -> dict[str, str]:
     """The source identity a bare-metal listing's derivation key is built from.
 
-    It includes the pool, so a Physical Resource moved to another pool derives
-    a new listing and its old one closes as a withdrawn source: advertisement
-    is authorized by the pool a listing's binding records.
+    The Physical Resource anchors the listing and its declared shape completes
+    it. The pool is included so a resource moved to another pool derives a new
+    listing and its old one closes as a withdrawn source: advertisement is
+    authorized by the pool a listing's binding records. The shape digest is
+    included so a corrected declaration closes the listing and publishes a
+    successor rather than leaving a listing that can never reopen under an
+    unchanged key. See openspec/specs/storefront-publication/spec.md, "A
+    bare-metal listing's derivation identity includes its shape".
     """
-    return {"pool_id": pool_id, "physical_resource_id": physical_resource_id}
+    return {
+        "pool_id": pool_id,
+        "physical_resource_id": physical_resource_id,
+        "shape_digest": shape_digest,
+    }
 
 
 def _classify(
-    resource: TrustedBareMetalResource, admission: str
+    resource: TrustedBareMetalResource, admission: str, shaped: bool
 ) -> str:
     if admission == POOL_HELD:
         return HELD
     if admission != POOL_ADMITTED or not resource.enabled:
         return WITHDRAWN
+    if not shaped:
+        return HELD
     return CANDIDATE if resource.view.available else UNAVAILABLE
 
 
@@ -90,36 +117,54 @@ def classify_bare_metal_resources(
     generation: TrustedBareMetalProjection,
     *,
     pool_admission: Mapping[str, str],
-    site_labels: dict[str, str] | None = None,
+    pool_regions: Mapping[str, str | None],
 ) -> BareMetalSiteClassification:
     """Classify every bare-metal resource in one accepted site generation.
 
     ``pool_admission`` maps each pool to :data:`POOL_ADMITTED`,
     :data:`POOL_HELD`, or :data:`POOL_NOT_ADMITTED`, as the caller read the
-    pool's declarations; a pool it does not name admits nothing.
+    pool's declarations; a pool it does not name admits nothing. A pool
+    ``pool_regions`` gives no region is held: the compute schema requires a
+    region and there is no other source for one.
     """
     candidates: list[dict[str, Any]] = []
     classified: list[ClassifiedBareMetalResource] = []
     for resource in generation.resources:
-        classification = _classify(
-            resource, pool_admission.get(resource.pool_id, POOL_NOT_ADMITTED)
-        )
+        admission = pool_admission.get(resource.pool_id, POOL_NOT_ADMITTED)
+        region = pool_regions.get(resource.pool_id)
+        if admission == POOL_ADMITTED and region is None:
+            admission = POOL_HELD
+        try:
+            shape = derive_bare_metal_shape(
+                resource.declared_capacity, resource.declared_attributes
+            )
+        except BareMetalShapeError as exc:
+            shape, problems = None, exc.problems
+        else:
+            problems = ()
+        classification = _classify(resource, admission, shape is not None)
+        digest = shape_digest(shape) if shape is not None else None
         classified.append(
             ClassifiedBareMetalResource(
                 classification=classification,
                 site_id=generation.site_id,
                 pool_id=resource.pool_id,
                 physical_resource_id=resource.physical_resource_id,
+                shape_digest=digest,
+                problems=problems,
+                publication_capabilities_ignored=bool(resource.view.capabilities),
             )
         )
         if classification != CANDIDATE:
             continue
-        (listing,) = available_bare_metal_listings([resource.view], site=site_labels)
+        assert region is not None and digest is not None  # guaranteed by _classify
+        (listing,) = available_bare_metal_listings([resource], region=region)
         candidates.append(
             {
                 "site_id": generation.site_id,
                 "pool_id": resource.pool_id,
                 "physical_resource_id": resource.physical_resource_id,
+                "shape_digest": digest,
                 "projection_revision": generation.revision,
                 "projection_digest": generation.digest,
                 "host_id": listing.host_id,
@@ -142,8 +187,9 @@ IDENTITY_FIELDS = (
     "offering_mode",
     "host_id",
     "physical_host_id",
-    "capabilities",
-    "site",
+    "region",
+    *COMPUTE_CAPABILITY_SCHEMA.flat_names(FieldKind.QUANTITY),
+    *COMPUTE_CAPABILITY_SCHEMA.flat_names(FieldKind.ATTRIBUTE),
 )
 TERM_RESOURCE_FIELDS = (
     "access_methods",

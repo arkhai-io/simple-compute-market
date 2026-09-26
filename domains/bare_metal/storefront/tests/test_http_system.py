@@ -20,6 +20,7 @@ from arkhai_bare_metal_storefront.server import (
 )
 from arkhai_bare_metal_storefront.site_clients import BareMetalSiteBinding
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
+from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
 
 
 def _app(runtime: BareMetalStorefrontRuntime):
@@ -66,6 +67,7 @@ async def _insert_listing(runtime: BareMetalStorefrontRuntime) -> None:
         physical_resource_id="resource-1",
         listing={
             "capacity_backing": "backed",
+            **LISTING_HARDWARE,
             "kind": "bare_metal.v2",
             "host_id": "machine-1",
             "physical_host_id": "physical-host-1",
@@ -89,13 +91,13 @@ async def test_listing_routes_return_exact_validated_domain_payload(tmp_path) ->
     assert response.status_code == 200
     assert response.json()["listing_resource"] == {
         "capacity_backing": "backed",
+        **LISTING_HARDWARE,
         "kind": "bare_metal.v2",
         "offering_mode": "bare_metal",
         "host_id": "machine-1",
         "physical_host_id": "physical-host-1",
         "access_methods": ["ssh"],
         "max_duration_seconds": 7200,
-        "capabilities": {},
     }
     assert listing_list.status_code == 200
     assert listing_list.json()["count"] == 1

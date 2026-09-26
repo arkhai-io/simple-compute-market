@@ -157,10 +157,12 @@ wheels = [
 
 [[package]]
 name = "arkhai-bare-metal"
-version = "0.5.0"
+version = "0.6.0"
 source = { editable = "." }
 dependencies = [
+    { name = "arkhai-compute" },
     { name = "arkhai-core" },
+    { name = "arkhai-kit-capability-shape" },
     { name = "pydantic" },
 ]
 
@@ -177,8 +179,10 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "arkhai-compute", specifier = ">=0.1.0" },
     { name = "arkhai-core", specifier = ">=0.2.0" },
     { name = "arkhai-core-storefront", marker = "extra == 'storefront'", specifier = ">=0.6.0" },
+    { name = "arkhai-kit-capability-shape", specifier = ">=0.2.0" },
     { name = "pydantic", specifier = ">=2.7" },
 ]
 provides-extras = ["storefront"]
@@ -187,6 +191,18 @@ provides-extras = ["storefront"]
 dev = [
     { name = "arkhai-core-storefront", specifier = ">=0.6.0" },
     { name = "pytest", specifier = ">=8.0" },
+]
+
+[[package]]
+name = "arkhai-compute"
+version = "0.1.0"
+source = { registry = "../../.dist" }
+dependencies = [
+    { name = "arkhai-kit-capability-shape" },
+]
+wheels = [
+    { path = "arkhai_compute-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_compute-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -244,6 +260,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/e1/9d/03b17e1d4d307d94eed950cb888ac0388bbcaf4f928b0b6e185c826c8be5/arkhai_kit_alkahest-0.1.1.tar.gz", hash = "sha256:0d9c0d62739b184d8f765c08fdd6a0da15db6a52d1efb52b302bc29b43c16c2a", size = 158975, upload-time = "2026-07-23T19:37:54.968Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/13/5a/8fbe337320164c61acb63985db79446e5683543c521fc40fec0f97ac8a14/arkhai_kit_alkahest-0.1.1-py3-none-any.whl", hash = "sha256:fc9b6fe980353ec8e5eb418763f0ca842bd14b6182104a8e2a354a0bef4fc96d", size = 41238, upload-time = "2026-07-23T19:37:53.828Z" },
+]
+
+[[package]]
+name = "arkhai-kit-capability-shape"
+version = "0.2.0"
+source = { registry = "../../.dist" }
+wheels = [
+    { path = "arkhai_kit_capability_shape-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_kit_capability_shape-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]

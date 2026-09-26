@@ -31,6 +31,7 @@ from market_storefront_kit import (
 
 from .domain_runtime import get_market_domain_contract
 from .negotiation import default_seller_round_hook
+from .opening_guard import build_listing_source_guard
 from .negotiation_service import BareMetalNegotiationService
 from .settlement import build_bare_metal_settlement_plan
 from .settlement_service import BareMetalSettlementService
@@ -172,6 +173,11 @@ class BareMetalStorefrontRuntime:
                 self.settlement_composition.accepted_obligation_dispatch()
                 if self.settlement_composition is not None
                 else default_hosted_selection_dispatch()
+            ),
+            source_guard=(
+                build_listing_source_guard(self.db, self.capacity_client.site)
+                if self.capacity_client is not None
+                else None
             ),
         )
 

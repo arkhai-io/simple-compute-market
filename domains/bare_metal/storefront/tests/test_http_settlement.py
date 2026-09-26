@@ -28,6 +28,7 @@ from arkhai_bare_metal_storefront.server import (
     build_bare_metal_storefront_registry,
 )
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
+from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
 
 
 def _app(runtime: BareMetalStorefrontRuntime):
@@ -168,6 +169,7 @@ async def _accepted_runtime(
         physical_resource_id="resource-1",
         listing={
             "capacity_backing": "backed",
+            **LISTING_HARDWARE,
             "kind": "bare_metal.v2",
             "host_id": "machine-1",
             "physical_host_id": "host-1",
@@ -645,6 +647,9 @@ async def test_http_fulfillment_restarts_on_recorded_site_and_redacts_result(
     assert repeated.json() == released.json()
     assert capacity.reserve_calls[0]["site"] == "site-a"
     assert capacity.reserve_calls[0]["claim"]["resource_id"] == "resource-1"
+    # Read back from the persisted listing, not supplied by the buyer.
+    assert capacity.reserve_calls[0]["claim"]["gpu_model"] == LISTING_HARDWARE["gpu_model"]
+    assert capacity.reserve_calls[0]["claim"]["dimensions"] == {"units": 1}
     assert len(provisioning.begin_calls) == 1
     assert len(provisioning.teardown_calls) == 1
     assert len(restarted_capacity.site_client.releases) == 1

@@ -14,6 +14,7 @@ import pytest
 
 from market_capability_shape import CapabilityShapeError, FieldKind, flatten_shape
 
+from arkhai_compute import COMPUTE_CAPABILITY_SCHEMA
 from arkhai_vms import VM_CAPABILITY_SCHEMA
 
 
@@ -42,3 +43,7 @@ def test_a_shape_without_a_gpu_model_is_refused():
     with pytest.raises(CapabilityShapeError) as refused:
         flatten_shape({"gpu": {"count": 1}, "memory": {"gib": 64}}, VM_CAPABILITY_SCHEMA)
     assert [problem.path for problem in refused.value.problems] == ["gpu.model"]
+
+
+def test_the_vm_schema_is_the_compute_family_schema():
+    assert VM_CAPABILITY_SCHEMA is COMPUTE_CAPABILITY_SCHEMA

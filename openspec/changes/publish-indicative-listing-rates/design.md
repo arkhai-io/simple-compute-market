@@ -601,10 +601,11 @@ follows.
   - it must read its pools' projected declarations —
     `bare-metal-publication-reads-pool-declarations`, complete;
   - it must publish a capability shape per listing, since the shape is the rate's
-    key, and must join the site-scoped override store for the storefront tier —
-    `bare-metal-listing-shapes`. That change also makes bare-metal listings visible
-    to the compute schema's dimension filters, which read top-level
+    key — `bare-metal-listing-shapes`. That change also makes bare-metal listings
+    visible to the compute schema's dimension filters, which read top-level
     `listing_resource` fields that bare metal currently nests under `capabilities`;
+  - it must join the site-scoped override store for the storefront tier — owned by
+    this change; see "Bare metal joins the site-scoped override store";
   - it must publish unbacked listings at all — `unbacked-bare-metal-listings` — for
     the supply Goal 7 exists to serve to carry a rate.
 
@@ -612,6 +613,79 @@ Implementation of this change therefore waits on the first two. Its system
 evidence for unbacked supply waits on `unbacked-bare-metal-listings` for bare
 metal and `compose-contact-exchange-across-compute` for VM. The registry primitives
 have no domain dependency and may land first.
+
+### Bare metal joins the site-scoped override store
+
+The storefront's final authority over an asking rate needs a storefront tier on bare
+metal, and bare metal has none. `bare-metal-listing-shapes` first scoped joining the
+override store. Its design review moved the work here, because nothing in making a
+bare-metal listing a discoverable shape depends on it, and extracting live VM HTTP
+behaviour added regression surface to that change without serving its purpose. It is
+too small to be a change of its own. This change is its first consumer, so it lands
+here. The decisions below were reached in that change's design discussion and
+transfer unchanged.
+
+**Vocabulary.** Bare metal contributes a `PoolOverrideContribution` for `bare_metal`:
+
+- settlement clauses;
+- the terms `min_duration_seconds` and `max_duration_seconds`;
+- asking rates, through this change's shared resolution.
+
+A bare-metal override states no shapes: a whole machine has no shape to choose, so
+`listing_shapes` is refused and `judge_shapes` returns nothing. An override's clauses
+replace the configured `BARE_METAL_STOREFRONT_PUBLICATION_CLAUSES` for that site's
+pool as a whole. Its duration bounds replace the configured bounds. Region and backing
+remain the site's.
+
+**One route service, bound per storefront.** The override HTTP handling moves out of
+VM's admin controller into `kit/pool-overrides` as a framework-free
+`PoolOverrideRouteService`:
+
+- `replace(body)` validates the record and refuses a bad one with 422;
+- `read(query)` validates the query (400), chooses between one override and a
+  list, and answers 404 for a missing one;
+- `delete(query)` requires the whole address.
+
+VM's controller and bare metal's `api.py` each bind it with FastAPI, authenticating
+through the kit's `pool_override_contract`. This follows `kit/contact-exchange`'s
+`IntroductionRouteService`. A FastAPI router inside the kit was rejected: it would
+add a web-framework dependency to a storefront-side kit and make a routing decision
+`kit-owned-storefront-shell` will make for every shared route at once.
+
+**After-write effects are conditional.** `PoolOverrideService`'s `refresh_site` and
+`wake_publication` accept `None`. A storefront with no cached projection has nothing
+to refresh, and one whose publication is operator-invoked has no loop to wake, so a
+bare-metal write takes effect at the next publication run. The shared live-projection
+requirement is modified to make both effects conditional on a storefront that has
+them.
+
+**Status is judged against a durable record.** Bare-metal publication runs either in
+the server or in the one-shot `bare-metal-storefront publish` process. Every run
+therefore writes, per site whose generation it accepted, the site, revision, digest,
+projected pool IDs, and acceptance time to a bare-metal storefront table. Override
+status reads that table, and a site with no record is `unknown`.
+
+In-memory state was rejected. It would report every override `unknown` after a
+command-line run and after every restart.
+
+**A thin command.** `bare-metal-storefront pool-override` offers `set --file`, `get`,
+`list`, and `delete`, with `--mode` never defaulted. It works as follows:
+
+- it calls the administrator API over the kit's `SyncPoolOverrideClient`, never the
+  database;
+- it signs as the storefront's own marketplace signer, from the
+  `BARE_METAL_STOREFRONT_IDENTITY_*` and `ARKHAI_IDENTITY_CREDENTIAL` inputs the
+  server reads, which must appear in `BARE_METAL_STOREFRONT_ADMIN_IDENTITIES`;
+- it connects to `--storefront-url`, else `BARE_METAL_STOREFRONT_PUBLIC_URL`, else
+  `http://localhost:8000`.
+
+It is written for bare metal rather than copied verbatim from VM. VM's
+infeasible-shape warning cannot fire for an override that states no shapes, and
+copying it would add dead behaviour to make a future merge mechanical.
+
+**The combined compute-family shell** registers no `bare_metal` override
+contribution. It does not run bare-metal publication, so it keeps refusing
+`bare_metal` writes as a mode no market serves until it does.
 
 ## Risks / Trade-offs
 

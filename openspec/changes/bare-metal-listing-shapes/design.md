@@ -32,11 +32,6 @@ What the code does today:
   `kit/capability-shape` states that it knows no family or field name.
 - Region is a pool hint read by `market_resource_pools.hints.raw_region`, with no
   trust gate. VM resolves it through `resolve_region`; only SLA is trust-gated.
-- VM's pool-override HTTP routes, admin-identity binding, command-line group,
-  migration composition, and status live in the VM storefront. The kit supplies the store,
-  service, signed-resource contract, and typed client. `PoolOverrideService`
-  expects a cached projection source and a publication loop to wake. Bare-metal
-  publication holds neither between its operator-invoked runs.
 - The bare-metal storefront has no seller inventory guard: opening validation checks
   duration and access method against the stored listing, not its declaration.
 
@@ -226,104 +221,58 @@ its resource, and the site has no bare-metal region-matching rule to align.
 
 A bare-metal seller sells a whole machine, so there is no shape to choose. A pool
 that states `listing_shapes` for `bare_metal` has it ignored, and the run reports it
-so an operator is not misled into thinking it applies. The pool-overrides
-contribution refuses `listing_shapes` for the same reason.
+so an operator is not misled into thinking it applies.
 
-### Bare metal joins the override store through a kit route service
-
-Bare metal contributes a `PoolOverrideContribution` for `bare_metal`:
-
-- **Vocabulary.** Settlement clauses and the terms `min_duration_seconds` and
-  `max_duration_seconds`. The asking rate and hold rate join the same record through
-  the changes that define them.
-- **Shapes.** Any stated `listing_shapes` is refused, and `judge_shapes` returns
-  nothing.
-
-Precedence is override, then configuration. An override's clauses replace the
-configured `BARE_METAL_STOREFRONT_PUBLICATION_CLAUSES` for that site's pool as a
-whole. Its duration bounds replace the configured maximum and the default of no
-minimum. Region and backing remain the site's.
-
-The HTTP surface moves into `kit/pool-overrides` as a framework-free route service,
-`PoolOverrideRouteService`:
-
-- `replace(body)`, `read(query)`, and `delete(query)` return the kit's response
-  models and raise `PoolOverrideRefused` with its status.
-- The contract failures, get-versus-list dispatch, and 404 for a missing read move
-  there from VM's controller.
-- VM's admin controller and bare metal's `api.py` each become a thin FastAPI
-  binding. Each authenticates with the kit's `pool_override_contract`, through VM's
-  middleware and bare metal's `_admin` respectively.
-
-This follows the precedent the review cited: `kit/contact-exchange`'s
-`IntroductionRouteService` is framework-free, and each storefront binds it. A FastAPI
-router inside the kit would add a web-framework dependency no storefront-side kit
-carries today. It would also bind a routing decision that `kit-owned-storefront-shell`
-will make for every shared route at once. This refines the review's "router in the
-kit": the logic moves out of VM rather than being copied, and the binding stays with
-each storefront until the shell owns it.
-
-Status for bare metal is judged against the last generation each site's publication
-run accepted. The storefront records that generation durably (see "Decisions taken
-while planning"). A site with no accepted generation is `unknown`. This is the store's
-existing meaning for a site whose projection is not held, so nothing is called
-`orphaned` on an answer the storefront does not have.
-
-After an accepted write, bare metal has no cache to refresh and no loop to wake. The
-write takes effect at the next operator-invoked publication run. The shared
-requirement therefore makes those two effects conditional on a storefront that has
-them.
-
-### Bare metal gains a `pool-override` command in the same layering
-
-`bare-metal-storefront pool-override` offers `set --file`, `get`, `list`, and
-`delete`, with `--mode` never defaulted. It follows the same layering as the routes:
-
-- The kit's `SyncPoolOverrideClient` does the work, over the canonical storefront
-  client's authenticated transport. The bare-metal storefront already depends on it.
-- The Typer layer is copied from VM's `market_storefront/groups/pool_overrides.py`
-  into the bare-metal storefront rather than imported, because bare metal may not
-  import the VM storefront. It is copied unchanged, including the infeasible-shape
-  warning. That warning never fires for bare metal, since a bare-metal override states
-  no shapes, but keeping the two copies identical makes folding them one mechanical
-  step when the compute-family storefronts converge.
-
-The command calls the storefront's administrator API and never opens its database,
-as VM's does. Bare metal's `publish` and `redeliver-introduction` commands run
-in-process against the storefront's database. An override write is different: it must
-pass the running storefront's live-site check, and it must be authenticated as an
-administrator like any other write to it.
-
-The command signs as the storefront's own marketplace signer, resolved from the same
-`BARE_METAL_STOREFRONT_IDENTITY_*` and `ARKHAI_IDENTITY_CREDENTIAL` inputs the server
-reads. It pins that signer as the expected responder. As with VM, the signer must
-appear in `BARE_METAL_STOREFRONT_ADMIN_IDENTITIES` for the command to act.
-
-The storefront URL is `--storefront-url`, else `BARE_METAL_STOREFRONT_PUBLIC_URL`,
-else `http://localhost:8000`, which is the `serve` default. The small admin-session
-helper this needs lives beside the command in the bare-metal storefront. It is
-bare-metal configuration, not shared logic.
-
-### A minimal seller inventory guard at opening
+### The opening guard is a domain function the storefront calls
 
 `storefront-publication` requires seller policy to recheck every published field
 sourced from a declaration or pool before agreeing terms. Bare metal has no such check
 today. This change publishes declaration-sourced shape fields and a pool-sourced
-region, so it adds the minimum at opening, on both the Alkahest and hosted paths:
+region, so it adds the check at opening, on both the Alkahest and hosted paths.
 
-1. Fetch the listing's own site's resource-pool projection through that site's
-   trusted client.
-2. Find the bound Physical Resource under the bound pool.
-3. Re-derive its shape and region, and compare the shape digest with the binding's
-   recorded digest and the region with the published region.
+The substance is a pure function in `arkhai_bare_metal`. It takes:
 
-A mismatch, a missing resource, or a disabled declaration is refused with a
-declared-match reason, distinct from any availability reason. An unreachable site is
-refused as retryable.
+- an accepted site generation;
+- the pool regions the storefront resolved;
+- the listing's binding facts: pool, Physical Resource, shape digest, and published
+  region.
 
-The guard deliberately stays this small. `bare-metal-and-credits-domain-stacks` 4a
-re-homes bare metal's opening validation onto the kit negotiation runtime's
-`validate_opening` hook, and this check moves with it.
+It classifies the generation with `classify_bare_metal_resources` and returns one of:
+
+- **match** — the bound resource is a candidate or unavailable, with an equal digest
+  and region;
+- **declared mismatch** — the digest or region differs, or the resource is held for
+  an unreadable declaration;
+- **absent** — the resource is missing, withdrawn, or its pool no longer admits bare
+  metal.
+
+Publication and the guard therefore read declarations through one code path, which is
+what "the inventory guard checks a listing against its own source" asks for.
+
+The storefront does only the transport around it:
+
+1. fetch the bound site's live projection through that site's trusted client;
+2. resolve pool regions;
+3. call the function;
+4. refuse a mismatch or absence with 409 and a declared-match reason, and an
+   unreachable or unverified site with 503.
+
+It checks declaration, not availability. An availability check at opening is outside
+this change.
+
+A storefront with no trusted site authority composed cannot confirm any listing, so
+it refuses every opening as retryable. A bare-metal storefront therefore refuses a
+negotiation it could never admit. This matches the VM storefront, whose negotiation
+already depends on its sites, and was accepted when the implementation surfaced it.
+
+**Sequencing with `bare-metal-and-credits-domain-stacks` §4a.** §4a re-homes bare
+metal's opening validation onto the kit negotiation runtime's `validate_opening` hook
+and has not started. This change lands first. §4a then calls the same domain function
+from the hook and moves only the fetch and the status mapping. That change's design
+carries a note saying so.
+
+Revisit trigger: §4a starting before this change completes. The guard would then be
+written against the hook directly rather than the current negotiation service.
 
 ### Test fixtures follow the real path
 
@@ -332,28 +281,33 @@ The bare-metal publication-view fixture moves `gpu_model` out of the view's
 `units: 1` beside hardware quantities. Tests then exercise the path a site actually
 serves.
 
+### Joining the override store moved to `publish-indicative-listing-rates`
+
+An earlier version of this design also joined bare metal to the site-scoped
+pool-override store. That work extracted VM's override HTTP handling into a kit route
+service and added bare-metal routes, status, and a command. Design review moved it
+out, for three reasons:
+
+- nothing in making a bare-metal listing a discoverable shape depends on it;
+- extracting live VM HTTP behaviour added regression surface this change does not
+  need;
+- this change is on Goal 7's critical path, and it reaches review sooner without it.
+
+It is too small to be a change of its own. `publish-indicative-listing-rates` is its
+first consumer, because the storefront's final authority over an asking rate needs a
+storefront tier on bare metal. It therefore owns the work, with the decisions reached
+here recorded in its design: the vocabulary, the framework-free route service,
+conditional after-write effects, a durable record of accepted generations for status,
+a thin command, and no contribution in the combined shell.
+
+Code already written for it in this change's working tree (the kit route service and
+VM's rebinding) was reverted rather than carried, so this change touches neither
+`kit/pool-overrides` nor VM's admin controller.
+
 ## Decisions taken while planning
 
 Planning named every file each decision touches. Doing so settled the following
-points, which the decisions above left to implementation or got wrong.
-
-### The last accepted generation is recorded durably, not in memory
-
-The earlier text kept each site's last accepted generation in the server's memory.
-That misses the ordinary path. `bare-metal-storefront publish` runs in its own
-process, so a server would report every override `unknown` until someone happened to
-step publication through the administrator route, and again after every restart.
-
-Every publication run therefore writes, per site whose generation it accepted:
-
-- `site_id`;
-- the generation's `revision` and `digest`;
-- the projected pool IDs;
-- the time it was accepted.
-
-These go into a bare-metal storefront table in the same run. Override status reads
-that table. A run that holds a site as unknown writes nothing for it, so the last
-accepted generation stands.
+points, which the decisions above left to implementation.
 
 ### The payload kind stays `bare_metal.v2`
 
@@ -404,21 +358,22 @@ It gains `--resource`, compiled through
 `registry_client.query.compile_resource_query` against the registry's filter
 specification, as the VM buyer does. This is the shared query grammar, not a new one.
 
-### The combined compute-family shell registers no bare-metal override contribution
-
-The VM storefront image installs the bare-metal contribution for its shared shell, but
-it does not run bare-metal publication. Registering a `bare_metal` override
-contribution there would accept overrides that nothing applies. The shell keeps
-refusing `bare_metal` override writes as a mode no market serves, until it publishes
-bare metal.
-
-It still needs version pins raised for the new bare-metal storefront wheel.
-
 ### Bare-metal storefront tests keep their flat layout
 
 `domains/bare_metal/storefront/tests/` is not split into `unit/` and `integration/`.
 Restructuring it is outside this change, so new tests join the flat directory,
 named by the seam they prove.
+
+## Design review corrections
+
+- **The VM commitment is scoped to VM.** The modified "Every VM listing is a listing
+  shape" requirement had widened its opening sentence to mention bare-metal shapes.
+  Its Commitment paragraph still said a listing's claim "MUST request exactly its
+  shape's quantities", which read as a second, contradictory rule for bare metal.
+  The Commitment and VM-default paragraphs now say "VM listing" and "VM pool"
+  throughout, and point to the bare-metal whole-unit requirement as the other
+  commitment model. `ARCHITECTURE.md`'s "Storefront capacity boundary" carries the
+  same sentence and is scoped the same way at promotion.
 
 ## Open questions
 

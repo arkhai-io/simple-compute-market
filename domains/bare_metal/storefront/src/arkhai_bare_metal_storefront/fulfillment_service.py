@@ -18,6 +18,8 @@ from core_storefront import StorefrontFulfillmentContext
 from market_fulfillment import VersionedEnvelope
 from market_identity import Identity
 
+from .claims import ClaimAttributesMissing, whole_machine_claim
+
 if TYPE_CHECKING:
     from .sqlite_client import SQLiteClient
 
@@ -153,13 +155,14 @@ class BareMetalFulfillmentService:
                 negotiation_id=negotiation_id,
                 escrow_uid=escrow_uid,
             )
+            try:
+                claim = whole_machine_claim(context)
+            except ClaimAttributesMissing as exc:
+                raise BareMetalFulfillmentError(str(exc)) from exc
+            claim["resource_id"] = str(context["physical_resource_id"])
             reserved = recovered or await self.capacity_client.reserve(
                 site=str(context["site_id"]),
-                claim={
-                    "resource_id": str(context["physical_resource_id"]),
-                    "dimensions": {"units": 1},
-                    "offering_mode": "bare_metal",
-                },
+                claim=claim,
                 deal_ref={
                     "negotiation_id": negotiation_id,
                     "escrow_uid": escrow_uid,

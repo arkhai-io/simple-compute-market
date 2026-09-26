@@ -12,6 +12,7 @@ from market_core.schemas import RateValue, SettlementOption, derive_settlement_o
 NOW = datetime(2099, 1, 1, tzinfo=timezone.utc)
 OFFER = datetime(2099, 1, 1, 2, tzinfo=timezone.utc)
 FULFILL = datetime(2099, 1, 1, 3, tzinfo=timezone.utc)
+from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
 
 
 def _base(profile: str) -> SettlementOption:
@@ -45,6 +46,7 @@ def _candidate(access_methods: list[str] | None = None) -> dict:
         host_id="machine-a",
         physical_host_id="host-a",
         access_methods=access_methods or ["ssh"],
+        **LISTING_HARDWARE,
     )
     return {
         "derivation_key": "site-a:resource-a",

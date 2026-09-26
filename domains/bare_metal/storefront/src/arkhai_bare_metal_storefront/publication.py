@@ -1,8 +1,8 @@
 """One bare-metal publication run: derive, publish, reconcile, and converge.
 
 A run fetches every configured site's resource-pool projection through that
-site's own client, reads each pool's declarations through the shared site
-declaration reader, and classifies every bare-metal resource (see
+site's own client, reads each pool's declarations and region (see
+``site_reading``), and classifies every bare-metal resource (see
 ``arkhai_bare_metal.storefront_publication``). Candidates are published,
 refreshed, or reopened; listings whose resource is unavailable or withdrawn
 close; listings at a site whose projection could not be read, or in a pool
@@ -35,9 +35,6 @@ from arkhai_bare_metal import (
     CANDIDATE,
     HELD,
     IDENTITY_CHANGED,
-    POOL_ADMITTED,
-    POOL_HELD,
-    POOL_NOT_ADMITTED,
     UNAVAILABLE,
     UNCHANGED,
     BareMetalListing,
@@ -65,7 +62,6 @@ from market_capacity_publication import (
     converge_registries,
 )
 from market_identity import Identity
-from market_resource_pools import read_site_declarations
 
 from .publication_service import (
     BareMetalPublicationHooks,
@@ -73,6 +69,7 @@ from .publication_service import (
     bare_metal_publication_candidate,
     build_publication_runtime,
 )
+from .site_reading import SitePoolReading, read_site_pools
 from .sqlite_client import SQLiteClient
 
 logger = logging.getLogger(__name__)
@@ -231,32 +228,50 @@ class BareMetalPublicationCycle:
                 "hold", site_id=site_id, reason="site_projection_refused", error=str(exc)
             )
             return
+        reading = read_site_pools(response["resource_pools"])
+        self._report_pools(site_id, reading)
         classification = classify_bare_metal_resources(
             generation,
-            pool_admission=self._pool_admission(site_id, response["resource_pools"]),
+            pool_admission=reading.admission,
+            pool_regions=reading.regions,
         )
         self._classifications[site_id] = classification
         for item in classification.of(HELD):
+            if item.pool_id in reading.regionless:
+                reason = "pool_region_missing"
+            elif item.problems:
+                reason = "declaration_unresolvable"
+            else:
+                reason = "pool_unresolvable"
             self.report.record(
                 "hold",
                 site_id=site_id,
                 pool_id=item.pool_id,
                 physical_resource_id=item.physical_resource_id,
-                reason="pool_unresolvable",
+                reason=reason,
+                **({"problems": list(item.problems)} if item.problems else {}),
             )
+        for item in classification.resources:
+            if item.publication_capabilities_ignored:
+                self.report.record(
+                    "report",
+                    site_id=site_id,
+                    pool_id=item.pool_id,
+                    physical_resource_id=item.physical_resource_id,
+                    reason="publication_capabilities_ignored",
+                )
         for candidate in classification.candidates:
             candidate["derivation_key"] = self._key(
-                site_id, candidate["pool_id"], candidate["physical_resource_id"]
+                site_id,
+                candidate["pool_id"],
+                candidate["physical_resource_id"],
+                candidate["shape_digest"],
             )
             self._candidates.append(candidate)
 
-    def _pool_admission(
-        self, site_id: str, pools: list[Mapping[str, Any]]
-    ) -> dict[str, str]:
-        declarations = read_site_declarations(pools)
-        admission: dict[str, str] = {}
-        for pool_id, problems in sorted(declarations.unresolvable.items()):
-            admission[pool_id] = POOL_HELD
+    def _report_pools(self, site_id: str, reading: SitePoolReading) -> None:
+        """Record every pool-level reason a site's pools publish nothing."""
+        for pool_id, problems in sorted(reading.unresolvable.items()):
             self._held_pools.add((site_id, pool_id))
             logger.warning(
                 "bare-metal pool %s at %s is unresolvable: %s",
@@ -264,34 +279,41 @@ class BareMetalPublicationCycle:
                 site_id,
                 ", ".join(problems),
             )
-        for pool_id, pool in sorted(declarations.resolved.items()):
-            if not pool.enabled or not pool.advertises(BARE_METAL_OFFERING_MODE):
-                admission[pool_id] = POOL_NOT_ADMITTED
-            elif not pool.backed:
-                # Every bare-metal listing is capacity-backed; one derived from
-                # an unbacked pool would publish a backing its pool contradicts.
-                admission[pool_id] = POOL_NOT_ADMITTED
-                self.report.record(
-                    "refuse",
-                    site_id=site_id,
-                    pool_id=pool_id,
-                    reason="pool_unbacked",
-                )
-                logger.warning(
-                    "bare-metal pool %s at %s is unbacked; bare-metal listings "
-                    "are capacity-backed, so none is derived from it",
-                    pool_id,
-                    site_id,
-                )
-            else:
-                admission[pool_id] = POOL_ADMITTED
-        return admission
+        for pool_id in reading.regionless:
+            # Held, not withdrawn: a missing region is a declaration to repair,
+            # and the listings it already published stay as they are.
+            self._held_pools.add((site_id, pool_id))
+            logger.warning(
+                "bare-metal pool %s at %s states no region; its listings are held",
+                pool_id,
+                site_id,
+            )
+        for pool_id in reading.unbacked:
+            self.report.record(
+                "refuse", site_id=site_id, pool_id=pool_id, reason="pool_unbacked"
+            )
+            logger.warning(
+                "bare-metal pool %s at %s is unbacked; bare-metal listings "
+                "are capacity-backed, so none is derived from it",
+                pool_id,
+                site_id,
+            )
+        for pool_id in reading.listing_shapes_stated:
+            self.report.record(
+                "report",
+                site_id=site_id,
+                pool_id=pool_id,
+                reason="listing_shapes_not_applicable",
+            )
 
-    def _key(self, site_id: str, pool_id: str, physical_resource_id: str) -> str:
+    def _key(
+        self, site_id: str, pool_id: str, physical_resource_id: str, shape_digest: str
+    ) -> str:
         return self._db.bare_metal_derivation_key(
             site_id=site_id,
             pool_id=pool_id,
             physical_resource_id=physical_resource_id,
+            shape_digest=shape_digest,
         )
 
     # -- reconciliation (worker thread) ----------------------------------
@@ -307,12 +329,20 @@ class BareMetalPublicationCycle:
     def _close_stale(self, _db_path: str, _base_url: str) -> list[str]:
         """Close from the disjoint classes, only at sites whose generation was accepted.
 
-        A candidate's listing is left to publication; a resource that is
-        unavailable closes its listing for availability; a held pool's
-        listings are untouched; every other open listing at the site — its
-        resource withdrawn, or no longer projected under the pool its binding
-        records — closes as a withdrawn source. Each listing is in at most one
-        class, so the plan never names one twice.
+        Each open binding is matched to its resource by the site, pool, and
+        Physical Resource it records, before its key: a resource held for an
+        unreadable declaration has no shape and so no key to match on. Then:
+
+        - a held resource, or one in a held pool, leaves the listing as it is;
+        - a candidate under the binding's own key is left to publication;
+        - an unavailable resource under the binding's own key closes for
+          availability;
+        - anything else closes as a withdrawn source: a withdrawn or absent
+          resource, or one whose key differs because its declared shape changed
+          or because the binding predates shape-bearing keys. A changed shape's
+          successor is published under its new key in the same run.
+
+        Each listing is in at most one class, so the plan never names one twice.
         """
         if not self._classifications:
             return []
@@ -321,25 +351,38 @@ class BareMetalPublicationCycle:
                 site_ids=tuple(self._classifications)
             )
         )
-        classes: dict[str, str] = {}
-        for site_id, classification in self._classifications.items():
-            for item in classification.resources:
-                classes[
-                    self._key(site_id, item.pool_id, item.physical_resource_id)
-                ] = item.classification
+        resources = {
+            (site_id, item.pool_id, item.physical_resource_id): item
+            for site_id, classification in self._classifications.items()
+            for item in classification.resources
+        }
         plan: list[str] = []
         reasons: dict[str, str] = {}
         for binding in bindings:
-            classification = classes.get(binding.derivation_key)
-            if classification == CANDIDATE:
+            if (binding.site_id, binding.pool_id) in self._held_pools:
                 continue
-            if classification == HELD or (
-                binding.pool_id is not None
-                and (binding.site_id, binding.pool_id) in self._held_pools
-            ):
+            item = resources.get(
+                (binding.site_id, binding.pool_id, binding.physical_resource_id)
+            )
+            if item is not None and item.classification == HELD:
+                continue
+            same_key = (
+                item is not None
+                and item.shape_digest is not None
+                and binding.derivation_key
+                == self._key(
+                    binding.site_id,
+                    item.pool_id,
+                    item.physical_resource_id,
+                    item.shape_digest,
+                )
+            )
+            if same_key and item.classification == CANDIDATE:
                 continue
             reason = (
-                CLOSE_UNAVAILABLE if classification == UNAVAILABLE else CLOSE_SOURCE_GONE
+                CLOSE_UNAVAILABLE
+                if same_key and item.classification == UNAVAILABLE
+                else CLOSE_SOURCE_GONE
             )
             plan.append(binding.listing_id)
             reasons[binding.listing_id] = reason

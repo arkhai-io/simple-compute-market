@@ -29,6 +29,7 @@ from market_settlement_runtime import (
     derive_obligation_ref,
 )
 
+from .claims import ClaimAttributesMissing, whole_machine_claim
 from .hosted_binding import build_accepted_hosted_obligation
 from .models import BareMetalHostedLifecycle
 from .sqlite_client import SQLiteClient
@@ -544,10 +545,10 @@ class BareMetalHostedLifecycleCallbacks:
             "negotiation_id": binding.negotiation_id,
             "hosted_obligation_ref": binding.obligation_ref,
         }
-        claim = {
-            "dimensions": {"units": 1},
-            "offering_mode": facts.offering_mode,
-        }
+        try:
+            claim = whole_machine_claim(context, offering_mode=facts.offering_mode)
+        except ClaimAttributesMissing as exc:
+            raise BareMetalHostedLifecycleError(str(exc)) from exc
         if facts.resource_selection == "specific":
             claim["resource_id"] = facts.physical_resource_id
         elif facts.pool_id is not None:

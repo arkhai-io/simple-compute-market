@@ -6,11 +6,13 @@ import pytest
 
 from arkhai_bare_metal_storefront.negotiation import default_seller_round_hook
 from market_policy.negotiation_middleware import NegotiationRound
+from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
 
 
 def _listing(**overrides):
     listing_resource = {
         "capacity_backing": "backed",
+        **LISTING_HARDWARE,
         "kind": "bare_metal.v2",
         "host_id": "machine-trusted",
         "physical_host_id": "host-trusted",

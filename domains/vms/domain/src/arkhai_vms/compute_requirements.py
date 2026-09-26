@@ -1,41 +1,24 @@
 """Canonical VM capacity-dimension vocabulary.
 
-These names and units are part of the VM domain contract. Translation into a
+VM capacity is stated in the compute family's vocabulary, which every compute
+domain binds from one owner so a VM listing and a bare-metal listing with the
+same hardware publish the same fields. The names are re-exported here so VM
+code keeps reading them from its own domain package. Translation into a
 specific provisioning playbook belongs to that provider's requirement delegate.
 """
 
-from market_capability_shape import CapabilitySchema, FieldKind, ShapeField
-
-GPU_COUNT_DIMENSION = "gpu_count"
-VCPU_COUNT_DIMENSION = "vcpu_count"
-RAM_GB_DIMENSION = "ram_gb"
-DISK_GB_DIMENSION = "disk_gb"
-
-DIMENSION_KEYS: tuple[str, ...] = (
-    GPU_COUNT_DIMENSION,
-    VCPU_COUNT_DIMENSION,
-    RAM_GB_DIMENSION,
+from arkhai_compute import (
+    COMPUTE_CAPABILITY_SCHEMA,
+    DIMENSION_KEYS,
     DISK_GB_DIMENSION,
+    GPU_COUNT_DIMENSION,
+    GPU_MODEL_ATTRIBUTE,
+    RAM_GB_DIMENSION,
+    VCPU_COUNT_DIMENSION,
 )
 
-GPU_MODEL_ATTRIBUTE = "gpu_model"
-
-# The VM vocabulary for family-grouped capability shapes. The flat names are
-# the published listing fields, the capacity-claim dimensions, and the site's
-# declared capacity keys, so they are the existing wire names rather than
-# family-prefixed ones: ``memory.gib`` flattens to ``ram_gb`` and
-# ``storage.gib`` to ``disk_gb``. Both are GiB, as the requirement delegate
-# treats them. Only ``gpu`` is required; a family a shape omits commits
-# nothing, and the site provisions it from its own defaults.
-VM_CAPABILITY_SCHEMA = CapabilitySchema(
-    fields=(
-        ShapeField("gpu", "count", FieldKind.QUANTITY, GPU_COUNT_DIMENSION, required=True),
-        ShapeField("gpu", "model", FieldKind.ATTRIBUTE, GPU_MODEL_ATTRIBUTE, required=True),
-        ShapeField("cpu", "count", FieldKind.QUANTITY, VCPU_COUNT_DIMENSION),
-        ShapeField("memory", "gib", FieldKind.QUANTITY, RAM_GB_DIMENSION),
-        ShapeField("storage", "gib", FieldKind.QUANTITY, DISK_GB_DIMENSION),
-    )
-)
+# A VM shape is a compute-family shape: the VM domain adds no family or field.
+VM_CAPABILITY_SCHEMA = COMPUTE_CAPABILITY_SCHEMA
 
 __all__ = [
     "DIMENSION_KEYS",

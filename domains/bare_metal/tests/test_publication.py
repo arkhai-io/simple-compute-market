@@ -22,10 +22,10 @@ from arkhai_bare_metal.fixtures.publication_view import (
 def _resource(view=None, *, physical_resource_id="resource-1", enabled=True, views=None):
     return {
         "physical_resource_id": physical_resource_id,
-        "resource_type": "compute.gpu",
-        "capacity": {"gpu_count": 8},
-        "available": {"gpu_count": 8},
-        "attributes": {},
+        "resource_type": "compute.bare-metal",
+        "capacity": {"units": 1, "gpu_count": 8, "ram_gb": 512},
+        "available": {"units": 1, "gpu_count": 8, "ram_gb": 512},
+        "attributes": {"gpu_model": "H200", "physical_host_id": "physical-host-1"},
         "enabled": enabled,
         "publication_views": (
             views
@@ -35,8 +35,7 @@ def _resource(view=None, *, physical_resource_id="resource-1", enabled=True, vie
                 or build_bare_metal_publication_view(
                     physical_resource_id,
                     access_methods=["ssh", "serial-console"],
-                    capacity={"gpu_count": 8, "ram_gb": 512},
-                    capabilities={"gpu_model": "H200", "ram_gb": 512},
+                    capacity={"units": 1, "gpu_count": 8, "ram_gb": 512},
                 )
             }
         ),
@@ -59,7 +58,7 @@ def test_interpreter_preserves_distinct_identities_and_listing_semantics():
     generation = _parse(_projection(_pool()))
 
     (resource,) = generation.resources
-    listings = available_bare_metal_listings([resource.view])
+    listings = available_bare_metal_listings([resource], region="us-west")
 
     assert (generation.site_id, generation.revision, generation.digest) == (
         "site-a",
@@ -71,19 +70,43 @@ def test_interpreter_preserves_distinct_identities_and_listing_semantics():
     assert listings[0].host_id == "machine-1"
     assert listings[0].physical_host_id == "physical-host-1"
     assert listings[0].access_methods == ["ssh", "serial-console"]
-    assert listings[0].capabilities == {
-        "gpu_count": 8,
-        "ram_gb": 512,
-        "gpu_model": "H200",
-    }
-    assert listings[0].site is None
+    assert (listings[0].gpu_count, listings[0].gpu_model, listings[0].ram_gb) == (8, "H200", 512)
+    assert listings[0].region == "us-west"
+
+
+def test_the_declaration_is_carried_beside_the_view():
+    """The shape is read from what admission matches, not from the view."""
+    generation = _parse(_projection(_pool()))
+
+    (resource,) = generation.resources
+    assert resource.declared_capacity == {"units": 1, "gpu_count": 8, "ram_gb": 512}
+    assert resource.declared_attributes["gpu_model"] == "H200"
+
+
+def test_publication_only_capabilities_are_accepted_but_never_published():
+    view = build_bare_metal_publication_view(
+        capacity={"units": 1, "gpu_count": 8, "ram_gb": 512},
+        capabilities={"gpu_model": "B200", "ram_gb": 4096},
+    )
+    generation = _parse(_projection(_pool("pool-1", _resource(view))))
+
+    (listing,) = available_bare_metal_listings(generation.resources, region="us-west")
+    assert (listing.gpu_model, listing.ram_gb) == ("H200", 512)
+
+
+def test_a_resource_whose_capacity_is_not_a_mapping_refuses_the_generation():
+    resource = _resource()
+    resource["capacity"] = [1]
+
+    with pytest.raises(ValueError, match="mappings"):
+        _parse(_projection(_pool("pool-1", resource)))
 
 
 def test_unavailable_resource_is_not_listed():
     view = build_bare_metal_publication_view(available=False)
     generation = _parse(_projection(_pool("pool-1", _resource(view))))
 
-    assert available_bare_metal_listings([generation.resources[0].view]) == []
+    assert available_bare_metal_listings(generation.resources, region="us-west") == []
 
 
 def test_a_disabled_resource_keeps_its_enablement_beside_its_view():

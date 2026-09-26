@@ -29,6 +29,8 @@ from arkhai_bare_metal_storefront.settlement_composition import (
     BareMetalStorefrontSettlementComposition,
 )
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
+from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
+from source_sites import SourceSites
 
 BUYER_SIGNER = Eip191Signer(bytes.fromhex("22" * 32))
 SELLER_SIGNER = Eip191Signer(bytes.fromhex("11" * 32))
@@ -101,6 +103,8 @@ def _runtime(path: str) -> BareMetalStorefrontRuntime:
         seller_principal=SELLER_SIGNER.identity,
         admin_principals=TrustedIdentitySet(identities=(ADMIN_SIGNER.identity,)),
         storefront_url="http://seller:8000",
+        # Openings recheck each listing against the site that published it.
+        capacity_client=SourceSites(),
         marketplace_signer=SELLER_SIGNER,
         settlement_composition=(
             BareMetalStorefrontSettlementComposition.from_raw_config(
@@ -143,6 +147,7 @@ async def _insert_contact_listing(runtime: BareMetalStorefrontRuntime) -> dict:
         physical_resource_id="resource-1",
         listing={
             "capacity_backing": "backed",
+            **LISTING_HARDWARE,
             "kind": "bare_metal.v2",
             "host_id": "machine-1",
             "physical_host_id": "physical-host-1",

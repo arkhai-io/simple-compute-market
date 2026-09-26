@@ -51,6 +51,9 @@ class BareMetalResourceProjection(BaseModel):
         min_length=1,
     )
     capacity: dict[str, Any] = Field(default_factory=dict)
+    # Publication-only data a seller may still configure. A listing's hardware
+    # comes from the capacity declaration, which admission matches, so this is
+    # accepted from a site but never published; publication reports it ignored.
     capabilities: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
@@ -66,16 +69,6 @@ class BareMetalResourceProjection(BaseModel):
             raise ValueError("access_methods must not contain blank values")
         _assert_public_value(self.capacity, path="capacity")
         _assert_public_value(self.capabilities, path="capabilities")
-        conflicts = {
-            key
-            for key in self.capacity.keys() & self.capabilities.keys()
-            if self.capacity[key] != self.capabilities[key]
-        }
-        if conflicts:
-            names = ", ".join(sorted(conflicts))
-            raise ValueError(
-                f"capacity and capabilities conflict for: {names}",
-            )
         return self
 
 
@@ -95,6 +88,11 @@ class TrustedBareMetalResource(BaseModel):
     pool_id: str = Field(min_length=1)
     enabled: bool
     view: BareMetalResourceProjection
+    # The declaration's own capacity and attributes, read from the projected
+    # resource rather than the view: they are what admission matches, so they
+    # are the only source of the listing's shape.
+    declared_capacity: dict[str, Any] = Field(default_factory=dict)
+    declared_attributes: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _validate_containment(self) -> "TrustedBareMetalResource":

@@ -16,6 +16,9 @@ from arkhai_bare_metal_buyer.config import load_bare_metal_buyer_config
 from arkhai_bare_metal_buyer.plugin import domain
 from market_core import DomainCapability
 from arkhai_bare_metal import BareMetalListing
+from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
+from registry_client import FilterSpecResponse
+from arkhai_bare_metal_buyer.cli import bare_metal_listing_params
 
 from arkhai_bare_metal_buyer.fulfillment import BareMetalFulfillmentTransport
 from market_identity import IdentityScheme, TrustedIdentitySet, create_signer
@@ -158,6 +161,7 @@ def test_hosted_option_binding_compares_physical_host_identity() -> None:
         host_id="machine-1",
         physical_host_id="physical-host-1",
         access_methods=["ssh"],
+        **LISTING_HARDWARE,
     )
 
     _validate_hosted_option_binding(
@@ -243,3 +247,55 @@ def test_the_read_command_can_redeliver() -> None:
         if item.name == "introduction"
     )
     assert "deliver" in command.callback.__code__.co_varnames
+
+
+# The two compute-schema filters these tests query, declared as a registry does.
+_FILTER_SPEC = FilterSpecResponse(
+    version=6,
+    etag="spec-etag-1",
+    listing_shape={},
+    filters=[
+        {"name": "gpu_model", "path": "$.listing_resource.gpu_model", "op": "in",
+         "value_type": "string", "on_missing": "fail"},
+        {"name": "gpu_count_min", "query_name": "gpu_count", "query_aliases": ["gpu_count_min"],
+         "path": "$.listing_resource.gpu_count", "op": "range", "value_type": "integer",
+         "alias_kind": "lower_bound", "on_missing": "fail"},
+    ],
+    schema_id="compute.market",
+    schema_version=2,
+)
+
+
+class _SpecClient:
+    def __init__(self) -> None:
+        self.spec_reads = 0
+
+    def get_filter_spec(self) -> FilterSpecResponse:
+        self.spec_reads += 1
+        return _FILTER_SPEC
+
+
+def test_a_listing_read_is_always_restricted_to_bare_metal() -> None:
+    client = _SpecClient()
+
+    assert bare_metal_listing_params(client, None, registry_url="https://registry") == {
+        "offering_mode": "bare_metal"
+    }
+    assert client.spec_reads == 0
+
+
+def test_a_resource_query_compiles_against_the_registry_and_carries_its_etag() -> None:
+    params = bare_metal_listing_params(
+        _SpecClient(), "gpu_model=H200 gpu_count>=8", registry_url="https://registry"
+    )
+
+    assert params["offering_mode"] == "bare_metal"
+    assert params["etag"] == "spec-etag-1"
+    assert {key for key in params} >= {"gpu_model", "gpu_count_min"}
+
+
+def test_a_field_the_registry_does_not_declare_is_refused_before_any_read() -> None:
+    with pytest.raises(typer.BadParameter, match="--resource|region"):
+        bare_metal_listing_params(
+            _SpecClient(), "region=us-west", registry_url="https://registry"
+        )

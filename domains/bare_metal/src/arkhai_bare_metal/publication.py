@@ -5,12 +5,16 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from arkhai_compute import COMPUTE_CAPABILITY_SCHEMA
+from market_capability_shape import flatten_shape
+
 from .projections import (
     BareMetalResourceProjection,
     TrustedBareMetalProjection,
     TrustedBareMetalResource,
 )
 from .schema import BareMetalListing
+from .shapes import derive_bare_metal_shape
 
 BARE_METAL_PUBLICATION_VIEW = "bare_metal.v2"
 
@@ -74,11 +78,21 @@ def trusted_bare_metal_projection(
                     "bare-metal view physical_resource_id conflicts with "
                     "the containing site projection",
                 )
+            declared_capacity = raw_resource.get("capacity") or {}
+            declared_attributes = raw_resource.get("attributes") or {}
+            if not isinstance(declared_capacity, Mapping) or not isinstance(
+                declared_attributes, Mapping
+            ):
+                raise ValueError(
+                    "a projected resource's capacity and attributes must be mappings"
+                )
             resources.append(
                 TrustedBareMetalResource(
                     pool_id=pool_id,
                     enabled=enabled,
                     view=view,
+                    declared_capacity=dict(declared_capacity),
+                    declared_attributes=dict(declared_attributes),
                 )
             )
 
@@ -91,36 +105,38 @@ def trusted_bare_metal_projection(
 
 
 def available_bare_metal_listings(
-    resources: Iterable[BareMetalResourceProjection | Mapping[str, Any]],
+    resources: Iterable[TrustedBareMetalResource],
     *,
+    region: str,
     min_duration_seconds: int | None = None,
     max_duration_seconds: int | None = None,
-    site: dict[str, str] | None = None,
 ) -> list[BareMetalListing]:
-    """Derive listings from validated available specific-resource views."""
+    """Derive listings from trusted resources whose whole machine is available.
+
+    Each listing publishes its resource's declared shape under the compute
+    family's flat names. A resource whose declaration does not read as a shape
+    raises ``BareMetalShapeError``; callers that must hold rather than fail
+    classify resources first (see ``storefront_publication``).
+    """
     listings: list[BareMetalListing] = []
-    for raw in resources:
-        resource = BareMetalResourceProjection.model_validate(raw)
-        if not resource.available:
+    for resource in resources:
+        if not resource.view.available:
             continue
-        capabilities = dict(resource.capacity)
-        for key, value in resource.capabilities.items():
-            existing = capabilities.get(key)
-            if key in capabilities and existing != value:
-                raise ValueError(
-                    f"capacity and capabilities conflict for: {key}",
-                )
-            capabilities[key] = value
+        shape = derive_bare_metal_shape(
+            resource.declared_capacity, resource.declared_attributes
+        )
+        flat = flatten_shape(shape, COMPUTE_CAPABILITY_SCHEMA)
         listings.append(
             BareMetalListing(
                 capacity_backing="backed",
-                host_id=resource.host_id,
-                physical_host_id=resource.physical_host_id,
-                access_methods=list(resource.access_methods),
+                host_id=resource.view.host_id,
+                physical_host_id=resource.view.physical_host_id,
+                access_methods=list(resource.view.access_methods),
                 min_duration_seconds=min_duration_seconds,
                 max_duration_seconds=max_duration_seconds,
-                site=site,
-                capabilities=capabilities,
+                region=region,
+                **dict(flat.quantities),
+                **dict(flat.attributes),
             ),
         )
     return listings

@@ -4,7 +4,9 @@ import time
 import base64
 from datetime import datetime, timedelta, timezone
 import uuid
+from dataclasses import replace
 
+import pytest
 from fastapi.testclient import TestClient
 from market_core.schemas import (
     RateValue,
@@ -41,6 +43,8 @@ from arkhai_bare_metal_storefront.server import (
     build_bare_metal_storefront_registry,
 )
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
+from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
+from source_sites import SourceSite, SourceSites, listing_source_projection
 
 
 def _app(runtime: BareMetalStorefrontRuntime):
@@ -104,6 +108,8 @@ def _runtime(path: str) -> BareMetalStorefrontRuntime:
             identities=(ADMIN_SIGNER.identity,),
         ),
         storefront_url="http://seller:8000",
+        # Openings recheck each listing against the site that published it.
+        capacity_client=SourceSites(),
         marketplace_signer=SELLER_SIGNER,
         seller_evm_address="0x3333333333333333333333333333333333333333",
         plan_builder=lambda **kwargs: {
@@ -130,6 +136,7 @@ async def _insert_listing(runtime: BareMetalStorefrontRuntime) -> None:
         physical_resource_id="resource-1",
         listing={
             "capacity_backing": "backed",
+            **LISTING_HARDWARE,
             "kind": "bare_metal.v2",
             "host_id": "machine-1",
             "physical_host_id": "physical-host-1",
@@ -222,6 +229,7 @@ async def _insert_hosted_listing(
         physical_resource_id="resource-1",
         listing={
             "capacity_backing": "backed",
+            **LISTING_HARDWARE,
             "kind": "bare_metal.v2",
             "host_id": "machine-1",
             "physical_host_id": "physical-host-1",
@@ -551,3 +559,68 @@ async def test_a_caller_with_no_request_identity_is_refused_unsigned(tmp_path) -
 
     assert refused.status_code == 401
     assert "X-Market-Signature" not in refused.headers
+
+
+async def _open_against(tmp_path, site: SourceSite):
+    """Open a negotiation on the seeded listing, its site answering ``site``."""
+    runtime = replace(
+        _runtime(str(tmp_path / "storefront.db")), capacity_client=SourceSites(site)
+    )
+    await _insert_listing(runtime)
+    opening = _opening()
+    with TestClient(_app(runtime)) as client:
+        response = client.post(
+            "/api/v1/negotiate/new",
+            json=opening,
+            headers=_headers("negotiate_new", "listing-1", opening),
+        )
+        threads = client.get("/api/v1/listings/listing-1/negotiations")
+    return response, threads.json()["count"], site
+
+
+@pytest.mark.parametrize(
+    "projection",
+    [
+        pytest.param(
+            listing_source_projection(capacity={"units": 1, "gpu_count": 4, "ram_gb": 2048}),
+            id="fewer GPUs declared",
+        ),
+        pytest.param(listing_source_projection(gpu_model="B200"), id="model changed"),
+        pytest.param(listing_source_projection(region="eu-central"), id="region moved"),
+        pytest.param(listing_source_projection(resource_id="resource-2"), id="resource gone"),
+    ],
+)
+async def test_an_opening_on_a_listing_its_source_no_longer_supports_is_refused(
+    tmp_path, projection
+) -> None:
+    response, threads, site = await _open_against(tmp_path, SourceSite(projection))
+
+    assert response.status_code == 409
+    assert "no longer matches its declaration" in response.json()["detail"]
+    assert threads == 0
+    assert site.calls == 1
+
+
+async def test_an_opening_whose_site_cannot_answer_is_refused_as_retryable(tmp_path) -> None:
+    response, threads, _ = await _open_against(
+        tmp_path, SourceSite(error=ConnectionError("site unreachable"))
+    )
+
+    assert response.status_code == 503
+    assert "site-a" in response.json()["detail"]
+    assert threads == 0
+
+
+async def test_an_opening_with_no_site_authority_is_refused_as_retryable(tmp_path) -> None:
+    runtime = replace(_runtime(str(tmp_path / "storefront.db")), capacity_client=None)
+    await _insert_listing(runtime)
+    opening = _opening()
+
+    with TestClient(_app(runtime)) as client:
+        response = client.post(
+            "/api/v1/negotiate/new",
+            json=opening,
+            headers=_headers("negotiate_new", "listing-1", opening),
+        )
+
+    assert response.status_code == 503
