@@ -155,19 +155,21 @@ wheels = [
 
 [[package]]
 name = "arkhai-bare-metal"
-version = "0.5.0"
+version = "0.6.0"
 source = { registry = "../../../.dist" }
 dependencies = [
+    { name = "arkhai-compute" },
     { name = "arkhai-core" },
+    { name = "arkhai-kit-capability-shape" },
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_bare_metal-0.5.0-py3-none-any.whl" },
+    { path = "arkhai_bare_metal-0.6.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-bare-metal-storefront"
-version = "0.5.0"
+version = "0.6.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-bare-metal" },
@@ -192,7 +194,18 @@ dependencies = [
     { name = "uvicorn" },
 ]
 wheels = [
-    { path = "arkhai_bare_metal_storefront-0.5.0-py3-none-any.whl" },
+    { path = "arkhai_bare_metal_storefront-0.6.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-compute"
+version = "0.1.0"
+source = { registry = "../../../.dist" }
+dependencies = [
+    { name = "arkhai-kit-capability-shape" },
+]
+wheels = [
+    { path = "arkhai_compute-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -295,10 +308,10 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-capability-shape"
-version = "0.1.0"
+version = "0.2.0"
 source = { registry = "../../../.dist" }
 wheels = [
-    { path = "arkhai_kit_capability_shape-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_kit_capability_shape-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -511,15 +524,16 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms"
-version = "0.4.0"
+version = "0.5.0"
 source = { registry = "../../../.dist" }
 dependencies = [
+    { name = "arkhai-compute" },
     { name = "arkhai-core" },
     { name = "arkhai-kit-capability-shape" },
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_vms-0.4.0-py3-none-any.whl" },
+    { path = "arkhai_vms-0.5.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -644,8 +658,8 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "alkahest-py", specifier = "==1.1.2" },
-    { name = "arkhai-bare-metal", specifier = ">=0.5.0" },
-    { name = "arkhai-bare-metal-storefront", specifier = "==0.5.0" },
+    { name = "arkhai-bare-metal", specifier = ">=0.6.0" },
+    { name = "arkhai-bare-metal-storefront", specifier = "==0.6.0" },
     { name = "arkhai-compute-provisioning", specifier = ">=0.6.1" },
     { name = "arkhai-core", specifier = ">=0.2.0" },
     { name = "arkhai-core-registry-client", specifier = ">=0.12.0" },
@@ -665,7 +679,7 @@ requires-dist = [
     { name = "arkhai-kit-site", specifier = ">=0.4.0" },
     { name = "arkhai-kit-site-client", specifier = ">=0.6.0" },
     { name = "arkhai-kit-storefront", specifier = "==0.1.1" },
-    { name = "arkhai-vms", specifier = ">=0.3.0" },
+    { name = "arkhai-vms", specifier = ">=0.5.0" },
     { name = "arkhai-vms-listings", extras = ["pools", "overrides"], specifier = ">=0.3.0" },
     { name = "arkhai-vms-negotiation", specifier = ">=0.1.0" },
     { name = "arkhai-vms-settlement", specifier = ">=0.1.0" },
