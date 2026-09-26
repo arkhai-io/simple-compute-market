@@ -28,7 +28,7 @@ contact.
 **Bare metal is Goal 7's primary target domain.** Out-of-band supply is
 overwhelmingly whole machines. This change therefore has to work for bare metal,
 not only for VM, and bare metal cannot yet carry it: bare-metal publication reads
-no pool declaration, publishes no capability shape, and publishes no unbacked
+its pools' projected declarations but publishes no capability shape and no unbacked
 listing. Each of those is owned by another change (see "Domain scope and
 dependencies").
 

@@ -20,16 +20,29 @@ Introductions likewise settle through the composition
 domains share one implementation of accepted-state interpretation and one
 per-origin contact resolution.
 
+### Identity is the site and the Physical Resource; host fields are optional when unbacked
+
+An unbacked listing's derivation identity is its site and Physical Resource, the same
+identity a backed listing has, with `host_id` and `physical_host_id` optional because
+an unbacked declaration names no host. This is the resource-granular identity VM
+adopted when capacity stopped requiring hosts, applied to bare metal unchanged.
+
+### The candidate comes from the capacity declaration
+
+An unbacked candidate is derived from the pool's capacity declaration through the
+kit's declaration reader, as VM's is, not from a `bare_metal.v2` publication view
+produced by a configuration-free provider. A fabricated physical view of supply
+nothing stands behind is what backing-as-a-listing-property exists to avoid.
+
+### This is a publication change
+
+Negotiation and settlement composition for an unbacked bare-metal listing sit on the
+kit negotiation runtime, which bare metal composes through
+`bare-metal-and-credits-domain-stacks` Section 4a; that section's own prerequisite,
+the negotiation runtime kit, is in place. This change adds the unbacked candidate to
+publication and relies on that composition for the rest, unless planning finds a
+piece neither owns.
+
 ## Open questions
 
-- **Listing identity without a host.** A bare-metal listing's identity is its site and
-  Physical Resource, and its schema requires a `host_id` and `physical_host_id`. An
-  unbacked pool's capacity declaration need name no host. Whether an unbacked listing's
-  identity is its Physical Resource alone, and which listing fields become optional for
-  it, is undecided.
-- **Where the candidate comes from.** Backed bare-metal candidates come from each
-  Physical Resource's `bare_metal.v2` publication view. Whether an unbacked candidate
-  uses the same view, produced by a configuration-free provider, or is derived from the
-  capacity declaration directly.
-- **Whether this is one change or several.** Publication, negotiation, and settlement
-  composition may be separable; decide when planning.
+None.

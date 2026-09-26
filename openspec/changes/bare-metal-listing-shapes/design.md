@@ -40,18 +40,36 @@ under the existing listing-identity requirement and is handled by it.
 per offering mode. Bare metal contributes one for `bare_metal` rather than
 introducing its own storefront-override mechanism.
 
+### Bare metal binds the compute-family capability schema
+
+Bare metal binds the same capability schema VM uses — the families `gpu`, `cpu`,
+`memory`, and `storage`, extended with any family bare metal needs — rather than a
+bare-metal schema whose fields map to the same wire names. The compute family shares
+one registry schema identity, its flat dimension spelling is one decision taken for
+both domains (`settle-capacity-claim-vocabulary`), and the two domains converge on
+one storefront over time; two schemas producing the same flat names would be a
+divergence that later has to be undone.
+
+### Existing listings are closed and republished once
+
+Bare metal is not deployed, so no published listing has buyers holding its reference.
+Every bare-metal listing is closed and republished with its shape once, as VM's
+upgrade to listing shapes did, rather than left invisible to dimension filters until
+it next closes.
+
+### The nested `capabilities` mapping is retired
+
+The top-level shape fields replace `listing_resource.capabilities`; the nested form
+is not published beside them. There is no deployed buyer to keep compatible, the
+bare-metal buyer in this repository is updated with the storefront, and publishing
+both would keep two spellings of one shape alive from the first release.
+
+### Overrides state settlement clauses and terms only
+
+A whole machine has no shape to choose, so the bare-metal override vocabulary is
+settlement clauses and commercial terms. The asking rate and the hold rate join the
+same record through the changes that define them.
+
 ## Open questions
 
-- **Which capability schema.** Whether bare metal binds the VM capability schema —
-  the compute family's form factors share one registry schema identity — or its own
-  schema whose fields map to the same wire names. Decide before planning.
-- **Existing listings.** A published bare-metal listing did not publish the new
-  top-level fields; under the listing-identity requirement, a newly published
-  identity field is neither added to an existing listing nor a reason to close it. So
-  existing listings would stay invisible to dimension filters until they next close.
-  Whether to accept that or close and republish each once, as VM's upgrade to listing
-  shapes did, is undecided.
-- **Whether `capabilities` stays published** beside the top-level fields for
-  compatibility with existing bare-metal buyers, and for how long.
-- **Which override fields bare metal accepts.** Whether an override may state
-  settlement clauses and terms only, given there is no shape choice to override.
+None.

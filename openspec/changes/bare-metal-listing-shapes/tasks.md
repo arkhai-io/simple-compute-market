@@ -5,7 +5,11 @@ not yet planned.
 
 ## 1. Design
 
-- [ ] 1.1 Decide each open question in `design.md` and record the decision there.
+- [x] 1.1 Decide each open question in `design.md` and record the decision there.
+      Decided: the compute-family schema; close and republish once; the nested
+      `capabilities` mapping retired; overrides carry clauses and terms only.
+- [ ] 1.2 Plan the implementation, naming the files each decision touches, the focused
+      and integration suites, and the permanent documentation destinations.
 
 ## 2. Closeout
 

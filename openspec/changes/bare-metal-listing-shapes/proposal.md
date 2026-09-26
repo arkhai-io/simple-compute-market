@@ -86,3 +86,6 @@ None.
   region hint and the override store's pool resolution both need them.
 - **Blocks `publish-indicative-listing-rates`** for bare metal, and
   `unbacked-bare-metal-listings`, whose listings need the same discoverable shape.
+- Shares one capability schema and one flat dimension spelling with VM;
+  `settle-capacity-claim-vocabulary` decides that spelling for both domains, and
+  this change follows whichever it takes.

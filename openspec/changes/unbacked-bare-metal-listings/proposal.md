@@ -80,4 +80,8 @@ None.
   discoverable by the compute schema's dimension filters.
 - **Blocked on `compose-contact-exchange-across-compute`** Sections 1–3b, for the
   promoted introduction composition and the per-origin contact payload.
+- **Blocked on `bare-metal-and-credits-domain-stacks` Section 4a** for negotiation
+  and settlement of an unbacked bare-metal listing through the kit negotiation
+  runtime; that section's only prerequisite, the negotiation runtime kit, is in
+  place, so nothing else in that change gates this one.
 - **Unblocks** the bare-metal system evidence of `publish-indicative-listing-rates`.

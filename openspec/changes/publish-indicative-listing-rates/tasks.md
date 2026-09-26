@@ -20,7 +20,7 @@ service's canonical typed client over `ASGITransport`.
 No decision gate remains open except 4.0. The tasks below confirm the code facts
 each decision rests on still hold, and stop rather than proceed if one has moved.
 
-- [ ] 1.1 Confirm `market_core.schemas.PER_UNIT_SECONDS` still holds exactly
+- [ ] 1.1 Confirm `market_alkahest.schemas.PER_UNIT_SECONDS` still holds exactly
       `{"hour": 3600}`. The hourly-only rule is a local asking-rate contract
       validated against that table for parity, not a rule inherited from it.
 - [ ] 1.2 Confirm `SettlementPublicationClause` still expresses a published rate as
