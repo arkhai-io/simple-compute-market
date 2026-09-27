@@ -75,7 +75,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-site"
-version = "0.5.0"
+version = "0.6.0"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-kit-identity" },

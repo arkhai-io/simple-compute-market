@@ -48,8 +48,7 @@ def _lease_view(reservation: dict[str, Any]) -> BareMetalLeaseView:
         lease_start_utc=reservation.get("lease_start_utc"),
         lease_end_utc=reservation.get("lease_end_utc"),
         state=str(reservation.get("state")),
-        release_job_id=reservation.get("release_job_id")
-        or reservation.get("vm_remove_job_id"),
+        release_job_id=reservation.get("release_job_id"),
         access_ref=bare_metal_access_ref(reservation),
     )
 

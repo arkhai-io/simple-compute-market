@@ -1312,7 +1312,6 @@ class AdminController:
             state="releasing",
             close_oversized=True,
             provider_lease_id=body.provider_lease_id,
-            vm_remove_job_id=body.vm_remove_job_id,
         )
 
     @router.post(

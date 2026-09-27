@@ -428,7 +428,7 @@ async def test_releasing_reservation_past_grace_marks_release_failed(
         capacity_reservation_id=capacity_reservation_id,
         offering_mode=VM_OFFERING_MODE,
     )
-    ledger.begin_releasing(capacity_reservation_id, vm_remove_job_id="fulfillment-1")
+    ledger.begin_releasing(capacity_reservation_id, release_job_id="fulfillment-1")
     _set_fulfillment_state(
         session_factory,
         capacity_reservation_id,
@@ -470,7 +470,7 @@ async def test_releasing_reservation_within_grace_skips(session_factory, ledger)
         capacity_reservation_id=capacity_reservation_id,
         offering_mode=VM_OFFERING_MODE,
     )
-    ledger.begin_releasing(capacity_reservation_id, vm_remove_job_id="fulfillment-1")
+    ledger.begin_releasing(capacity_reservation_id, release_job_id="fulfillment-1")
     _set_fulfillment_state(
         session_factory,
         capacity_reservation_id,
@@ -492,7 +492,7 @@ async def test_succeeded_vm_remove_releases_normally(session_factory, ledger):
         capacity_reservation_id=capacity_reservation_id,
         offering_mode=VM_OFFERING_MODE,
     )
-    ledger.begin_releasing(capacity_reservation_id, vm_remove_job_id="fulfillment-1")
+    ledger.begin_releasing(capacity_reservation_id, release_job_id="fulfillment-1")
     _set_fulfillment_state(
         session_factory, capacity_reservation_id, SettlementRecordState.torn_down.value,
     )
@@ -520,7 +520,7 @@ async def test_failed_vm_remove_marks_release_failed_without_notification(sessio
         capacity_reservation_id=capacity_reservation_id,
         offering_mode=VM_OFFERING_MODE,
     )
-    ledger.begin_releasing(capacity_reservation_id, vm_remove_job_id="fulfillment-1")
+    ledger.begin_releasing(capacity_reservation_id, release_job_id="fulfillment-1")
     _set_fulfillment_state(
         session_factory,
         capacity_reservation_id,
@@ -567,7 +567,6 @@ async def test_due_leased_reservation_begins_fulfillment_teardown(session_factor
     assert summary["checked"] == 1
     row = ledger.get_reservation(capacity_reservation_id)
     assert row["state"] == "releasing"
-    assert row["vm_remove_job_id"] == "fulfillment-1"
     assert row["release_job_id"] == "fulfillment-1"
     assert row["offering_mode"] == "vm"
 
@@ -808,7 +807,6 @@ async def test_bare_metal_executor_releases_locally_and_notifies(session_factory
     row = ledger.get_reservation(reservation["capacity_reservation_id"])
     assert row["state"] == "released"
     assert row["release_job_id"] == "direct-release"
-    assert row["vm_remove_job_id"] is None
     assert row["executor_target"] == "node-1"
     assert row["executor_ref"] == {
         "physical_host_id": "host-kvm1",
@@ -924,7 +922,6 @@ async def test_admin_retry_release_resubmits_delegate(session_factory, ledger):
     )
 
     assert updated["state"] == "releasing"
-    assert updated["vm_remove_job_id"] == "remove-retry-1"
     assert updated["release_job_id"] == "remove-retry-1"
     assert ledger.snapshot()[0]["available_units"] < 8
     delegate.assert_awaited_once()

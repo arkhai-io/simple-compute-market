@@ -271,6 +271,24 @@ class TestUpdateLease:
         # The new end time was stored (compare prefix to avoid TZ formatting differences)
         assert reservation["lease_end_utc"].startswith(new_end[:19])
 
+    async def test_patch_release_job_id_replaces_the_release_handle(
+        self, client_and_queue,
+    ):
+        """An operator corrects a lease's release handle under its one name,
+        and the lease publishes the corrected value."""
+        client, _ = client_and_queue
+        lease = await _register(client, "escrow-patch-release-handle")
+
+        updated = await client.update_lease(
+            lease["id"], release_job_id="fulfillment-corrected",
+        )
+
+        assert updated["release_job_id"] == "fulfillment-corrected"
+        ledger = _container_module.resolved_capacity_ledger_service
+        reservation = ledger.get_reservation(lease["capacity_reservation_id"])
+        assert reservation["release_job_id"] == "fulfillment-corrected"
+        assert reservation["state"] == "leased"
+
     async def test_patch_vm_host_and_vm_target(self, client_and_queue):
         """PATCH can update host_id and vm_target for migrated VMs."""
         client, _ = client_and_queue
@@ -335,7 +353,7 @@ class TestUpdateLease:
         reservation = ledger.get_reservation(lease["capacity_reservation_id"])
         assert reservation["state"] in ("released", "releasing")
         if reservation["state"] == "releasing":
-            assert reservation["release_job_id"] == reservation["vm_remove_job_id"]
+            assert reservation["release_job_id"]
 
     async def test_releasing_lease_publishes_release_job_id_on_the_api(
         self, client_and_queue
@@ -349,9 +367,8 @@ class TestUpdateLease:
         demonstrably releasing. The e2e's `DealLease` view reads exactly
         this key, and asserting the ledger is not asserting the contract.
 
-        `vm_remove_job_id` is checked alongside it because it is retained
-        for wire compatibility only, and the two must carry the same value
-        rather than diverge.
+        The handle is published under that one name: the lease carries no
+        other job identifier besides the create job's.
         """
         client, _ = client_and_queue
         lease = await _register(client, "escrow-release-job-id-on-api")
@@ -375,10 +392,10 @@ class TestUpdateLease:
             f"release handle: {published}"
         )
         assert published["release_job_id"], published
-        assert published["vm_remove_job_id"] == published["release_job_id"], (
-            "the retained VM-conditional mirror must not diverge from the "
-            f"canonical field: {published}"
-        )
+        assert {key for key in published if key.endswith("_job_id")} == {
+            "create_job_id",
+            "release_job_id",
+        }, published
 
 
 class TestReleaseOversight:
@@ -424,7 +441,7 @@ class TestReleaseOversight:
         lease = await _register(client, "escrow-cancel-releasing", lease_end_utc=_past_dt())
         ledger = _container_module.resolved_capacity_ledger_service
         # Manually transition to releasing (simulating watchdog having fired)
-        ledger.begin_releasing(lease["capacity_reservation_id"], vm_remove_job_id="job-in-flight")
+        ledger.begin_releasing(lease["capacity_reservation_id"], release_job_id="job-in-flight")
 
         with pytest.raises(ProvisioningError) as exc_info:
             await client.release_lease_oversight(lease["id"], reason="manual ops")
@@ -450,7 +467,7 @@ class TestAdminLeaseRepair:
         assert retried["status"] == "releasing"
         reservation = ledger.get_reservation(lease["capacity_reservation_id"])
         assert reservation["state"] == "releasing"
-        assert reservation["vm_remove_job_id"] == fulfillment_id
+        assert reservation["release_job_id"] == fulfillment_id
 
     async def test_retry_release_non_failed_returns_409(self, client_and_queue):
         client, _ = client_and_queue

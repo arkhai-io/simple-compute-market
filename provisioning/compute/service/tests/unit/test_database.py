@@ -458,6 +458,7 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
         "20260921_003_capacity_declaration_attributes",
         "20260921_004_legacy_host_capacity_declarations",
         "20260922_001_pool_advertisement_and_backing",
+        "20260927_001_drop_reservation_release_mirror",
     }
 
 
@@ -517,7 +518,8 @@ def test_run_migrations_is_idempotent():
         migration_count = connection.execute(
             text("SELECT COUNT(*) FROM schema_migrations")
         ).scalar_one()
-    assert migration_count == 22
+    # Each migration recorded exactly once; the pinned-ID test names them.
+    assert migration_count == len(MIGRATIONS)
 
 
 # ---------------------------------------------------------------------------

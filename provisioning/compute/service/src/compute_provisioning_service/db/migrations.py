@@ -2527,6 +2527,27 @@ def _migrate_pool_advertisement_and_backing(engine: Engine) -> None:
             )
 
 
+def _migrate_drop_reservation_release_mirror(engine: Engine) -> None:
+    """Drop ``capacity_reservations.vm_remove_job_id``.
+
+    A reservation's release handle has one name, ``release_job_id``, for every
+    offering mode sharing this table. The dropped column only ever held a copy
+    of it for VM reservations, so no value is lost and nothing is backfilled.
+
+    Irreversible through this chain. A release whose model still maps the
+    column cannot read the table after this runs; rolling back to one requires
+    re-adding the column, empty and nullable, before that release starts. Its
+    readers take ``release_job_id`` first, so an empty column is sufficient.
+    A no-op where the column is absent, including every database created from
+    the current model.
+    """
+    if not _table_exists(engine, "capacity_reservations"):
+        return
+    _drop_columns_via_table_rebuild(
+        engine, "capacity_reservations", ["vm_remove_job_id"]
+    )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration("20260603_001_ansible_jobs_escrow_uid", _migrate_ansible_jobs_escrow_uid),
     Migration("20260603_002_hosts_public_host", _migrate_hosts_public_host),
@@ -2603,5 +2624,9 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260922_001_pool_advertisement_and_backing",
         _migrate_pool_advertisement_and_backing,
+    ),
+    Migration(
+        "20260927_001_drop_reservation_release_mirror",
+        _migrate_drop_reservation_release_mirror,
     ),
 )

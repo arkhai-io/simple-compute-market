@@ -32,7 +32,7 @@ class ReservationState(str, enum.Enum):
     provisioning — executor is building the workload.
     provisioning_failed  — provisioning failed before a usable lease existed.
     leased       — committed into an active lease (``lease_end_utc`` set).
-    releasing    — lease ended; teardown/vm_remove job in flight.
+    releasing    — lease ended; teardown in flight under ``release_job_id``.
     released             — teardown succeeded and capacity returned to the pool.
     release_failed       — teardown failed/timed out; capacity remains held.
     unmanaged            — lifecycle oversight released; capacity remains held until admin repair.
@@ -154,7 +154,6 @@ class CapacityReservation(Base):
     lease_start_utc = Column(String, nullable=True)
     lease_end_utc = Column(String, nullable=True)
     create_job_id = Column(String, nullable=True)
-    vm_remove_job_id = Column(String, nullable=True)
     failure_reason = Column(String, nullable=True)
     failure_message = Column(Text, nullable=True)
     released_at = Column(String, nullable=True)
