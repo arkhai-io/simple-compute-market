@@ -144,3 +144,22 @@ invokes every state transition it depends on; nothing advances on a timer while 
 - **Mock results drift from real playbook output** → the bare-metal result shape comes
   from the adapter that parses it, and the provisioning service's own tests keep the two
   agreeing.
+
+## Context from `bare-metal-listing-shapes`
+
+**Decided there, implemented here: fulfillment starts when settlement is verified.**
+VM's storefront starts Alkahest-path fulfillment itself once settlement verifies the
+escrow. Standalone bare metal instead waits for the buyer's
+`POST /api/v1/fulfillments/begin`, and the bare-metal buyer has no Alkahest path to
+call it.
+
+VM's direction was chosen:
+- the buyer makes one call;
+- retries stay in the seller's durable loop;
+- both domains already start hosted fulfillment this way.
+
+This change's Alkahest whole-host deal therefore has bare metal's settle path start
+fulfillment through its `fulfill` hook. It retires `POST /api/v1/fulfillments/begin`
+and `BareMetalFulfillmentTransport.begin()`, which exists only as the interim typed
+client for that route. Its settlement request names the negotiation, the buyer, and
+the EVM address only, as in every domain.

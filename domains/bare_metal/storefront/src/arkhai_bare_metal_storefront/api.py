@@ -661,7 +661,7 @@ async def begin_fulfillment(
             operation="bare_metal_fulfillment_begin",
             resource=body.negotiation_id,
             expected_principal=body.buyer_principal,
-            body=body.model_dump(mode="json"),
+            body=await _request_body(request),
         )
         lifecycle = await runtime.fulfillment_service().begin(
             negotiation_id=body.negotiation_id,

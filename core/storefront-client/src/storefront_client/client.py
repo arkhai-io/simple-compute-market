@@ -1706,21 +1706,19 @@ class StorefrontClient(_StorefrontClientBase):
         *,
         negotiation_id: str,
         buyer_evm_address: str,
-        ssh_public_key: str = "",
-        chain_name: str = "anvil",
         request_id: str | None = None,
     ) -> SettleResponse:
         """POST /api/v1/settle/{escrow_uid} through the buyer v2 contract.
 
         ``buyer_evm_address`` is the selected EVM settlement-effect address; it
         is deliberately distinct from the signer-owned marketplace principal.
+        The SSH key and chain are negotiated terms the storefront reads from the
+        accepted negotiation, so settlement does not restate them.
         """
         body: dict[str, Any] = {
             "negotiation_id": negotiation_id,
             "buyer_principal": self._principal_body(),
             "buyer_evm_address": buyer_evm_address,
-            "ssh_public_key": ssh_public_key,
-            "chain_name": chain_name,
         }
         return SettleResponse.from_dict(
             await self._authenticated_post(
@@ -3119,21 +3117,19 @@ class SyncStorefrontClient(_StorefrontClientBase):
         *,
         negotiation_id: str,
         buyer_evm_address: str,
-        ssh_public_key: str = "",
-        chain_name: str = "anvil",
         request_id: str | None = None,
     ) -> SettleResponse:
         """POST /api/v1/settle/{escrow_uid} through the buyer v2 contract.
 
         ``buyer_evm_address`` is the selected EVM settlement-effect address; it
         is deliberately distinct from the signer-owned marketplace principal.
+        The SSH key and chain are negotiated terms the storefront reads from the
+        accepted negotiation, so settlement does not restate them.
         """
         body: dict[str, Any] = {
             "negotiation_id": negotiation_id,
             "buyer_principal": self._principal_body(),
             "buyer_evm_address": buyer_evm_address,
-            "ssh_public_key": ssh_public_key,
-            "chain_name": chain_name,
         }
         return SettleResponse.from_dict(
             self._authenticated_post(

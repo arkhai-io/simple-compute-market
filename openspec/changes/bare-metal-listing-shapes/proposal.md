@@ -51,6 +51,10 @@ mechanisms.
   publication's classification also uses.
 - Give the bare-metal buyer's `list` command a `--resource` query in the shared
   grammar, so this repository's own bare-metal buyer can filter by hardware.
+- Converge VM and bare-metal settlement: a settlement request restates no
+  negotiated term. VM's settle request, the VM buyer, and the canonical client stop
+  carrying the SSH key and chain, which both domains read from the accepted
+  negotiation.
 
 ## Capabilities
 
@@ -103,7 +107,11 @@ None.
   - claim construction on both reservation paths;
   - opening guard;
   - import-boundary test.
-- `domains/bare_metal/buyer/`: `list --resource`.
+- `domains/bare_metal/buyer/`: `list --resource`, and `begin()` on the fulfillment
+  transport.
+- `domains/vms/storefront/` settle request and controller, `domains/vms/buyer/`
+  settle payloads, and `core/storefront-client/` `negotiate_new(selection_only=)`
+  and `settle`.
 - `e2e-tests` bare-metal publication scenario: declarations move hardware into
   `capacity` and `attributes`, and discovery is asserted by a dimension filter.
 - `docs/bare-metal-seller-quickstart.md`: the registration body.

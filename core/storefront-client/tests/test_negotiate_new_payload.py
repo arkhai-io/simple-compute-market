@@ -21,7 +21,7 @@ from storefront_client.auth import (
     SIGNATURE_VERSION_HEADER,
     TIMESTAMP_HEADER,
 )
-from storefront_client.client import StorefrontClient, SyncStorefrontClient
+from storefront_client.client import StorefrontClient, StorefrontClientError, SyncStorefrontClient
 
 _SIGNER = Ed25519Signer(bytes(range(32)))
 _PUBLISHER = Ed25519Signer(bytes(range(1, 33)))
@@ -256,3 +256,39 @@ def test_an_escrow_opening_with_a_selection_is_unchanged():
     body = json.loads(transport.requests[0].content)
     assert body["proposal"]["chain_name"] == "anvil"
     assert body["settlement_selection"] == _SELECTION
+
+
+def test_settle_restates_no_negotiated_term_and_is_identical_in_both_clients(monkeypatch):
+    """Settlement names the accepted negotiation, the buyer, and the EVM
+    settlement-effect address. The SSH key and chain are negotiated terms."""
+    monkeypatch.setattr("storefront_client.auth.time.time", lambda: 1_000)
+    async_transport = _CapturingAsyncTransport()
+    sync_transport = _CapturingSyncTransport()
+    publishers = TrustedIdentitySet(identities=(_PUBLISHER.identity,))
+    kwargs = {
+        "negotiation_id": "negotiation-1",
+        "buyer_evm_address": "0x" + "33" * 20,
+        "request_id": "request-1",
+    }
+
+    async def _run() -> None:
+        async with StorefrontClient(
+            "http://test", signer=_SIGNER, caller_role="buyer",
+            expected_publishers=publishers, transport=async_transport,
+        ) as client:
+            # The capturing double signs responses for negotiate_new only, so the
+            # settle response is refused after the request has been captured.
+            with pytest.raises(StorefrontClientError, match="response authentication"):
+                await client.settle("0x" + "ab" * 32, **kwargs)
+
+    asyncio.run(_run())
+    with SyncStorefrontClient(
+        "http://test", signer=_SIGNER, caller_role="buyer",
+        expected_publishers=publishers, transport=sync_transport,
+    ) as client:
+        with pytest.raises(StorefrontClientError, match="response authentication"):
+            client.settle("0x" + "ab" * 32, **kwargs)
+
+    assert async_transport.requests[0].content == sync_transport.requests[0].content
+    body = json.loads(async_transport.requests[0].content)
+    assert set(body) == {"negotiation_id", "buyer_principal", "buyer_evm_address"}

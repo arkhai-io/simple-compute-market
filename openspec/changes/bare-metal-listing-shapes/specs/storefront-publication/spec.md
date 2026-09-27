@@ -140,6 +140,19 @@ It MUST refuse as retryable when the site cannot be reached or does not verify.
 
 ## MODIFIED Requirements
 
+### Requirement: Seller protocol surface
+A storefront MUST expose authenticated listing, negotiation, settlement, identity, health, and operator control surfaces while keeping domain-specific behavior behind injected adapters.
+
+A settlement request MUST name the accepted negotiation and carry only what negotiation did not settle, such as the buyer's settlement-effect address. It MUST NOT restate a negotiated term, such as the buyer's access key or the settlement chain; the storefront reads those from the accepted negotiation, and MUST refuse a request that carries one. This holds in every domain.
+
+#### Scenario: Buyer settles accepted terms
+- **WHEN** the buyer submits a settlement request for an accepted negotiation
+- **THEN** the storefront verifies the agreed terms and settlement evidence before scheduling fulfillment
+
+#### Scenario: A settlement request restates a negotiated term
+- **WHEN** a buyer's settlement request carries an SSH public key or a chain name, matching the accepted terms or not
+- **THEN** the storefront refuses it before any settlement lookup
+
 ### Requirement: Every VM listing is a listing shape
 
 Every VM listing MUST be a listing shape: a family-grouped capability shape in the compute

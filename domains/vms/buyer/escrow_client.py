@@ -42,19 +42,18 @@ def encode_escrow_proposal(proposal: Any) -> dict[str, Any]:
 def make_alkahest_settlement_payload_fn(
     *,
     buyer_evm_address: str,
-    ssh_public_key: str,
 ) -> Callable[[str, Any], dict[str, Any]]:
-    """Build the VM-owned EVM settlement request encoder."""
+    """Build the VM-owned EVM settlement request encoder.
 
-    def _build(negotiation_id: str, proposal: Any) -> dict[str, Any]:
-        decoded = EscrowProposal.model_validate(
-            proposal.model_dump() if hasattr(proposal, "model_dump") else proposal
-        )
+    Settlement names the accepted negotiation and adds only the buyer's EVM
+    settlement-effect address. The SSH key and chain were negotiated, and the
+    storefront reads them from the accepted negotiation, so they are not sent.
+    """
+
+    def _build(negotiation_id: str, _proposal: Any) -> dict[str, Any]:
         return {
             "negotiation_id": negotiation_id,
-            "ssh_public_key": ssh_public_key,
             "buyer_evm_address": buyer_evm_address,
-            "chain_name": decoded.chain_name,
         }
 
     return _build

@@ -176,7 +176,12 @@ def test_make_vm_provision_terms_uses_compute_compat_shape():
     assert terms.kind == "compute.v1"
 
 
-def test_alkahest_resume_preserves_accepted_ssh_after_config_rotation(monkeypatch):
+def test_alkahest_resume_settles_without_restating_negotiated_terms(monkeypatch):
+    """Settlement names the accepted negotiation and the EVM address only.
+
+    The SSH key and chain are the accepted negotiation's, read by the
+    storefront; a rotated local SSH key is never consulted.
+    """
     buyer = Ed25519Signer(b"\x34" * 32)
     accepted_ssh = "ssh-ed25519 accepted-key"
     deal = SimpleNamespace(
@@ -272,7 +277,10 @@ def test_alkahest_resume_preserves_accepted_ssh_after_config_rotation(monkeypatc
     )
 
     assert result == {"status": "ready"}
-    assert submitted["payload"]["ssh_public_key"] == accepted_ssh
+    assert submitted["payload"] == {
+        "negotiation_id": "neg-accepted-ssh",
+        "buyer_evm_address": "0x" + "66" * 20,
+    }
 
 
 def test_current_accepted_state_without_provision_terms_never_uses_config():

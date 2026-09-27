@@ -7,7 +7,11 @@ import sqlite3
 import time
 import uuid
 
+import httpx
+import pytest
 from fastapi.testclient import TestClient
+from storefront_client import StorefrontClient, StorefrontClientError
+from storefront_client.models import SettleResponse, SettleStatusResponse
 from market_core.schemas import SettlementPlan
 from market_fulfillment import VersionedEnvelope
 from market_settlement_runtime import derive_obligation_ref
@@ -29,6 +33,8 @@ from arkhai_bare_metal_storefront.server import (
 )
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
+from arkhai_bare_metal_buyer.fulfillment import BareMetalFulfillmentTransport
+from loopback import serving
 
 
 def _app(runtime: BareMetalStorefrontRuntime):
@@ -48,6 +54,28 @@ ADMIN_SIGNER = Eip191Signer(bytes.fromhex("33" * 32))
 ESCROW_ADDRESS = "0x1111111111111111111111111111111111111111"
 ESCROW_UID = "0x" + "ab" * 32
 OTHER_ESCROW_UID = "0x" + "cd" * 32
+
+
+def _buyer(app) -> StorefrontClient:
+    """The canonical storefront client, as the buyer, over the in-process app."""
+    return StorefrontClient(
+        "http://seller",
+        signer=BUYER_SIGNER,
+        caller_role="buyer",
+        expected_publishers=TrustedIdentitySet(identities=(SELLER_SIGNER.identity,)),
+        transport=httpx.ASGITransport(app=app),
+    )
+
+
+def _settled(response: SettleResponse | SettleStatusResponse) -> dict:
+    """A typed settle or status response as the wire object it was read from."""
+    return {
+        "escrow_uid": response.escrow_uid,
+        "status": response.status,
+        "buyer_principal": response.buyer_principal.model_dump(mode="json"),
+        "seller_principal": response.seller_principal.model_dump(mode="json"),
+        **response.extra,
+    }
 
 
 def _settle_body(negotiation_id: str) -> dict:
@@ -225,22 +253,18 @@ async def test_settlement_is_verified_idempotently_without_fulfillment_claims(
     app = _app(runtime)
     body = _settle_body(negotiation_id)
 
-    with TestClient(app) as client:
-        first = client.post(
-            f"/api/v1/settle/{ESCROW_UID}",
-            json=body,
-            headers=_headers("settle_escrow", ESCROW_UID, body),
-        )
-        retry = client.post(
-            f"/api/v1/settle/{ESCROW_UID}",
-            json=body,
-            headers=_headers("settle_escrow", ESCROW_UID, body),
-        )
-        conflict = client.post(
-            f"/api/v1/settle/{OTHER_ESCROW_UID}",
-            json=body,
-            headers=_headers("settle_escrow", OTHER_ESCROW_UID, body),
-        )
+    async with app.router.lifespan_context(app):
+        async with _buyer(app) as buyer:
+            first = await buyer.settle(
+                ESCROW_UID, negotiation_id=negotiation_id, buyer_evm_address=BUYER
+            )
+            retry = await buyer.settle(
+                ESCROW_UID, negotiation_id=negotiation_id, buyer_evm_address=BUYER
+            )
+            with pytest.raises(StorefrontClientError) as conflict:
+                await buyer.settle(
+                    OTHER_ESCROW_UID, negotiation_id=negotiation_id, buyer_evm_address=BUYER
+                )
 
     restarted_domain = get_market_domain_contract()
     restarted = BareMetalStorefrontRuntime(
@@ -256,22 +280,15 @@ async def test_settlement_is_verified_idempotently_without_fulfillment_claims(
         chain_config_paths={"anvil": None},
         escrow_verifier=verifier,
     )
-    with TestClient(_app(restarted)) as client:
-        restart_retry = client.post(
-            f"/api/v1/settle/{ESCROW_UID}",
-            json=body,
-            headers=_headers("settle_escrow", ESCROW_UID, body),
-        )
-        status = client.get(
-            f"/api/v1/settle/{ESCROW_UID}/status",
-            headers=_headers(
-                "settle_status",
-                ESCROW_UID,
-                method="GET",
-            ),
-        )
+    restarted_app = _app(restarted)
+    async with restarted_app.router.lifespan_context(restarted_app):
+        async with _buyer(restarted_app) as buyer:
+            restart_retry = await buyer.settle(
+                ESCROW_UID, negotiation_id=negotiation_id, buyer_evm_address=BUYER
+            )
+            status = await buyer.get_settle_status(ESCROW_UID)
 
-    obligation_ref = first.json().get("obligation_ref")
+    obligation_ref = first.extra.get("obligation_ref")
     assert isinstance(obligation_ref, str) and len(obligation_ref) == 64
     expected = {
         "escrow_uid": ESCROW_UID,
@@ -282,21 +299,18 @@ async def test_settlement_is_verified_idempotently_without_fulfillment_claims(
         "fulfillment_available": True,
         "obligation_ref": obligation_ref,
     }
-    assert first.status_code == 200
-    assert first.json() == expected
-    assert retry.json() == expected
-    assert status.json() == expected
-    assert conflict.status_code == 409
-    assert conflict.json()["detail"] == "negotiation already has a primary escrow"
+    assert _settled(first) == expected
+    assert _settled(retry) == expected
+    assert _settled(status) == expected
+    assert conflict.value.status_code == 409
+    assert "negotiation already has a primary escrow" in str(conflict.value)
     assert len(calls) == 1
     assert calls[0]["agreed_duration_seconds"] == 3600
     assert calls[0]["agreed_price"] == 100
     assert "ssh_public_key" not in body
-    assert not (
-        {"provisioning_job_id", "tenant_credentials", "receipt", "result"}
-        & first.json().keys()
-    )
-    assert restart_retry.json() == expected
+    assert (first.provisioning_job_id, first.fulfillment_id) == (None, None)
+    assert not ({"tenant_credentials", "receipt", "result"} & first.extra.keys())
+    assert _settled(restart_retry) == expected
     assert restarted.settlement_runtime._clients == {}
     aggregate = await restarted.settlement_runtime.get_status(negotiation_id)
     expiration_unix = aggregate.obligations[1].obligation["expiration_unix"]
@@ -359,6 +373,8 @@ async def test_settlement_rejects_replacement_access_input_and_failed_verificati
     )
     app = _app(runtime)
 
+    # Rejection path: a settlement restating a negotiated term is a body the
+    # canonical client never sends, so its refusal is checked hand-built.
     with TestClient(app) as client:
         replacement_body = {
             **_settle_body(negotiation_id),
@@ -369,15 +385,15 @@ async def test_settlement_rejects_replacement_access_input_and_failed_verificati
             json=replacement_body,
             headers=_headers("settle_escrow", ESCROW_UID, replacement_body),
         )
-        body = _settle_body(negotiation_id)
-        failed = client.post(
-            f"/api/v1/settle/{ESCROW_UID}",
-            json=body,
-            headers=_headers("settle_escrow", ESCROW_UID, body),
-        )
+    async with app.router.lifespan_context(app):
+        async with _buyer(app) as buyer:
+            with pytest.raises(StorefrontClientError) as failed:
+                await buyer.settle(
+                    ESCROW_UID, negotiation_id=negotiation_id, buyer_evm_address=BUYER
+                )
 
     assert replacement.status_code == 422
-    assert failed.status_code == 400
+    assert failed.value.status_code == 400
     assert await runtime.db.load_escrow(escrow_uid=ESCROW_UID) is None
 
 
@@ -391,18 +407,16 @@ async def test_settlement_rejects_unmatched_obligation_without_registering_claim
         str(tmp_path / "storefront.db"),
         verifier,
     )
-    with TestClient(_app(runtime)) as client:
-        body = _settle_body(negotiation_id)
-        response = client.post(
-            f"/api/v1/settle/{ESCROW_UID}",
-            json=body,
-            headers=_headers("settle_escrow", ESCROW_UID, body),
-        )
+    app = _app(runtime)
+    async with app.router.lifespan_context(app):
+        async with _buyer(app) as buyer:
+            with pytest.raises(StorefrontClientError) as refused:
+                await buyer.settle(
+                    ESCROW_UID, negotiation_id=negotiation_id, buyer_evm_address=BUYER
+                )
 
-    assert response.status_code == 400
-    assert response.json()["detail"] == (
-        "settlement verification returned no exact obligation"
-    )
+    assert refused.value.status_code == 400
+    assert "settlement verification returned no exact obligation" in str(refused.value)
     assert await runtime.db.load_escrow(escrow_uid=ESCROW_UID) is None
     aggregate = await runtime.settlement_runtime.get_status(negotiation_id)
     assert aggregate.obligations == []
@@ -428,16 +442,14 @@ async def test_status_fails_closed_without_canonical_verified_adoption(
     )
     assert inserted
 
-    with TestClient(_app(runtime)) as client:
-        response = client.get(
-            f"/api/v1/settle/{ESCROW_UID}/status",
-            headers=_headers("settle_status", ESCROW_UID, method="GET"),
-        )
+    app = _app(runtime)
+    async with app.router.lifespan_context(app):
+        async with _buyer(app) as buyer:
+            with pytest.raises(StorefrontClientError) as refused:
+                await buyer.get_settle_status(ESCROW_UID)
 
-    assert response.status_code == 409
-    assert response.json()["detail"] == (
-        "verified settlement lifecycle is inconsistent"
-    )
+    assert refused.value.status_code == 409
+    assert "verified settlement lifecycle is inconsistent" in str(refused.value)
 
 
 class _FulfillmentSite:
@@ -545,6 +557,18 @@ class _ProvisioningClient:
         )
 
 
+def _fulfillment_client(base_url: str) -> BareMetalFulfillmentTransport:
+    """The production bare-metal buyer's fulfillment client, pointed at ``base_url``."""
+    return BareMetalFulfillmentTransport(
+        seller_url=base_url,
+        principal=BUYER_SIGNER.identity,
+        signer=BUYER_SIGNER,
+        resolve_seller_principals=lambda: TrustedIdentitySet(
+            identities=(SELLER_SIGNER.identity,)
+        ),
+    )
+
+
 async def test_http_fulfillment_restarts_on_recorded_site_and_redacts_result(
     tmp_path,
 ) -> None:
@@ -560,59 +584,22 @@ async def test_http_fulfillment_restarts_on_recorded_site_and_redacts_result(
         capacity_client=capacity,
         fulfillment_client=provisioning,
     )
-    settle_body = _settle_body(negotiation_id)
-    begin_body = {
-        "negotiation_id": negotiation_id,
-        "escrow_uid": ESCROW_UID,
-        "buyer_principal": BUYER_SIGNER.identity.model_dump(mode="json"),
-    }
-
-    with TestClient(_app(runtime)) as client:
-        settled = client.post(
-            f"/api/v1/settle/{ESCROW_UID}",
-            json=settle_body,
-            headers=_headers("settle_escrow", ESCROW_UID, settle_body),
-        )
-        begun = client.post(
-            "/api/v1/fulfillments/begin",
-            json=begin_body,
-            headers=_headers(
-                "bare_metal_fulfillment_begin",
-                negotiation_id,
-                begin_body,
-            ),
-        )
-        ready = client.get(
-            f"/api/v1/fulfillments/{negotiation_id}/status",
-            headers=_headers(
-                "bare_metal_fulfillment_status",
-                negotiation_id,
-                method="GET",
-            ),
-        )
-        result = client.get(
-            f"/api/v1/fulfillments/{negotiation_id}/result",
-            headers=_headers(
-                "bare_metal_fulfillment_result",
-                negotiation_id,
-                method="GET",
-            ),
-        )
-        access = client.get(
-            f"/api/v1/fulfillments/{negotiation_id}/access",
-            headers=_headers(
-                "bare_metal_fulfillment_access",
-                negotiation_id,
-                method="GET",
-            ),
-        )
-        tearing_down = client.post(
-            f"/api/v1/fulfillments/{negotiation_id}/teardown",
-            headers=_headers(
-                "bare_metal_fulfillment_teardown",
-                negotiation_id,
-            ),
-        )
+    with serving(_app(runtime)) as base_url:
+        async with StorefrontClient(
+            base_url,
+            signer=BUYER_SIGNER,
+            caller_role="buyer",
+            expected_publishers=TrustedIdentitySet(identities=(SELLER_SIGNER.identity,)),
+        ) as storefront:
+            settled = await storefront.settle(
+                ESCROW_UID, negotiation_id=negotiation_id, buyer_evm_address=BUYER
+            )
+        buyer = _fulfillment_client(base_url)
+        begun = buyer.begin(negotiation_id, escrow_uid=ESCROW_UID)
+        ready = buyer.status(negotiation_id)
+        result = buyer.result(negotiation_id)
+        access = buyer.access(negotiation_id)
+        tearing_down = buyer.teardown(negotiation_id)
 
     restarted_capacity = _CapacityClient()
     restarted = replace(
@@ -621,30 +608,17 @@ async def test_http_fulfillment_restarts_on_recorded_site_and_redacts_result(
         capacity_client=restarted_capacity,
         fulfillment_client=_ProvisioningClient(torn_down=True),
     )
-    with TestClient(_app(restarted)) as client:
-        released = client.get(
-            f"/api/v1/fulfillments/{negotiation_id}/status",
-            headers=_headers(
-                "bare_metal_fulfillment_status",
-                negotiation_id,
-                method="GET",
-            ),
-        )
-        repeated = client.get(
-            f"/api/v1/fulfillments/{negotiation_id}/status",
-            headers=_headers(
-                "bare_metal_fulfillment_status",
-                negotiation_id,
-                method="GET",
-            ),
-        )
+    with serving(_app(restarted)) as base_url:
+        buyer = _fulfillment_client(base_url)
+        released = buyer.status(negotiation_id)
+        repeated = buyer.status(negotiation_id)
 
-    assert settled.status_code == 200
-    assert begun.status_code == 200
-    assert ready.json()["state"] == "active"
-    assert tearing_down.json()["state"] == "teardown_dispatch_pending"
-    assert released.json()["state"] == "released"
-    assert repeated.json() == released.json()
+    assert settled.status == "settlement_verified"
+    assert begun["negotiation_id"] == negotiation_id
+    assert ready["state"] == "active"
+    assert tearing_down["state"] == "teardown_dispatch_pending"
+    assert released["state"] == "released"
+    assert repeated == released
     assert capacity.reserve_calls[0]["site"] == "site-a"
     assert capacity.reserve_calls[0]["claim"]["resource_id"] == "resource-1"
     # Read back from the persisted listing, not supplied by the buyer.
@@ -653,12 +627,12 @@ async def test_http_fulfillment_restarts_on_recorded_site_and_redacts_result(
     assert len(provisioning.begin_calls) == 1
     assert len(provisioning.teardown_calls) == 1
     assert len(restarted_capacity.site_client.releases) == 1
-    public_result = result.json()
+    public_result = result
     assert public_result["receipt"]["status"] == "ready"
     assert public_result["result"]["ssh_user"] == "tenant-a"
     assert public_result["result"]["host"] is None
     assert public_result["result"]["port"] is None
-    assert access.json() == {
+    assert access == {
         "negotiation_id": negotiation_id,
         "method": "ssh",
         "host": "203.0.113.25",

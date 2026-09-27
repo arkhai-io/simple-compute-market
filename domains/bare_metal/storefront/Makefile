@@ -35,7 +35,9 @@ reinit: ## Upgrade and reinstall changed internal wheel dependencies
 		--upgrade-package arkhai-kit-resource-pools --reinstall-package arkhai-kit-resource-pools \
 		--upgrade-package arkhai-kit-site --reinstall-package arkhai-kit-site \
 		--upgrade-package arkhai-kit-capability-shape --reinstall-package arkhai-kit-capability-shape \
-		--upgrade-package arkhai-compute --reinstall-package arkhai-compute
+		--upgrade-package arkhai-compute --reinstall-package arkhai-compute \
+		--upgrade-package arkhai-bare-metal-buyer --reinstall-package arkhai-bare-metal-buyer \
+		--upgrade-package arkhai-core-buyer --reinstall-package arkhai-core-buyer
 
 test: reinit ## Run the storefront package tests
 	uv run --find-links $(DIST_DIR) pytest tests -q

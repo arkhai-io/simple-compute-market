@@ -392,17 +392,78 @@ None.
 
 ## E2E debug follow-up
 
-The branch still pins storefront-client 0.20.0 in both storefront locks after
-the client moved to 0.21.0. Re-resolve those consumers with a targeted package
-upgrade against freshly built internal wheels. Retaining old wheels would hide
-the clean-build failure; broad dependency upgrades would add unrelated changes.
-This restores the existing wheel packaging contract in
-`docs/development/ARCHITECTURE.md#build-packaging-and-initialization` and requires
-no new permanent design. Further fixes depend on failures observed through
-`make run-e2e` and `make fetch-e2e-logs`.
+Two defects surfaced only in a clean CI build:
 
-The next run reached the bare-metal scenarios: seven passed, and hardware
-discovery failed because the scenario read `ListingSummary.listing_id`.
-The registry list client exposes `id`; the detail client exposes `listing_id`.
-Use the existing list model in the scenario without changing either API. The
-positive and negative hardware-filter assertions remain the validation boundary.
+- **Stale lock pins.** Both storefront locks still pinned `arkhai-core-storefront-client`
+  0.20.0 after the client moved to 0.21.0. A clean `.dist` holds only the version the
+  tree builds, so installation failed. Each consumer is re-resolved with a targeted
+  `--upgrade-package` against freshly built wheels. Broad upgrades would bring in
+  unrelated changes, and a retained old wheel would hide the failure.
+  `make check-internal-locks` now catches this before CI.
+- **Wrong list field.** The hardware-discovery scenario read `listing_id` from the
+  registry client's list model, which exposes `id` (the detail model exposes
+  `listing_id`). The scenario uses the list model as it is; neither API changes.
+
+## Test clients for bare-metal-specific routes
+
+The bare-metal fulfillment and introduction routes have typed clients only inside
+buyer packages: `BareMetalFulfillmentTransport` in `arkhai-bare-metal-buyer`, and
+the introduction calls in `core_buyer`. As an interim, the storefront's tests take
+`arkhai-bare-metal-buyer` as a dev-only dependency and drive those routes with the
+production buyer's own clients. That is the strongest available contract evidence,
+and production layering is unchanged.
+
+Moving each client into the package that owns its route is recorded as a need in
+`kit-owned-storefront-shell`. That change decides where those routes live, so
+moving the clients now would move them twice.
+
+## Why nothing called fulfillment begin
+
+The two storefronts start Alkahest-path fulfillment in different places:
+
+- **VM** starts it on the seller side: its settlement composition calls
+  `fulfill_domain` once an escrow is verified.
+- **Bare metal, standalone,** does not. Its settle route only verifies the escrow,
+  and its registered `fulfill` hook runs only when the combined VM shell dispatches
+  it. `POST /api/v1/fulfillments/begin` is the buyer's only way into Alkahest-path
+  fulfillment.
+
+No buyer called it because the bare-metal buyer has no Alkahest path: it accepts
+only one exact hosted (`fiat.stripe.v1`) obligation, and a hosted deal's storefront
+starts fulfillment itself.
+
+The route's owning client, `BareMetalFulfillmentTransport`, gains `begin()` so the
+route has a typed client for now.
+
+## VM and bare metal settle alike
+
+Negotiating for and accessing a whole machine differs from a VM slice only in the
+shape it sells: whether a host is divided, the provisioning playbook, and what the
+host offers once reached. None of that bears on negotiation or settlement, so where
+the two domains' negotiation or settlement differ, the better behaviour is chosen and
+applied to both unless a reason for the difference is found.
+
+**Settlement restates no negotiated term.** Both domains negotiate the buyer's SSH
+key in the provision terms and the chain in the accepted escrow proposal, and in both
+the accepted negotiation is the only authority; neither lets settlement change
+either value. VM required the buyer to echo both in the settle body and refused a
+mismatch. Bare metal refused the echo. The echo carried no information and could only
+fail, and it suggested settlement was a place to supply access material. The shared
+core `SettleRequest` already carried only the negotiation and the buyer.
+
+So VM's `VmSettleRequest` now carries only `buyer_evm_address` beside those, and
+refuses the echo as an unknown field. The VM buyer and the canonical client's
+`settle` no longer send it, and bare metal is unchanged. The change is pre-release,
+so VM buyers update their clients and there is no transitional acceptance. A settle
+command no longer requires a local SSH key it would not send.
+
+**Fulfillment starts when settlement is verified.** VM starts Alkahest-path
+fulfillment itself once settlement verifies the escrow; standalone bare metal waits
+for the buyer's `POST /api/v1/fulfillments/begin`. VM's direction is chosen:
+- the buyer makes one call and cannot omit the second;
+- retries stay in the seller's durable loop;
+- both domains already start hosted fulfillment this way.
+
+`bare-metal-mock-provisioned-deal` implements it, since it builds and proves bare
+metal's Alkahest deal end to end, and it retires the begin route and `begin()` with
+it. Until then, `begin()` is the typed client for the route that exists.

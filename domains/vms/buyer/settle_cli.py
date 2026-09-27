@@ -381,21 +381,14 @@ def run_settle_from_log(
         raise typer.Exit(2)
     chain_cfg = chain_by_name(chain_cfg_name)
     if deal.accepted_escrow_proposal is not None:
-        from .common import resolve_buyer_wallet, resolve_ssh_public_key
+        from .common import resolve_buyer_wallet
 
         resolved_buyer_address, resolved_buyer_private_key = resolve_buyer_wallet()
-        resolved_ssh_public_key = (
-            accepted_ssh_public_key
-            if accepted_ssh_public_key is not None
-            else resolve_ssh_public_key()
-        )
         missing: list[str] = []
         if not resolved_buyer_address:
             missing.append("wallet.address")
         if not resolved_buyer_private_key:
             missing.append("wallet.private_key")
-        if not resolved_ssh_public_key:
-            missing.append("provisioning.ssh_public_key")
         if missing:
             typer.secho(
                 "Missing required EVM config: " + ", ".join(missing),
@@ -406,7 +399,6 @@ def run_settle_from_log(
         chain = SimpleNamespace(
             buyer_address=resolved_buyer_address,
             buyer_private_key=resolved_buyer_private_key,
-            ssh_public_key=resolved_ssh_public_key,
             rpc_url=chain_cfg.rpc_url,
             chain_name=chain_cfg.name,
             alkahest_addr_config=alkahest_address_config_path,
@@ -548,9 +540,7 @@ def run_settle_from_log(
             escrow_uid=resolved_uid,
             payload={
                 "negotiation_id": deal.negotiation_id,
-                "ssh_public_key": chain.ssh_public_key,
                 "buyer_evm_address": chain.buyer_address,
-                "chain_name": chain.chain_name,
             },
             principal=deal.buyer_principal,
             signer=signer,

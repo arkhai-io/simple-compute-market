@@ -140,7 +140,6 @@ def make_legacy_settle_hook(
         settlement_recipient=accepted_proposal_recipient,
         build_settlement_payload=make_alkahest_settlement_payload_fn(
             buyer_evm_address=buyer_evm_address,
-            ssh_public_key=provision.ssh_public_key,
         ),
         settlement_submit_max_attempts=6,
         settlement_submit_retryable=looks_like_propagation_lag,

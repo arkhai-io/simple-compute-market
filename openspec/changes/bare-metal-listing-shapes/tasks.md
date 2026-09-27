@@ -308,7 +308,7 @@ Decision: planning's "`bare-metal list --resource`".
 
 ## 9. Combined shell and remaining consumers
 
-- [ ] 9.1 `domains/vms/storefront/pyproject.toml`:
+- [x] 9.1 `domains/vms/storefront/pyproject.toml`:
       - `arkhai-bare-metal-storefront==0.6.0`;
       - `arkhai-bare-metal>=0.6.0`;
       - `arkhai-vms>=0.5.0`.
@@ -381,6 +381,11 @@ Decision: planning's "`bare-metal list --resource`".
   `test_hosted_public_boundary.py::test_buyer_deployment_mounts_separate_profile_state_and_credential`,
   renders `docker-compose.yml`, which this change does not touch. It is outside
   this change.
+- **9.1 and 9.2 evidence (from R.8):**
+  - VM storefront: 1,333 passed and 1 skipped. Two Alkahest integration tests are
+    unrun because the local chain runtime could not start in that environment.
+  - VM buyer: relocked and consistent under `make check-internal-locks`. Its suite
+    has not been run, which keeps 9.2 open.
 - **Unrun:**
   - The VM storefront and VM buyer suites (9.1–9.2). Their locks cannot be
     re-resolved in the implementation environment because `download.pytorch.org`
@@ -389,7 +394,7 @@ Decision: planning's "`bare-metal list --resource`".
     and run `make -C domains test-storefront test-vms-buyer` before closeout.
   - Typing: only `core/` configures a type check, so none ran for the touched
     packages.
-  - End-to-end evidence was subsequently obtained; see sections 12.8 and 13.
+  - End-to-end: run 36252825190 passed both lanes (R.8); 12.8 reruns at closeout.
 - **Deviations from the plan:**
   - **One guard call.** `open()` runs the guard once, before the Alkahest and
     hosted paths branch, rather than at two call sites.
@@ -430,35 +435,40 @@ Decision: planning's "`bare-metal list --resource`".
       - Added `make check-internal-locks` (`scripts/check_internal_locks.py`),
         which fails on any lock pinning an internal wheel version the tree does not
         build.
-- [ ] R.4 Relock `domains/vms/buyer` and `domains/vms/storefront` with
+- [x] R.4 Relock `domains/vms/buyer` and `domains/vms/storefront` with
       `--upgrade-package` for `arkhai-vms`, `arkhai-kit-capability-shape`,
       `arkhai-bare-metal`, `arkhai-bare-metal-storefront`, and (for the storefront)
       `arkhai-core-storefront-client`, where the PyTorch
       index is reachable. `make check-internal-locks` must pass.
-- [ ] R.5 Move the raw-HTTP tests this change touched onto typed clients over the
-      in-process app, keeping raw calls only for rejection paths.
-      - `test_http_negotiation.py`: done. Every opening, refusal, and thread read
-        goes through `negotiate_new`, `list_negotiations`, or `get_negotiation`,
-        including the hosted opening (R.7). The unsigned request and the ambiguous
-        nested-and-direct selection stay raw as rejection paths.
-      - `test_http_system.py`: done. The listing reads go through `get_listing` and
-        `list_listings`. The unsigned pause and run-cycle requests stay raw as
-        rejection paths.
-      - The conversion surfaced and fixed two production defects:
-        - The negotiate-new, negotiate-continue, and settle routes verified
-          signatures against a re-serialized model, so the canonical client's
-          explicit `null`s failed. They now verify the body the caller sent.
-        - The negotiation read routes were unauthenticated and unsigned. They now
-          require the administrator's signed contract (`admin_list_negotiations`
-          with the query bound into the resource, and `admin_get_negotiation`),
-          matching the canonical client and VM.
-      - Open, blocked on a placement decision:
-        - `test_http_settlement.py`: the settle routes have canonical methods; the
-          fulfillment routes' typed client is `BareMetalFulfillmentTransport`, in
-          `arkhai-bare-metal-buyer`.
-        - `test_http_introductions.py` and `test_introduction_delivery.py`: the
-          introduction routes' typed calls live in `core_buyer`.
-        Neither is a dependency of the storefront's tests.
+- [x] R.5 The raw-HTTP tests this change touched now use typed clients over the
+      in-process app. Hand-built requests remain only for rejection paths a
+      conforming client cannot send (unsigned, no request identity, a mis-bound
+      resource, an ambiguous selection, a restated negotiated term) and for one
+      marked debt, the seller-role introduction read, which has no typed client.
+      - `test_http_negotiation.py` and `test_http_system.py`: the canonical
+        `StorefrontClient` over `httpx.ASGITransport`.
+      - `test_http_settlement.py`: settle and status through the canonical `settle`
+        and `get_settle_status`, which R.9 made able to settle a bare-metal deal.
+        The fulfillment lifecycle (begin, status, result, access, teardown, across a
+        restart) goes through the production buyer's `BareMetalFulfillmentTransport`.
+      - `test_http_introductions.py` and `test_introduction_delivery.py`: the
+        opening through `negotiate_new(selection_only=True)`, and start and read
+        through `core_buyer`'s `IntroductionTransport`.
+      - The buyer's clients send through `urllib`, so they reach the app through
+        `tests/loopback.py`, which serves it under uvicorn on a loopback port.
+      - Option A is the interim: the storefront's tests take
+        `arkhai-bare-metal-buyer` as a dev-only dependency. Option B, each typed
+        client in the package that owns its route (including a seller-role
+        introduction read), is a need recorded in `kit-owned-storefront-shell`.
+      - The conversion surfaced and fixed three production defects:
+        - Signatures verified against a re-serialized model on negotiate-new,
+          negotiate-continue, settle, and fulfillment-begin. All four now verify
+          the body the caller sent.
+        - Unauthenticated, unsigned negotiation reads. They now require the
+          administrator's signed contract.
+        - No typed client for `/fulfillments/begin`. The transport now has
+          `begin()`, and why nothing called it is traced in `design.md`.
+      - Evidence: `domains/bare_metal/storefront` 174 passed.
 - [x] R.7 The canonical client's `negotiate_new` gains `selection_only`. It is set
       explicitly, never inferred, so existing callers send what they sent before.
       It opens with a `settlement_selection` and a proposal carrying only `fields`,
@@ -479,6 +489,48 @@ Decision: planning's "`bare-metal list --resource`".
         `--upgrade-package arkhai-core-storefront-client` in R.4.
 - Evidence: `domains/bare_metal/storefront`, 174 passed. `make check-reinit`
   passes. `make check-internal-locks` flags only the R.4 VM locks.
+- [x] R.8 E2E debugging.
+      - Internal wheels were rebuilt, and `domains/bare_metal/storefront/uv.lock`
+        and `domains/vms/storefront/uv.lock` updated to the current storefront-client
+        wheel. The bare-metal storefront lock is also restored to the repository's
+        simplified platform-marker form. `make check-internal-locks` and frozen
+        installation pass.
+      - The e2e scenario reads the registry list client's `id` field, which its
+        `ListingSummary` exposes, rather than the storefront client's `listing_id`.
+        Both hardware-filter assertions are unchanged.
+      - Evidence: baseline run 36251858600 failed in both lanes on the missing
+        storefront-client 0.20.0 wheel.
+        [Run 36252825190](https://github.com/arkhai-io/simple-compute-market/actions/runs/36252825190)
+        passed both lanes at `42b364ba`. Bare metal: 8 passed, exercising hardware
+        discovery, withdrawal and reinstatement, and the region hold. VM: 126
+        passed and 2 existing multi-storefront negotiation skips, including
+        `test_listing_shapes.py`. Actions and Compose logs were retrieved.
+- [x] R.9 Settlement restates no negotiated term, in both domains (`design.md`, "VM
+      and bare metal settle alike").
+      - VM: `VmSettleRequest` drops `ssh_public_key` and `chain_name`, which are
+        now refused as unknown fields, and the settle controller drops its echo
+        checks.
+      - VM buyer: `make_alkahest_settlement_payload_fn` and `settle_cli` stop
+        sending them, and the settle command no longer requires a local SSH key.
+      - Canonical client: `settle` stops sending them, and
+        `arkhai-core-storefront-client` is 0.22.0.
+      - The e2e VM settle calls stop passing the key.
+      - Evidence:
+        - VM storefront: 1,334 passed; the two Alkahest environment failures are
+          unchanged from baseline.
+        - VM buyer: 196 passed, run with the repository root on `PYTHONPATH`
+          because a frozen sync skips its editable install.
+        - Client: 44 passed, including a byte-identical async and sync settle body
+          of exactly three keys.
+        - Bare-metal storefront: 174. Adapters: 2 and 39. Provisioning service:
+          666 + 272. e2e unit: 237, plus the unrelated compose failure.
+      - Relocked with CI's `uv` 0.11.17: `provisioning/compute/service`, both
+        adapters, `e2e-tests`, and `domains/bare_metal/storefront`.
+        `domains/vms/storefront` needs
+        `--upgrade-package arkhai-core-storefront-client` where the PyTorch index is
+        reachable.
+      - Fulfillment starting on settlement is decided and recorded in
+        `bare-metal-mock-provisioned-deal`, which implements it.
 - Reviewer prerequisite: running a package's `make test` from a fresh checkout
   needs `make dist-ci`, and for the bare-metal storefront also
   `make -C kit dist-hosted-settlement`, which `dist-ci` excludes.
@@ -528,7 +580,7 @@ Per `openspec/README.md#plan-closeout-requirements`.
       `make check-doc-citations CHANGE=bare-metal-listing-shapes` and resolve every
       match, then run it unscoped to confirm no permanent document this change touched
       cites a missing path.
-- [x] 12.8 **End-to-end pipeline.** Run both lanes (`make run-e2e`, then
+- [ ] 12.8 **End-to-end pipeline.** Run both lanes (`make run-e2e`, then
       `make fetch-e2e-logs`). Record:
       - the run ID and result;
       - that the bare-metal lane's publication scenario exercised discovery by
@@ -536,7 +588,8 @@ Per `openspec/README.md#plan-closeout-requirements`.
       - that the VM lane's `test_listing_shapes.py` passed on the re-exported schema.
       A pipeline blocked for an unrelated reason is recorded as a blocker naming its
       cause and owning change, and its validations are unrun.
-      Evidence: run 36252825190 passed both lanes at commit 42b364ba; see section 13.
+      Current evidence: run 36252825190 passed both lanes at `42b364ba` (R.8). Rerun
+      on the final commit, since R.5 and promotion follow it.
 - [ ] 12.9 **Promotion.** Complete the design-promotion record below and promote:
       - `openspec/specs/storefront-publication/spec.md`: the ADDED requirements and the
         MODIFIED requirement, plus the Evidence list entries for 4–6 and 8.
@@ -561,35 +614,6 @@ Per `openspec/README.md#plan-closeout-requirements`.
         bare-metal declaration carries its hardware in `capacity` and `attributes`
         with `units: 1`.
 
-## 13. E2E debugging
-
-- [x] 13.1 Rebuild internal wheels and update
-      `domains/bare_metal/storefront/uv.lock` and
-      `domains/vms/storefront/uv.lock` to the current storefront-client wheel.
-      Validate with `make check-internal-locks` and frozen dependency installation.
-      Both pass. Bare-metal storefront: 174 passed. VM storefront: 1333 passed,
-      one skipped; two Alkahest integration tests cannot start the local chain
-      runtime. Baseline E2E run 36251858600 failed in both lanes on the missing
-      storefront-client 0.20.0 wheel.
-- [x] 13.2 Run both lanes using `make run-e2e`, retrieve diagnostics with
-      `make fetch-e2e-logs`, and fix observed failures with focused validation.
-      Use the registry list client's `id` field in
-      `e2e-tests/tests/e2e/roles/scenarios/bare_metal/test_bare_metal_publication.py`
-      without changing its positive or negative hardware-filter assertions.
-      [Run 36252825190](https://github.com/arkhai-io/simple-compute-market/actions/runs/36252825190)
-      passed both lanes at commit `42b364ba`: bare-metal 8 passed; VM 126 passed,
-      2 existing multi-storefront negotiation skips. Bare-metal exercised hardware
-      discovery, withdrawal/reinstatement, and the region hold; VM exercised
-      `test_listing_shapes.py`, including discovery, purchase, reservation
-      commitment, and overrides. Both Actions and Compose logs were retrieved.
-- [x] 13.3 Debugging closeout: internal-lock, reinit, comment-hygiene, scoped
-      documentation-citation, and strict OpenSpec validation checks pass.
-      No imports changed. Documentation and narrative were reviewed; these lock
-      and test-client corrections restore existing contracts and introduce no
-      permanent behavior or design requiring promotion. Roadmap and campaign
-      status remain unchanged because other feature closeout work remains open.
-      E2E evidence is recorded above; this does not mark the full change complete.
-
 ## Design promotion record
 
 | Accepted decision | Permanent location |
@@ -603,7 +627,7 @@ Per `openspec/README.md#plan-closeout-requirements`.
 | Opening recheck of shape and region, as a domain function over classification | `openspec/specs/storefront-publication/spec.md`; rationale in its `architecture.md` |
 | The VM commitment rule is scoped to VM listings | `openspec/specs/storefront-publication/spec.md` (MODIFIED "Every VM listing is a listing shape"); `docs/development/ARCHITECTURE.md#storefront-capacity-boundary` |
 | Bare-metal negotiation reads require the administrator's signed contract; negotiation routes verify the body the caller sent | `openspec/specs/storefront-publication/spec.md` ("Scheme-neutral storefront authorization") |
+| A settlement request restates no negotiated term, in every domain | `openspec/specs/storefront-publication/spec.md` (MODIFIED "Seller protocol surface") |
 | Pool-override work moved to `publish-indicative-listing-rates` | Superseded here; owned by that change's design and tasks |
 | Payload kind unchanged; listing model names the schema's flat fields | Temporary: change history only (no permanent rule beyond the spec's published fields) |
 | Roadmap and campaign index | Filled in at 12.5 and 12.6 |
-| E2E lock and test-client corrections | Existing wheel contract in `docs/development/ARCHITECTURE.md#build-packaging-and-initialization`; no new permanent design. Roadmap and campaign status unchanged. |
