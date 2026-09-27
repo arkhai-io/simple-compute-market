@@ -1,12 +1,12 @@
 ## ADDED Requirements
 
-### Requirement: A reservation carries one release handle
+### Requirement: A reservation's release handle has one name
 
-A Capacity Reservation MUST carry exactly one durable release handle,
-`release_job_id`, regardless of the reservation's offering mode. The site
-authority MUST NOT write a domain-prefixed mirror of it. Every lease contract
-that publishes a release handle, or accepts one in a lease update, MUST name it
-`release_job_id`.
+A Capacity Reservation MUST represent its durable release handle, when it has
+one, only as `release_job_id`, regardless of the reservation's offering mode. The
+handle is absent until release begins. The site authority MUST NOT write a
+domain-prefixed mirror of it. Every lease contract that publishes a release
+handle, or accepts one in a lease update, MUST name it `release_job_id`.
 
 A reservation's pool, offering mode, and teardown path differ by domain, but the
 handle a caller follows to observe release does not, so one name serves every

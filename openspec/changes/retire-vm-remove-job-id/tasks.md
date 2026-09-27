@@ -48,11 +48,14 @@ decision these tasks implement.
       `_drop_columns_via_table_rebuild(engine, "capacity_reservations",
       ["vm_remove_job_id"])` when the table exists, and append it to
       `MIGRATIONS` as `20260927_001_drop_reservation_release_mirror`. Its
-      docstring states the present invariant (a reservation carries one release
-      handle) rather than the change that introduced it. No migration is added
-      to `domains/apicredits/service` or for bare metal: neither domain has been
-      released (`design.md`, "One migration, in compute provisioning, under its
-      own ID"). Add the new ID to the pinned set in
+      docstring states the present invariant (a reservation's release handle
+      has one name) rather than the change that introduced it, and the
+      operational constraint: the drop is irreversible by the chain, and a
+      prior release rolled back past it needs the nullable column re-added
+      before it starts (`design.md`, "The drop is an approved exception to
+      expand/contract"). No migration is added to `domains/apicredits/service`
+      or for bare metal (`design.md`, "One migration, in compute provisioning,
+      under its own ID"). Add the new ID to the pinned set in
       `provisioning/compute/service/tests/unit/test_database.py`.
 - [ ] 2.5 Reduce every test asserting the mirror to the canonical field rather
       than keeping both. A `vm_remove_job_id=` keyword becomes
@@ -119,6 +122,17 @@ decision these tasks implement.
       the reservation's release handle and the returned lease publishes it; a
       releasing lease's response carries `release_job_id` and no
       `vm_remove_job_id` key.
+- [ ] 3.6 **Unit, operator client models.** Add
+      `provisioning/compute/service/tests/unit/test_lease_models.py`:
+      `LeaseUpdate` defines `release_job_id` and not `vm_remove_job_id`;
+      a `LeaseUpdate` built from a body carrying only `vm_remove_job_id`
+      leaves `release_job_id` unset, pinning the decision to ignore rather
+      than refuse the retired name; and `LeaseResponse` defines no
+      `vm_remove_job_id`. The client has no suite of its own; `design.md`,
+      "Model contracts are proved at unit level", places these here.
+- [ ] 3.7 **Unit, storefront event model.** Add
+      `domains/vms/storefront/tests/unit/test_capacity_admin_models.py`:
+      `ReleaseStartedEventRequest` defines no `vm_remove_job_id`.
 
 ## 3b. Versions and locks
 
@@ -146,7 +160,14 @@ decision these tasks implement.
       bumped package it records. Each lock diff must touch only the bumped
       packages' versions and specifiers, and no lock may gain an absolute
       path.
-- [ ] 3b.4 `make check-internal-locks` and `make check-reinit` pass.
+- [ ] 3b.4 Move the exact internal pins in two Dockerfiles with the bumps:
+      `domains/vms/storefront/Dockerfile` (`arkhai-vms-storefront==0.7.1`)
+      and `provisioning/compute/service/Dockerfile`
+      (`arkhai-compute-provisioning-service==0.4.1`,
+      `arkhai-vms-provisioning-adapter==0.4.0`,
+      `arkhai-bare-metal-provisioning-adapter==0.2.1`). No other Dockerfile
+      pins a bumped package.
+- [ ] 3b.5 `make check-internal-locks` and `make check-reinit` pass.
 
 ## 4. Validation
 
@@ -166,7 +187,9 @@ decision these tasks implement.
 - [ ] 4.3 Grep the repository for the identifier afterwards and confirm every
       remaining hit is the retired `vm_leases` column in historical
       migrations, the legacy backfill and their tests; the storefront's own
-      `compute_allocations` column and its test; or documentation.
+      `compute_allocations` column and its test; the new migration and its
+      test (2.4, 2.6); the unit model tests asserting the name's absence (2.7,
+      3.6, 3.7); or documentation.
 
 ## 5. Closeout
 
@@ -184,9 +207,11 @@ Per `openspec/README.md#plan-closeout-requirements`, in its order.
       real suite.
 - [ ] 5.3 **Documentation compliance.** Re-check the accepted decisions against
       `openspec/README.md`'s placement rules. The one-release-handle rule
-      belongs in `site-capacity`. The wire disposition, the unrefused old name,
-      the per-domain migration scope, and the version table are change history
-      and stay in `design.md`.
+      belongs in `site-capacity`, and the pre-1.0 minor-bump convention in
+      `docs/development/RELEASING.md`. The wire disposition, the unrefused old
+      name, the per-domain migration scope, the expand/contract exception and
+      its recovery, and the version table are change history and stay in
+      `design.md`.
 - [ ] 5.4 **Narrative compression.** Reduce completed-task notes to final
       behaviour, validation evidence, deferred work, and permanent-documentation
       destinations.
@@ -221,17 +246,21 @@ Per `openspec/README.md#plan-closeout-requirements`, in its order.
 - [ ] 5.9 **Promotion.** After code review, add "A reservation carries one
       release handle" and its four scenarios to
       `openspec/specs/site-capacity/spec.md`, with an evidence line naming 2.6,
-      2.7 and 3.5's tests, confirm they match what landed, and complete the
+      2.7, 3.5 and 3.6's tests, and confirm they match what landed. Add the
+      pre-1.0 rule to `docs/development/RELEASING.md`'s "Versioning policy":
+      before 1.0, an incompatible change takes a minor bump. Complete the
       design-promotion record below.
 
 ## Design promotion record
 
 | Accepted decision | Permanent location |
 |---|---|
-| A reservation carries one release handle, `release_job_id`, with no domain-prefixed mirror; every lease contract publishes and accepts it under that name | `openspec/specs/site-capacity/spec.md` — "A reservation carries one release handle" |
+| A reservation's release handle has one name, `release_job_id`, with no domain-prefixed mirror; every lease contract publishes and accepts it under that name | `openspec/specs/site-capacity/spec.md` — "A reservation's release handle has one name" |
 | Outright removal rather than a deprecation window, and why | This change's `design.md` |
+| Before 1.0, an incompatible package change takes a minor bump | `docs/development/RELEASING.md` — "Versioning policy" |
+| The column drop is an approved exception to expand/contract, with its rollback recovery | This change's `design.md` |
 | The PATCH body renames the field; the old name is ignored rather than refused until a major release sets a compatibility policy | This change's `design.md` |
-| One compute-provisioning migration; none for unreleased bare-metal and API-credits databases | This change's `design.md` |
+| One compute-provisioning migration; none for bare-metal or API-credits databases | This change's `design.md` |
 | Version bumps and raised lower bounds | Each package's `pyproject.toml`; rationale in this change's `design.md` |
 | Roadmap currency | `docs/development/ROADMAP.md` — Goal 1 current state (5.5) |
 | Campaign index currency | `openspec/changes/README.md` — Goal 1 table (5.6) |
