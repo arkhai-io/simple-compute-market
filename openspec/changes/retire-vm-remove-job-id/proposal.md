@@ -11,8 +11,8 @@ job id.
 
 `fix-vm-fulfillment-capacity-boundary` task 10.5 recorded the deferral and
 named this change as its home. That task attempted the retirement once and
-withdrew it, because the name is a field on three packages' public wire
-models rather than a private column.
+withdrew it, because the name is a field on public wire models rather than a
+private column.
 
 Two things have changed since, and both make this smaller than the withdrawn
 attempt:
@@ -26,62 +26,69 @@ caller had to read the mirror, and it removes the wire-compatibility
 argument for keeping it.
 
 **The "22 files" estimate conflated two different columns.** A grep for the
-identifier finds `vm_leases.vm_remove_job_id` as well — the *legacy* table
-the backfill reads from. `db/migrations.py`'s backfill `SELECT`s
-`vl.vm_remove_job_id` from `vm_leases` and joins to `capacity_reservations`;
-it reads the legacy source and never writes the mirror, and
-`vm_provisioning_adapter/legacy_backfill.py` consumes that same legacy row.
-Those references are a different column that happens to share a name and are
-out of scope here. So is
+identifier also finds the retired `vm_leases` table's column of the same name.
+That table was dropped by migration `20260724_002`; the name survives only in
+the historical migrations that create, read, and backfill from it, in
+`vm_provisioning_adapter/legacy_backfill.py`, which consumes the legacy row,
+and in the tests that build pre-migration schemas. None of them reads or writes
+the reservation mirror, so all of them are out of scope. So is
 `market_storefront/utils/sqlite_client.py`'s column, which belongs to the
 storefront's own database.
 
 ## What This Change Covers
 
-Retiring the mirror on `capacity_reservations` only:
+Retiring the mirror on `capacity_reservations`, and the name everywhere a lease
+contract carries it:
 
-- The column on `market_site.db.CapacityReservation`, dropped through
+- The column on `market_site.db.CapacityReservation`, and a versioned
+  compute-provisioning migration dropping it through
   `_drop_columns_via_table_rebuild`. `vm_host` and `vm_target` were dropped
-  from this same table that way, which is the precedent for the migration.
+  from this same table that way, which is the precedent for the helper.
 - `CapacityLedgerService`: the `vm_remove_job_id` parameter aliases on
-  `attach_lease`, `begin_releasing`, `update_lease_fields` and
-  `update_lease_fields_in_session`, the mirror write in
+  `begin_releasing`, `update_lease_fields`, `update_lease_fields_in_session`
+  and `update_reservation_state`, the mirror write in
   `_sync_release_job_fields`, and the key in `_reservation_payload`.
 - The three readers that fall back to it —
   `compute_provisioning/lease_lifecycle.py`,
   `vm_provisioning_adapter/controllers/leases_controller.py`, and
   `bare_metal_provisioning_adapter/controllers/bare_metal_leases_controller.py`
-  — which can read `release_job_id` alone once the mirror is gone.
-- The wire surface: `LeaseResponse.vm_remove_job_id`, the lease PATCH body
-  field the adapter and `market_storefront`'s `capacity_admin_models`
-  accept, and the storefront admin controller that forwards it.
+  — which read `release_job_id` alone once the mirror is gone.
+- The VM lease contract: `LeaseResponse.vm_remove_job_id` is removed, and the
+  lease PATCH body (`LeaseUpdate`) names the handle `release_job_id` instead of
+  `vm_remove_job_id`, so an operator can still correct it.
+- `market_storefront`'s `ReleaseStartedEventRequest.vm_remove_job_id` and the
+  admin controller argument that forwards it. The value has always been
+  discarded, and nothing in the repository sends the event.
+- A version bump for every package whose wheel contents change, and raised
+  lower bounds where a consumer depends on the new behaviour.
 
 ## What This Change Does Not Cover
 
-- `vm_leases.vm_remove_job_id` and the legacy-backfill path that reads it.
-  That column is the historical record the backfill exists to consume;
-  dropping it is a separate question about retiring the legacy table.
+- The retired `vm_leases` table's column of the same name, and the historical
+  migration and legacy-backfill code that reads it.
 - The storefront's own `vm_remove_job_id` column in
-  `market_storefront/utils/sqlite_client.py`.
+  `market_storefront/utils/sqlite_client.py`, on the frozen
+  `compute_allocations` ledger.
 - `_reservation_payload`'s derived `vm_host`/`vm_target` keys, which are
   domain-shaped projections beside the generic
   `executor_ref`/`executor_target` rather than duplicated storage, and were
   explicitly left alone under 10.5.
+- A migration for API-credits or bare-metal databases. Neither domain has been
+  released; see `design.md`.
 
 ## Wire Compatibility
 
-Removing a field from `LeaseResponse` and from the lease PATCH body is a
-breaking change for any consumer outside this repository that reads or sends
-`vm_remove_job_id`. `release_job_id` is the replacement and is already
-published on both lease endpoints, so a consumer can migrate before the
-removal lands.
+Removing `vm_remove_job_id` from `LeaseResponse` is a breaking change for a
+consumer that reads it, and renaming the PATCH body field is a breaking change
+for one that sends it. `release_job_id` is the replacement on both, and is
+already published on both lease endpoints.
 
-The field is removed outright, with a version bump of the packages whose
-public models change. Every API in this repository is pre-1.0 and may break in
-this way, and no consumer outside the repository reads the field. The PATCH
-body refuses the retired field rather than ignoring it, so a caller still
-sending it learns at the boundary rather than by a silent no-op. `design.md`
-records the alternative and its revisit trigger.
+The field is removed outright, with a version bump of every package whose wheel
+contents change. Every API in this repository is pre-1.0 and may break in this
+way, and no consumer outside the repository reads or sends the field. A caller
+still sending the old name is treated exactly as a caller sending any other
+unknown field: the lease model ignores it. `design.md` records the alternatives
+and the revisit trigger.
 
 ## Permanent documentation impact
 
@@ -92,6 +99,6 @@ records the alternative and its revisit trigger.
 
 ### Knowledge to promote
 
-- `release_job_id` is the one release handle on a Capacity Reservation and on
-  both lease contracts; no domain-prefixed mirror exists —
-  `openspec/specs/site-capacity/spec.md`.
+- `release_job_id` is the one release handle on a Capacity Reservation and the
+  one name for it on every lease contract, published and updatable; no
+  domain-prefixed mirror exists — `openspec/specs/site-capacity/spec.md`.
