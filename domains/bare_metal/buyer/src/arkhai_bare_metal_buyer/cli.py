@@ -12,6 +12,7 @@ from typing import Any
 
 import typer
 from arkhai_bare_metal import (
+    BARE_METAL_OFFERING_MODE,
     BareMetalBuyerDemand,
     BareMetalListing,
     BareMetalProvisionTerms,
@@ -50,6 +51,7 @@ from core_buyer.run_log import RunLog
 from market_core.schemas import SettlementOption, SettlementPlan, SettlementSelection
 from market_identity import TrustedIdentitySet
 from pydantic_core import to_jsonable_python
+from registry_client.query import compile_resource_query
 from market_settlement_runtime import derive_obligation_ref
 
 from .config import (
@@ -179,14 +181,49 @@ def _recovered_transports(
 def list_bare_metal(
     config: str | None = typer.Option(None, "--config"),
     limit: int = typer.Option(50, min=1, max=200),
+    resource: str | None = typer.Option(
+        None,
+        "--resource",
+        help=(
+            "Filter by hardware and region in the registry's own query vocabulary, "
+            "e.g. 'gpu_model=H200 gpu_count>=8'."
+        ),
+    ),
 ) -> None:
-    """List authenticated bare-metal listings from the configured registry."""
+    """List authenticated bare-metal listings from the configured registry.
+
+    A resource query is compiled against the registry's published filter
+    specification and sent with its ETag, so a field the registry does not
+    declare is refused before any listing is read, and a specification that
+    changed since is refused by the registry rather than silently reinterpreted.
+    """
 
     buyer_config = load_bare_metal_buyer_config(config)
     identity = fresh_identity()
     with registry_client(buyer_config, identity) as client:
-        response = client.list_listings(limit=limit, offering_mode="bare_metal")
+        params = bare_metal_listing_params(client, resource, registry_url=buyer_config.registry_url)
+        response = client.list_listings(limit=limit, **params)
     _json(response)
+
+
+def bare_metal_listing_params(
+    client: Any, resource: str | None, *, registry_url: str
+) -> dict[str, Any]:
+    """The query parameters one bare-metal listing read sends.
+
+    Always restricted to bare metal; with ``resource``, also the compiled query
+    and the ETag of the filter specification it was compiled against.
+    """
+    params: dict[str, Any] = {"offering_mode": BARE_METAL_OFFERING_MODE}
+    if resource is None:
+        return params
+    try:
+        compiled = compile_resource_query(
+            resource, filter_spec=client.get_filter_spec(), registry_url=registry_url
+        )
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc), param_hint="--resource") from exc
+    return {**params, **compiled.as_params(), "etag": compiled.etag}
 
 
 @bare_metal_app.command("show")

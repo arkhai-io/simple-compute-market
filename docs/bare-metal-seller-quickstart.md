@@ -182,23 +182,32 @@ administrator signer and exact provisioning-authority trust. The authenticated
 
 ```json
 {
-  "total_units": 1,
   "resource_type": "compute.bare-metal",
   "pool_id": "whole-host-california",
   "host_id": "host-ca-h200-01",
-  "capacity": {"units": 1},
+  "capacity": {"units": 1, "gpu_count": 8, "vcpu_count": 192, "ram_gb": 2048, "disk_gb": 7680},
   "attributes": {
+    "gpu_model": "H200",
     "physical_host_id": "<provider-stable-host-id>",
     "allocation_mode": "exclusive",
     "bare_metal_publication": {
       "enabled": true,
-      "access_methods": ["ssh"],
-      "capabilities": {}
+      "access_methods": ["ssh"]
     }
   },
   "enabled": true
 }
 ```
+
+The declaration is where the listing's hardware comes from. `capacity` holds
+exactly one `units`, which is the machine a buyer reserves, and the hardware that
+machine contains, under the compute family's names: `gpu_count`, `vcpu_count`,
+`ram_gb`, and `disk_gb`. `attributes.gpu_model` names its GPU. The listing
+publishes those values where the compute registry's filters read them, so a
+buyer asking for `gpu_model=H200 gpu_count>=8` finds it. `gpu_count` and
+`gpu_model` are required; the other quantities are optional. A capacity key
+outside those names, a `units` other than one, or a missing GPU count or model
+holds the machine's listing and is reported by name.
 
 The URL path's Physical Resource id, the `host_id`, and `physical_host_id` are
 separate fields with the exact values shown by their roles. `host_id` is the
@@ -207,7 +216,10 @@ host's inventory alias, the first token of its line in the Ansible inventory;
 Do not substitute the provider id or public IP for the inventory alias.
 `physical_host_id` and `allocation_mode` belong at the top level of
 `attributes`, where the site authority's exclusive/shareable accounting reads
-them; `bare_metal_publication` carries only what the listing view exposes.
+them; `bare_metal_publication` carries only whether the machine is offered and
+how it is reached. Hardware stated anywhere else, such as a `capabilities` map
+inside `bare_metal_publication`, is not published, and the round reports it as
+ignored.
 Everything in `attributes` is published to storefronts. Registration is
 independently idempotent and must complete before publication.
 
@@ -231,7 +243,13 @@ Each round:
   own trusted client, and derives one listing per Physical Resource from the
   bare-metal view the site projects for it.
 - Lists a resource only if its pool advertises `bare_metal`, is enabled, and is
-  capacity-backed, as the Resource Pool document above declares. A pool that
+  capacity-backed, as the Resource Pool document above declares. The listing's
+  region is the pool's `region`; a pool that states none is held and reported,
+  since the compute registry requires a region.
+- Publishes each machine's declared hardware as the listing's shape. A machine
+  whose declaration cannot be read as one is held and reported with the reason;
+  other machines in its pool are unaffected. Correcting a machine's declared
+  hardware closes its listing and publishes a successor under the new shape. A pool that
   declares itself unbacked yields no bare-metal listing, and the round reports
   it by name.
 - Closes a listing whose capacity declaration is disabled, or whose pool stops

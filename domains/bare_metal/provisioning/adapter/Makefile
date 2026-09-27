@@ -11,7 +11,8 @@ reinit: ## Reinstall internal dependencies resolved from the shared wheel direct
 		--upgrade-package arkhai-kit-settlement-runtime --reinstall-package arkhai-kit-settlement-runtime \
 		--upgrade-package arkhai-kit-site --reinstall-package arkhai-kit-site \
 		--upgrade-package arkhai-vms --reinstall-package arkhai-vms \
-		--upgrade-package arkhai-kit-capability-shape --reinstall-package arkhai-kit-capability-shape
+		--upgrade-package arkhai-kit-capability-shape --reinstall-package arkhai-kit-capability-shape \
+		--upgrade-package arkhai-compute --reinstall-package arkhai-compute
 
 test: reinit ## Run the bare-metal provisioning adapter tests against current internal wheels
 	uv run --find-links $(DIST_DIR) pytest -q

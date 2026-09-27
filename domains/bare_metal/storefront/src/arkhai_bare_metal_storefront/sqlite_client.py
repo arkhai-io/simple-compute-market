@@ -50,6 +50,11 @@ from .models import BareMetalHostedLifecycle
 
 T = TypeVar("T", bound=BaseModel)
 
+# Version 2 of a bare-metal binding's source envelope records the listing's
+# shape digest, which its derivation key includes. A version 1 binding's key
+# matches no candidate, so source reconciliation closes it.
+BARE_METAL_SOURCE_ENVELOPE_VERSION = 2
+
 
 class SQLiteClient(CoreSQLiteClient):
     """Core market state plus validated opaque bare-metal artifacts."""
@@ -222,6 +227,7 @@ class SQLiteClient(CoreSQLiteClient):
         site_id: str,
         pool_id: str,
         physical_resource_id: str,
+        shape_digest: str,
     ) -> str:
         """The common derivation key a bare-metal listing is bound under.
 
@@ -237,6 +243,7 @@ class SQLiteClient(CoreSQLiteClient):
             source_identity=bare_metal_source_identity(
                 pool_id=pool_id,
                 physical_resource_id=physical_resource_id,
+                shape_digest=shape_digest,
             ),
         )
 
@@ -424,14 +431,18 @@ class SQLiteClient(CoreSQLiteClient):
     ) -> None:
         normalized = self._market_domain.codecs.listing(listing)
         domain_binding = self._bare_metal_domain_binding()
+        # The key is derived from the listing's own shape, so a listing can
+        # only ever be bound under the key its published fields imply.
+        shape_digest = normalized.shape_digest
         source_envelope = {
             "kind": "bare_metal.resource-projection.v1",
-            "schema_version": 1,
+            "schema_version": BARE_METAL_SOURCE_ENVELOPE_VERSION,
             "site_id": site_id,
             "pool_id": pool_id,
             "physical_resource_id": physical_resource_id,
             "host_id": normalized.host_id,
             "physical_host_id": normalized.physical_host_id,
+            "shape_digest": shape_digest,
         }
         binding = StorefrontListingBinding.from_source_envelope(
             listing_id=listing_id,
@@ -443,6 +454,7 @@ class SQLiteClient(CoreSQLiteClient):
                 site_id=site_id,
                 pool_id=pool_id,
                 physical_resource_id=physical_resource_id,
+                shape_digest=shape_digest,
             ),
             source_envelope=source_envelope,
             last_reconciled_at=updated_at,
@@ -698,6 +710,7 @@ class SQLiteClient(CoreSQLiteClient):
                 "pool_id": listing_binding.pool_id,
                 "host_id": listing.host_id,
                 "physical_host_id": listing.physical_host_id,
+                "claimed_attributes": listing.claimed_attributes,
             }
         )
         return self.bind_fulfillment_context(

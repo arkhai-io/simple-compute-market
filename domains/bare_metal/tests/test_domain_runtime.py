@@ -19,6 +19,7 @@ from arkhai_bare_metal import (
     BareMetalTerms,
 )
 from arkhai_bare_metal.domain_runtime import market_domain
+from arkhai_bare_metal.fixtures.listing import build_bare_metal_listing_resource
 from market_core import (
     DomainCapability,
     DomainCodecExample,
@@ -31,11 +32,9 @@ def test_storefront_runtime_normalizes_bare_metal_schema_slots() -> None:
     runtime = market_domain()
     lease_end = datetime.now(UTC) + timedelta(hours=1)
 
-    listing = runtime.codecs.listing({
-        "capacity_backing": "backed",
-        "host_id": "node-1",
-        "physical_host_id": "host-1",
-    })
+    listing = runtime.codecs.listing(
+        build_bare_metal_listing_resource(host_id="node-1", physical_host_id="host-1")
+    )
     message = runtime.codecs.message({
         "duration_seconds": 3600,
         "ssh_public_key": "ssh-ed25519 AAAA test",
@@ -92,11 +91,7 @@ def test_storefront_runtime_surfaces_bare_metal_validation_errors() -> None:
     runtime = market_domain()
 
     with pytest.raises(ValidationError, match="host_id must be non-empty"):
-        runtime.codecs.listing({
-            "capacity_backing": "backed",
-            "host_id": "",
-            "physical_host_id": "host-1",
-        })
+        runtime.codecs.listing(build_bare_metal_listing_resource(host_id=""))
 
 
 def test_bare_metal_listing_without_backing_is_refused() -> None:

@@ -447,7 +447,6 @@ def test_scalar_non_erc20_settlement_reaches_ready(
         escrow_uid,
         negotiation_id=negotiation_id,
         buyer_evm_address=buyer_config["wallet_address"],
-        ssh_public_key=buyer_config["ssh_public_key"],
     )
     assert settle.status == "provisioning", settle
 

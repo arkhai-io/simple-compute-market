@@ -107,11 +107,6 @@ class SettleController:
                 status_code=409,
                 detail="accepted provision terms have no SSH public key",
             )
-        if body.ssh_public_key != accepted_ssh_public_key:
-            raise HTTPException(
-                status_code=403,
-                detail="SSH public key does not match accepted provision terms",
-            )
 
         proposal = thread.get("buyer_escrow_proposal")
         if not isinstance(proposal, dict):
@@ -133,11 +128,6 @@ class SettleController:
             raise HTTPException(
                 status_code=409,
                 detail="accepted settlement terms have no chain",
-            )
-        if body.chain_name != accepted_chain:
-            raise HTTPException(
-                status_code=403,
-                detail="settlement chain does not match accepted terms",
             )
 
         composition = _container.resolved_settlement_composition

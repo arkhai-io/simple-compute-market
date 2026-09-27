@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 import pytest
+from arkhai_compute import COMPUTE_CAPABILITY_SCHEMA
+from market_capability_shape import FieldKind, shape_digest
 from pydantic import ValidationError
 
 from arkhai_bare_metal import (
@@ -27,6 +29,7 @@ from arkhai_bare_metal import (
     materialization_to_lease_create,
     receipt_from_lease_view,
 )
+from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
 
 
 def test_bare_metal_listing_is_domain_payload_not_registry_row():
@@ -36,8 +39,7 @@ def test_bare_metal_listing_is_domain_payload_not_registry_row():
         physical_host_id="host-physical-1",
         min_duration_seconds=3600,
         max_duration_seconds=7200,
-        site={"region": "us-west"},
-        capabilities={"gpu_model": "L40S", "ram_gb": 256},
+        **LISTING_HARDWARE,
     )
 
     assert listing.kind == BARE_METAL_SCHEMA_KIND
@@ -53,6 +55,7 @@ def test_bare_metal_listing_keeps_machine_and_physical_ids_separate():
         capacity_backing="backed",
         host_id="executor-local-node",
         physical_host_id="site-physical-host",
+        **LISTING_HARDWARE,
     )
 
     assert listing.host_id != listing.physical_host_id
@@ -66,7 +69,56 @@ def test_bare_metal_listing_rejects_invalid_duration_bounds():
             physical_host_id="host-physical-1",
             min_duration_seconds=7200,
             max_duration_seconds=3600,
+            **LISTING_HARDWARE,
         )
+
+
+def test_bare_metal_listing_publishes_exactly_the_compute_flat_names():
+    published = set(BareMetalListing.model_fields) - {
+        "kind", "offering_mode", "capacity_backing", "host_id", "physical_host_id",
+        "access_methods", "min_duration_seconds", "max_duration_seconds", "region",
+    }
+
+    assert published == set(COMPUTE_CAPABILITY_SCHEMA.flat_names(FieldKind.QUANTITY)) | set(
+        COMPUTE_CAPABILITY_SCHEMA.flat_names(FieldKind.ATTRIBUTE)
+    )
+
+
+def test_bare_metal_listing_refuses_a_field_beside_its_shape():
+    with pytest.raises(ValidationError, match="capabilities"):
+        BareMetalListing(
+            capacity_backing="backed",
+            host_id="bm-node-1",
+            physical_host_id="host-physical-1",
+            capabilities={"gpu_model": "H200"},
+            **LISTING_HARDWARE,
+        )
+
+
+@pytest.mark.parametrize("missing", ["region", "gpu_count", "gpu_model"])
+def test_bare_metal_listing_requires_region_and_gpu(missing):
+    fields = {key: value for key, value in LISTING_HARDWARE.items() if key != missing}
+    with pytest.raises(ValidationError, match=missing):
+        BareMetalListing(
+            capacity_backing="backed",
+            host_id="bm-node-1",
+            physical_host_id="host-physical-1",
+            **fields,
+        )
+
+
+def test_a_listing_digests_as_the_shape_stated_by_hand():
+    listing = BareMetalListing(
+        capacity_backing="backed",
+        host_id="bm-node-1",
+        physical_host_id="host-physical-1",
+        **LISTING_HARDWARE,
+    )
+
+    assert listing.shape == {"gpu": {"count": 8, "model": "H200"}, "memory": {"gib": 2048}}
+    assert listing.shape_digest == shape_digest(
+        {"memory": {"gib": 2048}, "gpu": {"model": "H200", "count": 8}}
+    )
 
 
 def test_bare_metal_message_requires_access_material_for_ssh():

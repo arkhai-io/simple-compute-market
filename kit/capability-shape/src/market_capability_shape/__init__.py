@@ -217,6 +217,44 @@ def flatten_shape(shape: Any, schema: CapabilitySchema) -> FlatShape:
     )
 
 
+def unflatten_shape(
+    quantities: Mapping[str, Any],
+    attributes: Mapping[str, Any],
+    schema: CapabilitySchema,
+) -> dict[str, dict[str, Any]]:
+    """Build the family-grouped shape ``schema`` flattens to these flat values.
+
+    The exact inverse of ``flatten_shape``: flattening the result returns
+    ``quantities`` and ``attributes``. Raises ``CapabilityShapeError`` naming
+    every flat name the schema does not define or defines as the other kind,
+    and every problem ``shape_problems`` finds in the result, so a caller
+    reading flat declarations gets the same refusals as one stating a shape.
+    """
+    by_flat_name = {field.flat_name: field for field in schema.fields}
+    problems: list[ShapeProblem] = []
+    shape: dict[str, dict[str, Any]] = {}
+    for values, kind in (
+        (quantities, FieldKind.QUANTITY),
+        (attributes, FieldKind.ATTRIBUTE),
+    ):
+        for flat_name, value in values.items():
+            definition = by_flat_name.get(flat_name)
+            if definition is None:
+                problems.append(ShapeProblem(str(flat_name), "is not defined by this schema"))
+            elif definition.kind is not kind:
+                problems.append(
+                    ShapeProblem(str(flat_name), f"is a {definition.kind.value}, not a {kind.value}")
+                )
+            else:
+                shape.setdefault(definition.family, {})[definition.field] = value
+    if problems:
+        raise CapabilityShapeError(tuple(problems))
+    problems.extend(shape_problems(shape, schema))
+    if problems:
+        raise CapabilityShapeError(tuple(problems))
+    return canonical_shape(shape)
+
+
 def canonical_shape(shape: Any) -> dict[str, dict[str, Any]]:
     """A structurally valid shape as plain nested dicts in sorted key order."""
     _require_structure(shape)
@@ -256,4 +294,5 @@ __all__ = [
     "shape_digest",
     "shape_problems",
     "shape_structure_problems",
+    "unflatten_shape",
 ]

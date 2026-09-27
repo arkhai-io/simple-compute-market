@@ -771,8 +771,6 @@ def _settle_kwargs():
         payload={
             "negotiation_id": "neg-1",
             "buyer_evm_address": _BUYER_ADDR,
-            "chain_name": "anvil",
-            "ssh_public_key": "ssh-rsa AAAA...",
         },
         principal=BUYER_SIGNER.identity,
         signer=BUYER_SIGNER,

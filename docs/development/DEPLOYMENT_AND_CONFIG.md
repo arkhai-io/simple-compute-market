@@ -380,11 +380,19 @@ exactly the effect of the same `PUT /api/v1/capacity/resources/{resource_id}`.
 - **Every declared attribute is published to storefronts.** Attributes are the
   categorical facts claims match (`gpu_model`, `region`); none may repeat a
   declaration field such as `host_id`.
-- **State a region twice: on the pool, which listings advertise, and on its
-  declarations, which reservations match.** A listing's claim requests the
+- **For VM, state a region twice: on the pool, which listings advertise, and on
+  its declarations, which reservations match.** A VM listing's claim requests the
   region and model it publishes, so a pool whose listings claim a region or model
   no member declares publishes nothing and is reported per pool; a region stated
   only on the pool publishes nothing.
+- **A bare-metal declaration describes one whole machine.** Set
+  `capacity.units` to `1`, and state its hardware under the compute family's
+  capacity names: `gpu_count`, and optionally `vcpu_count`, `ram_gb`, and
+  `disk_gb`. Set `attributes.gpu_model`. `gpu_count` and `gpu_model` are required
+  for bare-metal publication, and the machine's pool must state a `region`. Do
+  not put authoritative hardware in `bare_metal_publication`. What a storefront
+  publishes and holds from these declarations is specified in the
+  [storefront publication specification](../../openspec/specs/storefront-publication/spec.md#requirement-a-bare-metal-listings-shape-is-derived-from-its-declaration).
 
 `POST /api/v1/capacity/definitions/import` submits a document: it always
 reconciles and records no startup digest. With `validate_only` it reports the

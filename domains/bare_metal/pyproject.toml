@@ -1,12 +1,14 @@
 [project]
 name = "arkhai-bare-metal"
-version = "0.5.0"
+version = "0.6.0"
 license = "MIT"
 description = "Bare-metal market schema and domain vocabulary for Arkhai."
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.7",
     "arkhai-core>=0.2.0",
+    "arkhai-compute>=0.1.0",
+    "arkhai-kit-capability-shape>=0.2.0",
 ]
 
 [project.optional-dependencies]

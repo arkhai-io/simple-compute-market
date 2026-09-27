@@ -1207,7 +1207,6 @@ class TestStage08b_SettlementSubmittedAndJobQueued:
             deal_state.real_escrow_uid,
             negotiation_id=deal_state.negotiation_id,
             buyer_evm_address=buyer_config["wallet_address"],
-            ssh_public_key=buyer_config["ssh_public_key"],
         )
         assert settle_resp.status == "provisioning", (
             f"Expected status=provisioning, got: {settle_resp.status!r}. "

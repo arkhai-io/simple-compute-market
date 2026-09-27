@@ -11,7 +11,9 @@ import hashlib
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from arkhai_compute import COMPUTE_CAPABILITY_SCHEMA
+from market_capability_shape import FieldKind, shape_digest, unflatten_shape
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .provision_terms import BareMetalProvisionTerms
 
@@ -46,7 +48,17 @@ def bare_metal_executor_ref(
 
 
 class BareMetalListing(BaseModel):
-    """Bare-metal domain payload carried by a registry listing."""
+    """Bare-metal domain payload carried by a registry listing.
+
+    A listing offers one whole machine. Its hardware is the Physical Resource's
+    declared shape, published under the compute family's flat names so the
+    compute registry schema's dimension filters read it; the fields below are
+    exactly that schema's flat names, and nothing else may be added beside them.
+    See openspec/specs/storefront-publication/spec.md, "A bare-metal listing's
+    shape is derived from its declaration".
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
     kind: Literal["bare_metal.v2"] = BARE_METAL_SCHEMA_KIND
     offering_mode: Literal["bare_metal"] = "bare_metal"
@@ -76,18 +88,19 @@ class BareMetalListing(BaseModel):
         ge=1,
         description="Longest lease duration the seller advertises.",
     )
-    site: dict[str, str] | None = Field(
-        default=None,
-        description="Optional site/region/zone labels for discovery.",
+    region: str = Field(
+        min_length=1,
+        description="The region the machine's pool declares.",
     )
-    capabilities: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Domain-specific hardware capabilities for discovery.",
-    )
+    gpu_count: int = Field(ge=1, description="GPUs the machine contains.")
+    gpu_model: str = Field(min_length=1, description="The machine's GPU model.")
+    vcpu_count: int | None = Field(default=None, ge=1, description="vCPUs the machine contains.")
+    ram_gb: int | None = Field(default=None, ge=1, description="Memory, in GiB.")
+    disk_gb: int | None = Field(default=None, ge=1, description="Storage, in GiB.")
 
     @model_validator(mode="after")
     def _validate_listing(self) -> "BareMetalListing":
-        for field_name in ("host_id", "physical_host_id"):
+        for field_name in ("host_id", "physical_host_id", "region", "gpu_model"):
             if not str(getattr(self, field_name)).strip():
                 raise ValueError(f"{field_name} must be non-empty")
         if not self.access_methods:
@@ -101,6 +114,37 @@ class BareMetalListing(BaseModel):
         ):
             raise ValueError("min_duration_seconds must be <= max_duration_seconds")
         return self
+
+    @property
+    def shape(self) -> dict[str, dict[str, Any]]:
+        """The family-grouped shape the listing's published fields flatten from."""
+        quantities = {
+            name: getattr(self, name)
+            for name in COMPUTE_CAPABILITY_SCHEMA.flat_names(FieldKind.QUANTITY)
+            if getattr(self, name) is not None
+        }
+        attributes = {
+            name: getattr(self, name)
+            for name in COMPUTE_CAPABILITY_SCHEMA.flat_names(FieldKind.ATTRIBUTE)
+        }
+        return unflatten_shape(quantities, attributes, COMPUTE_CAPABILITY_SCHEMA)
+
+    @property
+    def shape_digest(self) -> str:
+        return shape_digest(self.shape)
+
+    @property
+    def claimed_attributes(self) -> dict[str, str]:
+        """The attributes a capacity claim for this listing requires admission to match.
+
+        The listing's quantities describe the one whole unit its claim reserves
+        and are not requested; its attributes are, so admission refuses a
+        declaration that no longer states what the listing published.
+        """
+        return {
+            name: getattr(self, name)
+            for name in COMPUTE_CAPABILITY_SCHEMA.flat_names(FieldKind.ATTRIBUTE)
+        }
 
 
 class BareMetalMessage(BaseModel):

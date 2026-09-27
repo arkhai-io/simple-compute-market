@@ -65,7 +65,8 @@ reinit: init-venv
 	--upgrade-package arkhai-kit-contact-exchange --reinstall-package arkhai-kit-contact-exchange \
 	--upgrade-package arkhai-kit-delivery --reinstall-package arkhai-kit-delivery \
 	--upgrade-package arkhai-kit-negotiation-runtime --reinstall-package arkhai-kit-negotiation-runtime \
-	--upgrade-package arkhai-kit-capability-shape --reinstall-package arkhai-kit-capability-shape
+	--upgrade-package arkhai-kit-capability-shape --reinstall-package arkhai-kit-capability-shape \
+	--upgrade-package arkhai-compute --reinstall-package arkhai-compute
 
 # -----------------------------------------------------------------------
 # Build

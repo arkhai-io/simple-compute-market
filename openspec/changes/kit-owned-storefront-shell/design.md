@@ -36,6 +36,30 @@ Design phase; not planned.
   API credits has a 196-line CLI, bare metal a publication CLI. Likely a kit CLI with
   contribution-registered groups, on the buyer executable's pattern; decide here or
   defer to a sibling.
+- **Where each route's typed client lives.** A documented need from
+  `bare-metal-listing-shapes`. `TESTING.md` requires a service's routes to be
+  exercised through its typed client, never hand-built requests. Two route families
+  have typed clients only inside buyer packages:
+  - the bare-metal fulfillment routes, whose client is `BareMetalFulfillmentTransport`
+    in `arkhai-bare-metal-buyer`;
+  - the introduction routes, whose client calls live in `core_buyer`.
+  A third route has no typed client at all: reading an introduction as the seller,
+  since the buyer's `IntroductionTransport` always signs as the buyer. The
+  storefront that serves them can reach them in tests only by taking a buyer
+  package as a test dependency, which is the interim that change adopted, and
+  hand-builds the seller read as marked debt. The
+  recommended direction is that each route this shell mounts, shared or a
+  contribution's extra route, has its typed client in the package that owns the
+  route: introductions beside `kit/contact-exchange`'s route service, bare-metal
+  fulfillment in the bare-metal domain package. Buyers then import those clients
+  rather than owning them. This belongs here rather than earlier because the shell
+  decides where those routes live; moving the clients first would move them twice.
+  Planning retires the interim test dependency.
+- **Settlement divergences already resolved.** From `bare-metal-listing-shapes`:
+  - a settlement request restates no negotiated term, in every domain;
+  - Alkahest-path fulfillment starts when settlement is verified, which
+    `bare-metal-mock-provisioned-deal` implements for bare metal.
+  The shared settle route adopts both, so neither is a drift to decide.
 - **Loop registration.** Whether a domain registers loops by name with the kit
   lifecycle, or the kit runtimes register their own loops and the domain supplies
   only timings.

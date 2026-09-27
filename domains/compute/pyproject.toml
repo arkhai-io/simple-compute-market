@@ -1,0 +1,37 @@
+[project]
+name = "arkhai-compute"
+version = "0.1.0"
+license = "MIT"
+description = "Compute-family market vocabulary shared by the VM and bare-metal domains."
+requires-python = ">=3.12,<3.14"
+# The compute family's vocabulary sits beneath every compute domain, so it
+# depends on nothing but the capability-shape foundation kit: a domain can bind
+# it without importing another domain, and the market core stays free of it.
+dependencies = [
+    "arkhai-kit-capability-shape>=0.2.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/arkhai_compute"]
+
+[tool.uv]
+# Internal wheels resolve from the repository's .dist/ rather than a
+# published index. Declared here rather than only passed as --find-links
+# so `uv lock` records the local registry: a lock resolved against the
+# index pins whatever version is published, which cannot satisfy a
+# constraint on an internal package built in this tree but not yet
+# released.
+find-links = ["../../.dist"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]

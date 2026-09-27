@@ -24,6 +24,8 @@ from typing import Any
 
 import pytest
 from arkhai_bare_metal.fixtures.publication_view import (
+    DEFAULT_CAPACITY,
+    DEFAULT_GPU_MODEL,
     build_bare_metal_publication_view,
 )
 from core_storefront.publication_runner import PublicationPayload
@@ -58,14 +60,22 @@ def member(
     available: bool = True,
     host_id: str | None = None,
     view_pool_id: str | None = "",
+    capacity: dict[str, Any] | None = None,
+    attributes: dict[str, Any] | None = None,
+    capabilities: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """A projected pool member carrying its bare-metal view.
+    """A projected pool member carrying its declaration and its bare-metal view.
 
-    The site's view folds enablement into ``available``, as the provisioning
+    The declaration is a whole machine: one unit holding the default hardware,
+    with the GPU model as a declared attribute. The site's view repeats the
+    capacity and folds enablement into ``available``, as the provisioning
     service builds it.
     """
+    declared = dict(DEFAULT_CAPACITY if capacity is None else capacity)
     return build_projected_resource(
         resource_id,
+        capacity=declared,
+        attributes={"gpu_model": DEFAULT_GPU_MODEL} if attributes is None else attributes,
         enabled=enabled,
         publication_views={
             "bare_metal.v2": build_bare_metal_publication_view(
@@ -74,13 +84,17 @@ def member(
                 host_id=host_id or f"machine-{resource_id}",
                 physical_host_id=f"physical-{resource_id}",
                 available=enabled and available,
+                capacity=declared,
+                capabilities=capabilities,
             )
         },
     )
 
 
 def pool(pool_id: str, *members: dict[str, Any], **declarations: Any) -> dict[str, Any]:
+    """A projected pool; it advertises bare metal and states a region unless told."""
     declarations.setdefault("advertisable_modes", ("bare_metal",))
+    declarations["policy_tags"] = {"region": "us-west", **declarations.get("policy_tags", {})}
     return build_resource_pool_row(pool_id, resources=members, **declarations)
 
 
@@ -611,3 +625,146 @@ async def test_a_changed_identity_closes_and_is_not_reopened(db):
     assert storefront.listing("site-a", "pool-1", "r1")[1] == "closed"
     assert storefront.registries.sent == []
     assert {"action": "refuse", "listing_id": listing_id, "reason": "identity_changed", "fields": ["host_id"]} in report["actions"]
+
+
+# -- shapes ----------------------------------------------------------------
+
+
+def _bindings(db: SQLiteClient, resource: str) -> list[tuple[str, str, str, str]]:
+    """``(listing_id, status, derivation_key, source_envelope_json)`` per binding."""
+    with sqlite3.connect(db.db_path) as conn:
+        return [
+            tuple(row)
+            for row in conn.execute(
+                """
+                SELECT b.listing_id, l.status, b.derivation_key, b.source_envelope_json
+                FROM storefront_listing_bindings b
+                JOIN listings l ON l.listing_id = b.listing_id
+                WHERE b.physical_resource_id = ?
+                ORDER BY l.created_at, b.listing_id
+                """,
+                (resource,),
+            ).fetchall()
+        ]
+
+
+async def test_a_listing_publishes_its_shape_where_the_compute_schema_reads_it(db):
+    storefront = Storefront(db, {"site-a": Site(pool("pool-1", member("r1", "pool-1")))})
+
+    await storefront.run()
+
+    body = storefront.registries.sent[0][3]["listing_resource"]
+    assert (body["gpu_count"], body["gpu_model"], body["ram_gb"]) == (8, "H200", 2048)
+    assert body["region"] == "us-west"
+    assert "capabilities" not in body and "site" not in body
+    ((_, _, _, envelope),) = _bindings(db, "r1")
+    assert json.loads(envelope)["schema_version"] == 2
+    assert json.loads(envelope)["shape_digest"].startswith("capability-shape.v1:")
+
+
+async def test_a_corrected_declaration_closes_and_publishes_a_successor(db):
+    site = Site(pool("pool-1", member("r1", "pool-1")))
+    storefront = Storefront(db, {"site-a": site})
+    await storefront.run()
+    ((first_id, _, first_key, first_envelope),) = _bindings(db, "r1")
+
+    site.serve(
+        pool("pool-1", member("r1", "pool-1", capacity={"units": 1, "gpu_count": 8, "ram_gb": 4096}))
+    )
+    report = await storefront.run()
+
+    (first, second) = _bindings(db, "r1")
+    assert first == (first_id, "closed", first_key, first_envelope)
+    assert second[1] == "open" and second[2] != first_key
+    assert closes(report) == {first_id: "source_gone"}
+    assert storefront.registries.operations() == [("closed", first_id), ("publish", second[0])]
+    assert storefront.registries.sent[1][3]["listing_resource"]["ram_gb"] == 4096
+
+
+async def test_an_unchanged_declaration_keeps_its_listing(db):
+    site = Site(pool("pool-1", member("r1", "pool-1")))
+    storefront = Storefront(db, {"site-a": site})
+    await storefront.run()
+
+    site.serve(pool("pool-1", member("r1", "pool-1")))
+    report = await storefront.run()
+
+    assert len(_bindings(db, "r1")) == 1
+    assert closes(report) == {}
+    assert storefront.registries.operations() == []
+
+
+async def test_a_pool_without_a_region_is_held_and_reported(db):
+    site = Site(pool("pool-1", member("r1", "pool-1")))
+    storefront = Storefront(db, {"site-a": site})
+    await storefront.run()
+    listing_id, _, _ = storefront.listing("site-a", "pool-1", "r1")
+
+    site.serve(
+        pool("pool-1", member("r1", "pool-1"), policy_tags={"region": ""}),
+        pool("pool-2", member("r2", "pool-2"), policy_tags={"region": None}),
+    )
+    report = await storefront.run()
+
+    assert storefront.listing("site-a", "pool-1", "r1")[:2] == (listing_id, "open")
+    assert ("site-a", "pool-2", "r2") not in storefront.listings()
+    held = {(item["pool_id"], item["reason"]) for item in actions(report, "hold")}
+    assert held == {("pool-1", "pool_region_missing"), ("pool-2", "pool_region_missing")}
+    assert storefront.registries.operations() == []
+
+
+async def test_an_unreadable_declaration_holds_only_its_own_listing(db):
+    site = Site(pool("pool-1", member("r1", "pool-1"), member("r2", "pool-1")))
+    storefront = Storefront(db, {"site-a": site})
+    await storefront.run()
+    r1_id, _, _ = storefront.listing("site-a", "pool-1", "r1")
+
+    site.serve(
+        pool(
+            "pool-1",
+            member("r1", "pool-1", attributes={}),
+            member("r2", "pool-1", enabled=False),
+        )
+    )
+    report = await storefront.run()
+
+    assert storefront.listing("site-a", "pool-1", "r1")[:2] == (r1_id, "open")
+    assert storefront.listing("site-a", "pool-1", "r2")[1] == "closed"
+    (hold,) = actions(report, "hold")
+    assert (hold["physical_resource_id"], hold["reason"]) == ("r1", "declaration_unresolvable")
+    assert any("gpu.model" in problem for problem in hold["problems"])
+
+
+async def test_a_declaration_never_readable_publishes_nothing(db):
+    storefront = Storefront(
+        db,
+        {"site-a": Site(pool("pool-1", member("r1", "pool-1", capacity={"gpu_count": 8})))},
+    )
+
+    report = await storefront.run()
+
+    assert storefront.listings() == {}
+    (hold,) = actions(report, "hold")
+    assert hold["reason"] == "declaration_unresolvable"
+
+
+async def test_bare_metal_listing_shapes_and_publication_capabilities_are_reported(db):
+    storefront = Storefront(
+        db,
+        {
+            "site-a": Site(
+                pool(
+                    "pool-1",
+                    member("r1", "pool-1", capabilities={"gpu_model": "B200"}),
+                    policy_tags={"listing_shapes": {"bare_metal": [{"gpu": {"count": 1}}]}},
+                )
+            )
+        },
+    )
+
+    report = await storefront.run()
+
+    reasons = {item["reason"] for item in actions(report, "report")}
+    assert reasons == {"listing_shapes_not_applicable", "publication_capabilities_ignored"}
+    body = storefront.registries.sent[0][3]["listing_resource"]
+    assert body["gpu_model"] == "H200"

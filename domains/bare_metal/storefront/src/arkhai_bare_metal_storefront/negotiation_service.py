@@ -32,6 +32,7 @@ from market_identity import Identity
 from market_settlement_runtime import AcceptedObligationArtifacts
 
 from .negotiation import BareMetalSellerRoundHook
+from .opening_guard import ListingSourceGuard, ListingSourceUnverifiable
 from .sqlite_client import SQLiteClient
 
 
@@ -182,6 +183,32 @@ class BareMetalNegotiationService:
     accepted_obligation_dispatch: AcceptedObligationDispatch = field(
         default_factory=dict
     )
+    # Rechecks a listing against its own declaration and pool before terms are
+    # agreed. ``None`` when no trusted site authority is composed, in which case
+    # no listing can be confirmed and every opening is refused as retryable.
+    source_guard: ListingSourceGuard | None = None
+
+    async def _recheck_source(self, listing_id: str) -> None:
+        """Refuse an opening whose listing its source no longer supports.
+
+        A declared mismatch or an absent source is a 409 with a reason distinct
+        from any availability refusal; a source that cannot be confirmed is a
+        retryable 503. See openspec/specs/storefront-publication/spec.md, "The
+        seller's inventory guard checks a listing against its own source".
+        """
+        if self.source_guard is None:
+            raise NegotiationRequestError(
+                "the listing's site authority is not configured", status_code=503
+            )
+        try:
+            check = await self.source_guard(listing_id)
+        except ListingSourceUnverifiable as exc:
+            raise NegotiationRequestError(str(exc), status_code=503) from exc
+        if not check.matches:
+            raise NegotiationRequestError(
+                f"listing no longer matches its declaration: {check.reason}",
+                status_code=409,
+            )
 
     async def open(
         self,
@@ -198,6 +225,7 @@ class BareMetalNegotiationService:
             raise NegotiationRequestError("listing is not open")
         if bool(listing.get("paused")):
             raise NegotiationRequestError("listing paused", status_code=503)
+        await self._recheck_source(request.listing_id)
 
         try:
             message = self.domain.codecs.message(request.provision_terms)

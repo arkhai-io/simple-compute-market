@@ -28,6 +28,9 @@ from arkhai_bare_metal_storefront.settlement_composition import (
 )
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 from market_hosted_settlement import StripeSettlementConfig
+from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
+from arkhai_bare_metal_storefront.opening_guard import build_listing_source_guard
+from source_sites import SourceSites
 
 BUYER_SIGNER = Eip191Signer(bytes.fromhex("22" * 32))
 SELLER_SIGNER = Eip191Signer(bytes.fromhex("11" * 32))
@@ -147,6 +150,7 @@ async def _service(tmp_path) -> tuple[BareMetalNegotiationService, dict[str, Any
         physical_resource_id="resource-1",
         listing={
             "capacity_backing": "backed",
+            **LISTING_HARDWARE,
             "kind": "bare_metal.v2",
             "host_id": "machine-1",
             "physical_host_id": "physical-host-1",
@@ -162,6 +166,7 @@ async def _service(tmp_path) -> tuple[BareMetalNegotiationService, dict[str, Any
         round_hook=None,  # type: ignore[arg-type]
         build_plan=lambda **kwargs: {},
         accepted_obligation_dispatch=_intro_dispatch(),
+        source_guard=build_listing_source_guard(db, SourceSites().site),
     )
     return service, option
 

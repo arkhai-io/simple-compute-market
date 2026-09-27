@@ -25,6 +25,15 @@ def _resource(**overrides):
     return values
 
 
+def test_publication_only_capabilities_may_differ_from_capacity():
+    """Nothing reads them, so a disagreement cannot refuse a site's generation."""
+    projection = BareMetalResourceProjection.model_validate(
+        _resource(capacity={"ram_gb": 256}, capabilities={"ram_gb": 512})
+    )
+
+    assert projection.capacity == {"ram_gb": 256}
+
+
 def test_resource_projection_preserves_distinct_identities_and_public_data():
     projection = BareMetalResourceProjection.model_validate(_resource())
 
@@ -47,11 +56,10 @@ def test_resource_projection_preserves_distinct_identities_and_public_data():
         {"access_methods": []},
         {"capabilities": {"service_url": "https://private.invalid"}},
         {"capabilities": {"nested": {"password": "secret"}}},
-        {"capacity": {"ram_gb": 256}, "capabilities": {"ram_gb": 512}},
         {"provider_config": {"inventory": "private"}},
     ],
 )
-def test_resource_projection_rejects_incomplete_private_or_conflicting_data(
+def test_resource_projection_rejects_incomplete_or_private_data(
     overrides,
 ):
     with pytest.raises(ValidationError):

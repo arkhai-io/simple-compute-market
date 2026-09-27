@@ -115,6 +115,18 @@ wheels = [
 ]
 
 [[package]]
+name = "arkhai-compute"
+version = "0.1.0"
+source = { registry = "../../../.dist" }
+dependencies = [
+    { name = "arkhai-kit-capability-shape" },
+]
+wheels = [
+    { path = "arkhai_compute-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_compute-0.1.0-py3-none-any.whl" },
+]
+
+[[package]]
 name = "arkhai-core"
 version = "0.3.0"
 source = { registry = "../../../.dist" }
@@ -173,11 +185,11 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-capability-shape"
-version = "0.1.0"
+version = "0.2.0"
 source = { registry = "../../../.dist" }
 wheels = [
-    { path = "arkhai_kit_capability_shape-0.1.0-py3-none-any.whl" },
-    { path = "arkhai_kit_capability_shape-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_kit_capability_shape-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_kit_capability_shape-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -225,9 +237,10 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms"
-version = "0.4.0"
+version = "0.5.0"
 source = { editable = "." }
 dependencies = [
+    { name = "arkhai-compute" },
     { name = "arkhai-core" },
     { name = "arkhai-kit-capability-shape" },
     { name = "pydantic" },
@@ -246,9 +259,10 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "arkhai-compute", specifier = ">=0.1.0" },
     { name = "arkhai-core", specifier = ">=0.3.0" },
     { name = "arkhai-core-storefront", marker = "extra == 'storefront'", specifier = ">=0.6.0" },
-    { name = "arkhai-kit-capability-shape", specifier = ">=0.1.0" },
+    { name = "arkhai-kit-capability-shape", specifier = ">=0.2.0" },
     { name = "pydantic", specifier = ">=2" },
 ]
 provides-extras = ["storefront"]

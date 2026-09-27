@@ -40,6 +40,18 @@ from .projections import (
     TrustedBareMetalProjection,
     TrustedBareMetalResource,
 )
+from .inventory_guard import (
+    SOURCE_ABSENT,
+    SOURCE_MATCHES,
+    SOURCE_MISMATCH,
+    ListingSourceCheck,
+    recheck_bare_metal_listing_source,
+)
+from .shapes import (
+    UNITS_DIMENSION,
+    BareMetalShapeError,
+    derive_bare_metal_shape,
+)
 from .provision_terms import (
     BARE_METAL_PROVISION_KIND,
     BARE_METAL_PROVISION_VERSION,
@@ -125,7 +137,11 @@ __all__ = [
     "NODE_GRANT_ACCESS_ACTION",
     "NODE_RECLAIM_ACCESS_ACTION",
     "PHYSICAL_HOST_ID_REF_KEY",
+    "SOURCE_ABSENT",
+    "SOURCE_MATCHES",
+    "SOURCE_MISMATCH",
     "SSH_ACCESS_METHOD",
+    "UNITS_DIMENSION",
     "BareMetalAcceptedHostedBinding",
     "BareMetalAccessResult",
     "BareMetalLeaseReadyEvidence",
@@ -144,6 +160,8 @@ __all__ = [
     "BareMetalProvisionTerms",
     "BareMetalReceipt",
     "BareMetalResourceProjection",
+    "BareMetalShapeError",
+    "ListingSourceCheck",
     "BareMetalTerms",
     "CanonicalPrincipal",
     "TrustedBareMetalProjection",
@@ -154,12 +172,14 @@ __all__ = [
     "build_bare_metal_lease_ready_evidence",
     "build_ready_bare_metal_hosted_options",
     "derive_accepted_hosted_binding",
+    "derive_bare_metal_shape",
     "decode_bare_metal_hosted_option_facts",
     "validate_accepted_hosted_plan",
     "derive_bare_metal_fulfillment_identity",
     "make_bare_metal_provision_terms",
     "materialization_to_lease_create",
     "receipt_from_lease_view",
+    "recheck_bare_metal_listing_source",
     "trusted_bare_metal_projection",
     "validate_buyer_selection",
 ]

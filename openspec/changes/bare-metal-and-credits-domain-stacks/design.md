@@ -102,6 +102,13 @@ Bare metal carries no legacy listing population to migrate: it is not deployed a
 its common binding is the only listing mapping, so no `legacy_migration` adapter is
 owed.
 
+`bare-metal-listing-shapes`, which lands first, adds a seller inventory guard to bare
+metal's current opening path. Its substance is a pure domain function in
+`arkhai_bare_metal` that rechecks a listing's shape and region against its site's
+projection. The storefront only fetches the projection and maps the outcome to a
+status. `validate_opening` calls the same function, so the move carries the fetch and
+the mapping, not the check.
+
 ### Teardown is domain-defined, and bare metal proves access revocation
 
 The shared lifecycle names a teardown boundary without imposing a VM payload.

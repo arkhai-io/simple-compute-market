@@ -67,9 +67,15 @@ Storefront status MAY project awaiting-payment reason, safe deadline, and transi
 ### Requirement: Seller protocol surface
 A storefront MUST expose authenticated listing, negotiation, settlement, identity, health, and operator control surfaces while keeping domain-specific behavior behind injected adapters.
 
+A settlement request MUST name the accepted negotiation and carry only what negotiation did not settle, such as the buyer's settlement-effect address. It MUST NOT restate a negotiated term, such as the buyer's access key or the settlement chain; the storefront reads those from the accepted negotiation, and MUST refuse a request that carries one. This holds in every domain.
+
 #### Scenario: Buyer settles accepted terms
 - **WHEN** the buyer submits a settlement request for an accepted negotiation
 - **THEN** the storefront verifies the agreed terms and settlement evidence before scheduling fulfillment
+
+#### Scenario: A settlement request restates a negotiated term
+- **WHEN** a buyer's settlement request carries an SSH public key or a chain name, matching the accepted terms or not
+- **THEN** the storefront refuses it before any settlement lookup
 
 ### Requirement: Operator-visible acceptance state
 The storefront MUST expose enough operator state to distinguish global negotiation pause from listing state and an empty resource projection from an inventory import failure.
@@ -1166,8 +1172,10 @@ diverged for the next pass.
 
 ### Requirement: Every VM listing is a listing shape
 
-Every VM listing MUST be a listing shape: a family-grouped capability shape in the VM
-domain's vocabulary. Bare-metal and API-credit listings are not listing shapes. A pool's VM
+Every VM listing MUST be a listing shape: a family-grouped capability shape in the compute
+family's vocabulary. A bare-metal listing's shape is derived from its Physical Resource's
+declaration rather than chosen, and is governed by the bare-metal requirements below. API-credit
+listings are not listing shapes. A pool's VM
 shapes MUST come from exactly one source, in this precedence:
 
 1. The storefront's override for that site and pool, when it states shapes.
@@ -1180,15 +1188,18 @@ MUST be derived from its capacity declarations, and MUST NOT be declared or publ
 **The VM default.** The VM domain's default generator MUST yield, for each GPU model among a
 pool's enabled members, one shape per GPU count from one to the largest declared GPU count
 among that model's members. Each such shape MUST declare the GPU family only. Every VM shape
-MUST name a GPU count and a GPU model. A fungible pool MUST publish one listing per feasible
-shape. A specific-resource pool MUST publish one listing per member per shape that member is
-feasible for.
+MUST name a GPU count and a GPU model. A fungible VM pool MUST publish one listing per
+feasible shape. A specific-resource VM pool MUST publish one listing per member per shape that
+member is feasible for.
 
-**Commitment.** A listing MUST publish every quantity and attribute its shape declares,
+**Commitment.** A VM listing MUST publish every quantity and attribute its shape declares,
 flattened through the domain's schema, and MUST NOT publish a quantity its shape does not
-declare. The capacity claim built from a listing MUST request exactly its shape's quantities.
-A listing commits only to what its shape declares. For a dimension its shape omits it makes
-no commitment, and what is provisioned for that dimension is the site's to decide.
+declare. The capacity claim built from a VM listing MUST request exactly its shape's
+quantities. A VM listing commits only to what its shape declares. For a dimension its shape
+omits it makes no commitment, and what is provisioned for that dimension is the site's to
+decide. A bare-metal listing commits differently: it sells one whole unit held exclusively,
+and its shape describes what that unit contains (see "A bare-metal listing sells one whole
+unit").
 
 #### Scenario: A site declares shapes for a pool
 
@@ -1565,6 +1576,144 @@ the storefront holds.
 - **THEN** its response reports only listings its own reservation made infeasible, and none
   the first reservation already closed
 
+### Requirement: A bare-metal listing's shape is derived from its declaration
+
+Every bare-metal listing MUST carry a family-grouped capability shape derived from the
+capacity declaration of the Physical Resource it offers, through the compute-family schema
+and the shared capability-shape utility:
+
+- its quantities MUST be the declared capacity dimensions other than `units`;
+- its attributes MUST be the declared attributes the schema names;
+- no other declared attribute is shape input.
+
+A declaration that cannot be read this way MUST be treated as unresolvable: it yields no new
+listing, its existing listing is held, and the publication run reports it naming the
+declaration. That covers:
+
+- a capacity dimension outside the schema;
+- a quantity that is not a positive integer;
+- a missing GPU count or GPU model;
+- a `units` dimension other than exactly one.
+
+Publication-only data the site copies into the bare-metal view MUST NOT be a source of shape
+fields.
+
+A bare-metal listing MUST NOT read a pool's `listing_shapes` hint. A pool stating one for
+bare metal MUST be reported as not applicable.
+
+#### Scenario: A Physical Resource declares its hardware
+
+- **WHEN** a Physical Resource declares capacity `{units: 1, gpu_count: 8, ram_gb: 2048}` and
+  the attribute `gpu_model: H200`
+- **THEN** its listing's shape is `{gpu: {count: 8, model: H200}, memory: {gib: 2048}}`
+
+#### Scenario: Two Physical Resources declare the same dimensions
+
+- **WHEN** two Physical Resources in one pool declare identical dimensions
+- **THEN** each publishes its own listing, and both listings carry the same shape
+
+#### Scenario: A declaration names no GPU model
+
+- **WHEN** a Physical Resource declares a GPU count but no `gpu_model` attribute
+- **THEN** no listing is derived from it, any listing previously derived from it is held,
+  and the run names the declaration and the missing field
+
+#### Scenario: Hardware stated only for publication
+
+- **WHEN** a declaration states its GPU model only inside its bare-metal publication
+  configuration
+- **THEN** that value is not published, the declaration is unresolvable for its missing
+  model, and the run reports the ignored publication field
+
+### Requirement: A bare-metal listing publishes its shape where the compute schema reads it
+
+A bare-metal listing MUST publish its shape's quantities and attributes as top-level fields
+of the listing resource under the compute family's flat names, so that the compute
+registry schema's dimension filters evaluate bare-metal listings as they evaluate VM
+listings.
+
+It MUST publish `region` from its pool's `region` hint. A pool with no non-empty string
+region hint MUST be held: its resources yield no new listing, its existing listings are
+neither closed nor refreshed, and the run reports the pool.
+
+A bare-metal listing MUST NOT publish its hardware in a nested mapping beside the top-level
+fields.
+
+#### Scenario: A buyer filters compute supply by GPU model
+
+- **WHEN** a buyer queries a compute registry for a GPU model that a published bare-metal
+  listing's Physical Resource declares
+- **THEN** the bare-metal listing is returned
+
+#### Scenario: A buyer filters by GPU count
+
+- **WHEN** a buyer queries a compute registry for listings with at least eight GPUs
+- **THEN** a bare-metal listing whose Physical Resource declares eight GPUs is returned
+
+#### Scenario: A pool states no region
+
+- **WHEN** a pool advertising bare metal carries no region hint
+- **THEN** no bare-metal listing is published from it and the run reports the pool
+
+### Requirement: A bare-metal listing's derivation identity includes its shape
+
+A bare-metal listing's derivation identity MUST be its site, pool, Physical Resource, and a
+canonical digest of its shape taken over the family-grouped form, and its durable binding
+MUST record the shape digest. A Physical Resource anchors at most one open listing at a time.
+A change to its declared shape MUST close its listing and publish a listing under a new
+derivation key, leaving the original binding unmodified.
+
+A listing bound under a derivation identity that carries no shape digest matches no
+candidate, and MUST close through source reconciliation. It MUST NOT be reopened.
+
+#### Scenario: A declared dimension is corrected
+
+- **WHEN** a Physical Resource behind an open listing changes its declared memory from
+  1024 to 2048
+- **THEN** that listing closes and a listing with a distinct derivation key publishes for
+  the new shape
+
+#### Scenario: A storefront upgrades
+
+- **WHEN** a bare-metal storefront whose listings were bound without a shape digest runs
+  publication
+- **THEN** each such open listing closes as a withdrawn source and a listing for the same
+  Physical Resource publishes under a shape-bearing derivation key in the same run
+
+### Requirement: A bare-metal listing sells one whole unit
+
+A bare-metal listing MUST be held by exclusive allocation of one unit of its Physical
+Resource. Its capacity claim MUST request exactly one `units` and MUST carry its shape's
+attributes, so that admission matches the published attributes. Its shape's quantities
+describe what that unit contains, and MUST NOT be requested dimension by dimension.
+
+The claimed attributes MUST come from the storefront's trusted record of the accepted
+listing, never from buyer input.
+
+#### Scenario: A declaration changes model after acceptance
+
+- **WHEN** a buyer accepts a bare-metal listing published with `gpu_model: H200`, and its
+  Physical Resource's declaration is changed to another model before reservation
+- **THEN** the site refuses the reservation
+
+### Requirement: Bare-metal opening rechecks its listing against its source
+
+Before a bare-metal seller agrees terms, the storefront MUST re-derive the listing's shape
+and region from its own site's live resource-pool projection, at its bound pool and
+Physical Resource. It MUST refuse with a declared-match reason when any of these hold:
+
+- the shape digest differs from the binding's;
+- the region differs from the published region;
+- the Physical Resource is absent or disabled.
+
+It MUST refuse as retryable when the site cannot be reached or does not verify.
+
+#### Scenario: A declaration shrinks beneath its listing
+
+- **WHEN** a buyer opens a negotiation on a bare-metal listing whose Physical Resource now
+  declares fewer GPUs than it published
+- **THEN** the opening is refused with a declared-match reason
+
 ## Evidence
 
 - Canonical listing, negotiation, settlement, fulfillment, and stage-log principals: `core/storefront/tests/unit/test_identity_migrations.py`, `test_settle_identity_models.py`, `test_sqlite_client_escrow_fulfillment_identity.py`, and `test_stage_log_identity.py`.
@@ -1600,5 +1749,10 @@ the storefront holds.
 - Durable seller close, kept by every later write: `core/storefront/tests/integration/test_listing_closure.py`, `kit/capacity-publication/tests/unit/test_publication.py`, `domains/apicredits/storefront/tests/integration/test_publish_reconcile.py`, and `domains/bare_metal/storefront/tests/test_publication_cycle.py`.
 - Registry convergence: `core/storefront/tests/integration/test_listing_closure.py`, `kit/capacity-publication/tests/unit/test_registry_convergence.py`, and `domains/apicredits/storefront/tests/unit/test_capacity_reconcile_converges.py`.
 - Loop controls from either client variant: `domains/vms/storefront/tests/unit/test_lifecycle_client_parity.py`.
+- Bare-metal shape derivation and its holds: `domains/bare_metal/tests/test_shapes.py`, `test_storefront_publication.py`, and `test_publication.py`; the published flat fields against the compute schema, `test_schema.py`.
+- Bare-metal publication with shape-bearing identity, successors, region holds, and reports: `domains/bare_metal/storefront/tests/test_publication_cycle.py` and `test_persistence.py`; system evidence in `e2e-tests/tests/e2e/roles/scenarios/bare_metal/test_bare_metal_publication.py`, stages 03b and 06.
+- The whole-unit claim and its admission by the site's own matcher: `domains/bare_metal/storefront/tests/test_claims.py`, `test_fulfillment_service.py`, and `test_http_settlement.py`.
+- The bare-metal opening recheck: `domains/bare_metal/tests/test_inventory_guard.py` and `domains/bare_metal/storefront/tests/test_http_negotiation.py`, through the canonical client.
+- A settlement request restates no negotiated term: `domains/vms/storefront/tests/unit/test_settlement_start_authority.py`, `domains/vms/buyer/tests/test_vm_settlement_helpers.py`, `core/storefront-client/tests/test_negotiate_new_payload.py`, and `domains/bare_metal/storefront/tests/test_http_settlement.py`.
 
 The installed bare-metal contribution supplies an independently runnable seller composition. Shared shells consume that contribution and the common immutable binding and lifecycle contexts; they do not replace the domain-owned codecs, seller policy, provisioning adapters, or fulfillment hook.

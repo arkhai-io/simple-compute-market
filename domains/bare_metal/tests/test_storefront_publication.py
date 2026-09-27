@@ -24,11 +24,24 @@ from arkhai_bare_metal import (
     listing_terms,
 )
 from arkhai_bare_metal.fixtures.publication_view import (
+    DEFAULT_CAPACITY,
     build_bare_metal_publication_view,
 )
+from market_capability_shape import shape_digest
+
+SHAPE = {"gpu": {"count": 8, "model": "H200"}, "memory": {"gib": 2048}}
 
 
-def _resource(resource_id, *, pool_id="pool-1", enabled=True, available=True):
+def _resource(
+    resource_id,
+    *,
+    pool_id="pool-1",
+    enabled=True,
+    available=True,
+    capacity=None,
+    attributes=None,
+    capabilities=None,
+):
     return TrustedBareMetalResource(
         pool_id=pool_id,
         enabled=enabled,
@@ -39,9 +52,18 @@ def _resource(resource_id, *, pool_id="pool-1", enabled=True, available=True):
                 host_id=f"machine-{resource_id}",
                 physical_host_id=f"physical-{resource_id}",
                 available=available,
+                capabilities=capabilities,
             )
         ),
+        declared_capacity=dict(DEFAULT_CAPACITY if capacity is None else capacity),
+        declared_attributes=dict(
+            {"gpu_model": "H200"} if attributes is None else attributes
+        ),
     )
+
+
+def _regions(*pool_ids, region="us-west"):
+    return {pool_id: region for pool_id in pool_ids}
 
 
 def _generation(*resources):
@@ -77,6 +99,7 @@ def test_each_resource_falls_into_exactly_one_class():
             "pool-unresolved": POOL_HELD,
             "pool-vm-only": POOL_NOT_ADMITTED,
         },
+        pool_regions=_regions("pool-1", "pool-unresolved", "pool-vm-only"),
     )
 
     assert _classes(classification) == {
@@ -99,6 +122,7 @@ def test_a_held_pool_holds_even_a_disabled_or_busy_resource():
             _resource("b", pool_id="p", available=False),
         ),
         pool_admission={"p": POOL_HELD},
+        pool_regions=_regions("p"),
     )
 
     assert set(_classes(classification).values()) == {HELD}
@@ -106,7 +130,9 @@ def test_a_held_pool_holds_even_a_disabled_or_busy_resource():
 
 def test_a_candidate_carries_its_source_and_listing():
     classification = classify_bare_metal_resources(
-        _generation(_resource("r1")), pool_admission={"pool-1": POOL_ADMITTED}
+        _generation(_resource("r1")),
+        pool_admission={"pool-1": POOL_ADMITTED},
+        pool_regions=_regions("pool-1"),
     )
 
     (candidate,) = classification.candidates
@@ -132,14 +158,113 @@ def test_a_candidate_carries_its_source_and_listing():
     }
     assert candidate["listing_resource"]["capacity_backing"] == "backed"
     assert candidate["listing"].host_id == "machine-r1"
+    assert candidate["shape_digest"] == shape_digest(SHAPE)
+    published = candidate["listing_resource"]
+    assert (published["gpu_count"], published["gpu_model"], published["ram_gb"]) == (
+        8, "H200", 2048,
+    )
+    assert published["region"] == "us-west"
+    assert "capabilities" not in published and "site" not in published
+
+
+def test_two_identical_declarations_publish_two_listings_with_one_shape():
+    classification = classify_bare_metal_resources(
+        _generation(_resource("r1"), _resource("r2")),
+        pool_admission={"pool-1": POOL_ADMITTED},
+        pool_regions=_regions("pool-1"),
+    )
+
+    first, second = classification.candidates
+    assert first["physical_resource_id"] != second["physical_resource_id"]
+    assert first["shape_digest"] == second["shape_digest"]
+
+
+def test_a_pool_without_a_region_holds_its_resources():
+    classification = classify_bare_metal_resources(
+        _generation(_resource("r1"), _resource("r2", available=False)),
+        pool_admission={"pool-1": POOL_ADMITTED},
+        pool_regions={"pool-1": None},
+    )
+
+    assert set(_classes(classification).values()) == {HELD}
+    assert classification.candidates == ()
+
+
+@pytest.mark.parametrize(
+    ("capacity", "attributes", "problem"),
+    [
+        pytest.param({"units": 1, "gpu_count": 8}, {}, "gpu.model", id="no model"),
+        pytest.param({"units": 1}, {"gpu_model": "H200"}, "gpu.count", id="no count"),
+        pytest.param({"gpu_count": 8}, {"gpu_model": "H200"}, "units", id="no units"),
+        pytest.param({"units": 2, "gpu_count": 8}, {"gpu_model": "H200"}, "units", id="two units"),
+        pytest.param({"units": 1, "gpu_count": 8, "fpga_count": 1}, {"gpu_model": "H200"},
+                     "fpga_count", id="outside the schema"),
+        pytest.param({"units": 1, "gpu_count": "8"}, {"gpu_model": "H200"}, "gpu.count",
+                     id="not an integer"),
+    ],
+)
+def test_an_unreadable_declaration_holds_only_its_own_resource(capacity, attributes, problem):
+    classification = classify_bare_metal_resources(
+        _generation(_resource("bad", capacity=capacity, attributes=attributes), _resource("good")),
+        pool_admission={"pool-1": POOL_ADMITTED},
+        pool_regions=_regions("pool-1"),
+    )
+
+    assert _classes(classification) == {"bad": HELD, "good": CANDIDATE}
+    (bad,) = classification.of(HELD)
+    assert bad.shape_digest is None
+    assert any(problem in reason for reason in bad.problems), bad.problems
+
+
+def test_accounting_attributes_are_not_shape_input():
+    classification = classify_bare_metal_resources(
+        _generation(
+            _resource(
+                "r1",
+                attributes={"gpu_model": "H200", "physical_host_id": "p", "rack": "7"},
+            )
+        ),
+        pool_admission={"pool-1": POOL_ADMITTED},
+        pool_regions=_regions("pool-1"),
+    )
+
+    (candidate,) = classification.candidates
+    assert candidate["shape_digest"] == shape_digest(SHAPE)
+
+
+def test_publication_only_capabilities_are_flagged_as_ignored():
+    classification = classify_bare_metal_resources(
+        _generation(_resource("r1", capabilities={"gpu_model": "B200"})),
+        pool_admission={"pool-1": POOL_ADMITTED},
+        pool_regions=_regions("pool-1"),
+    )
+
+    (item,) = classification.resources
+    assert item.publication_capabilities_ignored is True
+    assert classification.candidates[0]["listing"].gpu_model == "H200"
 
 
 def test_a_changed_pool_is_a_different_source_identity():
     """The pool is part of the source identity a listing is keyed by, so a
     Physical Resource moved to another pool derives a different listing."""
+    digest = shape_digest(SHAPE)
     assert bare_metal_source_identity(
-        pool_id="pool-1", physical_resource_id="r1"
-    ) != bare_metal_source_identity(pool_id="pool-2", physical_resource_id="r1")
+        pool_id="pool-1", physical_resource_id="r1", shape_digest=digest
+    ) != bare_metal_source_identity(
+        pool_id="pool-2", physical_resource_id="r1", shape_digest=digest
+    )
+
+
+def test_a_changed_shape_is_a_different_source_identity():
+    """A corrected declaration derives a new listing rather than one that can
+    never reopen under an unchanged key."""
+    assert bare_metal_source_identity(
+        pool_id="pool-1", physical_resource_id="r1", shape_digest=shape_digest(SHAPE)
+    ) != bare_metal_source_identity(
+        pool_id="pool-1",
+        physical_resource_id="r1",
+        shape_digest=shape_digest({"gpu": {"count": 8, "model": "H200"}}),
+    )
 
 
 def _stored():
@@ -150,7 +275,9 @@ def _stored():
         "host_id": "machine-1",
         "physical_host_id": "physical-1",
         "access_methods": ["ssh"],
-        "capabilities": {"gpu_count": 8},
+        "region": "us-west",
+        "gpu_count": 8,
+        "gpu_model": "H200",
         "max_duration_seconds": 3600,
     }
     terms = {
@@ -200,7 +327,9 @@ def test_a_changed_term_refreshes_in_place(resource_change, term_change, field):
     [
         {"host_id": "machine-2"},
         {"physical_host_id": "physical-2"},
-        {"capabilities": {"gpu_count": 4}},
+        {"gpu_count": 4},
+        {"gpu_model": "B200"},
+        {"region": "eu-central"},
         {"kind": "bare_metal.v3"},
     ],
 )
@@ -216,7 +345,7 @@ def test_a_changed_identity_is_refused(change):
 def test_a_field_the_stored_listing_never_published_is_no_commitment():
     resource, terms = _stored()
     stored = dict(resource)
-    del stored["capabilities"]
+    del stored["gpu_model"]
 
     comparison = compare_bare_metal_listing(
         stored_resource=stored,

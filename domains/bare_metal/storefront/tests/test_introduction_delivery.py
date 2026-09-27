@@ -8,7 +8,6 @@ import threading
 import time
 
 import pytest
-from fastapi.testclient import TestClient
 from market_delivery import (
     ConfiguredSink,
     DeliveryConfigurationError,
@@ -24,14 +23,14 @@ from arkhai_bare_metal_storefront.delivery import (
     storefront_delivery_section,
 )
 
+from loopback import serving
 from test_http_introductions import (
-    BUYER_SIGNER,
     _BUYER_CONTACT,
     _SELLER_CONTACT,
     _accept_and_start,
     _app,
-    _headers,
     _insert_contact_listing,
+    _introductions,
     _runtime,
 )
 
@@ -53,23 +52,6 @@ async def _await_delivery(received: list, *, expected: int = 1) -> None:
         await asyncio.sleep(0.01)
 
 
-def _start_again(client, negotiation_id: str, obligation_ref: str):
-    """Post the same start once more -- a repeat, not an authorized replay."""
-
-    body = {
-        "negotiation_id": negotiation_id,
-        "obligation_ref": obligation_ref,
-        "contact_payload": dict(_BUYER_CONTACT),
-    }
-    return client.post(
-        "/api/v1/introductions",
-        json=body,
-        headers=_headers(
-            BUYER_SIGNER, "buyer", "introduction_start", obligation_ref, body
-        ),
-    )
-
-
 async def test_the_reveal_tells_the_seller_its_own_half(tmp_path) -> None:
     runtime = _runtime(str(tmp_path / "storefront.db"))
     received: list = []
@@ -80,8 +62,8 @@ async def test_the_reveal_tells_the_seller_its_own_half(tmp_path) -> None:
     )
     option = await _insert_contact_listing(runtime)
 
-    with TestClient(_app(runtime)) as client:
-        negotiation_id, obligation_ref, projection = _accept_and_start(client, option)
+    with serving(_app(runtime)) as base_url:
+        negotiation_id, obligation_ref, projection = await _accept_and_start(base_url, option)
         assert projection["counterparty_contact"] == _SELLER_CONTACT
         await _await_delivery(received)
 
@@ -113,8 +95,8 @@ async def test_every_sink_failing_leaves_the_reveal_and_the_deal_intact(
     )
     option = await _insert_contact_listing(runtime)
 
-    with TestClient(_app(runtime)) as client:
-        negotiation_id, obligation_ref, projection = _accept_and_start(client, option)
+    with serving(_app(runtime)) as base_url:
+        negotiation_id, obligation_ref, projection = await _accept_and_start(base_url, option)
 
     assert projection["revealed"] is True
     assert projection["counterparty_contact"] == _SELLER_CONTACT
@@ -143,9 +125,9 @@ async def test_a_hanging_sink_does_not_extend_the_counterparty_request(
     option = await _insert_contact_listing(runtime)
 
     try:
-        with TestClient(_app(runtime)) as client:
+        with serving(_app(runtime)) as base_url:
             started = time.monotonic()
-            _, _, projection = _accept_and_start(client, option)
+            _, _, projection = await _accept_and_start(base_url, option)
             elapsed = time.monotonic() - started
             assert projection["revealed"] is True
             # The counterparty's request is finished while the sink it
@@ -167,12 +149,16 @@ async def test_a_repeat_start_announces_one_introduction_once(tmp_path) -> None:
     )
     option = await _insert_contact_listing(runtime)
 
-    with TestClient(_app(runtime)) as client:
-        negotiation_id, obligation_ref, _ = _accept_and_start(client, option)
+    with serving(_app(runtime)) as base_url:
+        negotiation_id, obligation_ref, _ = await _accept_and_start(base_url, option)
         await _await_delivery(received)
         first = len(received)
-        again = _start_again(client, negotiation_id, obligation_ref)
-        assert again.status_code == 200, again.text
+        again = _introductions(base_url).start(
+            negotiation_id=negotiation_id,
+            obligation_ref=obligation_ref,
+            contact_payload=dict(_BUYER_CONTACT),
+        )
+        assert again["revealed"] is True
         await asyncio.sleep(0.2)
 
     assert first == 1
@@ -182,8 +168,8 @@ async def test_a_repeat_start_announces_one_introduction_once(tmp_path) -> None:
 async def test_redelivery_sends_the_same_introduction_again(tmp_path) -> None:
     runtime = _runtime(str(tmp_path / "storefront.db"))
     option = await _insert_contact_listing(runtime)
-    with TestClient(_app(runtime)) as client:
-        _, obligation_ref, _ = _accept_and_start(client, option)
+    with serving(_app(runtime)) as base_url:
+        _, obligation_ref, _ = await _accept_and_start(base_url, option)
 
     received: list = []
     outcomes = await redeliver_introduction(

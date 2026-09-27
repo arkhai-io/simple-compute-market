@@ -17,6 +17,7 @@ from arkhai_bare_metal import (
 )
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 from market_identity import Ed25519Signer
+from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
 
 
 NOW = datetime(2030, 1, 1, tzinfo=timezone.utc)
@@ -69,6 +70,7 @@ def _artifacts():
 async def _seed_listing(client: SQLiteClient) -> BareMetalListing:
     listing = BareMetalListing(
         capacity_backing="backed",
+        **LISTING_HARDWARE,
         host_id="machine-1",
         physical_host_id="host-1",
         min_duration_seconds=900,
@@ -320,3 +322,21 @@ def test_common_artifact_table_contains_only_opaque_artifact_columns(tmp_path) -
     }
     forbidden = {"vm_host", "vm_target", "ssh_public_key", "host_id"}
     assert columns.isdisjoint(forbidden)
+
+
+async def test_a_listing_is_bound_under_the_key_its_own_shape_implies(tmp_path):
+    client = SQLiteClient(str(tmp_path / "storefront.db"))
+    listing = await _seed_listing(client)
+
+    binding = await client.load_listing_binding(listing_id="listing-1")
+
+    assert binding is not None
+    assert binding.derivation_key == client.bare_metal_derivation_key(
+        site_id="site-a",
+        pool_id="pool-a",
+        physical_resource_id="resource-1",
+        shape_digest=listing.shape_digest,
+    )
+    envelope = json.loads(binding.source_envelope_json)
+    assert envelope["schema_version"] == 2
+    assert envelope["shape_digest"] == listing.shape_digest

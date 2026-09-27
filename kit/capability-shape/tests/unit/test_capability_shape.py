@@ -15,6 +15,7 @@ from market_capability_shape import (
     shape_digest,
     shape_problems,
     shape_structure_problems,
+    unflatten_shape,
 )
 
 SCHEMA = CapabilitySchema(
@@ -171,3 +172,56 @@ def test_digest_is_unchanged_when_a_schema_renames_a_flat_name():
 def test_digest_refuses_a_malformed_shape():
     with pytest.raises(CapabilityShapeError):
         shape_digest({"widget": {}})
+
+
+# --- unflattening -------------------------------------------------------------
+
+
+def test_unflatten_is_the_inverse_of_flatten():
+    shape = {"widget": {"count": 3, "colour": "red"}, "space": {"units": 2}}
+    flat = flatten_shape(shape, SCHEMA)
+
+    rebuilt = unflatten_shape(flat.quantities, flat.attributes, SCHEMA)
+
+    assert rebuilt == canonical_shape(shape)
+    again = flatten_shape(rebuilt, SCHEMA)
+    assert dict(again.quantities) == dict(flat.quantities)
+    assert dict(again.attributes) == dict(flat.attributes)
+
+
+def test_a_derived_shape_digests_as_the_same_shape_stated_by_hand():
+    derived = unflatten_shape(
+        {"space_units": 2, "widget_count": 3}, {"widget_colour": "red"}, SCHEMA
+    )
+
+    assert shape_digest(derived) == shape_digest(
+        {"widget": {"colour": "red", "count": 3}, "space": {"units": 2}}
+    )
+
+
+@pytest.mark.parametrize(
+    ("quantities", "attributes", "path"),
+    [
+        ({"widget_count": 1, "gadget_count": 1}, {"widget_colour": "red"}, "gadget_count"),
+        ({"widget_count": 1}, {"widget_colour": "red", "shade": "dark"}, "shade"),
+    ],
+)
+def test_unflatten_refuses_a_flat_name_the_schema_does_not_define(quantities, attributes, path):
+    with pytest.raises(CapabilityShapeError) as refused:
+        unflatten_shape(quantities, attributes, SCHEMA)
+
+    assert path in _paths(refused.value.problems)
+
+
+def test_unflatten_refuses_a_flat_name_supplied_as_the_other_kind():
+    with pytest.raises(CapabilityShapeError) as refused:
+        unflatten_shape({"widget_count": 1, "widget_colour": "red"}, {}, SCHEMA)
+
+    assert "widget_colour" in _paths(refused.value.problems)
+
+
+def test_unflatten_refuses_what_flattening_would_refuse():
+    with pytest.raises(CapabilityShapeError) as refused:
+        unflatten_shape({"widget_count": 0}, {}, SCHEMA)
+
+    assert _paths(refused.value.problems) == {"widget.count", "widget.colour"}

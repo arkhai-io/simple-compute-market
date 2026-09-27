@@ -1,14 +1,14 @@
-.PHONY: dist dist-vms dist-vms-listings dist-vms-negotiation dist-vms-settlement dist-bare-metal dist-bare-metal-buyer \
+.PHONY: dist dist-compute dist-vms dist-vms-listings dist-vms-negotiation dist-vms-settlement dist-bare-metal dist-bare-metal-buyer \
 	dist-bare-metal-storefront dist-storefront dist-provisioning-operator-client dist-provisioning-adapters \
 	dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront \
 	dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer \
 	dist-buyer test-provisioning-iac test-provisioning-adapter test-storefront \
-	test-bare-metal test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware
+	test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware
 
 DIST_DIR ?= $(abspath ../.dist)
 
 
-dist: dist-vms dist-vms-listings dist-vms-negotiation dist-vms-settlement dist-bare-metal dist-bare-metal-buyer dist-bare-metal-storefront \
+dist: dist-compute dist-vms dist-vms-listings dist-vms-negotiation dist-vms-settlement dist-bare-metal dist-bare-metal-buyer dist-bare-metal-storefront \
 	dist-storefront dist-provisioning-operator-client dist-provisioning-adapters \
 	dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront \
 	dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer \
@@ -25,7 +25,15 @@ dist: dist-vms dist-vms-listings dist-vms-negotiation dist-vms-settlement dist-b
 # targets both defined in this file are expressed here.
 # ---------------------------------------------------------------------------
 
-dist-vms: ## Build arkhai-vms wheel into .dist/
+# The compute-family vocabulary every compute domain binds; built first so a
+# consumer syncing against .dist finds it beside the domains that depend on it.
+dist-compute: ## Build arkhai-compute wheel into .dist/
+	-mkdir -p $(DIST_DIR)
+	cd compute && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_compute-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-compute produced a platform-specific wheel -- must build inside Docker" && exit 1)
+
+dist-vms: dist-compute ## Build arkhai-vms wheel into .dist/
 	-mkdir -p $(DIST_DIR)
 	cd vms/domain && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_vms-*-none-any.whl > /dev/null 2>&1 || \
@@ -52,7 +60,7 @@ dist-vms-settlement: dist-vms-listings ## Build arkhai-vms-settlement wheel into
 	@ls $(DIST_DIR)/arkhai_vms_settlement-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-vms-settlement produced a platform-specific wheel -- must build inside Docker" && exit 1)
 
-dist-bare-metal: ## Build arkhai-bare-metal wheel into .dist/
+dist-bare-metal: dist-compute ## Build arkhai-bare-metal wheel into .dist/
 	-mkdir -p $(DIST_DIR)
 	cd bare_metal && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_bare_metal-*-none-any.whl > /dev/null 2>&1 || \
@@ -147,6 +155,9 @@ test-bare-metal: ## Bare-metal domain, storefront, buyer, and provisioning adapt
 	cd bare_metal/storefront && $(MAKE) test
 	cd bare_metal/buyer && $(MAKE) test
 	cd bare_metal/provisioning/adapter && $(MAKE) test
+
+test-compute: ## Compute-family vocabulary package tests
+	cd compute && $(MAKE) test
 
 test-vms-domain: ## VM market-domain package tests
 	cd vms/domain && $(MAKE) test

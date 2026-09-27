@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-kit-capability-shape"
-version = "0.1.0"
+version = "0.2.0"
 description = "Family-grouped capability shapes: structure, schema-driven flattening, and a canonical digest"
 requires-python = ">=3.12,<3.14"
 license = "MIT"

@@ -19,6 +19,7 @@ from arkhai_bare_metal_storefront.fulfillment_service import (
     BareMetalFulfillmentError,
     BareMetalFulfillmentService,
 )
+from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
 
 
 BUYER = Ed25519Signer(bytes.fromhex("11" * 32)).identity
@@ -39,6 +40,7 @@ class FakeDb:
             "physical_resource_id": "resource-a",
             "host_id": "machine-a",
             "physical_host_id": "host-a",
+            "claimed_attributes": {"gpu_model": LISTING_HARDWARE["gpu_model"]},
         }
         self.terms = BareMetalTerms(
             host_id="machine-a",
@@ -48,9 +50,9 @@ class FakeDb:
         )
         self.listing = BareMetalListing(
             capacity_backing="backed",
+            **LISTING_HARDWARE,
             host_id="machine-a",
             physical_host_id="host-a",
-            capabilities={"gpu_model": "H200"},
         )
 
     async def load_thread_binding(self, *, negotiation_id):
@@ -283,6 +285,7 @@ async def test_selected_site_lifecycle_is_idempotent_and_restores_capacity() -> 
     assert len(capacity.reserves) == 1
     assert capacity.reserves[0]["site"] == "site-a"
     assert capacity.reserves[0]["claim"] == {
+        "gpu_model": "H200",
         "resource_id": "resource-a",
         "dimensions": {"units": 1},
         "offering_mode": "bare_metal",
@@ -379,3 +382,25 @@ async def test_reservation_conflicting_site_fails_before_scheduling() -> None:
 
     assert fulfillment.schedules == []
     assert fulfillment.begins == []
+
+
+async def test_a_listing_naming_no_attributes_reserves_nothing() -> None:
+    """The claim's attributes come only from the trusted listing record; without
+    them the reservation is refused rather than made on units alone."""
+    db = FakeDb()
+    db.context.pop("claimed_attributes")
+    capacity = FakeCapacity()
+    service = BareMetalFulfillmentService(
+        db=db,
+        capacity_client=capacity,
+        fulfillment_client=FakeFulfillment(),
+    )
+
+    with pytest.raises(BareMetalFulfillmentError, match="no attributes to claim"):
+        await service.begin(
+            negotiation_id="neg-a",
+            escrow_uid="escrow-a",
+            buyer_principal=BUYER,
+        )
+
+    assert capacity.reserves == []

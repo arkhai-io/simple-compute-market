@@ -6,6 +6,7 @@ import time
 import uuid
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 from market_contact_exchange import MECHANISM as CONTACT_MECHANISM
 from market_core.schemas import derive_settlement_option_id
@@ -29,6 +30,11 @@ from arkhai_bare_metal_storefront.settlement_composition import (
     BareMetalStorefrontSettlementComposition,
 )
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
+from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
+from core_buyer.introductions import IntroductionTransport
+from loopback import serving
+from source_sites import SourceSites
+from storefront_client import StorefrontClient
 
 BUYER_SIGNER = Eip191Signer(bytes.fromhex("22" * 32))
 SELLER_SIGNER = Eip191Signer(bytes.fromhex("11" * 32))
@@ -101,6 +107,8 @@ def _runtime(path: str) -> BareMetalStorefrontRuntime:
         seller_principal=SELLER_SIGNER.identity,
         admin_principals=TrustedIdentitySet(identities=(ADMIN_SIGNER.identity,)),
         storefront_url="http://seller:8000",
+        # Openings recheck each listing against the site that published it.
+        capacity_client=SourceSites(),
         marketplace_signer=SELLER_SIGNER,
         settlement_composition=(
             BareMetalStorefrontSettlementComposition.from_raw_config(
@@ -143,6 +151,7 @@ async def _insert_contact_listing(runtime: BareMetalStorefrontRuntime) -> dict:
         physical_resource_id="resource-1",
         listing={
             "capacity_backing": "backed",
+            **LISTING_HARDWARE,
             "kind": "bare_metal.v2",
             "host_id": "machine-1",
             "physical_host_id": "physical-host-1",
@@ -175,37 +184,48 @@ def _opening(option: dict) -> dict:
     }
 
 
-def _accept_and_start(client: TestClient, option: dict) -> tuple[str, str, dict]:
-    opening = _opening(option)
-    response = client.post(
-        "/api/v1/negotiate/new",
-        json=opening,
-        headers=_headers(
-            BUYER_SIGNER, "buyer", "negotiate_new", "intro-listing", opening
+def _introductions(base_url: str, signer=BUYER_SIGNER) -> IntroductionTransport:
+    """The production buyer's introduction client, pointed at ``base_url``."""
+    return IntroductionTransport(
+        seller_url=base_url,
+        principal=signer.identity,
+        signer=signer,
+        resolve_seller_principals=lambda: TrustedIdentitySet(
+            identities=(SELLER_SIGNER.identity,)
         ),
     )
-    assert response.status_code == 200, response.text
-    payload = response.json()
+
+
+async def _accept_and_start(base_url: str, option: dict) -> tuple[str, str, dict]:
+    """Accept the contact listing and reveal, through the buyer's typed clients."""
+    opening = _opening(option)
+    async with StorefrontClient(
+        base_url,
+        signer=BUYER_SIGNER,
+        caller_role="buyer",
+        expected_publishers=TrustedIdentitySet(identities=(SELLER_SIGNER.identity,)),
+    ) as storefront:
+        payload = await storefront.negotiate_new(
+            listing_id=opening["listing_id"],
+            initial_amount=None,
+            provision_terms=opening["provision_terms"],
+            proposal_fields=opening["proposal"]["fields"],
+            settlement_selection=opening["proposal"]["settlement_selection"],
+            selection_only=True,
+            buyer_agent_url=opening["buyer_agent_url"],
+        )
     assert payload["action"] == "accept"
     negotiation_id = payload["negotiation_id"]
     plan = payload["settlement_plan"]
     obligation_ref = derive_obligation_ref(
         negotiation_id, 0, plan["obligations"][0]
     )
-    start_body = {
-        "negotiation_id": negotiation_id,
-        "obligation_ref": obligation_ref,
-        "contact_payload": dict(_BUYER_CONTACT),
-    }
-    started = client.post(
-        "/api/v1/introductions",
-        json=start_body,
-        headers=_headers(
-            BUYER_SIGNER, "buyer", "introduction_start", obligation_ref, start_body
-        ),
+    started = _introductions(base_url).start(
+        negotiation_id=negotiation_id,
+        obligation_ref=obligation_ref,
+        contact_payload=dict(_BUYER_CONTACT),
     )
-    assert started.status_code == 200, started.text
-    return negotiation_id, obligation_ref, started.json()
+    return negotiation_id, obligation_ref, started
 
 
 async def test_contact_options_publish_through_the_composition() -> None:
@@ -255,26 +275,20 @@ async def test_contact_options_publish_through_the_composition() -> None:
 async def test_introduction_start_reveals_and_completes(tmp_path) -> None:
     runtime = _runtime(str(tmp_path / "storefront.db"))
     option = await _insert_contact_listing(runtime)
-    with TestClient(_app(runtime)) as client:
-        negotiation_id, obligation_ref, projection = _accept_and_start(client, option)
-        assert projection["revealed"] is True
-        assert projection["counterparty_contact"] == _SELLER_CONTACT
-        assert projection["introduction"]["channel"] == "telegram"
-
-        read = client.get(
-            f"/api/v1/introductions/{obligation_ref}",
-            headers=_headers(
-                BUYER_SIGNER,
-                "buyer",
-                "introduction_read",
-                obligation_ref,
-                EMPTY_BODY,
-                method="GET",
-            ),
+    app = _app(runtime)
+    with serving(app) as base_url:
+        negotiation_id, obligation_ref, projection = await _accept_and_start(
+            base_url, option
         )
-        assert read.status_code == 200
-        assert read.json()["counterparty_contact"] == _SELLER_CONTACT
+        read = _introductions(base_url).read(obligation_ref=obligation_ref)
+    assert projection["revealed"] is True
+    assert projection["counterparty_contact"] == _SELLER_CONTACT
+    assert projection["introduction"]["channel"] == "telegram"
+    assert read["counterparty_contact"] == _SELLER_CONTACT
 
+    # Deferred debt, not an exemption: no typed client reads an introduction as
+    # the seller, so the seller's read is hand-built until one exists.
+    with TestClient(app) as client:
         seller_read = client.get(
             f"/api/v1/introductions/{obligation_ref}",
             headers=_headers(
@@ -286,8 +300,8 @@ async def test_introduction_start_reveals_and_completes(tmp_path) -> None:
                 method="GET",
             ),
         )
-        assert seller_read.status_code == 200
-        assert seller_read.json()["counterparty_contact"] == _BUYER_CONTACT
+    assert seller_read.status_code == 200
+    assert seller_read.json()["counterparty_contact"] == _BUYER_CONTACT
     status = await runtime.settlement_runtime.get_status(negotiation_id)
     assert status.status == "complete"
 
@@ -296,54 +310,21 @@ async def test_introduction_survives_a_storefront_restart(tmp_path) -> None:
     path = str(tmp_path / "storefront.db")
     runtime = _runtime(path)
     option = await _insert_contact_listing(runtime)
-    with TestClient(_app(runtime)) as client:
-        _, obligation_ref, _ = _accept_and_start(client, option)
+    with serving(_app(runtime)) as base_url:
+        _, obligation_ref, _ = await _accept_and_start(base_url, option)
 
-    restarted = _runtime(path)
-    with TestClient(_app(restarted)) as client:
-        read = client.get(
-            f"/api/v1/introductions/{obligation_ref}",
-            headers=_headers(
-                BUYER_SIGNER,
-                "buyer",
-                "introduction_read",
-                obligation_ref,
-                EMPTY_BODY,
-                method="GET",
-            ),
-        )
-        assert read.status_code == 200
-        assert read.json()["counterparty_contact"] == _SELLER_CONTACT
+    with serving(_app(_runtime(path))) as base_url:
+        read = _introductions(base_url).read(obligation_ref=obligation_ref)
+    assert read["counterparty_contact"] == _SELLER_CONTACT
 
 
 async def test_reveal_refusals(tmp_path) -> None:
     runtime = _runtime(str(tmp_path / "storefront.db"))
     option = await _insert_contact_listing(runtime)
-    with TestClient(_app(runtime)) as client:
-        unknown = "ee" * 32
-        premature = client.get(
-            f"/api/v1/introductions/{unknown}",
-            headers=_headers(
-                BUYER_SIGNER,
-                "buyer",
-                "introduction_read",
-                unknown,
-                EMPTY_BODY,
-                method="GET",
-            ),
-        )
-        assert premature.status_code == 404
+    with serving(_app(runtime)) as base_url:
+        with pytest.raises(RuntimeError, match="404"):
+            _introductions(base_url).read(obligation_ref="ee" * 32)
 
-        _, obligation_ref, _ = _accept_and_start(client, option)
-        outsider = client.get(
-            f"/api/v1/introductions/{obligation_ref}",
-            headers=_headers(
-                OUTSIDER_SIGNER,
-                "buyer",
-                "introduction_read",
-                obligation_ref,
-                EMPTY_BODY,
-                method="GET",
-            ),
-        )
-        assert outsider.status_code == 403
+        _, obligation_ref, _ = await _accept_and_start(base_url, option)
+        with pytest.raises(RuntimeError, match="403"):
+            _introductions(base_url, OUTSIDER_SIGNER).read(obligation_ref=obligation_ref)

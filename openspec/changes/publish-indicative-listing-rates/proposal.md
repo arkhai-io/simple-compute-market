@@ -71,6 +71,13 @@ bare metal alike, through one declaration form.
   which may state asking rates for a pool at any site and replaces the pool's as a
   whole list; an empty list withholds every rate. No storefront configuration default
   supplies an asking rate.
+- **Join bare metal to the site-scoped override store** for the `bare_metal`
+  offering mode, so the storefront tier has final authority on both compute domains.
+  Bare metal's vocabulary is settlement clauses, the terms `min_duration_seconds` and
+  `max_duration_seconds`, and asking rates; it states no shapes. The override HTTP
+  handling moves from the VM storefront into a framework-free route service in the
+  override kit, which both storefronts bind. A bare-metal `pool-override` command
+  mirrors VM's over the kit's typed client.
 - Fail a pool closed on a malformed or unreadable declaration or override, and
   publish no rate for a shape nothing prices.
 - Refresh a listing in place when its rate changes or is removed: price is a term of
@@ -129,8 +136,12 @@ None.
 - Affected code: the generic registry's filter specification model, etag
   serialization, and filter evaluation; the buyer query compiler's type mapping and
   co-requirement check; the resource-pool kit's policy-tag validation and reader; the
-  pool-override kit and the VM override terms; VM publication candidate derivation
-  and listing comparison; bare-metal publication once its dependencies land.
+  pool-override kit (a framework-free route service and optional after-write
+  effects) and the VM override terms and admin routes; VM publication candidate
+  derivation and listing comparison; bare-metal publication once its dependencies
+  land; the bare-metal storefront's override contribution, admin routes, migrations,
+  durable record of accepted site generations, system status, and `pool-override`
+  command.
 - Affected specification: `openspec/specs/registry-discovery/spec.md`,
   `openspec/specs/storefront-publication/spec.md`,
   `openspec/specs/resource-pool-management/spec.md`.
@@ -148,8 +159,10 @@ None.
 - **Depends on `bare-metal-publication-reads-pool-declarations`** (complete), without
   which bare-metal publication would read no pool policy tag.
 - **Blocked on `bare-metal-listing-shapes`**, which publishes a capability shape per
-  bare-metal listing — the key an asking rate is declared against — and joins bare
-  metal to the site-scoped override store.
+  bare-metal listing — the key an asking rate is declared against. Joining bare metal
+  to the site-scoped override store was scoped there first and moved here: it is
+  independent of the shape work, and the storefront tier's authority over asking
+  rates is its first bare-metal consumer.
 - **System evidence for unbacked supply blocked on `unbacked-bare-metal-listings`**
   (bare metal) and **`compose-contact-exchange-across-compute`** (VM). Until those
   land, no unbacked compute listing can be published in a running stack.
@@ -194,5 +207,11 @@ None.
   place — `openspec/specs/storefront-publication/spec.md`.
 - The `asking_rates` policy tag and its structural validation —
   `openspec/specs/resource-pool-management/spec.md`.
+- Bare metal's override vocabulary, its status source (the durable record of each
+  site's last accepted generation), and the override route service the storefronts
+  bind — `openspec/specs/storefront-publication/spec.md` and its `architecture.md`
+  ("Storefront pool overrides"); the bare-metal command and status in
+  `docs/development/DEPLOYMENT_AND_CONFIG.md` ("Storefront listing shapes and pool
+  overrides").
 - Why the rate is keyed by shape beside the shape, and why a site range is deferred
   — `openspec/specs/storefront-publication/architecture.md`.

@@ -9,7 +9,8 @@ reinit: ## Reinstall internal dependencies from the shared wheel directory
 		--upgrade-package arkhai-core-storefront --reinstall-package arkhai-core-storefront \
 		--upgrade-package arkhai-kit-identity --reinstall-package arkhai-kit-identity \
 		--upgrade-package arkhai-kit-policy --reinstall-package arkhai-kit-policy \
-		--upgrade-package arkhai-kit-capability-shape --reinstall-package arkhai-kit-capability-shape
+		--upgrade-package arkhai-kit-capability-shape --reinstall-package arkhai-kit-capability-shape \
+		--upgrade-package arkhai-compute --reinstall-package arkhai-compute
 
 test: reinit ## Run the tests against current internal wheels
 	uv run --find-links $(DIST_DIR) pytest -q
