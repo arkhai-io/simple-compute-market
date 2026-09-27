@@ -84,12 +84,16 @@ composition roots / deployed services
         ↓
 domain packages and role implementations
         ↓
+family vocabulary packages
+        ↓
 kit capabilities
         ↓
 core carrier and role contracts
 ```
 
 Core carrier packages must not import domain vocabulary. Domain packages may implement core hook shapes but should not make core depend on a concrete market. Composition roots own wiring and may depend on all lower layers.
+
+A family vocabulary package holds what sibling domains of one market family share, so they bind one definition instead of importing each other. `domains/compute` (`arkhai_compute`) is the compute family's: the capability schema whose families, fields, and flat names both the VM and bare-metal domains publish, claim, and declare capacity in. It depends only on foundation kits, never on a domain, a role, or core. The vocabulary belongs to neither the market-neutral foundation kit, which knows no family, nor core, which carries no market's vocabulary. See the [market composition architecture](../../openspec/specs/market-composition/architecture.md#the-compute-family-vocabulary).
 
 ### Kit layers
 
@@ -371,6 +375,7 @@ Within a service, controllers stay thin: HTTP routing, request/response schemas,
 | Capacity admission and reservation | Site authority | Serialization point for competing reservations |
 | Sellable capacity: each Physical Resource's declared shape, quantity, pool, and match attributes | Site authority | Declared by registration, a capacity-definitions document, or derivation from legacy host inventory; host records are connection identity only |
 | VM listing shapes a storefront publishes | Storefront, within what the site declares | A storefront pool override, else the pool's `listing_shapes` hint, else the VM domain's default generator; feasibility is judged against the site's declarations, and admission remains the site's |
+| A bare-metal listing's shape | Site authority, through the Physical Resource's declaration | Derived from the declared capacity and attributes; the storefront chooses nothing |
 | Resource-pool metadata and provider configuration | Resource-pool service | Provisioning routing metadata; disabled pools remain resolvable |
 | Pool deliverable-mode authorization | Resource-pool operator and service | One explicit set per pool; absence authorizes no mode, and each execution layer rechecks it |
 | Pool advertisement authorization and capacity backing | Resource-pool operator and service | Both declared explicitly on every pool write, never defaulted; a backed pool advertises only what it delivers, an unbacked pool delivers nothing, and backing is fixed at creation |
@@ -391,7 +396,9 @@ Storefront capacity pools and provisioning resource pools are separate concepts.
 
 A listing's capacity backing is declared by the pool it derives from and read from that declaration; it is never inferred from absent capacity data, an empty projection, or a stale generation. It is fixed on the listing's binding when the listing is created, and it is independent of how a pool's listings are enumerated and of which settlement mechanisms a listing offers. A capacity-backed listing is admitted at its site; an unbacked listing has no admission authority behind it, so it never reaches reservation and publishes only settlement options its domain does not fulfil through capacity. A listing's origin site is where it was declared, not an authority that admits it.
 
-Every VM listing is a listing shape, and a published dimension is a commitment: the claim a listing produces reserves every quantity it publishes, so it publishes exactly the quantities its shape declares. A dimension its shape omits is outside the commitment; fulfillment may supply it from the pool's configured VM defaults or leave it to downstream provisioning, and the operator keeps capacity sufficient for it. A VM shape comes from the storefront's own override for that site and pool, else the pool's `listing_shapes` hint, else the VM domain's default generator, and it is published only where a source member is feasible for it. Bare-metal and API-credit listings are not listing shapes. A configured site whose projection the storefront does not hold is unknown, not empty: its listings are held, and nothing is derived from local tables in its place. See the [storefront publication architecture](../../openspec/specs/storefront-publication/architecture.md#listing-shapes-and-the-storefronts-authority).
+Every VM listing is a listing shape, and a published dimension is a commitment: the claim a VM listing produces reserves every quantity it publishes, so it publishes exactly the quantities its shape declares. A dimension its shape omits is outside the commitment; fulfillment may supply it from the pool's configured VM defaults or leave it to downstream provisioning, and the operator keeps capacity sufficient for it. A VM shape comes from the storefront's own override for that site and pool, else the pool's `listing_shapes` hint, else the VM domain's default generator, and it is published only where a source member is feasible for it.
+
+A bare-metal listing's shape is derived, not chosen: it is its Physical Resource's declaration read through the compute-family schema, published under the same flat names so the compute filters read both domains alike. Its commitment is one whole unit: the claim reserves exactly one `units` of the resource, exclusively, and requires the shape's attributes, while the shape's quantities describe what that unit contains rather than being reserved one by one. The shape's digest completes the listing's derivation identity, so a corrected declaration closes the listing and publishes a successor. API-credit listings are not listing shapes. A configured site whose projection the storefront does not hold is unknown, not empty: its listings are held, and nothing is derived from local tables in its place. See the [storefront publication architecture](../../openspec/specs/storefront-publication/architecture.md#listing-shapes-and-the-storefronts-authority).
 
 VM publication runs on its own as a storefront lifecycle loop over the site projections the storefront trusts; a storefront that disables projection-backed derivation still derives capacity-backed listings from its local tables, and unbacked listings only ever from projections. Bare-metal publication remains operator-invoked. Terms of sale come only from durable sources — pool declarations, per-pool overrides, and configuration — never from a command's arguments.
 
@@ -521,8 +528,9 @@ see one machine.
 A seller's published shape is a **listing**, never an offer. `offer` names a
 negotiation message either party sends. For a domain using capability-shaped
 publication, what one listing offers, in its family-grouped vocabulary, is its
-**listing shape**; VM publication uses this model, and a pool states its shapes
-in its `listing_shapes` hint. A buyer's family-grouped statement of what it needs
+**listing shape**; VM publication states its shapes, from an override or a pool's
+`listing_shapes` hint, and bare-metal publication derives each one from a Physical
+Resource's declaration. A buyer's family-grouped statement of what it needs
 is a capability shape, not a listing shape. How many publication candidates a pool yields
 is its `listing_cardinality_mode`, which carries cardinality only — not what is
 offered, how a deal settles, or whether an admission authority backs the listing.

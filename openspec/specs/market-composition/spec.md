@@ -529,8 +529,12 @@ against declared supply have shapes; the market core MUST NOT carry it.
 - **Refusals.** A shape naming a family or field its schema does not define, missing a
   required field, or carrying a value of the wrong kind MUST be refused with the offending
   path named.
-- **One implementation.** Kit, role, and domain code that needs to validate, flatten, or
-  digest a capability shape MUST use this utility rather than a local implementation.
+- **Inverse.** The utility MUST build a family-grouped shape from flat quantities and
+  attributes through a schema, as the exact inverse of flattening, refusing every flat name
+  the schema does not define and every problem flattening would refuse.
+- **One implementation.** Kit, role, and domain code that needs to validate, flatten,
+  unflatten, or digest a capability shape MUST use this utility rather than a local
+  implementation.
 
 #### Scenario: The VM domain flattens a shape
 
@@ -555,6 +559,37 @@ against declared supply have shapes; the market core MUST NOT carry it.
 - **THEN** it accepts any well-formed family-grouped mapping and refuses only malformed
   structure
 
+#### Scenario: A declaration is read back into a shape
+
+- **WHEN** flat quantities `gpu_count: 8`, `ram_gb: 2048` and attribute `gpu_model: H200` are
+  unflattened with the compute-family schema
+- **THEN** the shape is `{gpu: {count: 8, model: H200}, memory: {gib: 2048}}`, and flattening
+  it returns the same flat values
+
+#### Scenario: A flat name is outside the schema
+
+- **WHEN** a flat quantity the schema does not name is unflattened
+- **THEN** the utility refuses it, naming the flat field
+
+### Requirement: The compute family shares one capability schema
+
+The compute-family capability schema — the families `gpu`, `cpu`, `memory`, and `storage`,
+their fields, and each field's flat name — MUST be owned by one compute-family domain package
+that every compute domain binds. The VM and bare-metal domains MUST NOT each define a schema,
+and neither MUST obtain the schema by importing the other. The package MUST depend only on
+the standard library and the capability-shape foundation kit.
+
+#### Scenario: Two compute domains flatten one shape
+
+- **WHEN** the VM and bare-metal domains each flatten `{gpu: {count: 8, model: H200}, memory: {gib: 2048}}`
+- **THEN** both produce `gpu_count: 8`, `ram_gb: 2048`, and `gpu_model: H200` through the
+  same schema object
+
+#### Scenario: The bare-metal storefront binds the schema
+
+- **WHEN** the bare-metal storefront's import boundary is checked
+- **THEN** it imports the compute-family package and no VM package
+
 ## Evidence
 
 - Import boundaries: `core/tests/unit/test_carrier_purity.py` and `domains/vms/storefront/tests/unit/test_architecture_imports.py`.
@@ -563,3 +598,5 @@ against declared supply have shapes; the market core MUST NOT carry it.
 - Frozen storefront registry, startup discovery, record-bound lifecycle carriers, and exact-object resolution: `core/storefront/tests/unit/test_domain_registry.py`, `test_domain_plugins.py`, `test_app_composition.py`, and `test_domain_lifecycle.py`.
 
 - One schema-driven flattening of family-grouped capability shapes, its canonical digest, and its standard-library-only boundary: `kit/capability-shape/tests/unit/test_capability_shape.py` and `test_import_boundary.py`; the VM family schema against `DIMENSION_KEYS`: `domains/vms/domain/tests/test_capability_shapes.py` and `test_schema.py`.
+- The schema-driven inverse of flattening: `kit/capability-shape/tests/unit/test_capability_shape.py`.
+- One compute-family capability schema bound by both compute domains: `domains/compute/tests/test_capability_schema.py` and `test_import_boundary.py`, `domains/vms/domain/tests/test_compute_requirements.py`, and `domains/bare_metal/tests/test_import_boundary.py`.
