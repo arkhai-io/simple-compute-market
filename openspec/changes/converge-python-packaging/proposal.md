@@ -4,8 +4,9 @@ Every project that installs internal wheels from `.dist` repeats, by hand, facts
 own lock and `pyproject.toml` already state:
 
 - 37 `reinit` targets list `--upgrade-package X --reinstall-package X` per internal
-  package; 7 Dockerfiles list `--refresh-package X`; 3 Dockerfiles spell their own
-  distribution's version; 5 Dockerfiles rewrite the lock's registry path with `sed`;
+  package; 7 Dockerfiles list `--refresh-package X`; 4 Dockerfiles carry 7
+  repository-distribution version literals; 5 Dockerfiles rewrite the lock's registry
+  path with `sed`;
   10 `pyproject.toml` files declare a relative `find-links` path; 3 declare
   `cache-keys` globs; 3 Makefiles and 2 CI matrix entries disable editable installs;
   16 `reinit` targets choose a Python version, 21 let uv choose.
@@ -38,13 +39,14 @@ The work lands in two implementation slices under this one change.
 - The three outlier images converge on the convention the other images follow:
   dependencies synced from the committed lock, then the project's own wheel installed
   from `.dist`.
-- One script, `scripts/uv_project.py`, owns every uv invocation that touches the
-  wheelhouse: `reinit` (a project environment), `image` and `install-wheel` (image
-  builds), and `lock` (relock without installing). Internal-package flags are derived
-  from the lock when the command runs.
+- One script, `scripts/uv_project.py`, owns the operations that mutate an environment
+  or a lock against the wheelhouse: `reinit` (a project environment), `image` and
+  `install-wheel` (image builds), and `lock` (relock without installing).
+  Internal-package flags are derived from the lock when the command runs.
 - Every `reinit` target is one call to that script. Every image install goes through
-  it, against the committed lock used unmodified from a layout that mirrors the
-  repository.
+  it: dependencies from the committed lock with `--locked`, used unmodified from a
+  layout that mirrors the repository, and the image's own wheel by the version its
+  `pyproject.toml` declares, from the wheelhouse only.
 - A root `make lock` relocks projects against current wheels and installs nothing.
   It replaces `scripts/refresh-review-locks.py`.
 - Python 3.13 is declared once, in a root `.python-version`; environments and images
@@ -52,7 +54,9 @@ The work lands in two implementation slices under this one change.
 - `[tool.uv] find-links` declarations are removed; the script supplies the wheelhouse.
 - `make check-packaging` runs four focused checks — `check-uv-setup`, `check-locks`,
   `check-python-version`, and (from slice 2) `check-project-layout` — replacing
-  `check-reinit` and `check-internal-locks`. The plan-closeout requirements, and the
+  `check-reinit` and `check-internal-locks`. `check-locks` proves, offline, that each
+  lock matches its project, that each internal wheel's requirements match what the lock
+  recorded for it, and that every repository distribution resolves from the wheelhouse. The plan-closeout requirements, and the
   closeout task of every active change whose closeout is not yet complete, call it.
 - `docs/development/BUILD_AND_PACKAGING.md` becomes the permanent home of these
   conventions and names the check that enforces each.
@@ -68,6 +72,9 @@ The work lands in two implementation slices under this one change.
   `cache-keys` are removed.
 - `domains/bare_metal/provisioning/adapter` stops resolving siblings through relative
   editable sources and installs them from `.dist`.
+- Every distribution whose wheel contents change bumps its minor version, pins and
+  locks follow, and the publication workflow's path filters move with the directories,
+  so PyPI publishes the renamed code rather than skipping an existing version.
 - `check-project-layout` joins `check-packaging`.
 
 ## Capabilities
@@ -90,7 +97,9 @@ None.
 - Changing which packages are internal, how `.dist` is built, or the `==` pins between
   internal packages. `reinit` reinstalls every internal wheel regardless of version, and
   `lock` upgrades internal pins, so exact pins cost an edit only at a version bump.
-- Publication to PyPI or the distribution inventory.
+- The publication mechanism or the distribution inventory. Slice 2 changes versions,
+  pins, and path filters so the existing workflow publishes the renamed packages;
+  `publish-wheels-through-a-gate` owns the mechanism.
 - How `registry`, `apicredits/service`, and `e2e-tests` images provide their own
   project (copied source, or an editable install); only their dependency installs change.
 - How CI runs test suites, beyond removing the `no_editable` flag.
@@ -102,7 +111,9 @@ None.
   `arkhai_vms_listings`, `domains.vms.negotiation` → `arkhai_vms_negotiation`,
   `domains.vms.settlement` → `arkhai_vms_settlement`, `domains.apicredits.buyer` →
   `arkhai_apicredits_buyer`, `domains.apicredits` → `arkhai_apicredits`. No alias is
-  kept. `docs/configuration.md` documents one of these paths to hook authors.
+  kept. Each renamed distribution, and each published distribution whose source
+  follows the rename, releases under a new minor version.
+  `docs/configuration.md` documents one of these paths to hook authors.
 - **Contributor workflow.** `make check-packaging` replaces `make check-reinit` and
   `make check-internal-locks`; `make lock` is the way to refresh locks. Every project
   environment uses Python 3.13, which uv installs when absent.
@@ -113,14 +124,17 @@ No wire, database, or configuration contract changes.
 ## Impact
 
 - `scripts/`: `uv_project.py` and four check scripts added; `check_reinit.py`,
-  `check_internal_locks.py`, and `refresh-review-locks.py` removed.
+  `check_internal_locks.py`, `refresh-review-locks.py`, and
+  `tests/test_storefront_image_pins.py` removed.
 - Every Makefile with a `reinit` target; the root `Makefile` (`lock`,
   `check-packaging`, review-lock targets); every Dockerfile that copies `.dist` and
   the two per-Dockerfile ignore files; `.python-version`; ten `pyproject.toml`
   `find-links` declarations.
 - Slice 2: the six projects' files, their `pyproject.toml` build targets, and about
-  140 importing files across `domains/`, `e2e-tests/`, and kit boundary tests;
-  `.github/workflows/tests.yml`.
+  140 importing files across `domains/`, `e2e-tests/`, and kit boundary tests; the
+  version, `==` pins, and locks of every distribution whose wheel contents change;
+  `.github/workflows/tests.yml` and `.github/workflows/publish-pypi.yml`;
+  `docs/development/RELEASING.md`.
 - `AGENTS.md`, `docs/prompts/implementation.md`, `openspec/README.md`,
   `docs/development/ARCHITECTURE.md`, `docs/configuration.md`, the new
   `docs/development/BUILD_AND_PACKAGING.md`, and the closeout task of each active
@@ -155,5 +169,7 @@ No wire, database, or configuration contract changes.
 - Why derivation reads the lock, why internal packages are both upgraded and
   reinstalled, why images mirror the repository layout →
   `openspec/specs/deployment-state/architecture.md#artifact-and-package-boundary`.
+- Why lock currency is checked against wheel metadata, and what it cannot see → the
+  same architecture section.
 - Closeout runs `make check-packaging` → `openspec/README.md#plan-closeout-requirements`
   and `openspec/specs/planning-governance/spec.md`.

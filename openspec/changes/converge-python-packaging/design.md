@@ -10,8 +10,11 @@ This change replaces the lists with derivations and the exceptions with one layo
 and makes both checkable at closeout.
 
 The change was proposed as `derive-internal-package-lists-from-locks`, scoped to
-`reinit` targets and Dockerfile refresh lists. Discussion widened it to the
-build process generally, and it was renamed.
+`reinit` targets and Dockerfile refresh lists. Discussion widened it to the build
+process generally, and it was renamed. A design review then tightened the image lock
+contract, the lock-currency proof, the definition of an internal package, the script's
+scope, and the inventory, and added the version bumps the import renames require; see
+"Review resolution".
 
 ## Findings from the current tree
 
@@ -29,6 +32,13 @@ continued line as recipe text, so it passes. `domains/vms/provisioning/adapter` 
 compared with what each lock resolves from `.dist`, `e2e-tests` misses 12,
 `apicredits/service` 8, `compute/service` 7, `vms/storefront` 6.
 
+**Four Dockerfiles carry seven version literals.** Four name the image's own
+distribution (`compute/service`, `vms/storefront`, `bare_metal/storefront`,
+`apicredits/storefront`). `compute/service` also names both provisioning adapters, which
+its `adapters` extra already declares and locks. `vms/storefront` also names
+`arkhai-bare-metal-storefront`, a base dependency its builder stage already installs
+from the lock; its runtime stage copies `.dist` only to install these two wheels.
+
 **Both reinit flags are needed, for different reasons.** Rebuilding a wheel at the
 same version and syncing a consumer:
 
@@ -44,12 +54,16 @@ same version and syncing a consumer:
 wheel's metadata and rewrite the dependencies the lock records for it. `uv lock
 --check` and `--locked` cannot see a same-version wheel's changed dependencies.
 
+**A lock goes stale against a same-version wheel only through metadata.** A lock
+records a local wheel by filename, with no hash, and records the names (and extras) of
+its dependencies. New code in a same-version wheel therefore never makes a lock stale;
+changed requirements do, and both sides of that comparison are readable offline: the
+wheel's `METADATA` in `.dist`, and the lock's record.
+
 **Images do not all install from their lock.** `apicredits/sample-app`,
 `compute/service`, and `bare_metal/storefront` `uv pip install` top-level wheels; the
 first two refresh their own wheel, which their locks record as editable, and the third
-resolves third-party versions freshly on each build. Every lock-based image refreshes
-with `--refresh-package` only, so a rebuilt wheel that gained a dependency installs
-without it — the fourth row above.
+resolves third-party versions freshly on each build.
 
 **A committed lock works unmodified from a mirrored layout.** With the project and the
 wheelhouse at the same relative positions as in the repository, `uv sync --locked`
@@ -70,39 +84,56 @@ import the six paths. No configuration, persisted state, or model file names the
 RL models load by file path, and policies are referenced by registered name.
 `docs/configuration.md` shows hook authors one of the paths.
 
+**Publication skips a version that already exists.** `.github/workflows/publish-pypi.yml`
+runs on pushes to `main` that touch a published package's paths, and skips any
+distribution whose declared version PyPI already has. All six renamed distributions
+are in its matrix. Its `apicredits-domain` path filter already names a `src/` tree the
+project does not have yet.
+
 **Every package any lock resolves from a local registry is declared by a repository
-project** (40 names). That matches `deployment-state`'s rule that `.dist` holds only
-repository-built artifacts, so derivation needs no repository-wide name list.
+project** (40 names), and every such registry is the repository wheelhouse.
 
 ## Decisions
 
-### D1. The lock is the only source of the internal-package set
+### D1. An internal package is one the lock resolves from the repository wheelhouse
 
-The internal packages a project refreshes are exactly those its `uv.lock` resolves
-from a local wheel registry — a `registry` source that is a filesystem path, relative
-or absolute. Index-served packages, source packages, and the project itself are
-excluded. The set is computed when the command runs, so a lock rewritten earlier in
-the same invocation is read after the rewrite.
+For refresh derivation, the internal packages of a project are exactly those its
+`uv.lock` resolves from the repository wheelhouse: a `registry` source whose path,
+resolved against the project directory, is the canonical `.dist`. Any other local
+registry path is an error, not an internal package. Index-served packages, source
+packages, and the project itself are excluded. The set is computed when the command
+runs, so a lock rewritten earlier in the same invocation is read after the rewrite.
+
+This definition needs only the project and the wheelhouse, so it works inside an image.
+It cannot on its own notice a repository distribution that has started resolving from
+an index; the repository-wide inventory in D12 does.
 
 *Rejected: deriving image refreshes from the wheelhouse contents.* It was proposed
 while three images did not install from their lock. Once they converge (D5), the lock
 is what `make test` exercised and is what an image should build.
 
-### D2. One script owns every uv invocation that touches the wheelhouse
+### D2. One script owns environment sync, lock generation, and image installs
 
-`scripts/uv_project.py`, standard library only, run from the project directory:
+`scripts/uv_project.py`, standard library only, run from the project directory, owns
+the operations that mutate an environment or a lock against the wheelhouse:
 
 - `reinit` — `uv sync --python <declared> --find-links <relative .dist>` plus, per
   internal package, `--upgrade-package X --reinstall-package X`.
-- `image -- <uv sync options>` — `uv sync` with the options the Dockerfile passes
-  (groups, extras, `--no-install-project`) plus the same per-package pair. The
-  Dockerfile states what to install; the script states which packages are internal.
-- `install-wheel` — `uv pip install --no-deps --reinstall` of the project's own
-  distribution at the version its `pyproject.toml` declares, from the wheelhouse,
-  into `UV_PROJECT_ENVIRONMENT`.
+- `image -- <uv sync options>` — `uv sync --locked` with the options the Dockerfile
+  passes (groups, extras, `--no-install-project`) plus `--reinstall-package X` per
+  internal package. The Dockerfile states what to install; the script states which
+  packages are internal.
+- `install-wheel` — `uv pip install --no-deps --no-index --reinstall --find-links
+  <.dist>` of the project's own distribution at the version its `pyproject.toml`
+  declares, into `UV_PROJECT_ENVIRONMENT`. `--no-index` keeps it from falling through to
+  an index when the wheel is missing: `--find-links` adds candidates rather than
+  replacing the index.
 - `lock [project …]` — `uv lock --find-links <relative .dist>` plus
   `--upgrade-package X` per internal package, for every named project or every
   project; installs nothing.
+
+Read-only uses of the wheelhouse stay outside it: test targets' `uv run --find-links`
+executes against an environment `reinit` built.
 
 The script runs the command rather than printing flags for a caller to splice in.
 The originally accepted design had Makefiles call `$$(python3 …)` inside the `uv sync`
@@ -119,15 +150,19 @@ Per the findings table, reinstall alone installs new code without a dependency t
 rebuilt wheel gained, and `--locked` succeeds in that state. Iterating on a wheel
 without bumping its version therefore legitimately rewrites the consumer lock's
 recorded dependencies, and `reinit` must be allowed to do so. Those lock changes are
-the ones to commit.
+committed; `check-locks` (D12) fails until they are.
 
-### D4. An image installs its lock exactly as `reinit` does
+### D4. An image installs the committed lock and never relocks
 
-`image` passes the same `--upgrade-package X --reinstall-package X` pair (reinstall
-implies refresh, which is what the persistent uv cache mount needs). An image is
-therefore the committed lock relocked for internal packages the same way `reinit`
-relocked it before `make test`. This also closes the defect where today's images
-install a rebuilt wheel without a dependency it gained.
+`image` syncs with `--locked` and `--reinstall-package X` per internal package. The
+reinstall flag implies a refresh, which is what the persistent uv cache mount needs to
+drop a previous build of a same-version wheel. Nothing in an image build rewrites the
+lock, so the image contains the lock the project's tests ran against, as committed.
+
+`--locked` rejects a lock that no longer matches its `pyproject.toml`, but not one that
+recorded a same-version wheel's old requirements; `check-locks` (D12) is what keeps such
+a lock from being committed. The image contract therefore rests on the closeout gate,
+not on the build detecting it.
 
 Images copy the project's `pyproject.toml` and `uv.lock` and the wheelhouse to the
 same relative positions they hold in the repository (under a fixed image root such as
@@ -142,18 +177,24 @@ Slice 1 begins by moving `apicredits/sample-app`, `compute/service` (with
 lock-synced dependencies plus own-wheel install, so D4 applies to every image
 uniformly. `bare_metal/storefront` thereby gains locked third-party versions.
 
-### D6. The project's own version comes from its `pyproject.toml`
+### D6. An image installs only its own distribution by version, in the builder stage
 
-`install-wheel` reads name and version from `pyproject.toml`, removing the
-`name==version` literals from Dockerfiles. `scripts/tests/test_storefront_image_pins.py`
-exists only to catch drift in those literals and is removed.
+`install-wheel` reads the name and version from `pyproject.toml`, so no Dockerfile
+spells a version. Every other repository distribution an image needs comes from the
+lock sync: the adapter literals in `compute/service` disappear with its `adapters`
+extra, and the second wheel in the VM storefront's runtime stage is dropped because the
+builder already installs it. The own-wheel install runs in the builder stage; runtime
+stages copy the finished venv and do not copy the wheelhouse.
+`scripts/tests/test_storefront_image_pins.py` exists only to catch drift in version
+literals and is removed.
 
 ### D7. `make lock` relocks unconditionally and installs nothing
 
 It depends on `dist`, because a consumer's lock records its internal dependencies'
-metadata from the wheels. Because `uv lock --check` cannot detect a same-version
-wheel's changed dependencies, `lock` does not skip projects it judges current; relocking
-a current project is fast and changes nothing. It replaces
+metadata from the wheels. It relocks every project it is given rather than skipping any
+a check reports current: relocking a current project is fast and changes nothing. A
+relock that leaves the tree unchanged is the strongest available proof of lock currency,
+and needs the network, including the PyPI and PyTorch indexes. It replaces
 `scripts/refresh-review-locks.py`, and `make review-locks` calls it with the review
 scope's projects.
 
@@ -170,7 +211,7 @@ standard library and runs under the host `python3`.
 
 The ten `[tool.uv] find-links` declarations are removed. The script supplies
 `--find-links`, and test targets keep supplying it on `uv run`, so the repository layout
-is stated only by the tool that depends on it.
+is stated only by the tools that depend on it.
 
 ### D10. Every distribution is one flat import package under `src/`, installed editable
 
@@ -205,24 +246,41 @@ editable `[tool.uv.sources]`. They move to `.dist` resolution in slice 2, which 
 
 ### D12. Packaging conventions are checked by four focused scripts
 
-`make check-packaging` runs each; each is also its own target.
+`make check-packaging` runs each; each is also its own target. None needs the network.
 
 | Target | Fails on |
 |---|---|
-| `check-uv-setup` | a project with tests whose lock installs internal wheels and has no `reinit`; a `reinit` recipe other than the script call; a Dockerfile uv install from the wheelhouse not made through the script; any literal `--upgrade-package`, `--reinstall-package`, or `--refresh-package`; a lock registry rewrite; a repository distribution's `name==version` in a Dockerfile |
-| `check-locks` | a lock that fails `uv lock --check`, or that pins an internal package at a version the tree does not build |
+| `check-uv-setup` | a project with tests whose lock installs internal wheels and has no `reinit`; a `reinit` recipe other than the script call; a Dockerfile uv install from the wheelhouse not made through the script; any literal `--upgrade-package`, `--reinstall-package`, or `--refresh-package`; a lock registry rewrite; a repository distribution's `name==version` in a Dockerfile; a runtime stage that copies the wheelhouse |
+| `check-locks` | see below |
 | `check-python-version` | a `--python` value, `.python-version` file, or Dockerfile `PYTHON_VERSION` default other than the root declaration |
 | `check-project-layout` | a wheel target that is not one package under `src/`; `[tool.uv] find-links`; `cache-keys`; a relative `[tool.uv.sources]` path; `UV_NO_EDITABLE`, `--no-editable`, or `no_editable` outside image builds |
 
+`check-locks` runs after `dist` and proves lock currency on three axes:
+
+1. **Against the project.** `uv lock --check`, which catches a lock that no longer
+   satisfies its `pyproject.toml`.
+2. **Against the wheels.** For each package a lock resolves from the wheelhouse, the
+   locked version is one the tree builds, and the wheel of that version in `.dist`
+   agrees with the lock's record: the names of its unconditional requirements equal the
+   lock's recorded dependencies, the names under each extra the lock records equal that
+   extra's recorded dependencies, and each locked dependency version satisfies the
+   wheel's specifier for it. This catches a same-version wheel whose requirements changed
+   after the consumer was last locked.
+3. **Against the repository inventory.** The set of repository distributions is derived
+   from every project `pyproject.toml`. Any lock that resolves one of them from anywhere
+   but the wheelhouse — an index, or another local path — fails, and so does any lock
+   whose wheelhouse registry is not the canonical `.dist`.
+
+Environment markers are not compared beyond deciding which extra a requirement belongs
+to: uv simplifies markers against `requires-python` when it locks, so a textual
+comparison would report differences that are not staleness. A same-version wheel that
+changes only a requirement's platform or version marker is the residual this check does
+not see; `make lock` followed by an unchanged tree covers it.
+
 Makefiles are parsed with Make's rules — backslash continuation, and comments on rule
 lines — so the defect in the Findings cannot recur. Dockerfiles are parsed per stage and
-per instruction with continuation. `check-locks` runs after `dist`; it needs no network
-when locks are current. `check-uv-setup` absorbs `check_reinit.py`; `check-locks` absorbs
-`check_internal_locks.py`.
-
-`check-locks` does not detect a same-version wheel's changed dependencies; `reinit`,
-`lock`, and image builds all repair that state, and the end-to-end pipeline builds images
-with the same flags.
+per instruction with continuation. `check-uv-setup` absorbs `check_reinit.py`;
+`check-locks` absorbs `check_internal_locks.py`.
 
 ### D13. Closeout runs `make check-packaging`
 
@@ -249,34 +307,73 @@ describes the hosted client as a staged wheel to "rebuild, upgrade, and reinstal
 is modified to "move the pin and relock", since the client is index-served and pinned
 exactly.
 
+### D16. Slice 2 bumps the version of every distribution whose wheel contents change
+
+The publication workflow skips a version PyPI already has, so renamed code published
+under an unchanged version would never reach PyPI, and the next consumer release pinned
+to that version would install the old import paths. Every distribution whose built wheel
+contents change in slice 2 therefore bumps its version: the six renamed distributions,
+and every other published distribution whose source changes to follow the renamed
+imports. Being 0.x releases with a breaking import change, they bump the minor version.
+Every `==` pin on a bumped distribution moves with it, and the affected locks are
+relocked with `make lock`. The planning pass enumerates the distributions by comparing
+wheel contents before and after the rename.
+
+`publish-pypi.yml`'s path filters are updated to the moved directories, and
+`docs/development/RELEASING.md` records the import migration for the bumped releases.
+The publication mechanism is otherwise unchanged; `publish-wheels-through-a-gate` owns
+it.
+
 ## Slices
 
 1. **Environments** — D1–D9, D12 without `check-project-layout`, D13, D14 for what the
    slice makes true. Order: outlier images (D5), Python declaration (D8), script and
    callers (D2–D4, D6, D7, D9), checks, documentation.
-2. **Layout** — D10, D11, `check-project-layout`, and the layout sections of
+2. **Layout** — D10, D11, D16, `check-project-layout`, and the layout sections of
    `BUILD_AND_PACKAGING.md`.
 
 Slice 1 leaves `UV_NO_EDITABLE` and `cache-keys` in place for the six projects; the
 script's uv commands inherit the environment, so their behavior is unchanged until
 slice 2.
 
+## Review resolution
+
+A design review raised eight findings; each is resolved as follows.
+
+1. *Image lock contract contradictory* — images use `--locked` and never relock (D4).
+2. *Closeout gate cannot prove lock currency* — `check-locks` compares wheel metadata
+   with lock records offline, with its residual stated (D12); `make lock` is the
+   network-dependent stronger proof (D7).
+3. *Import renames not technically necessary* — the flat layout is kept as decided (D10).
+4. *Renames lack a versioning story* — slice 2 bumps every changed distribution (D16).
+5. *Internal-package definition too loose* — canonical wheelhouse in the script (D1),
+   repository inventory in `check-locks` (D12).
+6. *Script ownership overstated; `install-wheel` not fail-closed* — scope narrowed to
+   mutating operations, and `install-wheel` uses `--no-index` (D2).
+7. *Inventory miscounted* — four Dockerfiles, seven literals (Findings, D6).
+8. *Not yet planned* — the file-level plan and closeout task are the planning phase.
+
 ## Risks
 
 - **Mirrored layout in images.** Verified with uv locally; each image's build and its
   existing import smoke checks confirm it.
+- **Metadata comparison noise.** `check-locks` compares requirement names and
+  specifiers, not markers; its tests include a lock uv produced for a wheel with
+  platform-marked and extra-scoped requirements, so a correct lock is shown to pass.
 - **PyTorch index access.** `make lock` and `reinit` for the three projects that declare
   the index need it; an environment that blocks it cannot relock them. Reported as a
   uv resolution failure naming the package.
-- **Import rename.** Mechanical but wide; each renamed project's suite, every consumer's
-  suite, wheel-content inspection, and the end-to-end pipeline cover it.
+- **Import rename and publication.** Mechanical but wide; each renamed project's suite,
+  every consumer's suite, wheel-content inspection, and the end-to-end pipeline cover
+  the rename, and D16 keeps PyPI consistent with it.
 - **3.12 → 3.13 images.** Covered by image builds and the end-to-end pipeline.
 
 ## Rollback
 
 No persisted state or wire contract changes; reverting the change restores the prior
 build. The import rename is a public API break for anyone importing the six packages
-outside this repository; reverting it restores the old paths.
+outside this repository; versions already published under the new paths remain on
+PyPI, and a revert would publish further bumped versions restoring the old paths.
 
 ## Open questions
 

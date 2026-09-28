@@ -12,8 +12,14 @@ wheel change invalidates that stage.
 #### Scenario: A consumer resolves a sibling distribution
 
 - **WHEN** a project that depends on another repository distribution is locked
-- **THEN** its lock records that distribution from the local wheel registry, not from
-  a source path
+- **THEN** its lock records that distribution from the repository wheelhouse, not from
+  a source path or a package index
+
+#### Scenario: A repository distribution resolves from an index
+
+- **WHEN** any lock resolves a distribution that a repository project declares from a
+  package index, or from a local registry other than the repository wheelhouse
+- **THEN** the packaging check fails and names the lock and the distribution
 
 #### Scenario: A project declares a sibling source
 
@@ -44,13 +50,13 @@ either.
 
 A rebuilt wheel keeps its version, so a sync keeps both an environment's installed copy
 and the lock's recorded dependencies for it unless told otherwise. A project's `reinit`
-MUST upgrade and reinstall every package its `uv.lock` resolves from a local wheel
-registry, and MUST derive that set from the lock when it runs rather than list it.
+MUST upgrade and reinstall every package its `uv.lock` resolves from the repository
+wheelhouse, and MUST derive that set from the lock when it runs rather than list it.
 Upgrading re-reads a same-version wheel's metadata and MAY rewrite the lock's recorded
 dependencies; reinstalling replaces its installed code. Packages resolved from an index
 or from source are not refreshed. If the set cannot be derived, the sync MUST NOT run.
 
-Every project with tests whose lock resolves a package from a local wheel registry MUST
+Every project with tests whose lock resolves a package from the repository wheelhouse MUST
 have a `reinit` target, and that target MUST delegate to the shared derivation without
 naming packages.
 
@@ -80,21 +86,36 @@ naming packages.
   derivation
 - **THEN** the packaging check fails and names the project
 
-### Requirement: An image installs its lock the way a project environment does
+### Requirement: An image installs the committed lock
 
 An image that installs a project's dependencies MUST install them from that project's
-committed lock, used unmodified, with the same internal-package derivation and flags as
-the project's `reinit`, so the image contains what the project's tests exercised. An
-image that installs the project's own distribution MUST install it from the wheelhouse
-at the version the project declares, without a version literal in the image definition.
-An image definition MUST NOT list internal packages or rewrite a lock.
+committed lock, used unmodified, and MUST NOT relock: the build MUST fail rather than
+resolve when the lock does not match the project. It MUST derive the internal packages
+the same way the project's `reinit` does and MUST reinstall each, so a persistent
+package cache cannot supply a previous build of a same-version wheel. An image that
+installs the project's own distribution MUST install it from the wheelhouse alone, at
+the version the project declares, without a version literal in the image definition;
+every other repository distribution it contains MUST come from the lock. An image
+definition MUST NOT list internal packages or rewrite a lock.
 
 #### Scenario: A wheel is rebuilt without a version change
 
-- **GIVEN** a wheel in `.dist` rebuilt with new code and a new dependency at the same
-  version, and an image builder whose persistent cache holds the previous build
+- **GIVEN** a wheel in `.dist` rebuilt with new code at the same version, and an image
+  builder whose persistent cache holds the previous build
 - **WHEN** the image is built
-- **THEN** it contains the new code and the new dependency
+- **THEN** it contains the new code
+
+#### Scenario: The committed lock does not match its project
+
+- **WHEN** an image is built from a lock that no longer satisfies the project's
+  `pyproject.toml`
+- **THEN** the build fails rather than relocking
+
+#### Scenario: The project's own wheel is missing from the wheelhouse
+
+- **WHEN** an image installs its own distribution and `.dist` holds no wheel of the
+  declared version
+- **THEN** the build fails rather than installing from a package index
 
 #### Scenario: A project's version is bumped
 
@@ -148,16 +169,27 @@ building MAY disagree with it.
 ### Requirement: Packaging conventions are checked mechanically
 
 One repository target MUST run every packaging check — environment setup, lock
-currency, Python version, and project layout — and fail if any fails. Each check MUST
-also be runnable alone. Lock currency MUST fail on a lock that is not current with its
-project, and on a lock that pins an internal package at a version the tree does not
-build.
+currency, Python version, and project layout — and fail if any fails, without network
+access. Each check MUST also be runnable alone.
+
+Lock currency MUST fail on a lock that no longer satisfies its project; on a lock that
+pins an internal package at a version the tree does not build; and on a lock whose
+record of an internal package disagrees with that package's wheel in the wheelhouse —
+a requirement added or removed, unconditionally or under an extra the lock records, or
+a locked dependency version the wheel's requirement no longer admits.
 
 #### Scenario: A lock pins a superseded internal version
 
 - **WHEN** an internal distribution's declared version is bumped and a consumer's lock
   still pins the previous one
 - **THEN** the packaging check fails and names the consumer and the package
+
+#### Scenario: A same-version wheel gains a requirement
+
+- **GIVEN** an internal wheel rebuilt at the same version with a new requirement, and a
+  consumer lock not refreshed since
+- **WHEN** the packaging check runs
+- **THEN** it fails and names the consumer, the package, and the requirement
 
 #### Scenario: Every convention holds
 
