@@ -149,7 +149,7 @@ See `design.md`'s "Design-promotion record" table.
       the generic `executor_ref`/`executor_target`, not duplicated storage.
 
       **Closed as deferred (2026-09-14):** tracked by
-      `openspec/changes/retire-vm-remove-job-id/`, which this task named as
+      `openspec/changes/archive/2026-09-28-retire-vm-remove-job-id/`, which this task named as
       its home. Scoping it there corrected this note in one material way:
       the "22 files" figure conflates two different columns. A grep for the
       identifier also finds `vm_leases.vm_remove_job_id`, the legacy table
@@ -373,7 +373,7 @@ Section 6, per `AGENTS.md`'s rule to amend rather than replace planning history.
 | Committed reservation dimensions are authoritative for fulfillment shape | `openspec/specs/site-capacity/spec.md` — “Committed dimensions remain authoritative through scheduling” |
 | Physical providers translate canonical dimensions through a pool-selected registered requirement delegate | `openspec/specs/physical-provisioning/spec.md` — “Provisioning shape comes from committed capacity” and “Ansible fulfillment adapter” |
 | Delegate identifier, registry validation, and provider-config snapshot semantics | `openspec/specs/resource-pool-management/spec.md` — “Registered requirement delegates” |
-| A lease's release handle is `release_job_id` on both lease contracts; `vm_remove_job_id` is a retired mirror | `openspec/specs/site-capacity/spec.md` — carried into [`retire-vm-remove-job-id`](../retire-vm-remove-job-id/), which owns the removal |
+| A lease's release handle is `release_job_id` on both lease contracts; `vm_remove_job_id` is a retired mirror | `openspec/specs/site-capacity/spec.md` — carried into [`retire-vm-remove-job-id`](../2026-09-28-retire-vm-remove-job-id/), which owns the removal |
 | An explicit convergence cycle must be able to reach rows the worker itself claimed, or "run one cycle" is not a step | `docs/development/TESTING.md` — “Pause the loop, then advance it explicitly” |
 | A best-effort write inside a caller's transaction uses the caller's session, never a second one | Code docstring: `market_site.ledger.update_lease_fields_in_session` |
 | Internal packages are consumed from `.dist` wheels rather than relative editable sibling paths | Existing `docs/development/ARCHITECTURE.md` packaging/dependency section; amend only if the current text is insufficient |
