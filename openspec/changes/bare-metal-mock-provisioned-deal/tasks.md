@@ -58,3 +58,7 @@ it, and each has a delta in `specs/buyer-orchestration/spec.md` or
 
 - [ ] 2.1 The closeout task defined in `openspec/README.md#plan-closeout-requirements`,
       expanded when the plan is written.
+- [ ] 2.2 **Packaging.** Run `make check-packaging` and resolve every failure it
+      reports: environment and image installs derive their internal packages from
+      their locks, every lock is current, and every Python version selection reads
+      the root declaration.

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from domains.apicredits.settlement import CreditsServiceClient
+from arkhai_apicredits.settlement import CreditsServiceClient
 
 _client: CreditsServiceClient | None = None
 

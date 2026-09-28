@@ -4066,7 +4066,7 @@ Section 11 is planned:
   verbatim by `core_storefront/sqlite_migrations.py`'s existing
   `DROP COLUMN` migration.
 - **apicredits' own database is a secondary, lower-stakes consideration,
-  not a blocker.** `domains/apicredits/service/src/db/database.py`'s
+  not a blocker.** `domains/apicredits/service/src/apicredits_service/db/database.py`'s
   `init_db` calls `Base.metadata.create_all()` with no migration runner at
   all — apicredits composes the same `kit/site` `CapacityLedgerService`
   (confirmed: `container.py`'s own comment says apicredits resources "carry
@@ -4154,7 +4154,7 @@ planning:
   `e2e-tests` is a fully separate root with its own `Makefile`/`reinit` —
   confirmed genuinely decoupled from `compute_provisioning`/`kit/fulfillment`
   (it wraps the provisioning HTTP surface with its own hand-written
-  `e2e-tests/src/provisioning_test_client.py`, not the `ComputeProvisioningClient`
+  `e2e-tests/src/e2e_harness/provisioning_test_client.py`, not the `ComputeProvisioningClient`
   package), so its `reinit` not refreshing those wheels is correct, not a
   gap. `openspec validate --all --strict` has been recorded as unavailable
   in every validation environment used since Section 8 — 11.5 should

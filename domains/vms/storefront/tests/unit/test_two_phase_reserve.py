@@ -234,7 +234,7 @@ def test_claim_survives_listing_model_validation():
     Accept paths derive the same pinned resource claim before and after model
     validation rather than silently selecting whichever resource is first.
     """
-    from domains.vms.listings.models import Listing
+    from arkhai_vms_listings.models import Listing
     from market_storefront.services.vm_job_spec_service import (
         compute_capacity_claim_from_order,
     )

@@ -105,7 +105,7 @@ def patched_sqlite(db):
 
 
 async def _persist_bound_listing(db: SQLiteClient, order: dict) -> None:
-    from domains.vms.listings.models import Listing
+    from arkhai_vms_listings.models import Listing
 
     listing = Listing.model_validate(order)
     wire = listing.model_dump(mode="json")
@@ -283,7 +283,7 @@ class TestPublishOrderRecordsPublications:
 
     @pytest.mark.asyncio
     async def test_mutated_listing_model_is_revalidated_before_publish(self, db):
-        from domains.vms.listings.models import Listing
+        from arkhai_vms_listings.models import Listing
 
         listing = Listing.model_validate(_compute_order("mutated-listing"))
         listing.listing_resource.resource_id = None

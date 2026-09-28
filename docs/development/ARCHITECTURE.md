@@ -694,21 +694,19 @@ Configuration resolution, ConfigMap/Secret mounting, stateful-service persistenc
 
 ## Build, packaging, and initialization
 
-Internal Python packages are built as wheels into the repository `.dist` directory. Consumers install those wheels with `--find-links`; they do not use editable relative sibling paths.
-
-The required development pattern is:
+Internal Python packages are built as wheels into the repository `.dist` directory, and every project consumes them from there; no project resolves a sibling through a source path. A rebuilt wheel keeps its version, so each environment, image, and lock refreshes its internal packages explicitly, and the set is derived from the project's lock when the operation runs rather than listed anywhere:
 
 ```text
-build prerequisite internal wheels
+make dist                      build every internal wheel
         ↓
-uv sync --find-links <repo>/.dist
-        ↓
---upgrade-package / --reinstall-package changed internal distributions
+make reinit (in the project)   sync, upgrading and reinstalling the lock's internal packages
         ↓
 run focused tests
+        ↓
+image build                    install the committed lock unchanged, same internal packages
 ```
 
-Docker builds copy `.dist` from the build context in every stage that resolves internal packages. Using a sibling source path forces an unnecessarily broad Docker context and can allow local source layout to differ from packaged behavior.
+One root `.python-version` fixes the interpreter for every environment and image. Docker builds copy `.dist` from the build context into builder stages; runtime stages receive only the finished environment. [`BUILD_AND_PACKAGING.md`](BUILD_AND_PACKAGING.md) owns the mechanics — `scripts/uv_project.py`, `make lock`, the image layout — and the `make check-packaging` checks that enforce them.
 
 Aggregate Make targets must run every included subproject's default tests. A standalone subproject target remains useful for focused work, but the aggregate contract is complete coverage, not a curated subset.
 

@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from market_identity import Ed25519Signer
 
-from src.hosted_real_stripe.evidence import (
+from e2e_harness.hosted_real_stripe.evidence import (
     CollectionEvidence,
     EvidenceValidationError,
     FundingEvidence,
@@ -24,7 +24,7 @@ from src.hosted_real_stripe.evidence import (
     verify_evidence_signature,
     write_evidence,
 )
-from src.hosted_real_stripe.gates import (
+from e2e_harness.hosted_real_stripe.gates import (
     AuthorizationRejected,
     AuthorizationUnavailable,
     ReleaseIdentityRejected,

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from src import settings as settings_module
+from e2e_harness import settings as settings_module
 
 
 def test_e2e_bootstrap_uses_resolver_environment_and_file_precedence(

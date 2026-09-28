@@ -167,7 +167,6 @@ dependencies = [
 ]
 wheels = [
     { path = "arkhai_bare_metal-0.6.0-py3-none-any.whl" },
-    { path = "arkhai_bare_metal-0.6.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -186,7 +185,6 @@ dependencies = [
 ]
 wheels = [
     { path = "arkhai_bare_metal_provisioning_adapter-0.2.1-py3-none-any.whl" },
-    { path = "arkhai_bare_metal_provisioning_adapter-0.2.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -197,7 +195,6 @@ dependencies = [
     { name = "arkhai-kit-capability-shape" },
 ]
 wheels = [
-    { path = "arkhai_compute-0.1.0-py3-none-any.whl" },
     { path = "arkhai_compute-0.1.0-py3-none-any.whl" },
 ]
 
@@ -214,7 +211,6 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_compute_provisioning-0.7.1-py3-none-any.whl" },
     { path = "arkhai_compute_provisioning-0.7.1-py3-none-any.whl" },
 ]
 
@@ -311,7 +307,6 @@ dependencies = [
 ]
 wheels = [
     { path = "arkhai_core-0.3.0-py3-none-any.whl" },
-    { path = "arkhai_core-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -324,7 +319,6 @@ dependencies = [
 ]
 wheels = [
     { path = "arkhai_core_storefront_client-0.22.0-py3-none-any.whl" },
-    { path = "arkhai_core_storefront_client-0.22.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -332,7 +326,6 @@ name = "arkhai-kit-capability-shape"
 version = "0.2.0"
 source = { registry = "../../../.dist" }
 wheels = [
-    { path = "arkhai_kit_capability_shape-0.2.0-py3-none-any.whl" },
     { path = "arkhai_kit_capability_shape-0.2.0-py3-none-any.whl" },
 ]
 
@@ -350,7 +343,6 @@ dependencies = [
 ]
 wheels = [
     { path = "arkhai_kit_config-0.1.2-py3-none-any.whl" },
-    { path = "arkhai_kit_config-0.1.2-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -365,7 +357,6 @@ dependencies = [
     { name = "uuid6" },
 ]
 wheels = [
-    { path = "arkhai_kit_fulfillment-0.3.0-py3-none-any.whl" },
     { path = "arkhai_kit_fulfillment-0.3.0-py3-none-any.whl" },
 ]
 
@@ -382,7 +373,6 @@ dependencies = [
 ]
 wheels = [
     { path = "arkhai_kit_identity-0.3.0-py3-none-any.whl" },
-    { path = "arkhai_kit_identity-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -397,7 +387,6 @@ dependencies = [
 ]
 wheels = [
     { path = "arkhai_kit_resource_pools-0.5.0-py3-none-any.whl" },
-    { path = "arkhai_kit_resource_pools-0.5.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -410,7 +399,6 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_settlement_runtime-0.1.2-py3-none-any.whl" },
     { path = "arkhai_kit_settlement_runtime-0.1.2-py3-none-any.whl" },
 ]
 
@@ -428,7 +416,6 @@ dependencies = [
 ]
 wheels = [
     { path = "arkhai_kit_site-0.6.0-py3-none-any.whl" },
-    { path = "arkhai_kit_site-0.6.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -441,7 +428,6 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_site_client-0.6.0-py3-none-any.whl" },
     { path = "arkhai_kit_site_client-0.6.0-py3-none-any.whl" },
 ]
 
@@ -456,7 +442,6 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_vms-0.5.0-py3-none-any.whl" },
     { path = "arkhai_vms-0.5.0-py3-none-any.whl" },
 ]
 
@@ -480,7 +465,6 @@ dependencies = [
 ]
 wheels = [
     { path = "arkhai_vms_provisioning_adapter-0.4.0-py3-none-any.whl" },
-    { path = "arkhai_vms_provisioning_adapter-0.4.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -494,7 +478,6 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_vms_provisioning_operator_client-0.5.0-py3-none-any.whl" },
     { path = "arkhai_vms_provisioning_operator_client-0.5.0-py3-none-any.whl" },
 ]
 

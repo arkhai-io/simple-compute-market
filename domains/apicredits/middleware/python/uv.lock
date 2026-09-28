@@ -26,7 +26,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-apicredits-middleware"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
@@ -65,7 +65,7 @@ dev = [
 [[package]]
 name = "arkhai-kit-identity"
 version = "0.3.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "cryptography" },
     { name = "eth-account" },
@@ -73,9 +73,8 @@ dependencies = [
     { name = "pydantic" },
     { name = "rfc8785" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/22/6c/ddd7fed8d0390e4e837cc2f32748a724d5139d1dffa53f69e75d27b0c37e/arkhai_kit_identity-0.3.0.tar.gz", hash = "sha256:e6ef92c3c9d1bc1590b26305f391eb30b5c154f35f164c6e8d80f8d40feaa4d8", size = 93024, upload-time = "2026-08-15T18:14:50.534Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/32/a0/37a82e5e807aa6c13a398680cfdd1cefeb17d8f5b2a16bf5e00570163ece/arkhai_kit_identity-0.3.0-py3-none-any.whl", hash = "sha256:ba395cc11e544c1d6c80069b9acac479ac75af2bd277d81af3a891cdc73af0df", size = 24206, upload-time = "2026-08-15T18:14:49.453Z" },
+    { path = "arkhai_kit_identity-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]

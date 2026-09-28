@@ -20,7 +20,10 @@ SKIP_PARTS = {".venv", "__pycache__", "build", "dist", "tests"}
 BARE_METAL_STOREFRONT = ("arkhai_bare_metal_storefront",)
 VM_IMPLEMENTATIONS = (
     "arkhai_vms",
-    "domains.vms",
+    "arkhai_vms_buyer",
+    "arkhai_vms_listings",
+    "arkhai_vms_negotiation",
+    "arkhai_vms_settlement",
     "market_storefront",
     "vm_provisioning_adapter",
 )

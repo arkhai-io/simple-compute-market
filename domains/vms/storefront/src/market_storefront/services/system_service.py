@@ -59,7 +59,7 @@ def _default_publication_derivation_provider() -> dict[str, dict[str, Any]]:
     their listings claim an attribute no member declares, and which fields
     each pool still takes from its legacy storefront override row.
     """
-    from domains.vms.listings.reconciler import derivation_reports
+    from arkhai_vms_listings.reconciler import derivation_reports
 
     return derivation_reports()
 

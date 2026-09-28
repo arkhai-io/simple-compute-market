@@ -23,8 +23,8 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-from db.database import run_migrations
-from db.migrations import _migrate_pool_advertisement_and_backing
+from apicredits_service.db.database import run_migrations
+from apicredits_service.db.migrations import _migrate_pool_advertisement_and_backing
 
 
 def _sqlite_memory_engine():

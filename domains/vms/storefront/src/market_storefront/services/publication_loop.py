@@ -25,7 +25,7 @@ from core_storefront.publication_runner import (
     REOPEN_UNCHANGED,
     PublicationPayload,
 )
-from domains.vms.listings.listing_comparison import (
+from arkhai_vms_listings.listing_comparison import (
     REFRESH_IN_PLACE,
     REFUSE,
     TERM_LISTING_FIELDS,
@@ -33,7 +33,7 @@ from domains.vms.listings.listing_comparison import (
     compare_listing,
     refreshed_listing_resource,
 )
-from domains.vms.listings.reconciler import (
+from arkhai_vms_listings.reconciler import (
     ShapeFeasibility,
     available_compute_slices,
     open_listing_resource_keys,

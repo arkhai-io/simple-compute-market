@@ -1,30 +1,17 @@
-DIST_DIR ?= ../../../.dist
+# Every uv command in this Makefile uses the repository's declared Python version.
+export UV_PYTHON := $(or $(shell cat ../../../.python-version 2>/dev/null),$(error ../../../.python-version not found))
 
-# Tests import this package from its installed wheel; see `cache-keys` in pyproject.toml.
-export UV_NO_EDITABLE := 1
+DIST_DIR ?= ../../../.dist
 
 .PHONY: init reinit test
 
-init:
-	uv venv --allow-existing --python 3.12
-	uv sync --dev --python 3.12 --find-links $(DIST_DIR)
+init: reinit
 
-# Reinstall all internal wheel dependencies when iterating on kit or core packages.
-# Run the relevant dist-* targets from the monorepo root first.
+# Refresh every internal wheel this project's lock installs; the set is derived
+# from the lock. Run `make dist` from the repository root first so .dist/ holds
+# fresh wheels.
 reinit:
-	uv sync --dev --python 3.12 --find-links $(DIST_DIR) \
-		--reinstall-package arkhai-apicredits-buyer \
-		--upgrade-package arkhai-core              --reinstall-package arkhai-core \
-		--upgrade-package arkhai-apicredits-domain --reinstall-package arkhai-apicredits-domain \
-		--upgrade-package arkhai-core-buyer        --reinstall-package arkhai-core-buyer \
-		--upgrade-package arkhai-core-registry-client --reinstall-package arkhai-core-registry-client \
-		--upgrade-package arkhai-kit-alkahest      --reinstall-package arkhai-kit-alkahest \
-		--upgrade-package arkhai-kit-config        --reinstall-package arkhai-kit-config \
-		--upgrade-package arkhai-kit-identity      --reinstall-package arkhai-kit-identity \
-		--upgrade-package arkhai-kit-policy        --reinstall-package arkhai-kit-policy \
-		--upgrade-package arkhai-kit-settlement-runtime --reinstall-package arkhai-kit-settlement-runtime \
-		--upgrade-package arkhai-kit-hosted-settlement --reinstall-package arkhai-kit-hosted-settlement \
-		--upgrade-package arkhai-kit-delivery --reinstall-package arkhai-kit-delivery
+	python3 ../../../scripts/uv_project.py reinit
 
 test: reinit
 	uv run --find-links $(DIST_DIR) pytest tests -q

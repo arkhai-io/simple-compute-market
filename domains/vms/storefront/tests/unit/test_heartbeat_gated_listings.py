@@ -187,7 +187,7 @@ def test_interruptible_listing_resource_is_marked():
 
 
 def _artifacts(demands, heartbeat_interval=60, chain_config_paths=None):
-    from domains.vms.settlement.proposals import (
+    from arkhai_vms_settlement.proposals import (
         accepted_escrow_artifacts_from_proposal,
     )
 

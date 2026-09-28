@@ -6,8 +6,8 @@ import uuid
 from typing import Any, Callable
 
 from arkhai_vms import DIMENSION_KEYS as _DIMENSION_COMPUTE_KEYS
-from domains.vms.listings import extract_compute_from_order
-from domains.vms.listings.models import Listing
+from arkhai_vms_listings import extract_compute_from_order
+from arkhai_vms_listings.models import Listing
 
 
 _REQUIRED_COMPUTE_KEYS = (
@@ -18,7 +18,7 @@ _REQUIRED_COMPUTE_KEYS = (
 )
 
 # Every VM listing today is GPU compute -- ComputeGpuResourceAdapter is the
-# only resource adapter this domain registers (domains/vms/listings/resources.py),
+# only resource adapter this domain registers (domains/vms/listings/src/arkhai_vms_listings/resources.py),
 # so this is a domain constant, not something the order schema needs to
 # carry yet. Must match what capacity registration actually advertises
 # (kit/site's CapacityBucket.resource_type for VM resources), or the

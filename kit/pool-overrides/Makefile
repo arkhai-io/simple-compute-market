@@ -1,3 +1,6 @@
+# Every uv command in this Makefile uses the repository's declared Python version.
+export UV_PYTHON := $(or $(shell cat ../../.python-version 2>/dev/null),$(error ../../.python-version not found))
+
 DIST_DIR ?= ../../.dist
 
 .PHONY: build init reinit test
@@ -5,13 +8,10 @@ DIST_DIR ?= ../../.dist
 build: ## Build the wheel into the shared .dist/
 	uv build --wheel --out-dir $(DIST_DIR)
 
-init: ## Create or update the environment
-	uv sync --dev --find-links $(DIST_DIR)
+init: reinit ## Create or update the environment
 
 reinit: ## Reinstall internal dependencies from the shared wheel directory
-	uv sync --dev --find-links $(DIST_DIR) \
-		--upgrade-package arkhai-kit-identity --reinstall-package arkhai-kit-identity \
-		--upgrade-package arkhai-kit-site-client --reinstall-package arkhai-kit-site-client
+	python3 ../../scripts/uv_project.py reinit
 
 test: reinit ## Run the unit and library integration suites against current internal wheels
 	uv run --find-links $(DIST_DIR) pytest

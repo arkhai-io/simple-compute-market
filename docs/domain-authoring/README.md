@@ -93,8 +93,8 @@ Define:
 
 Examples:
 
-- `domains/apicredits/listings/models.py`
-- `domains/vms/listings/models.py`
+- `domains/apicredits/src/arkhai_apicredits/listings/models.py`
+- `domains/vms/listings/src/arkhai_vms_listings/models.py`
 
 ### Registry validation and filters
 

@@ -11,8 +11,8 @@ from market_core import RegistryDescriptor
 from market_identity import Ed25519Signer, Eip191Signer, TrustedIdentitySet
 
 from registry_client import RegistryClient
-from src.db.database import get_db
-from src.main import app
+from core_registry.db.database import get_db
+from core_registry.main import app
 
 MAKER_SECRET = bytes.fromhex(
     "5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
@@ -58,7 +58,7 @@ def registry_authority(monkeypatch):
         }
     )
     monkeypatch.setattr(
-        "src.config.settings.registry_authority_id",
+        "core_registry.config.settings.registry_authority_id",
         "test-registry",
     )
     yield signer
@@ -172,7 +172,7 @@ def sign_raw_marketplace_requests(monkeypatch, registry_authority, db_session):
         kwargs["headers"] = headers
         return await original(client, method, url, **kwargs)
 
-    from src.db.database import get_db
+    from core_registry.db.database import get_db
 
     def override_get_db():
         yield db_session
@@ -211,7 +211,7 @@ async def registry_client(
 
 
 def _make_publisher(db_session, signer, storefront_url: str):
-    from src.db.models import Publisher, PublisherIdentity
+    from core_registry.db.models import Publisher, PublisherIdentity
 
     publisher = Publisher(storefront_url=storefront_url)
     publisher.identities.append(
@@ -239,7 +239,7 @@ def taker_publisher(db_session, taker_signer):
 
 @pytest.fixture
 def open_order(db_session, maker_publisher):
-    from src.db.models import Listing, OrderStatusEnum
+    from core_registry.db.models import Listing, OrderStatusEnum
 
     order = Listing(
         listing_id="integ-open-order-1",
@@ -268,7 +268,7 @@ def open_order(db_session, maker_publisher):
 
 @pytest.fixture
 def authenticated_open_order(db_session, maker_publisher):
-    from src.db.models import Listing, OrderStatusEnum
+    from core_registry.db.models import Listing, OrderStatusEnum
 
     order = Listing(
         listing_id="integ-auth-order-1",

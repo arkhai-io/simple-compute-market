@@ -11,7 +11,7 @@ import logging
 from typing import Any
 
 from core_storefront.stage_log import stage_event
-from domains.apicredits.settlement import fulfill_api_credits_obligation
+from arkhai_apicredits.settlement import fulfill_api_credits_obligation
 from market_settlement_runtime import FailurePolicy
 from market_identity import Identity
 

@@ -34,7 +34,7 @@ from market_policy.negotiation_middleware import (
     NegotiationStep,
 )
 
-from domains.vms.buyer.buyer_client import (
+from arkhai_vms_buyer.buyer_client import (
     NegotiationOutcome,
     ResumeState,
     negotiate_with_seller,

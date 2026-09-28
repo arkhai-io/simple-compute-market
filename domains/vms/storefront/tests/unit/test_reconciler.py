@@ -1,4 +1,4 @@
-"""Unit tests for domains.vms.listings.reconciler.
+"""Unit tests for arkhai_vms_listings.reconciler.
 
 External boundary: a real sqlite3 file DB with a minimal hand-built
 schema (not the full SQLiteClient migration chain) -- reconciler.py is
@@ -26,8 +26,8 @@ from core_storefront.sqlite_migrations import (
 from market_identity import Identity
 from market_site.projections import resource_pool_projection
 
-from domains.vms.listings.pricing_resolution import GpuPricingFields
-from domains.vms.listings.reconciler import (
+from arkhai_vms_listings.pricing_resolution import GpuPricingFields
+from arkhai_vms_listings.reconciler import (
     PoolHintResolutionSettings,
     _accumulate_capacity_pool_member,
     _fungible_availability_from_buckets,
@@ -47,7 +47,7 @@ from domains.vms.listings.reconciler import (
     site_id_for_listing,
     stale_open_listing_ids as _stale_open_listing_ids,
 )
-from domains.vms.listings.listing_shapes import resolve_shape
+from arkhai_vms_listings.listing_shapes import resolve_shape
 from market_storefront.domain_runtime import (
     build_vm_storefront_domain,
     build_vm_storefront_registry,
@@ -2160,7 +2160,7 @@ class TestUnbackedDerivation:
 
 class TestEnumerationQuantity:
     def test_absent_count_yields_nothing_and_is_reported(self, db_path):
-        from domains.vms.listings.reconciler import derivation_reports
+        from arkhai_vms_listings.reconciler import derivation_reports
 
         pool = _declared_pool("broker-a", [("res-1", None, 0)], tags=_UNBACKED)
 
@@ -2170,7 +2170,7 @@ class TestEnumerationQuantity:
         }
 
     def test_declared_zero_yields_nothing_silently(self, db_path):
-        from domains.vms.listings.reconciler import derivation_reports
+        from arkhai_vms_listings.reconciler import derivation_reports
 
         pool = _declared_pool("broker-a", [("res-1", 0, 0)], tags=_UNBACKED)
 
@@ -2405,7 +2405,7 @@ def _shape_slices(db_path, pools, *, buckets=None, holds=None):
 
 
 def _site_report() -> dict:
-    from domains.vms.listings.reconciler import derivation_reports
+    from arkhai_vms_listings.reconciler import derivation_reports
 
     return derivation_reports()["site-a"]
 

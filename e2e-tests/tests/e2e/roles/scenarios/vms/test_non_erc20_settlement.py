@@ -22,7 +22,7 @@ from market_alkahest.alkahest import (
     prewarm_alkahest_address_config_cache,
     resolve_alkahest_address_config,
 )
-from src.settings import settings
+from e2e_harness.settings import settings
 from tests.e2e.roles.scenarios.vms.conftest import (
     _signer,
     capacity_source_for,

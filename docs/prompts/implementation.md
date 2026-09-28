@@ -27,8 +27,8 @@ Use a discuss → plan → implement workflow:
 3. During implementation
    a. implement the plan.
    b. run tests covering all code changes.
-   c. once those tests pass, run `make check-reinit` and resolve every
-      gap it reports before returning a fileset.
+   c. once those tests pass, run `make check-packaging` and resolve every
+      failure it reports before returning a fileset.
    d. pause for design review if the plan premise is invalidated by
       discovered code.
    e. ensure production comments describe present intent, invariants,

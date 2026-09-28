@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from domains.apicredits.buyer.common import resolve_key_disposition
-from domains.apicredits.buyer.listing_cli import (
+from arkhai_apicredits_buyer.common import resolve_key_disposition
+from arkhai_apicredits_buyer.listing_cli import (
     format_accepted_escrows,
     format_listing_resource,
     format_unit_price,

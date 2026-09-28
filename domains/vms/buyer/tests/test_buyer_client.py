@@ -29,7 +29,7 @@ from market_core.schemas import (
     SettlementSelection,
     derive_settlement_option_id,
 )
-from domains.vms.buyer.buyer_client import NegotiationOutcome, negotiate_with_seller
+from arkhai_vms_buyer.buyer_client import NegotiationOutcome, negotiate_with_seller
 from arkhai_vms import VmProvisionTerms, make_vm_provision_terms
 from identity_helpers import (
     BUYER_SIGNER,

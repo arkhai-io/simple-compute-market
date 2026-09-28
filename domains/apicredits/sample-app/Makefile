@@ -1,23 +1,17 @@
+# Every uv command in this Makefile uses the repository's declared Python version.
+export UV_PYTHON := $(or $(shell cat ../../../.python-version 2>/dev/null),$(error ../../../.python-version not found))
+
 DIST_DIR ?= ../../../.dist
 
 .PHONY: init reinit test
 
-init:
-	uv venv --allow-existing --python 3.12
-	uv sync --dev --python 3.12 --find-links $(DIST_DIR)
+init: reinit
 
-# Reinstall arkhai-apicredits-middleware when iterating on it.
-# Run make dist-apicredits-middleware from the monorepo root first.
-#
-# arkhai-kit-identity is refreshed alongside it because the app requires
-# the middleware's `signed` extra, which resolves to that wheel out of
-# $(DIST_DIR). Upgrading only the middleware would re-resolve the extra
-# against whatever identity wheel is already pinned in uv.lock, so
-# iterating on kit/identity would silently test a stale copy.
+# Refresh every internal wheel this project's lock installs; the set is derived
+# from the lock. Run `make dist` from the repository root first so .dist/ holds
+# fresh wheels.
 reinit:
-	uv sync --dev --python 3.12 --find-links $(DIST_DIR) \
-		--upgrade-package arkhai-apicredits-middleware --reinstall-package arkhai-apicredits-middleware \
-		--upgrade-package arkhai-kit-identity --reinstall-package arkhai-kit-identity
+	python3 ../../../scripts/uv_project.py reinit
 
 test: reinit
 	uv run --find-links $(DIST_DIR) pytest tests -q

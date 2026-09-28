@@ -4,8 +4,8 @@ from datetime import datetime, timedelta
 
 from market_identity import Ed25519Signer, Eip191Signer, Identity
 
-from src.api.utils import effective_identity_status, publisher_accepts_identity
-from src.db.models import Publisher, PublisherIdentity
+from core_registry.api.utils import effective_identity_status, publisher_accepts_identity
+from core_registry.db.models import Publisher, PublisherIdentity
 
 
 def _publisher(principal: Identity, **binding_fields) -> Publisher:

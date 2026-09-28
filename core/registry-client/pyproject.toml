@@ -17,8 +17,6 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/registry_client"]
 
-[tool.hatch.build.targets.wheel.force-include]
-"src/registry_client/py.typed" = "registry_client/py.typed"
 
 [tool.mypy]
 python_version = "3.12"

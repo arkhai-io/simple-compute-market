@@ -94,7 +94,7 @@ from market_alkahest.alkahest import (
     get_recipient_arbiter,
     resolve_alkahest_address_config,
 )
-from src.settings import settings
+from e2e_harness.settings import settings
 from tests.e2e.roles.scenarios.vms.host_registry import (
     E2E_DEAL_CLI_HOST,
     E2E_DEAL_CLI_POOL_ID,

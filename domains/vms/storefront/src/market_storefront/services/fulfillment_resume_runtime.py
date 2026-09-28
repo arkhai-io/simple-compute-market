@@ -662,7 +662,7 @@ async def resume_incomplete_fulfillments_once(
     remote = fulfillment_client or build_fulfillment_client(capacity)
     worker = owner or f"fulfillment-resume:{uuid.uuid4()}"
     if register_lease is None or submit_fulfillment is None:
-        from domains.vms.settlement.fulfillment import (
+        from arkhai_vms_settlement.fulfillment import (
             reconcile_or_submit_compute_fulfillment,
         )
 

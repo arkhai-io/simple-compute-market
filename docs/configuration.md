@@ -88,7 +88,7 @@ or `policy = "..."` is used when one escrow kind needs its own sequence.
 | `max_rounds_guard` | Guard | every | Exits with `max_rounds_reached` once `len(history) >= [negotiation].max_rounds` (default 5). |
 | `bisection` | Decider | every | Bisects between the seller's floor (`accepted_escrows[0]` primary rate × duration) and the peer's latest offer; accepts within ~1% convergence, counters at midpoint, exits with `price_unreasonable` when the peer's offer is below `floor / 1.5`. No ML dependencies. |
 | `listed_price` | Decider | every | Accepts the peer's proposal when its amount is within the side's bound (≥ the floor in `maximize`, ≤ the ceiling in `minimize`); exits with `price_above_bound` otherwise. Never counters beyond the opening; accepts amountless escrow shapes as proposed. |
-| `rl` | Decider | every | Loads the trained pufferlib checkpoint at `domains/vms/negotiation/rl/models/arkhai_negotiator_seller.pt` and produces the next move. Requires the `[rl]` extra (torch + pufferlib). Exits with `torch_unavailable` if torch isn't installed; exits with `model_missing` if the checkpoint isn't at the configured path. |
+| `rl` | Decider | every | Loads the trained pufferlib checkpoint at `domains/vms/negotiation/src/arkhai_vms_negotiation/rl/models/arkhai_negotiator_seller.pt` and produces the next move. Requires the `[rl]` extra (torch + pufferlib). Exits with `torch_unavailable` if torch isn't installed; exits with `model_missing` if the checkpoint isn't at the configured path. |
 | `erc20_bisection`, `native_token_bisection`, `erc1155_bisection` | Decider | every | Escrow-family names for the same scalar-`amount` bisection policy. Useful in `[negotiation.policies]` dispatch tables. |
 | `erc20_rl`, `native_token_rl`, `erc1155_rl` | Decider | every | Escrow-family names for the same scalar-`amount` RL policy. Requires the same torch/checkpoint setup as `rl`. |
 | `accept_exact_listing` | Decider | every | Accepts only when the buyer proposal exactly matches the selected listing escrow entry, listing-level demands, and concrete amount; rejects all mismatches and never counters. |
@@ -266,7 +266,7 @@ buyer-side:
 | `max_rounds_guard` | Same as seller — exits after `[negotiation].max_rounds`. |
 | `listed_price` *(default decider)* | Accepts any seller number within the buyer's ceiling (`minimize` direction); exits otherwise. |
 | `bisection` | Symmetric — bisects from the buyer's side (`minimize` direction). |
-| `rl` | Symmetric — loads the buyer's trained checkpoint at `domains/vms/negotiation/rl/models/arkhai_negotiator_buyer.pt`. |
+| `rl` | Symmetric — loads the buyer's trained checkpoint at `domains/vms/negotiation/src/arkhai_vms_negotiation/rl/models/arkhai_negotiator_buyer.pt`. |
 | `erc20_bisection`, `native_token_bisection`, `erc1155_bisection` | Symmetric aliases for the scalar-`amount` bisection decider. |
 | `erc20_rl`, `native_token_rl`, `erc1155_rl` | Symmetric aliases for the scalar-`amount` RL decider. |
 | `accept_exact_listing` | Useful for non-negotiated exact-match escrow kinds. |
@@ -333,7 +333,7 @@ the survivors.
 ### The aggregation contract
 
 ```python
-from domains.vms.buyer.aggregation import (
+from arkhai_vms_buyer.aggregation import (
     AggregationPolicy,
     NegotiateFn,
     register_aggregation_policy,
@@ -354,7 +354,7 @@ Same two paths as on the seller side:
 **1. Decorator (in-process):**
 
 ```python
-from domains.vms.buyer.aggregation import (
+from arkhai_vms_buyer.aggregation import (
     NegotiationOutcome,
     register_aggregation_policy,
 )
@@ -384,7 +384,7 @@ registry would conflict if a folder name overlapped.)
 ## Reference
 
 - Seller settings schema: `domains/vms/storefront/src/market_storefront/settings.toml`.
-- Buyer settings example: `domains/vms/buyer/config_cli.py` (the
+- Buyer settings example: `domains/vms/buyer/src/arkhai_vms_buyer/config_cli.py` (the
   `init-user` template comment).
 - Middleware module: `kit/policy/src/market_policy/negotiation_middleware.py`.
-- Aggregation module: `domains/vms/buyer/aggregation.py`.
+- Aggregation module: `domains/vms/buyer/src/arkhai_vms_buyer/aggregation.py`.

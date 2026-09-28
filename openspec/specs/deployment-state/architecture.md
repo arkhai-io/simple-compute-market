@@ -34,7 +34,13 @@ Where a service has an explicit migration phase, deployment runs it before appli
 
 ## Artifact and package boundary
 
-Internal Python boundaries are exercised as distributions. Prerequisite packages are built into `.dist`, consumers install from that wheelhouse, and reinitialization explicitly upgrades or reinstalls changed distributions. Images include `.dist` in every stage that resolves internal packages.
+Internal Python boundaries are exercised as distributions. Prerequisite packages are built into `.dist`, consumers install from that wheelhouse, and every environment, image, and lock refreshes its internal packages explicitly. Images include `.dist` in the builder stages that resolve internal packages; runtime stages receive only the finished environment.
+
+The refreshed set is derived from each project's lock when the operation runs, never listed. Hand-maintained lists drifted in every place they were kept, and one Makefile silently dropped a package because a help comment continued with a backslash swallowed the flag. A rebuilt wheel keeps its version, so two refreshes are needed: reinstalling replaces installed code, and upgrading re-reads the wheel's metadata so the lock records dependencies the wheel gained. `uv sync --locked` succeeds without the latter and leaves a dependency missing, so project environments upgrade and may rewrite their lock, which is then committed.
+
+Images install that committed lock unchanged, with `--locked`, from a layout that mirrors the project's depth below the repository root; the same derivation reinstalls internal packages so a persistent build cache cannot reuse a same-version build. An image therefore contains what the project's tests ran against. Because `--locked` cannot see a same-version wheel's changed requirements either, the guarantee rests on the lock-currency check comparing each lock's records with the wheels' metadata, not on the build.
+
+One root `.python-version` fixes the interpreter: uv does not read it from a nested project, so every Makefile, CI job, and image reads it explicitly. The conventions and their checks are described in [`BUILD_AND_PACKAGING.md`](../../../docs/development/BUILD_AND_PACKAGING.md).
 
 The architectural purpose is reproducibility: package metadata and wheel contents, not checkout-relative imports, determine what a consumer receives. Pure-Python wheel checks prevent a host-built native artifact from being mistaken for a target-platform image dependency.
 

@@ -15,9 +15,9 @@ from unittest.mock import patch
 
 from market_policy.negotiation_middleware import load_negotiation_chain
 
-from domains.apicredits.buyer.buyer_client import negotiate_with_seller
-from domains.apicredits.negotiation import make_api_credits_provision_terms
-from domains.apicredits.negotiation.buyer_policies import (  # noqa: F401 — registers the middleware
+from arkhai_apicredits_buyer.buyer_client import negotiate_with_seller
+from arkhai_apicredits.negotiation import make_api_credits_provision_terms
+from arkhai_apicredits.negotiation.buyer_policies import (  # noqa: F401 — registers the middleware
     APICREDITS_BUYER_GUARDS,
     answer_key_challenge,
 )

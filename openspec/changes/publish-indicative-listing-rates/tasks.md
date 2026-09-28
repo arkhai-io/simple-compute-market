@@ -264,6 +264,10 @@ Blocked on Section 2.
       that as an explicit blocker naming the cause and the change that owns it, and treat
       the validations it gates as unrun rather than passed.
 - [ ] 8.9 **Promotion.** Complete the design-promotion record below.
+- [ ] 8.10 **Packaging.** Run `make check-packaging` and resolve every failure it
+      reports: environment and image installs derive their internal packages from
+      their locks, every lock is current, and every Python version selection reads
+      the root declaration.
 
 ## Design promotion record
 

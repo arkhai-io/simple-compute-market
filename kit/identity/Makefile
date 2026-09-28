@@ -1,3 +1,6 @@
+# Every uv command in this Makefile uses the repository's declared Python version.
+export UV_PYTHON := $(or $(shell cat ../../.python-version 2>/dev/null),$(error ../../.python-version not found))
+
 DIST_DIR ?= ../../.dist
 
 .PHONY: build test

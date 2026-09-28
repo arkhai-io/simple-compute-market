@@ -33,7 +33,7 @@ Implementation is not complete when code merely passes tests. It is complete whe
 - temporary migration and changelog commentary has been removed from production code;
 - the active change records where each material decision was promoted;
 - the relevant focused, integration, packaging, and typing checks have been run or any unrun checks are disclosed;
-- `make check-reinit` passes.
+- `make check-packaging` passes.
 
 ## Documentation ownership
 
@@ -99,7 +99,7 @@ A bare documentation pointer is not a substitute for a useful local explanation.
 - Follow the dependency layers defined in `ARCHITECTURE.md` and the relevant subsystem specification.
 - `TYPE_CHECKING` imports count as architectural dependencies.
 - Internal Python dependencies are built into `.dist` and installed from wheels. Do not add editable sibling paths merely to make local development work.
-- Reinit targets must explicitly upgrade/reinstall changed internal packages from `.dist`. `make check-reinit` verifies every project's `reinit` against the internal wheels its `uv.lock` installs; a gap means a test run can silently exercise a stale copy of a package whose version did not change.
+- Environments, images, and locks are built through `scripts/uv_project.py`, which derives the internal packages from each project's lock; never list internal packages by hand. `docs/development/BUILD_AND_PACKAGING.md` owns the conventions and names the check enforcing each.
 
 ## Tests and diagnostics
 
@@ -108,14 +108,14 @@ A bare documentation pointer is not a substitute for a useful local explanation.
 - When a failure cannot be reproduced locally, report useful diagnostic steps and identify any design decision needed before changing behavior.
 - A difficult-to-test failure is evidence to consider a testability refactor, not permission to bypass the boundary.
 - Run `make check-comment-hygiene` before implementation is considered complete; see `openspec/README.md#plan-closeout-requirements`.
-- Once the tests covering a change pass, run `make check-reinit` and resolve every gap it reports before returning a fileset. Passing tests do not prove it: they may have run against wheels a missing `reinit` line left stale, and the next environment to rebuild will fail instead.
+- Once the tests covering a change pass, run `make check-packaging` and resolve every failure it reports before returning a fileset. Passing tests do not prove it: they may have run against an environment a missing or hand-maintained refresh left stale, and the next environment to rebuild will fail instead.
 
 ## Generated implementation artifacts
 
 Return only updated files. Represent a file requiring deletion by replacing its entire contents with a single-line tombstone comment stating the reason, at the file's original path — never a separate manifest file, a suffixed parallel copy, or a silent omission. Tombstones are review artifacts only: final production code and permanent documentation must not contain one.
 
 ```python
-# TOMBSTONE: delete this file — replaced by domains/apicredits/settlement/credits_client.py
+# TOMBSTONE: delete this file — replaced by domains/apicredits/src/arkhai_apicredits/settlement/credits_client.py
 ```
 
 ## Public repository discipline

@@ -16,15 +16,15 @@ import httpx
 import pytest
 from registry_client.models import ValidatePublishRequest
 
-from src.api.filter_spec import compute_etag, get_loaded_spec
-from src.db.models import Listing, OrderStatusEnum
-from src.main import app
+from core_registry.api.filter_spec import compute_etag, get_loaded_spec
+from core_registry.db.models import Listing, OrderStatusEnum
+from core_registry.main import app
 
 
 @pytest.fixture
 def _raw_client(db_session):
     """httpx.AsyncClient over the FastAPI app, sharing the test DB session."""
-    from src.db.database import get_db
+    from core_registry.db.database import get_db
 
     def _override_get_db():
         try:

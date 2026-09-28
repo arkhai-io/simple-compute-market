@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-vms-buyer"
-version = "0.3.4"
+version = "0.4.0"
 license = "MIT"
 description = "Buyer-side CLI for the market: discover sellers, negotiate, place orders. Pure HTTP client; no server, no agent runtime."
 requires-python = ">=3.12,<3.14"
@@ -24,9 +24,9 @@ dependencies = [
   "arkhai-kit-policy",
   "arkhai-kit-settlement-runtime==0.1.2",
   "arkhai-vms>=0.3.0",
-  "arkhai-vms-listings>=0.1.0",
-  "arkhai-vms-negotiation>=0.1.0",
-  "arkhai-vms-settlement>=0.1.0",
+  "arkhai-vms-listings>=0.4.0",
+  "arkhai-vms-negotiation>=0.2.0",
+  "arkhai-vms-settlement>=0.2.0",
 ]
 
 [dependency-groups]
@@ -39,7 +39,7 @@ dev = [
 
 # RL negotiation strategy — inference only. Mirrors the storefront's
 # [rl] extra: ``uv pip install -e ".[rl]"`` runs trained pufferlib
-# checkpoints from domains/vms/negotiation/rl/models/ without
+# checkpoints from domains/vms/negotiation/src/arkhai_vms_negotiation/rl/models/ without
 # pulling in pufferlib itself. The model architecture is reproduced
 # inline in arkhai_common.ArkhaiInferencePolicy (state-dict compatible).
 rl = [
@@ -47,14 +47,6 @@ rl = [
 ]
 
 [tool.uv]
-# Tests import this package from its installed wheel, not an editable
-# install: a directory-mapped package has no editable form that presents it
-# under its import path. The Makefile and CI set UV_NO_EDITABLE, and these
-# keys make uv rebuild that wheel whenever a module changes.
-cache-keys = [
-    { file = "pyproject.toml" },
-    { file = "*.py" },
-]
 # Restrict resolution to platforms we actually run/support for the VM buyer.
 # Without this, uv attempts future/platform marker splits and can fail before
 # reaching local path sources for internal packages.
@@ -67,7 +59,7 @@ environments = [
 # The `market` console script ships from arkhai-core-buyer; this package
 # contributes the validated VM market-domain contract.
 [project.entry-points."market.buyer_domains"]
-vms = "domains.vms.buyer.cli:domain"
+vms = "arkhai_vms_buyer.cli:domain"
 
 [tool.uv.sources]
 torch = [
@@ -87,16 +79,8 @@ build-backend = "hatchling.build"
 allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
-# This directory is the `domains.vms.buyer` package, mapped by directory so a
-# module added here ships without a packaging edit. The listings, negotiation,
-# and settlement modules it imports come from their own wheels.
-# `main.py`, the PyInstaller entry point, ships as `domains.vms.buyer.main`.
-include = ["/*.py"]
-
-[tool.hatch.build.targets.wheel.sources]
-"" = "domains/vms/buyer/"
+packages = ["src/arkhai_vms_buyer"]
 
 [tool.pytest.ini_options]
-pythonpath = ["."]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"

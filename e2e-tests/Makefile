@@ -1,6 +1,9 @@
 # PyPI intermittently serves 5xx where internal package names should
 # 404 (they resolve from .dist); back off through the flap instead of
 # failing after uv's default 3 tries.
+# Every uv command in this Makefile uses the repository's declared Python version.
+export UV_PYTHON := $(or $(shell cat ../.python-version 2>/dev/null),$(error ../.python-version not found))
+
 export UV_HTTP_RETRIES ?= 10
 
 PYTHON      ?= python3
@@ -26,47 +29,10 @@ DIST_DIR ?= ../.dist
 init-venv:
 	uv venv --allow-existing
 
-init: init-venv
-	uv sync --find-links $(DIST_DIR)
+init: init-venv reinit
 
 reinit: init-venv
-	uv sync --find-links $(DIST_DIR) \
-	--upgrade-package arkhai-core                           --reinstall-package arkhai-core \
-	--upgrade-package arkhai-core-buyer                     --reinstall-package arkhai-core-buyer \
-	--upgrade-package arkhai-core-storefront                --reinstall-package arkhai-core-storefront \
-	--upgrade-package arkhai-core-registry-client            --reinstall-package arkhai-core-registry-client \
-	--upgrade-package arkhai-core-storefront-client          --reinstall-package arkhai-core-storefront-client \
-	--upgrade-package arkhai-kit-config                      --reinstall-package arkhai-kit-config \
-	--upgrade-package arkhai-kit-identity                    --reinstall-package arkhai-kit-identity \
-	--upgrade-package arkhai-kit-policy                      --reinstall-package arkhai-kit-policy \
-	--upgrade-package arkhai-kit-settlement-runtime          --reinstall-package arkhai-kit-settlement-runtime \
-	--upgrade-package arkhai-kit-storefront                 --reinstall-package arkhai-kit-storefront \
-	--upgrade-package arkhai-kit-alkahest                    --reinstall-package arkhai-kit-alkahest \
-	--upgrade-package arkhai-hosted-settlement-client        --reinstall-package arkhai-hosted-settlement-client \
-	--upgrade-package arkhai-kit-hosted-settlement           --reinstall-package arkhai-kit-hosted-settlement \
-	--upgrade-package arkhai-kit-site                        --reinstall-package arkhai-kit-site \
-	--upgrade-package arkhai-kit-site-client                 --reinstall-package arkhai-kit-site-client \
-	--upgrade-package arkhai-kit-resource-pools              --reinstall-package arkhai-kit-resource-pools \
-	--upgrade-package arkhai-kit-fulfillment                 --reinstall-package arkhai-kit-fulfillment \
-	--upgrade-package arkhai-vms                             --reinstall-package arkhai-vms \
-	--upgrade-package arkhai-vms-listings                    --reinstall-package arkhai-vms-listings \
-	--upgrade-package arkhai-vms-negotiation                 --reinstall-package arkhai-vms-negotiation \
-	--upgrade-package arkhai-vms-settlement                  --reinstall-package arkhai-vms-settlement \
-	--upgrade-package arkhai-vms-buyer                       --reinstall-package arkhai-vms-buyer \
-	--upgrade-package arkhai-vms-storefront                  --reinstall-package arkhai-vms-storefront \
-	--upgrade-package arkhai-bare-metal                      --reinstall-package arkhai-bare-metal \
-	--upgrade-package arkhai-compute-provisioning            --reinstall-package arkhai-compute-provisioning \
-	--upgrade-package arkhai-vms-provisioning-operator-client --reinstall-package arkhai-vms-provisioning-operator-client \
-	--upgrade-package arkhai-apicredits-buyer                --reinstall-package arkhai-apicredits-buyer \
-	--upgrade-package arkhai-apicredits-domain --reinstall-package arkhai-apicredits-domain \
-	--upgrade-package arkhai-bare-metal-storefront --reinstall-package arkhai-bare-metal-storefront \
-	--upgrade-package arkhai-kit-capacity-publication --reinstall-package arkhai-kit-capacity-publication \
-	--upgrade-package arkhai-kit-pool-overrides --reinstall-package arkhai-kit-pool-overrides \
-	--upgrade-package arkhai-kit-contact-exchange --reinstall-package arkhai-kit-contact-exchange \
-	--upgrade-package arkhai-kit-delivery --reinstall-package arkhai-kit-delivery \
-	--upgrade-package arkhai-kit-negotiation-runtime --reinstall-package arkhai-kit-negotiation-runtime \
-	--upgrade-package arkhai-kit-capability-shape --reinstall-package arkhai-kit-capability-shape \
-	--upgrade-package arkhai-compute --reinstall-package arkhai-compute
+	python3 ../scripts/uv_project.py reinit
 
 # -----------------------------------------------------------------------
 # Build
@@ -75,7 +41,6 @@ reinit: init-venv
 IMAGE_NAME ?= arkhai
 IMAGE_TAG  ?= e2e-tests
 GIT_SUFFIX := $(shell git rev-parse --short HEAD)
-PYTHON_VERSION := 3.13
 
 build: build-images
 

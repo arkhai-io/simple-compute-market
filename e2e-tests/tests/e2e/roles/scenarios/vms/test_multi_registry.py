@@ -100,7 +100,7 @@ from market_identity import (
     create_signer,
     sign_request,
 )
-from src.settings import settings
+from e2e_harness.settings import settings
 from tests.e2e.roles.scenarios.vms.host_registry import (
     E2E_HOST_GPU_COUNT,
     E2E_MULTI_REGISTRY_HOST,

@@ -1,8 +1,8 @@
-"""Unit tests for domains.vms.listings.listing_cardinality_mode."""
+"""Unit tests for arkhai_vms_listings.listing_cardinality_mode."""
 
 from __future__ import annotations
 
-from domains.vms.listings.listing_cardinality_mode import (
+from arkhai_vms_listings.listing_cardinality_mode import (
     resolve_vm_listing_cardinality_mode,
 )
 

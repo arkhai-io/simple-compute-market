@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 from market_identity import create_signer
 
-from src.hosted_real_stripe.runtime import (
+from e2e_harness.hosted_real_stripe.runtime import (
     ComposeStack,
     EphemeralBuyerConfig,
     EphemeralMarketplaceConfig,
@@ -17,7 +17,7 @@ from src.hosted_real_stripe.runtime import (
     ProcessUnavailable,
     require_runtime_authority_identity,
 )
-from src.hosted_real_stripe.gates import HostedContract
+from e2e_harness.hosted_real_stripe.gates import HostedContract
 
 _RELEASED_CAPABILITIES = (
     "account-owner-admission.v1",
@@ -361,7 +361,7 @@ def test_a_run_authorizes_the_registries_its_topology_locks(monkeypatch, tmp_pat
 
     import tomllib
 
-    from src.hosted_real_stripe.runtime import _fill_registry_auth
+    from e2e_harness.hosted_real_stripe.runtime import _fill_registry_auth
 
     template = (
         '[registry]\n'
@@ -397,7 +397,7 @@ def test_a_run_authorizes_the_registries_its_topology_locks(monkeypatch, tmp_pat
     # A value that could break out of the string it is written into is refused
     # outright rather than escaped, because a key needing escaping is not one
     # this run was meant to be given.
-    from src.hosted_real_stripe.runtime import ProcessUnavailable
+    from e2e_harness.hosted_real_stripe.runtime import ProcessUnavailable
 
     for hostile in ('has"quote', "has\\backslash", "has\nnewline", "x" * 513):
         monkeypatch.setenv("VMS_REGISTRY_BOOTSTRAP_API_KEY", hostile)
@@ -439,8 +439,8 @@ def test_a_locally_built_authority_is_pointed_at_no_signed_release(tmp_path) -> 
     reports it back, so a local run names the build it composed.
     """
 
-    from src.hosted_real_stripe.gates import LOCAL_COORDINATE
-    from src.hosted_real_stripe.runtime import EphemeralServiceEnv
+    from e2e_harness.hosted_real_stripe.gates import LOCAL_COORDINATE
+    from e2e_harness.hosted_real_stripe.runtime import EphemeralServiceEnv
 
     with EphemeralServiceEnv(
         api_key="sk_test_example",

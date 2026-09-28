@@ -567,7 +567,7 @@ class TestEvaluateNegotiate:
         c, db = admin_client
         await _seed_listing(db, "neg-eval-1")
         with patch(
-            "domains.vms.negotiation.storefront_round._load_storefront_chain",
+            "arkhai_vms_negotiation.storefront_round._load_storefront_chain",
             return_value=_bisection_chain(),
         ):
             result = await c.evaluate_negotiate(
@@ -587,7 +587,7 @@ class TestEvaluateNegotiate:
         c, db = admin_client
         await _seed_listing(db, "neg-eval-2")
         with patch(
-            "domains.vms.negotiation.storefront_round._load_storefront_chain",
+            "arkhai_vms_negotiation.storefront_round._load_storefront_chain",
             return_value=_bisection_chain(),
         ):
             result = await c.evaluate_negotiate(
@@ -610,7 +610,7 @@ class TestEvaluateNegotiate:
         c, db = admin_client
         await _seed_listing(db, "neg-eval-floor")  # default price_per_hour=9000
         with patch(
-            "domains.vms.negotiation.storefront_round._load_storefront_chain",
+            "arkhai_vms_negotiation.storefront_round._load_storefront_chain",
             return_value=_bisection_chain(),
         ):
             result = await c.evaluate_negotiate(
@@ -650,7 +650,7 @@ class TestEvaluateNegotiate:
         c, db = admin_client
         await _seed_listing(db, "neg-eval-no-thread")
         with patch(
-            "domains.vms.negotiation.storefront_round._load_storefront_chain",
+            "arkhai_vms_negotiation.storefront_round._load_storefront_chain",
             return_value=_bisection_chain(),
         ):
             await c.evaluate_negotiate(
@@ -695,7 +695,7 @@ def _bisection_chain():
     Skips the guards so the test's seeded listings don't need to match
     an inventory-portfolio entry. Avoids the torch/rl dependency.
     """
-    from domains.vms.negotiation.policies import bisection_middleware
+    from arkhai_vms_negotiation.policies import bisection_middleware
 
     return [bisection_middleware]
 

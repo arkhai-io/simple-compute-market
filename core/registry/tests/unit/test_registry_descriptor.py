@@ -3,8 +3,8 @@ from __future__ import annotations
 import pytest
 from market_identity import Ed25519Signer
 
-from src.api.filter_spec import FilterSpec, SchemaIdentity
-from src.registry_descriptor import build_registry_descriptor
+from core_registry.api.filter_spec import FilterSpec, SchemaIdentity
+from core_registry.registry_descriptor import build_registry_descriptor
 
 
 def _filter_spec() -> FilterSpec:

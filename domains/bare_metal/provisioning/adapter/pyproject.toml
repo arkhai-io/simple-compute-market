@@ -25,11 +25,3 @@ packages = ["src/bare_metal_provisioning_adapter"]
 [dependency-groups]
 dev = ["pytest>=9.0.2", "pytest-asyncio>=0.23"]
 
-[tool.uv.sources]
-arkhai-bare-metal = { path = "../..", editable = true }
-arkhai-compute-provisioning = { path = "../../../../provisioning/compute", editable = true }
-arkhai-kit-fulfillment = { path = "../../../../kit/fulfillment", editable = true }
-arkhai-kit-resource-pools = { path = "../../../../kit/resource-pools", editable = true }
-arkhai-compute-provisioning-service = { path = "../../../../provisioning/compute/service", editable = true }
-arkhai-vms-provisioning-operator-client = { path = "../../../vms/provisioning/client", editable = true }
-arkhai-vms-provisioning-adapter = { path = "../../../vms/provisioning/adapter", editable = true }

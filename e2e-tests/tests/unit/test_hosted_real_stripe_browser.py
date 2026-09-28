@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import pytest
 
 
-from src.hosted_real_stripe.browser import (
+from e2e_harness.hosted_real_stripe.browser import (
     CheckoutContractError,
     ChromiumUnavailable,
     ChromiumCheckout,

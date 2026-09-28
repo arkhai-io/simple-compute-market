@@ -19,7 +19,7 @@ from market_policy.negotiation_middleware import (
     _REGISTRY,
     load_negotiation_chain,
 )
-from domains.vms.negotiation import storefront_round
+from arkhai_vms_negotiation import storefront_round
 
 
 _STUB_POLICY = textwrap.dedent("""

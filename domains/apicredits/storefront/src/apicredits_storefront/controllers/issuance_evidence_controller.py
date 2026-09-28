@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Awaitable, Callable
 
-from domains.apicredits.settlement.issuance_evidence import (
+from arkhai_apicredits.settlement.issuance_evidence import (
     SignedApiCreditsIssuanceEvidenceV1,
 )
 from fastapi import APIRouter, Depends, HTTPException, Request

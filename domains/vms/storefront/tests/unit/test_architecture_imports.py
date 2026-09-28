@@ -55,7 +55,12 @@ ROLE_EXECUTABLE_PREFIXES = (
 # Both repository namespaces and installed domain package names are guarded.
 # A kit must receive domain behavior through injected hooks instead.
 DOMAIN_PREFIXES = (
-    "domains",
+    "arkhai_apicredits",
+    "arkhai_apicredits_buyer",
+    "arkhai_vms_buyer",
+    "arkhai_vms_listings",
+    "arkhai_vms_negotiation",
+    "arkhai_vms_settlement",
     "apicredits_storefront",
     "arkhai_bare_metal",
     "arkhai_bare_metal_storefront",
@@ -132,7 +137,7 @@ def test_kit_imports_no_domain_or_upward_role_packages():
 
 def test_kit_boundary_classifier_rejects_domain_and_upward_imports() -> None:
     forbidden = ROLE_EXECUTABLE_PREFIXES + DOMAIN_PREFIXES
-    assert _matches_prefix("domains.vms.settlement", forbidden)
+    assert _matches_prefix("arkhai_vms_settlement", forbidden)
     assert _matches_prefix("market_storefront.server", forbidden)
     assert not _matches_prefix("core_storefront.domain_registry", forbidden)
 
@@ -180,7 +185,7 @@ def test_vm_storefront_imports_no_bare_metal_composition() -> None:
     )
     violations = _violations(
         [storefront_root],
-        ("domains.bare_metal", "arkhai_bare_metal_storefront"),
+        ("arkhai_bare_metal_storefront",),
     )
     assert not violations, "VM storefront must not import bare-metal roots:\n" + "\n".join(
         violations
@@ -191,7 +196,14 @@ def test_core_storefront_imports_no_domain_composition() -> None:
     core_root = REPO / "core" / "storefront" / "src" / "core_storefront"
     violations = _violations(
         [core_root],
-        ("domains.vms", "domains.bare_metal", "market_storefront", "arkhai_bare_metal_storefront"),
+        (
+            "arkhai_vms_buyer",
+            "arkhai_vms_listings",
+            "arkhai_vms_negotiation",
+            "arkhai_vms_settlement",
+            "market_storefront",
+            "arkhai_bare_metal_storefront",
+        ),
     )
     assert not violations, "core storefront must stay domain-free:\n" + "\n".join(
         violations

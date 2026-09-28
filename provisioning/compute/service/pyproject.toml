@@ -63,6 +63,3 @@ dev = [
     "pytest>=9.0.2",
     "pytest-asyncio>=0.23",
 ]
-
-[tool.uv]
-find-links = ["../../../.dist"]

@@ -1125,7 +1125,7 @@ design.
   - `e2e-tests`' own suite via its own `Makefile`/`reinit` — confirmed
     genuinely decoupled from `compute_provisioning`/`kit/fulfillment`
     (it wraps the provisioning HTTP surface with its own
-    `e2e-tests/src/provisioning_test_client.py`, not
+    `e2e-tests/src/e2e_harness/provisioning_test_client.py`, not
     `ComputeProvisioningClient`), so no reinit change is needed there.
   - A fresh-database migration pass per touched service (no single
     repository-wide "run all migrations" target exists) plus the existing
@@ -1797,3 +1797,7 @@ Per `openspec/README.md#plan-closeout-requirements`.
       cannot run for a reason unrelated to this change, record that as an
       explicit blocker naming the cause and the change that owns it, and
       treat the validations it gates as unrun rather than passed.
+- [ ] 13.10 **Packaging.** Run `make check-packaging` and resolve every failure it
+      reports: environment and image installs derive their internal packages from
+      their locks, every lock is current, and every Python version selection reads
+      the root declaration.

@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-apicredits-buyer"
-version = "0.3.1"
+version = "0.4.0"
 license = "MIT"
 description = "API-credits buyer schema plugin for the core `market` CLI: discover credit listings, negotiate quantity x rate, settle into issued keys."
 requires-python = ">=3.12,<3.14"
@@ -14,7 +14,7 @@ dependencies = [
   "alkahest-py==1.1.2",
   "arkhai-core-buyer>=0.3.0",
   "arkhai-core>=0.2.0",
-  "arkhai-apicredits-domain>=0.1.0",
+  "arkhai-apicredits-domain>=0.4.0",
   "arkhai-kit-alkahest",
   "arkhai-kit-config",
   "arkhai-kit-policy",
@@ -30,21 +30,11 @@ test = [
 # The `market` console script ships from arkhai-core-buyer; this package
 # contributes the validated API-credit market-domain contract.
 [project.entry-points."market.buyer_domains"]
-apicredits = "domains.apicredits.buyer.cli:domain"
+apicredits = "arkhai_apicredits_buyer.cli:domain"
 
 [dependency-groups]
 dev = [
   "pytest>=8.0.0",
-]
-
-[tool.uv]
-# Tests import this package from its installed wheel, not an editable
-# install: a directory-mapped package has no editable form that presents it
-# under its import path. The Makefile and CI set UV_NO_EDITABLE, and these
-# keys make uv rebuild that wheel whenever a module changes.
-cache-keys = [
-    { file = "pyproject.toml" },
-    { file = "*.py" },
 ]
 
 [build-system]
@@ -55,13 +45,6 @@ build-backend = "hatchling.build"
 allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
-# Shared schema, listing, negotiation, settlement, and contract modules are
-# owned by arkhai-apicredits-domain; this wheel owns only the buyer-role
-# modules in this directory, mapped by directory.
-include = ["/*.py"]
-
-[tool.hatch.build.targets.wheel.sources]
-"" = "domains/apicredits/buyer/"
+packages = ["src/arkhai_apicredits_buyer"]
 
 [tool.pytest.ini_options]
-pythonpath = ["."]

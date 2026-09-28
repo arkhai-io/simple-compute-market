@@ -17,7 +17,7 @@ from core_storefront.domain_registry import (
     StorefrontDomainRegistry,
 )
 from market_alkahest import create_alkahest_registration
-from domains.vms.negotiation.storefront_round import default_seller_round_hook
+from arkhai_vms_negotiation.storefront_round import default_seller_round_hook
 from market_core import (
     DomainCapability,
     DomainContractValidationError,

@@ -12,7 +12,7 @@ import httpx
 import pytest
 
 from registry_client import ListingRequest
-from src.main import app
+from core_registry.main import app
 from tests.integration.test_validate_publish import _ValidationAuth
 
 pytestmark = pytest.mark.asyncio

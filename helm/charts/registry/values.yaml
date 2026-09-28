@@ -62,7 +62,7 @@ config:
   # Gateway path prefix. Empty for host-routed or direct deployments.
   rootPath: ""
   # API-key gating (both off => fully public registry; write on => open
-  # discovery, gated publishing). See core/registry/src/config.py.
+  # discovery, gated publishing). See core/registry/src/core_registry/config.py.
   requireReadApiKey: false
   requireWriteApiKey: false
 

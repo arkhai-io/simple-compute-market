@@ -7,8 +7,8 @@ from apicredits_storefront.domain_runtime import (
     APICREDITS_STOREFRONT_DOMAIN,
     get_market_domain_contract,
 )
-from domains.apicredits.domain_runtime import market_domain
-from domains.apicredits.schema import API_CREDITS_SCHEMA_KIND
+from arkhai_apicredits.domain_runtime import market_domain
+from arkhai_apicredits.schema import API_CREDITS_SCHEMA_KIND
 from market_core import (
     DomainCapability,
     DomainCodecExample,

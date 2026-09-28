@@ -76,7 +76,7 @@ None.
   containers that construct a ledger, the capacity-row migration in each service,
   and every test that constructs `CapacityLedgerService` — 26 files today.
 - Affected packaging: `kit/site` loses an internal dependency, so every `reinit`
-  and lock that installs it is rechecked with `make check-reinit`.
+  and lock that installs it is rechecked with `make check-packaging`.
 - Affected documentation: `docs/development/ARCHITECTURE.md`'s kit layers stop
   needing an exception once the code matches them.
 

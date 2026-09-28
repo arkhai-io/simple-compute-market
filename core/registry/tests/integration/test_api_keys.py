@@ -20,9 +20,9 @@ from market_identity import (
     canonical_body_hash,
     sign_request,
 )
-from src.config import settings
-from src.db.database import get_db
-from src.main import app
+from core_registry.config import settings
+from core_registry.db.database import get_db
+from core_registry.main import app
 
 
 @pytest_asyncio.fixture

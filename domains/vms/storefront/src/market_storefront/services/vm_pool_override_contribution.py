@@ -14,7 +14,7 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from arkhai_vms import canonical_vm_shape, vm_shape_digest, vm_shape_problems
-from domains.vms.listings import (
+from arkhai_vms_listings import (
     ShapeFeasibility as ShapeFeasibilityJudge,
     declared_shape_feasibility,
     vm_override_view,

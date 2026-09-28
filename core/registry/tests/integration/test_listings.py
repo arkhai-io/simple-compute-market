@@ -13,7 +13,7 @@ from registry_client.models import (
     ListingSummary,
     UpdateListingRequest,
 )
-from src.main import app
+from core_registry.main import app
 
 
 def _listing_request(listing_id: str | None = None, **listing_resource_extras) -> ListingRequest:

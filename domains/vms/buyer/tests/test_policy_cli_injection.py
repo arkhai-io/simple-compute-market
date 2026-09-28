@@ -70,7 +70,7 @@ def test_escape_hatch_collects_repeated_pairs():
 
 
 def test_assembled_buy_and_negotiate_surface_the_default_policy_flags():
-    from domains.vms.buyer.cli import app
+    from arkhai_vms_buyer.cli import app
 
     for verb in ("buy", "negotiate"):
         result = runner.invoke(app, [verb, "--help"])
@@ -89,7 +89,7 @@ def test_negotiate_with_seller_delivers_policy_params_to_the_chain():
         NegotiationDecision,
     )
 
-    from domains.vms.buyer.buyer_client import negotiate_with_seller
+    from arkhai_vms_buyer.buyer_client import negotiate_with_seller
     from test_buyer_client import (
         _MockResponse,
         _escrow_proposal,
@@ -182,7 +182,7 @@ def test_unknown_configured_policy_errors_instead_of_substituting():
     """A typo'd policy name must not silently become some other policy."""
     import pytest
 
-    from domains.vms.buyer.buyer_client import load_buyer_chain
+    from arkhai_vms_buyer.buyer_client import load_buyer_chain
 
     with patch(
         "core_buyer.buyer_config.resolve_config_value",
@@ -197,7 +197,7 @@ def test_round_0_exit_never_contacts_the_seller():
     opening means no negotiation — the seller is never contacted."""
     from market_policy.negotiation_middleware import NegotiationDecision
 
-    from domains.vms.buyer.buyer_client import negotiate_with_seller
+    from arkhai_vms_buyer.buyer_client import negotiate_with_seller
     from test_buyer_client import (
         _escrow_proposal,
         _provision,
@@ -239,7 +239,7 @@ def test_chain_exhaustion_errors_and_releases_the_seller():
         NegotiationDecision,
     )
 
-    from domains.vms.buyer.buyer_client import negotiate_with_seller
+    from arkhai_vms_buyer.buyer_client import negotiate_with_seller
     from test_buyer_client import (
         _MockResponse,
         _escrow_proposal,

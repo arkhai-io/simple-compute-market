@@ -1,3 +1,6 @@
+# Every uv command in this Makefile uses the repository's declared Python version.
+export UV_PYTHON := $(or $(shell cat ../../../.python-version 2>/dev/null),$(error ../../../.python-version not found))
+
 IMAGE_NAME ?= arkhai
 IMAGE_TAG  ?= storefront
 GIT_SUFFIX := $(shell git rev-parse --short HEAD)
@@ -21,42 +24,10 @@ include $(HOSTED_REPO_ROOT)/make/hosted-release.mk
 verify-hosted-release:
 	$(VERIFY_HOSTED_RELEASE)
 
-init: ## Resolve deps from verified wheels and create .venv.
-	uv sync --find-links $(DIST_DIR)
+init: reinit ## Resolve deps from verified wheels and create .venv.
 
 reinit: ## Force-reinstall verified internal wheels.
-	uv sync --find-links $(DIST_DIR) \
-	--upgrade-package arkhai-core                    --reinstall-package arkhai-core \
-	--upgrade-package arkhai-core-storefront         --reinstall-package arkhai-core-storefront \
-	--upgrade-package arkhai-kit-capacity-publication --reinstall-package arkhai-kit-capacity-publication \
-	--upgrade-package arkhai-vms-storefront       --reinstall-package arkhai-vms-storefront \
-	--upgrade-package arkhai-bare-metal             --reinstall-package arkhai-bare-metal \
-	--upgrade-package arkhai-bare-metal-storefront  --reinstall-package arkhai-bare-metal-storefront \
-	--upgrade-package arkhai-kit-identity            --reinstall-package arkhai-kit-identity \
-	--upgrade-package arkhai-kit-alkahest            --reinstall-package arkhai-kit-alkahest \
-	--upgrade-package arkhai-kit-config              --reinstall-package arkhai-kit-config \
-	--upgrade-package arkhai-kit-policy              --reinstall-package arkhai-kit-policy \
-	--upgrade-package arkhai-kit-settlement-runtime  --reinstall-package arkhai-kit-settlement-runtime \
-	--upgrade-package arkhai-kit-storefront         --reinstall-package arkhai-kit-storefront \
-	--upgrade-package arkhai-kit-negotiation-runtime --reinstall-package arkhai-kit-negotiation-runtime \
-	--upgrade-package arkhai-hosted-settlement-client --reinstall-package arkhai-hosted-settlement-client \
-	--upgrade-package arkhai-kit-hosted-settlement     --reinstall-package arkhai-kit-hosted-settlement \
-	--upgrade-package arkhai-kit-site                --reinstall-package arkhai-kit-site \
-	--upgrade-package arkhai-kit-resource-pools       --reinstall-package arkhai-kit-resource-pools \
-	--upgrade-package arkhai-kit-fulfillment         --reinstall-package arkhai-kit-fulfillment \
-	--upgrade-package arkhai-vms              --reinstall-package arkhai-vms \
-	--upgrade-package arkhai-vms-listings     --reinstall-package arkhai-vms-listings \
-	--upgrade-package arkhai-vms-negotiation  --reinstall-package arkhai-vms-negotiation \
-	--upgrade-package arkhai-vms-settlement   --reinstall-package arkhai-vms-settlement \
-	--upgrade-package arkhai-compute-provisioning --reinstall-package arkhai-compute-provisioning \
-	--upgrade-package arkhai-core-storefront-client  --reinstall-package arkhai-core-storefront-client \
-	--upgrade-package arkhai-kit-site-client         --reinstall-package arkhai-kit-site-client \
-	--upgrade-package arkhai-core-registry-client    --reinstall-package arkhai-core-registry-client \
-	--upgrade-package arkhai-kit-contact-exchange --reinstall-package arkhai-kit-contact-exchange \
-	--upgrade-package arkhai-kit-delivery --reinstall-package arkhai-kit-delivery \
-	--upgrade-package arkhai-kit-capability-shape --reinstall-package arkhai-kit-capability-shape \
-	--upgrade-package arkhai-kit-pool-overrides --reinstall-package arkhai-kit-pool-overrides \
-	--upgrade-package arkhai-compute --reinstall-package arkhai-compute
+	python3 ../../../scripts/uv_project.py reinit
 
 # build deliberately does NOT depend on reinit. reinit drives a host-side
 # `uv sync` that resolves the [rl] extra (incl. torch) across whatever
@@ -89,7 +60,7 @@ test-integration: ## Run integration tests (no real infrastructure required — 
 
 deploy: deploy-storefront
 
-# Buyers are pure HTTP clients (the `market` CLI / domains.vms.buyer
+# Buyers are pure HTTP clients (the `market` CLI / arkhai_vms_buyer
 # library); they don't run a storefront. Use `make deploy-storefront`
 # to bring up the seller; run `market buy ...` from the host or another
 # container against `http://bob-storefront:8001`.

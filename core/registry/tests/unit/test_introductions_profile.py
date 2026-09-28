@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from src.api.filter_eval import build_criteria, evaluate_all
-from src.api.filter_spec import load_filter_spec
+from core_registry.api.filter_eval import build_criteria, evaluate_all
+from core_registry.api.filter_spec import load_filter_spec
 
 _PROFILE = Path(__file__).resolve().parents[2] / "filter-spec.introductions.yaml"
 

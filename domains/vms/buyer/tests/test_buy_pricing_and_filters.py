@@ -15,10 +15,10 @@ import pytest
 from arkhai_vms import make_vm_provision_terms
 from core_buyer.action_policy import BuyerActionPolicy
 from core_buyer.registry_config import RegistryAuthority
-from domains.vms.buyer.buy_cli import _make_hosted_settle_hook
-from domains.vms.buyer.buyer_client import NegotiationOutcome
-from domains.vms.buyer.negotiate_cli import _pricing_listing_for_selection
-from domains.vms.buyer.buy_orchestrator import (
+from arkhai_vms_buyer.buy_cli import _make_hosted_settle_hook
+from arkhai_vms_buyer.buyer_client import NegotiationOutcome
+from arkhai_vms_buyer.negotiate_cli import _pricing_listing_for_selection
+from arkhai_vms_buyer.buy_orchestrator import (
     BuyConfig,
     BuyConstraints,
     NegotiationResult,
@@ -28,7 +28,7 @@ from domains.vms.buyer.buy_orchestrator import (
     query_registry_for_matches,
     run_buy,
 )
-from domains.vms.buyer.settlement_composition import resolve_buyer_settlement_policy
+from arkhai_vms_buyer.settlement_composition import resolve_buyer_settlement_policy
 from registry_client import FilterSpecResponse
 from market_hosted_settlement import (
     FundingMode,
@@ -287,7 +287,7 @@ def test_hosted_settle_uses_storefront_and_never_calls_authority_directly(
         lambda _transport, **_kwargs: {"status": "ready"},
     )
     monkeypatch.setattr(
-        "domains.vms.buyer.buy_cli.prepare_hosted_funding_authorization",
+        "arkhai_vms_buyer.buy_cli.prepare_hosted_funding_authorization",
         lambda **_kwargs: SimpleNamespace(
             funding_profile=FundingProfile.CARD,
             funding_authorization_ref="funding-auth-safe-1",
@@ -361,7 +361,7 @@ def test_hosted_settle_never_authorizes_or_starts_before_accepted_terms(
 ) -> None:
 
     monkeypatch.setattr(
-        "domains.vms.buyer.buy_cli.prepare_hosted_funding_authorization",
+        "arkhai_vms_buyer.buy_cli.prepare_hosted_funding_authorization",
         lambda **_kwargs: pytest.fail("funding authorization preceded accepted terms"),
     )
     monkeypatch.setattr(

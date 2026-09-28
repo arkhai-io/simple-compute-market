@@ -126,7 +126,7 @@ def test_public_import_discovery_works_without_fixture_distribution(monkeypatch)
         (
             "market_hosted_settlement",
             "market_storefront.settlement_composition",
-            "domains.vms.buyer.settlement_composition",
+            "arkhai_vms_buyer.settlement_composition",
         )
     )
 

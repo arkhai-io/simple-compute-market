@@ -1,8 +1,8 @@
-"""Unit tests for domains.vms.listings.pool_descriptors."""
+"""Unit tests for arkhai_vms_listings.pool_descriptors."""
 
 from __future__ import annotations
 
-from domains.vms.listings.pool_descriptors import resolve_region, resolve_sla
+from arkhai_vms_listings.pool_descriptors import resolve_region, resolve_sla
 
 
 class TestResolveRegion:

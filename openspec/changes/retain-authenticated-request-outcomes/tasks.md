@@ -68,3 +68,7 @@
 - [ ] 5.9 **Promotion.** Complete the design-promotion record. The exact-retry
       implementation belongs in
       `openspec/specs/marketplace-identity/spec.md`'s neighbourhood.
+- [ ] 5.10 **Packaging.** Run `make check-packaging` and resolve every failure it
+      reports: environment and image installs derive their internal packages from
+      their locks, every lock is current, and every Python version selection reads
+      the root declaration.

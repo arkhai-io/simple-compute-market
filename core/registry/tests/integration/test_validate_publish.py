@@ -22,7 +22,7 @@ from market_identity import (
     sign_request,
 )
 
-from src.main import app
+from core_registry.main import app
 
 
 class _ValidationAuth(httpx.Auth):

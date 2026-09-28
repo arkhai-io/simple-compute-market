@@ -18,7 +18,7 @@ def _driver_flags(target: str) -> set[str]:
 
     body = re.search(rf"^{re.escape(target)}:.*?(?=\n\n)", MAKEFILE, re.S | re.M)
     assert body, f"{target} is no longer a Makefile target"
-    assert "src.hosted_real_stripe.driver" in body.group(0), (
+    assert "e2e_harness.hosted_real_stripe.driver" in body.group(0), (
         f"{target} no longer invokes the driver"
     )
     return set(re.findall(r"^\s+(--[a-z-]+)", body.group(0), re.M))

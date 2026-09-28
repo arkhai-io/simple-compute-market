@@ -26,7 +26,7 @@ import httpx
 from market_identity import IdentityScheme
 import pytest
 
-from src.settings import settings
+from e2e_harness.settings import settings
 from tests.e2e.roles.buyer_cli import (
     BuyerCli,
     _alkahest_addresses_path,

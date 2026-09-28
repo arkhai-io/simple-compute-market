@@ -9,13 +9,13 @@ from pathlib import Path
 
 import pytest
 
-from src.hosted_real_stripe.driver import _parser
-from src.hosted_real_stripe.evidence import (
+from e2e_harness.hosted_real_stripe.driver import _parser
+from e2e_harness.hosted_real_stripe.evidence import (
     HostedReleaseIdentityEvidence,
     IdentityEvidence,
     MarketplaceIdentityEvidence,
 )
-from src.hosted_real_stripe.gates import (
+from e2e_harness.hosted_real_stripe.gates import (
     LOCAL_COORDINATE,
     AuthorizationRejected,
     AuthorizationUnavailable,
@@ -458,7 +458,7 @@ def test_every_combination_of_released_and_local_halves_admits(tmp_path) -> None
 def test_a_bound_release_that_lacks_a_scenario_capability_says_so(tmp_path) -> None:
     """The prerequisite is named before the run reaches for it."""
 
-    from src.hosted_real_stripe.gates import require_hosted_capabilities
+    from e2e_harness.hosted_real_stripe.gates import require_hosted_capabilities
 
     identity = _local_producer(tmp_path)
 
@@ -484,7 +484,7 @@ def test_no_safety_gate_takes_a_mode_or_a_release(tmp_path) -> None:
 
     import inspect
 
-    from src.hosted_real_stripe import gates
+    from e2e_harness.hosted_real_stripe import gates
 
     for name in (
         "require_test_secret",
@@ -586,7 +586,7 @@ def test_a_development_run_can_read_what_a_protected_run_must_not(tmp_path) -> N
 
     import sys
 
-    from src.hosted_real_stripe.runtime import MarketplaceLifecycleSession, ProcessUnavailable
+    from e2e_harness.hosted_real_stripe.runtime import MarketplaceLifecycleSession, ProcessUnavailable
 
     # Writes to stderr and exits at once, which is how a bridge that dies on
     # startup behaves: stdout reaches EOF before stderr has been drained.
@@ -626,8 +626,8 @@ def test_a_development_run_can_read_what_a_protected_run_must_not(tmp_path) -> N
 def test_only_a_development_run_prints_the_failure_behind_the_code(capsys) -> None:
     """Nothing but the proven mode may turn the disclosure on."""
 
-    from src.hosted_real_stripe.driver import _disclose
-    from src.hosted_real_stripe.runtime import ProcessUnavailable
+    from e2e_harness.hosted_real_stripe.driver import _disclose
+    from e2e_harness.hosted_real_stripe.runtime import ProcessUnavailable
 
     cause = RuntimeError("the storefront never registered a payer profile")
     caught = ProcessUnavailable("marketplace lifecycle state was unavailable")
@@ -648,14 +648,14 @@ def test_the_driver_asks_for_the_tail_only_when_the_run_is_local() -> None:
     """The session is constructed from the proven mode, not from the flag."""
 
     source = (
-        Path(__file__).resolve().parents[2] / "src" / "hosted_real_stripe" / "driver.py"
+        Path(__file__).resolve().parents[2] / "src" / "e2e_harness" / "hosted_real_stripe" / "driver.py"
     ).read_text(encoding="utf-8")
 
     assert 'retain_diagnostics=release.mode == "local"' in source
 
 
 def _teardown_argv(tmp_path, **options) -> tuple[str, ...]:
-    from src.hosted_real_stripe.runtime import ComposeStack
+    from e2e_harness.hosted_real_stripe.runtime import ComposeStack
 
     stack = ComposeStack(
         compose_env=tmp_path / "compose.env",
@@ -684,7 +684,7 @@ def test_a_retained_run_drops_only_the_anonymous_volumes_it_added(tmp_path) -> N
     unnamed ones — anything that predates the stack belongs to somebody else.
     """
 
-    from src.hosted_real_stripe.runtime import ComposeStack
+    from e2e_harness.hosted_real_stripe.runtime import ComposeStack
 
     mine = "f" * 64
     theirs = "a" * 64
@@ -724,7 +724,7 @@ def test_a_protected_run_refuses_an_inherited_payer_fixture() -> None:
 
     import argparse
 
-    from src.hosted_real_stripe.driver import AuthorizationRejected, run
+    from e2e_harness.hosted_real_stripe.driver import AuthorizationRejected, run
 
     args = argparse.Namespace(retain_authority_state=True, release_mode="attested")
     with pytest.raises(AuthorizationRejected, match="may not inherit authority state"):
@@ -737,7 +737,7 @@ def test_the_staged_bridge_does_not_inherit_an_ambient_proxy(tmp_path, monkeypat
     import json
     import sys
 
-    from src.hosted_real_stripe.runtime import MarketplaceLifecycleSession
+    from e2e_harness.hosted_real_stripe.runtime import MarketplaceLifecycleSession
 
     monkeypatch.setenv("ALL_PROXY", "socks5h://127.0.0.1:10808")
     monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:10809")

@@ -12,8 +12,8 @@ from core_storefront.domain_registry import (
     canonical_source_envelope,
 )
 
-from domains.vms.listings.listing_shapes import resolve_shape
-from domains.vms.listings.reconciler import (
+from arkhai_vms_listings.listing_shapes import resolve_shape
+from arkhai_vms_listings.reconciler import (
     LISTING_SOURCE_KIND,
     LISTING_SOURCE_SCHEMA_VERSION,
 )

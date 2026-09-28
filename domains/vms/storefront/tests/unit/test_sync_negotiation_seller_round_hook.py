@@ -29,7 +29,7 @@ from market_storefront.domain_runtime import (
     build_vm_storefront_domain,
     build_vm_storefront_registry,
 )
-from domains.vms.negotiation.storefront_round import SellerRoundResult
+from arkhai_vms_negotiation.storefront_round import SellerRoundResult
 from market_hosted_settlement import default_hosted_selection_dispatch
 from market_storefront.negotiation_runtime import (
     _accepted_selection_artifacts,

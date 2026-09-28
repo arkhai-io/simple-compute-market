@@ -104,7 +104,7 @@ def listing_cardinality_mode_explanations() -> dict[str, dict[str, str]]:
     publication candidate generation: this only needs each pool's
     projected `policy_tags`, not pricing or availability.
     """
-    from domains.vms.listings.listing_cardinality_mode import (
+    from arkhai_vms_listings.listing_cardinality_mode import (
         resolve_vm_listing_cardinality_mode,
     )
 

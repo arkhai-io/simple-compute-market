@@ -9,7 +9,7 @@ every call to that route. Three tables therefore have to stay identical:
 
 - `CREDITS_ROUTE_CONTRACTS` (the service, authoritative),
 - `apicredits_middleware.client` (the gated app, `service` role),
-- `domains.apicredits.settlement.credits_client` (the storefront, `seller`).
+- `arkhai_apicredits.settlement.credits_client` (the storefront, `seller`).
 
 Lives in the service's own suite because the service owns the authoritative
 table, and because the two clients it compares against need `fastapi` and
@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import pytest
 
-from middleware.route_contracts import CREDITS_ROUTE_CONTRACTS
+from apicredits_service.middleware.route_contracts import CREDITS_ROUTE_CONTRACTS
 
 
 @pytest.fixture(scope="module")
@@ -100,14 +100,17 @@ def test_batch_route_signs_the_empty_resource(contracts, middleware_client):
 
 
 def test_storefront_operations_exist_and_admit_the_seller_role(contracts):
-    """The storefront's five operations, signed as `seller`."""
-    from domains.apicredits.settlement import credits_client as sf
+    """The storefront's operations, signed as `seller`."""
+    from arkhai_apicredits.settlement import credits_client as sf
 
     keyed = {
         sf.ISSUANCE_GET_OPERATION: "fulfillment_id",
         sf.KEY_GET_OPERATION: "key_id",
         sf.KEY_REVOKE_OPERATION: "key_id",
         sf.KEY_ADJUST_OPERATION: "key_id",
+        sf.KEY_GRANTS_LIST_OPERATION: "key_id",
+        sf.KEY_USAGE_LIST_OPERATION: "key_id",
+        sf.KEYS_LIST_OPERATION: None,
     }
     for operation, path_resource in keyed.items():
         assert operation in contracts, sorted(contracts)
@@ -124,7 +127,7 @@ def test_issuance_signs_the_optional_body_resource(contracts):
     not a path segment, so it is the one most likely to be "fixed" into
     signing something else.
     """
-    from domains.apicredits.settlement import credits_client as sf
+    from arkhai_apicredits.settlement import credits_client as sf
 
     contract = contracts[sf.ISSUE_OPERATION]
     assert sf.STOREFRONT_ROLE in contract.allowed_roles
@@ -140,6 +143,6 @@ def test_the_two_clients_do_not_claim_each_others_roles(middleware_client):
     keys. That is expressed by the roles the two clients sign as, so the
     two constants must stay different.
     """
-    from domains.apicredits.settlement import credits_client as sf
+    from arkhai_apicredits.settlement import credits_client as sf
 
     assert middleware_client.GATED_APP_ROLE != sf.STOREFRONT_ROLE

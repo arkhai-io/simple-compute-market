@@ -1,3 +1,6 @@
+# Every uv command in this Makefile uses the repository's declared Python version.
+export UV_PYTHON := $(or $(shell cat ../../../.python-version 2>/dev/null),$(error ../../../.python-version not found))
+
 .PHONY: help install reinit test serve build clean
 
 .DEFAULT_GOAL := help
@@ -7,33 +10,17 @@ help: ## Show available commands
 
 DIST_DIR ?= ../../../.dist
 
-install: ## Install dependencies using uv
+install: reinit ## Install dependencies using uv
 	@command -v uv >/dev/null 2>&1 || { echo "uv is not installed. Install from https://docs.astral.sh/uv/"; exit 1; }
-	uv sync --dev --find-links $(DIST_DIR)
 
-reinit: ## Force-reinstall internal wheels without bumping versions. Run make dist-* from the monorepo root first. \
-		--upgrade-package arkhai-kit-capability-shape --reinstall-package arkhai-kit-capability-shape
-# The two client packages are dev-only but are refreshed here for the same
-# reason as the kits: they are built into $(DIST_DIR) without a version bump,
-# so a cached same-version wheel would shadow fresh content and the
-# boundary tests would prove yesterday's clients against today's authority.
-	uv sync --dev --find-links $(DIST_DIR) \
-		--upgrade-package arkhai-kit-identity --reinstall-package arkhai-kit-identity \
-		--upgrade-package arkhai-kit-site --reinstall-package arkhai-kit-site \
-		--upgrade-package arkhai-kit-resource-pools --reinstall-package arkhai-kit-resource-pools \
-		--upgrade-package arkhai-apicredits-middleware --reinstall-package arkhai-apicredits-middleware \
-		--upgrade-package arkhai-apicredits-domain --reinstall-package arkhai-apicredits-domain \
-		--upgrade-package arkhai-kit-site-client --reinstall-package arkhai-kit-site-client \
-		--upgrade-package arkhai-core --reinstall-package arkhai-core \
-		--upgrade-package arkhai-kit-alkahest --reinstall-package arkhai-kit-alkahest \
-		--upgrade-package arkhai-kit-policy --reinstall-package arkhai-kit-policy \
-		--upgrade-package arkhai-kit-settlement-runtime --reinstall-package arkhai-kit-settlement-runtime
+reinit: ## Sync this environment, refreshing the internal wheels its lock installs. Run make dist first.
+	python3 ../../../scripts/uv_project.py reinit
 
 test: reinit ## Run the test suite
-	PYTHONPATH=src uv run --find-links $(DIST_DIR) pytest tests -q
+	uv run --find-links $(DIST_DIR) pytest tests -q
 
 serve: ## Run the service locally (reload)
-	PYTHONPATH=src uv run --find-links $(DIST_DIR) python src/main.py
+	uv run --find-links $(DIST_DIR) python -m apicredits_service.main
 
 build: ## Build the wheel into the shared .dist/
 	uv build --wheel --out-dir $(DIST_DIR)

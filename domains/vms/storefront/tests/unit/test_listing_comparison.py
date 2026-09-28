@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from domains.vms.listings.listing_comparison import (
+from arkhai_vms_listings.listing_comparison import (
     BACKING_DISAGREES,
     BACKING_UNDISCLOSED,
     IDENTITY_DIFFERS,
@@ -106,7 +106,7 @@ def test_a_field_the_source_resolves_differently_still_diverges():
 def test_every_vm_dimension_is_an_identity_field():
     from arkhai_vms import DIMENSION_KEYS
 
-    from domains.vms.listings.listing_comparison import IDENTITY_FIELDS
+    from arkhai_vms_listings.listing_comparison import IDENTITY_FIELDS
 
     assert set(DIMENSION_KEYS) <= set(IDENTITY_FIELDS)
     # Identity is what a listing is and where; the dimensions are listed once,

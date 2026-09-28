@@ -23,6 +23,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Use the repository's declared Python version
+        run: echo "UV_PYTHON=$(cat .python-version)" >> "$GITHUB_ENV"
       - uses: astral-sh/setup-uv@v4
         with:
           version: "0.8.13"

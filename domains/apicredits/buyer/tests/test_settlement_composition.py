@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from market_hosted_settlement import StripeSettlementConfig
 
-from domains.apicredits.buyer.settlement_composition import (
+from arkhai_apicredits_buyer.settlement_composition import (
     buyer_settlement_registry,
     resolve_buyer_settlement_policy,
 )
@@ -10,7 +10,7 @@ from domains.apicredits.buyer.settlement_composition import (
 
 def test_hosted_only_registry_resolution_does_not_resolve_wallet(monkeypatch) -> None:
     monkeypatch.setattr(
-        "domains.apicredits.buyer.settlement_composition.resolve_buyer_wallet",
+        "arkhai_apicredits_buyer.settlement_composition.resolve_buyer_wallet",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
             AssertionError("hosted-only policy resolved wallet")
         ),

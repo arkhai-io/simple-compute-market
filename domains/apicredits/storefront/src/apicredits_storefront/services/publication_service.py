@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from domains.apicredits.listings.reconciler import (
+from arkhai_apicredits.listings.reconciler import (
     reopenable_credit_listing_ids,
     stale_open_credit_listing_ids,
 )

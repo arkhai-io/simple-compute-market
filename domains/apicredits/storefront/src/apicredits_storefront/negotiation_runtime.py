@@ -16,13 +16,13 @@ from apicredits_storefront.services.capacity_client import (
 )
 from apicredits_storefront.services.keys_lookup import lookup_key_record
 from apicredits_storefront.utils.config import CHAINS, settings
-from domains.apicredits.listings.models import coerce_resource_dict
-from domains.apicredits.listings.pricing import (
+from arkhai_apicredits.listings.models import coerce_resource_dict
+from arkhai_apicredits.listings.pricing import (
     determine_strategy_from_order,
     extract_unit_price_from_order,
 )
-from domains.apicredits.negotiation.storefront_round import ApiCreditsSellerRoundHook
-from domains.apicredits.negotiation.terms import (
+from arkhai_apicredits.negotiation.storefront_round import ApiCreditsSellerRoundHook
+from arkhai_apicredits.negotiation.terms import (
     provision_key_id,
     provision_key_mode,
     provision_quantity,

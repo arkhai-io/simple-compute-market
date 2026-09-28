@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from domains.vms.listings import extract_compute_from_order
-from domains.vms.settlement import (
+from arkhai_vms_listings import extract_compute_from_order
+from arkhai_vms_settlement import (
     encode_compute_lease,
     token_resource_from_accepted_escrow,
 )

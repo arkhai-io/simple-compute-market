@@ -206,8 +206,8 @@ webhook_timeout = 5.0
 # use [negotiation.policies.<kind>] chain = [...] when a kind needs
 # its own guard + terminal sequence.
 policies           = ["has_matching_inventory_guard", "escrow_shape_guard", "bisection"]
-seller_model_path  = "domains/vms/negotiation/rl/models/arkhai_negotiator_seller.pt"
-buyer_model_path   = "domains/vms/negotiation/rl/models/arkhai_negotiator_buyer.pt"
+seller_model_path  = "domains/vms/negotiation/src/arkhai_vms_negotiation/rl/models/arkhai_negotiator_seller.pt"
+buyer_model_path   = "domains/vms/negotiation/src/arkhai_vms_negotiation/rl/models/arkhai_negotiator_buyer.pt"
 extra_policy_paths = []
 
 [pricing]
@@ -221,7 +221,7 @@ publish_priceless            = false
 # Whether a resource pool's own projected `sla` hint
 # is consulted at all when resolving a listing's advertised SLA (the
 # middle tier of a storefront override > pool hint > this default
-# precedence chain -- see domains.vms.listings.pool_descriptors).
+# precedence chain -- see arkhai_vms_listings.pool_descriptors).
 # Off by default: publishing a site's self-reported SLA claim is new
 # capability a storefront operator must opt into, not something already
 # trusted today.
@@ -232,7 +232,7 @@ default_sla                  = 0.0
 
 # Per-GPU-model pricing defaults (tier 1 of the
 # storefront-override > pool-hint > this-default precedence chain --
-# see domains.vms.listings.pricing_resolution). Structured as a
+# see arkhai_vms_listings.pricing_resolution). Structured as a
 # family-grouped requirement shape, reserving room for non-GPU families
 # (cpu/memory/storage) once that vocabulary is available and a pricing
 # dimension exists to key them by -- only `gpu` has entries today.

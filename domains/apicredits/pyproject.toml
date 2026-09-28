@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-apicredits-domain"
-version = "0.3.0"
+version = "0.4.0"
 license = "MIT"
 description = "Shared API-credit domain models, policies, and market-domain contract."
 requires-python = ">=3.12,<3.14"
@@ -13,19 +13,6 @@ dependencies = [
     "pydantic>=2",
 ]
 
-[tool.uv]
-# Tests import this package from its installed wheel, not an editable
-# install: a directory-mapped package has no editable form that presents it
-# under its import path. The Makefile and CI set UV_NO_EDITABLE, and these
-# keys make uv rebuild that wheel whenever a module changes.
-cache-keys = [
-    { file = "pyproject.toml" },
-    { file = "*.py" },
-    { file = "listings/*.py" },
-    { file = "negotiation/*.py" },
-    { file = "settlement/*.py" },
-]
-
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
@@ -34,14 +21,7 @@ build-backend = "hatchling.build"
 allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
-# This directory is the `domains.apicredits` package; its role packages
-# (buyer, service, storefront, middleware, sample-app) are separate projects
-# nested inside it. The wheel maps the shared modules and subpackages by
-# directory, so a module added to one ships without a packaging edit.
-include = ["/*.py", "/listings/*.py", "/negotiation/*.py", "/settlement/*.py"]
-
-[tool.hatch.build.targets.wheel.sources]
-"" = "domains/apicredits/"
+packages = ["src/arkhai_apicredits"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -56,8 +36,8 @@ filterwarnings = [
     # have to start passing `by_alias=True` in step or the emitted key changes
     # silently. Scoped to these two modules so the same shadow appearing
     # anywhere else still surfaces.
-    "ignore:Field name \"schema\".*shadows an attribute:UserWarning:domains.apicredits.settlement.credits_client",
-    "ignore:Field name \"schema\".*shadows an attribute:UserWarning:domains.apicredits.settlement.issuance_evidence",
+    "ignore:Field name \"schema\".*shadows an attribute:UserWarning:arkhai_apicredits.settlement.credits_client",
+    "ignore:Field name \"schema\".*shadows an attribute:UserWarning:arkhai_apicredits.settlement.issuance_evidence",
 ]
 
 [dependency-groups]

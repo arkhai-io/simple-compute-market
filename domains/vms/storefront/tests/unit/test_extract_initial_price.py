@@ -14,13 +14,13 @@ from __future__ import annotations
 
 import pytest
 
-from domains.vms.listings.models import (
+from arkhai_vms_listings.models import (
     ComputeResource,
     GPUModel,
     Listing,
     Region,
 )
-from domains.vms.listings.pricing import extract_initial_price_from_order
+from arkhai_vms_listings.pricing import extract_initial_price_from_order
 from market_identity import Ed25519Signer
 from market_storefront.utils.config import settings
 from tests._settings_overrides import settings_overrides
