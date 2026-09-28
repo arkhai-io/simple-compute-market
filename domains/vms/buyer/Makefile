@@ -1,3 +1,6 @@
+# Every uv command in this Makefile uses the repository's declared Python version.
+export UV_PYTHON := $(or $(shell cat ../../../.python-version 2>/dev/null),$(error ../../../.python-version not found))
+
 REPO_ROOT := $(shell git rev-parse --show-toplevel)
 DIST_DIR ?= ../../../.dist
 
@@ -6,30 +9,10 @@ export UV_NO_EDITABLE := 1
 
 .PHONY: build init reinit test smoke-test
 
-init:
-	uv venv --allow-existing --python 3.12
-	uv sync --dev --python 3.12 --find-links $(DIST_DIR)
+init: reinit
 
 reinit:
-	uv sync --dev --python 3.12 --find-links $(DIST_DIR) \
-	--upgrade-package arkhai-core         --reinstall-package arkhai-core \
-	--upgrade-package arkhai-core-buyer   --reinstall-package arkhai-core-buyer \
-	--upgrade-package arkhai-core-registry-client --reinstall-package arkhai-core-registry-client \
-	--upgrade-package arkhai-vms-buyer     --reinstall-package arkhai-vms-buyer \
-	--upgrade-package arkhai-kit-identity  --reinstall-package arkhai-kit-identity \
-	--upgrade-package arkhai-kit-alkahest --reinstall-package arkhai-kit-alkahest \
-	--upgrade-package arkhai-hosted-settlement-client --reinstall-package arkhai-hosted-settlement-client \
-	--upgrade-package arkhai-kit-hosted-settlement --reinstall-package arkhai-kit-hosted-settlement \
-	--upgrade-package arkhai-kit-config   --reinstall-package arkhai-kit-config \
-	--upgrade-package arkhai-kit-policy   --reinstall-package arkhai-kit-policy \
-	--upgrade-package arkhai-kit-settlement-runtime --reinstall-package arkhai-kit-settlement-runtime \
-	--upgrade-package arkhai-vms             --reinstall-package arkhai-vms \
-	--upgrade-package arkhai-vms-listings    --reinstall-package arkhai-vms-listings \
-	--upgrade-package arkhai-vms-negotiation --reinstall-package arkhai-vms-negotiation \
-	--upgrade-package arkhai-vms-settlement  --reinstall-package arkhai-vms-settlement \
-	--upgrade-package arkhai-kit-delivery --reinstall-package arkhai-kit-delivery \
-	--upgrade-package arkhai-kit-capability-shape --reinstall-package arkhai-kit-capability-shape \
-	--upgrade-package arkhai-compute --reinstall-package arkhai-compute
+	python3 ../../../scripts/uv_project.py reinit
 
 test: reinit
 	uv run --find-links $(DIST_DIR) pytest tests -q

@@ -39,7 +39,6 @@ version = "0.2.0"
 source = { registry = "../../.dist" }
 wheels = [
     { path = "arkhai_kit_capability_shape-0.2.0-py3-none-any.whl" },
-    { path = "arkhai_kit_capability_shape-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -88,7 +87,6 @@ dependencies = [
 ]
 wheels = [
     { path = "arkhai_kit_identity-0.3.0-py3-none-any.whl" },
-    { path = "arkhai_kit_identity-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -102,7 +100,6 @@ dependencies = [
     { name = "sqlalchemy" },
 ]
 wheels = [
-    { path = "arkhai_kit_resource_pools-0.5.0-py3-none-any.whl" },
     { path = "arkhai_kit_resource_pools-0.5.0-py3-none-any.whl" },
 ]
 
@@ -119,7 +116,6 @@ dependencies = [
     { name = "sqlalchemy" },
 ]
 wheels = [
-    { path = "arkhai_kit_site-0.6.0-py3-none-any.whl" },
     { path = "arkhai_kit_site-0.6.0-py3-none-any.whl" },
 ]
 

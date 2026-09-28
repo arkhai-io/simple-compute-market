@@ -693,7 +693,7 @@ review environment can use the wheelhouse's declared Python version.
 **Current implementation:** `make review-wheelhouse` (scope preview via
 `make review-wheelhouse-scope`, controlled by `REVIEW_PROJECTS`,
 `REVIEW_SCOPE_FILE`, or `BASE_REF`), which rebuilds wheels, refreshes
-scoped lockfiles (`scripts/refresh-review-locks.py`), and bundles the
+scoped lockfiles (`scripts/uv_project.py lock`), and bundles the
 result via `scripts/package-review-wheelhouse.sh`.
 
 ## Running the hosted Stripe body locally

@@ -24,6 +24,8 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Use the repository's declared Python version
+        run: echo "UV_PYTHON=$(cat .python-version)" >> "$GITHUB_ENV"
       - name: Set up Python and uv
         uses: astral-sh/setup-uv@v6
         with:

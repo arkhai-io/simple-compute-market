@@ -175,7 +175,7 @@ Buyer package:
 
 ```bash
 cd domains/vms/buyer
-uv sync --python 3.12 --extra test
+make reinit
 uv run pytest tests/ -v
 make smoke-test
 cd ../../..

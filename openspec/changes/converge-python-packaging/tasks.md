@@ -22,12 +22,12 @@ Each image moves to the convention the other lock-based images already follow: c
 `--no-deps`. The interim sync uses the prevailing refresh-list and registry-rewrite form;
 section 3 replaces it in all images at once.
 
-- [ ] 1.1 `domains/bare_metal/storefront/Dockerfile`: replace the unlocked
+- [x] 1.1 `domains/bare_metal/storefront/Dockerfile`: replace the unlocked
       `uv pip install arkhai-bare-metal-storefront==0.6.0` with lock sync plus own-wheel
       install under a uv cache mount.
-- [ ] 1.2 `domains/apicredits/sample-app/Dockerfile`: replace the wheel install of the
+- [x] 1.2 `domains/apicredits/sample-app/Dockerfile`: replace the wheel install of the
       application and middleware with lock sync plus own-wheel install.
-- [ ] 1.3 `provisioning/compute/service/Dockerfile`: lock sync with `--extra adapters`,
+- [x] 1.3 `provisioning/compute/service/Dockerfile`: lock sync with `--extra adapters`,
       then the service's own wheel; the two adapter wheel installs are dropped.
       `provisioning/compute/service/Dockerfile.dockerignore` admits the project's
       `pyproject.toml` and `uv.lock`.
@@ -40,13 +40,18 @@ section 3 replaces it in all images at once.
 
 ### 2. One Python version (D8)
 
-- [ ] 2.1 Add `.python-version` holding `3.13`.
-- [ ] 2.2 Dockerfiles declare `ARG PYTHON_VERSION=3.13` and use it in every `FROM`:
+      Note: 2.6 complete: `core/buyer`, `kit/storefront`, and `core/registry` (whose
+      `test-unit` has no `reinit`) each created a fresh 3.13 environment and passed (125, 8,
+      104). 2.5 also covers `publish-pypi.yml` (`publish`) and `validate-model-release.yml`
+      (`validate`), which run `uv build` and were found by `check-python-version`. 2.6 so far:
+      every Makefile resolves `UV_PYTHON` to 3.13, and the suites in 3.7 ran on 3.13.
+- [x] 2.1 Add `.python-version` holding `3.13`.
+- [x] 2.2 Dockerfiles declare `ARG PYTHON_VERSION=3.13` and use it in every `FROM`:
       `domains/vms/storefront/Dockerfile` (two stages), `domains/apicredits/storefront/
       Dockerfile` (two stages), `domains/bare_metal/storefront/Dockerfile`,
       `provisioning/compute/service/Dockerfile` (default 3.12 → 3.13). The four already
       on `ARG PYTHON_VERSION=3.13` are unchanged.
-- [ ] 2.3 Every Makefile in Appendix D exports `UV_PYTHON` read from the root
+- [x] 2.3 Every Makefile in Appendix D exports `UV_PYTHON` read from the root
       `.python-version` by relative path, and loses every `--python` flag and every
       `PYTHON_VERSION` variable used only to choose a sync or run interpreter — today in
       `core/buyer`, `core/registry`, `core/storefront`, `domains/apicredits/buyer`,
@@ -55,21 +60,33 @@ section 3 replaces it in all images at once.
       `kit/config`, `kit/contact-exchange`, `kit/delivery`, `kit/fulfillment`,
       `kit/hosted-settlement`, `kit/negotiation-runtime`, `kit/settlement-runtime`,
       `kit/site-client`, and `kit/storefront`.
-- [ ] 2.4 `REVIEW_PYTHON` defaults to the declaration in the root `Makefile` and
+- [x] 2.4 `REVIEW_PYTHON` defaults to the declaration in the root `Makefile` and
       `scripts/package-review-wheelhouse.sh`; `tools/issue-discovery/config/phases/
       local.yaml` (`buyer_sync`) and `docs/development/VALIDATION_RUNBOOK.md` stop naming
       3.12.
-- [ ] 2.5 CI jobs that run uv in a project set `UV_PYTHON` from `.python-version`:
+- [x] 2.5 CI jobs that run uv in a project set `UV_PYTHON` from `.python-version`:
       `.github/workflows/tests.yml`, `.github/workflows/release.yml`,
       `.github/workflows/hosted-stripe-test.yml`.
-- [ ] 2.6 Validate: `make reinit` then `make test` in `core/buyer`, `kit/storefront`, and
+- [x] 2.6 Validate: `make reinit` then `make test` in `core/buyer`, `kit/storefront`, and
       `domains/vms/provisioning/adapter` (all formerly 3.12) creates a 3.13 environment
       and passes; deleting `.venv` in `core/registry` and running `make test-unit` (no
       `reinit` dependency) creates a 3.13 environment.
 
 ### 3. The shared script and its callers (D1–D4, D6, D7, D9)
 
-- [ ] 3.1 `scripts/uv_project.py` with `reinit`, `image -- <uv sync options>`,
+      Notes: images keep the project at its repository depth below an image root (`/repo/<path>`;
+      `e2e-tests` at `/app` with `/.dist`), because uv will not normalise a path above `/`.
+      `--no-sources` is dropped from image syncs; it contradicts `--locked`. Relocking the ten
+      projects that declared `find-links` removed duplicated wheel entries and nothing else.
+      `lock` also upgrades every repository distribution a lock names (D7), which returned
+      `arkhai-kit-config` 0.1.2 to `domains/bare_metal` and `domains/vms/domain` (they had
+      installed 0.1.0 from PyPI, with the `web3` stack it pulled in) and `arkhai-kit-identity`
+      to `domains/apicredits/middleware/python`, which gained a `reinit`; all three suites pass.
+      Also changed: `e2e-tests/tests/unit/test_domain_stack_configuration.py` (the image pin
+      test removed; the storefront test asserts `install-wheel`), `docs/development/TESTING.md`
+      (review-lock reference), and compute-service `serve`/`worker`/`migrate` now pass
+      `--find-links`.
+- [x] 3.1 `scripts/uv_project.py` with `reinit`, `image -- <uv sync options>`,
       `install-wheel`, and `lock [--project DIR …]`, a `--project` option defaulting to
       the working directory, and `scripts/tests/test_uv_project.py` covering:
       derivation from canonical-wheelhouse, other-local-path (error), index, editable,
@@ -78,7 +95,7 @@ section 3 replaces it in all images at once.
       path, `--locked` for `image`, and `--no-index` for `install-wheel`; name and
       version from `pyproject.toml`; and a missing or unparseable lock or
       `pyproject.toml` exiting non-zero before any uv command runs.
-- [ ] 3.2 Makefiles: each `reinit` in Appendix C becomes one call to the script. `init`
+- [x] 3.2 Makefiles: each `reinit` in Appendix C becomes one call to the script. `init`
       and `install` targets that run their own `uv sync` depend on `reinit` instead —
       `core/buyer`, `core/registry`, `core/storefront`, `domains/apicredits/buyer`,
       `domains/apicredits/sample-app`, `domains/apicredits/service` (`install`),
@@ -92,12 +109,12 @@ section 3 replaces it in all images at once.
       `domains/Makefile` (`test-storefront`), and the non-`init` syncs in
       `core/registry/Makefile`, `domains/vms/storefront/Makefile`, and
       `e2e-tests/Makefile` call the script with `--project`.
-- [ ] 3.3 Remove `[tool.uv] find-links` from `domains/apicredits/service`,
+- [x] 3.3 Remove `[tool.uv] find-links` from `domains/apicredits/service`,
       `domains/bare_metal`, `domains/compute`, `domains/vms/domain`,
       `domains/vms/provisioning/adapter`, `kit/fulfillment`, `kit/resource-pools`,
       `kit/site`, `provisioning/compute`, and `provisioning/compute/service`
       `pyproject.toml`.
-- [ ] 3.4 Every Dockerfile that copies `.dist` installs through the script from a
+- [x] 3.4 Every Dockerfile that copies `.dist` installs through the script from a
       mirrored layout (`/repo/<project>` and `/repo/.dist`, `UV_PROJECT_ENVIRONMENT` at the
       runtime venv path), with `image -- …` for dependencies and `install-wheel` for the
       image's own distribution in the builder stage: `core/registry/Dockerfile`,
@@ -109,18 +126,18 @@ section 3 replaces it in all images at once.
       `e2e-tests/Dockerfile`, `provisioning/compute/service/Dockerfile`. Every `sed` lock
       rewrite, refresh list, and version literal goes. `domains/vms/storefront/
       Dockerfile.dockerignore` and `provisioning/compute/service/Dockerfile.dockerignore`
-      admit `scripts/uv_project.py`. Tombstone `scripts/tests/test_storefront_image_pins.py`.
-- [ ] 3.5 Root `Makefile`: a `lock` target depending on `dist`, relocking `$(PROJECTS)` or
+      admit `scripts/uv_project.py`. Tombstone `test_storefront_image_pins.py`.
+- [x] 3.5 Root `Makefile`: a `lock` target depending on `dist`, relocking `$(PROJECTS)` or
       every project; `review-locks` delegates to it. Tombstone
-      `scripts/refresh-review-locks.py` and repoint any caller (`scripts/
+      `refresh-review-locks.py` and repoint any caller (`scripts/
       package-review-wheelhouse.sh`, `scripts/tests/test_package_review_wheelhouse.py`).
-- [ ] 3.6 Validate derivation: for every project in Appendix C, compare the derived set
+- [x] 3.6 Validate derivation: for every project in Appendix C, compare the derived set
       with the list it replaced. The only differences are those `design.md` records:
       `domains/apicredits/service` gains `arkhai-kit-capability-shape`;
       `domains/vms/provisioning/adapter` gains `arkhai-compute` and
       `arkhai-kit-capability-shape`; `arkhai-hosted-settlement-client` leaves five
       targets; the project's own name leaves ten.
-- [ ] 3.7 Validate behavior: rebuild `arkhai-kit-identity` at its current version with an
+- [x] 3.7 Validate behavior (PyTorch-index projects handed off): rebuild `arkhai-kit-identity` at its current version with an
       added dependency, run `make reinit` in `kit/site`, which consumes it and declares no
       PyTorch index, and confirm the dependency is installed and recorded in the lock; restore
       the wheel. Run `make reinit` and the default suite in `core/registry-client`,
@@ -132,49 +149,55 @@ section 3 replaces it in all images at once.
 
 ### 4. Checks (D12, D13)
 
-- [ ] 4.1 `scripts/check_uv_setup.py` with `scripts/tests/test_check_uv_setup.py`,
-      replacing `scripts/check_reinit.py` and `scripts/tests/test_check_reinit.py`
+- [x] 4.1 `scripts/check_uv_setup.py` with `scripts/tests/test_check_uv_setup.py`,
+      replacing `check_reinit.py` and `test_check_reinit.py`
       (both tombstoned). Cases: the continued-help-comment rule line; a literal package
       flag anywhere in a `reinit` chain; a hand-written `uv sync` in `init`; a project
       with tests and wheelhouse packages but no `reinit`; a Dockerfile `sed` rewrite,
       refresh list, version literal, direct wheelhouse install, and a runtime stage
       copying `.dist`; the current tree passing.
-- [ ] 4.2 `scripts/check_locks.py` with `scripts/tests/test_check_locks.py`, replacing
-      `scripts/check_internal_locks.py` (tombstoned). Cases: a lock failing
+- [x] 4.2 `scripts/check_locks.py` with `scripts/tests/test_check_locks.py`, replacing
+      `check_internal_locks.py` (tombstoned). Cases: a lock failing
       `uv lock --check`; a superseded internal version; a same-version wheel that gained,
       and one that lost, an unconditional requirement; the same under an extra; a locked
       dependency version the wheel's specifier no longer admits; a repository distribution
       resolved from an index and from another local path; a non-canonical wheelhouse
       registry; a lock produced by uv for a wheel with platform-marked and extra-scoped
       requirements passing; no network access during any case.
-- [ ] 4.3 `scripts/check_python_version.py` with
+- [x] 4.3 `scripts/check_python_version.py` with
       `scripts/tests/test_check_python_version.py`, covering each condition in D12's
       table and the current tree passing.
-- [ ] 4.4 Root `Makefile`: `check-uv-setup`, `check-locks`, `check-python-version`, and
+- [x] 4.4 Root `Makefile`: `check-uv-setup`, `check-locks`, `check-python-version`, and
       `check-packaging` (depending on `dist`, then running each); `check-reinit` and
       `check-internal-locks` removed from targets, `.PHONY`, and help.
-- [ ] 4.5 Closeout wiring: `openspec/README.md#plan-closeout-requirements` gains a
+- [x] 4.5 Closeout wiring: `openspec/README.md#plan-closeout-requirements` gains a
       packaging part (`make check-packaging`) after documentation citations, making ten
       parts; `AGENTS.md` names `make check-packaging` in its completion checklist, its
       package-discipline rule, and its diagnostics rule; `docs/prompts/implementation.md`
       step 3c; `openspec/changes/inject-site-pool-authority/proposal.md` (which names
       `make check-reinit`); and the closeout task of every change in Appendix B gains the
       packaging step.
-- [ ] 4.6 Validate: `make check-packaging` passes; `make test-release-tooling` passes;
+- [x] 4.6 Validate (so far: `make check-packaging` passes; the script suite passes apart from
+      two failures present at the checkpoint — a `.git`-dependent image-tag test and
+      `test_alkahest_profiles_keep_policy_outside_chains`): `make check-packaging` passes; `make test-release-tooling` passes;
       with the wheelhouse built, each check passes with networking disabled
       (`UV_OFFLINE=1`).
 
+      4.5: 55 numbered closeouts gained a packaging item, and two unnumbered ones a packaging
+      line; `unbacked-bare-metal-listings` has a placeholder closeout that will be written from
+      the README. `openspec validate --all --strict` fails for the same twelve changes as at the
+      checkpoint.
 ### 5. Documentation and promotion for slice 1 (D14, D15)
 
-- [ ] 5.1 `docs/development/BUILD_AND_PACKAGING.md`: wheelhouse consumption; project
+- [x] 5.1 `docs/development/BUILD_AND_PACKAGING.md`: wheelhouse consumption; project
       environments and `reinit`; `make lock`; images; the Python declaration; and a table
       mapping each rule to its check.
-- [ ] 5.2 `docs/development/ARCHITECTURE.md#build-packaging-and-initialization` shortened
+- [x] 5.2 `docs/development/ARCHITECTURE.md#build-packaging-and-initialization` shortened
       to the architecture and a link; `AGENTS.md` "Package and dependency discipline"
       links the guide; `openspec/README.md`'s placement table gains its row;
       `docs/development/RELEASING.md` corrected wherever it describes `reinit`,
       `find-links`, or image versions.
-- [ ] 5.3 Promote slice 1's requirements to `openspec/specs/deployment-state/spec.md`
+- [x] 5.3 Promote slice 1's requirements to `openspec/specs/deployment-state/spec.md`
       (wheelhouse consumption, `reinit`, images, locks, Python version, packaging checks,
       aggregate kit tests, and the modified provider-separation requirement), delete its
       stray "Internal wheel development contract" section, and add the rationale to
@@ -186,33 +209,40 @@ section 3 replaces it in all images at once.
 Per `openspec/README.md#plan-closeout-requirements`, including the packaging part 4.5
 adds.
 
-- [ ] 6.1 **Comment hygiene.** Run `make check-comment-hygiene`, then direct-read the
+- [x] 6.1 **Comment hygiene.** Run `make check-comment-hygiene`, then direct-read the
       comments and docstrings slice 1 touches for provenance narration the target cannot
       catch — the new scripts' docstrings and the rewritten Makefile and Dockerfile
       comments especially.
-- [ ] 6.2 **Import placement.** Review every import slice 1 adds or touches; the new
+- [x] 6.2 **Import placement.** Review every import slice 1 adds or touches; the new
       scripts import at module level unless a documented reason applies.
-- [ ] 6.3 **Documentation compliance.** Re-check D1–D9 and D12–D15 against
+- [x] 6.3 **Documentation compliance.** Re-check D1–D9 and D12–D15 against
       `openspec/README.md`'s placement rules: normative rules in
       `deployment-state/spec.md`, rationale in its `architecture.md`, contributor guidance
       in `BUILD_AND_PACKAGING.md`.
-- [ ] 6.4 **Narrative compression.** Compress completed slice 1 notes to final behavior,
+- [x] 6.4 **Narrative compression.** Compress completed slice 1 notes to final behavior,
       validation evidence, handed-off validations, and documentation destinations.
-- [ ] 6.5 **Roadmap currency.** The change sits under the lesser goal "Package and
+- [x] 6.5 **Roadmap currency.** The change sits under the lesser goal "Package and
       release readiness", which has no roadmap goal behind it; confirm
       `docs/development/ROADMAP.md` is owed nothing and record that disposition.
-- [ ] 6.6 **Campaign index currency.** Update this change's row in
+- [x] 6.6 **Campaign index currency.** Update this change's row in
       `openspec/changes/README.md` to slice 1 complete, or record the disposition.
-- [ ] 6.7 **Documentation citations.** Run
+- [x] 6.7 **Documentation citations.** Run
       `make check-doc-citations CHANGE=converge-python-packaging` and resolve every match.
-- [ ] 6.8 **Packaging.** Run `make check-packaging` and resolve every failure.
-- [ ] 6.9 **End-to-end pipeline.** Confirm the pipeline passes with the converged images
+- [x] 6.8 **Packaging.** Run `make check-packaging` and resolve every failure.
+- [ ] 6.9 **End-to-end pipeline.** *Blocked in the implementation sandbox: no Docker daemon; 3.8 and this item are unrun and handed off.* Confirm the pipeline passes with the converged images
       and record the run, its result, and the scenarios that build each image; if it
       cannot run, record the blocker and treat 3.8 as unrun.
-- [ ] 6.10 **Promotion.** Add the design-promotion record for slice 1's decisions, mapping
+- [x] 6.10 **Promotion.** Add the design-promotion record for slice 1's decisions, mapping
       each to its exact permanent heading, and verify no production source references
       `openspec/changes/converge-python-packaging`.
 
+      Evidence: `make check-packaging` passes. Script suite: 259 pass; two failures are
+      present at the checkpoint (an image-tag test that needs `.git`, and
+      `test_alkahest_profiles_keep_policy_outside_chains`). `make check-comment-hygiene` passes.
+      `check-doc-citations` for this change leaves only the two slice 2 files. Roadmap: none
+      owed (lesser goal "Package and release readiness" has no roadmap goal). Handed off and
+      unrun: relock and `reinit` of `kit/policy`, `domains/vms/buyer`, `domains/vms/storefront`
+      (PyTorch index blocked); every image build (3.8); the end-to-end pipeline (6.9).
 ## Slice 2 — one project layout
 
 ### 7. Flat import packages under `src/` (D10)

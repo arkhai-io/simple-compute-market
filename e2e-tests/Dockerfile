@@ -24,7 +24,8 @@ WORKDIR /app
 # These are built on the host by `make dist` before `docker build`.
 # The Dockerfile is built from the monorepo root:
 #   cd .. && docker build -t arkhai:e2e-tests -f e2e-tests/Dockerfile .
-COPY .dist/ /dist/
+COPY .dist/ /.dist/
+COPY scripts/uv_project.py /scripts/uv_project.py
 
 COPY e2e-tests/src ./src
 COPY e2e-tests/tests ./tests
@@ -38,43 +39,12 @@ COPY e2e-tests/tests ./tests
 # service images, including the registry rewrite below.
 COPY e2e-tests/pyproject.toml e2e-tests/uv.lock ./
 
-# The lock records the monorepo wheel registry as a path relative to the
-# project directory on the host (`../.dist`), which does not exist at this
-# layout. Point it at the copied wheels instead.
-RUN sed -E -i 's|registry = "[^"]*\.dist"|registry = "/dist"|' uv.lock || true
-
-# --refresh-package the monorepo workspace wheels: they are rebuilt into
-# .dist/ without a version bump, so a cached same-version wheel in the uv
-# cache mount would otherwise shadow fresh content (e.g. a arkhai-kit-policy
-# 0.1.0 missing a newly-added module). Third-party deps still hit the cache.
+# The lock is used as committed: /app sits one level below /, as e2e-tests sits
+# below the repository root, so the lock's relative wheelhouse path resolves to
+# /.dist. uv_project.py derives the internal packages from the lock and
+# reinstalls them, so a cached build of a same-version wheel is never reused.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --find-links /dist \
-        --refresh-package arkhai-core \
-        --refresh-package arkhai-core-buyer \
-        --refresh-package arkhai-core-storefront \
-        --refresh-package arkhai-kit-site \
-        --refresh-package arkhai-apicredits-service \
-        --refresh-package arkhai-apicredits-storefront \
-        --refresh-package arkhai-vms-buyer \
-        --refresh-package arkhai-vms \
-        --refresh-package arkhai-vms-listings \
-        --refresh-package arkhai-vms-negotiation \
-        --refresh-package arkhai-vms-settlement \
-        --refresh-package arkhai-apicredits-buyer \
-        --refresh-package arkhai-apicredits-domain \
-        --refresh-package arkhai-kit-policy \
-        --refresh-package arkhai-vms-storefront \
-        --refresh-package arkhai-vms-provisioning-operator-client \
-        --refresh-package arkhai-core-storefront-client \
-        --refresh-package arkhai-kit-alkahest \
-        --refresh-package arkhai-kit-identity \
-        --refresh-package arkhai-kit-settlement-runtime \
-        --refresh-package arkhai-kit-storefront \
-        --refresh-package arkhai-hosted-settlement-client \
-        --refresh-package arkhai-kit-hosted-settlement \
-        --refresh-package arkhai-kit-site-client \
-        --refresh-package arkhai-kit-config \
-        --refresh-package arkhai-core-registry-client
+    python3 /scripts/uv_project.py image --project /app --
 
 # Stage 2: Lean runtime image
 FROM python:${PYTHON_VERSION}-slim AS runtime

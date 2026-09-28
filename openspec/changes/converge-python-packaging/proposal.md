@@ -48,7 +48,7 @@ The work lands in two implementation slices under this one change.
   layout that mirrors the repository, and the image's own wheel by the version its
   `pyproject.toml` declares, from the wheelhouse only.
 - A root `make lock` relocks projects against current wheels and installs nothing.
-  It replaces `scripts/refresh-review-locks.py`.
+  It replaces `refresh-review-locks.py`.
 - Python 3.13 is declared once, in a root `.python-version`; environments and images
   use it. The four images on 3.12 move to 3.13.
 - `[tool.uv] find-links` declarations are removed; the script supplies the wheelhouse.

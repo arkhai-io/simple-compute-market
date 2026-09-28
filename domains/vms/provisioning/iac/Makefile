@@ -1,3 +1,6 @@
+# Every uv command in this Makefile uses the repository's declared Python version.
+export UV_PYTHON := $(or $(shell cat ../../../../.python-version 2>/dev/null),$(error ../../../../.python-version not found))
+
 .PHONY: validate validate-inventory validate-playbooks validate-tests validate-acceptance test
 
 validate: validate-inventory validate-playbooks validate-tests

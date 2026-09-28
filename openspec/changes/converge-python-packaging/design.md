@@ -25,7 +25,7 @@ the decisions below.
 `domains/apicredits/service/Makefile`, `reinit`'s rule line ends with a `##` help
 comment and a backslash; Make continues the comment onto the next line, so
 `--upgrade-package arkhai-kit-capability-shape` is never passed (`make -n reinit`
-confirms). `scripts/check_reinit.py` matches only the first rule line and counts the
+confirms). `check_reinit.py` matches only the first rule line and counts the
 continued line as recipe text, so it passes. `domains/vms/provisioning/adapter` has no
 `tests/` directory, so the check skips it; its list is missing `arkhai-compute` and
 `arkhai-kit-capability-shape`. Dockerfile lists are unchecked and further behind:
@@ -175,8 +175,12 @@ a lock from being committed. The image contract therefore rests on the closeout 
 not on the build detecting it.
 
 Images copy the project's `pyproject.toml` and `uv.lock` and the wheelhouse to the
-same relative positions they hold in the repository (under a fixed image root such as
-`/repo`) and set `UV_PROJECT_ENVIRONMENT` to the runtime venv path, so the lock is used
+same relative positions they hold in the repository: the project at its repository
+depth below an image root, the wheelhouse at `<image root>/.dist`. Most images use
+`/repo/<path>`; `e2e-tests`, one level deep, keeps `/app` with `/.dist`, so its editable
+project install stays valid in the runtime stage. uv refuses to normalise a path above
+`/`, so the depth must match exactly. Image syncs drop `--no-sources`, which contradicts
+`--locked` for a lock resolved with index sources and set `UV_PROJECT_ENVIRONMENT` to the runtime venv path, so the lock is used
 unmodified. The script is copied into builder stages only. The two deny-all
 per-Dockerfile ignore files admit it; a missing admission fails the `COPY` loudly.
 
@@ -195,17 +199,20 @@ lock sync: the adapter literals in `compute/service` disappear with its `adapter
 extra, and the second wheel in the VM storefront's runtime stage is dropped because the
 builder already installs it. The own-wheel install runs in the builder stage; runtime
 stages copy the finished venv and do not copy the wheelhouse.
-`scripts/tests/test_storefront_image_pins.py` exists only to catch drift in version
+`test_storefront_image_pins.py` exists only to catch drift in version
 literals and is removed.
 
 ### D7. `make lock` relocks unconditionally and installs nothing
 
 It depends on `dist`, because a consumer's lock records its internal dependencies'
-metadata from the wheels. It relocks every project it is given rather than skipping any
+metadata from the wheels. It upgrades every internal package and every other
+repository distribution the lock names, so a distribution that drifted to an index
+returns to the wheelhouse; implementation found two locks installing
+`arkhai-kit-config` 0.1.0 from PyPI instead of the tree's 0.1.2. It relocks every project it is given rather than skipping any
 a check reports current: relocking a current project is fast and changes nothing. A
 relock that leaves the tree unchanged is the strongest available proof of lock currency,
 and needs the network, including the PyPI and PyTorch indexes. It replaces
-`scripts/refresh-review-locks.py`, and `make review-locks` calls it with the review
+`refresh-review-locks.py`, and `make review-locks` calls it with the review
 scope's projects.
 
 ### D8. One Python version, declared once
@@ -433,3 +440,24 @@ PyPI, and a revert would publish further bumped versions restoring the old paths
 ## Open questions
 
 None.
+
+## Design promotion record
+
+| Accepted decision | Permanent location |
+|---|---|
+| D1 An internal package is one the lock resolves from the repository wheelhouse | `openspec/specs/deployment-state/spec.md` — "A project environment refreshes exactly the internal packages its lock installs"; `docs/development/BUILD_AND_PACKAGING.md#the-wheelhouse` |
+| D2 One script owns environment sync, lock generation, and image installs | `docs/development/BUILD_AND_PACKAGING.md#project-environments`, `#locks`, `#images`; `docs/development/ARCHITECTURE.md#build-packaging-and-initialization` |
+| D3 `reinit` upgrades and reinstalls and never uses `--locked` | `openspec/specs/deployment-state/spec.md` — "A project environment refreshes exactly the internal packages its lock installs"; `openspec/specs/deployment-state/architecture.md#artifact-and-package-boundary` |
+| D4 An image installs the committed lock and never relocks, from a layout at the project's repository depth | `openspec/specs/deployment-state/spec.md` — "An image installs the committed lock"; `openspec/specs/deployment-state/architecture.md#artifact-and-package-boundary`; `docs/development/BUILD_AND_PACKAGING.md#images` |
+| D5 The outlier images converge on lock sync plus own wheel | `openspec/specs/deployment-state/spec.md` — "An image installs the committed lock" |
+| D6 An image installs only its own distribution by version, in the builder stage | `openspec/specs/deployment-state/spec.md` — "An image installs the committed lock"; `docs/development/BUILD_AND_PACKAGING.md#images` |
+| D7 `make lock` relocks unconditionally, upgrading internal and repository distributions, and installs nothing | `openspec/specs/deployment-state/spec.md` — "Locks are refreshed without installing"; `docs/development/BUILD_AND_PACKAGING.md#locks` |
+| D8 One Python version, declared once and read explicitly everywhere | `openspec/specs/deployment-state/spec.md` — "One Python version is declared for the repository"; `docs/development/BUILD_AND_PACKAGING.md#one-python-version` |
+| D9 No project declares the wheelhouse | `openspec/specs/deployment-state/spec.md` — "Internal distributions are consumed as wheels from the repository wheelhouse"; `docs/development/BUILD_AND_PACKAGING.md#the-wheelhouse` |
+| D12 Packaging checks (`check-uv-setup`, `check-locks`, `check-python-version`) | `openspec/specs/deployment-state/spec.md` — "Packaging conventions are checked mechanically"; `docs/development/BUILD_AND_PACKAGING.md#checks` |
+| D13 Closeout runs `make check-packaging` | `openspec/specs/planning-governance/spec.md` — "Packaging check at change closeout"; `openspec/README.md#plan-closeout-requirements`, part 8; `AGENTS.md` |
+| D14 `BUILD_AND_PACKAGING.md` is the permanent guide | `docs/development/BUILD_AND_PACKAGING.md`; `openspec/README.md` documentation placement table |
+| D15 Stray internal-wheel section folded into requirements; hosted-client updates move the pin and relock | `openspec/specs/deployment-state/spec.md` — "Internal distributions are consumed as wheels…", "Aggregate kit tests cover every kit", "Packaging preserves provider separation" |
+| D10, D11, D16 and `check-project-layout` | Slice 2; not yet promoted |
+
+Slice 1's requirements are already in the owning specs, so archive must not add them again: prune them from this change's delta, or archive without spec sync, once slice 2 has promoted the rest.

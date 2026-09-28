@@ -1,6 +1,9 @@
 # PyPI intermittently serves 5xx where internal package names should
 # 404 (they resolve from .dist); back off through the flap instead of
 # failing after uv's default 3 tries.
+# Every uv command in this Makefile uses the repository's declared Python version.
+export UV_PYTHON := $(or $(shell cat .python-version 2>/dev/null),$(error .python-version not found))
+
 export UV_HTTP_RETRIES ?= 10
 
 GIT_SUFFIX := $(shell git rev-parse --short HEAD)
@@ -57,7 +60,7 @@ HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT ?=
 HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE ?=
 HOSTED_STRIPE_TEST_EVIDENCE ?= $(DIST_DIR)/hosted-stripe-test-evidence.json
 
-.PHONY: e2e-dev-identities e2e-dev-identities-env e2e-bare-metal-dev-env check-hosted-client-pin fix-hosted-client-pin review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-compute-provisioning test-provisioning test-provisioning-iac test-registry test-storefront test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning dist-compute-provisioning-service dist-kits verify-hosted-release dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-reinit check-internal-locks
+.PHONY: e2e-dev-identities e2e-dev-identities-env e2e-bare-metal-dev-env check-hosted-client-pin fix-hosted-client-pin review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-compute-provisioning test-provisioning test-provisioning-iac test-registry test-storefront test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning dist-compute-provisioning-service dist-kits verify-hosted-release dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-packaging check-uv-setup check-locks check-python-version lock
 .PHONY: build-hosted-producer
 .PHONY: test-release-tooling test-deployment-packaging prepare-hosted-compose prepare-hosted-compose-local hosted-preflight hosted-preflight-local hosted-stripe-test-local hosted-compose-up hosted-compose-restart hosted-compose-clean hosted-stripe-test hosted-stripe-test-stop
 .PHONY: dist-arkhai-core-registry
@@ -924,11 +927,20 @@ check-comment-hygiene: ## Fail if change-ID/task-number references leak outside 
 check-doc-citations: ## Fail if a document cites a path that is absent or tombstoned (CHANGE=<name> to scope)
 	@python3 scripts/check_doc_citations.py "$(CHANGE)"
 
-check-reinit: ## Fail if a reinit target does not reinstall every internal wheel its lock installs
-	@python3 scripts/check_reinit.py
+lock: dist ## Relock projects against current wheels without installing anything (PROJECTS="dir ..." narrows it)
+	python3 scripts/uv_project.py lock $(PROJECTS)
 
-check-internal-locks: ## Fail if a lock pins an internal wheel at a version the tree does not build
-	@python3 scripts/check_internal_locks.py
+check-packaging: dist ## Run every packaging check against the tree and a freshly built wheelhouse
+	@$(MAKE) --no-print-directory check-uv-setup check-locks check-python-version
+
+check-uv-setup: ## Fail if a reinit target or image install names internal packages instead of deriving them
+	@python3 scripts/check_uv_setup.py
+
+check-locks: ## Fail if a lock is not current with its project, the wheels in .dist, or the repository (run make dist first)
+	@python3 scripts/check_locks.py
+
+check-python-version: ## Fail if anything selects a Python version other than .python-version
+	@python3 scripts/check_python_version.py
 
 code-snapshot: ## Zip all git-tracked files for sharing (excludes gitignored artifacts).
 	@mkdir -p .snapshot
@@ -972,11 +984,8 @@ review-wheelhouse-prepare: ## Rebuild the wheelhouse from scratch, then refresh 
 	@$(MAKE) review-locks
 
 review-locks: ## Refresh selected project lockfiles against current repository wheels.
-	@uv run python $(CURDIR)/scripts/refresh-review-locks.py \
-		--root "$(CURDIR)" \
-		--dist-dir "$(DIST_DIR)" \
-		--python "$${REVIEW_PYTHON:-3.13}" \
-		--projects $${REVIEW_PROJECTS}
+	@if [ -z "$${REVIEW_PROJECTS}" ]; then echo "REVIEW_PROJECTS names no projects" >&2; exit 1; fi
+	python3 scripts/uv_project.py lock $${REVIEW_PROJECTS}
 
 review-wheelhouse: ## Resolve scope, rebuild wheels, refresh locks, and bundle dependencies.
 	@projects="$${REVIEW_PROJECTS:-}"; \

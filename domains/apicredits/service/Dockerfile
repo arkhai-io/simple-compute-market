@@ -14,23 +14,17 @@ ENV UV_HTTP_RETRIES=10
 
 WORKDIR /app
 
-COPY .dist/ /.dist/
-COPY domains/apicredits/service/pyproject.toml domains/apicredits/service/uv.lock ./
-# The lock records the find-links dir relative to the repo; point it at
-# the in-image wheel dir (uv re-canonicalizes on every relock).
-RUN sed -E -i 's|registry = "[^"]*\.dist"|registry = "/.dist"|' uv.lock || true
-
-# Deps only — the app modules are copied in and run via --app-dir, the
-# same way `make serve` / the tests run them (top-level main/config/...).
-# --refresh-package: internal wheels are rebuilt into /.dist without a
-# version bump, so a cached same-version wheel in the uv cache mount
-# would otherwise shadow fresh content (e.g. arkhai-kit-site missing
-# the generic `units` capacity claim key).
+# The lock is used as committed: the project's pyproject and lock sit at the
+# same depth below /repo as below the repository root, so the lock's relative
+# wheelhouse path resolves to /repo/.dist. uv_project.py derives the internal
+# packages from the lock and reinstalls them, so a cached build of a
+# same-version wheel is never reused.
+COPY .dist/ /repo/.dist/
+COPY scripts/uv_project.py /repo/scripts/uv_project.py
+COPY domains/apicredits/service/pyproject.toml domains/apicredits/service/uv.lock /repo/domains/apicredits/service/
+ENV UV_PROJECT_ENVIRONMENT=/app/.venv
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --no-sources --no-dev --no-install-project --find-links /.dist \
-        --refresh-package arkhai-kit-site \
-        --refresh-package arkhai-apicredits-domain \
-        --refresh-package arkhai-kit-identity
+    python3 /repo/scripts/uv_project.py image --project /repo/domains/apicredits/service -- --no-dev --no-install-project
 
 # Stage 2: lean runtime.
 FROM --platform=linux/amd64 python:${PYTHON_VERSION}-slim AS runtime

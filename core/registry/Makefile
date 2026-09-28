@@ -1,5 +1,7 @@
+# Every uv command in this Makefile uses the repository's declared Python version.
+export UV_PYTHON := $(or $(shell cat ../../.python-version 2>/dev/null),$(error ../../.python-version not found))
+
 GIT_SUFFIX := $(shell git rev-parse --short HEAD)
-PYTHON_VERSION := 3.13
 
 # Path to the monorepo .dist/ wheel directory, relative to core/registry/.
 # Used by uv when resolving pure-Python internal packages distributed as wheels
@@ -11,14 +13,10 @@ DIST_DIR ?= ../../.dist
 # Installation & Setup
 # ==============================================================================
 
-init: init-uv
-	uv sync --dev --python $(PYTHON_VERSION) --find-links $(DIST_DIR)
+init: init-uv reinit
 
 reinit:
-	uv sync --dev --python $(PYTHON_VERSION) --find-links $(DIST_DIR) \
-		--upgrade-package arkhai-core                  --reinstall-package arkhai-core \
-		--upgrade-package arkhai-kit-identity          --reinstall-package arkhai-kit-identity \
-		--upgrade-package arkhai-core-registry-client --reinstall-package arkhai-core-registry-client
+	python3 ../../scripts/uv_project.py reinit
 
 init-uv:
 	@command -v uv >/dev/null 2>&1 || { echo "uv is not installed. Installing uv..."; curl -LsSf https://astral.sh/uv/0.8.13/install.sh | sh; source $HOME/.local/bin/env; }

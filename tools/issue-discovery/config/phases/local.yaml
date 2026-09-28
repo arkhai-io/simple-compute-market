@@ -129,7 +129,7 @@ phases:
       - build
     commands:
       - id: buyer_sync
-        run: uv sync --python 3.12 --extra test
+        run: uv sync --extra test
         workdir: buyer
         timeout_seconds: 600
       - id: buyer_pytest

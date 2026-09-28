@@ -1,3 +1,6 @@
+# Every uv command in this Makefile uses the repository's declared Python version.
+export UV_PYTHON := $(or $(shell cat ../../../.python-version 2>/dev/null),$(error ../../../.python-version not found))
+
 .PHONY: help init reinit build test clean
 
 .DEFAULT_GOAL := help
@@ -7,37 +10,11 @@ DIST_DIR ?= ../../../.dist
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
-init: ## Install dependencies from public indexes and internal wheels
+init: reinit ## Install dependencies from public indexes and internal wheels
 	@command -v uv >/dev/null 2>&1 || { echo "uv is not installed. Install from https://docs.astral.sh/uv/"; exit 1; }
-	uv sync --dev --find-links $(DIST_DIR)
 
 reinit: ## Upgrade and reinstall changed internal wheel dependencies
-	uv sync --dev --find-links $(DIST_DIR) \
-		--reinstall-package arkhai-bare-metal-storefront \
-		--upgrade-package arkhai-bare-metal    --reinstall-package arkhai-bare-metal \
-		--upgrade-package arkhai-core          --reinstall-package arkhai-core \
-		--upgrade-package arkhai-core-storefront --reinstall-package arkhai-core-storefront \
-		--upgrade-package arkhai-core-storefront-client --reinstall-package arkhai-core-storefront-client \
-		--upgrade-package arkhai-compute-provisioning --reinstall-package arkhai-compute-provisioning \
-		--upgrade-package arkhai-kit-alkahest   --reinstall-package arkhai-kit-alkahest \
-		--upgrade-package arkhai-kit-capacity-publication --reinstall-package arkhai-kit-capacity-publication \
-		--upgrade-package arkhai-kit-contact-exchange --reinstall-package arkhai-kit-contact-exchange \
-		--upgrade-package arkhai-kit-identity  --reinstall-package arkhai-kit-identity \
-		--upgrade-package arkhai-kit-policy     --reinstall-package arkhai-kit-policy \
-		--upgrade-package arkhai-kit-site-client --reinstall-package arkhai-kit-site-client \
-		--upgrade-package arkhai-kit-settlement-runtime --reinstall-package arkhai-kit-settlement-runtime \
-		--upgrade-package arkhai-kit-storefront --reinstall-package arkhai-kit-storefront \
-		--upgrade-package arkhai-kit-hosted-settlement --reinstall-package arkhai-kit-hosted-settlement \
-		--upgrade-package arkhai-core-registry-client --reinstall-package arkhai-core-registry-client \
-		--upgrade-package arkhai-kit-config --reinstall-package arkhai-kit-config \
-		--upgrade-package arkhai-kit-delivery --reinstall-package arkhai-kit-delivery \
-		--upgrade-package arkhai-kit-fulfillment --reinstall-package arkhai-kit-fulfillment \
-		--upgrade-package arkhai-kit-resource-pools --reinstall-package arkhai-kit-resource-pools \
-		--upgrade-package arkhai-kit-site --reinstall-package arkhai-kit-site \
-		--upgrade-package arkhai-kit-capability-shape --reinstall-package arkhai-kit-capability-shape \
-		--upgrade-package arkhai-compute --reinstall-package arkhai-compute \
-		--upgrade-package arkhai-bare-metal-buyer --reinstall-package arkhai-bare-metal-buyer \
-		--upgrade-package arkhai-core-buyer --reinstall-package arkhai-core-buyer
+	python3 ../../../scripts/uv_project.py reinit
 
 test: reinit ## Run the storefront package tests
 	uv run --find-links $(DIST_DIR) pytest tests -q

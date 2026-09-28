@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUTFILE="${1:-${ROOT_DIR}/.snapshot/review-wheelhouse.tar.gz}"
 PROJECTS="${REVIEW_PROJECTS:-}"
-REVIEW_PYTHON="${REVIEW_PYTHON:-3.13}"
+REVIEW_PYTHON="${REVIEW_PYTHON:-$(cat "${ROOT_DIR}/.python-version")}"
 MARKETPLACE_SOURCE_COMMIT="${REVIEW_SOURCE_COMMIT:-$(git -C "${ROOT_DIR}" rev-parse HEAD)}"
 IDENTITY_WHEEL="arkhai_kit_identity-0.3.0-py3-none-any.whl"
 HOSTED_CLIENT_WHEEL="arkhai_hosted_settlement_client-0.2.1-py3-none-any.whl"

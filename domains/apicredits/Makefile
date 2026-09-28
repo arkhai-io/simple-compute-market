@@ -1,3 +1,6 @@
+# Every uv command in this Makefile uses the repository's declared Python version.
+export UV_PYTHON := $(or $(shell cat ../../.python-version 2>/dev/null),$(error ../../.python-version not found))
+
 DIST_DIR ?= ../../.dist
 
 .PHONY: reinit test test-domain test-service test-storefront test-buyer test-sample-app test-middleware check-middleware-toolchains
@@ -8,13 +11,7 @@ test: test-domain test-service test-storefront test-buyer test-sample-app test-m
 reinit test-domain: export UV_NO_EDITABLE := 1
 
 reinit: ## Force-reinstall internal wheels without bumping versions. Run make dist from the monorepo root first.
-	uv sync --dev --find-links $(DIST_DIR) \
-		--upgrade-package arkhai-apicredits-domain --reinstall-package arkhai-apicredits-domain \
-		--upgrade-package arkhai-core --reinstall-package arkhai-core \
-		--upgrade-package arkhai-kit-policy --reinstall-package arkhai-kit-policy \
-		--upgrade-package arkhai-kit-alkahest --reinstall-package arkhai-kit-alkahest \
-		--upgrade-package arkhai-kit-identity --reinstall-package arkhai-kit-identity \
-		--upgrade-package arkhai-kit-settlement-runtime --reinstall-package arkhai-kit-settlement-runtime
+	python3 ../../scripts/uv_project.py reinit
 
 test-domain: reinit ## Domain-package-level tests (distribution/wheel-import + credits client contract)
 	uv run --find-links $(DIST_DIR) pytest tests -q
