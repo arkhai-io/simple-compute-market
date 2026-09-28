@@ -1,1 +1,0 @@
-# TOMBSTONE: delete this file — its scenarios run through the canonical clients in domains/apicredits/service/tests/integration/test_signed_authority.py, and its shared-secret gate check is covered there too.
