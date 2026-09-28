@@ -561,6 +561,16 @@ Added after the slice 2 implementation review; resolution in `design.md`
       the rollback note now states the nine projects and eight published renames; the
       version rule in the proposal and D16 allows the policy's patch bump for a non-breaking
       change; the three review tombstones were deleted from the tree.
+- [x] 13.8 **Closeout review.** Three more review tombstones remained, all moved non-Python
+      files (`e2e-tests/src/hosted_real_stripe/evidence.schema.json` and the two
+      `domains/vms/negotiation/rl/models/*.pt`), and were deleted. They survived because
+      `scripts/tombstones.py` recognised tombstones only in formats where `#` starts a
+      comment; it now also recognises a file of any other kind whose whole content is the
+      single line `# TOMBSTONE: delete this file …`, and a binary file never matches.
+      `scripts/tests/test_tombstones.py` (7 tests) covers both rules, live code after the
+      marker, fenced examples, real binaries, and `find_tombstones` finding moved `.py`,
+      `.json`, and `.pt` artifacts. The design-promotion record gains its roadmap and
+      campaign-index rows.
 
 ## Appendix A — slice 2 rename sites
 

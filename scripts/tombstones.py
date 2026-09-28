@@ -24,22 +24,31 @@ COMMENT_HASH_SUFFIXES = frozenset({
 #: Files without a suffix where a leading ``#`` is still a comment.
 COMMENT_HASH_NAMES = frozenset({"Makefile", "Dockerfile"})
 
+#: The one form a tombstone takes in a file of any other kind. A moved data
+#: file or binary artifact (a JSON schema, a model checkpoint) is tombstoned by
+#: replacing its whole content with this single line; real content of those
+#: kinds never is that line, and a binary file does not decode as text at all.
+WHOLE_FILE_PREFIX = "# TOMBSTONE: delete this file"
+
 
 def is_tombstone(path: Path) -> bool:
     """True when the file's entire meaningful content is a tombstone comment.
 
-    Deliberately strict. A file that merely begins with the marker and then
-    carries live code is not deleted — treating it as such would drop working
+    In a format where ``#`` starts a comment, the tombstone may wrap onto
+    continuation comment lines. In any other file it must be the single line
+    `WHOLE_FILE_PREFIX` begins. Deliberately strict: a file that merely begins
+    with the marker and then carries live code is not deleted — treating it as such would drop working
     modules from a manifest audit. And the documents defining this convention
     show a tombstone inside a fenced example surrounded by prose, which the
     whole-file requirement excludes.
     """
-    if path.suffix not in COMMENT_HASH_SUFFIXES and path.name not in COMMENT_HASH_NAMES:
-        return False
     try:
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         return False
+    if path.suffix not in COMMENT_HASH_SUFFIXES and path.name not in COMMENT_HASH_NAMES:
+        stripped = text.strip()
+        return "\n" not in stripped and stripped.startswith(WHOLE_FILE_PREFIX)
 
     lines = [line for line in text.splitlines() if line.strip()]
     if not lines or not lines[0].lstrip().startswith(MARKER):

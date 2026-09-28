@@ -538,5 +538,8 @@ None.
 | D11 Relative sources removed | `openspec/specs/deployment-state/spec.md` — "Internal distributions are consumed as wheels from the repository wheelhouse" (scenario "A project declares a sibling source"); `docs/development/RELEASING.md#local-development` |
 | D16 Changed distributions bump their version | `docs/development/RELEASING.md#import-package-renames`, and the versioning policy there |
 | `check-project-layout` | `openspec/specs/deployment-state/spec.md` — "Packaging conventions are checked mechanically"; `docs/development/BUILD_AND_PACKAGING.md#checks` |
+| Roadmap currency | None owed: the change sits under the lesser goal "Package and release readiness", which has no goal in `docs/development/ROADMAP.md` |
+| Campaign index currency | `openspec/changes/README.md` — the change's row records it archived on 2026-09-28 with its promotion targets, and the "Package and release readiness" graph marks it archived ahead of `type-core-packages` |
 
-Slice 1's requirements are already in the owning specs, so archive must not add them again: prune them from this change's delta, or archive without spec sync, once slice 2 has promoted the rest.
+Every requirement of this change was promoted into its owning spec as its slice closed, so
+the archived change carries no delta.
