@@ -439,11 +439,14 @@ Per `openspec/README.md#plan-closeout-requirements`.
       `domains/apicredits/buyer`, `domains/apicredits/storefront`, `domains/vms/buyer`
       (three), `domains/vms/negotiation`, `domains/vms/settlement`,
       `domains/vms/storefront` (three), and `e2e-tests` (three) `pyproject.toml`.
-- [ ] 8.3 Rebuild the wheelhouse and run `make lock` for every project whose lock names a
+- [x] 8.3 Rebuild the wheelhouse and run `make lock` for every project whose lock names a
       bumped distribution (handoff for PyTorch-index projects), then `make check-locks`.
-      *Six locks relocked (version moves only). Handed off: `make lock
-      PROJECTS="domains/vms/buyer domains/vms/storefront"`, then `make reinit && make test` in
-      both; until then `check-locks` reports their pre-bump pins and nothing else.*
+      *Six locks relocked here (version moves only); `domains/vms/buyer` and
+      `domains/vms/storefront` relocked with the PyTorch index (handed off, 2026-09-28). The VM
+      storefront suite passed except `tests/integration/test_alkahest.py` (two tests), which
+      could not start its local chain: the `anvil` first on that host's `PATH` was an unrelated
+      npm CLI (`~/.anvil-cli/npm-global/bin/anvil`, `w0.7.6`) rather than Foundry's. Those two
+      tests are unrun, not failed by this change; the test file is unchanged.*
 - [x] 8.4 `.github/workflows/publish-pypi.yml` path filters for the six moved projects,
       including `apicredits-domain`; `scripts/tests/test_publish_matrix.py` if it asserts
       them; `docs/development/RELEASING.md` records the import migration for the bumped
@@ -497,9 +500,9 @@ Per `openspec/README.md#plan-closeout-requirements`.
 - [x] 11.7 **Documentation citations.** Run
       `make check-doc-citations CHANGE=converge-python-packaging` and resolve every match,
       including citations to moved files.
-- [ ] 11.8 **Packaging.** Run `make check-packaging`, now including
+- [x] 11.8 **Packaging.** Run `make check-packaging`, now including
       `check-project-layout`, and resolve every failure.
-- [ ] 11.9 **End-to-end pipeline.** Confirm the pipeline passes on the renamed packages
+- [x] 11.9 **End-to-end pipeline.** Confirm the pipeline passes on the renamed packages
       and record the run, its result, and the VM and API-credit scenarios exercising them;
       if it cannot run, record the blocker and treat the validations it gates as unrun.
 - [x] 11.10 **Promotion.** Complete the design-promotion record for every decision, and
@@ -510,8 +513,13 @@ Per `openspec/README.md#plan-closeout-requirements`.
       reports only the two VM locks awaiting the PyTorch index; comment hygiene passes; scoped
       citations resolve, and two citations in `pools-7-storefront-fulfillment-cutover` and
       `deduplicate-dynaconf-bootstrap` were repointed to `e2e_harness`. Roadmap: none owed.
-      Handed off: 8.3's two relocks (then 11.8), and 11.9, since the registry, API-credits
-      service, and e2e images and every VM and API-credits package changed.*
+      After the handoffs: `make check-packaging` passes all four checks (11.8). CI run
+      36440255647 (`e2e.yml`, 2026-09-28): every changed image built through `uv_project.py`;
+      `e2e-bare-metal` 8 passed; `e2e-vm` 126 passed, 2 skipped; the services' logs show
+      `core_registry`, `apicredits_service`, `arkhai_apicredits`, `arkhai_vms_listings`, and
+      `arkhai_vms_settlement` running with no import error (11.9). The run before it,
+      36436382784, failed at the VM storefront image because the relocked locks were not yet
+      committed: `uv sync --locked` refused the stale lock instead of relocking, as designed.*
 ## Appendix A — slice 2 rename sites
 
 Every file outside `openspec/` and generated locks that names `domains.vms.buyer`,
