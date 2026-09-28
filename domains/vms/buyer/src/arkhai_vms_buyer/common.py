@@ -34,8 +34,23 @@ from core_buyer.registry_config import (  # noqa: F401
 
 
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-STOREFRONT_ROOT = REPO_ROOT / "domains" / "vms" / "storefront"
+def repository_root(*starts: Path) -> Path | None:
+    """The repository checkout the buyer is running from, or None outside one.
+
+    Walks upward for the directory holding both the root `.python-version`
+    and the VM storefront, starting from this module (an editable install
+    lives inside the checkout) and then from the working directory (a wheel
+    or bundled binary run from inside one). Requiring the storefront as well
+    keeps an unrelated `.python-version`, such as a home-directory pin, from
+    being taken for the root.
+    """
+    for start in starts or (Path(__file__).resolve().parent, Path.cwd().resolve()):
+        for candidate in (start, *start.parents):
+            if (candidate / ".python-version").is_file() and (
+                candidate / "domains" / "vms" / "storefront"
+            ).is_dir():
+                return candidate
+    return None
 
 #: The registry schema understood by the VM buyer domain. Discovery verbs
 #: resolve registries through `resolve_indexer_urls_for_schema(COMPUTE_SCHEMA_ID, …)`
@@ -209,8 +224,10 @@ def run_step(
     # When running storefront-side commands (e.g. registration scripts)
     # the working dir is the storefront package, but uv created the
     # venv at the storefront package root.
-    if cwd.resolve() == STOREFRONT_ROOT.resolve():
-        storefront_venv = STOREFRONT_ROOT / ".venv"
+    root = repository_root()
+    storefront_root = root / "domains" / "vms" / "storefront" if root else None
+    if storefront_root is not None and cwd.resolve() == storefront_root.resolve():
+        storefront_venv = storefront_root / ".venv"
         if storefront_venv.exists():
             venv_path = storefront_venv
     venv_bin = venv_path / "bin"

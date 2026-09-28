@@ -36,7 +36,7 @@ dependencies").
 part of this change's scope rather than an implementation detail.** Two capability
 gaps, both in the schema-driven filter engine:
 
-`_Range.min` and `_Range.max` in `core/registry/src/api/filter_eval.py` are typed
+`_Range.min` and `_Range.max` in `core/registry/src/core_registry/api/filter_eval.py` are typed
 `float | int | None`, `_coerce_scalar` parses `value_type: number` with
 `float(raw)`, and range evaluation reads only resolved values satisfying
 `isinstance(v, (int, float))`. A decimal-text listing value is therefore not

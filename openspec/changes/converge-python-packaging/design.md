@@ -466,6 +466,25 @@ unverified second `make lock` run, and `BUILD_AND_PACKAGING.md` said no file sta
 Python version although Dockerfile `ARG` defaults do. The image builds and pipeline it
 counted as unrun have since passed in CI run 36409616543.
 
+## Slice 2 review resolution
+
+A review of the implemented slice 2 found four issues, corrected in section 13.
+
+- **The VM buyer computed the repository root at a fixed depth** (`parents[3]`), which the
+  move to `src/` broke; the network commands pointed at a nonexistent `scripts/zerotier`.
+  Fixed depth was only ever right from a source checkout, so the root is now found by its
+  markers (the root `.python-version`, which `check-python-version` keeps unique, and the
+  VM storefront).
+- **The review-scope manifest named moved or absent test roots.** A test now requires every
+  path it names to exist.
+- **Moved tests kept a wrong tier.** Tests running a real app or database are integration
+  under `TESTING.md` and moved when touched; integration happy paths go through canonical
+  typed clients, so the three key-administration reads with no client method gained one
+  rather than staying raw requests.
+- **The proposal and several comments still described the six-project scope and old source
+  paths.** The citation check scans documentation, not code comments or Helm values, which
+  is how the path references survived.
+
 ## Risks
 
 - **Mirrored layout in images.** Verified with uv locally; each image's build and its

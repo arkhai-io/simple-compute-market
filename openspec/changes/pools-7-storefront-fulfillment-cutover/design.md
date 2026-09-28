@@ -4066,7 +4066,7 @@ Section 11 is planned:
   verbatim by `core_storefront/sqlite_migrations.py`'s existing
   `DROP COLUMN` migration.
 - **apicredits' own database is a secondary, lower-stakes consideration,
-  not a blocker.** `domains/apicredits/service/src/db/database.py`'s
+  not a blocker.** `domains/apicredits/service/src/apicredits_service/db/database.py`'s
   `init_db` calls `Base.metadata.create_all()` with no migration runner at
   all — apicredits composes the same `kit/site` `CapacityLedgerService`
   (confirmed: `container.py`'s own comment says apicredits resources "carry

@@ -450,6 +450,20 @@ def _gated_client(signed_app):
     )
 
 
+def _capacity_client(signed_app, *, admin: bool = True):
+    """The seller's canonical capacity client: the admin client, or the reader."""
+    from market_site_client.client import SiteCapacityAdminClient, SiteCapacityClient
+
+    return (SiteCapacityAdminClient if admin else SiteCapacityClient)(
+        "http://credits-service",
+        signer=STOREFRONT_SIGNER,
+        expected_authorities=TrustedIdentitySet(
+            identities=(Ed25519Signer(AUTHORITY_SEED).identity,),
+        ),
+        transport=httpx.ASGITransport(app=signed_app),
+    )
+
+
 async def _seed_quota(signed_app, resource_id: str = "weather-quota", units: int = 100):
     """Register the quota an issuance draws on, through the capacity client.
 
@@ -459,17 +473,7 @@ async def _seed_quota(signed_app, resource_id: str = "weather-quota", units: int
     `SiteCapacityAdminClient`, so seeding it here brings the third canonical
     client onto the same real application and makes the flow the deployed one.
     """
-    from market_site_client import SiteCapacityAdminClient
-
-    client = SiteCapacityAdminClient(
-        "http://credits-service",
-        signer=STOREFRONT_SIGNER,
-        expected_authorities=TrustedIdentitySet(
-            identities=(Ed25519Signer(AUTHORITY_SEED).identity,),
-        ),
-        transport=httpx.ASGITransport(app=signed_app),
-    )
-    return await client.register_resource(
+    return await _capacity_client(signed_app).register_resource(
         resource_id,
         total_units=units,
         resource_type="api.credits",
@@ -567,3 +571,124 @@ async def test_the_seller_client_reads_back_what_it_issued(signed_app):
         derive_credit_fulfillment_id("obl-2")
     )
     assert grant is not None
+
+
+BUYER = "0xabcdef0000000000000000000000000000000001"
+STRANGER = "0x9999000000000000000000000000000000000003"
+
+
+def _credit_request(
+    obligation_ref: str,
+    quantity: int,
+    *,
+    owner: str = BUYER,
+    existing_key: str | None = None,
+    resource_id: str = "svc-quota",
+):
+    """An issuance for an eip191 buyer, new key or a top-up of an existing one."""
+    from market_identity import Identity
+
+    from arkhai_apicredits.settlement.credits_client import (
+        CreditIssuanceRequest,
+        CreditKeyTarget,
+        credit_issuance_request_digest,
+        derive_credit_fulfillment_id,
+    )
+
+    key = (
+        CreditKeyTarget(mode="existing", key_id=existing_key)
+        if existing_key
+        else CreditKeyTarget(mode="new")
+    )
+    fields: dict[str, Any] = {
+        "fulfillment_id": derive_credit_fulfillment_id(obligation_ref),
+        "obligation_ref": obligation_ref,
+        "mechanism": "alkahest.v1",
+        "owner": Identity(scheme="eip191", identifier=owner),
+        "service": "weather-api",
+        "resource_id": resource_id,
+        "quantity": quantity,
+        "key": key,
+    }
+    return CreditIssuanceRequest(
+        **fields, request_digest=credit_issuance_request_digest(**fields)
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_deal_issues_spends_tops_up_and_guards_its_key(signed_app):
+    """The credit lifecycle, driven end to end through the canonical clients.
+
+    Issuance commits quota, the gated application verifies and spends the key
+    to exhaustion, a second deal tops the same key up, a stranger cannot top
+    it up, and the key's detail carries its ownership claim but no secret.
+    """
+    from arkhai_apicredits.settlement.credits_client import CreditsServiceError
+
+    await _seed_quota(signed_app, resource_id="svc-quota", units=1000)
+    seller, gated = _seller_client(signed_app), _gated_client(signed_app)
+
+    issued = await seller.submit_credit_issuance(_credit_request("0xdeal1", 3))
+    assert issued.secret and issued.balance == 3
+
+    snapshot = await _capacity_client(signed_app, admin=False).snapshot()
+    quota = next(r for r in snapshot if r["resource_id"] == "svc-quota")
+    assert quota["available_units"] == 997
+
+    verified = await gated.verify(key_id=issued.key_id, secret=issued.secret)
+    assert verified.valid is True
+
+    for i in range(3):
+        spent = await gated.consume(key_id=issued.key_id, amount=1, idempotency_key=f"req-{i}")
+        assert spent.ok is True, spent
+    refused = await gated.consume(key_id=issued.key_id, amount=1)
+    assert (refused.ok, refused.balance, refused.reason) == (False, 0, "insufficient_credits")
+
+    topped = await seller.submit_credit_issuance(
+        _credit_request("0xdeal2", 2, existing_key=issued.key_id)
+    )
+    assert topped.balance == 2 and topped.secret is None
+    spent = await gated.consume(key_id=issued.key_id, amount=1)
+    assert spent.ok is True and spent.balance == 1
+
+    with pytest.raises(CreditsServiceError) as refusal:
+        await seller.submit_credit_issuance(
+            _credit_request("0xdeal3", 1, owner=STRANGER, existing_key=issued.key_id)
+        )
+    assert refusal.value.reason == "key_not_owned"
+
+    detail = await seller.get_key(issued.key_id)
+    assert detail["owner_scheme"] == "eip191"
+    assert "secret" not in detail and "secret_hash" not in detail
+
+
+@pytest.mark.asyncio
+async def test_batch_consumption_and_the_key_administration_surface(signed_app):
+    """Batch spending, then every key-administration read and write the seller holds."""
+    await _seed_quota(signed_app, resource_id="svc-quota", units=1000)
+    seller, gated = _seller_client(signed_app), _gated_client(signed_app)
+    issued = await seller.submit_credit_issuance(_credit_request("0xdeal4", 5))
+
+    results = await gated.consume_batch(
+        [
+            {"key_id": issued.key_id, "amount": 2, "idempotency_key": "b1"},
+            {"key_id": issued.key_id, "amount": 2, "idempotency_key": "b1"},
+            {"key_id": "ak_missing", "amount": 1},
+        ]
+    )
+    assert results[0].ok is True and results[0].balance == 3
+    assert results[1].duplicate is True
+    assert results[2].ok is False
+
+    adjusted = await seller.adjust_key_balance(issued.key_id, delta=10, reason="goodwill")
+    assert adjusted["balance"] == 13
+
+    listed = await seller.list_keys(owner_id=BUYER)
+    assert issued.key_id in {key["key_id"] for key in listed["keys"]}
+    assert (await seller.list_key_grants(issued.key_id))["total"] == 2
+    assert (await seller.list_key_usage(issued.key_id))["total"] == 1
+
+    revoked = await seller.revoke_key(issued.key_id)
+    assert revoked["status"] == "revoked"
+    refused = await gated.consume(key_id=issued.key_id, amount=1)
+    assert (refused.ok, refused.reason) == (False, "key_revoked")

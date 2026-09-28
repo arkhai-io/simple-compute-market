@@ -14,7 +14,7 @@ contributor, a fork, or a CI job with no repository secrets — run
 
 ## Why the credential files carry no comment
 
-`core/registry/src/main.py` reads a credential file with
+`core/registry/src/core_registry/main.py` reads a credential file with
 `read_text().strip()` and passes the whole result to `create_signer`. A `#`
 comment line inside one of those files would become part of the credential and
 fail the signer construction. The fixture statement `AGENTS.md` requires
@@ -51,7 +51,7 @@ default `test test test ... junk` mnemonic. Their private keys are published in
 Foundry's own documentation and already appear in this repository — for example
 `domains/vms/storefront/.env.bob.docker` and
 `core/registry/tests/integration/conftest.py`. The compose files pin the
-matching addresses, and `core/registry/src/main.py` refuses to start if a
+matching addresses, and `core/registry/src/core_registry/main.py` refuses to start if a
 credential does not derive the pinned identifier, so these assignments are not
 interchangeable:
 

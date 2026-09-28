@@ -129,7 +129,7 @@ PROJECTS: dict[str, Project] = {
     "domains/vms/provisioning/adapter": Project(
         "domains/vms/provisioning/adapter",
         "arkhai-vms-provisioning-adapter",
-        ("domains/vms/provisioning/adapter/tests",),
+        (),
         ("dist",),
     ),
     "domains/apicredits": Project(
@@ -147,7 +147,7 @@ PROJECTS: dict[str, Project] = {
     "domains/apicredits/service": Project(
         "domains/apicredits/service",
         "arkhai-apicredits-service",
-        ("domains/apicredits/service/src/tests",),
+        ("domains/apicredits/service/tests",),
         ("dist",),
     ),
     "domains/vms/storefront": Project(

@@ -117,3 +117,25 @@ def test_settlement_deployment_change_selects_full_wheelhouse_scope() -> None:
         "domains/vms/buyer",
         "domains/vms/storefront",
     }
+
+
+def test_every_project_and_test_root_the_resolver_names_exists() -> None:
+    """A moved project or test directory must move in the manifest too.
+
+    The resolver reports these paths to the review environment, which runs
+    each test root; a stale one silently skips that project's tests.
+    """
+    missing = [
+        path
+        for project in resolver.PROJECTS.values()
+        for path in (project.path, *project.tests)
+        if not (REPO_ROOT / path).is_dir()
+    ]
+
+    assert missing == []
+
+
+def test_the_api_credits_service_is_reviewed_across_both_test_tiers() -> None:
+    project = resolver.PROJECTS["domains/apicredits/service"]
+
+    assert project.tests == ("domains/apicredits/service/tests",)

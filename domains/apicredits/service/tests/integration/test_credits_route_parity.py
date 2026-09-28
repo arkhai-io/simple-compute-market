@@ -100,7 +100,7 @@ def test_batch_route_signs_the_empty_resource(contracts, middleware_client):
 
 
 def test_storefront_operations_exist_and_admit_the_seller_role(contracts):
-    """The storefront's five operations, signed as `seller`."""
+    """The storefront's operations, signed as `seller`."""
     from arkhai_apicredits.settlement import credits_client as sf
 
     keyed = {
@@ -108,6 +108,9 @@ def test_storefront_operations_exist_and_admit_the_seller_role(contracts):
         sf.KEY_GET_OPERATION: "key_id",
         sf.KEY_REVOKE_OPERATION: "key_id",
         sf.KEY_ADJUST_OPERATION: "key_id",
+        sf.KEY_GRANTS_LIST_OPERATION: "key_id",
+        sf.KEY_USAGE_LIST_OPERATION: "key_id",
+        sf.KEYS_LIST_OPERATION: None,
     }
     for operation, path_resource in keyed.items():
         assert operation in contracts, sorted(contracts)

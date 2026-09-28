@@ -285,7 +285,7 @@ def _signed_response_body(response: httpx.Response) -> Any:
 
 #: This client's operations as the credits service names them. Must agree
 #: exactly with `CREDITS_ROUTE_CONTRACTS` in
-#: `domains/apicredits/service/src/middleware/route_contracts.py`: the
+#: `domains/apicredits/service/src/apicredits_service/middleware/route_contracts.py`: the
 #: service recomputes the operation and resource from the route it matched
 #: and verifies the signature over its own values, so a mismatch here is a
 #: signature that cannot verify rather than a cosmetic drift. Asserted by
@@ -299,6 +299,9 @@ ISSUANCE_GET_OPERATION = "credits_issuance_get"
 KEY_GET_OPERATION = "credits_key_get"
 KEY_REVOKE_OPERATION = "credits_key_revoke"
 KEY_ADJUST_OPERATION = "credits_key_adjust"
+KEYS_LIST_OPERATION = "credits_keys_list"
+KEY_GRANTS_LIST_OPERATION = "credits_key_grants_list"
+KEY_USAGE_LIST_OPERATION = "credits_key_usage_list"
 
 #: The role the storefront presents: it issues grants against settled deals
 #: and administers keys. Distinct from the gated application's `service`,
@@ -364,13 +367,16 @@ class CreditsServiceClient:
         operation: str,
         resource: str,
         body: Any | None = None,
+        params: Mapping[str, Any] | None = None,
         timeout: float,
     ) -> httpx.Response:
         """Issue one request, signed when this client is configured to.
 
         On the signed path the RFC 8785 canonical bytes that were hashed are
         the bytes sent, because the service recomputes the body hash from
-        what it receives.
+        what it receives. Query parameters are not part of the signed
+        envelope: the service matches the route, and so the operation and
+        resource it verifies, on the path alone.
         """
         url = f"{self._service_url}{path}"
         if self._signer is None:
@@ -379,6 +385,7 @@ class CreditsServiceClient:
                     method,
                     url,
                     json=body,
+                    params=params,
                     headers=self._headers(),
                 )
 
@@ -412,7 +419,7 @@ class CreditsServiceClient:
             headers["Content-Type"] = "application/json"
         async with self._http(timeout) as http:
             response = await http.request(
-                method, url, content=content, headers=headers,
+                method, url, content=content, headers=headers, params=params,
             )
         self._verify_authority_response(
             response,
@@ -571,6 +578,63 @@ class CreditsServiceClient:
         )
         if resp.status_code == 404:
             return None
+        resp.raise_for_status()
+        return resp.json()
+
+    async def list_keys(
+        self,
+        *,
+        status: str | None = None,
+        owner_id: str | None = None,
+        timeout: float = 10.0,
+    ) -> dict[str, Any]:
+        """Every key, optionally filtered by status or owner."""
+        params = {k: v for k, v in (("status", status), ("owner_id", owner_id)) if v is not None}
+        resp = await self._call(
+            "GET",
+            "/api/v1/keys",
+            operation=KEYS_LIST_OPERATION,
+            resource="",
+            params=params or None,
+            timeout=timeout,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    async def list_key_grants(
+        self,
+        key_id: str,
+        *,
+        timeout: float = 10.0,
+    ) -> dict[str, Any]:
+        """The grants credited to one key."""
+        resp = await self._call(
+            "GET",
+            f"/api/v1/keys/{key_id}/grants",
+            operation=KEY_GRANTS_LIST_OPERATION,
+            resource=key_id,
+            timeout=timeout,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    async def list_key_usage(
+        self,
+        key_id: str,
+        *,
+        after_id: int = 0,
+        limit: int = 500,
+        timeout: float = 10.0,
+    ) -> dict[str, Any]:
+        """One page of a key's consumption events, after ``after_id``."""
+        resp = await self._call(
+            "GET",
+            f"/api/v1/keys/{key_id}/usage",
+            operation=KEY_USAGE_LIST_OPERATION,
+            resource=key_id,
+            params={"after_id": int(after_id), "limit": int(limit)},
+            timeout=timeout,
+        )
         resp.raise_for_status()
         return resp.json()
 

@@ -64,11 +64,12 @@ The work lands in two implementation slices under this one change.
 
 **Slice 2 — one project layout.**
 
-- The six nested-import projects move to `src/<flat import package>`
-  (`arkhai_vms_buyer`, `arkhai_vms_listings`, `arkhai_vms_negotiation`,
-  `arkhai_vms_settlement`, `arkhai_apicredits_buyer`, `arkhai_apicredits`), and every
-  import, entry point, test patch target, warning filter, and Dockerfile smoke import
-  is renamed.
+- Nine projects move to one flat import package under `src/`: the six nested-import
+  projects (`arkhai_vms_buyer`, `arkhai_vms_listings`, `arkhai_vms_negotiation`,
+  `arkhai_vms_settlement`, `arkhai_apicredits_buyer`, `arkhai_apicredits`) and, found
+  at planning, `core/registry` (`core_registry`), the API-credits service
+  (`apicredits_service`), and `e2e-tests` (`e2e_harness`). Every import, entry point,
+  test patch target, warning filter, image start command, and smoke import is renamed.
 - Every project installs editable. `UV_NO_EDITABLE`, the CI `no_editable` flag, and
   `cache-keys` are removed.
 - `domains/bare_metal/provisioning/adapter` stops resolving siblings through relative
@@ -107,12 +108,15 @@ None.
 
 ## Breaking changes
 
-- **Public import paths.** Six published distributions change their import package:
+- **Public import paths.** Eight published distributions change their import package:
   `domains.vms.buyer` → `arkhai_vms_buyer`, `domains.vms.listings` →
   `arkhai_vms_listings`, `domains.vms.negotiation` → `arkhai_vms_negotiation`,
   `domains.vms.settlement` → `arkhai_vms_settlement`, `domains.apicredits.buyer` →
-  `arkhai_apicredits_buyer`, `domains.apicredits` → `arkhai_apicredits`. No alias is
-  kept. Each renamed distribution, and each published distribution whose source
+  `arkhai_apicredits_buyer`, `domains.apicredits` → `arkhai_apicredits`, the registry's
+  top-level `api`/`db`/`services`/`types` → `core_registry`, and the API-credits
+  service's top-level `controllers`/`db`/`middleware`/`models`/`services` →
+  `apicredits_service`. `e2e-tests` also changes (`src` → `e2e_harness`) but is not
+  published. No alias is kept. Each renamed distribution, and each published distribution whose source
   follows the rename, releases under a new minor version.
   `docs/configuration.md` documents one of these paths to hook authors.
 - **Contributor workflow.** `make check-packaging` replaces `make check-reinit` and
@@ -131,8 +135,9 @@ No wire, database, or configuration contract changes.
   `check-packaging`, review-lock targets); every Dockerfile that copies `.dist` and
   the two per-Dockerfile ignore files; `.python-version`; ten `pyproject.toml`
   `find-links` declarations.
-- Slice 2: the six projects' files, their `pyproject.toml` build targets, and about
-  140 importing files across `domains/`, `e2e-tests/`, and kit boundary tests; the
+- Slice 2: the nine projects' files, their `pyproject.toml` build targets, the
+  registry's and service's image start commands and Alembic path, and about 150
+  importing files across `domains/`, `e2e-tests/`, and kit boundary tests; the
   version, `==` pins, and locks of every distribution whose wheel contents change;
   `.github/workflows/tests.yml` and `.github/workflows/publish-pypi.yml`;
   `docs/development/RELEASING.md`.

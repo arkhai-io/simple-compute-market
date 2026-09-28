@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-apicredits-middleware"
-version = "0.1.0"
+version = "0.1.1"
 license = "MIT"
 description = "Seller-side ASGI middleware gating a downstream app on prepaid API credits from the arkhai credits service."
 requires-python = ">=3.12,<3.14"

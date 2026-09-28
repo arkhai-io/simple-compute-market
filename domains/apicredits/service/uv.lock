@@ -154,13 +154,13 @@ wheels = [
 
 [[package]]
 name = "arkhai-apicredits-middleware"
-version = "0.1.0"
+version = "0.1.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "httpx" },
 ]
 wheels = [
-    { path = "arkhai_apicredits_middleware-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_apicredits_middleware-0.1.1-py3-none-any.whl" },
 ]
 
 [package.optional-dependencies]

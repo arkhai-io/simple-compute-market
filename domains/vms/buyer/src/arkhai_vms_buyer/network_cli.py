@@ -10,12 +10,28 @@ their own membership; the surface is identical.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import typer
 
-from .common import REPO_ROOT, run_step
+from .common import repository_root, run_step
 
 
 network_app = typer.Typer(no_args_is_help=True)
+
+
+def _zerotier_dir() -> Path:
+    """The repository's ZeroTier scripts, which the network commands run."""
+    root = repository_root()
+    if root is None:
+        typer.secho(
+            "The network commands run the repository's ZeroTier scripts; "
+            "run them from a checkout of the repository.",
+            err=True,
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(2)
+    return root / "scripts" / "zerotier"
 
 
 @network_app.command("join")
@@ -43,7 +59,7 @@ def network_join(
     run_step(
         f"Join ZeroTier network {network_id}",
         ["make", "join", f"NETWORK_ID={network_id}"],
-        REPO_ROOT / "scripts" / "zerotier",
+        _zerotier_dir(),
     )
 
 
@@ -53,5 +69,5 @@ def network_get_peers() -> None:
     run_step(
         "Get ZeroTier peers (make get-peers)",
         ["make", "get-peers"],
-        REPO_ROOT / "scripts" / "zerotier",
+        _zerotier_dir(),
     )

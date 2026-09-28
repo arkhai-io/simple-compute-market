@@ -520,6 +520,41 @@ Per `openspec/README.md#plan-closeout-requirements`.
       `arkhai_vms_settlement` running with no import error (11.9). The run before it,
       36436382784, failed at the VM storefront image because the relocked locks were not yet
       committed: `uv sync --locked` refused the stale lock instead of relocking, as designed.*
+### 13. Slice 2 review corrections
+
+Added after the slice 2 implementation review; resolution in `design.md`
+("Slice 2 review resolution"). Numbered after the plan so no reference moves.
+
+- [x] 13.1 **VM buyer repository root.** `arkhai_vms_buyer.common.repository_root()` walks up
+      from the module, then the working directory, to the directory holding the root
+      `.python-version` and `domains/vms/storefront`; `run_step` and the network commands
+      resolve it when they run, and the network commands refuse to run outside a checkout.
+      `domains/vms/buyer/tests/test_repository_root.py` (6 tests) covers nested depth, a
+      stray `.python-version`, the working-directory fallback, the real checkout's
+      `scripts/zerotier`, and `network join` targeting it. Buyer suite: 202 passed.
+- [x] 13.2 **Review-scope manifest.** `scripts/resolve-review-scope.py` names the API-credits
+      service's `tests` (both tiers) and no longer names a nonexistent
+      `domains/vms/provisioning/adapter/tests`, found by the new test that every project and
+      test root the resolver names exists. Resolver tests: 5 passed.
+- [x] 13.3 **Typed-client coverage for the service.** `CreditsServiceClient` gains
+      `list_keys`, `list_key_grants`, and `list_key_usage` (operations `credits_keys_list`,
+      `credits_key_grants_list`, `credits_key_usage_list`, matching the service's route
+      contracts) and query-parameter support in `_call`, outside the signed envelope; the
+      parity test covers them. `test_api.py`'s deal flow and key-administration scenarios
+      now run in `tests/integration/test_signed_authority.py` through the three canonical
+      clients against the real signed app; its shared-secret gate check was already covered
+      there. `test_migrations.py` and `test_keys_service.py` moved to `tests/integration/`.
+      Service suite: 65 passed.
+- [x] 13.4 **Scope and paths.** `proposal.md` states the nine-project scope and eight public
+      import breaks. Stale source paths fixed in `dev-env/identities/README.md`,
+      `helm/charts/registry/values.yaml`, both `route_contracts.py` comments, and two other
+      active changes' designs (`pools-7-storefront-fulfillment-cutover`,
+      `publish-indicative-listing-rates`). The middleware comment changes
+      `arkhai-apicredits-middleware`'s wheel, so it moves 0.1.0 → 0.1.1 (patch; comment only),
+      and the middleware, service, and sample-app locks moved that version only.
+- [x] 13.5 **Records.** 11.1 and 11.3 reopened by the review and re-closed by 13.1–13.4; the
+      two `test_alkahest.py` tests passed once Foundry's `anvil` led the host `PATH`.
+
 ## Appendix A — slice 2 rename sites
 
 Every file outside `openspec/` and generated locks that names `domains.vms.buyer`,

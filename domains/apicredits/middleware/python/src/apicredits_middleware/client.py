@@ -35,7 +35,7 @@ UNAUTHENTICATED_SERVICE = "unauthenticated_service"
 #: client method that performs it.
 #:
 #: These must agree exactly with `CREDITS_ROUTE_CONTRACTS` in the credits
-#: service (`domains/apicredits/service/src/middleware/route_contracts.py`):
+#: service (`domains/apicredits/service/src/apicredits_service/middleware/route_contracts.py`):
 #: the service recomputes the operation and resource from the matched route
 #: and verifies the signature over *its* values, so a disagreement here is
 #: not a loose end -- it is a signature that cannot verify. The batch route
