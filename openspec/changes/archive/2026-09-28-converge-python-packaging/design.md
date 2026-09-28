@@ -375,9 +375,11 @@ exactly.
 The publication workflow skips a version PyPI already has, so renamed code published
 under an unchanged version would never reach PyPI, and the next consumer release pinned
 to that version would install the old import paths. Every distribution whose built wheel
-contents change in slice 2 therefore bumps its version: the six renamed distributions,
-and every other published distribution whose source changes to follow the renamed
-imports. Being 0.x releases with a breaking import change, they bump the minor version.
+contents change in slice 2 therefore bumps its version: the eight renamed published
+distributions, and every other published distribution whose source changes to follow the
+renamed imports. A breaking import change in a 0.x release takes a minor bump; any other
+changed wheel takes the bump `RELEASING.md`'s versioning policy gives it, as the
+middleware's comment-only change took a patch bump (13.4).
 Every `==` pin on a bumped distribution moves with it, and the affected locks are
 relocked with `make lock`. Planning enumerates the distributions from ownership of the
 changed sites — imports, entry points, test patch targets, and warning filters — keeping
@@ -503,8 +505,8 @@ A review of the implemented slice 2 found four issues, corrected in section 13.
 ## Rollback
 
 No persisted state or wire contract changes; reverting the change restores the prior
-build. The import rename is a public API break for anyone importing the six packages
-outside this repository; versions already published under the new paths remain on
+build. The import rename is a public API break for anyone importing the eight renamed
+published packages outside this repository; versions already published under the new paths remain on
 PyPI, and a revert would publish further bumped versions restoring the old paths.
 
 ## Open questions

@@ -2,8 +2,8 @@
 
 Design: `design.md` (D1–D16). Two slices, each ending in its own closeout. Slice 1 makes
 every environment, image, and lock go through one script and adds the packaging checks;
-slice 2 moves the six nested-import projects to the flat `src/` layout and publishes them
-under new versions.
+slice 2 moves nine projects to the flat `src/` layout — the six nested-import projects and
+the three found at planning — and publishes the eight published ones under new versions.
 
 **Validation that cannot run in the implementation sandbox.** Docker image builds, the
 end-to-end pipeline, and any relock or `reinit` of a project that declares the PyTorch
@@ -554,6 +554,13 @@ Added after the slice 2 implementation review; resolution in `design.md`
       and the middleware, service, and sample-app locks moved that version only.
 - [x] 13.5 **Records.** 11.1 and 11.3 reopened by the review and re-closed by 13.1–13.4; the
       two `test_alkahest.py` tests passed once Foundry's `anvil` led the host `PATH`.
+- [x] 13.6 **Validation after the corrections.** `make check-packaging` passes all four checks
+      (2026-09-28). CI run 36451262562 (`e2e.yml`): all 17 images built; `e2e-bare-metal` 8
+      passed; `e2e-vm` 126 passed, 2 skipped; no import error in either job's service logs.
+- [x] 13.7 **Pre-closeout review.** The remaining six-project wording in this plan, D16, and
+      the rollback note now states the nine projects and eight published renames; the
+      version rule in the proposal and D16 allows the policy's patch bump for a non-breaking
+      change; the three review tombstones were deleted from the tree.
 
 ## Appendix A — slice 2 rename sites
 

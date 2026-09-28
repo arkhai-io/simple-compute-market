@@ -74,8 +74,9 @@ The work lands in two implementation slices under this one change.
   `cache-keys` are removed.
 - `domains/bare_metal/provisioning/adapter` stops resolving siblings through relative
   editable sources and installs them from `.dist`.
-- Every distribution whose wheel contents change bumps its minor version, pins and
-  locks follow, and the publication workflow's path filters move with the directories,
+- Every distribution whose wheel contents change bumps its version — a minor bump for
+  a breaking 0.x import change, otherwise the bump the versioning policy gives it — pins
+  and locks follow, and the publication workflow's path filters move with the directories,
   so PyPI publishes the renamed code rather than skipping an existing version.
 - `check-project-layout` joins `check-packaging`.
 
