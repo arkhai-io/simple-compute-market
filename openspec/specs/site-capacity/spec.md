@@ -250,7 +250,7 @@ Capacity projection events MUST remain anonymous and versioned, while deal-scope
 
 **Evidence**
 
-- Explicit request identity, absence and undeclared-mode refusal, legacy reservation behavior, declaration narrowing, and independent cross-mode accounting: `kit/site/tests/unit/test_ledger.py`.
+- Explicit request identity, absence and undeclared-mode refusal, legacy reservation behavior, declaration narrowing, and independent cross-mode accounting: `kit/site/tests/integration/test_ledger.py`.
 - Scheduling-time mode enforcement and withdrawal after reservation: `kit/fulfillment/tests/unit/test_scheduler.py`.
 - Pre-dispatch enforcement, including a previously prepared operation after declaration withdrawal: `kit/fulfillment/tests/unit/test_fulfillment.py`.
 - Durable reservation/settlement/job backfill, quarantine, idempotency, and schema drift: `provisioning/compute/service/tests/unit/test_pool_offering_mode_migration.py`.
@@ -260,7 +260,8 @@ Capacity projection events MUST remain anonymous and versioned, while deal-scope
 - “Do not close on ignorance” reconciliation: `domains/vms/storefront/tests/unit/test_cli_publish_helpers.py`.
 - Shared feasibility predicate: `kit/site/tests/unit/test_resource_satisfies_requirement.py`.
 - Session-scoped settlement assignment, locked reservation reads, and in-session backing-resource lookup: `kit/site/tests/unit/test_settlement_assignment.py`.
-- Reservation supersede (`resize_reservation`) and unconditional settlement-abandonment hook invocation across TTL lapse, release, and resize: `kit/site/tests/unit/test_ledger.py`.
+- Reservation supersede (`resize_reservation`) and unconditional settlement-abandonment hook invocation across TTL lapse, release, and resize: `kit/site/tests/integration/test_ledger.py`.
+- One release-handle name: the ledger payload and model in `kit/site/tests/integration/test_ledger.py`; the published and updatable VM lease handle in `provisioning/compute/service/tests/integration/test_leases_api.py`, the published bare-metal lease handle in `provisioning/compute/service/tests/integration/test_bare_metal_leases_api.py`, and the lease models in `provisioning/compute/service/tests/unit/test_lease_models.py`; the upgrade, including the mirror-only backfill and the refusal on disagreement, in `provisioning/compute/service/tests/integration/test_reservation_release_mirror_migration.py`; and the deployed VM release path through teardown in `e2e-tests/tests/e2e/roles/scenarios/vms/test_full_deal.py`.
 - Listing identity normalization and validation: `domains/vms/storefront/tests/unit/test_listing_model_capacity_identity.py`.
 - Claim identity precedence and fail-closed construction: `domains/vms/storefront/tests/unit/test_two_phase_reserve.py`, `domains/vms/storefront/tests/unit/test_vm_fulfillment_planner.py`, and `domains/vms/storefront/tests/unit/test_fulfill_vm_obligation_error_handling.py`.
 - Listing publication and legacy-invalid remediation: `domains/vms/storefront/tests/integration/test_listings_api.py`.
@@ -687,3 +688,42 @@ provider or different capacity backing.
 
 - **WHEN** a reassignment is requested for a capacity resource with no live capacity obligation
 - **THEN** the reassignment succeeds
+
+### Requirement: A reservation's release handle has one name
+
+A Capacity Reservation MUST represent its durable release handle, when it has
+one, only as `release_job_id`, regardless of the reservation's offering mode. The
+handle is absent until release begins. The site authority MUST NOT write a
+domain-prefixed mirror of it. Every lease contract that publishes a release
+handle, or accepts one in a lease update, MUST name it `release_job_id`.
+
+A reservation's pool, offering mode, and teardown path differ by domain, but the
+handle a caller follows to observe release does not, so one name serves every
+offering mode that shares the reservation table.
+
+#### Scenario: A VM reservation begins releasing
+
+- **WHEN** the compute lifecycle records the release job for a reservation whose offering mode is the VM mode
+- **THEN** the reservation's `release_job_id` is set and no second, VM-named field is written
+
+#### Scenario: A lease is read through either adapter
+
+- **WHEN** a VM lease or a bare-metal lease is read through its adapter's lease contract
+- **THEN** the release handle is published as `release_job_id` and under no other name
+
+#### Scenario: An operator corrects a lease's release handle
+
+- **WHEN** a VM lease update supplies `release_job_id`
+- **THEN** the reservation's release handle is replaced with that value and the lease response publishes it
+
+#### Scenario: A compute provisioning database is upgraded
+
+- **WHEN** a compute provisioning database whose reservation table holds a domain-prefixed release mirror is migrated
+- **THEN** a reservation whose handle is held only in the mirror keeps it as `release_job_id`
+- **AND** the mirror column is removed without losing any reservation's release handle or other reservation data
+- **AND** a database without the column migrates unchanged
+
+#### Scenario: A compute provisioning database holds two different release handles
+
+- **WHEN** a reservation's `release_job_id` and its domain-prefixed mirror hold different values
+- **THEN** the upgrade stops, naming the reservation, and changes nothing

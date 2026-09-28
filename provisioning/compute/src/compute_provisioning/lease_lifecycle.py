@@ -389,7 +389,7 @@ class LeaseLifecycleService:
     ) -> str:
         lease_end = self._parse_utc(reservation.get("lease_end_utc")) or now
         past_grace = now >= lease_end + timedelta(seconds=grace_seconds)
-        job_id = reservation.get("release_job_id") or reservation.get("vm_remove_job_id")
+        job_id = reservation.get("release_job_id")
         # "direct-release" means the executor's submit_release reported
         # nothing to poll -- e.g. no release delegate configured for that
         # offering mode. This is independent of whether release_jobs is

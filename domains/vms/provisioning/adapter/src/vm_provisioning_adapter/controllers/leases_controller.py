@@ -59,15 +59,7 @@ def _lease_view(reservation: dict[str, Any]) -> LeaseResponse:
         lease_end_utc=_parse_utc(reservation.get("lease_end_utc")) or now,
         status=lease_state_for_reservation_state(str(reservation.get("state"))).value,
         create_job_id=reservation.get("create_job_id"),
-        # Both, from the one ledger field. `release_job_id` is the canonical
-        # name the compute lease contract already publishes and the one
-        # callers should read; `vm_remove_job_id` is retained for wire
-        # compatibility, and is deliberately read from the same key rather
-        # than from the reservation's own mirror column so the two cannot
-        # disagree in this response.
         release_job_id=reservation.get("release_job_id"),
-        vm_remove_job_id=reservation.get("release_job_id")
-        or reservation.get("vm_remove_job_id"),
         created_at=now,
         updated_at=now,
     )
@@ -178,7 +170,7 @@ class LeasesController:
                     executor_ref={"host_id": body.host_id} if body.host_id else None,
                     lease_start_utc=body.lease_start_utc,
                     lease_end_utc=body.lease_end_utc,
-                    release_job_id=body.vm_remove_job_id,
+                    release_job_id=body.release_job_id,
                     create_job_id=body.create_job_id,
                 ),
             )

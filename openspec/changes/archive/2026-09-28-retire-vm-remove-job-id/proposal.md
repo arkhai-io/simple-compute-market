@@ -42,7 +42,9 @@ contract carries it:
 
 - The column on `market_site.db.CapacityReservation`, and a versioned
   compute-provisioning migration dropping it through
-  `_drop_columns_via_table_rebuild`. `vm_host` and `vm_target` were dropped
+  `_drop_columns_via_table_rebuild`. The migration first carries a handle held
+  only in the mirror into `release_job_id`, since that column was added without
+  a backfill, and refuses to drop over a row whose two values disagree. `vm_host` and `vm_target` were dropped
   from this same table that way, which is the precedent for the helper.
 - `CapacityLedgerService`: the `vm_remove_job_id` parameter aliases on
   `begin_releasing`, `update_lease_fields`, `update_lease_fields_in_session`
@@ -73,8 +75,10 @@ contract carries it:
   domain-shaped projections beside the generic
   `executor_ref`/`executor_target` rather than duplicated storage, and were
   explicitly left alone under 10.5.
-- A migration for API-credits or bare-metal databases. Neither domain has been
-  released; see `design.md`.
+- A migration for API-credits or bare-metal databases. Bare-metal pools share
+  the compute provisioning database the VM migration covers, and API-credits
+  reservations are never VM-mode, so its column has never held a value; see
+  `design.md`.
 
 ## Wire Compatibility
 
@@ -85,15 +89,27 @@ already published on both lease endpoints.
 
 The field is removed outright, with a version bump of every package whose wheel
 contents change. Every API in this repository is pre-1.0 and may break in this
-way, and no consumer outside the repository reads or sends the field. A caller
+way. No consumer in the repository reads or sends the field, and no external
+compatibility commitment exists for it; the packages are published, so the
+change rests on that absence of commitment rather than on a claim that no
+outside reader exists. A caller
 still sending the old name is treated exactly as a caller sending any other
 unknown field: the lease model ignores it. `design.md` records the alternatives
 and the revisit trigger.
+
+## Schema Compatibility
+
+Dropping the column in the release that stops writing it is non-additive with
+no coexistence period, an exception to the expand/contract rule in
+`docs/development/ARCHITECTURE.md` that this change takes deliberately. Rolling
+back past the migration requires re-adding the nullable column before starting
+the prior image; `design.md` records the exception, its cost, and the recovery.
 
 ## Permanent documentation impact
 
 - [ ] `docs/development/ARCHITECTURE.md`
 - [x] Existing subsystem specification — `openspec/specs/site-capacity/spec.md`
+- [x] Release policy — `docs/development/RELEASING.md`
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 
@@ -102,3 +118,5 @@ and the revisit trigger.
 - `release_job_id` is the one release handle on a Capacity Reservation and the
   one name for it on every lease contract, published and updatable; no
   domain-prefixed mirror exists — `openspec/specs/site-capacity/spec.md`.
+- Before 1.0, an incompatible package change takes a minor version bump —
+  `docs/development/RELEASING.md`, "Versioning policy".

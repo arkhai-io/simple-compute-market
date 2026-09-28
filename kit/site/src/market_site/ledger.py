@@ -1731,7 +1731,6 @@ class CapacityLedgerService:
         self,
         capacity_reservation_id: str,
         *,
-        vm_remove_job_id: str | None = None,
         release_job_id: str | None = None,
     ) -> dict[str, Any] | None:
         """Transition a leased reservation to releasing (teardown in flight).
@@ -1744,9 +1743,9 @@ class CapacityLedgerService:
             if reservation is None or reservation.state not in HELD_RESERVATION_STATES:
                 return None
             reservation.state = ReservationState.releasing.value
-            self._sync_release_job_fields(
+            self._set_release_job_id(
                 reservation,
-                release_job_id=release_job_id or vm_remove_job_id,
+                release_job_id=release_job_id,
             )
             db.commit()
             return self._reservation_payload(reservation)
@@ -1760,7 +1759,6 @@ class CapacityLedgerService:
         executor_ref: Mapping[str, Any] | None = None,
         lease_start_utc: str | None = None,
         lease_end_utc: str | None = None,
-        vm_remove_job_id: str | None = None,
         release_job_id: str | None = None,
         create_job_id: str | None = None,
     ) -> dict[str, Any] | None:
@@ -1788,7 +1786,6 @@ class CapacityLedgerService:
                 executor_ref=executor_ref,
                 lease_start_utc=lease_start_utc,
                 lease_end_utc=lease_end_utc,
-                vm_remove_job_id=vm_remove_job_id,
                 release_job_id=release_job_id,
                 create_job_id=create_job_id,
             )
@@ -1805,7 +1802,6 @@ class CapacityLedgerService:
         executor_ref: Mapping[str, Any] | None = None,
         lease_start_utc: str | None = None,
         lease_end_utc: str | None = None,
-        vm_remove_job_id: str | None = None,
         release_job_id: str | None = None,
         create_job_id: str | None = None,
     ) -> dict[str, Any] | None:
@@ -1843,9 +1839,9 @@ class CapacityLedgerService:
             reservation.lease_start_utc = str(lease_start_utc)
         if lease_end_utc is not None:
             reservation.lease_end_utc = str(lease_end_utc)
-        self._sync_release_job_fields(
+        self._set_release_job_id(
             reservation,
-            release_job_id=release_job_id or vm_remove_job_id,
+            release_job_id=release_job_id,
         )
         if create_job_id is not None:
             reservation.create_job_id = create_job_id
@@ -1892,7 +1888,6 @@ class CapacityLedgerService:
         state: str,
         failure_reason: str | None = None,
         failure_message: str | None = None,
-        vm_remove_job_id: str | None = None,
         release_job_id: str | None = None,
     ) -> dict[str, Any] | None:
         """Update a site reservation state without emitting capacity events.
@@ -1911,9 +1906,9 @@ class CapacityLedgerService:
                 reservation.failure_reason = failure_reason
             if failure_message is not None:
                 reservation.failure_message = failure_message
-            self._sync_release_job_fields(
+            self._set_release_job_id(
                 reservation,
-                release_job_id=release_job_id or vm_remove_job_id,
+                release_job_id=release_job_id,
             )
             db.commit()
             return self._reservation_payload(reservation)
@@ -2507,7 +2502,6 @@ class CapacityLedgerService:
             "lease_start_utc": reservation.lease_start_utc,
             "lease_end_utc": reservation.lease_end_utc,
             "create_job_id": reservation.create_job_id,
-            "vm_remove_job_id": reservation.vm_remove_job_id,
             "claim_attributes": (
                 dict(reservation.claim_attributes)
                 if reservation.claim_attributes is not None
@@ -2566,7 +2560,7 @@ class CapacityLedgerService:
             reservation.executor_ref = dict(executor_ref)
 
     @staticmethod
-    def _sync_release_job_fields(
+    def _set_release_job_id(
         reservation: CapacityReservation,
         *,
         release_job_id: str | None,
@@ -2574,5 +2568,3 @@ class CapacityLedgerService:
         if release_job_id is None:
             return
         reservation.release_job_id = release_job_id
-        if reservation.offering_mode == VM_OFFERING_MODE:
-            reservation.vm_remove_job_id = release_job_id

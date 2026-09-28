@@ -2527,6 +2527,64 @@ def _migrate_pool_advertisement_and_backing(engine: Engine) -> None:
             )
 
 
+def _migrate_drop_reservation_release_mirror(engine: Engine) -> None:
+    """Drop ``capacity_reservations.vm_remove_job_id``.
+
+    A reservation's release handle has one name, ``release_job_id``, for every
+    offering mode sharing this table. The dropped column is a VM-only copy of
+    that handle, with one exception: ``release_job_id`` was added without a
+    backfill, so a row that predates it can hold its handle only here. Such a
+    row is given the value as its ``release_job_id`` before the drop, which is
+    how every reader treated it while the column existed. A row holding two
+    different values has no single handle to keep; the migration refuses
+    rather than choose, and nothing is changed.
+
+    Irreversible through this chain. A release whose model still maps the
+    column cannot read the table after this runs; rolling back to one requires
+    re-adding the column, empty and nullable, before that release starts. Its
+    readers take ``release_job_id`` first, so an empty column is sufficient.
+    A no-op where the column is absent, including every database created from
+    the current model.
+    """
+    if not _table_exists(engine, "capacity_reservations"):
+        return
+    if not _column_exists(engine, "capacity_reservations", "vm_remove_job_id"):
+        return
+    with engine.begin() as connection:
+        divergent = connection.execute(
+            text(
+                "SELECT capacity_reservation_id FROM capacity_reservations "
+                "WHERE vm_remove_job_id IS NOT NULL "
+                "AND release_job_id IS NOT NULL "
+                "AND release_job_id != vm_remove_job_id "
+                "ORDER BY capacity_reservation_id"
+            )
+        ).scalars().all()
+        if divergent:
+            raise SchemaDriftError(
+                "capacity_reservations holds two different release handles "
+                "for reservations "
+                + ", ".join(divergent)
+                + ": release_job_id and vm_remove_job_id disagree. Set each "
+                "row's release_job_id to its correct handle and clear "
+                "vm_remove_job_id, then restart."
+            )
+        backfilled = connection.execute(
+            text(
+                "UPDATE capacity_reservations "
+                "SET release_job_id = vm_remove_job_id "
+                "WHERE release_job_id IS NULL AND vm_remove_job_id IS NOT NULL"
+            )
+        ).rowcount
+    if backfilled:
+        logger.info(
+            "[MIGRATION] Carried %d release handle(s) into release_job_id",
+            backfilled,
+        )
+    _drop_columns_via_table_rebuild(
+        engine, "capacity_reservations", ["vm_remove_job_id"]
+    )
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration("20260603_001_ansible_jobs_escrow_uid", _migrate_ansible_jobs_escrow_uid),
     Migration("20260603_002_hosts_public_host", _migrate_hosts_public_host),
@@ -2603,5 +2661,9 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260922_001_pool_advertisement_and_backing",
         _migrate_pool_advertisement_and_backing,
+    ),
+    Migration(
+        "20260927_001_drop_reservation_release_mirror",
+        _migrate_drop_reservation_release_mirror,
     ),
 )

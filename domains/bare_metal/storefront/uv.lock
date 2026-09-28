@@ -229,7 +229,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-compute-provisioning"
-version = "0.7.0"
+version = "0.7.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-fulfillment" },
@@ -240,7 +240,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_compute_provisioning-0.7.0-py3-none-any.whl" },
+    { path = "arkhai_compute_provisioning-0.7.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -495,7 +495,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-site"
-version = "0.5.0"
+version = "0.6.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-identity" },
@@ -506,7 +506,7 @@ dependencies = [
     { name = "sqlalchemy" },
 ]
 wheels = [
-    { path = "arkhai_kit_site-0.5.0-py3-none-any.whl" },
+    { path = "arkhai_kit_site-0.6.0-py3-none-any.whl" },
 ]
 
 [[package]]

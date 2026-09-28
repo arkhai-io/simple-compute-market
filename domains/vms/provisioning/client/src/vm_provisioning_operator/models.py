@@ -465,9 +465,13 @@ class LeaseUpdate(BaseModel):
             "``POST /api/v1/system/check-leases`` for an immediate trigger."
         ),
     )
-    vm_remove_job_id: Optional[str] = Field(
+    release_job_id: Optional[str] = Field(
         default=None,
-        description="Provisioning job_id for the most recent vm_remove teardown job.",
+        description=(
+            "The reservation's release handle. For a VM this is the durable "
+            "fulfillment_id of the teardown, which is what teardown status is "
+            "read by."
+        ),
     )
     create_job_id: Optional[str] = Field(
         default=None,
@@ -550,17 +554,11 @@ class LeaseResponse(BaseModel):
     lease_end_utc: datetime
     status: str
     create_job_id: Optional[str] = None
-    #: The reservation's canonical release handle. For a VM this is the
-    #: durable ``fulfillment_id`` of the teardown aggregate, which is what a
-    #: caller needs to read teardown status -- not an Ansible queue job id.
-    #:
-    #: ``vm_remove_job_id`` below is a VM-conditional mirror of this same
-    #: value, written only when the offering mode is VM and always to what
-    #: ``release_job_id`` already holds. It is retained for wire
-    #: compatibility only and carries nothing this field does not;
-    #: ``release_job_id`` is the field to read.
+    #: The reservation's release handle, set once release begins. For a VM
+    #: this is the durable ``fulfillment_id`` of the teardown aggregate, which
+    #: is what a caller needs to read teardown status -- not an Ansible queue
+    #: job id.
     release_job_id: Optional[str] = None
-    vm_remove_job_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

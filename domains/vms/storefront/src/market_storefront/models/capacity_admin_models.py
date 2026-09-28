@@ -130,7 +130,6 @@ class ReleaseStartedEventRequest(BaseModel):
     capacity_reservation_id: str
     site_id: str
     provider_lease_id: str | None = None
-    vm_remove_job_id: str | None = None
 
 
 class CapacityReleasedEventRequest(BaseModel):

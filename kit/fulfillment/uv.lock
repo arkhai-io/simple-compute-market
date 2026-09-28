@@ -108,7 +108,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-site"
-version = "0.5.0"
+version = "0.6.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-kit-identity" },
@@ -119,8 +119,8 @@ dependencies = [
     { name = "sqlalchemy" },
 ]
 wheels = [
-    { path = "arkhai_kit_site-0.5.0-py3-none-any.whl" },
-    { path = "arkhai_kit_site-0.5.0-py3-none-any.whl" },
+    { path = "arkhai_kit_site-0.6.0-py3-none-any.whl" },
+    { path = "arkhai_kit_site-0.6.0-py3-none-any.whl" },
 ]
 
 [[package]]

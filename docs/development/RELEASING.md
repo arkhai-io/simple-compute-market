@@ -127,6 +127,14 @@ Each package follows [SemVer](https://semver.org):
 - **Minor** — new public API, backwards compatible.
 - **Patch** — bug fix or internal change.
 
+Before a package reaches 1.0.0 its major version stays at zero: an
+incompatible change takes a **minor** bump in place of a major one, and
+the other rules apply unchanged. A consumer that depends on the
+incompatible behaviour raises its lower bound to the new minor version.
+Moving a package to 1.0.0 is a deliberate decision that sets its
+compatibility commitment, not a consequence of shipping an incompatible
+change.
+
 Cross-package compatibility is enforced via dependency constraints in
 `pyproject.toml`. Use `>=X.Y` (lower bound) for forward compatibility,
 or `>=X.Y,<X+1` when a breaking major release is anticipated.

@@ -15,7 +15,7 @@ from market_resource_pools.db import (
     ResourcePool,
 )
 
-from market_site.db import HELD_RESERVATION_STATES, Base
+from market_site.db import HELD_RESERVATION_STATES, Base, CapacityReservation
 from market_site.ledger import (
     ALLOCATION_MODE_EXCLUSIVE,
     ALLOCATION_MODE_SHAREABLE,
@@ -731,6 +731,29 @@ def test_find_active_lease_by_vm_target_matches_via_executor_ref(seeded: Capacit
     assert seeded.attach_lease(capacity_reservation_id=reserved["capacity_reservation_id"]) is None
 
 
+def test_a_vm_release_handle_has_one_name(seeded: CapacityLedgerService):
+    """A VM reservation's release handle is ``release_job_id``, with no
+    VM-named copy on the payload or on the stored row."""
+    reserved = seeded.reserve(
+        claim={"offering_mode": "vm"}, deal_ref={"escrow_uid": "0xhandle"},
+    )
+    seeded.commit(
+        resource_id=reserved["resource_id"],
+        capacity_reservation_id=reserved["capacity_reservation_id"],
+        lease_start_utc="2020-01-01T00:00:00Z",
+        lease_end_utc="2020-01-01 00:00",
+    )
+
+    releasing = seeded.begin_releasing(
+        reserved["capacity_reservation_id"], release_job_id="fulfillment-1",
+    )
+
+    assert releasing["offering_mode"] == "vm"
+    assert releasing["release_job_id"] == "fulfillment-1"
+    assert "vm_remove_job_id" not in releasing
+    assert "vm_remove_job_id" not in CapacityReservation.__table__.columns
+
+
 def test_list_lease_due_and_begin_releasing(seeded: CapacityLedgerService):
     reserved = seeded.reserve(claim={"offering_mode": "vm", **{}}, deal_ref={"escrow_uid": "0xdue"})
     seeded.commit(
@@ -743,10 +766,9 @@ def test_list_lease_due_and_begin_releasing(seeded: CapacityLedgerService):
     assert [a["capacity_reservation_id"] for a in due] == [reserved["capacity_reservation_id"]]
 
     releasing = seeded.begin_releasing(
-        reserved["capacity_reservation_id"], vm_remove_job_id="check-1",
+        reserved["capacity_reservation_id"], release_job_id="check-1",
     )
     assert releasing["state"] == "releasing"
-    assert releasing["vm_remove_job_id"] == "check-1"
     assert releasing["release_job_id"] == "check-1"
     # releasing still holds the units and is no longer "due".
     assert seeded.snapshot()[0]["available_units"] == 7

@@ -271,7 +271,11 @@ async def test_generic_market_lease_terminate_dispatches_bare_metal_reclaim(
     assert reservation["state"] == "releasing"
     assert reservation["offering_mode"] == "bare_metal"
     assert reservation["release_job_id"]
-    assert reservation["vm_remove_job_id"] is None
+
+    # The bare-metal lease contract publishes the handle under its one name.
+    published = await bare_metal_client.get_lease(lease["capacity_reservation_id"])
+    assert published["release_job_id"] == reservation["release_job_id"]
+    assert "vm_remove_job_id" not in published
 
     session_factory = _container_module.resolved_session_factory
     with session_factory() as db:
