@@ -31,8 +31,13 @@ section 3 replaces it in all images at once.
       then the service's own wheel; the two adapter wheel installs are dropped.
       `provisioning/compute/service/Dockerfile.dockerignore` admits the project's
       `pyproject.toml` and `uv.lock`.
-- [ ] 1.4 *Builds and smoke checks: done in CI run 36409616543 (`e2e.yml`, 2026-09-28); the before/after `uv pip freeze`
-      comparison was not performed and stays unrun.* Validate: build the three images (`Makefile` targets building
+- [x] 1.4 *Builds and smoke checks: CI run 36409616543 (`e2e.yml`, 2026-09-28). Installed-package
+      comparison, by `importlib.metadata` inside each image: every "after" image installs
+      exactly its committed lock (sample app 54 of 54, bare-metal storefront 96 of 96 on
+      3.12 → 3.13, compute service 88 of 88 with `adapters`, 3.12 → 3.13); repository
+      distributions are unchanged; third-party versions moved from freshly resolved to
+      locked, which drops `py-ecc` (locked `eth-account` 0.13.7) and adds `greenlet` (locked
+      SQLAlchemy 2.0.x).* Validate: build the three images (`Makefile` targets building
       `domains/bare_metal/storefront/Dockerfile` and
       `domains/apicredits/sample-app/Dockerfile`; `make -C provisioning/compute/service
       build-image`), run each image's existing import smoke check, and compare
@@ -146,8 +151,8 @@ section 3 replaces it in all images at once.
       `e2e-tests` (unit tier). `make lock` relocks every project: run with the PyTorch index
       available, it changed only `domains/bare_metal/buyer/uv.lock` (14 duplicated wheel
       entries removed; no package, version, or source change). A second, unchanged run is
-      not yet shown; 12.8 checks it. `make reinit` and `make test` in the three PyTorch-index
-      projects remain handed off.
+      shown in 12.8. `make reinit` and `make test` in the three PyTorch-index projects passed
+      (handed off, run 2026-09-28).
 - [x] 3.8 Validate images (handoff where Docker is unavailable): build all eight images,
       run their smoke checks, and run the end-to-end pipeline.
       Evidence: CI run 36409616543 (`e2e.yml`, 2026-09-28). Both jobs built all eight images through `uv_project.py image`
@@ -351,7 +356,7 @@ Per `openspec/README.md#plan-closeout-requirements`.
 
 ### 7. Flat import packages under `src/` (D10)
 
-- [ ] 7.1 Move each project's modules to `src/<package>/` with `git mv`, keeping data files
+- [x] 7.1 Move each project's modules to `src/<package>/` with `git mv`, keeping data files
       beside the modules that load them, and point its wheel target at `src/<package>`:
       `domains/vms/buyer` → `arkhai_vms_buyer`, `domains/vms/listings` →
       `arkhai_vms_listings`, `domains/vms/negotiation` → `arkhai_vms_negotiation` (with
@@ -359,19 +364,52 @@ Per `openspec/README.md#plan-closeout-requirements`.
       `domains/apicredits/buyer` → `arkhai_apicredits_buyer`, `domains/apicredits` →
       `arkhai_apicredits` (its `listings/`, `negotiation/`, `settlement/`, `schema.py`,
       `domain_runtime.py`, and `__init__.py`; the sibling subprojects stay where they are).
-- [ ] 7.2 Re-run the Appendix A scan, reconcile it, and rename every import, entry point,
+- [x] 7.2 Re-run the Appendix A scan, reconcile it, and rename every import, entry point,
       `monkeypatch` target string, `filterwarnings` entry, and prose reference it lists,
       except the three exclusions it names. `domains/vms/storefront/Dockerfile`'s smoke
       import follows; `domains/vms/compose.yml`'s `PYTHONPATH` note is corrected, and the
       variable removed if nothing then needs it.
-- [ ] 7.3 Remove editable-install workarounds: `UV_NO_EDITABLE` from
+      *Section 7 complete; section 8 through 8.2, with 8.3 partly handed off.
+      - 7.1–7.2: every rebuilt wheel holds exactly its one package, the RL models inside
+        `arkhai_vms_negotiation`. 158 files renamed, leaving only the three exclusions.
+        `test_distribution.py` needed its wheel-member paths corrected by hand. The nine
+        import-boundary tests that keyed on the retired `domains` prefix now name the new
+        packages; a planted `arkhai_vms_listings` import in `kit/site` fails its test.
+      - 7.3–7.4: `UV_NO_EDITABLE`, the CI `no_editable` fields, and `cache-keys` removed;
+        `docs/configuration.md` renamed in 7.2.
+      - 7.6: `core/registry`, the API-credits service, and `e2e-tests` each build one package
+        (`core_registry`, `apicredits_service`, `e2e_harness`); `__file__`-relative paths
+        moved one level; Alembic prepends `src`; images start `core_registry.main:app` and
+        `apicredits_service.main:app` with `--app-dir /app/src`; the root `Makefile`'s hosted
+        driver runs `e2e_harness.hosted_real_stripe.driver`. The service's former `src/tests`
+        now run from `tests/unit` and pass.
+      - 7.7: both wheels are byte-identical apart from `RECORD` and keep `py.typed`; no bump.
+      - 7.5 suites: API-credits domain 42, buyer 17, storefront 84, service 66, sample app 1;
+        `core/registry` 104 unit and 119 integration; `e2e-tests` unit 236 of 237 (the
+        `compose.vms.yml` failure present at the checkpoint); `kit/fulfillment` 176; VM buyer
+        196 and VM storefront 1086, both from their committed locks without the `rl` extra.
+      - 8.5 run early: exactly the ten distributions in 8.1 changed; the other 34 wheels are
+        identical.
+      - 8.3: six locks relocked, moving only the bumped versions. `domains/vms/buyer` and
+        `domains/vms/storefront` need the PyTorch index; until they are relocked,
+        `check-locks` reports their pre-bump pins.*
+- [x] 7.6 Converge the three projects found at planning (D10): `core/registry` → `src/core_registry`
+      (setuptools → hatchling; the `src.*` imports in 53 files, `alembic/env.py`, the image `CMD`,
+      and the `serve` target); `domains/apicredits/service` → `src/apicredits_service` (setuptools →
+      hatchling; the top-level `db`, `models`, `services`, `middleware`, `controllers` imports in 20
+      files; `src/tests` joins the project's `tests/`; the image's `PYTHONPATH` and `--app-dir`; the
+      Makefile's `PYTHONPATH=src`); `e2e-tests` → `src/e2e_harness` (the `src.*` imports in 27 files
+      and every path naming `e2e-tests/src`). Validate each project's suite.
+- [x] 7.7 Drop the `force-include` of `py.typed` from `core` and `core/registry-client`; confirm each
+      wheel's contents are unchanged, so neither is bumped.
+- [x] 7.3 Remove editable-install workarounds: `UV_NO_EDITABLE` from
       `domains/vms/buyer/Makefile`, `domains/apicredits/Makefile`, and
       `domains/apicredits/buyer/Makefile`; the `no_editable` matrix fields and
       `UV_NO_EDITABLE` environment line from `.github/workflows/tests.yml`; `cache-keys`
       from `domains/vms/buyer`, `domains/apicredits/buyer`, and `domains/apicredits`
       `pyproject.toml`.
-- [ ] 7.4 `docs/configuration.md` hook examples use `arkhai_vms_buyer.aggregation`.
-- [ ] 7.5 Validate: each renamed project's default suite; the suites of
+- [x] 7.4 `docs/configuration.md` hook examples use `arkhai_vms_buyer.aggregation`.
+- [x] 7.5 Validate: each renamed project's default suite; the suites of
       `domains/vms/storefront`, `domains/apicredits/storefront`,
       `domains/apicredits/service`, `kit/fulfillment`, and `e2e-tests` (unit tier); each
       renamed wheel contains exactly `src/<package>` plus metadata; the Appendix A scan
@@ -379,7 +417,7 @@ Per `openspec/README.md#plan-closeout-requirements`.
 
 ### 8. Versions and publication (D16)
 
-- [ ] 8.1 Bump every distribution whose wheel contents change. Enumerated from Appendix A
+- [x] 8.1 Bump every distribution whose wheel contents change. Enumerated from Appendix A
       ownership, keeping projects whose changed files ship in the wheel:
 
       | Distribution | From | To |
@@ -392,58 +430,71 @@ Per `openspec/README.md#plan-closeout-requirements`.
       | `arkhai-apicredits-domain` | 0.3.0 | 0.4.0 |
       | `arkhai-apicredits-storefront` | 0.4.1 | 0.5.0 |
       | `arkhai-vms-storefront` | 0.7.1 | 0.8.0 |
+      | `arkhai-core-registry` | 0.2.0 | 0.3.0 |
+      | `arkhai-apicredits-service` | 0.3.0 | 0.4.0 |
 
-      `arkhai-apicredits-service` changes only tests; `arkhai-core-buyer`,
+      `arkhai-e2e-tests` is not published; `arkhai-core-buyer`,
       `arkhai-kit-alkahest`, and `arkhai-kit-policy` hold only Appendix A exclusions.
-- [ ] 8.2 Move every requirement on a bumped distribution to its new lower bound:
+- [x] 8.2 Move every requirement on a bumped distribution to its new lower bound:
       `domains/apicredits/buyer`, `domains/apicredits/storefront`, `domains/vms/buyer`
       (three), `domains/vms/negotiation`, `domains/vms/settlement`,
       `domains/vms/storefront` (three), and `e2e-tests` (three) `pyproject.toml`.
 - [ ] 8.3 Rebuild the wheelhouse and run `make lock` for every project whose lock names a
       bumped distribution (handoff for PyTorch-index projects), then `make check-locks`.
-- [ ] 8.4 `.github/workflows/publish-pypi.yml` path filters for the six moved projects,
+      *Six locks relocked (version moves only). Handed off: `make lock
+      PROJECTS="domains/vms/buyer domains/vms/storefront"`, then `make reinit && make test` in
+      both; until then `check-locks` reports their pre-bump pins and nothing else.*
+- [x] 8.4 `.github/workflows/publish-pypi.yml` path filters for the six moved projects,
       including `apicredits-domain`; `scripts/tests/test_publish_matrix.py` if it asserts
       them; `docs/development/RELEASING.md` records the import migration for the bumped
       releases.
-- [ ] 8.5 Validate: build every published distribution's wheel before and after slice 2
+      *The filters are project-directory globs and the projects did not move, so they needed no
+      change; `apicredits-domain`'s `src/**` filter now covers the domain's modules. `RELEASING.md`
+      records the renames, loses its stale Version column, and no longer recommends relative
+      sources for local development. All three `wheel_only` packages now build an sdist; dropping
+      the flag would start publishing sdists for them, which is left for a separate decision.*
+- [x] 8.5 Validate: build every published distribution's wheel before and after slice 2
       and compare contents; every distribution whose contents changed is in 8.1.
 
 ### 9. Relative sources (D11)
 
-- [ ] 9.1 `domains/bare_metal/provisioning/adapter/pyproject.toml` drops its
+- [x] 9.1 `domains/bare_metal/provisioning/adapter/pyproject.toml` drops its
       `[tool.uv.sources]` block; relock with `make lock PROJECTS=
       domains/bare_metal/provisioning/adapter`; its suite passes against `.dist` wheels.
+      *The adapter's lock resolves all seven siblings from the wheelhouse; its suite passes.*
 - [x] 9.2 Record the transfer in `openspec/changes/remove-relative-uv-sources/tasks.md`:
       its open sections 1–3 now belong to this change. Done at planning, 2026-09-27.
 
 ### 10. Layout check and documentation
 
-- [ ] 10.1 `scripts/check_project_layout.py` with
+- [x] 10.1 `scripts/check_project_layout.py` with
       `scripts/tests/test_check_project_layout.py`, covering each condition in D12's table
       and the current tree passing; `check-project-layout` joins `check-packaging`.
-- [ ] 10.2 `BUILD_AND_PACKAGING.md` gains the layout rule; promote the layout requirement
+- [x] 10.2 `BUILD_AND_PACKAGING.md` gains the layout rule; promote the layout requirement
       and the wheelhouse-source rule to `openspec/specs/deployment-state/spec.md`.
 
+      *`check-project-layout` passes the tree and reports 27 problems across exactly the converged
+      projects against the pre-slice-2 tree; its nine tests pass.*
 ### 11. Closeout
 
 Per `openspec/README.md#plan-closeout-requirements`.
 
-- [ ] 11.1 **Comment hygiene.** Run `make check-comment-hygiene`, then direct-read the
+- [x] 11.1 **Comment hygiene.** Run `make check-comment-hygiene`, then direct-read the
       comments and docstrings slice 2 touches, including module docstrings in moved files
       that describe their former location.
-- [ ] 11.2 **Import placement.** Review every import slice 2 rewrites; renaming must not
+- [x] 11.2 **Import placement.** Review every import slice 2 rewrites; renaming must not
       move an import between module and function level.
-- [ ] 11.3 **Documentation compliance.** Re-check D10, D11, and D16 against
+- [x] 11.3 **Documentation compliance.** Re-check D10, D11, and D16 against
       `openspec/README.md`'s placement rules, and confirm every delta requirement of this
       change landed in its owning spec.
-- [ ] 11.4 **Narrative compression.** Compress completed notes across both slices,
+- [x] 11.4 **Narrative compression.** Compress completed notes across both slices,
       moving any remaining rationale into `design.md` first.
-- [ ] 11.5 **Roadmap currency.** Confirm and record that `docs/development/ROADMAP.md` is
+- [x] 11.5 **Roadmap currency.** Confirm and record that `docs/development/ROADMAP.md` is
       owed nothing.
-- [ ] 11.6 **Campaign index currency.** Update this change's row and the "Package and
+- [x] 11.6 **Campaign index currency.** Update this change's row and the "Package and
       release readiness" dependency graph in `openspec/changes/README.md` to complete, and
       reconcile `remove-relative-uv-sources`' row with its transferred work.
-- [ ] 11.7 **Documentation citations.** Run
+- [x] 11.7 **Documentation citations.** Run
       `make check-doc-citations CHANGE=converge-python-packaging` and resolve every match,
       including citations to moved files.
 - [ ] 11.8 **Packaging.** Run `make check-packaging`, now including
@@ -451,9 +502,16 @@ Per `openspec/README.md#plan-closeout-requirements`.
 - [ ] 11.9 **End-to-end pipeline.** Confirm the pipeline passes on the renamed packages
       and record the run, its result, and the VM and API-credit scenarios exercising them;
       if it cannot run, record the blocker and treat the validations it gates as unrun.
-- [ ] 11.10 **Promotion.** Complete the design-promotion record for every decision, and
+- [x] 11.10 **Promotion.** Complete the design-promotion record for every decision, and
       verify no production source references `openspec/changes/converge-python-packaging`.
 
+      *Evidence: script suite 280 passed, with the two failures present at the checkpoint;
+      `check-uv-setup`, `check-python-version`, and `check-project-layout` pass; `check-locks`
+      reports only the two VM locks awaiting the PyTorch index; comment hygiene passes; scoped
+      citations resolve, and two citations in `pools-7-storefront-fulfillment-cutover` and
+      `deduplicate-dynaconf-bootstrap` were repointed to `e2e_harness`. Roadmap: none owed.
+      Handed off: 8.3's two relocks (then 11.8), and 11.9, since the registry, API-credits
+      service, and e2e images and every VM and API-credits package changed.*
 ## Appendix A — slice 2 rename sites
 
 Every file outside `openspec/` and generated locks that names `domains.vms.buyer`,

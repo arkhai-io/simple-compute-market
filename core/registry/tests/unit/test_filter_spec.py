@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from src.api.filter_spec import (
+from core_registry.api.filter_spec import (
     compute_etag,
     load_filter_spec,
 )
@@ -22,7 +22,7 @@ from src.api.filter_spec import (
 
 @pytest.fixture(autouse=True)
 def _isolate_filter_spec_cache():
-    from src.api import filter_spec as fs_mod
+    from core_registry.api import filter_spec as fs_mod
 
     fs_mod.reset_cache()
     yield
@@ -363,7 +363,7 @@ def _authenticated_filter_client(app, db_session):
         canonical_body_hash,
         sign_request,
     )
-    from src.db.database import get_db
+    from core_registry.db.database import get_db
 
     caller = Ed25519Signer(bytes(range(32)))
     registry = Ed25519Signer(bytes(range(1, 33)))
@@ -458,7 +458,7 @@ def test_etag_present_on_endpoint(
         """,
     )
     monkeypatch.setenv("REGISTRY_FILTER_SPEC_PATH", str(path))
-    from src.api import filter_spec as fs_mod
+    from core_registry.api import filter_spec as fs_mod
 
     fs_mod.reset_cache()
 
@@ -499,7 +499,7 @@ def test_endpoint_serves_schema_identity(
         """,
     )
     monkeypatch.setenv("REGISTRY_FILTER_SPEC_PATH", str(path))
-    from src.api import filter_spec as fs_mod
+    from core_registry.api import filter_spec as fs_mod
 
     fs_mod.reset_cache()
 

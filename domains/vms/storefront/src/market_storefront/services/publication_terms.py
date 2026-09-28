@@ -12,8 +12,8 @@ from __future__ import annotations
 from typing import Any
 
 from arkhai_vms.storefront_adapter import vm_listing_resource_for_listing
-from domains.vms.listings.pricing_resolution import GpuPricingFields
-from domains.vms.listings.reconciler import PoolHintResolutionSettings
+from arkhai_vms_listings.pricing_resolution import GpuPricingFields
+from arkhai_vms_listings.reconciler import PoolHintResolutionSettings
 from market_alkahest.alkahest import (
     get_erc20_splitter,
     get_recipient_arbiter,

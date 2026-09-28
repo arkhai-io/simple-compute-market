@@ -24,8 +24,8 @@ from core_storefront.sqlite_client import (
 )
 from core_storefront.domain_registry import StorefrontDomainRegistry
 from core_storefront.sqlite_migrations import MigrationLike
-from domains.vms.listings.host_csv_importer import upsert_hosts_from_csv
-from domains.vms.listings.resource_csv_importer import (
+from arkhai_vms_listings.host_csv_importer import upsert_hosts_from_csv
+from arkhai_vms_listings.resource_csv_importer import (
     SettlementClauseCompiler,
     upsert_resources_from_csv,
     upsert_resources_from_csv_content,

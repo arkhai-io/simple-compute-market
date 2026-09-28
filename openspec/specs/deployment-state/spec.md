@@ -787,6 +787,31 @@ wheel change invalidates that stage.
   package index, or from a local registry other than the repository wheelhouse
 - **THEN** the packaging check fails and names the lock and the distribution
 
+#### Scenario: A project declares a sibling source
+
+- **WHEN** a project's `pyproject.toml` names a repository distribution through a
+  relative source path, or declares a `find-links` location
+- **THEN** the packaging check fails and names the project
+
+### Requirement: Each distribution is one flat import package under src
+
+Each repository Python distribution MUST build its wheel from exactly one top-level
+import package located at `src/<package>` in its project, and its project environment
+MUST install it editable. A project MUST NOT map a directory onto a different import
+path, disable editable installation, or declare rebuild cache keys to compensate for
+either.
+
+#### Scenario: A module is edited
+
+- **WHEN** a developer edits a module of the project under test
+- **THEN** the next test run imports the edited module without a sync
+
+#### Scenario: A project maps its directory onto a nested import path
+
+- **WHEN** a wheel target includes files from outside `src/<package>` or places them
+  under another import path
+- **THEN** the packaging check fails and names the project
+
 ### Requirement: A project environment refreshes exactly the internal packages its lock installs
 
 A rebuilt wheel keeps its version, so a sync keeps both an environment's installed copy
@@ -874,7 +899,7 @@ definition MUST NOT list internal packages or rewrite a lock.
 
 The repository MUST provide one command that relocks projects against the current
 wheelhouse, upgrading every internal package each lock resolves from it, without
-creating or modifying any environment. Because a lock check cannot observe a
+creating or modifying any environment. Because `uv lock --check` alone cannot observe a
 same-version wheel's changed dependencies, the command MUST relock every project it is
 given rather than skipping those a check reports current.
 
@@ -921,7 +946,7 @@ building MAY disagree with it.
 ### Requirement: Packaging conventions are checked mechanically
 
 One repository target MUST build the repository wheelhouse and then run every
-packaging check — environment setup, lock currency, and Python version —
+packaging check — environment setup, lock currency, Python version, and project layout —
 failing if any fails. Each check MUST also be runnable alone. The checks MUST read only
 the committed tree and the built wheelhouse, and MUST NOT resolve dependencies, relock,
 or contact a package index; building the wheelhouse retains whatever its isolated builds
@@ -930,7 +955,7 @@ need.
 Lock currency MUST fail on a lock that no longer satisfies its project; on a lock that
 pins an internal package at a version the tree does not build; and on a lock whose
 record of an internal package disagrees with that package's wheel in the wheelhouse —
-a requirement added or removed, unconditionally or under an extra the lock records, or
+a requirement added or removed, unconditionally or under an extra in use, or
 a locked dependency version the wheel's requirement no longer admits.
 
 #### Scenario: A lock pins a superseded internal version
@@ -982,6 +1007,7 @@ but the aggregate MUST NOT silently omit a kit.
 - Wheel-directory dependency resolution without parent-path UV sources: package `pyproject.toml` files and package Makefiles using `--find-links`.
 - Derived internal-package refresh for environments, images, and locks: `scripts/uv_project.py`, `scripts/tests/test_uv_project.py`, every `reinit` target, and every Dockerfile that copies `.dist`.
 - Packaging checks: `scripts/check_uv_setup.py`, `scripts/check_locks.py`, `scripts/check_python_version.py` and their tests under `scripts/tests/`; `make check-packaging`.
+- One project layout: `scripts/check_project_layout.py` and its tests; every project's `[tool.hatch.build.targets.wheel]`.
 - One Python version: the root `.python-version`, the `UV_PYTHON` export in each Makefile that runs uv, and the CI step that sets it.
 - Extracted compute API/worker packaging and image lifecycle: `provisioning/compute/service/pyproject.toml`, `provisioning/compute/service/Dockerfile`, and its composition, worker, and image smoke tests.
 - Explicit contribution configuration and secret-free render surfaces: `domains/vms/storefront/tests/unit/test_config_loader.py`, `test_cli.py`, `helm/charts/storefront/templates/tests/storefront-environment-test.yaml`, and Helm schema fixtures.

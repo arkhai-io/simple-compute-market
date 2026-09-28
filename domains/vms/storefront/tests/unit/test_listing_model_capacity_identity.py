@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from domains.vms.listings.models import Listing
+from arkhai_vms_listings.models import Listing
 
 
 def _listing(pool_id=None, resource_id=None):

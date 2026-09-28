@@ -39,7 +39,7 @@ curl 'http://localhost:8080/listings?limit=10'
 ```bash
 cd core/registry
 uv sync
-DATABASE_URL=sqlite:///./indexer.db uv run uvicorn src.main:app --port 8080
+DATABASE_URL=sqlite:///./indexer.db uv run uvicorn core_registry.main:app --port 8080
 ```
 
 ## API key auth

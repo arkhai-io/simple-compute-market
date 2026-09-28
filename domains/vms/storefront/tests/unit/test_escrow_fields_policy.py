@@ -14,7 +14,7 @@ from market_policy.negotiation_middleware import (
     NegotiationContext,
     NegotiationRound,
 )
-from domains.vms.negotiation.policies import (
+from arkhai_vms_negotiation.policies import (
     accept_exact_listing_middleware,
     escrow_shape_guard,
 )

@@ -60,7 +60,7 @@ test-integration: ## Run integration tests (no real infrastructure required — 
 
 deploy: deploy-storefront
 
-# Buyers are pure HTTP clients (the `market` CLI / domains.vms.buyer
+# Buyers are pure HTTP clients (the `market` CLI / arkhai_vms_buyer
 # library); they don't run a storefront. Use `make deploy-storefront`
 # to bring up the seller; run `market buy ...` from the host or another
 # container against `http://bob-storefront:8001`.

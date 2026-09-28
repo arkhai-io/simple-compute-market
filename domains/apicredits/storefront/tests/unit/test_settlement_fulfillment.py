@@ -12,14 +12,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from domains.apicredits.settlement import fulfillment as fulfillment_module
-from domains.apicredits.settlement.credits_client import (
+from arkhai_apicredits.settlement import fulfillment as fulfillment_module
+from arkhai_apicredits.settlement.credits_client import (
     CreditIssuanceRequest,
     CreditIssuanceResult,
     CreditsServiceClient,
     CreditsServiceError,
 )
-from domains.apicredits.settlement.fulfillment import fulfill_api_credits_obligation
+from arkhai_apicredits.settlement.fulfillment import fulfill_api_credits_obligation
 from market_core import ImmutableFulfillmentCapability
 from market_identity import Ed25519Signer
 from apicredits_storefront.settlement_models import ApiCreditsSettleRequest
@@ -839,8 +839,8 @@ def test_a_stored_listing_row_is_projected_before_the_domain_validates_it():
     traded this bug for a weaker guard on untrusted input.
     """
     from apicredits_storefront.domain_runtime import _domain_order
-    from domains.apicredits.domain_runtime import _normalize_listing
-    from domains.apicredits.schema import ApiCreditsListing
+    from arkhai_apicredits.domain_runtime import _normalize_listing
+    from arkhai_apicredits.schema import ApiCreditsListing
     from pydantic import ValidationError
 
     resource = {

@@ -1,8 +1,8 @@
-"""Unit tests for domains.vms.listings.pricing_resolution."""
+"""Unit tests for arkhai_vms_listings.pricing_resolution."""
 
 from __future__ import annotations
 
-from domains.vms.listings.pricing_resolution import (
+from arkhai_vms_listings.pricing_resolution import (
     GpuPricingFields,
     resolve_gpu_pricing,
 )

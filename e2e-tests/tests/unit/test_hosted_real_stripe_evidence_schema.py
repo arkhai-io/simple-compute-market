@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 from jsonschema import Draft202012Validator
 
-from src.hosted_real_stripe.evidence import (
+from e2e_harness.hosted_real_stripe.evidence import (
     CollectionEvidence,
     DiagnosticEvidence,
     FundingEvidence,
@@ -47,6 +47,7 @@ from tests.unit.test_hosted_real_stripe_evidence import (
 SCHEMA_PATH = (
     Path(__file__).resolve().parents[2]
     / "src"
+    / "e2e_harness"
     / "hosted_real_stripe"
     / "evidence.schema.json"
 )

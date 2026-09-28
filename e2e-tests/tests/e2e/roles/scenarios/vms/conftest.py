@@ -39,8 +39,8 @@ from market_identity import (
     create_signer,
     sign_request,
 )
-from src.settings import settings
-from src.provisioning_test_client import ProvisioningTestClient
+from e2e_harness.settings import settings
+from e2e_harness.provisioning_test_client import ProvisioningTestClient
 from tests.e2e.roles.helpers.domain_deal import DomainDealState, require_state
 
 log = logging.getLogger(__name__)

@@ -1,4 +1,1 @@
-from domains.vms.buyer.cli import app
-
-if __name__ == "__main__":
-    app()
+# TOMBSTONE: delete this file — moved to domains/vms/buyer/src/arkhai_vms_buyer/main.py when the project adopted the one-package `src/` layout.

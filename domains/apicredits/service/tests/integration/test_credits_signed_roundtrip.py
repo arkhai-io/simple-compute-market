@@ -23,7 +23,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from market_identity import Identity, TrustedIdentitySet, create_signer
 from market_site.auth import SiteAuthMiddleware
-from middleware.route_contracts import CREDITS_ROUTE_CONTRACTS
+from apicredits_service.middleware.route_contracts import CREDITS_ROUTE_CONTRACTS
 from apicredits_middleware.client import TokensClient
 from apicredits_middleware.signing import (
     AuthoritySigning,
@@ -221,7 +221,7 @@ async def test_an_untrusted_gated_app_is_refused(signers):
 
 @pytest.fixture
 def storefront_client(signers):
-    from domains.apicredits.settlement import CreditsServiceClient
+    from arkhai_apicredits.settlement import CreditsServiceClient
 
     authority = signers["authority"]
     seller = create_signer("ed25519", _seed("api-credits-registry"))
@@ -301,7 +301,7 @@ async def test_storefront_signing_requires_both_halves():
     an unauthenticated answer, which is the weaker of the two properties
     silently replacing the stronger.
     """
-    from domains.apicredits.settlement import CreditsServiceClient
+    from arkhai_apicredits.settlement import CreditsServiceClient
 
     signer = create_signer("ed25519", _seed("api-credits-registry"))
     with pytest.raises(ValueError, match="together"):

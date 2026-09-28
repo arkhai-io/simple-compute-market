@@ -58,4 +58,4 @@ ENV ENABLE_HEALTH_CHECKS=false HEALTH_CHECK_INTERVAL=60 ENDPOINT_CHECK_TIMEOUT=1
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')" || exit 1
 
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "core_registry.main:app", "--app-dir", "/app/src", "--host", "0.0.0.0", "--port", "8080"]

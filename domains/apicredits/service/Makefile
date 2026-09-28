@@ -17,10 +17,10 @@ reinit: ## Sync this environment, refreshing the internal wheels its lock instal
 	python3 ../../../scripts/uv_project.py reinit
 
 test: reinit ## Run the test suite
-	PYTHONPATH=src uv run --find-links $(DIST_DIR) pytest tests -q
+	uv run --find-links $(DIST_DIR) pytest tests -q
 
 serve: ## Run the service locally (reload)
-	PYTHONPATH=src uv run --find-links $(DIST_DIR) python src/main.py
+	uv run --find-links $(DIST_DIR) python -m apicredits_service.main
 
 build: ## Build the wheel into the shared .dist/
 	uv build --wheel --out-dir $(DIST_DIR)

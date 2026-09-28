@@ -87,7 +87,7 @@ serve:
 		echo ZeroTier node ID: $$NODE_ID; \
 		sudo zerotier-cli join $$ZT_NETWORK; \
 	fi; \
-	uv run uvicorn src.main:app --host $$HOST --port $$PORT --reload $$ENV_ARG'
+	uv run uvicorn core_registry.main:app --host $$HOST --port $$PORT --reload $$ENV_ARG'
 
 # ==============================================================================
 # Database Management

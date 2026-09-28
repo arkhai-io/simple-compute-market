@@ -3,9 +3,6 @@ export UV_PYTHON := $(or $(shell cat ../../../.python-version 2>/dev/null),$(err
 
 DIST_DIR ?= ../../../.dist
 
-# Tests import this package from its installed wheel; see `cache-keys` in pyproject.toml.
-export UV_NO_EDITABLE := 1
-
 .PHONY: init reinit test
 
 init: reinit

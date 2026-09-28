@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-vms-listings"
-version = "0.3.0"
+version = "0.4.0"
 license = "MIT"
 description = "VM listing derivation, pricing resolution, and reconciliation, shared by the VM storefront and buyer."
 requires-python = ">=3.12,<3.14"
@@ -31,12 +31,5 @@ overrides = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-# The sources sit at the import path's own directory, so the wheel maps this
-# directory onto `domains/vms/listings` rather than listing its modules. Every
-# module added here ships without a packaging edit. `domains` and
-# `domains.vms` are namespace packages that several wheels contribute to.
 [tool.hatch.build.targets.wheel]
-include = ["*.py"]
-
-[tool.hatch.build.targets.wheel.sources]
-"" = "domains/vms/listings/"
+packages = ["src/arkhai_vms_listings"]

@@ -30,9 +30,9 @@ from core_storefront.models.listing_models import (
     RefundRequest,
 )
 from core_storefront.stage_log import stage_event
-from domains.vms.listings.models import Listing
-from domains.vms.listings.resources import parse_resource_from_dict
-from domains.vms.negotiation.policies import _amount_from_proposal
+from arkhai_vms_listings.models import Listing
+from arkhai_vms_listings.resources import parse_resource_from_dict
+from arkhai_vms_negotiation.policies import _amount_from_proposal
 from market_capacity_publication import CapacityBinding, CapacityRuntime
 from market_core import MarketDomainContract
 from market_identity import Identity, Signer
@@ -373,7 +373,7 @@ class ListingService:
         list[dict[str, Any]],
         list[dict[str, Any]],
     ]:
-        from domains.vms.listings.models import ComputeResource
+        from arkhai_vms_listings.models import ComputeResource
 
         try:
             normalized_listing_resource = self._normalize_token_resource(request.listing_resource)
@@ -502,7 +502,7 @@ class ListingService:
         listing's terms with what its source and configuration now yield, so a
         refreshed listing and a newly created one cannot disagree about terms.
         """
-        from domains.vms.listings.models import Listing
+        from arkhai_vms_listings.models import Listing
 
         from market_storefront.utils.config import BASE_URL_OVERRIDE
 
@@ -696,7 +696,7 @@ class ListingService:
         resources: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Refresh one listing's ready options without touching accepted Terms."""
-        from domains.vms.listings.models import Listing
+        from arkhai_vms_listings.models import Listing
 
         from market_storefront.services.publication_service import (
             publish_order_to_registry,

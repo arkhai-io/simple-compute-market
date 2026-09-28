@@ -50,7 +50,12 @@ def test_hosted_kit_imports_only_released_client_and_lower_level_kits() -> None:
     assert imported_roots <= _ALLOWED_IMPORT_ROOTS
     assert not imported_roots & {
         "core_buyer",
-        "domains",
+        "arkhai_apicredits",
+        "arkhai_apicredits_buyer",
+        "arkhai_vms_buyer",
+        "arkhai_vms_listings",
+        "arkhai_vms_negotiation",
+        "arkhai_vms_settlement",
         "hosted_settlement_service",
         "httpx",
         "requests",

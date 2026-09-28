@@ -42,7 +42,7 @@ from identity_helpers import (
     signed_response_headers,
 )
 
-from domains.vms.buyer.buy_orchestrator import (
+from arkhai_vms_buyer.buy_orchestrator import (
     BuyConfig,
     BuyConstraints,
     BuyResult,
@@ -52,8 +52,8 @@ from domains.vms.buyer.buy_orchestrator import (
     run_buy,
     submit_settlement_request,
 )
-from domains.vms.buyer.escrow_client import looks_like_propagation_lag
-from domains.vms.buyer.buyer_client import NegotiationOutcome
+from arkhai_vms_buyer.escrow_client import looks_like_propagation_lag
+from arkhai_vms_buyer.buyer_client import NegotiationOutcome
 
 
 _ESCROW_ADDR = "0x" + "cd" * 20

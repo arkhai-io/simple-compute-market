@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from src.hosted_real_stripe.lifecycle_bridge import LifecycleBridge
+from e2e_harness.hosted_real_stripe.lifecycle_bridge import LifecycleBridge
 
 
 class _Marketplace:

@@ -1,1 +1,1 @@
-"""Concrete VM buyer executable package."""
+# TOMBSTONE: delete this file — moved to domains/vms/buyer/src/arkhai_vms_buyer/__init__.py when the project adopted the one-package `src/` layout.

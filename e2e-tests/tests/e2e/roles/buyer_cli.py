@@ -43,7 +43,7 @@ from market_identity import (
 
 import pytest
 
-from src.settings import settings
+from e2e_harness.settings import settings
 
 log = logging.getLogger(__name__)
 

@@ -258,6 +258,20 @@ precedent (`arkhai_vms`, `arkhai_bare_metal`, `arkhai_compute`):
 | `arkhai-vms-settlement` | `domains.vms.settlement` | `arkhai_vms_settlement` |
 | `arkhai-apicredits-buyer` | `domains.apicredits.buyer` | `arkhai_apicredits_buyer` |
 | `arkhai-apicredits-domain` | `domains.apicredits` | `arkhai_apicredits` |
+| `arkhai-core-registry` | `src.*` from source; wheel ships `types`, `services`, `api`, `db` | `core_registry` |
+| `arkhai-apicredits-service` | `db`, `models`, `services`, … on `PYTHONPATH`; wheel ships six generic packages including `tests` | `apicredits_service` |
+| `arkhai-e2e-tests` | `src.*` (the wheel's package is named `src`) | `e2e_harness` |
+
+The last three were found at planning, when every project's wheel target was checked
+against the rule. The two published ones are broken as wheels, not only inconsistent:
+the registry's code imports `src.api` while its wheel installs top-level `api` and a
+`types` package the standard library shadows, and the service's wheel ships its own
+`tests` and generic `db`, `models`, and `services` packages. All three work only because
+they run from source. Both move to hatchling with a single package. Two other findings
+need no rename: `core` and `core/registry-client` use `force-include` only for their own
+`py.typed`, which hatch already includes, so the setting is dropped with wheel contents
+unchanged; and `domains/vms/provisioning/iac` is a virtual project that builds no wheel,
+so the rule, which is about distributions, does not reach it.
 
 No alias is kept. Every project then installs editable, and `UV_NO_EDITABLE`, the CI
 `no_editable` flag, and `cache-keys` have no remaining reason to exist. `domains` and
@@ -499,6 +513,9 @@ None.
 | R2 Lock currency derives the extras in use from edges, `requires-dist`, and wheel requirements | `openspec/specs/deployment-state/spec.md` — "Packaging conventions are checked mechanically" (scenario "An empty extra a consumer requests gains a requirement"); `docs/development/BUILD_AND_PACKAGING.md#checks` |
 | R3 A Dockerfile using `${PYTHON_VERSION}` declares its default before the first `FROM` | `docs/development/BUILD_AND_PACKAGING.md#one-python-version`, `#checks` |
 | R4 Unprovable version checks fail; forked locks use the edge version | `docs/development/BUILD_AND_PACKAGING.md#checks`; this change's D12 |
-| D10, D11, D16 and `check-project-layout` | Slice 2; not yet promoted |
+| D10 Every distribution is one flat import package under `src/`, installed editable | `openspec/specs/deployment-state/spec.md` — "Each distribution is one flat import package under src"; `docs/development/BUILD_AND_PACKAGING.md#project-layout` |
+| D11 Relative sources removed | `openspec/specs/deployment-state/spec.md` — "Internal distributions are consumed as wheels from the repository wheelhouse" (scenario "A project declares a sibling source"); `docs/development/RELEASING.md#local-development` |
+| D16 Changed distributions bump their version | `docs/development/RELEASING.md#import-package-renames`, and the versioning policy there |
+| `check-project-layout` | `openspec/specs/deployment-state/spec.md` — "Packaging conventions are checked mechanically"; `docs/development/BUILD_AND_PACKAGING.md#checks` |
 
 Slice 1's requirements are already in the owning specs, so archive must not add them again: prune them from this change's delta, or archive without spec sync, once slice 2 has promoted the rest.

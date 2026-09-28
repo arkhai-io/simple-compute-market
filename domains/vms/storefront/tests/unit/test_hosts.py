@@ -13,8 +13,8 @@ import textwrap
 
 import pytest
 
-from domains.vms.listings.resources import ComputeGpuResourceAdapter
-from domains.vms.listings.models import (
+from arkhai_vms_listings.resources import ComputeGpuResourceAdapter
+from arkhai_vms_listings.models import (
     ComputeResource,
     GPUModel,
     GpuInterconnect,

@@ -4,8 +4,8 @@ import sqlite3
 
 import pytest
 
-from domains.vms.listings.listing_shapes import resolve_shape
-from domains.vms.listings.reconciler import (
+from arkhai_vms_listings.listing_shapes import resolve_shape
+from arkhai_vms_listings.reconciler import (
     available_compute_slices as _available_compute_slices,
     listing_shape_key,
 )

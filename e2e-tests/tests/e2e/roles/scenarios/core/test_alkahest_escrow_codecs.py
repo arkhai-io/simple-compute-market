@@ -33,7 +33,7 @@ from market_storefront.utils.escrow_verification import (
     _normalize_obligation_data,
     _read_chain_obligation_data,
 )
-from src.settings import settings
+from e2e_harness.settings import settings
 
 pytestmark = pytest.mark.e2e_alkahest_escrow_codecs
 

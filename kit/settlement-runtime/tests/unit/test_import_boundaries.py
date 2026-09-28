@@ -33,7 +33,8 @@ def test_runtime_imports_only_stdlib_pydantic_identity_and_its_own_modules() -> 
 def test_no_upward_or_concrete_imports_are_hidden_in_source() -> None:
     forbidden_roots = (
         "core_storefront",
-        "domains.",
+        "arkhai_apicredits",
+        "arkhai_vms_",
         "eth_account",
         "fastapi",
         "hosted_settlement_client",

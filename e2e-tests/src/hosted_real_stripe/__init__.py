@@ -1,18 +1,1 @@
-"""Protected Stripe test-mode hosted settlement system support."""
-
-from .evidence import StripeTestEvidence, write_evidence
-from .gates import (
-    require_ready_account,
-    require_release_identity,
-    require_run_identity,
-    require_test_secret,
-)
-
-__all__ = [
-    "StripeTestEvidence",
-    "require_ready_account",
-    "require_release_identity",
-    "require_run_identity",
-    "require_test_secret",
-    "write_evidence",
-]
+# TOMBSTONE: delete this file — moved to e2e-tests/src/e2e_harness/hosted_real_stripe/__init__.py when the project adopted the one-package `src/` layout.

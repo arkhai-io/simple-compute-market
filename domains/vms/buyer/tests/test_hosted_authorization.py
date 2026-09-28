@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from core_buyer.action_policy import BuyerActionRequired
-from domains.vms.buyer import hosted_authorization
+from arkhai_vms_buyer import hosted_authorization
 from market_hosted_settlement import (
     AutomationDecision,
     AutomationPolicyRefused,

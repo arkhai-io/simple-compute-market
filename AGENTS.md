@@ -115,7 +115,7 @@ A bare documentation pointer is not a substitute for a useful local explanation.
 Return only updated files. Represent a file requiring deletion by replacing its entire contents with a single-line tombstone comment stating the reason, at the file's original path — never a separate manifest file, a suffixed parallel copy, or a silent omission. Tombstones are review artifacts only: final production code and permanent documentation must not contain one.
 
 ```python
-# TOMBSTONE: delete this file — replaced by domains/apicredits/settlement/credits_client.py
+# TOMBSTONE: delete this file — replaced by domains/apicredits/src/arkhai_apicredits/settlement/credits_client.py
 ```
 
 ## Public repository discipline

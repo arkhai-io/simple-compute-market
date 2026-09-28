@@ -158,7 +158,7 @@ class ListingsController:
                 status_code=404, detail=f"Listing {listing_id} not found"
             )
 
-        from domains.vms.listings.models import Listing
+        from arkhai_vms_listings.models import Listing
 
         try:
             listing = Listing.model_validate(row)

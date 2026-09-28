@@ -74,7 +74,7 @@ def db_engine(tmp_path):
 # ---------------------------------------------------------------------------
 # AsyncProvisioningTestClient
 #
-# The canonical ProvisioningTestClient (e2e-tests/src/) is sync-only.
+# The canonical ProvisioningTestClient (e2e-tests/src/e2e_harness/) is sync-only.
 # This async variant is backed by the same ASGITransport as the main
 # ProvisioningClient so all calls share the in-process app.  No raw HTTP
 # calls appear in test bodies — all test code calls named methods here.

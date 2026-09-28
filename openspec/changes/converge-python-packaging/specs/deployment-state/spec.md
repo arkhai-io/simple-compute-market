@@ -133,7 +133,7 @@ definition MUST NOT list internal packages or rewrite a lock.
 
 The repository MUST provide one command that relocks projects against the current
 wheelhouse, upgrading every internal package each lock resolves from it, without
-creating or modifying any environment. Because a lock check cannot observe a
+creating or modifying any environment. Because `uv lock --check` alone cannot observe a
 same-version wheel's changed dependencies, the command MUST relock every project it is
 given rather than skipping those a check reports current.
 
@@ -189,7 +189,7 @@ need.
 Lock currency MUST fail on a lock that no longer satisfies its project; on a lock that
 pins an internal package at a version the tree does not build; and on a lock whose
 record of an internal package disagrees with that package's wheel in the wheelhouse —
-a requirement added or removed, unconditionally or under an extra the lock records, or
+a requirement added or removed, unconditionally or under an extra in use, or
 a locked dependency version the wheel's requirement no longer admits.
 
 #### Scenario: A lock pins a superseded internal version

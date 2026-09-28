@@ -5,21 +5,21 @@ from __future__ import annotations
 import pytest
 from market_identity import Ed25519Signer, Identity, IdentityScheme
 
-from domains.apicredits.listings.pricing import (
+from arkhai_apicredits.listings.pricing import (
     determine_strategy_from_order,
     extract_unit_price_from_order,
 )
-from domains.apicredits.listings.reconciler import (
+from arkhai_apicredits.listings.reconciler import (
     listing_quota_resource_id,
     reopenable_credit_listing_ids,
     stale_open_credit_listing_ids,
 )
-from domains.apicredits.negotiation.policies import (
+from arkhai_apicredits.negotiation.policies import (
     api_credits_round_zero_guard,
     key_owned_by_buyer_principal,
     credit_quota_guard,
 )
-from domains.apicredits.negotiation.terms import (
+from arkhai_apicredits.negotiation.terms import (
     make_api_credits_provision_terms,
     provision_key_id,
     provision_key_mode,

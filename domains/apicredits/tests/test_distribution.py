@@ -50,12 +50,12 @@ def test_no_apicredits_project_declares_an_internal_editable_source() -> None:
 def test_domain_wheel_owns_shared_concepts(wheels: dict[str, Path]) -> None:
     members = _members(wheels["domain"])
     assert {
-        "domains/apicredits/__init__.py",
-        "domains/apicredits/domain_runtime.py",
-        "domains/apicredits/schema.py",
-        "domains/apicredits/listings/models.py",
-        "domains/apicredits/negotiation/terms.py",
-        "domains/apicredits/settlement/fulfillment.py",
+        "arkhai_apicredits/__init__.py",
+        "arkhai_apicredits/domain_runtime.py",
+        "arkhai_apicredits/schema.py",
+        "arkhai_apicredits/listings/models.py",
+        "arkhai_apicredits/negotiation/terms.py",
+        "arkhai_apicredits/settlement/fulfillment.py",
     } <= members
 
 
@@ -65,14 +65,14 @@ def test_role_wheels_do_not_duplicate_shared_concepts(
     shared_files = {
         name
         for name in _members(wheels["domain"])
-        if name.startswith("domains/apicredits/")
+        if name.startswith("arkhai_apicredits/")
     }
     buyer_files = _members(wheels["buyer"])
     storefront_files = _members(wheels["storefront"])
 
     assert shared_files.isdisjoint(buyer_files)
     assert shared_files.isdisjoint(storefront_files)
-    assert "domains/apicredits/buyer/cli.py" in buyer_files
+    assert "arkhai_apicredits_buyer/cli.py" in buyer_files
     assert "apicredits_storefront/domain_runtime.py" in storefront_files
 
 

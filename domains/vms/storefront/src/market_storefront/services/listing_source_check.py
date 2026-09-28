@@ -19,8 +19,8 @@ import logging
 from collections.abc import Mapping
 from typing import Any
 
-from domains.vms.listings.listing_comparison import REFUSE, compare_listing
-from domains.vms.listings.reconciler import (
+from arkhai_vms_listings.listing_comparison import REFUSE, compare_listing
+from arkhai_vms_listings.reconciler import (
     ShapeFeasibility,
     available_compute_slices,
     slice_identity,

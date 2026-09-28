@@ -252,7 +252,7 @@ async def capacity_binding_for_listing(
     the listing as capacity-backed; callers that reserve, commit, or release
     require that class and refuse an ``UnbackedBinding``.
     """
-    from domains.vms.listings.models import Listing
+    from arkhai_vms_listings.models import Listing
 
     durable = await sqlite_client.load_listing_binding(listing_id=listing_id)
     row = await sqlite_client.load_listing(listing_id=listing_id)

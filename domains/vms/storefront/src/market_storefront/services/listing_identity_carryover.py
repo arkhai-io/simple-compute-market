@@ -37,7 +37,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from domains.vms.listings.reconciler import LISTING_SOURCE_KIND, positive_gpu_count
+from arkhai_vms_listings.reconciler import LISTING_SOURCE_KIND, positive_gpu_count
 from market_identity import Identity
 
 from market_storefront.publication_binding import prepare_vm_listing_binding

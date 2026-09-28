@@ -1,0 +1,889 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "arkhai.hosted-settlement-stripe-test-evidence.v4",
+  "title": "Protected hosted Stripe evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "lane",
+    "identities",
+    "provider",
+    "scenario",
+    "result",
+    "stage",
+    "funding",
+    "operation_ref",
+    "collection",
+    "refund",
+    "payment_outcome",
+    "recovery",
+    "loss",
+    "diagnostic",
+    "evidence_signature"
+  ],
+  "properties": {
+    "schema": {
+      "const": "arkhai.hosted-settlement-stripe-test-evidence.v4"
+    },
+    "lane": {
+      "const": "stripe-test"
+    },
+    "identities": {
+      "$ref": "#/$defs/identities"
+    },
+    "provider": {
+      "$ref": "#/$defs/provider"
+    },
+    "scenario": {
+      "enum": [
+        "collection",
+        "reclaim",
+        "missed_webhook",
+        "api_restart",
+        "worker_restart",
+        "funding_restart",
+        "delayed_funding",
+        "off_session_success",
+        "requires_action",
+        "ach_return",
+        "post_collection_loss",
+        "decline",
+        "insufficient_funds",
+        "authentication"
+      ]
+    },
+    "result": {
+      "enum": [
+        "passed",
+        "product",
+        "account",
+        "environment",
+        "timeout",
+        "excluded"
+      ]
+    },
+    "stage": {
+      "enum": [
+        "release_identity",
+        "authorization",
+        "account_readiness",
+        "payer_profile",
+        "payer_setup",
+        "funding_authorization",
+        "browser_preflight",
+        "webhook_forwarding",
+        "hosted_release",
+        "marketplace_lifecycle",
+        "browser_checkout",
+        "funding",
+        "provider_inspection",
+        "recovery",
+        "loss_boundary",
+        "complete"
+      ]
+    },
+    "funding": {
+      "$ref": "#/$defs/funding"
+    },
+    "operation_ref": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/operationRef"
+        }
+      ]
+    },
+    "collection": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/collection"
+        }
+      ]
+    },
+    "refund": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/refund"
+        }
+      ]
+    },
+    "payment_outcome": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/paymentOutcome"
+        }
+      ]
+    },
+    "recovery": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/recovery"
+        }
+      ]
+    },
+    "loss": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/loss"
+        }
+      ]
+    },
+    "diagnostic": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/diagnostic"
+        }
+      ]
+    },
+    "evidence_signature": {
+      "$ref": "#/$defs/evidenceSignature"
+    }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "operationRef": {
+      "type": "string",
+      "pattern": "^op_[0-9a-f]{24}$"
+    },
+    "evidenceSignature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "signer",
+        "signature"
+      ],
+      "properties": {
+        "protocol": {
+          "const": "arkhai.marketplace-evidence-signature.v1"
+        },
+        "signer": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "scheme",
+            "identifier"
+          ],
+          "properties": {
+            "scheme": {
+              "enum": [
+                "eip191",
+                "ed25519"
+              ]
+            },
+            "identifier": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          }
+        },
+        "signature": {
+          "type": "string",
+          "pattern": "^[0-9a-f]+$",
+          "minLength": 128,
+          "maxLength": 130
+        }
+      }
+    },
+    "identities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "marketplace",
+        "hosted_release",
+        "run_ref",
+        "release_mode"
+      ],
+      "properties": {
+        "marketplace": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "repository",
+            "commit",
+            "workflow_run_id",
+            "workflow_ref",
+            "manifest_sha256",
+            "image_digest",
+            "image",
+            "wheelhouse_sha256",
+            "settlement_config_schema_sha256",
+            "provenance_sha256"
+          ],
+          "properties": {
+            "repository": {
+              "const": "arkhai-io/simple-compute-market"
+            },
+            "commit": {
+              "$ref": "#/$defs/commit"
+            },
+            "workflow_run_id": {
+              "$ref": "#/$defs/run_id_or_local"
+            },
+            "workflow_ref": {
+              "$ref": "#/$defs/ref_or_local"
+            },
+            "manifest_sha256": {
+              "$ref": "#/$defs/digest_or_local"
+            },
+            "image_digest": {
+              "$ref": "#/$defs/digest_or_local"
+            },
+            "image": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            "wheelhouse_sha256": {
+              "$ref": "#/$defs/digest_or_local"
+            },
+            "settlement_config_schema_sha256": {
+              "$ref": "#/$defs/digest_or_local"
+            },
+            "provenance_sha256": {
+              "$ref": "#/$defs/digest_or_local"
+            }
+          }
+        },
+        "hosted_release": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "repository",
+            "source_commit",
+            "workflow_run_id",
+            "workflow_ref",
+            "manifest_sha256",
+            "client_wheel_sha256",
+            "image_digest",
+            "image",
+            "manifest_digest"
+          ],
+          "properties": {
+            "repository": {
+              "const": "arkhai-io/stripe-settlement-service"
+            },
+            "source_commit": {
+              "$ref": "#/$defs/commit_or_local"
+            },
+            "workflow_run_id": {
+              "$ref": "#/$defs/run_id_or_local"
+            },
+            "workflow_ref": {
+              "$ref": "#/$defs/ref_or_local"
+            },
+            "manifest_sha256": {
+              "$ref": "#/$defs/digest_or_local"
+            },
+            "client_wheel_sha256": {
+              "$ref": "#/$defs/digest_or_local"
+            },
+            "image_digest": {
+              "$ref": "#/$defs/digest_or_local"
+            },
+            "image": {
+              "type": "string",
+              "maxLength": 512
+            },
+            "manifest_digest": {
+              "$ref": "#/$defs/digest_or_unset"
+            }
+          }
+        },
+        "run_ref": {
+          "type": "string",
+          "pattern": "^run_[0-9a-f]{24}$"
+        },
+        "release_mode": {
+          "enum": [
+            "attested",
+            "local"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "release_mode": {
+                "const": "attested"
+              }
+            },
+            "required": [
+              "release_mode"
+            ]
+          },
+          "then": {
+            "properties": {
+              "marketplace": {
+                "$ref": "#/$defs/attested_marketplace"
+              },
+              "hosted_release": {
+                "$ref": "#/$defs/attested_hosted_release"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "mode",
+        "connected_account_ready",
+        "loopback_webhook_verified"
+      ],
+      "properties": {
+        "name": {
+          "const": "stripe"
+        },
+        "mode": {
+          "const": "test"
+        },
+        "connected_account_ready": {
+          "type": "boolean"
+        },
+        "loopback_webhook_verified": {
+          "type": "boolean"
+        }
+      }
+    },
+    "funding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile",
+        "interaction",
+        "payer_profile_bound",
+        "authorization_obligation_bound",
+        "authorization_operation_scoped",
+        "accepted_profile_preserved",
+        "authoritative_funding_observed",
+        "transient_action_observed",
+        "delayed_state_observed"
+      ],
+      "properties": {
+        "profile": {
+          "enum": [
+            "card.v1",
+            "us_bank_transfer.v1",
+            "us_ach_debit.v1"
+          ]
+        },
+        "interaction": {
+          "enum": [
+            "interactive",
+            "saved_instrument"
+          ]
+        },
+        "payer_profile_bound": {
+          "type": "boolean"
+        },
+        "authorization_obligation_bound": {
+          "type": "boolean"
+        },
+        "authorization_operation_scoped": {
+          "type": "boolean"
+        },
+        "accepted_profile_preserved": {
+          "type": "boolean"
+        },
+        "authoritative_funding_observed": {
+          "type": "boolean"
+        },
+        "transient_action_observed": {
+          "type": "boolean"
+        },
+        "delayed_state_observed": {
+          "type": "boolean"
+        }
+      }
+    },
+    "collection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operation_ref",
+        "checkout_count",
+        "payment_intent_count",
+        "charge_count",
+        "transfer_count",
+        "amount",
+        "currency",
+        "destination_matches",
+        "transfer_group_matches",
+        "source_transaction_matches",
+        "operation_metadata_matches",
+        "marketplace_state",
+        "authority_state",
+        "fulfillment_state"
+      ],
+      "properties": {
+        "operation_ref": {
+          "$ref": "#/$defs/operationRef"
+        },
+        "checkout_count": {
+          "enum": [
+            0,
+            1
+          ]
+        },
+        "payment_intent_count": {
+          "const": 1
+        },
+        "charge_count": {
+          "const": 1
+        },
+        "transfer_count": {
+          "const": 1
+        },
+        "amount": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[a-z]{3}$"
+        },
+        "destination_matches": {
+          "const": true
+        },
+        "transfer_group_matches": {
+          "const": true
+        },
+        "source_transaction_matches": {
+          "type": "boolean"
+        },
+        "operation_metadata_matches": {
+          "const": true
+        },
+        "marketplace_state": {
+          "const": "collected"
+        },
+        "authority_state": {
+          "const": "collected"
+        },
+        "fulfillment_state": {
+          "const": "fulfilled"
+        }
+      }
+    },
+    "refund": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operation_ref",
+        "checkout_count",
+        "payment_intent_count",
+        "charge_count",
+        "refund_count",
+        "transfer_count",
+        "amount",
+        "currency",
+        "operation_metadata_matches",
+        "marketplace_state",
+        "authority_state"
+      ],
+      "properties": {
+        "operation_ref": {
+          "$ref": "#/$defs/operationRef"
+        },
+        "checkout_count": {
+          "enum": [
+            0,
+            1
+          ]
+        },
+        "payment_intent_count": {
+          "const": 1
+        },
+        "charge_count": {
+          "const": 1
+        },
+        "refund_count": {
+          "const": 1
+        },
+        "transfer_count": {
+          "const": 0
+        },
+        "amount": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[a-z]{3}$"
+        },
+        "operation_metadata_matches": {
+          "const": true
+        },
+        "marketplace_state": {
+          "const": "reclaimed"
+        },
+        "authority_state": {
+          "const": "refunded"
+        }
+      }
+    },
+    "paymentOutcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operation_ref",
+        "outcome",
+        "checkout_count",
+        "payment_intent_count",
+        "charge_count",
+        "transfer_count",
+        "refund_count",
+        "operation_metadata_matches"
+      ],
+      "properties": {
+        "operation_ref": {
+          "$ref": "#/$defs/operationRef"
+        },
+        "outcome": {
+          "enum": [
+            "declined",
+            "insufficient_funds",
+            "authentication_succeeded"
+          ]
+        },
+        "checkout_count": {
+          "enum": [
+            0,
+            1
+          ]
+        },
+        "payment_intent_count": {
+          "enum": [
+            0,
+            1
+          ]
+        },
+        "charge_count": {
+          "enum": [
+            0,
+            1
+          ]
+        },
+        "transfer_count": {
+          "const": 0
+        },
+        "refund_count": {
+          "const": 0
+        },
+        "operation_metadata_matches": {
+          "const": true
+        }
+      }
+    },
+    "recovery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "process",
+        "original_operation_preserved",
+        "checkout_count",
+        "terminal_effect_count"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "missed_webhook",
+            "api_restart",
+            "worker_restart",
+            "funding_restart"
+          ]
+        },
+        "process": {
+          "enum": [
+            "webhook_forwarder",
+            "api",
+            "worker"
+          ]
+        },
+        "original_operation_preserved": {
+          "const": true
+        },
+        "checkout_count": {
+          "enum": [
+            0,
+            1
+          ]
+        },
+        "terminal_effect_count": {
+          "const": 1
+        }
+      }
+    },
+    "loss": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "accepted_operation_preserved",
+        "fulfillment_blocked",
+        "operator_incident_observed"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "ach_return",
+            "post_collection_loss"
+          ]
+        },
+        "accepted_operation_preserved": {
+          "const": true
+        },
+        "fulfillment_blocked": {
+          "type": "boolean"
+        },
+        "operator_incident_observed": {
+          "type": "boolean"
+        }
+      }
+    },
+    "diagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stage",
+        "code"
+      ],
+      "properties": {
+        "stage": {
+          "enum": [
+            "release_identity",
+            "authorization",
+            "account_readiness",
+            "payer_profile",
+            "payer_setup",
+            "funding_authorization",
+            "browser_preflight",
+            "webhook_forwarding",
+            "hosted_release",
+            "marketplace_lifecycle",
+            "browser_checkout",
+            "funding",
+            "provider_inspection",
+            "recovery",
+            "loss_boundary",
+            "complete"
+          ]
+        },
+        "code": {
+          "enum": [
+            "credentials_missing",
+            "authorization_rejected",
+            "stripe_unavailable",
+            "account_not_ready",
+            "payer_profile_unavailable",
+            "setup_action_unavailable",
+            "profile_prerequisite_unavailable",
+            "chromium_unavailable",
+            "stripe_cli_unavailable",
+            "webhook_route_unavailable",
+            "hosted_release_unavailable",
+            "marketplace_unavailable",
+            "lifecycle_contract_rejected",
+            "checkout_contract_rejected",
+            "provider_invariant_failed",
+            "convergence_timeout",
+            "reversal_unsupported",
+            "funding_relation_missing",
+            "reversal_rejected",
+            "settlement_parked",
+            "interactive_lane_not_automated",
+            "loss_projection_unimplemented"
+          ]
+        }
+      }
+    },
+    "attested_marketplace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "commit",
+        "workflow_run_id",
+        "workflow_ref",
+        "manifest_sha256",
+        "image_digest",
+        "image",
+        "wheelhouse_sha256",
+        "settlement_config_schema_sha256",
+        "provenance_sha256"
+      ],
+      "properties": {
+        "repository": {
+          "const": "arkhai-io/simple-compute-market"
+        },
+        "commit": {
+          "$ref": "#/$defs/commit"
+        },
+        "workflow_run_id": {
+          "type": "string",
+          "pattern": "^[0-9]+$"
+        },
+        "workflow_ref": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 256
+        },
+        "manifest_sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "image_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "image": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._/-]{2,255}@sha256:[0-9a-f]{64}$"
+        },
+        "wheelhouse_sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "settlement_config_schema_sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "provenance_sha256": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "attested_hosted_release": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "source_commit",
+        "workflow_run_id",
+        "workflow_ref",
+        "manifest_sha256",
+        "client_wheel_sha256",
+        "image_digest",
+        "image",
+        "manifest_digest"
+      ],
+      "properties": {
+        "repository": {
+          "const": "arkhai-io/stripe-settlement-service"
+        },
+        "source_commit": {
+          "$ref": "#/$defs/commit"
+        },
+        "workflow_run_id": {
+          "type": "string",
+          "pattern": "^[0-9]+$"
+        },
+        "workflow_ref": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 256
+        },
+        "manifest_sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "client_wheel_sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "image_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "image": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "manifest_digest": {
+          "$ref": "#/$defs/digest_or_unset"
+        }
+      }
+    },
+    "commit_or_local": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/commit"
+        },
+        {
+          "const": "local"
+        }
+      ]
+    },
+    "digest_or_unset": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/digest"
+        },
+        {
+          "const": ""
+        }
+      ]
+    },
+    "digest_or_local": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/digest"
+        },
+        {
+          "const": "local"
+        }
+      ]
+    },
+    "run_id_or_local": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^[0-9]+$"
+        },
+        {
+          "const": "local"
+        }
+      ]
+    },
+    "ref_or_local": {
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 256
+        },
+        {
+          "const": "local"
+        }
+      ]
+    }
+  }
+}

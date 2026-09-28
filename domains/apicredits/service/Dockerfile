@@ -48,4 +48,4 @@ EXPOSE ${PORT}
 HEALTHCHECK --interval=10s --timeout=5s --retries=6 --start-period=10s \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8082/health')" || exit 1
 
-CMD ["uvicorn", "main:app", "--app-dir", "/app/src", "--host", "0.0.0.0", "--port", "8082"]
+CMD ["uvicorn", "apicredits_service.main:app", "--app-dir", "/app/src", "--host", "0.0.0.0", "--port", "8082"]

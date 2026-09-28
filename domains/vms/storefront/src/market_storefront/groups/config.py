@@ -476,8 +476,8 @@ _INIT_USER_TEMPLATE = """\
 #                                              # erc1155 = "erc1155_bisection"
 #                                              # [negotiation.policies.erc721]
 #                                              # chain = ["accept_exact_listing"]
-# seller_model_path = "domains/vms/negotiation/rl/models/arkhai_negotiator_seller.pt"
-# buyer_model_path  = "domains/vms/negotiation/rl/models/arkhai_negotiator_buyer.pt"
+# seller_model_path = "domains/vms/negotiation/src/arkhai_vms_negotiation/rl/models/arkhai_negotiator_seller.pt"
+# buyer_model_path  = "domains/vms/negotiation/src/arkhai_vms_negotiation/rl/models/arkhai_negotiator_buyer.pt"
 
 [pricing]
 # settlements = [                             # complete structured publication

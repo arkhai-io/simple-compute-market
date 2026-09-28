@@ -33,8 +33,8 @@ def _build_market_domain_contract() -> MarketDomainContract:
         build_api_credit_accepted_artifacts,
     )
     from market_alkahest import create_alkahest_registration
-    from domains.apicredits.domain_runtime import market_domain
-    from domains.apicredits.negotiation.storefront_round import (
+    from arkhai_apicredits.domain_runtime import market_domain
+    from arkhai_apicredits.negotiation.storefront_round import (
         default_seller_round_hook,
     )
 
@@ -302,7 +302,7 @@ def _domain_order(row: Any) -> dict[str, Any]:
     Field names are read off the model, so a field added to the domain
     listing is carried without editing this.
     """
-    from domains.apicredits.schema import ApiCreditsListing
+    from arkhai_apicredits.schema import ApiCreditsListing
 
     fields = frozenset(ApiCreditsListing.model_fields)
     return {key: value for key, value in dict(row).items() if key in fields}

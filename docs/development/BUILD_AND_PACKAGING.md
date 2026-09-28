@@ -12,6 +12,25 @@ project already declares, and nothing chooses the Python version independently: 
 consumer reads the root declaration, and the one copy that cannot — a Dockerfile's
 `ARG PYTHON_VERSION` default — is checked against it.
 
+## Project layout
+
+Every distribution builds its wheel from exactly one import package at
+`src/<package>`, with hatchling:
+
+```toml
+[tool.hatch.build.targets.wheel]
+packages = ["src/arkhai_vms_listings"]
+```
+
+Nothing else in the build configuration remaps, includes, or excludes files, so a module
+added under `src/<package>` ships without a packaging edit, and the installed name is the
+directory name. Every project environment installs its own project editable, so an edited
+module is live without a sync. Nothing disables editable installs and no project declares
+`cache-keys`; both were workarounds for packages whose directory did not match their import
+path. A virtual project (`[tool.uv] package = false`) builds no wheel and is outside this
+rule. Data files a package loads, such as the VM negotiation models, live inside the
+package directory and ship with it.
+
 ## The wheelhouse
 
 Internal distributions are built as wheels into the repository wheelhouse, `.dist`, by
@@ -84,8 +103,9 @@ wheelhouse must have a `reinit` target.
 nothing; `make lock PROJECTS="kit/site core/buyer"` narrows it. It upgrades every internal
 package and every other repository distribution a lock names, so a distribution that has
 drifted to a package index returns to the wheelhouse. It relocks unconditionally, because
-no lock check can see a same-version wheel's changed requirements; relocking a current
-project changes nothing. Run it after editing a project's dependencies or bumping an
+`uv lock --check` alone cannot see a same-version wheel's changed requirements, and
+`check-locks` compares names and specifiers but not markers; relocking a current project
+changes nothing. Run it after editing a project's dependencies or bumping an
 internal version, instead of reaching for `make test` to do it.
 
 Relocking needs the indexes each lock resolves from. `kit/policy`, `domains/vms/buyer`,
@@ -136,6 +156,7 @@ closeout ([plan-closeout requirements](../../openspec/README.md#plan-closeout-re
 |---|---|
 | `check-uv-setup` | a literal `--upgrade-package`, `--reinstall-package`, or `--refresh-package` in a Makefile or Dockerfile; a Makefile recipe running `uv sync` itself; a `reinit` recipe other than the script call by a path that resolves; a project with tests and wheelhouse packages but no `reinit`; a Dockerfile that rewrites a lock, spells a repository distribution's version, installs from the wheelhouse without the script, calls the script where its stage did not copy it, or copies the wheelhouse into the runtime stage |
 | `check-locks` | a lock `uv lock --check --offline` rejects; a lock pinning an internal version the tree does not build; a lock whose record of an internal package disagrees with that wheel's metadata (a requirement added or removed, unconditionally or under an extra in use, or a locked version its specifier no longer admits); a version check it cannot evaluate; a repository distribution resolved from an index or from a local registry other than `.dist` |
+| `check-project-layout` | a distribution whose wheel target is not exactly `packages = ["src/<package>"]` with that package present, or that builds with another backend or other build settings; a `[tool.uv]` `find-links` or `cache-keys`; a `[tool.uv.sources]` entry naming a path; `UV_NO_EDITABLE`, `--no-editable`, or `no_editable` in a Makefile, shell script, or workflow |
 | `check-python-version` | a `.python-version` other than the root one; a literal `--python` version in a Makefile, shell script, or tool phase configuration; a Makefile running uv without exporting `UV_PYTHON` from the root declaration; a CI job running uv without it, setting it before checkout or under a different `if:` than checkout, or a setup pin of another minor version; a Dockerfile `FROM` naming a Python version, using `${PYTHON_VERSION}` without an `ARG` default before the first `FROM`, or a default other than the declared one |
 
 uv records no section for an empty extra, and no extra on the consumer's dependency edge

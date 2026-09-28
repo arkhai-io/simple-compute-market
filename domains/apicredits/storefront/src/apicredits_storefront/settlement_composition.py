@@ -7,7 +7,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from domains.apicredits.settlement import (
+from arkhai_apicredits.settlement import (
     ApiCreditsIssuanceEvidenceBodyV1,
     CreditIssuanceRequest,
     CreditsServiceClient,

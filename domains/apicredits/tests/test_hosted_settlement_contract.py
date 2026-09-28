@@ -10,8 +10,8 @@ from market_core.schemas import (
 from market_identity import Ed25519Signer
 from pydantic import ValidationError
 
-from domains.apicredits.listings import checked_credit_total, selected_unit_price
-from domains.apicredits.schema import ApiCreditsListing, ApiCreditsMessage
+from arkhai_apicredits.listings import checked_credit_total, selected_unit_price
+from arkhai_apicredits.schema import ApiCreditsListing, ApiCreditsMessage
 
 BUYER = Ed25519Signer(b"\x75" * 32).identity
 SELLER = Ed25519Signer(b"\x76" * 32).identity

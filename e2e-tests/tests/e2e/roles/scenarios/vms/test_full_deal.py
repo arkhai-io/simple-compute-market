@@ -93,7 +93,7 @@ from importlib import resources
 import pytest
 
 from market_alkahest.alkahest import get_recipient_arbiter
-from src.settings import settings
+from e2e_harness.settings import settings
 from tests.e2e.roles.scenarios.vms.host_registry import (
     E2E_DEAL_HOST,
     E2E_DEAL_POOL_ID,

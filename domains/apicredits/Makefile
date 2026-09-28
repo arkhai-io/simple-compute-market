@@ -7,9 +7,6 @@ DIST_DIR ?= ../../.dist
 
 test: test-domain test-service test-storefront test-buyer test-sample-app test-middleware
 
-# The domain's own tests import this package from its installed wheel; see `cache-keys` in pyproject.toml.
-reinit test-domain: export UV_NO_EDITABLE := 1
-
 reinit: ## Force-reinstall internal wheels without bumping versions. Run make dist from the monorepo root first.
 	python3 ../../scripts/uv_project.py reinit
 

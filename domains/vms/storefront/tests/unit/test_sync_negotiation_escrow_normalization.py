@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from domains.vms.negotiation.policies import (
+from arkhai_vms_negotiation.policies import (
     buyer_counter_guard,
     round_zero_opening_guard,
 )

@@ -1125,7 +1125,7 @@ design.
   - `e2e-tests`' own suite via its own `Makefile`/`reinit` — confirmed
     genuinely decoupled from `compute_provisioning`/`kit/fulfillment`
     (it wraps the provisioning HTTP surface with its own
-    `e2e-tests/src/provisioning_test_client.py`, not
+    `e2e-tests/src/e2e_harness/provisioning_test_client.py`, not
     `ComputeProvisioningClient`), so no reinit change is needed there.
   - A fresh-database migration pass per touched service (no single
     repository-wide "run all migrations" target exists) plus the existing

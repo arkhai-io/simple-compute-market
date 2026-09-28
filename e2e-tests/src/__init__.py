@@ -1,3 +1,1 @@
-"""arkhai-e2e-tests — integration test suite for Arkhai deployed environments."""
-
-__version__ = "0.1.0"
+# TOMBSTONE: delete this file — moved to e2e-tests/src/e2e_harness/__init__.py when the project adopted the one-package `src/` layout.

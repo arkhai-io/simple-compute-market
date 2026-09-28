@@ -60,7 +60,7 @@ HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT ?=
 HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE ?=
 HOSTED_STRIPE_TEST_EVIDENCE ?= $(DIST_DIR)/hosted-stripe-test-evidence.json
 
-.PHONY: e2e-dev-identities e2e-dev-identities-env e2e-bare-metal-dev-env check-hosted-client-pin fix-hosted-client-pin review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-compute-provisioning test-provisioning test-provisioning-iac test-registry test-storefront test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning dist-compute-provisioning-service dist-kits verify-hosted-release dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-packaging check-uv-setup check-locks check-python-version lock
+.PHONY: e2e-dev-identities e2e-dev-identities-env e2e-bare-metal-dev-env check-hosted-client-pin fix-hosted-client-pin review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-compute-provisioning test-provisioning test-provisioning-iac test-registry test-storefront test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning dist-compute-provisioning-service dist-kits verify-hosted-release dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-packaging check-uv-setup check-locks check-python-version check-project-layout lock
 .PHONY: build-hosted-producer
 .PHONY: test-release-tooling test-deployment-packaging prepare-hosted-compose prepare-hosted-compose-local hosted-preflight hosted-preflight-local hosted-stripe-test-local hosted-compose-up hosted-compose-restart hosted-compose-clean hosted-stripe-test hosted-stripe-test-stop
 .PHONY: dist-arkhai-core-registry
@@ -264,7 +264,7 @@ hosted-stripe-test-local: hosted-preflight-local ## Run one development scenario
 	# --frozen: a run must not re-resolve dependencies, and an absolute
 	# --find-links would otherwise rewrite the project lock on every run.
 	uv run --frozen --project e2e-tests --extra stripe-test --find-links "$(DIST_DIR)" \
-		python -m src.hosted_real_stripe.driver \
+		python -m e2e_harness.hosted_real_stripe.driver \
 		--compose-env "$(HOSTED_COMPOSE_ENV)" \
 		--release-mode local \
 		$(HOSTED_PRODUCER_PINS) \
@@ -355,7 +355,7 @@ hosted-stripe-test: hosted-preflight ## Run one protected Stripe test-mode syste
 	# --frozen: a run must not re-resolve dependencies, and an absolute
 	# --find-links would otherwise rewrite the project lock on every run.
 	uv run --frozen --project e2e-tests --extra stripe-test --find-links "$(DIST_DIR)" \
-		python -m src.hosted_real_stripe.driver \
+		python -m e2e_harness.hosted_real_stripe.driver \
 		--compose-env "$(HOSTED_COMPOSE_ENV)" \
 		--hosted-manifest-sha256 "$(HOSTED_PRODUCTION_MANIFEST_SHA256)" \
 		--hosted-client-wheel-sha256 "$(HOSTED_PRODUCTION_CLIENT_WHEEL_SHA256)" \
@@ -931,7 +931,7 @@ lock: dist ## Relock projects against current wheels without installing anything
 	python3 scripts/uv_project.py lock $(PROJECTS)
 
 check-packaging: dist ## Run every packaging check against the tree and a freshly built wheelhouse
-	@$(MAKE) --no-print-directory check-uv-setup check-locks check-python-version
+	@$(MAKE) --no-print-directory check-uv-setup check-locks check-python-version check-project-layout
 
 check-uv-setup: ## Fail if a reinit target or image install names internal packages instead of deriving them
 	@python3 scripts/check_uv_setup.py
@@ -941,6 +941,9 @@ check-locks: ## Fail if a lock is not current with its project, the wheels in .d
 
 check-python-version: ## Fail if anything selects a Python version other than .python-version
 	@python3 scripts/check_python_version.py
+
+check-project-layout: ## Fail if a distribution is not one package under src/ or cannot install editable
+	@python3 scripts/check_project_layout.py
 
 code-snapshot: ## Zip all git-tracked files for sharing (excludes gitignored artifacts).
 	@mkdir -p .snapshot

@@ -993,7 +993,7 @@ class AdminController:
         if not isinstance(proposal, dict):
             return False
         try:
-            from domains.vms.settlement.proposals import proposal_is_splitter_gated
+            from arkhai_vms_settlement.proposals import proposal_is_splitter_gated
 
             from market_storefront.utils.config import CHAINS
 
@@ -1191,7 +1191,7 @@ class AdminController:
         so it is refreshed first; reconciling against it unrefreshed would report
         nothing now and let a later operation report these closes as its own.
         """
-        from domains.vms.listings.reconciler import stale_open_listing_ids
+        from arkhai_vms_listings.reconciler import stale_open_listing_ids
 
 
         home_site, _ = self._site_topology()
@@ -1225,7 +1225,7 @@ class AdminController:
     async def _reopen_available_compute_listings(self, changed_site: str) -> list[str]:
         """Reopen the capacity-backed listings ``changed_site``'s change made
         available again, after refreshing that site's cached projection."""
-        from domains.vms.listings.reconciler import closed_available_listing_ids
+        from arkhai_vms_listings.reconciler import closed_available_listing_ids
 
 
         home_site, _ = self._site_topology()

@@ -9,8 +9,8 @@ from market_core import RegistryDescriptor
 from market_identity import Ed25519Signer
 
 from registry_client import RegistryClient, RegistryClientError, SyncRegistryClient
-from src.db.models import PublisherReplayReservation
-from src.main import app
+from core_registry.db.models import PublisherReplayReservation
+from core_registry.main import app
 
 
 async def test_typed_client_reads_authority_authenticated_descriptor(

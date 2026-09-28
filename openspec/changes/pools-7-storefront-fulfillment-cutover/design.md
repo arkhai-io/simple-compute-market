@@ -4154,7 +4154,7 @@ planning:
   `e2e-tests` is a fully separate root with its own `Makefile`/`reinit` —
   confirmed genuinely decoupled from `compute_provisioning`/`kit/fulfillment`
   (it wraps the provisioning HTTP surface with its own hand-written
-  `e2e-tests/src/provisioning_test_client.py`, not the `ComputeProvisioningClient`
+  `e2e-tests/src/e2e_harness/provisioning_test_client.py`, not the `ComputeProvisioningClient`
   package), so its `reinit` not refreshing those wheels is correct, not a
   gap. `openspec validate --all --strict` has been recorded as unavailable
   in every validation environment used since Section 8 — 11.5 should

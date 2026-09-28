@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from src.hosted_real_stripe.lifecycle_bridge import _caused_by_timeout
+from e2e_harness.hosted_real_stripe.lifecycle_bridge import _caused_by_timeout
 
 
 def test_direct_timeout_is_a_timeout() -> None:

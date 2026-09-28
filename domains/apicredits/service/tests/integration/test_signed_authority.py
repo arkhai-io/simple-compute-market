@@ -46,7 +46,12 @@ GATED_SIGNER = Ed25519Signer(b"credits-gatedapp-seed-32-bytes!!")
 OPERATOR_SIGNER = Ed25519Signer(b"credits-operator-seed-32-bytes!!")
 IMPOSTOR_SIGNER = Ed25519Signer(b"credits-impostor-seed-32-bytes!!")
 
-_MODULES = ("main", "identity", "config", "container")
+_MODULES = (
+    "apicredits_service.main",
+    "apicredits_service.identity",
+    "apicredits_service.config",
+    "apicredits_service.container",
+)
 
 SIGNATURE_VERSION_HEADER = "X-Market-Signature-Version"
 IDENTITY_SCHEME_HEADER = "X-Market-Identity-Scheme"
@@ -105,10 +110,10 @@ def _load_app(directory: Path, monkeypatch, *, with_identity: bool):
         monkeypatch.delenv("APICREDITS_TRUSTED_PRINCIPALS", raising=False)
     for name in _MODULES:
         sys.modules.pop(name, None)
-    main = importlib.import_module("main")
+    main = importlib.import_module("apicredits_service.main")
     # `main` imports the container under an alias, so the module is reached
     # directly rather than through it.
-    importlib.import_module("container").init()
+    importlib.import_module("apicredits_service.container").init()
     return main
 
 
@@ -403,7 +408,7 @@ def test_a_deployment_without_an_identity_keeps_the_shared_secret_gate(
 
 
 def _seller_client(signed_app):
-    from domains.apicredits.settlement import CreditsServiceClient
+    from arkhai_apicredits.settlement import CreditsServiceClient
 
     return CreditsServiceClient(
         "http://credits-service",
@@ -480,7 +485,7 @@ def _issuance_request(obligation_ref: str, quantity: int = 5):
     refuses a pair that does not agree -- which is what makes an issuance
     idempotent per obligation rather than per caller-chosen string.
     """
-    from domains.apicredits.settlement.credits_client import (
+    from arkhai_apicredits.settlement.credits_client import (
         CreditIssuanceRequest,
         CreditKeyTarget,
         credit_issuance_request_digest,
@@ -554,7 +559,7 @@ async def test_the_seller_client_reads_back_what_it_issued(signed_app):
     key = await seller.get_key(issued.key_id)
     assert key["balance"] == 7
 
-    from domains.apicredits.settlement.credits_client import (
+    from arkhai_apicredits.settlement.credits_client import (
         derive_credit_fulfillment_id,
     )
 

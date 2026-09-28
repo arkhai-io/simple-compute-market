@@ -12,7 +12,7 @@ import pytest
 from market_identity import RequestEnvelope, TrustedIdentitySet, canonical_body_hash, sign_request
 from registry_client import RegistryClient, RegistryClientError
 from registry_client.models import ListingRequest, UpdateListingRequest
-from src.main import app
+from core_registry.main import app
 
 pytestmark = pytest.mark.asyncio
 
@@ -94,7 +94,7 @@ async def test_ed25519_lazily_publishes_updates_and_deletes(
         assert updated["status"] == "closed"
         await client.delete_listing("ed-listing")
 
-    from src.db.models import Listing, PublisherIdentity
+    from core_registry.db.models import Listing, PublisherIdentity
 
     binding = db_session.query(PublisherIdentity).one()
     assert binding.scheme == "ed25519"
@@ -220,7 +220,7 @@ async def test_exact_request_replay_returns_recorded_outcome_once(
     )
     assert second == first
 
-    from src.db.models import Listing, PublisherReplayReservation
+    from core_registry.db.models import Listing, PublisherReplayReservation
 
     assert db_session.query(Listing).count() == 1
     assert db_session.query(PublisherReplayReservation).count() == 1
@@ -326,7 +326,7 @@ async def test_deterministic_four_xx_is_cached_for_exact_retry(
     assert outcomes[0] == outcomes[1]
     assert outcomes[0][0] == 404
 
-    from src.db.models import PublisherReplayReservation
+    from core_registry.db.models import PublisherReplayReservation
 
     replay = db_session.query(PublisherReplayReservation).filter_by(
         request_id=request_id
@@ -340,8 +340,8 @@ async def test_active_lease_blocks_then_expired_lease_resumes(
     db_session,
     monkeypatch,
 ):
-    from src.api import listing_routes
-    from src.db.models import PublisherReplayReservation
+    from core_registry.api import listing_routes
+    from core_registry.db.models import PublisherReplayReservation
 
     original = listing_routes.ensure_publisher_for_identity
 

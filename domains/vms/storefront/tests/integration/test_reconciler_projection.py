@@ -97,7 +97,7 @@ def test_another_modes_stored_override_does_not_reach_vm_derivation(db_path):
 
 
 def test_an_undecodable_stored_override_holds_its_pool(db_path):
-    from domains.vms.listings.reconciler import derivation_reports
+    from arkhai_vms_listings.reconciler import derivation_reports
 
     conn = sqlite3.connect(db_path)
     try:

@@ -103,7 +103,7 @@ services:
       - ARKHAI_PROVISIONING_MODE=${PROVISIONING_MODE:-http}
       - MOCK_PROVISIONING_SUCCESS=${MOCK_PROVISIONING_SUCCESS:-true}
       # The storefront's policy discovery needs `domains/` on PYTHONPATH
-      # so it can find domains.vms.negotiation.rl callables.
+      # so it can find arkhai_vms_negotiation.rl callables.
       - PYTHONPATH=/app:/app/src
     volumes:
       # Chain-/seller-specific config is the one environment-supplied mount;

@@ -10,7 +10,7 @@ from hosted_settlement_client import (
     verify_account_owner_admission,
 )
 
-from src.hosted_real_stripe.driver import (
+from e2e_harness.hosted_real_stripe.driver import (
     _SAVED_INSTRUMENT_PROFILES,
     _browser_outcome,
     _classify,
@@ -25,8 +25,8 @@ from src.hosted_real_stripe.driver import (
     _wait_until_reclaim_eligible,
     _terminal_projection,
 )
-from src.hosted_real_stripe.gates import LaneExcluded
-from src.hosted_real_stripe.runtime import LifecycleContractError, ProcessUnavailable
+from e2e_harness.hosted_real_stripe.gates import LaneExcluded
+from e2e_harness.hosted_real_stripe.runtime import LifecycleContractError, ProcessUnavailable
 
 
 def _prepared() -> dict[str, object]:
@@ -67,7 +67,7 @@ def test_maintained_account_binding_is_owner_signed_for_opaque_reference(
         "HOSTED_SETTLEMENT_E2E_STOREFRONT_IDENTITY_CREDENTIAL",
         credential,
     )
-    monkeypatch.setattr("src.hosted_real_stripe.driver.time.time", lambda: 2_000_000_000)
+    monkeypatch.setattr("e2e_harness.hosted_real_stripe.driver.time.time", lambda: 2_000_000_000)
     config = Path(__file__).resolve().parents[2] / "config" / "hosted-storefront.toml"
 
     raw = _maintained_account_binding(
@@ -146,8 +146,8 @@ def test_prepared_effect_binds_public_lifecycle_to_exact_profile_terms() -> None
 
 def test_refund_eligibility_wait_happens_outside_lifecycle_request(monkeypatch) -> None:
     delays: list[float] = []
-    monkeypatch.setattr("src.hosted_real_stripe.driver.time.time", lambda: 100.0)
-    monkeypatch.setattr("src.hosted_real_stripe.driver.time.sleep", delays.append)
+    monkeypatch.setattr("e2e_harness.hosted_real_stripe.driver.time.time", lambda: 100.0)
+    monkeypatch.setattr("e2e_harness.hosted_real_stripe.driver.time.sleep", delays.append)
 
     _wait_until_reclaim_eligible({"reclaim_eligible_at_unix": 120})
 

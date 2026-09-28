@@ -11,7 +11,7 @@ from market_policy.negotiation_middleware import (
     load_negotiation_chain,
     run_negotiation_chain,
 )
-from domains.vms.negotiation.policies import (
+from arkhai_vms_negotiation.policies import (
     listed_price_middleware,
     accept_exact_listing_middleware,
     amount_bisection_middleware,

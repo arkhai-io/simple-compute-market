@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-vms-storefront"
-version = "0.7.1"
+version = "0.8.0"
 license = "MIT"
 description = "Provider-side storefront server: hosts /orders, /negotiate, /settle, /alerts/resource endpoints. The provider-side counterpart to arkhai-vms-buyer."
 authors = [
@@ -28,9 +28,9 @@ dependencies = [
     "arkhai-bare-metal>=0.6.0",
     "arkhai-bare-metal-storefront==0.6.0",
     "arkhai-vms>=0.5.0",
-    "arkhai-vms-listings[pools,overrides]>=0.3.0",
-    "arkhai-vms-negotiation>=0.1.0",
-    "arkhai-vms-settlement>=0.1.0",
+    "arkhai-vms-listings[pools,overrides]>=0.4.0",
+    "arkhai-vms-negotiation>=0.2.0",
+    "arkhai-vms-settlement>=0.2.0",
     "arkhai-compute-provisioning>=0.6.1",
     "arkhai-kit-fulfillment>=0.3.0",
     "opentelemetry-exporter-gcp-trace>=1.9.0,<2.0.0",
@@ -71,7 +71,7 @@ dev = [
 [project.optional-dependencies]
 
 # Inference-only — just enough to load and run the trained .pt checkpoints
-# in domains/vms/negotiation/rl/models/. The architecture is
+# in domains/vms/negotiation/src/arkhai_vms_negotiation/rl/models/. The architecture is
 # reproduced inline in arkhai_common.ArkhaiInferencePolicy (state-dict
 # compatible with checkpoints trained against pufferlib.models.Default,
 # verified bit-identical). Training (which still uses pufferlib's C env)

@@ -14,7 +14,7 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_filter_spec_endpoint_returns_loaded_spec(registry_client) -> None:
-    from src.main import app
+    from core_registry.main import app
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
@@ -59,7 +59,7 @@ async def test_filter_spec_endpoint_returns_loaded_spec(registry_client) -> None
 
 @pytest.mark.asyncio
 async def test_filter_spec_etag_stable_across_requests(registry_client) -> None:
-    from src.main import app
+    from core_registry.main import app
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"

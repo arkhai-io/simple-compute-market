@@ -8,8 +8,8 @@ from core_buyer import (
     RegistryDiscovery,
     RegistryQueryPlan,
 )
-from domains.vms.buyer import listing_cli
-from domains.vms.buyer.cli import app
+from arkhai_vms_buyer import listing_cli
+from arkhai_vms_buyer.cli import app
 from typer.testing import CliRunner
 
 runner = CliRunner()
@@ -107,7 +107,7 @@ def test_listing_explain_emits_stable_json_and_stops_before_normal_selection(
 def test_listing_rejects_clause_with_generated_fields_before_registry(
     monkeypatch,
 ) -> None:
-    from domains.vms.buyer.settlement_composition import (
+    from arkhai_vms_buyer.settlement_composition import (
         resolve_buyer_settlement_policy,
     )
 

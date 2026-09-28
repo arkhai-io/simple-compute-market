@@ -17,7 +17,7 @@ from core_buyer.orchestration import make_publisher_trust_resolver
 from core_buyer.orchestrator import BuyConfig
 from core_buyer.profile_service import BuyerProfileService
 from core_buyer.registry_config import RegistryAuthority
-from domains.vms.buyer.hosted_authorization import prepare_hosted_funding_authorization
+from arkhai_vms_buyer.hosted_authorization import prepare_hosted_funding_authorization
 from hosted_settlement_client import (
     FundingMode,
     FundingProfile,

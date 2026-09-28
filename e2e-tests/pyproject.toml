@@ -36,18 +36,18 @@ dependencies = [
     "arkhai-core-registry-client>=0.12.0",
     "arkhai-kit-alkahest>=0.1.0",
     "arkhai-kit-site-client>=0.4.0",
-	"arkhai-vms-storefront>=0.7.0",
+	"arkhai-vms-storefront>=0.8.0",
     "arkhai-vms-provisioning-operator-client>=0.4.0",
     # The buyer's `market` CLI, run as a subprocess by the buyer-machine
     # e2e (tests/e2e/roles/buyer_cli.py). Installed so the binary is on
     # PATH inside arkhai:e2e-tests when the suite runs in-network.
     # arkhai-kit-policy is the buyer's sibling negotiation-strategy dep,
     # resolved from .dist alongside the other internal wheels.
-    "arkhai-vms-buyer>=0.3.0",
+    "arkhai-vms-buyer>=0.4.0",
     # The API-credits schema plugin, discovered by the same `market`
     # binary (one binary, many registry schemas); its verbs are
     # namespaced under `market credits …`.
-    "arkhai-apicredits-buyer>=0.2.0",
+    "arkhai-apicredits-buyer>=0.4.0",
     "arkhai-kit-policy>=0.1.0",
 ]
 
@@ -65,7 +65,7 @@ stripe-test = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src"]
+packages = ["src/e2e_harness"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

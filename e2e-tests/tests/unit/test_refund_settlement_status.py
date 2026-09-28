@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from src.hosted_real_stripe.stripe_api import (
+from e2e_harness.hosted_real_stripe.stripe_api import (
     ExpectedEffect,
     ProviderInvariantError,
     ProviderNotConverged,

@@ -4,15 +4,15 @@ from types import SimpleNamespace
 import pytest
 import typer
 from arkhai_vms import make_vm_provision_terms
-from domains.vms.buyer import (
+from arkhai_vms_buyer import (
     common,
     settle_cli,
     settlement_composition,
 )
 import core_buyer.hosted_settlement as hosted_settlement
-from domains.vms.buyer.escrow_selection import select_escrow_entry
-from domains.vms.buyer.settlement_composition import resolve_buyer_settlement_policy
-from domains.vms.settlement import escrow_proposal_from_accepted_entry
+from arkhai_vms_buyer.escrow_selection import select_escrow_entry
+from arkhai_vms_buyer.settlement_composition import resolve_buyer_settlement_policy
+from arkhai_vms_settlement import escrow_proposal_from_accepted_entry
 from market_core.schemas import SettlementOption, derive_settlement_option_id
 from core_buyer.buyer_config import ResolvedBuyerIdentity
 from core_buyer.action_policy import BuyerActionPolicy

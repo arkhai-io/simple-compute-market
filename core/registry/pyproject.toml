@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-core-registry"
-version = "0.2.0"
+version = "0.3.0"
 license = "MIT"
 description = "Listing discovery/index service (registry role)"
 requires-python = ">=3.12"
@@ -21,15 +21,9 @@ dependencies = [
     "arkhai-kit-identity==0.3.0",
 ]
 
-[tool.setuptools]
-package-dir = {"" = "src"}
-
-[tool.setuptools.packages.find]
-where = ["src"]
-
 [build-system]
-requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = [
@@ -45,3 +39,6 @@ dev = [
 testpaths = ["tests"]
 asyncio_mode = "auto"
 addopts = ["--tb=short", "-v"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/core_registry"]

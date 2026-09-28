@@ -12,7 +12,7 @@ a worse debugging experience than the automated one.
 ## The fact that shapes everything
 
 A protected run keeps no diagnostics. `retain_diagnostics` is set to
-`release.mode == "local"` in three places in `e2e-tests/src/hosted_real_stripe/driver.py`,
+`release.mode == "local"` in three places in `e2e-tests/src/e2e_harness/hosted_real_stripe/driver.py`,
 and evidence validation permits a failed run exactly one stage-matched
 diagnostic code and nothing else. That is the sanitization requirement working,
 not a bug, and it is why `payer_profile_unavailable` was undiagnosable until

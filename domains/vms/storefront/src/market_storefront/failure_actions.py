@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from core_storefront.stage_log import stage_event
-from domains.vms.listings.reconciler import (
+from arkhai_vms_listings.reconciler import (
     closed_available_listing_ids,
 )
 from market_settlement_runtime import FailurePolicy

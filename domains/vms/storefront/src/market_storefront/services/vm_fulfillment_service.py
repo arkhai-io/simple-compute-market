@@ -10,7 +10,7 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from domains.vms.settlement import submit_compute_fulfillment
+from arkhai_vms_settlement import submit_compute_fulfillment
 from market_capacity_publication import CapacityBinding
 
 from market_storefront.services.vm_fulfillment_planner import build_vm_fulfillment_plan

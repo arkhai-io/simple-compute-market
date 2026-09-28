@@ -4,9 +4,6 @@ export UV_PYTHON := $(or $(shell cat ../../../.python-version 2>/dev/null),$(err
 REPO_ROOT := $(shell git rev-parse --show-toplevel)
 DIST_DIR ?= ../../../.dist
 
-# Tests import this package from its installed wheel; see `cache-keys` in pyproject.toml.
-export UV_NO_EDITABLE := 1
-
 .PHONY: build init reinit test smoke-test
 
 init: reinit
@@ -18,7 +15,7 @@ test: reinit
 	uv run --find-links $(DIST_DIR) pytest tests -q
 
 build: reinit
-	uv run --no-sync pyinstaller --onefile --name market ./main.py
+	uv run --no-sync pyinstaller --onefile --name market ./src/arkhai_vms_buyer/main.py
 
 smoke-test:
 	cd dist && ./market -v

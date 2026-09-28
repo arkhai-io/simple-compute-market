@@ -22,7 +22,7 @@ from registry_client import SyncRegistryClient
 from storefront_client import SyncStorefrontClient
 from vm_provisioning_operator import SyncProvisioningClient
 
-from src.settings import settings
+from e2e_harness.settings import settings
 
 
 def lane_setting(name: str) -> str:

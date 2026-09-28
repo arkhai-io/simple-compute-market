@@ -1,5 +1,5 @@
-from domains.vms.buyer import config_cli
-from domains.vms.buyer.cli import app
+from arkhai_vms_buyer import config_cli
+from arkhai_vms_buyer.cli import app
 from typer.testing import CliRunner
 
 

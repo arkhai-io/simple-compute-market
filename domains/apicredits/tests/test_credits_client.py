@@ -13,7 +13,7 @@ import httpx
 import pytest
 from market_identity import Identity, IdentityScheme
 
-from domains.apicredits.settlement.credits_client import (
+from arkhai_apicredits.settlement.credits_client import (
     CreditIssuanceRequest,
     CreditKeyTarget,
     CreditsServiceClient,

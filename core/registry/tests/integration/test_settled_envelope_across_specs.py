@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 from registry_client import ListingRequest
-from src.api import filter_spec as filter_spec_module
+from core_registry.api import filter_spec as filter_spec_module
 
 pytestmark = pytest.mark.asyncio
 

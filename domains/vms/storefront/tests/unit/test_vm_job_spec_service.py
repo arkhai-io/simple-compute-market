@@ -47,7 +47,7 @@ def test_resource_type_constant_matches_the_actual_registered_gpu_resource_type(
     constant must equal what ComputeGpuResourceAdapter actually
     registers, or the claim would reject every real VM resource that
     exists."""
-    from domains.vms.listings.resources import ComputeGpuResourceAdapter
+    from arkhai_vms_listings.resources import ComputeGpuResourceAdapter
 
     assert _VM_RESOURCE_TYPE == ComputeGpuResourceAdapter().resource_type
 

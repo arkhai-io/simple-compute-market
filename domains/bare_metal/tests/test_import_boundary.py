@@ -11,7 +11,15 @@ import ast
 from pathlib import Path
 
 SRC = Path(__file__).resolve().parents[1] / "src" / "arkhai_bare_metal"
-FORBIDDEN = ("arkhai_vms", "domains.vms", "market_storefront", "vm_provisioning_adapter")
+FORBIDDEN = (
+    "arkhai_vms",
+    "arkhai_vms_buyer",
+    "arkhai_vms_listings",
+    "arkhai_vms_negotiation",
+    "arkhai_vms_settlement",
+    "market_storefront",
+    "vm_provisioning_adapter",
+)
 
 
 def _imports(path: Path):

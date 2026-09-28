@@ -60,7 +60,7 @@ def test_domain_contract_imports_from_built_wheel(
     )
     code = """
 from pathlib import Path
-from domains.apicredits import domain_runtime
+from arkhai_apicredits import domain_runtime
 contract = domain_runtime.market_domain()
 module_path = Path(domain_runtime.__file__).resolve()
 assert contract.identity == "api_credits.v1"
@@ -78,12 +78,8 @@ assert "site-packages" in module_path.parts
 def test_service_schema_module_imports_from_built_wheel(
     wheels: dict[str, Path],
 ) -> None:
-    """The service wheel installs controllers/db/middleware/models/services
-    as flat top-level packages (no wrapping arkhai_apicredits_service
-    package name, confirmed by inspecting the built wheel's own file
-    list) -- this is the one package in this file that previously had no
-    real-install-and-import coverage at all, unlike domain's existing
-    test above.
+    """The service wheel installs one package, `apicredits_service`, and its
+    schema module imports from the installed wheel rather than from source.
     """
     venv = wheels["service"].parent / "venv-service"
     subprocess.run(
@@ -110,7 +106,7 @@ def test_service_schema_module_imports_from_built_wheel(
     )
     code = """
 from pathlib import Path
-from db import models
+from apicredits_service.db import models
 module_path = Path(models.__file__).resolve()
 assert hasattr(models, "ApiKey")
 assert hasattr(models, "CreditGrant")
@@ -134,7 +130,7 @@ def test_storefront_domain_imports_resolve_without_a_raw_source_copy(
     puts there) plus the installed wheels -- deliberately no raw
     ``domains/`` source copy, unlike the Dockerfile's previous
     (now-removed) ``COPY domains/ ./domains/`` step. Every
-    ``domains.apicredits.*`` module the storefront package's own code
+    ``arkhai_apicredits.*`` module the storefront package's own code
     actually imports must resolve from the installed
     ``arkhai-apicredits-domain`` wheel with nothing else on the path to
     fall back to.
@@ -176,13 +172,13 @@ def test_storefront_domain_imports_resolve_without_a_raw_source_copy(
     code = """
 import importlib
 for name in (
-    "domains.apicredits.domain_runtime",
-    "domains.apicredits.negotiation.storefront_round",
-    "domains.apicredits.listings.models",
-    "domains.apicredits.listings.pricing",
-    "domains.apicredits.listings.reconciler",
-    "domains.apicredits.negotiation.terms",
-    "domains.apicredits.settlement",
+    "arkhai_apicredits.domain_runtime",
+    "arkhai_apicredits.negotiation.storefront_round",
+    "arkhai_apicredits.listings.models",
+    "arkhai_apicredits.listings.pricing",
+    "arkhai_apicredits.listings.reconciler",
+    "arkhai_apicredits.negotiation.terms",
+    "arkhai_apicredits.settlement",
 ):
     mod = importlib.import_module(name)
     assert "site-packages" in mod.__file__, (name, mod.__file__)
