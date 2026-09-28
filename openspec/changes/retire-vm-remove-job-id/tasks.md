@@ -243,7 +243,7 @@ decision these tasks implement.
         `XDG_DATA_HOME`; neither file is touched by this change, so it fails on the
         checkpoint tree as well.
 
-- [ ] 4.2 The end-to-end run is closeout part 8 (5.8); unrun, see 5.8.
+- [x] 4.2 The end-to-end run is closeout part 8 (5.8).
 - [x] 4.3 Grep the repository for the identifier afterwards and confirm every
       remaining hit is the retired `vm_leases` column in historical
       migrations, the legacy backfill and their tests; the storefront's own
@@ -322,7 +322,7 @@ Per `openspec/README.md#plan-closeout-requirements`, in its order.
 
       **Done.** Passes.
 
-- [ ] 5.8 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and
+- [x] 5.8 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and
       record the evidence: the run, its result, and the scenarios that
       exercise this change's behaviour — the VM lane's teardown stages
       (10a–11b), which read a releasing lease's handle end to end, and the
@@ -335,18 +335,40 @@ Per `openspec/README.md#plan-closeout-requirements`, in its order.
       change that owns it, and treat the validations it gates as unrun rather
       than passed.
 
-      **Blocked, recorded as unrun.** The implementation environment has no
-      Docker, so neither lane could run. No change owns that: it is the
-      environment, and `make run-e2e` runs both lanes in GitHub Actions. The
-      validations it gates remain unrun, not passed.
+      **Done.** GitHub Actions run 36390260302, commit `abac926`, built every
+      bumped wheel (`arkhai-kit-site` 0.6.0, operator client 0.5.0, VM
+      adapter 0.4.0, compute provisioning 0.7.1 and service 0.4.1, bare-metal
+      adapter 0.2.1, VM storefront 0.7.1).
+      - VM lane: 126 passed, 2 skipped. The skips are
+        `test_multi_registry.py` stages 06b and 06c, multi-registry
+        negotiation, which this change does not reach. Teardown stages 10a,
+        10b, 11a and 11b passed in both `test_full_deal.py` and
+        `test_full_deal_buyer_cli.py`; 10b reads the releasing lease's
+        `release_job_id` as the teardown `fulfillment_id`.
+      - Bare-metal lane: 8 passed.
+      - Both lanes' provisioning services applied
+        `20260927_001_drop_reservation_release_mirror` at startup, on fresh
+        databases where it has no column to reconcile, and the API-credits
+        service started from a database created by the changed model.
+      - Neither lane's service logs contain a traceback, a 5xx response, or
+        the retired field name.
 
-- [ ] 5.9 **Promotion.** After code review, add "A reservation's release
+- [x] 5.9 **Promotion.** After code review, add "A reservation's release
       handle has one name" and its five scenarios to
       `openspec/specs/site-capacity/spec.md`, with an evidence line naming 2.6,
       2.7, 3.5 and 3.6's tests, and confirm they match what landed. Add the
       pre-1.0 rule to `docs/development/RELEASING.md`'s "Versioning policy":
       before 1.0, an incompatible change takes a minor bump. Complete the
       design-promotion record below.
+
+      **Done.** The requirement and its five scenarios are in
+      `openspec/specs/site-capacity/spec.md`, taken verbatim from the delta, and
+      the central evidence list names the ledger, lease, model, migration and
+      end-to-end tests. Each scenario was checked against the landed code and
+      the test that proves it. `docs/development/RELEASING.md`'s versioning
+      policy states the pre-1.0 rule; it covers incompatible changes only and
+      leaves the other bump rules as they were. Both files were verified
+      changed.
 
 ## 6. Code review follow-ups
 
@@ -402,12 +424,12 @@ Findings from the implementation review, each accepted as recorded here.
 
 | Accepted decision | Permanent location |
 |---|---|
-| A reservation's release handle has one name, `release_job_id`, with no domain-prefixed mirror; every lease contract publishes and accepts it under that name | `openspec/specs/site-capacity/spec.md` — "A reservation's release handle has one name" |
+| A reservation's release handle has one name, `release_job_id`, with no domain-prefixed mirror; every lease contract publishes and accepts it under that name; an upgrade keeps a mirror-only handle and stops on disagreement | `openspec/specs/site-capacity/spec.md` — "A reservation's release handle has one name" (promoted, 5.9) |
 | Outright removal rather than a deprecation window, and why | This change's `design.md` |
-| Before 1.0, an incompatible package change takes a minor bump | `docs/development/RELEASING.md` — "Versioning policy" |
+| Before 1.0, an incompatible package change takes a minor bump | `docs/development/RELEASING.md` — "Versioning policy" (promoted, 5.9) |
 | The column drop is an approved exception to expand/contract, with its rollback recovery | This change's `design.md` |
 | The PATCH body renames the field; the old name is ignored rather than refused until a major release sets a compatibility policy | This change's `design.md` |
-| One compute-provisioning migration; none for bare-metal or API-credits databases | This change's `design.md` |
+| One compute-provisioning migration, reconciling mirror-only and divergent rows before the drop; none for bare-metal or API-credits databases | This change's `design.md` |
 | Version bumps and raised lower bounds | Each package's `pyproject.toml`; rationale in this change's `design.md` |
 | Roadmap currency | `docs/development/ROADMAP.md` — Goal 1 current state (5.5) |
 | Campaign index currency | `openspec/changes/README.md` — Goal 1 table (5.6) |
