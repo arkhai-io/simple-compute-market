@@ -30,5 +30,11 @@ offering mode that shares the reservation table.
 #### Scenario: A compute provisioning database is upgraded
 
 - **WHEN** a compute provisioning database whose reservation table holds a domain-prefixed release mirror is migrated
-- **THEN** the column is removed through the same table rebuild that removed earlier physical-placement columns
+- **THEN** a reservation whose handle is held only in the mirror keeps it as `release_job_id`
+- **AND** the column is removed through the same table rebuild that removed earlier physical-placement columns
 - **AND** a database without the column migrates unchanged
+
+#### Scenario: A compute provisioning database holds two different release handles
+
+- **WHEN** a reservation's `release_job_id` and its domain-prefixed mirror hold different values
+- **THEN** the upgrade stops, naming the reservation, and changes nothing

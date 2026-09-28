@@ -250,7 +250,7 @@ Capacity projection events MUST remain anonymous and versioned, while deal-scope
 
 **Evidence**
 
-- Explicit request identity, absence and undeclared-mode refusal, legacy reservation behavior, declaration narrowing, and independent cross-mode accounting: `kit/site/tests/unit/test_ledger.py`.
+- Explicit request identity, absence and undeclared-mode refusal, legacy reservation behavior, declaration narrowing, and independent cross-mode accounting: `kit/site/tests/integration/test_ledger.py`.
 - Scheduling-time mode enforcement and withdrawal after reservation: `kit/fulfillment/tests/unit/test_scheduler.py`.
 - Pre-dispatch enforcement, including a previously prepared operation after declaration withdrawal: `kit/fulfillment/tests/unit/test_fulfillment.py`.
 - Durable reservation/settlement/job backfill, quarantine, idempotency, and schema drift: `provisioning/compute/service/tests/unit/test_pool_offering_mode_migration.py`.
@@ -260,7 +260,7 @@ Capacity projection events MUST remain anonymous and versioned, while deal-scope
 - “Do not close on ignorance” reconciliation: `domains/vms/storefront/tests/unit/test_cli_publish_helpers.py`.
 - Shared feasibility predicate: `kit/site/tests/unit/test_resource_satisfies_requirement.py`.
 - Session-scoped settlement assignment, locked reservation reads, and in-session backing-resource lookup: `kit/site/tests/unit/test_settlement_assignment.py`.
-- Reservation supersede (`resize_reservation`) and unconditional settlement-abandonment hook invocation across TTL lapse, release, and resize: `kit/site/tests/unit/test_ledger.py`.
+- Reservation supersede (`resize_reservation`) and unconditional settlement-abandonment hook invocation across TTL lapse, release, and resize: `kit/site/tests/integration/test_ledger.py`.
 - Listing identity normalization and validation: `domains/vms/storefront/tests/unit/test_listing_model_capacity_identity.py`.
 - Claim identity precedence and fail-closed construction: `domains/vms/storefront/tests/unit/test_two_phase_reserve.py`, `domains/vms/storefront/tests/unit/test_vm_fulfillment_planner.py`, and `domains/vms/storefront/tests/unit/test_fulfill_vm_obligation_error_handling.py`.
 - Listing publication and legacy-invalid remediation: `domains/vms/storefront/tests/integration/test_listings_api.py`.

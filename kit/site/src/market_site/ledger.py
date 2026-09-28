@@ -1743,7 +1743,7 @@ class CapacityLedgerService:
             if reservation is None or reservation.state not in HELD_RESERVATION_STATES:
                 return None
             reservation.state = ReservationState.releasing.value
-            self._sync_release_job_fields(
+            self._set_release_job_id(
                 reservation,
                 release_job_id=release_job_id,
             )
@@ -1839,7 +1839,7 @@ class CapacityLedgerService:
             reservation.lease_start_utc = str(lease_start_utc)
         if lease_end_utc is not None:
             reservation.lease_end_utc = str(lease_end_utc)
-        self._sync_release_job_fields(
+        self._set_release_job_id(
             reservation,
             release_job_id=release_job_id,
         )
@@ -1906,7 +1906,7 @@ class CapacityLedgerService:
                 reservation.failure_reason = failure_reason
             if failure_message is not None:
                 reservation.failure_message = failure_message
-            self._sync_release_job_fields(
+            self._set_release_job_id(
                 reservation,
                 release_job_id=release_job_id,
             )
@@ -2560,7 +2560,7 @@ class CapacityLedgerService:
             reservation.executor_ref = dict(executor_ref)
 
     @staticmethod
-    def _sync_release_job_fields(
+    def _set_release_job_id(
         reservation: CapacityReservation,
         *,
         release_job_id: str | None,

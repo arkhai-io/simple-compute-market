@@ -35,6 +35,11 @@ site databases built on that chain are deployed. The API-credits service
 creates the table through `create_all` from the same model; its reservations are
 never VM-mode, so its mirror column has only ever held NULL.
 
+The mirror is not a copy on every stored row. Migration `20260707_001` added
+`release_job_id` without backfilling it, so a reservation that already carried
+`vm_remove_job_id` then holds its handle only in the mirror; the fallback
+readers are what kept such a row's release pollable.
+
 On a fresh compute provisioning database, `create_all` builds
 `capacity_reservations` from the model before migrations run. No historical
 migration writes the mirror: the legacy lease backfill reads the retired
@@ -110,6 +115,21 @@ helper `vm_host` and `vm_target` left this table by. The helper is a no-op where
 the column is absent, so a database created from the current model migrates
 unchanged.
 
+Before dropping, the migration reconciles the two columns row by row, because
+the fallback readers are removed in the same release:
+
+- **Mirror only** (`release_job_id` NULL, mirror set): the mirror's value
+  becomes `release_job_id`. Every reader already treated the row that way, so
+  this keeps the handle rather than choosing one; without it, a releasing row of
+  this kind would stop being polled and be marked `release_failed` at the end of
+  its grace period with its capacity still held.
+- **Divergent** (both set, different values): the migration raises
+  `SchemaDriftError` naming the reservations and changes nothing. Picking a
+  winner is an operator decision; the error says how to resolve it.
+
+The alternative, refusing on both cases, was rejected because a mirror-only
+row has one unambiguous handle.
+
 The migration exists because VM site databases are deployed, and it serves bare
 metal too: bare-metal pools share the compute provisioning database, so no
 bare-metal migration is needed. API credits needs none either. Its reservations
@@ -184,7 +204,7 @@ The alternative of following the written policy literally, with major bumps to
 | `arkhai-bare-metal-provisioning-adapter` | 0.2.0 → 0.2.1 | Reader drops a fallback |
 | `arkhai-vms-storefront` | 0.7.0 → 0.7.1 | An always-ignored event field is removed; behaviour is unchanged |
 
-Two lower bounds rise because a consumer depends on the new version:
+Three lower bounds rise because a consumer depends on the new version:
 
 - `arkhai-compute-provisioning-service` requires `arkhai-kit-site>=0.6.0`. Its
   migration drops a column the older model still maps, so the pair must move
@@ -192,6 +212,12 @@ Two lower bounds rise because a consumer depends on the new version:
 - `arkhai-vms-provisioning-adapter` requires
   `arkhai-vms-provisioning-operator-client>=0.5.0`. It reads
   `LeaseUpdate.release_job_id`, which older clients do not define.
+- `arkhai-compute-provisioning-service` requires
+  `arkhai-vms-provisioning-adapter>=0.4.0` in its `adapters` extra and its dev
+  group. Adapter 0.3.0 reads `LeaseUpdate.vm_remove_job_id` and accepts client
+  0.5.0, which no longer defines it, so the older bound admitted a pair that
+  fails on every lease PATCH. The bare-metal adapter's bound stays: its older
+  release only falls back to a payload key that is now absent.
 
 Every `uv.lock` recording a bumped package is regenerated. Each project's
 `reinit` target already upgrades and reinstalls its internal wheels, so the
@@ -203,7 +229,11 @@ service and both provisioning adapters.
 ### Model contracts are proved at unit level
 
 `TESTING.md` assigns request and response model validation rules to unit tests
-and the client-to-API contract to integration tests. The operator client's lease
+and the client-to-API contract to integration tests. Tests that exercise a real
+database are integration tests: the migration test is created in the compute
+provisioning service's `tests/integration`, and `kit/site`'s ledger tests, which
+this change touches, move from its `tests/unit` to `tests/integration` as
+`TESTING.md` requires of a library test when next touched. The operator client's lease
 methods send and return plain dictionaries, so an integration test through the
 client proves the route but never builds the client's models itself. The field
 sets of `LeaseUpdate`, `LeaseResponse` and `ReleaseStartedEventRequest`, and the

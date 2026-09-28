@@ -732,8 +732,8 @@ def test_find_active_lease_by_vm_target_matches_via_executor_ref(seeded: Capacit
 
 
 def test_a_vm_release_handle_has_one_name(seeded: CapacityLedgerService):
-    """A VM reservation's release handle is ``release_job_id`` and nothing
-    else: no domain-named copy on the payload or on the stored row."""
+    """A VM reservation's release handle is ``release_job_id``, with no
+    VM-named copy on the payload or on the stored row."""
     reserved = seeded.reserve(
         claim={"offering_mode": "vm"}, deal_ref={"escrow_uid": "0xhandle"},
     )
@@ -750,15 +750,8 @@ def test_a_vm_release_handle_has_one_name(seeded: CapacityLedgerService):
 
     assert releasing["offering_mode"] == "vm"
     assert releasing["release_job_id"] == "fulfillment-1"
-    assert not {key for key in releasing if key.endswith("_job_id")} - {
-        "release_job_id",
-        "create_job_id",
-    }
-    assert not {
-        column.name
-        for column in CapacityReservation.__table__.columns
-        if column.name.endswith("_job_id")
-    } - {"release_job_id", "create_job_id"}
+    assert "vm_remove_job_id" not in releasing
+    assert "vm_remove_job_id" not in CapacityReservation.__table__.columns
 
 
 def test_list_lease_due_and_begin_releasing(seeded: CapacityLedgerService):

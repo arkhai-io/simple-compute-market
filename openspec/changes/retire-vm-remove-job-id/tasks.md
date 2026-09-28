@@ -91,28 +91,29 @@ decision these tasks implement.
       **Done, with one deviation.** A mirror `is None` assertion was deleted
       rather than rewritten as a key-absence check: 2.7 proves absence once at the
       ledger, and each site already asserts `release_job_id` beside the deleted line.
-      The integration test publishing the handle asserts the lease's exact set of
-      `*_job_id` keys instead of naming the retired field. `test_database.py`'s
-      hard-coded migration count became `len(MIGRATIONS)`.
+      The integration test publishing the handle asserts the retired key is
+      absent (6.5). `test_database.py`'s hard-coded migration count became
+      `len(MIGRATIONS)`.
 
 - [x] 2.6 **Unit, migration.** Add
-      `provisioning/compute/service/tests/unit/test_reservation_release_mirror_migration.py`,
+      `provisioning/compute/service/tests/integration/test_reservation_release_mirror_migration.py`
+      (created under `unit/`, placed in `integration/` by 6.6),
       following `test_reservation_offering_mode_migration.py`: a current-schema
       database with the column added back and populated loses the column while
       every row keeps its `release_job_id` and other columns; a database
       without the column is unchanged; a rerun is a no-op; and `run_migrations`
       applies the drop to a database whose `schema_migrations` lacks the new ID.
 
-      **Done.** Six cases, including the rollback recovery: a column re-added
-      after the drop is recorded survives a later migration run.
+      **Done.** Eight cases, including the rollback recovery (a column re-added
+      after the drop is recorded survives a later migration run) and the two
+      reconciliation cases 6.2 added.
 
-- [x] 2.7 **Unit, ledger.** In `kit/site/tests/unit/test_ledger.py`, a VM-mode
+- [x] 2.7 **Ledger.** In `kit/site/tests/integration/test_ledger.py` (moved
+      from `tests/unit/` by 6.6), a VM-mode
       reservation moved to releasing carries `release_job_id` and a payload
       with no `vm_remove_job_id` key, and the model defines no such column.
 
-      **Done.** Asserts the payload's and model's `*_job_id` sets are exactly
-      `release_job_id` and `create_job_id`, so the retired name appears nowhere in
-      the test.
+      **Done.** Asserts the retired key on the payload and the model (6.5).
 
 ## 3. Retire the wire field
 
@@ -155,7 +156,8 @@ decision these tasks implement.
       `domains/vms/storefront/tests/unit/test_capacity_admin_models.py`:
       `ReleaseStartedEventRequest` defines no `vm_remove_job_id`.
 
-      **Done.** Asserts the event defines no `*_job_id` field.
+      **Done.** Asserts the field is undefined and that an event carrying it is
+      accepted with the value dropped (6.5).
 
 ## 3b. Versions and locks
 
@@ -224,9 +226,10 @@ decision these tasks implement.
       lease contract directly; `domains/apicredits/service` proves its fresh
       database builds from the changed model.
 
-      **Done.** Passed: `kit/site` 256, `kit/fulfillment` 176,
-      `provisioning/compute` 131, `provisioning/compute/service` unit 676 and
-      integration 273, VM adapter 39, bare-metal adapter 2, VM storefront unit 1085
+      **Done.** Passed after the code-review follow-ups: `kit/site` 256 (105 in
+      the moved `integration/test_ledger.py`), `kit/fulfillment` 176,
+      `provisioning/compute` 131, `provisioning/compute/service` unit 670 and
+      integration 281, VM adapter 39, bare-metal adapter 2, VM storefront unit 1086
       (1 skipped) and integration 250, bare-metal storefront 174, API-credits service
       34, e2e unit 237. The VM storefront ran in a frozen environment without
       `torch`, which none of its sources or tests import.
@@ -245,8 +248,8 @@ decision these tasks implement.
       remaining hit is the retired `vm_leases` column in historical
       migrations, the legacy backfill and their tests; the storefront's own
       `compute_allocations` column and its test; the new migration and its
-      test (2.4, 2.6); the unit model tests asserting the name's absence (2.7,
-      3.6, 3.7); or documentation.
+      test (2.4, 2.6); tests asserting the name's absence or that it is ignored
+      (2.7, 3.5, 3.6, 3.7); or documentation.
 
       **Done.** Every remaining hit is in an allowed category; the one
       permanent-document hit, in `ROADMAP.md`, was removed by 5.5.
@@ -337,13 +340,63 @@ Per `openspec/README.md#plan-closeout-requirements`, in its order.
       environment, and `make run-e2e` runs both lanes in GitHub Actions. The
       validations it gates remain unrun, not passed.
 
-- [ ] 5.9 **Promotion.** After code review, add "A reservation carries one
-      release handle" and its four scenarios to
+- [ ] 5.9 **Promotion.** After code review, add "A reservation's release
+      handle has one name" and its five scenarios to
       `openspec/specs/site-capacity/spec.md`, with an evidence line naming 2.6,
       2.7, 3.5 and 3.6's tests, and confirm they match what landed. Add the
       pre-1.0 rule to `docs/development/RELEASING.md`'s "Versioning policy":
       before 1.0, an incompatible change takes a minor bump. Complete the
       design-promotion record below.
+
+## 6. Code review follow-ups
+
+Findings from the implementation review, each accepted as recorded here.
+
+- [x] 6.1 **Service admits the old VM adapter.** Raise
+      `arkhai-vms-provisioning-adapter` to `>=0.4.0` in both the `adapters`
+      extra and the dev group of `provisioning/compute/service/pyproject.toml`,
+      and relock. Adapter 0.3.0 reads `LeaseUpdate.vm_remove_job_id` and
+      accepts client 0.5.0, which does not define it.
+
+      **Done.** The service lock changed in exactly those two specifiers. The
+      bare-metal adapter's bound stays (`design.md`).
+- [x] 6.2 **Reconcile before the drop.** `release_job_id` was added by
+      `20260707_001` without a backfill, so the mirror can hold a row's only
+      handle. The migration copies a mirror-only value into `release_job_id`,
+      and raises `SchemaDriftError` naming the reservations, changing nothing,
+      when the two columns disagree (`design.md`). Two cases added to the
+      migration test.
+
+      **Done.** The divergent case also proves the guard runs before the
+      backfill.
+- [x] 6.3 **Name the helper for what it does.** `_sync_release_job_fields` in
+      `kit/site/src/market_site/ledger.py` sets one field and is renamed
+      `_set_release_job_id`.
+- [x] 6.4 **Spec follows the reconciliation.** The delta's upgrade scenario
+      states the mirror-only backfill, and a fifth scenario states the refusal
+      on disagreement.
+- [x] 6.5 **Assert the requirement, not a broader rule.** The ledger, lease
+      integration, and storefront event tests asserted that no other `*_job_id`
+      field exists, which would forbid unrelated future job identifiers. Each
+      now asserts the retired key specifically; the storefront event test also
+      proves the retired name is accepted and dropped, as `LeaseUpdate`'s does.
+- [x] 6.6 **Test tiers.** Tests exercising a real database are integration
+      tests (`docs/development/TESTING.md`). `kit/site/tests/unit/test_ledger.py`
+      moves whole to `kit/site/tests/integration/test_ledger.py`, its old path
+      tombstoned; the migration test is placed in the compute provisioning
+      service's `tests/integration`. `openspec/specs/site-capacity/spec.md`'s
+      evidence citations follow the ledger file.
+
+      Recorded, not moved: `test_ledger_lease_lifecycle.py` and
+      `test_database.py`, also touched here, run in-memory SQLite under the
+      service's `tests/unit`. `TESTING.md`'s move-when-touched rule is stated for
+      library packages, and the service keeps many database-backed tests there;
+      re-tiering them is a separate decision.
+
+      Not covered as a client contract: `test_bare_metal_leases_api.py` drives
+      the real application through its own HTTP helper rather than a public
+      client, so it proves the application path, not a client contract. This is
+      pre-existing and unchanged here.
 
 ## Design promotion record
 

@@ -42,7 +42,9 @@ contract carries it:
 
 - The column on `market_site.db.CapacityReservation`, and a versioned
   compute-provisioning migration dropping it through
-  `_drop_columns_via_table_rebuild`. `vm_host` and `vm_target` were dropped
+  `_drop_columns_via_table_rebuild`. The migration first carries a handle held
+  only in the mirror into `release_job_id`, since that column was added without
+  a backfill, and refuses to drop over a row whose two values disagree. `vm_host` and `vm_target` were dropped
   from this same table that way, which is the precedent for the helper.
 - `CapacityLedgerService`: the `vm_remove_job_id` parameter aliases on
   `begin_releasing`, `update_lease_fields`, `update_lease_fields_in_session`

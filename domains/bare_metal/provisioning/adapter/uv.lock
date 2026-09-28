@@ -302,7 +302,7 @@ requires-dist = [
     { name = "arkhai-kit-identity", specifier = "==0.3.0" },
     { name = "arkhai-kit-resource-pools", specifier = ">=0.3.0" },
     { name = "arkhai-kit-site", specifier = ">=0.6.0" },
-    { name = "arkhai-vms-provisioning-adapter", marker = "extra == 'adapters'", specifier = ">=0.3.0" },
+    { name = "arkhai-vms-provisioning-adapter", marker = "extra == 'adapters'", specifier = ">=0.4.0" },
     { name = "cachetools", specifier = ">=5.3" },
     { name = "cryptography", specifier = ">=42.0" },
     { name = "dependency-injector", specifier = ">=4.41.0" },
@@ -325,7 +325,7 @@ dev = [
     { name = "arkhai-bare-metal", specifier = ">=0.5.0" },
     { name = "arkhai-bare-metal-provisioning-adapter", specifier = ">=0.2.0" },
     { name = "arkhai-kit-site-client", specifier = ">=0.6.0" },
-    { name = "arkhai-vms-provisioning-adapter", specifier = ">=0.3.0" },
+    { name = "arkhai-vms-provisioning-adapter", specifier = ">=0.4.0" },
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-asyncio", specifier = ">=0.23" },
 ]

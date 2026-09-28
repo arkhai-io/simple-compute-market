@@ -367,8 +367,7 @@ class TestUpdateLease:
         demonstrably releasing. The e2e's `DealLease` view reads exactly
         this key, and asserting the ledger is not asserting the contract.
 
-        The handle is published under that one name: the lease carries no
-        other job identifier besides the create job's.
+        The handle is published under that one name and no VM-named copy.
         """
         client, _ = client_and_queue
         lease = await _register(client, "escrow-release-job-id-on-api")
@@ -392,10 +391,7 @@ class TestUpdateLease:
             f"release handle: {published}"
         )
         assert published["release_job_id"], published
-        assert {key for key in published if key.endswith("_job_id")} == {
-            "create_job_id",
-            "release_job_id",
-        }, published
+        assert "vm_remove_job_id" not in published, published
 
 
 class TestReleaseOversight:

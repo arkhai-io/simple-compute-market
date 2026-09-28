@@ -31,7 +31,7 @@ dependencies = [
 
 [project.optional-dependencies]
 adapters = [
-    "arkhai-vms-provisioning-adapter>=0.3.0",
+    "arkhai-vms-provisioning-adapter>=0.4.0",
     "arkhai-bare-metal-provisioning-adapter>=0.2.0",
 ]
 
@@ -54,7 +54,7 @@ asyncio_mode = "auto"
 
 [dependency-groups]
 dev = [
-    "arkhai-vms-provisioning-adapter>=0.3.0",
+    "arkhai-vms-provisioning-adapter>=0.4.0",
     "arkhai-bare-metal-provisioning-adapter>=0.2.0",
     # The bare-metal view's contract fixture, which the producer test validates
     # its projected views against.
