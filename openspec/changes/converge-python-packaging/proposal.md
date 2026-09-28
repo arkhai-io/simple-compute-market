@@ -54,7 +54,8 @@ The work lands in two implementation slices under this one change.
 - `[tool.uv] find-links` declarations are removed; the script supplies the wheelhouse.
 - `make check-packaging` runs four focused checks — `check-uv-setup`, `check-locks`,
   `check-python-version`, and (from slice 2) `check-project-layout` — replacing
-  `check-reinit` and `check-internal-locks`. `check-locks` proves, offline, that each
+  `check-reinit` and `check-internal-locks`. The target builds `.dist` first; the
+  checks themselves never resolve, relock, or contact an index. `check-locks` proves that each
   lock matches its project, that each internal wheel's requirements match what the lock
   recorded for it, and that every repository distribution resolves from the wheelhouse. The plan-closeout requirements, and the
   closeout task of every active change whose closeout is not yet complete, call it.

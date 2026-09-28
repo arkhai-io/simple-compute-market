@@ -160,6 +160,11 @@ building MAY disagree with it.
 - **WHEN** `reinit` runs on a host whose default Python is newer than the declared one
 - **THEN** the environment uses the declared version
 
+#### Scenario: A target creates the environment without reinit
+
+- **WHEN** a project's test or service target runs uv and no project environment exists
+- **THEN** the environment it creates uses the declared version
+
 #### Scenario: An image default disagrees
 
 - **WHEN** a Dockerfile's Python version default, a Makefile's `--python` value, or a
@@ -168,9 +173,12 @@ building MAY disagree with it.
 
 ### Requirement: Packaging conventions are checked mechanically
 
-One repository target MUST run every packaging check — environment setup, lock
-currency, Python version, and project layout — and fail if any fails, without network
-access. Each check MUST also be runnable alone.
+One repository target MUST build the repository wheelhouse and then run every
+packaging check — environment setup, lock currency, Python version, and project layout —
+failing if any fails. Each check MUST also be runnable alone. The checks MUST read only
+the committed tree and the built wheelhouse, and MUST NOT resolve dependencies, relock,
+or contact a package index; building the wheelhouse retains whatever its isolated builds
+need.
 
 Lock currency MUST fail on a lock that no longer satisfies its project; on a lock that
 pins an internal package at a version the tree does not build; and on a lock whose
@@ -193,8 +201,14 @@ a locked dependency version the wheel's requirement no longer admits.
 
 #### Scenario: Every convention holds
 
-- **WHEN** the packaging target runs on a tree that follows every convention
-- **THEN** it succeeds without network access
+- **GIVEN** a tree that follows every convention and a built wheelhouse
+- **WHEN** the packaging checks run with no network access
+- **THEN** they succeed
+
+#### Scenario: An index the locks resolve from is unreachable
+
+- **WHEN** the packaging target runs where the PyTorch index cannot be reached
+- **THEN** its result is the same as where it can
 
 ### Requirement: Aggregate kit tests cover every kit
 

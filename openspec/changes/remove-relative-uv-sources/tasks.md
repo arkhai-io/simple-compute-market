@@ -1,15 +1,20 @@
+Sections 1–3 were transferred to `converge-python-packaging` when it was planned on
+2026-09-27: its `check-project-layout` is the path-source guard, its slice 2 removes the
+remaining relative sources, and its `check-uv-setup` rule decides which projects are owed
+a `reinit`. They are closed here and tracked there. Section 4 is this change's own work.
+
 ## 1. Inventory and guard
 
-- [ ] 1.1 Confirm the exact internal path sources and lock entries in the API-credit domain, both provisioning adapters, compute contract, and compute service projects.
-- [ ] 1.2 Add a repository check that rejects internal parent/sibling path sources while allowing external index selectors.
+- [x] 1.1 Confirm the exact internal path sources and lock entries in the API-credit domain, both provisioning adapters, compute contract, and compute service projects. — *transferred to `converge-python-packaging`*
+- [x] 1.2 Add a repository check that rejects internal parent/sibling path sources while allowing external index selectors. — *transferred to `converge-python-packaging`*
 
 ## 2. Wheel-only project cutovers
 
-- [ ] 2.1 Add/repair build and reinit targets for `provisioning/compute` and its service with explicit wheel ordering/reinstall.
-- [ ] 2.2 Add/repair targets for VM and bare-metal provisioning adapters and rebuild their prerequisites.
-- [ ] 2.3 Cut over the API-credit domain and all five affected locks without unrelated dependency drift.
-- [ ] 2.4 Verify clean-environment install, tests, wheel contents, and no source-tree import leakage for each project.
-- [ ] 2.5 Close the wider `reinit` gap this change's second bullet already owns. Inventoried
+- [x] 2.1 Add/repair build and reinit targets for `provisioning/compute` and its service with explicit wheel ordering/reinstall. — *transferred to `converge-python-packaging`*
+- [x] 2.2 Add/repair targets for VM and bare-metal provisioning adapters and rebuild their prerequisites. — *transferred to `converge-python-packaging`*
+- [x] 2.3 Cut over the API-credit domain and all five affected locks without unrelated dependency drift. — *transferred to `converge-python-packaging`*
+- [x] 2.4 Verify clean-environment install, tests, wheel contents, and no source-tree import leakage for each project. — *transferred to `converge-python-packaging`*
+- [x] 2.5 Close the wider `reinit` gap this change's second bullet already owns. Inventoried — *transferred to `converge-python-packaging`*
       2026-08-13 against `e91767a3`: 16 of 33 projects with a `pyproject.toml` have no
       `reinit` target. Eleven have a Makefile without one — `core`,
       `core/registry-client`, `core/storefront-client`,
@@ -33,9 +38,9 @@
 
 ## 3. Documentation and validation
 
-- [ ] 3.1 Correct `docs/development/RELEASING.md` and any conflicting local-development guidance.
-- [ ] 3.2 Run packaging checks, affected suites, full path-source scan, and strict OpenSpec validation.
-- [ ] 3.3 Promote the accepted rule to `openspec/specs/deployment-state/spec.md` and rationale to `architecture.md`, recording destinations in `design.md` before archive.
+- [x] 3.1 Correct `docs/development/RELEASING.md` and any conflicting local-development guidance. — *transferred to `converge-python-packaging`*
+- [x] 3.2 Run packaging checks, affected suites, full path-source scan, and strict OpenSpec validation. — *transferred to `converge-python-packaging`*
+- [x] 3.3 Promote the accepted rule to `openspec/specs/deployment-state/spec.md` and rationale to `architecture.md`, recording destinations in `design.md` before archive. — *transferred to `converge-python-packaging`*
 
 ## 4. CI wheelhouse repair
 

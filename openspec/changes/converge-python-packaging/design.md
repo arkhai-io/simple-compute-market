@@ -93,6 +93,13 @@ project does not have yet.
 **Every package any lock resolves from a local registry is declared by a repository
 project** (40 names), and every such registry is the repository wheelhouse.
 
+**uv does not read a `.python-version` above the project.** A project nested below a
+directory holding `.python-version` gets the host's default interpreter from both
+`uv run` and `uv sync`. Of 75 Make targets that run uv in a project with a `reinit`
+target, 40 do not depend on `reinit`, and 27 `init` or `install` targets run their own
+`uv sync`; any of them can create an environment on whatever interpreter the host has.
+(Found at planning.)
+
 ## Decisions
 
 ### D1. An internal package is one the lock resolves from the repository wheelhouse
@@ -132,8 +139,11 @@ the operations that mutate an environment or a lock against the wheelhouse:
   `--upgrade-package X` per internal package, for every named project or every
   project; installs nothing.
 
-Read-only uses of the wheelhouse stay outside it: test targets' `uv run --find-links`
-executes against an environment `reinit` built.
+Every Makefile `uv sync` goes through it: `init` and `install` targets that sync depend
+on `reinit` instead, and an aggregate Makefile that syncs another project calls the
+script with `--project <dir>`. Read-only uses of the wheelhouse stay outside it: test and
+service targets' `uv run --find-links` executes against the project environment, on the
+interpreter D8 fixes.
 
 The script runs the command rather than printing flags for a caller to splice in.
 The originally accepted design had Makefiles call `$$(python3 …)` inside the `uv sync`
@@ -200,12 +210,25 @@ scope's projects.
 
 ### D8. One Python version, declared once
 
-A root `.python-version` holds `3.13`, matching the CI pin. `uv_project.py` reads it and
-passes `--python` explicitly, so no project relies on uv's discovery reaching a parent
-directory. Makefiles stop passing `--python` and drop `PYTHON_VERSION` used only for
-syncing. Dockerfile `PYTHON_VERSION` defaults become `3.13`; the four images on 3.12 move
-(the locked `alkahest_py` release ships `cp313` wheels). The script itself uses only the
-standard library and runs under the host `python3`.
+A root `.python-version` holds `3.13`, matching the CI pin. uv does not discover it from
+a nested project, so every consumer reads it explicitly:
+
+- `uv_project.py` passes `--python` with it.
+- Every Makefile that runs uv exports `UV_PYTHON` read from it by relative path, which uv
+  honors wherever it would honor `--python`; `uv run` targets that create an environment
+  therefore create it on the declared version. `--python` flags and `PYTHON_VERSION`
+  variables are removed.
+- CI jobs that run uv in a project set `UV_PYTHON` from it; the `python-version: 3.13.7`
+  setup pins agree at minor precision.
+- `REVIEW_PYTHON` defaults to it.
+- Dockerfiles declare `ARG PYTHON_VERSION=3.13` and use it in every `FROM`; the four
+  images on 3.12, three of which hard-code the tag, move (the locked `alkahest_py`
+  release ships `cp313` wheels).
+
+The script itself uses only the standard library and runs under the host `python3`.
+
+*Rejected: a `.python-version` in each project* — 44 copies of one fact. *Rejected:
+capping each project's `requires-python`* — it changes what published wheels admit.
 
 ### D9. No project declares the wheelhouse
 
@@ -246,16 +269,30 @@ editable `[tool.uv.sources]`. They move to `.dist` resolution in slice 2, which 
 
 ### D12. Packaging conventions are checked by four focused scripts
 
-`make check-packaging` runs each; each is also its own target. None needs the network.
+`make check-packaging` depends on `dist` and then runs each; each is also its own
+target. The checks read the committed tree and the built wheelhouse, and never resolve
+dependencies, relock, or contact a package index. Building the wheelhouse is a
+prerequisite with its own needs: `uv build` isolates each build and fetches the
+project's declared build backend (`hatchling`, or `setuptools` and `wheel`), so from a
+clean cache `dist` needs the index that serves them. What closeout never needs is the
+indexes the locks resolve from — in particular the PyTorch index. With a cold cache and
+the network disabled, `uv lock --check` on `kit/policy` passes while `uv build` fails.
+
+*Rejected: wheel builds without network, by disabling build isolation against a shared,
+pre-provisioned build environment.* That environment would be a new hand-maintained list
+of build backends and versions, and would make wheel contents depend on it rather than on
+each project's `build-system.requires`. Every place closeout runs can reach the index
+that serves build backends. *Rejected: dropping the no-index property for the checks.*
+It is true, testable, and is what lets closeout run where the PyTorch index is blocked.
 
 | Target | Fails on |
 |---|---|
 | `check-uv-setup` | a project with tests whose lock installs internal wheels and has no `reinit`; a `reinit` recipe other than the script call; a Dockerfile uv install from the wheelhouse not made through the script; any literal `--upgrade-package`, `--reinstall-package`, or `--refresh-package`; a lock registry rewrite; a repository distribution's `name==version` in a Dockerfile; a runtime stage that copies the wheelhouse |
 | `check-locks` | see below |
-| `check-python-version` | a `--python` value, `.python-version` file, or Dockerfile `PYTHON_VERSION` default other than the root declaration |
+| `check-python-version` | a `.python-version` file other than the root one; a `--python` literal in a Makefile, shell script, or tool phase configuration; a Makefile that runs uv without exporting `UV_PYTHON` from the root declaration by a path that resolves; a CI job that runs uv in a project without `UV_PYTHON` from it; a Dockerfile `FROM` with a hard-coded Python tag or a `PYTHON_VERSION` default other than the root declaration |
 | `check-project-layout` | a wheel target that is not one package under `src/`; `[tool.uv] find-links`; `cache-keys`; a relative `[tool.uv.sources]` path; `UV_NO_EDITABLE`, `--no-editable`, or `no_editable` outside image builds |
 
-`check-locks` runs after `dist` and proves lock currency on three axes:
+`check-locks` proves lock currency on three axes:
 
 1. **Against the project.** `uv lock --check`, which catches a lock that no longer
    satisfies its `pyproject.toml`.
@@ -316,8 +353,11 @@ contents change in slice 2 therefore bumps its version: the six renamed distribu
 and every other published distribution whose source changes to follow the renamed
 imports. Being 0.x releases with a breaking import change, they bump the minor version.
 Every `==` pin on a bumped distribution moves with it, and the affected locks are
-relocked with `make lock`. The planning pass enumerates the distributions by comparing
-wheel contents before and after the rename.
+relocked with `make lock`. Planning enumerates the distributions from ownership of the
+changed sites — imports, entry points, test patch targets, and warning filters — keeping
+those whose changed files ship in the wheel. Implementation confirms the enumeration by
+comparing each distribution's wheel contents before and after the rename; a distribution
+whose contents changed but was not bumped fails that comparison.
 
 `publish-pypi.yml`'s path filters are updated to the moved directories, and
 `docs/development/RELEASING.md` records the import migration for the bumped releases.
@@ -352,6 +392,21 @@ A design review raised eight findings; each is resolved as follows.
    mutating operations, and `install-wheel` uses `--no-index` (D2).
 7. *Inventory miscounted* — four Dockerfiles, seven literals (Findings, D6).
 8. *Not yet planned* — the file-level plan and closeout task are the planning phase.
+
+A second review found one further contradiction, resolved as follows.
+
+9. *The packaging target promised to run without network, but its `dist` prerequisite
+   fetches build backends* — the target builds the wheelhouse first, and the no-network
+   promise is narrowed to the checks, which never resolve, relock, or contact an index
+   (D12). Wheel production stays isolated.
+10. *Distributions to bump cannot be enumerated by comparing wheels before planning* —
+    planning enumerates from ownership of changed sites; wheel comparison validates at
+    implementation (D16).
+
+Planning found one further gap, resolved without changing any decision's intent:
+uv ignores a parent `.python-version`, so D8 now exports `UV_PYTHON` from the
+declaration in every Makefile and CI job that runs uv, and D2 routes every Makefile
+`uv sync` through `reinit`.
 
 ## Risks
 

@@ -330,18 +330,19 @@ Two changes joined this campaign on 2026-09-02. The first completed and was arch
 
 ```text
 publish-wheels-through-a-gate (its prerequisite archived 2026-09-04)
-remove-relative-uv-sources ──► type-core-packages ──► configure-pypi-trusted-publishing
+converge-python-packaging ──► type-core-packages ──► configure-pypi-trusted-publishing
+(remove-relative-uv-sources: open work transferred to converge-python-packaging)
 ```
 
-`converge-python-packaging` absorbs the open sections of `remove-relative-uv-sources` (its path-source guard, remaining cutovers, and `reinit` inventory); that change's completed CI wheelhouse repair is unaffected, and its open tasks are marked transferred when this change is planned.
+`converge-python-packaging` absorbed the open sections of `remove-relative-uv-sources` (its path-source guard, remaining cutovers, and `reinit` inventory) when it was planned on 2026-09-27; that change's completed CI wheelhouse repair is unaffected, and it has no remaining open work.
 
 | Order | Change | Status | Acceptance boundary |
 |---|---|---|---|
 | 1 | [`publish-wheels-through-a-gate`](publish-wheels-through-a-gate/) | active; the interim half needs no prerequisite | Automated publication to PyPI stops; merge to `main` publishes all twenty-eight distributions to the development registry; one inventory-derived list replaces the two enumerations; a human-invoked promotion copies bytes to PyPI and fails the whole set if any version there holds different content |
-| 1 | [`remove-relative-uv-sources`](remove-relative-uv-sources/) | active | Remove remaining internal parent-path sources and enforce wheel-only resolution. Re-inventoried 2026-08-06: one confirmed project remains and one named target no longer exists at its recorded path |
+| — | [`remove-relative-uv-sources`](remove-relative-uv-sources/) | open work transferred to `converge-python-packaging` 2026-09-27; archivable | Remove remaining internal parent-path sources and enforce wheel-only resolution. Its CI wheelhouse repair is complete; the rest is now `converge-python-packaging` |
 | 2 | [`type-core-packages`](type-core-packages/) | active after affected public surfaces stabilize | Restore advertised checks, ratchet package by package, verify `py.typed` in installed wheels. Its deferred `kit/site` question should wait for the kit-composition goal's extraction scope |
 | 3 | [`configure-pypi-trusted-publishing`](configure-pypi-trusted-publishing/) | externally blocked | Reconcile the consumable distribution graph and verify trusted publishers plus PyPI-only downstream installation. Should follow the kit extraction, which changes wheel contents |
-| — | [`converge-python-packaging`](converge-python-packaging/) | designed; not planned | Two slices. Environments: `reinit`, image installs, and a new `make lock` derive internal-package flags from each project's lock through one script; the three outlier images install from their lock; Python 3.13 declared once; `make check-packaging` replaces `check-reinit` and `check-internal-locks` and joins every closeout. Layout: six nested-import projects move to `src/<package>` under new minor versions and every project installs editable. Design reviewed 2026-09-27 |
+| 1 | [`converge-python-packaging`](converge-python-packaging/) | planned; slice 1 next | Two slices. Environments: `reinit`, image installs, and a new `make lock` derive internal-package flags from each project's lock through one script; the three outlier images install from their lock; Python 3.13 declared once; `make check-packaging` replaces `check-reinit` and `check-internal-locks` and joins every closeout. Layout: six nested-import projects move to `src/<package>` under new minor versions and every project installs editable. Design reviewed and planned 2026-09-27 |
 
 The two sequences are independent of each other and share this campaign because they share its completion test: nothing outside this repository can install what it publishes.
 
