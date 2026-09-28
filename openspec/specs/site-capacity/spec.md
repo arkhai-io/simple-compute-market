@@ -261,7 +261,7 @@ Capacity projection events MUST remain anonymous and versioned, while deal-scope
 - Shared feasibility predicate: `kit/site/tests/unit/test_resource_satisfies_requirement.py`.
 - Session-scoped settlement assignment, locked reservation reads, and in-session backing-resource lookup: `kit/site/tests/unit/test_settlement_assignment.py`.
 - Reservation supersede (`resize_reservation`) and unconditional settlement-abandonment hook invocation across TTL lapse, release, and resize: `kit/site/tests/integration/test_ledger.py`.
-- One release-handle name: the ledger payload and model in `kit/site/tests/integration/test_ledger.py`; the published and updatable lease handle in `provisioning/compute/service/tests/integration/test_leases_api.py` and the lease models in `provisioning/compute/service/tests/unit/test_lease_models.py`; the upgrade, including the mirror-only backfill and the refusal on disagreement, in `provisioning/compute/service/tests/integration/test_reservation_release_mirror_migration.py`; and the deployed VM release path through teardown in `e2e-tests/tests/e2e/roles/scenarios/vms/test_full_deal.py`.
+- One release-handle name: the ledger payload and model in `kit/site/tests/integration/test_ledger.py`; the published and updatable VM lease handle in `provisioning/compute/service/tests/integration/test_leases_api.py`, the published bare-metal lease handle in `provisioning/compute/service/tests/integration/test_bare_metal_leases_api.py`, and the lease models in `provisioning/compute/service/tests/unit/test_lease_models.py`; the upgrade, including the mirror-only backfill and the refusal on disagreement, in `provisioning/compute/service/tests/integration/test_reservation_release_mirror_migration.py`; and the deployed VM release path through teardown in `e2e-tests/tests/e2e/roles/scenarios/vms/test_full_deal.py`.
 - Listing identity normalization and validation: `domains/vms/storefront/tests/unit/test_listing_model_capacity_identity.py`.
 - Claim identity precedence and fail-closed construction: `domains/vms/storefront/tests/unit/test_two_phase_reserve.py`, `domains/vms/storefront/tests/unit/test_vm_fulfillment_planner.py`, and `domains/vms/storefront/tests/unit/test_fulfill_vm_obligation_error_handling.py`.
 - Listing publication and legacy-invalid remediation: `domains/vms/storefront/tests/integration/test_listings_api.py`.
@@ -720,7 +720,7 @@ offering mode that shares the reservation table.
 
 - **WHEN** a compute provisioning database whose reservation table holds a domain-prefixed release mirror is migrated
 - **THEN** a reservation whose handle is held only in the mirror keeps it as `release_job_id`
-- **AND** the column is removed through the same table rebuild that removed earlier physical-placement columns
+- **AND** the mirror column is removed without losing any reservation's release handle or other reservation data
 - **AND** a database without the column migrates unchanged
 
 #### Scenario: A compute provisioning database holds two different release handles

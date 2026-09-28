@@ -307,10 +307,9 @@ Per `openspec/README.md#plan-closeout-requirements`, in its order.
       `fix-vm-fulfillment-capacity-boundary`'s row, which names this change as
       the owner of its one deferral. Record the update in the promotion record.
 
-      **Done.** This change's row reads "implemented; code review, end-to-end
-      run, and promotion outstanding", and `fix-vm-fulfillment-capacity-boundary`'s
-      row says its deferral is implemented here. The dependency edge stays until
-      archive.
+      **Done.** This change's row reads "complete; ready to archive", and
+      `fix-vm-fulfillment-capacity-boundary`'s row says its deferral is complete
+      here. The dependency edge stays until archive.
 
 - [x] 5.7 **Documentation citations.** Run
       `make check-doc-citations CHANGE=retire-vm-remove-job-id` and resolve every match.
@@ -335,7 +334,8 @@ Per `openspec/README.md#plan-closeout-requirements`, in its order.
       change that owns it, and treat the validations it gates as unrun rather
       than passed.
 
-      **Done.** GitHub Actions run 36390260302, commit `abac926`, built every
+      **Done.** GitHub Actions run 36390260302, at commit
+      `994f6cbcb47fcb8b8f36ef495705102edd6a7f24` (the code-review follow-ups), built every
       bumped wheel (`arkhai-kit-site` 0.6.0, operator client 0.5.0, VM
       adapter 0.4.0, compute provisioning 0.7.1 and service 0.4.1, bare-metal
       adapter 0.2.1, VM storefront 0.7.1).
@@ -363,9 +363,10 @@ Per `openspec/README.md#plan-closeout-requirements`, in its order.
 
       **Done.** The requirement and its five scenarios are in
       `openspec/specs/site-capacity/spec.md`, taken verbatim from the delta, and
-      the central evidence list names the ledger, lease, model, migration and
-      end-to-end tests. Each scenario was checked against the landed code and
-      the test that proves it. `docs/development/RELEASING.md`'s versioning
+      the central evidence list names the ledger, VM and bare-metal lease,
+      model, migration and end-to-end tests. Each scenario was checked against
+      the landed code and the test that proves it; the bare-metal lease read
+      is proved at its route by 7.1. `docs/development/RELEASING.md`'s versioning
       policy states the pre-1.0 rule; it covers incompatible changes only and
       leaves the other bump rules as they were. Both files were verified
       changed.
@@ -404,9 +405,9 @@ Findings from the implementation review, each accepted as recorded here.
       proves the retired name is accepted and dropped, as `LeaseUpdate`'s does.
 - [x] 6.6 **Test tiers.** Tests exercising a real database are integration
       tests (`docs/development/TESTING.md`). `kit/site/tests/unit/test_ledger.py`
-      moves whole to `kit/site/tests/integration/test_ledger.py`, its old path
-      tombstoned; the migration test is placed in the compute provisioning
-      service's `tests/integration`. `openspec/specs/site-capacity/spec.md`'s
+      moves whole to `kit/site/tests/integration/test_ledger.py`, and the
+      migration test lives only in the compute provisioning service's
+      `tests/integration` (7.2). `openspec/specs/site-capacity/spec.md`'s
       evidence citations follow the ledger file.
 
       Recorded, not moved: `test_ledger_lease_lifecycle.py` and
@@ -420,16 +421,42 @@ Findings from the implementation review, each accepted as recorded here.
       client, so it proves the application path, not a client contract. This is
       pre-existing and unchanged here.
 
+## 7. Promotion review follow-ups
+
+- [x] 7.1 **Bare-metal handle proved at its route.** The promoted requirement
+      says a lease read through either adapter publishes the handle as
+      `release_job_id`. `test_generic_market_lease_terminate_dispatches_bare_metal_reclaim`
+      in `provisioning/compute/service/tests/integration/test_bare_metal_leases_api.py`
+      now reads the releasing bare-metal lease back and asserts its populated
+      `release_job_id` and the absence of the retired key; the permanent
+      evidence line cites it.
+- [x] 7.2 **Migration test in one tier only.** The copy under
+      `provisioning/compute/service/tests/unit/` is removed, leaving the
+      eight-case test under `tests/integration`. Service suites rerun: unit 670,
+      integration 281, with no migration test collected from `unit/`.
+- [x] 7.3 **Current-state spec wording.** The upgrade scenario says the mirror
+      column is removed without losing any reservation's release handle or
+      other data, in place of its provenance in an earlier table rebuild, in
+      both the delta and `openspec/specs/site-capacity/spec.md`.
+- [x] 7.4 **Record accuracy.** 5.6's campaign-status note, 5.8's commit (the
+      runner image's build commit had been recorded in place of the
+      repository's), and 6.6's wording now describe the final tree.
+- [x] 7.5 **Every decision classified.** The promotion record names each
+      change-history decision as not promoted, including the storefront event
+      field.
+
 ## Design promotion record
 
 | Accepted decision | Permanent location |
 |---|---|
 | A reservation's release handle has one name, `release_job_id`, with no domain-prefixed mirror; every lease contract publishes and accepts it under that name; an upgrade keeps a mirror-only handle and stops on disagreement | `openspec/specs/site-capacity/spec.md` — "A reservation's release handle has one name" (promoted, 5.9) |
-| Outright removal rather than a deprecation window, and why | This change's `design.md` |
+| Outright removal rather than a deprecation window, and why | Change history in this change's `design.md`; not promoted |
 | Before 1.0, an incompatible package change takes a minor bump | `docs/development/RELEASING.md` — "Versioning policy" (promoted, 5.9) |
-| The column drop is an approved exception to expand/contract, with its rollback recovery | This change's `design.md` |
-| The PATCH body renames the field; the old name is ignored rather than refused until a major release sets a compatibility policy | This change's `design.md` |
-| One compute-provisioning migration, reconciling mirror-only and divergent rows before the drop; none for bare-metal or API-credits databases | This change's `design.md` |
-| Version bumps and raised lower bounds | Each package's `pyproject.toml`; rationale in this change's `design.md` |
+| The column drop is an approved exception to expand/contract, with its rollback recovery | Change history in this change's `design.md`; not promoted, because it is a one-release exception rather than a rule |
+| The PATCH body renames the field; the old name is ignored rather than refused until a major release sets a compatibility policy | Change history in this change's `design.md`; not promoted. The name `release_job_id` on a lease update is promoted as part of the site-capacity requirement |
+| One compute-provisioning migration, reconciling mirror-only and divergent rows before the drop; none for bare-metal or API-credits databases | Change history in this change's `design.md`; not promoted. The upgrade's observable outcome is promoted as the site-capacity requirement's upgrade scenarios |
+| Version bumps and raised lower bounds | Each package's `pyproject.toml`; rationale is change history in this change's `design.md`, not promoted |
+| `ReleaseStartedEventRequest.vm_remove_job_id` is removed, and stale input remains accepted and discarded | Change history in this change's `design.md`; not promoted, because observable event behaviour is unchanged |
+| Model contracts are proved at unit level; real-database tests are integration tests | Change history in this change's `design.md`; not promoted, because it applies rules `docs/development/TESTING.md` already states |
 | Roadmap currency | `docs/development/ROADMAP.md` — Goal 1 current state (5.5) |
 | Campaign index currency | `openspec/changes/README.md` — Goal 1 table (5.6) |

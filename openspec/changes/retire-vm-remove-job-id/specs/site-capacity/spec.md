@@ -31,7 +31,7 @@ offering mode that shares the reservation table.
 
 - **WHEN** a compute provisioning database whose reservation table holds a domain-prefixed release mirror is migrated
 - **THEN** a reservation whose handle is held only in the mirror keeps it as `release_job_id`
-- **AND** the column is removed through the same table rebuild that removed earlier physical-placement columns
+- **AND** the mirror column is removed without losing any reservation's release handle or other reservation data
 - **AND** a database without the column migrates unchanged
 
 #### Scenario: A compute provisioning database holds two different release handles
