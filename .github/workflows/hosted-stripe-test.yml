@@ -170,6 +170,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Use the repository's declared Python version
+        if: env.SELECTED == 'true'
         run: echo "UV_PYTHON=$(cat .python-version)" >> "$GITHUB_ENV"
       - name: Set up exact Python and uv
         if: env.SELECTED == 'true'

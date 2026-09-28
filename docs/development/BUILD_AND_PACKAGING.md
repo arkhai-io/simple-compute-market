@@ -7,8 +7,10 @@ the architecture they serve is in
 [`ARCHITECTURE.md`](ARCHITECTURE.md#build-packaging-and-initialization).
 
 Every rule here replaces a list someone used to maintain by hand. Nothing in a Makefile,
-Dockerfile, `pyproject.toml`, or workflow names an internal package, repeats a version the
-project already declares, or states the Python version.
+Dockerfile, `pyproject.toml`, or workflow names an internal package or repeats a version the
+project already declares, and nothing chooses the Python version independently: each
+consumer reads the root declaration, and the one copy that cannot — a Dockerfile's
+`ARG PYTHON_VERSION` default — is checked against it.
 
 ## The wheelhouse
 
@@ -39,7 +41,8 @@ caller lists them.
 The root `.python-version` declares the version every environment and image uses. uv does
 not read that file from a nested project, so each consumer reads it explicitly:
 
-- `scripts/uv_project.py` passes it as `--python`.
+- `scripts/uv_project.py reinit` passes it as `--python`. `lock` needs no interpreter
+  choice and `image` takes the image's own interpreter, which the base image fixes.
 - Every Makefile that runs uv exports it, by a path relative to the Makefile:
 
   ```make
@@ -48,9 +51,13 @@ not read that file from a nested project, so each consumer reads it explicitly:
 
   uv honours `UV_PYTHON` wherever it would honour `--python`, so a target that creates an
   environment without `reinit` still creates it on the declared version.
-- Every CI job that runs uv sets it right after checkout:
-  `echo "UV_PYTHON=$(cat .python-version)" >> "$GITHUB_ENV"`.
-- Every Dockerfile declares `ARG PYTHON_VERSION=<declared>` and uses it in each `FROM`.
+- Every CI job that runs uv sets it in a step after checkout that runs under the same
+  `if:` condition as checkout:
+  `echo "UV_PYTHON=$(cat .python-version)" >> "$GITHUB_ENV"`. A step that reads the file
+  where checkout did not run fails; one that skips where checkout ran leaves uv on the
+  runner's default.
+- Every Dockerfile declares `ARG PYTHON_VERSION=<declared>` before its first `FROM` and
+  uses it in each `FROM`.
 
 To change the version, edit `.python-version` and the Dockerfile defaults, then run
 `make check-python-version`.
@@ -128,10 +135,13 @@ closeout ([plan-closeout requirements](../../openspec/README.md#plan-closeout-re
 | Target | Fails on |
 |---|---|
 | `check-uv-setup` | a literal `--upgrade-package`, `--reinstall-package`, or `--refresh-package` in a Makefile or Dockerfile; a Makefile recipe running `uv sync` itself; a `reinit` recipe other than the script call by a path that resolves; a project with tests and wheelhouse packages but no `reinit`; a Dockerfile that rewrites a lock, spells a repository distribution's version, installs from the wheelhouse without the script, calls the script where its stage did not copy it, or copies the wheelhouse into the runtime stage |
-| `check-locks` | a lock `uv lock --check --offline` rejects; a lock pinning an internal version the tree does not build; a lock whose record of an internal package disagrees with that wheel's metadata (a requirement added or removed, unconditionally or under a recorded extra, or a locked version its specifier no longer admits); a repository distribution resolved from an index or from a local registry other than `.dist` |
-| `check-python-version` | a `.python-version` other than the root one; a literal `--python` version in a Makefile, shell script, or tool phase configuration; a Makefile running uv without exporting `UV_PYTHON` from the root declaration; a CI job running uv without it, or a setup pin of another minor version; a Dockerfile `FROM` naming a Python version, or a `PYTHON_VERSION` default other than the declared one |
+| `check-locks` | a lock `uv lock --check --offline` rejects; a lock pinning an internal version the tree does not build; a lock whose record of an internal package disagrees with that wheel's metadata (a requirement added or removed, unconditionally or under an extra in use, or a locked version its specifier no longer admits); a version check it cannot evaluate; a repository distribution resolved from an index or from a local registry other than `.dist` |
+| `check-python-version` | a `.python-version` other than the root one; a literal `--python` version in a Makefile, shell script, or tool phase configuration; a Makefile running uv without exporting `UV_PYTHON` from the root declaration; a CI job running uv without it, setting it before checkout or under a different `if:` than checkout, or a setup pin of another minor version; a Dockerfile `FROM` naming a Python version, using `${PYTHON_VERSION}` without an `ARG` default before the first `FROM`, or a default other than the declared one |
 
-`check-locks` compares environment markers only to decide which extra a requirement
-belongs to, so a same-version wheel that changes nothing but a marker is not seen; `make
-lock` followed by an unchanged tree is the stronger proof. It needs `.dist` built first,
-which `check-packaging` does.
+uv records no section for an empty extra, and no extra on the consumer's dependency edge
+either, so `check-locks` derives the extras in use from every place that can request one:
+the lock's dependency edges, each locked project's `requires-dist`, and the requirements of
+the wheels the lock installs. It compares environment markers only to decide which extra a
+requirement belongs to, so a same-version wheel that changes nothing but a marker is not
+seen; `make lock` followed by an unchanged tree is the stronger proof. It needs `.dist`
+built first, which `check-packaging` does.

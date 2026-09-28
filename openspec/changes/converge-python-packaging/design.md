@@ -296,7 +296,7 @@ It is true, testable, and is what lets closeout run where the PyTorch index is b
 |---|---|
 | `check-uv-setup` | a project with tests whose lock installs internal wheels and has no `reinit`; a `reinit` recipe other than the script call; a Dockerfile uv install from the wheelhouse not made through the script; any literal `--upgrade-package`, `--reinstall-package`, or `--refresh-package`; a lock registry rewrite; a repository distribution's `name==version` in a Dockerfile; a runtime stage that copies the wheelhouse |
 | `check-locks` | see below |
-| `check-python-version` | a `.python-version` file other than the root one; a `--python` literal in a Makefile, shell script, or tool phase configuration; a Makefile that runs uv without exporting `UV_PYTHON` from the root declaration by a path that resolves; a CI job that runs uv in a project without `UV_PYTHON` from it; a Dockerfile `FROM` with a hard-coded Python tag or a `PYTHON_VERSION` default other than the root declaration |
+| `check-python-version` | a `.python-version` file other than the root one; a `--python` literal in a Makefile, shell script, or tool phase configuration; a Makefile that runs uv without exporting `UV_PYTHON` from the root declaration by a path that resolves; a CI job that runs uv without `UV_PYTHON` from it, or whose `UV_PYTHON` step precedes checkout or carries a different `if:` than checkout; a Dockerfile `FROM` with a hard-coded Python tag, a `FROM` using `${PYTHON_VERSION}` without an `ARG PYTHON_VERSION` default before the first `FROM`, or a default other than the root declaration |
 | `check-project-layout` | a wheel target that is not one package under `src/`; `[tool.uv] find-links`; `cache-keys`; a relative `[tool.uv.sources]` path; `UV_NO_EDITABLE`, `--no-editable`, or `no_editable` outside image builds |
 
 `check-locks` proves lock currency on three axes:
@@ -306,9 +306,14 @@ It is true, testable, and is what lets closeout run where the PyTorch index is b
 2. **Against the wheels.** For each package a lock resolves from the wheelhouse, the
    locked version is one the tree builds, and the wheel of that version in `.dist`
    agrees with the lock's record: the names of its unconditional requirements equal the
-   lock's recorded dependencies, the names under each extra the lock records equal that
-   extra's recorded dependencies, and each locked dependency version satisfies the
-   wheel's specifier for it. This catches a same-version wheel whose requirements changed
+   lock's recorded dependencies, and the names under each extra in use equal that extra's
+   recorded dependencies, a missing section counting as empty. An extra is in use when a
+   lock dependency edge, a locked project's `requires-dist`, or a locked wheel's
+   `Requires-Dist` requests it; uv records no section for an empty extra and, when the
+   extra is empty, no extra on the consumer's edge either. Each locked dependency version
+   must satisfy the wheel's specifier for it, checked against the version uv records on
+   the dependency edge when the resolution forks; a specifier or version the check cannot
+   evaluate is a problem, not a pass. This catches a same-version wheel whose requirements changed
    after the consumer was last locked.
 3. **Against the repository inventory.** The set of repository distributions is derived
    from every project `pyproject.toml`. Any lock that resolves one of them from anywhere
@@ -415,6 +420,38 @@ uv ignores a parent `.python-version`, so D8 now exports `UV_PYTHON` from the
 declaration in every Makefile and CI job that runs uv, and D2 routes every Makefile
 `uv sync` through `reinit`.
 
+## Implementation review resolution
+
+A review of the implemented slice 1 raised four corrections, planned as section 12.
+
+- **R1 — A CI step that reads `.python-version` ran where checkout did not.** In
+  `hosted-stripe-test.yml`, checkout is gated on `env.SELECTED`, the added `UV_PYTHON` step
+  was not, and unselected matrix rows would fail reading a file that was never checked out.
+  `check-python-version` proved only that the step existed. The step now carries
+  checkout's condition, and the check requires, in every job, that the step follow
+  checkout and carry the same `if:`. A general rule was chosen over a test of the one
+  workflow, so every gated job is covered.
+- **R2 — `check-locks` missed a requirement added to an empty extra.** Reproduced with real
+  uv: when a consumer requests `pkg[client]` and `client` is empty, uv records no
+  `optional-dependencies` section for it and no extra on the consumer's edge — only the
+  consumer's `requires-dist` names it. After a same-version rebuild gives `client` a
+  requirement, `uv lock --check --offline` passes and the check, which compared only
+  recorded sections, did too. The extras in use are now derived from every place that can
+  request one, and the lock-shape tests now run the real `uv` rather than hand-written
+  lock data, because uv's serialisation is the boundary under test.
+- **R3 — A Dockerfile using `${PYTHON_VERSION}` without declaring it passed.** The check
+  now requires the `ARG` default.
+- **R4 — `check-locks` passed what it could not evaluate.** Unparseable specifiers or
+  versions, and dependencies locked at several versions, were skipped. Forked resolutions
+  now use the version uv records on the dependency edge; anything still unprovable is a
+  reported problem. Today's tree has no such case.
+
+The review also corrected overstated status: 4.2 claimed a real-uv lock it did not use, 4.6
+said a suite passed that has two failures present at the checkpoint, 3.7 claimed an
+unverified second `make lock` run, and `BUILD_AND_PACKAGING.md` said no file states the
+Python version although Dockerfile `ARG` defaults do. The image builds and pipeline it
+counted as unrun have since passed in CI run 36409616543.
+
 ## Risks
 
 - **Mirrored layout in images.** Verified with uv locally; each image's build and its
@@ -458,6 +495,10 @@ None.
 | D13 Closeout runs `make check-packaging` | `openspec/specs/planning-governance/spec.md` — "Packaging check at change closeout"; `openspec/README.md#plan-closeout-requirements`, part 8; `AGENTS.md` |
 | D14 `BUILD_AND_PACKAGING.md` is the permanent guide | `docs/development/BUILD_AND_PACKAGING.md`; `openspec/README.md` documentation placement table |
 | D15 Stray internal-wheel section folded into requirements; hosted-client updates move the pin and relock | `openspec/specs/deployment-state/spec.md` — "Internal distributions are consumed as wheels…", "Aggregate kit tests cover every kit", "Packaging preserves provider separation" |
+| R1 A CI step reading the declaration shares checkout's `if:` and follows it | `openspec/specs/deployment-state/spec.md` — "One Python version is declared for the repository" (scenario "A CI job checks out conditionally"); `docs/development/BUILD_AND_PACKAGING.md#one-python-version` |
+| R2 Lock currency derives the extras in use from edges, `requires-dist`, and wheel requirements | `openspec/specs/deployment-state/spec.md` — "Packaging conventions are checked mechanically" (scenario "An empty extra a consumer requests gains a requirement"); `docs/development/BUILD_AND_PACKAGING.md#checks` |
+| R3 A Dockerfile using `${PYTHON_VERSION}` declares its default before the first `FROM` | `docs/development/BUILD_AND_PACKAGING.md#one-python-version`, `#checks` |
+| R4 Unprovable version checks fail; forked locks use the edge version | `docs/development/BUILD_AND_PACKAGING.md#checks`; this change's D12 |
 | D10, D11, D16 and `check-project-layout` | Slice 2; not yet promoted |
 
 Slice 1's requirements are already in the owning specs, so archive must not add them again: prune them from this change's delta, or archive without spec sync, once slice 2 has promoted the rest.

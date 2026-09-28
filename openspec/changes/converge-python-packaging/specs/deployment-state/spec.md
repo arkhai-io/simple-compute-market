@@ -165,6 +165,12 @@ building MAY disagree with it.
 - **WHEN** a project's test or service target runs uv and no project environment exists
 - **THEN** the environment it creates uses the declared version
 
+#### Scenario: A CI job checks out conditionally
+
+- **WHEN** a CI job's checkout runs only under a condition
+- **THEN** the step that reads the Python declaration runs under the same condition, and
+  the packaging check fails if it does not
+
 #### Scenario: An image default disagrees
 
 - **WHEN** a Dockerfile's Python version default, a Makefile's `--python` value, or a
@@ -191,6 +197,13 @@ a locked dependency version the wheel's requirement no longer admits.
 - **WHEN** an internal distribution's declared version is bumped and a consumer's lock
   still pins the previous one
 - **THEN** the packaging check fails and names the consumer and the package
+
+#### Scenario: An empty extra a consumer requests gains a requirement
+
+- **GIVEN** a consumer that requests an extra of an internal wheel while that extra has no
+  requirements, and the wheel rebuilt at the same version with a requirement under it
+- **WHEN** the packaging check runs
+- **THEN** it fails and names the consumer, the package and extra, and the requirement
 
 #### Scenario: A same-version wheel gains a requirement
 

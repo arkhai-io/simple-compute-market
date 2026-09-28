@@ -9,10 +9,14 @@ explicitly, and this check rejects:
   tool phase configuration;
 - a Makefile that runs uv without exporting `UV_PYTHON` read from the root
   declaration by a path that resolves;
-- a CI job that runs uv without setting `UV_PYTHON` from the declaration, or
-  a `python-version` setup pin of another minor version;
-- a Dockerfile `FROM` naming a Python version literally, or a
-  `PYTHON_VERSION` build argument defaulting to another version.
+- a CI job that runs uv without setting `UV_PYTHON` from the declaration; a
+  job whose `UV_PYTHON` step comes before its checkout, or runs under a
+  different `if:` condition than its checkout, so it reads the declaration
+  where no checkout happened or skips it where one did; or a `python-version`
+  setup pin of another minor version;
+- a Dockerfile `FROM` naming a Python version literally, a `FROM` using
+  `${PYTHON_VERSION}` with no `ARG PYTHON_VERSION` default before the first
+  `FROM`, or a default other than the declared version.
 
 Conventions: docs/development/BUILD_AND_PACKAGING.md.
 """
@@ -58,6 +62,42 @@ def declared(root: Path) -> str | None:
     return value if re.fullmatch(r"\d+\.\d+", value) else None
 
 
+def job_steps(job: str) -> list[str]:
+    """The text of each step in a job's `steps:` list, in order."""
+    lines = job.split("\n")
+    start = next((i for i, line in enumerate(lines) if line.strip() == "steps:"), None)
+    if start is None:
+        return []
+    steps: list[list[str]] = []
+    indent = None
+    for line in lines[start + 1:]:
+        stripped = line.lstrip()
+        if not stripped:
+            continue
+        depth = len(line) - len(stripped)
+        if indent is None and stripped.startswith("- "):
+            indent = depth
+        if indent is None or depth < indent:
+            break
+        if depth == indent and stripped.startswith("- "):
+            steps.append([])
+        if steps:
+            steps[-1].append(line)
+    return ["\n".join(step) for step in steps]
+
+
+def step_condition(step: str) -> str | None:
+    """A step's own `if:` condition, whitespace-normalised."""
+    lines = step.split("\n")
+    key_indent = len(lines[0]) - len(lines[0].lstrip()) + 2
+    for number, line in enumerate(lines):
+        body = line.lstrip()[2:] if number == 0 else line.lstrip()
+        depth = key_indent if number == 0 else len(line) - len(line.lstrip())
+        if depth == key_indent and body.startswith("if:"):
+            return " ".join(body[3:].split())
+    return None
+
+
 def ci_problems(workflow: Path, root: Path, version: str) -> list[str]:
     where = workflow.relative_to(root)
     problems = []
@@ -68,8 +108,25 @@ def ci_problems(workflow: Path, root: Path, version: str) -> list[str]:
     jobs = re.split(r"^  (?=[A-Za-z0-9_-]+:\s*$)", text.split("\njobs:", 1)[-1], flags=re.M)
     for job in jobs[1:]:
         name = job.split(":", 1)[0]
-        if _RUNS_UV.search(_uncommented(job)) and _CI_EXPORT not in job:
+        if not _RUNS_UV.search(_uncommented(job)):
+            continue
+        steps = job_steps(job)
+        exports = [i for i, step in enumerate(steps) if _CI_EXPORT in step]
+        checkouts = [i for i, step in enumerate(steps) if "uses: actions/checkout" in step]
+        if not exports:
             problems.append(f"{where}: job `{name}` runs uv without UV_PYTHON from {DECLARATION}")
+            continue
+        if not checkouts or exports[0] < checkouts[0]:
+            problems.append(f"{where}: job `{name}` reads {DECLARATION} before checking out")
+            continue
+        wanted, actual = step_condition(steps[checkouts[0]]), step_condition(steps[exports[0]])
+        if wanted != actual:
+            def described(condition: str | None) -> str:
+                return f"`if: {condition}`" if condition else "no condition"
+            problems.append(
+                f"{where}: job `{name}` sets UV_PYTHON under {described(actual)} but checks "
+                f"out under {described(wanted)}; they must match"
+            )
     return problems
 
 
@@ -109,6 +166,14 @@ def problems(root: Path = ROOT) -> list[str]:
         for default in _ARG.findall(text):
             if default != version:
                 found.append(f"{where}: PYTHON_VERSION defaults to {default}; the repository declares {version}")
+        first_from = next((i for i, line in enumerate(text.splitlines()) if line.strip().upper().startswith("FROM")), None)
+        uses_variable = any("${PYTHON_VERSION}" in line or "$PYTHON_VERSION" in line
+                            for line in text.splitlines() if line.strip().upper().startswith("FROM"))
+        declared_before = first_from is not None and any(
+            _ARG.match(line.strip()) for line in text.splitlines()[:first_from]
+        )
+        if uses_variable and not declared_before:
+            found.append(f"{where}: FROM uses PYTHON_VERSION without an `ARG PYTHON_VERSION=` default before it")
     return found
 
 

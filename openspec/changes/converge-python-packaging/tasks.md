@@ -31,7 +31,8 @@ section 3 replaces it in all images at once.
       then the service's own wheel; the two adapter wheel installs are dropped.
       `provisioning/compute/service/Dockerfile.dockerignore` admits the project's
       `pyproject.toml` and `uv.lock`.
-- [ ] 1.4 Validate: build the three images (`Makefile` targets building
+- [ ] 1.4 *Builds and smoke checks: done in CI run 36409616543 (`e2e.yml`, 2026-09-28); the before/after `uv pip freeze`
+      comparison was not performed and stays unrun.* Validate: build the three images (`Makefile` targets building
       `domains/bare_metal/storefront/Dockerfile` and
       `domains/apicredits/sample-app/Dockerfile`; `make -C provisioning/compute/service
       build-image`), run each image's existing import smoke check, and compare
@@ -142,10 +143,16 @@ section 3 replaces it in all images at once.
       PyTorch index, and confirm the dependency is installed and recorded in the lock; restore
       the wheel. Run `make reinit` and the default suite in `core/registry-client`,
       `kit/site`, `domains/apicredits/service`, `domains/bare_metal/storefront`, and
-      `e2e-tests` (unit tier). `make lock` relocks every project and, run twice, changes
-      nothing the second time.
-- [ ] 3.8 Validate images (handoff where Docker is unavailable): build all eight images,
+      `e2e-tests` (unit tier). `make lock` relocks every project: run with the PyTorch index
+      available, it changed only `domains/bare_metal/buyer/uv.lock` (14 duplicated wheel
+      entries removed; no package, version, or source change). A second, unchanged run is
+      not yet shown; 12.8 checks it. `make reinit` and `make test` in the three PyTorch-index
+      projects remain handed off.
+- [x] 3.8 Validate images (handoff where Docker is unavailable): build all eight images,
       run their smoke checks, and run the end-to-end pipeline.
+      Evidence: CI run 36409616543 (`e2e.yml`, 2026-09-28). Both jobs built all eight images through `uv_project.py image`
+      and `install-wheel` (16 `uv sync --locked` runs) on 3.13 bases; the VM storefront's
+      runtime smoke import passed; the services ran from `python3.13` environments.
 
 ### 4. Checks (D12, D13)
 
@@ -156,14 +163,17 @@ section 3 replaces it in all images at once.
       with tests and wheelhouse packages but no `reinit`; a Dockerfile `sed` rewrite,
       refresh list, version literal, direct wheelhouse install, and a runtime stage
       copying `.dist`; the current tree passing.
-- [x] 4.2 `scripts/check_locks.py` with `scripts/tests/test_check_locks.py`, replacing
+- [x] 4.2 *Reopened by the implementation review and closed by 12.2–12.4.*
+      `scripts/check_locks.py` with `scripts/tests/test_check_locks.py`, replacing
       `check_internal_locks.py` (tombstoned). Cases: a lock failing
       `uv lock --check`; a superseded internal version; a same-version wheel that gained,
       and one that lost, an unconditional requirement; the same under an extra; a locked
       dependency version the wheel's specifier no longer admits; a repository distribution
       resolved from an index and from another local path; a non-canonical wheelhouse
-      registry; a lock produced by uv for a wheel with platform-marked and extra-scoped
-      requirements passing; no network access during any case.
+      registry; no network access during any case. Locks produced by the real `uv` are
+      exercised in `scripts/tests/test_check_locks_uv.py` (12.3): a current lock with
+      platform-marked and extra-scoped requirements passes, and a requirement gained by an
+      empty extra the consumer requests fails although `uv lock --check` passes.
 - [x] 4.3 `scripts/check_python_version.py` with
       `scripts/tests/test_check_python_version.py`, covering each condition in D12's
       table and the current tree passing.
@@ -177,11 +187,10 @@ section 3 replaces it in all images at once.
       step 3c; `openspec/changes/inject-site-pool-authority/proposal.md` (which names
       `make check-reinit`); and the closeout task of every change in Appendix B gains the
       packaging step.
-- [x] 4.6 Validate (so far: `make check-packaging` passes; the script suite passes apart from
-      two failures present at the checkpoint — a `.git`-dependent image-tag test and
-      `test_alkahest_profiles_keep_policy_outside_chains`): `make check-packaging` passes; `make test-release-tooling` passes;
-      with the wheelhouse built, each check passes with networking disabled
-      (`UV_OFFLINE=1`).
+- [x] 4.6 Validate: `make check-packaging` passes; `make test-release-tooling` was run and
+      fails only on two tests that fail identically at the checkpoint — a `.git`-dependent
+      image-tag test and `test_alkahest_profiles_keep_policy_outside_chains`; with the
+      wheelhouse built, each check passes with networking disabled (`UV_OFFLINE=1`).
 
       4.5: 55 numbered closeouts gained a packaging item, and two unnumbered ones a packaging
       line; `unbacked-bare-metal-listings` has a placeholder closeout that will be written from
@@ -229,7 +238,8 @@ adds.
 - [x] 6.7 **Documentation citations.** Run
       `make check-doc-citations CHANGE=converge-python-packaging` and resolve every match.
 - [x] 6.8 **Packaging.** Run `make check-packaging` and resolve every failure.
-- [ ] 6.9 **End-to-end pipeline.** *Blocked in the implementation sandbox: no Docker daemon; 3.8 and this item are unrun and handed off.* Confirm the pipeline passes with the converged images
+- [x] 6.9 **End-to-end pipeline.** Evidence: CI run 36409616543 (`e2e.yml`, 2026-09-28): `e2e-bare-metal` 8 passed;
+      `e2e-vm` 126 passed, 2 skipped; no failures. Confirm the pipeline passes with the converged images
       and record the run, its result, and the scenarios that build each image; if it
       cannot run, record the blocker and treat 3.8 as unrun.
 - [x] 6.10 **Promotion.** Add the design-promotion record for slice 1's decisions, mapping
@@ -242,7 +252,101 @@ adds.
       `check-doc-citations` for this change leaves only the two slice 2 files. Roadmap: none
       owed (lesser goal "Package and release readiness" has no roadmap goal). Handed off and
       unrun: relock and `reinit` of `kit/policy`, `domains/vms/buyer`, `domains/vms/storefront`
-      (PyTorch index blocked); every image build (3.8); the end-to-end pipeline (6.9).
+      (PyTorch index blocked); every image build (3.8); the end-to-end pipeline (6.9). The
+      builds and pipeline have since run (3.8, 6.9); the PyTorch-index `reinit` and suites
+      remain handed off. The implementation review reopened 4.2; section 12 corrects it and
+      re-runs this closeout.
+### 12. Slice 1 review corrections
+
+Added after the slice 1 implementation review; the review and its resolution are in
+`design.md` ("Implementation review resolution"). Numbered after slice 2 so no existing
+reference moves; it lands before slice 2 begins.
+
+- [x] 12.1 **A CI step reading the declaration runs exactly where checkout runs (R1).**
+      `.github/workflows/hosted-stripe-test.yml`: the `UV_PYTHON` step gains
+      `if: env.SELECTED == 'true'`, matching its checkout. `scripts/check_python_version.py`:
+      in each job, the step that exports `UV_PYTHON` must follow the job's checkout step and
+      carry the same `if:` condition (both absent, or equal after whitespace normalisation).
+      `scripts/tests/test_check_python_version.py`: a gated checkout with an ungated step
+      fails; matching conditions pass; a step before checkout fails; the current tree passes.
+- [x] 12.2 **Lock currency covers every extra in use (R2).** `scripts/check_locks.py`
+      derives, for each internal package, the extras in use from every place that can
+      request one — extras on the lock's dependency edges, each locked project's
+      `requires-dist`, and the `Requires-Dist` lines of the wheels the lock installs — and
+      compares each against the lock's recorded section for it, a missing section counting as
+      empty. `scripts/tests/test_check_locks.py` drops its hand-written empty
+      `optional-dependencies` fixture in favour of 12.3.
+- [x] 12.3 **Real-uv regression tests (R2).** New `scripts/tests/test_check_locks_uv.py`:
+      writes wheels directly as zip archives into a temporary wheelhouse, locks a consumer
+      with the real `uv` executable isolated from every index, rebuilds a wheel at the same
+      version, and runs `check_locks` on the result. Cases: a current lock passes, including
+      a wheel with platform-marked and extra-scoped requirements; a gained unconditional
+      requirement fails; a requirement gained by an extra the consumer requests while that
+      extra was empty fails, although `uv lock --check` passes; a requirement gained by an
+      extra no consumer requests passes. Skipped when `uv` is not on `PATH`.
+- [x] 12.4 **Unprovable version checks fail (R4).** `scripts/check_locks.py` checks a
+      dependency's specifier against the version recorded on the lock's dependency edge when
+      uv records one (forked resolutions), otherwise against the single locked version; a
+      specifier or version it cannot evaluate, or several locked versions with no edge
+      version, is reported as a problem rather than skipped. Tests in
+      `scripts/tests/test_check_locks.py`. Today's tree has no such case, so no lock changes.
+- [x] 12.5 **An image's Python variable has the declared default (R3).**
+      `scripts/check_python_version.py`: a Dockerfile whose `FROM` uses `${PYTHON_VERSION}`
+      must declare `ARG PYTHON_VERSION=<declared>` before its first `FROM`. Test in
+      `scripts/tests/test_check_python_version.py`.
+- [x] 12.6 **Documentation.** `docs/development/BUILD_AND_PACKAGING.md`: the opening says no
+      file chooses the Python version independently, with Dockerfile `ARG` defaults checked
+      against the declaration; "One Python version" scopes `--python` to `reinit` and `lock`
+      and says images take theirs from the base image; the CI bullet requires the step's
+      `if:` to match checkout's; the checks table gains R1–R4; the closing residual note
+      names what `check-locks` still cannot see. `openspec/specs/deployment-state/spec.md`
+      gains the two scenarios added to this change's delta (an extra gaining a requirement; a
+      conditional checkout). `design.md` D12 is amended in place.
+- [x] 12.7 **Status corrections.** Done at planning: 4.2 reopened, 4.6 reworded, 3.7's
+      relock evidence corrected, 3.8 and 6.9 recorded from CI, and the campaign row set to
+      "slice 1 in review". At implementation: re-check 4.2 with its wording naming the
+      real-uv tests.
+- [x] 12.8 **Validate.** *Evidence: the script suite passes (271) apart from the two tests
+      that fail identically at the checkpoint; the four real-uv tests pass, and the
+      empty-extra test fails against the previous checker; the reviewer's scratch
+      reproduction is reported by the new checker; `make check-packaging` passes; `make
+      lock` over every project this environment can reach, run twice, left the second run
+      unchanged. Against the committed locks, this environment's uv re-renders markers in
+      five locks without changing any package, version, or source; the committed versions
+      were kept. The three PyTorch-index projects still need the index.* The script suite, including 12.3 with the real `uv`;
+      `make check-packaging`; `make test-release-tooling` (only the two failures present at
+      the checkpoint may remain); the reviewer's reproduction — an empty requested extra
+      that gains a requirement at the same version — fails `check-locks`; and `make lock`
+      run twice leaves the tree unchanged for every project this environment can relock.
+
+#### Review corrections closeout
+
+Per `openspec/README.md#plan-closeout-requirements`.
+
+- [x] 12.9 **Comment hygiene.** Run `make check-comment-hygiene`, then direct-read the
+      docstrings of `check_locks.py` and `check_python_version.py` and the new test module.
+- [x] 12.10 **Import placement.** Review every import 12.1–12.5 adds; the real-uv tests
+      import at module level.
+- [x] 12.11 **Documentation compliance.** Normative additions in `deployment-state/spec.md`,
+      mechanics in `BUILD_AND_PACKAGING.md`, rationale in `design.md` D12.
+- [x] 12.12 **Narrative compression.** Compress section 12's notes to final behaviour and
+      evidence.
+- [x] 12.13 **Roadmap currency.** None owed; record it. *None owed: the lesser goal
+      "Package and release readiness" has no roadmap goal.*
+- [x] 12.14 **Campaign index currency.** Set this change's row to slice 1 complete and
+      slice 2 next.
+- [x] 12.15 **Documentation citations.** Run
+      `make check-doc-citations CHANGE=converge-python-packaging`; only slice 2's two files
+      may remain.
+- [x] 12.16 **Packaging.** Run `make check-packaging` and resolve every failure.
+- [x] 12.17 **End-to-end pipeline.** The corrections touch checkers, one workflow step's
+      condition, and documentation only; record whether a new run is needed, and if so its
+      result. *No new run is needed: no image, service, or `e2e.yml` step changed. The step
+      whose condition changed belongs to `hosted-stripe-test.yml`, which runs by dispatch or
+      schedule; its next run is the evidence for that condition.*
+- [x] 12.18 **Promotion.** Extend the design-promotion record with R1–R4 and verify no
+      production source references `openspec/changes/converge-python-packaging`.
+
 ## Slice 2 — one project layout
 
 ### 7. Flat import packages under `src/` (D10)

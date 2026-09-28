@@ -14,6 +14,7 @@ _SPEC.loader.exec_module(checker)
 
 EXPORT = ("export UV_PYTHON := $(or $(shell cat ../../.python-version 2>/dev/null),"
           "$(error ../../.python-version not found))\n")
+CHECKOUT = "      - uses: actions/checkout@v4\n"
 STEP = '      - name: Use it\n        run: echo "UV_PYTHON=$(cat .python-version)" >> "$GITHUB_ENV"\n'
 
 
@@ -33,7 +34,7 @@ def _conforming(root: Path) -> None:
     _write(root, "kit/site/Makefile", EXPORT + "test:\n\tuv run pytest\n")
     _write(root, "kit/site/Dockerfile", "ARG PYTHON_VERSION=3.13\nFROM python:${PYTHON_VERSION}-slim\n")
     _write(root, ".github/workflows/tests.yml",
-           "jobs:\n  python:\n    steps:\n" + STEP + "      - run: uv run pytest\n"
+           "jobs:\n  python:\n    steps:\n" + CHECKOUT + STEP + "      - run: uv run pytest\n"
            "  node:\n    steps:\n      - run: npm test\n")
 
 
@@ -109,3 +110,52 @@ def test_image_versions_come_from_the_build_argument(tmp_path):
 
 def test_the_current_tree_passes():
     assert checker.problems() == []
+
+
+def _job(root: Path, steps: str) -> None:
+    _write(root, ".github/workflows/tests.yml",
+           "jobs:\n  stripe:\n    steps:\n" + steps + "      - run: uv sync\n")
+
+
+GATED_CHECKOUT = ("      - name: Checkout\n        if: env.SELECTED == 'true'\n"
+                  "        uses: actions/checkout@v4\n        with:\n          fetch-depth: 0\n")
+
+
+def test_a_step_reading_the_declaration_must_share_a_gated_checkouts_condition(tmp_path):
+    root = _repository(tmp_path)
+    _conforming(root)
+    _job(root, GATED_CHECKOUT + STEP)
+
+    assert checker.problems(root) == [
+        ".github/workflows/tests.yml: job `stripe` sets UV_PYTHON under no condition but "
+        "checks out under `if: env.SELECTED == 'true'`; they must match"
+    ]
+
+
+def test_matching_conditions_pass_including_one_on_the_steps_first_line(tmp_path):
+    root = _repository(tmp_path)
+    _conforming(root)
+    _job(root, GATED_CHECKOUT + "      - if: env.SELECTED   == 'true'\n"
+               '        run: echo "UV_PYTHON=$(cat .python-version)" >> "$GITHUB_ENV"\n')
+
+    assert checker.problems(root) == []
+
+
+def test_a_step_reading_the_declaration_before_checkout_fails(tmp_path):
+    root = _repository(tmp_path)
+    _conforming(root)
+    _job(root, STEP + CHECKOUT)
+
+    assert checker.problems(root) == [
+        ".github/workflows/tests.yml: job `stripe` reads .python-version before checking out"
+    ]
+
+
+def test_an_image_variable_needs_a_declared_default(tmp_path):
+    root = _repository(tmp_path)
+    _conforming(root)
+    _write(root, "c/Dockerfile", "FROM python:${PYTHON_VERSION}-slim\nARG PYTHON_VERSION=3.13\n")
+
+    assert checker.problems(root) == [
+        "c/Dockerfile: FROM uses PYTHON_VERSION without an `ARG PYTHON_VERSION=` default before it"
+    ]

@@ -115,13 +115,36 @@ def test_a_same_version_wheel_that_dropped_a_requirement_fails(tmp_path):
     ]
 
 
-def test_requirements_under_an_extra_are_compared_with_that_extra(tmp_path):
+def test_an_extra_requested_only_through_requires_dist_is_compared(tmp_path):
+    """uv records neither a section nor an edge extra for an empty extra."""
     root = _repository(tmp_path)
     _wheel(root, "arkhai-core", "0.3.0", ["pydantic>=2", 'httpx; extra == "client"'])
-    _consumer(root, CORE.replace(
-        "\n[[package]]\nname = \"pydantic\"",
-        "\n[package.optional-dependencies]\nclient = []\n\n[[package]]\nname = \"pydantic\"",
-    ))
+    project = _consumer(root, CORE)
+    lock = (project / "uv.lock").read_text("utf-8")
+    (project / "uv.lock").write_text(lock.replace(
+        'source = { editable = "." }\n',
+        'source = { editable = "." }\n\n[package.metadata]\n'
+        'requires-dist = [{ name = "arkhai-core", extras = ["client"] }]\n', 1), "utf-8")
+
+    assert _problems(root) == [
+        "domains/consumer: arkhai-core[client]'s wheel requires httpx, which the lock does not record; run `make lock`"
+    ]
+
+
+def test_an_extra_requested_by_another_internal_wheel_is_compared(tmp_path):
+    root = _repository(tmp_path)
+    _declare(root, "kit/site", "arkhai-site", "0.1.0")
+    _wheel(root, "arkhai-core", "0.3.0", ["pydantic>=2", 'httpx; extra == "client"'])
+    _wheel(root, "arkhai-site", "0.1.0", ["arkhai-core[client]"])
+    _consumer(root, CORE + '''
+[[package]]
+name = "arkhai-site"
+version = "0.1.0"
+source = { registry = "../../.dist" }
+dependencies = [
+    { name = "arkhai-core" },
+]
+''')
 
     assert _problems(root) == [
         "domains/consumer: arkhai-core[client]'s wheel requires httpx, which the lock does not record; run `make lock`"
@@ -173,3 +196,39 @@ def test_a_missing_wheel_asks_for_the_wheelhouse_to_be_built(tmp_path):
 ])
 def test_specifier_matching(version, specifier, expected):
     assert checker.satisfies(version, specifier) is expected
+
+
+def test_an_unevaluable_version_fails_rather_than_passes(tmp_path):
+    root = _repository(tmp_path)
+    _wheel(root, "arkhai-core", "0.3.0", ["pydantic>=2"])
+    _consumer(root, CORE.replace('version = "2.9.0"', 'version = "2.9.0rc1"'))
+
+    assert _problems(root) == [
+        "domains/consumer: cannot verify that the lock's pydantic (2.9.0rc1) meets arkhai-core's requirement >=2"
+    ]
+
+
+FORKED = CORE.replace('    { name = "pydantic" },', '    { name = "pydantic", version = "2.9.0", marker = "python_full_version >= \'3.13\'" },') + '''
+[[package]]
+name = "pydantic"
+version = "1.10.0"
+source = { registry = "https://pypi.org/simple" }
+'''
+
+
+def test_a_forked_lock_is_checked_against_the_edge_version(tmp_path):
+    root = _repository(tmp_path)
+    _wheel(root, "arkhai-core", "0.3.0", ["pydantic>=2"])
+    _consumer(root, FORKED)
+
+    assert _problems(root) == []
+
+
+def test_several_locked_versions_with_no_edge_version_cannot_be_verified(tmp_path):
+    root = _repository(tmp_path)
+    _wheel(root, "arkhai-core", "0.3.0", ["pydantic>=2"])
+    _consumer(root, FORKED.replace(', version = "2.9.0", marker = "python_full_version >= \'3.13\'"', ""))
+
+    assert _problems(root) == [
+        "domains/consumer: cannot verify that the lock's pydantic (1.10.0, 2.9.0) meets arkhai-core's requirement >=2"
+    ]
