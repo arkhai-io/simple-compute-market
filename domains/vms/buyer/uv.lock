@@ -300,7 +300,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms-buyer"
-version = "0.3.4"
+version = "0.4.0"
 source = { editable = "." }
 dependencies = [
     { name = "alkahest-py" },
@@ -347,9 +347,9 @@ requires-dist = [
     { name = "arkhai-kit-policy" },
     { name = "arkhai-kit-settlement-runtime", specifier = "==0.1.2" },
     { name = "arkhai-vms", specifier = ">=0.3.0" },
-    { name = "arkhai-vms-listings", specifier = ">=0.1.0" },
-    { name = "arkhai-vms-negotiation", specifier = ">=0.1.0" },
-    { name = "arkhai-vms-settlement", specifier = ">=0.1.0" },
+    { name = "arkhai-vms-listings", specifier = ">=0.4.0" },
+    { name = "arkhai-vms-negotiation", specifier = ">=0.2.0" },
+    { name = "arkhai-vms-settlement", specifier = ">=0.2.0" },
     { name = "eth-account", specifier = ">=0.13.0" },
     { name = "pyinstaller", specifier = ">=6.19.0" },
     { name = "pyyaml", specifier = ">=6.0.0" },
@@ -367,7 +367,7 @@ dev = [
 
 [[package]]
 name = "arkhai-vms-listings"
-version = "0.3.0"
+version = "0.4.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-alkahest" },
@@ -377,12 +377,12 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_vms_listings-0.3.0-py3-none-any.whl" },
+    { path = "arkhai_vms_listings-0.4.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-vms-negotiation"
-version = "0.1.0"
+version = "0.2.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-alkahest" },
@@ -390,19 +390,19 @@ dependencies = [
     { name = "arkhai-vms-listings" },
 ]
 wheels = [
-    { path = "arkhai_vms_negotiation-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_vms_negotiation-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-vms-settlement"
-version = "0.1.0"
+version = "0.2.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-alkahest" },
     { name = "arkhai-vms-listings" },
 ]
 wheels = [
-    { path = "arkhai_vms_settlement-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_vms_settlement-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]
