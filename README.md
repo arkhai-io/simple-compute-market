@@ -16,19 +16,12 @@ Compute is the first domain. Custom versioned domain contracts can extend the sa
 
 If you're looking for a traditional, managed compute marketplace experience while still retaining lots of control over you business decisions, check out [Arkhai Compute](https://compute.arkhai.io/), our managed service layer over SCM. The underlying protocol and self-hosted software remain open.
 
-**Open · Modular · Sovereign**
-
-[Buyer quickstart](./docs/buyer-quickstart.md) · [Seller quickstart](./docs/seller-quickstart.md) · [Registry quickstart](./docs/indexer-quickstart.md) · [Architecture](./docs/development/ARCHITECTURE.md) · [Roadmap](./docs/development/ROADMAP.md) · [Managed service](https://compute.arkhai.io/)
-
-## Repository navigation
-
-- [Documentation](./docs/)
+- [Buyer quickstart](./docs/buyer-quickstart.md)
+- [Seller quickstart](./docs/seller-quickstart.md)
+- [Registry quickstart](./docs/indexer-quickstart.md)
 - [Architecture](./docs/development/ARCHITECTURE.md)
-- [Capability specifications](./openspec/specs/README.md)
-- [Active changes](./openspec/changes/README.md)
 - [Roadmap](./docs/development/ROADMAP.md)
-- [Repository map](#repository-map)
-- [Development](#development)
+- [Managed service](https://compute.arkhai.io/)
 
 ## Why SCM?
 
@@ -289,6 +282,42 @@ It is currently composed end to end for the bare-metal domain.
 
 See the [settlement specifications](./openspec/specs/README.md) and [current release status](./docs/development/ROADMAP.md#hosted-settlement-release-status).
 
+## Repository map
+
+```text
+simple-compute-market/
+├── core/           # Domain-neutral contracts and role implementations
+├── kit/            # Reusable market capabilities
+├── domains/        # Domain contracts and implementations
+│   ├── vms/
+│   ├── bare_metal/
+│   └── apicredits/
+├── provisioning/   # Physical-capacity and provisioning authority
+├── compose/        # Reusable Docker Compose stacks
+├── compose.*.yml    # Domain and development Compose configurations
+├── docker-compose.yml
+├── helm/           # Kubernetes/Helm deployments
+├── e2e-tests/       # Smoke and complete-deal scenarios
+├── dev-env/        # Development environment and state generation
+├── scripts/        # Build, installation, review, and validation scripts
+├── tools/          # Developer and issue-discovery tools
+├── manifests/      # Hosted-settlement release trust manifests
+├── make/           # Shared Makefile targets
+├── Makefile        # Root build, test, and validation entry points
+├── install.sh      # Installation entry point
+├── openspec/
+│   ├── specs/      # Authoritative implemented contracts
+│   └── changes/    # Proposed changes and implementation plans
+├── docs/           # User, operator, architecture, and development guides
+├── .github/
+│   └── workflows/  # GitHub Actions workflows
+├── AGENTS.md       # Repository engineering guidance
+├── README.md
+└── LICENSE
+```
+
+Selected paths shown. `compose.*.yml` groups the root-level Compose configurations; hidden agent settings, configuration examples, and individual helper files are omitted.
+
 ## Open-source public good
 
 SCM is released under the [MIT License](./LICENSE).
@@ -299,18 +328,6 @@ SCM is released under the [MIT License](./LICENSE).
 - [Arkhai Compute](https://compute.arkhai.io/) is a separate managed-service layer; its current and planned charges are separate from the open protocol.
 - Each role can be deployed and adapted independently.
 - Commercial integration, managed operation, or support does not change the open-source license.
-
-## Repository map
-
-- `core/` — domain-neutral contracts and role implementations
-- `kit/` — reusable market capabilities
-- `domains/` — VM, bare-metal, and API-credit contracts and implementations
-- `provisioning/` — physical-capacity and provisioning authority
-- `compose/` and `helm/` — deployment compositions
-- `e2e-tests/` — smoke and complete-deal scenarios
-- `openspec/specs/` — authoritative implemented contracts
-- `openspec/changes/` — proposed changes and implementation plans
-- `docs/` — user, operator, architecture, and development guides
 
 ## Development
 
