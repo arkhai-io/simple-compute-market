@@ -14,7 +14,7 @@ It provides reusable infrastructure for discovery, signed negotiation, explicit 
 
 Compute is the first domain. Custom versioned domain contracts can extend the same machinery to markets for storage, bandwidth, information, and other assets; the implemented domains in this repository are listed below.
 
-If you're looking for a traditional, managed compute marketplace experience while still retaining lots of control over you business decisions, check out [Arkhai Compute](https://compute.arkhai.io/), our managed service layer over SCM. The underlying protocol and self-hosted software remain open.
+If you're looking for a traditional, managed compute marketplace experience while still retaining lots of control over your business decisions, check out [Arkhai Compute](https://compute.arkhai.io/), our managed service layer over SCM. The underlying protocol and self-hosted software remain open.
 
 - [Buyer quickstart](./docs/buyer-quickstart.md)
 - [Seller quickstart](./docs/seller-quickstart.md)
@@ -30,7 +30,7 @@ Compute capacity is siloed, and buyer requirements are diverse. The terms, payme
 Most marketplaces solve this by placing discovery, pricing, payment, and fulfillment under one platform. SCM separates those responsibilities into independently operated protocol roles connected through signed interfaces.
 
 - **Buyers** choose registries, storefronts, requirements, and purchasing policies.
-- **Sellers** operate sovereign storefronts, and publish offers, negotiate, and coordinate settlement.
+- **Sellers** operate sovereign storefronts and publish offers, negotiate, and coordinate settlement.
 - **Seller-side resource services** control provisioning or other domain-specific delivery.
 - **Registries** validate and index listings for discovery under operator-defined schemas and access rules.
 
