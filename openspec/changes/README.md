@@ -100,14 +100,13 @@ capacity-reservation-lifecycle-hardening ──► billable-capacity-reservation
 
 ## Roadmap goal — Make the settlement mechanism a composed choice
 
-```text
-finish-settlement-mechanism-neutrality ──► contact-exchange-settlement-mechanism
-```
+Both earlier changes were archived 2026-08-19:
+[`finish-settlement-mechanism-neutrality`](archive/2026-08-19-finish-settlement-mechanism-neutrality/)
+and [`contact-exchange-settlement-mechanism`](archive/2026-08-19-contact-exchange-settlement-mechanism/).
 
 | Change | Status | Acceptance boundary |
 |---|---|---|
-| [`finish-settlement-mechanism-neutrality`](finish-settlement-mechanism-neutrality/) | design phase; core/kit-alkahest sections independent, hosted-surface sections coordinate with `consume-expanded-stripe-funding` | Pre-terms mechanism dispatch, verification, and negotiation scalar participation become registration-owned with no per-domain mechanism conditionals; every deal gains the neutral `obligation_ref` identity; Alkahest-shaped carriers move to `kit/alkahest` while `RateValue` stays core; option-aware discovery filters; residual mechanism literals removed |
-| [`contact-exchange-settlement-mechanism`](contact-exchange-settlement-mechanism/) | design phase; blocked only on the declinable-scalar and accepted-plan `service_terms` items of `finish-settlement-mechanism-neutrality` | A `contact-exchange.v1` peer mechanism completing a deal by durable, authenticated, idempotent contact reveal — no payment, no provisioning — with the introduction package in persisted `service_terms`, plus a loose-listing registry profile; composed first on bare metal |
+| [`settle-through-arkhai-payments`](settle-through-arkhai-payments/) | design phase; headless payer credentials depend on `arkhai-io/arkhai-payments` | The settlement slot stops being escrow-shaped: escrow fields move into `alkahest.v1`, negotiation emits an explicit agreement, `arkhai.payments.v1` settles charge-first through the Arkhai payments service, and `fiat.stripe.v1` with `kit/hosted-settlement` is deleted. Supersedes the hosted-fiat changes built on them ([overview](settle-through-arkhai-payments/overview.html)) |
 
 ## Lesser goal — POOLS capacity and fulfillment foundation
 
