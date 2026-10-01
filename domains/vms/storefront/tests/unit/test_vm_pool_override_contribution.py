@@ -34,7 +34,14 @@ def test_it_serves_the_vm_mode():
 def test_complete_vm_terms_and_shapes_are_readable():
     assert _problems(
         listing_shapes=[SHAPE],
-        terms={"sla": 99.5, "min_price": "3", "token": "0xtoken", "max_duration_seconds": 3600},
+        terms={
+            "sla": 99.5,
+            "max_duration_seconds": 3600,
+            "pricing": {
+                "gpu": {"H100": {"rates": [{"asset": "usd", "rate": "2", "per": "hour"}]}},
+                "memory": {"rates": [{"asset": "usd", "rate": "0.01", "per": "hour"}]},
+            },
+        },
     ) == []
 
 
@@ -44,8 +51,15 @@ def test_complete_vm_terms_and_shapes_are_readable():
         ({"sla": -1}, "sla"),
         ({"max_duration_seconds": 0}, "max_duration_seconds"),
         ({"max_duration_seconds": "60"}, "max_duration_seconds"),
-        ({"min_price": 3}, "min_price"),
+        ({"min_price": "3"}, "min_price"),
+        ({"token": "0xtoken"}, "token"),
         ({"region": "us-east"}, "region"),
+        ({"pricing": {"bandwidth": {"rates": []}}}, "pricing"),
+        ({"pricing": {"gpu": {"rates": []}}}, "pricing"),
+        (
+            {"pricing": {"cpu": {"rates": [{"asset": "usd", "rate": "0", "per": "hour"}]}}},
+            "pricing",
+        ),
     ],
 )
 def test_terms_outside_the_vm_vocabulary_are_named(terms, field):

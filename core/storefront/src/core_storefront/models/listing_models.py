@@ -132,6 +132,9 @@ class ListingResponse(BaseModel):
     max_duration_seconds: int | None = None
     storefront_url: str
     seller_principal: Identity
+    # Domain-owned resolved rates a listing's prices derive from, when its
+    # domain records them; served here and never published to a registry.
+    rate_structure: dict[str, Any] | None = None
     model_config = ConfigDict(extra="allow")
 
     @model_validator(mode="before")

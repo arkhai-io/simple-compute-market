@@ -94,8 +94,8 @@ None.
 
 ## Dependencies and Related Changes
 
-- Shared prerequisite for `capacity-shape-pricing` and
-  `negotiation-driven-capacity-resize`, and for the parked capacity-economics thread.
+- Shared prerequisite for `negotiation-driven-capacity-resize` and for the parked
+  capacity-economics thread.
   It does not belong exclusively to any roadmap goal.
 - Complements `capacity-shape-envelope`: admissibility first, from declared policy and
   without a round trip; then this check, authoritative and remote.

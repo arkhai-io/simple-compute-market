@@ -25,7 +25,8 @@ replace implementation history," not because any of it remains active.
 
 ## 2. Negotiate the capacity shape
 
-Depends on `capacity-shape-pricing` Sections 1–3 and 5. Section 2b is the
+Depends on `capacity-shape-pricing` and, for task 2.4's quantitative check,
+`capacity-shape-envelope`. Section 2b is the
 deployment boundary.
 
 ### 2a. The revised-terms field
@@ -52,7 +53,12 @@ deployment boundary.
 - [ ] 2.4 Compose the VM `evaluate_round` in `design.md`'s order — admissibility,
       authoritative feasibility, commercial feasibility, pricing — with a distinct
       refusal reason for each, and a stated "not checked" for a check the domain
-      does not compose.
+      does not compose. Implement the commercial feasibility guard here: a
+      requested shape's categorical commitments (GPU model, region) checked by
+      equality against the listing's, declining without a quote; the quantitative
+      check is the envelope's predicate. Tests: a categorical mismatch declines
+      without pricing; a shape outside the envelope declines before the guard runs.
+      Promote "Seller feasibility precedes pricing" with this change's spec delta.
 - [ ] 2.5 Retire `_validate_vm_opening`'s shape-mismatch refusal: a round-0 shape
       differing from the listing is evaluated by the same composition rather than
       rejected. Delete the Section 0 regression tests that assert the refusal.

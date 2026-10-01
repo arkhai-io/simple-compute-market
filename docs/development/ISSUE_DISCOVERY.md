@@ -130,6 +130,14 @@ sudo ./scripts/bootstrap-clean-host-ubuntu.sh run
 
 The bootstrap installs host prerequisites, including Docker, Compose plugin, `make`, `git`, `curl`, `jq`, `python3`, `uv`, and ZeroTier. It then runs `./scripts/issue-discovery strict` from the checkout by default.
 
+The API-credits middleware prerequisite check and bootstrap check require Node
+with native TypeScript type stripping enabled, a working Cargo/rustc toolchain,
+and the native `cc` compiler. A Node version number alone does not establish
+TypeScript support: some distribution builds omit it. The bootstrap replaces
+such a Node build through NodeSource and installs `build-essential` for Rust's
+native compiler and linker dependencies. Installing `build-essential` does not
+change Node's TypeScript support.
+
 Set `SCM_CLEAN_ROOM_SEQUENCE` when the bootstrap should run a YAML-backed clean-room sequence instead of a single validation command. The bootstrap asks the issue-discovery CLI to render the sequence script, writes it under `.scm-local/clean-room/`, and runs it. The default clean-room status file is `.scm-local/clean-room/step-status.tsv`.
 
 Useful modes:

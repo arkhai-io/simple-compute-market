@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import replace
 from typing import Any, TypeVar
 
 from core_storefront.publication_runner import (
@@ -70,6 +71,7 @@ from market_storefront.services.listing_source_check import (
 )
 from market_storefront.services.publication_terms import (
     compile_publication_clauses,
+    compose_clause_rates,
     demands_for_publication_clauses,
     listing_resource_for_candidate,
     normalize_max_duration_seconds,
@@ -279,8 +281,13 @@ class VmPublicationCycle:
         listing_resource: dict[str, Any],
     ) -> PublicationPayload | str:
         try:
-            request = self._create_request(source, candidate, listing_resource)
-            derived = self._await(self._listings.derive_listing(request))
+            request, rate_structure = self._create_request(
+                source, candidate, listing_resource
+            )
+            derived = replace(
+                self._await(self._listings.derive_listing(request)),
+                rate_structure=rate_structure,
+            )
         except Exception as exc:
             self.report.record(
                 "refuse", source=_source_of(candidate), reason=str(exc)
@@ -301,7 +308,13 @@ class VmPublicationCycle:
         source: Any,
         candidate: dict[str, Any],
         listing_resource: dict[str, Any],
-    ) -> VmCreateListingRequest:
+    ) -> tuple[VmCreateListingRequest, dict[str, Any] | None]:
+        """The create request a candidate derives, and its rate structure.
+
+        Clause rates are composed before compilation completes the request, so a
+        shape-priced listing whose rates cannot price its shape is refused here,
+        through the same path as any other underivable candidate.
+        """
         pricing = source.pricing_resource(candidate, listing_resource)
         raw_clauses = pricing.get("settlements")
         if raw_clauses is None:
@@ -314,8 +327,13 @@ class VmPublicationCycle:
                 "no settlement clauses: set the pool's `settlements` pricing hint "
                 "or configure [pricing].settlements"
             )
-        clauses = compile_publication_clauses(raw_clauses)
-        return VmCreateListingRequest(
+        composed = compose_clause_rates(
+            compile_publication_clauses(raw_clauses),
+            listing_shape=candidate["listing_shape"],
+            family_rates=candidate.get("family_rates"),
+        )
+        clauses = composed.clauses
+        request = VmCreateListingRequest(
             listing_resource=listing_resource,
             capacity_source={
                 "site_id": candidate["site_id"],
@@ -331,6 +349,7 @@ class VmPublicationCycle:
                 pricing.get("max_duration_seconds")
             ),
         )
+        return request, composed.rate_structure
 
     def _publish_listing(
         self,
@@ -399,7 +418,10 @@ class VmPublicationCycle:
             )
             return {"status": REOPEN_UNCHANGED}
 
-        fresh = derived.listing.model_dump(mode="json")
+        fresh = {
+            **derived.listing.model_dump(mode="json"),
+            "rate_structure": derived.rate_structure,
+        }
         stored_resource = stored_listing_resource(stored)
         comparison = compare_listing(
             stored_resource=stored_resource,
@@ -453,6 +475,7 @@ class VmPublicationCycle:
             publication_clauses=derived.publication_clauses(),
             demands=fresh.get("demands"),
             max_duration_seconds=fresh.get("max_duration_seconds"),
+            rate_structure=derived.rate_structure,
         )
         refreshed = await self._db.load_listing(listing_id=listing_id)
         publication = await _candidate(self._db, refreshed)

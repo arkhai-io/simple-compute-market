@@ -86,6 +86,17 @@ wheels = [
 ]
 
 [[package]]
+name = "arkhai-kit-capability-pricing"
+version = "0.1.0"
+source = { registry = "../../../.dist" }
+dependencies = [
+    { name = "arkhai-kit-capability-shape" },
+]
+wheels = [
+    { path = "arkhai_kit_capability_pricing-0.1.0-py3-none-any.whl" },
+]
+
+[[package]]
 name = "arkhai-kit-capability-shape"
 version = "0.2.0"
 source = { registry = "../../../.dist" }
@@ -157,6 +168,7 @@ source = { editable = "." }
 dependencies = [
     { name = "arkhai-compute" },
     { name = "arkhai-core" },
+    { name = "arkhai-kit-capability-pricing" },
     { name = "arkhai-kit-capability-shape" },
     { name = "pydantic" },
 ]
@@ -177,6 +189,7 @@ requires-dist = [
     { name = "arkhai-compute", specifier = ">=0.1.0" },
     { name = "arkhai-core", specifier = ">=0.3.0" },
     { name = "arkhai-core-storefront", marker = "extra == 'storefront'", specifier = ">=0.6.0" },
+    { name = "arkhai-kit-capability-pricing", specifier = ">=0.1.0" },
     { name = "arkhai-kit-capability-shape", specifier = ">=0.2.0" },
     { name = "pydantic", specifier = ">=2" },
 ]

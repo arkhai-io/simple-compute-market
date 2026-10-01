@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import pytest
+from apicredits_storefront import negotiation_runtime
+from market_core.schemas import RateValue, derive_settlement_option_id
+from market_negotiation_runtime import NegotiationTerms
 from market_identity import Ed25519Signer, Identity, IdentityScheme
 
 from arkhai_apicredits.listings.pricing import (
@@ -14,6 +17,7 @@ from arkhai_apicredits.listings.reconciler import (
     reopenable_credit_listing_ids,
     stale_open_credit_listing_ids,
 )
+from arkhai_apicredits.negotiation.storefront_round import _seller_reference_amount
 from arkhai_apicredits.negotiation.policies import (
     api_credits_round_zero_guard,
     key_owned_by_buyer_principal,
@@ -398,3 +402,82 @@ def test_ownership_guard_rejects_cross_scheme_collision():
     )
     assert decision.action == "reject"
     assert decision.reason.startswith("key_not_owned")
+
+
+def test_round_reference_amount_is_exact_for_a_rational_floor_and_a_long_rate():
+    hidden = _listing()
+    hidden["accepted_escrows"][0]["rates"] = []
+    assert _seller_reference_amount(hidden, 3, default_min_price="1.5") == 4
+
+    long_rate = "123456789012345678901234567"
+    assert _seller_reference_amount(_listing(rate=long_rate), 1000) == int(long_rate) * 1000
+
+
+def test_float_floor_is_refused():
+    hidden = _listing()
+    hidden["accepted_escrows"][0]["rates"] = []
+    with pytest.raises(ValueError, match="decimal text"):
+        extract_unit_price_from_order(hidden, default_min_price=1.5)
+
+
+def _hosted_option(rate=None):
+    rates = [RateValue(field="amount", per="credit", value=rate)] if rate else []
+    option = {
+        "mechanism": "fiat.stripe.v1",
+        "asset": "usd",
+        "rates": [r.model_dump(mode="json") for r in rates],
+        "params": {},
+    }
+    option["option_id"] = derive_settlement_option_id(
+        mechanism="fiat.stripe.v1", asset="usd", rates=rates, params={}
+    )
+    return option
+
+
+def _selecting(option):
+    return {"settlement_selection": {
+        "mechanism": option["mechanism"], "option_id": option["option_id"],
+        "expiration_unix": 2_000_000_000,
+    }}
+
+
+def test_a_selected_escrow_other_than_the_first_is_the_reference():
+    listing = _listing(rate="100")
+    second = dict(listing["accepted_escrows"][0])
+    second.update(
+        escrow_address="0x" + "22" * 20,
+        rates=[{"field": "amount", "per": "token", "value": "250"}],
+    )
+    listing["accepted_escrows"].append(second)
+    proposal = {"chain_name": "anvil", "escrow_address": "0x" + "22" * 20}
+
+    assert _seller_reference_amount(listing, 2, proposal=proposal) == 500
+
+
+def test_a_selected_settlement_option_is_the_reference():
+    option = _hosted_option(rate=40)
+    listing = {**_listing(rate="100"), "settlement_options": [option]}
+
+    assert _seller_reference_amount(listing, 3, proposal=_selecting(option)) == 120
+
+
+def test_a_selected_rateless_option_uses_the_floor():
+    option = _hosted_option()
+    listing = {**_listing(rate="100"), "settlement_options": [option]}
+
+    assert _seller_reference_amount(
+        listing, 3, default_min_price="7", proposal=_selecting(option)
+    ) == 21
+
+
+def test_kit_reference_hook_reads_the_whole_pinned_proposal(monkeypatch):
+    monkeypatch.setattr(negotiation_runtime, "provision_quantity", lambda _decoded: 3)
+    monkeypatch.setattr(negotiation_runtime, "_default_min_price", lambda: None)
+    option = _hosted_option(rate=40)
+    listing = {**_listing(rate="100"), "settlement_options": [option]}
+    terms = NegotiationTerms(decoded={}, wire=None)
+
+    assert negotiation_runtime._reference_amount(
+        listing, {}, terms, True, _selecting(option)
+    ) == 120
+    assert negotiation_runtime._reference_amount(listing, {}, terms, False, None) == 0

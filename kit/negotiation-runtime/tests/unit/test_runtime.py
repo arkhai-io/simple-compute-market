@@ -96,10 +96,22 @@ class HookHarness:
         self.proposal_key = proposal_key
         self.policy_calls: list[RoundRequest] = []
         self.events: list[tuple[str, str, dict[str, Any]]] = []
+        self.reference_calls: list[dict[str, Any] | None] = []
         self.next_decision = NegotiationDecision(
             action="counter",
             proposal={proposal_key: 12},
         )
+
+    def reference_amount(
+        self,
+        _listing: Any,
+        _record: Mapping[str, Any],
+        _terms: Any,
+        scalar: bool,
+        pinned: Mapping[str, Any] | None,
+    ) -> int:
+        self.reference_calls.append(dict(pinned) if pinned is not None else None)
+        return 15 if scalar else 0
 
     def amount(self, proposal: Mapping[str, Any] | None) -> int | None:
         if proposal is None or self.proposal_key not in proposal:
@@ -197,9 +209,7 @@ class HookHarness:
             validate_continuation=validate_continuation,
             evaluate_round=self.evaluate,
             determine_strategy=lambda _listing, _record: "domain-policy",
-            reference_amount=lambda _listing, _record, _terms, scalar: (
-                15 if scalar else 0
-            ),
+            reference_amount=self.reference_amount,
             amount_from_proposal=self.amount,
             proposal_from_amount=self.proposal_from_amount,
             agreement_terms=lambda _listing, _record, _terms: AgreementTerms(0),
@@ -365,6 +375,9 @@ async def test_accept_resumes_recorded_terms_and_builds_artifact_before_effects(
 
     assert response["accepted_artifact"]["terms"] == {"units": 7}
     assert response["accepted_artifact"]["amount"] == 12
+    # The domain sees the buyer's pinned proposal, whose selected option it
+    # negotiates from.
+    assert harness.reference_calls == [{"price": 10}]
     assert repository.agreements[0]["agreed_price"] == 12
     assert repository.threads["neg-fixed"]["terminal_state"] == "success"
     assert repository.effects[-2][0] == "hold"

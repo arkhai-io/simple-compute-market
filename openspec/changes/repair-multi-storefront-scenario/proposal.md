@@ -3,7 +3,7 @@
 ## Why
 
 The VM e2e suite carries a two-storefront scenario — Bob and Alice publishing
-to overlapping registries — and four of its stages cannot pass. The provisioning
+to overlapping registries — and its Alice negotiation stages cannot pass. The provisioning
 service serves one storefront: `ProvisioningIdentityContext.storefront_principal`
 is a single `Identity` and the seller role bootstraps one principal, so Alice is
 not a trusted caller. Her capacity poller reports `Invalid marketplace
@@ -21,49 +21,38 @@ made the gap visible. Its scope ends at the fixtures; this one owns the gap.
 
 ## What changes
 
-Nothing yet. The four blocked stages are skipped with the reason recorded at the
-call site, and this change holds the work to unblock them:
-
-- Let the provisioning service trust more than one storefront principal, so a
-  second commercial front-end over the same hardware is a configuration rather
-  than a rebuild.
-- Confirm the remaining Alice stages — registry isolation and fan-in, which are
-  the scenario's actual subject — pass once the suite next runs, and record any
-  that do not as findings rather than assuming.
+Give Alice a separate provisioning service while Bob retains his own. Configure
+each authority with its own service identity and one storefront counterparty.
+Seed Alice's inventory through her authority and remove her local derivation
+opt-out. Remove the explicit negotiation skips (`06b` and `06c`) and demonstrate
+the complete registry scenario passing. Check the actual runtime skip set;
+the earlier four-stage estimate is not the acceptance boundary.
 
 ## Scope
 
-One provisioning service serving several storefronts. The inverse — several
-provisioning services serving one storefront — is separate work and is not
-addressed here.
+Two storefronts, each backed by its own provisioning authority. Multiple
+storefronts per site are explicitly out of scope. Reuse the identity topology
+in `service-identity-signing` and preserve the one-recipient assumption in
+`replace-polling-with-authenticated-push`. No new authentication or shared-site
+ownership model is introduced.
 
 ## Impact
 
-Until this lands, the suite reports four skips where it previously reported four
-silent absences. That is strictly more informative and is the only change to
-current behaviour.
-
-Alice's storefront derives its listings from local tables
-(`storefront.alice.toml` sets `use_site_projection_for_listings = false`)
-because provisioning does not trust her and she can load no projection.
-`pools-9-retire-local-physical-authority` deletes that path, so its cutover and
-its migration of `test_multi_registry.py` to provisioning-seeded inventory
-depend on this change. Once provisioning trusts Alice, her inventory is seeded
-through provisioning like Bob's and the opt-out goes.
-
-When it lands, a storefront becomes substitutable in practice: the property
-`docs/development/ROADMAP.md` Goal 1 names as the value of consolidating
-physical authority in the provisioning service, and which nothing currently
-demonstrates end to end.
+Development topology, service identities, storefront configuration, and e2e
+inventory seeding must support two separate authorities. This repair remains a
+prerequisite for `pools-9-retire-local-physical-authority`, which removes Alice's
+current local derivation path. Both storefronts must consume provisioning
+projections and the scenario must pass before that retirement proceeds.
 
 ## Permanent documentation impact
 
-- [x] Roadmap goal state changes
+- [x] `docs/development/DEPLOYMENT_AND_CONFIG.md` — separate development authorities.
+- [x] `docs/development/TESTING.md` — scenario setup and coverage boundary.
+- [x] `docs/development/ROADMAP.md` — reconcile the gap with this accepted scope.
 
 ### Knowledge to promote
 
-Goal 1's open-gap table gains this gap and names this change as its owner. The
-goal already argues that consolidating physical authority is what makes a
-storefront replaceable "by a different commercial front-end over the same
-hardware"; that the provisioning service cannot presently serve two is a
-current-state fact the goal should carry rather than leave to a skip string.
+Alice and Bob each use their own provisioning authority. The scenario proves
+registry isolation, fan-in, and distinct negotiations with projection-backed
+listings. It does not demonstrate multiple storefronts sharing a site or
+shared-hardware storefront substitution.

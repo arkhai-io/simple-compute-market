@@ -897,3 +897,107 @@ async def test_an_upgraded_storefront_republishes_once_keeping_seller_state(worl
     assert "publish" not in later["counts"] and "close" not in later["counts"]
     for listing_id in ("v1-open", "v1-seller", "v1-paused", "v1-recon"):
         assert (await _listing(world, listing_id))["status"] == "closed"
+
+
+# -- shape-priced listings -----------------------------------------------------
+
+
+def _rateless_clause() -> dict:
+    clause = settlement_clause()
+    del clause["rate"], clause["per"]
+    return clause
+
+
+def _gpu_rates(rate: str, asset: str | None = None) -> dict:
+    asset = asset or settlement_clause()["asset"]
+    return {"gpu": {"H100": {"rates": [{"asset": asset, "rate": rate, "per": "hour"}]}}}
+
+
+async def test_shape_priced_listings_publish_composed_rates_and_record_their_structure(
+    registry_world,
+):
+    world = registry_world
+    world.set_settlement_clauses([_rateless_clause()])
+    world.pools.append(
+        pool("broker-a", backing="unbacked", gpu_count=2, pricing=_gpu_rates("80"))
+    )
+
+    assert (await _cycle(world))["counts"] == {"publish": 2}
+
+    listings = await _listings(world)
+    rates = {
+        row["listing_resource"]["gpu_count"]: row["accepted_escrows"][0]["rates"][0]["value"]
+        for row in listings.values()
+    }
+    assert rates == {1: "80", 2: "160"}
+    for listing_id, row in listings.items():
+        assert (await _listing(world, listing_id))["rate_structure"] == {
+            "gpu": _gpu_rates("80")["gpu"]["H100"]["rates"]
+        }
+        # A registry receives the composed rate and never the structure.
+        for _, body in world.registries.to("publish", listing_id):
+            assert "rate_structure" not in body
+            assert body["accepted_escrows"] == row["accepted_escrows"]
+
+
+async def test_a_family_rate_change_refreshes_shape_priced_listings_in_place(world):
+    world.set_settlement_clauses([_rateless_clause()])
+    world.pools.append(
+        pool("broker-a", backing="unbacked", gpu_count=2, pricing=_gpu_rates("80"))
+    )
+    await _cycle(world)
+    before = await _listings(world)
+
+    world.pools[0] = pool(
+        "broker-a", backing="unbacked", gpu_count=2, pricing=_gpu_rates("90")
+    )
+    result = await _cycle(world)
+
+    after = await _listings(world)
+    assert set(after) == set(before)
+    assert result["counts"] == {"refresh": 2}
+    assert {
+        row["accepted_escrows"][0]["rates"][0]["value"] for row in after.values()
+    } == {"90", "180"}
+
+
+async def test_the_recorded_structure_holds_families_the_shape_omits(world):
+    world.set_settlement_clauses([_rateless_clause()])
+    asset = settlement_clause()["asset"]
+    memory = [{"asset": asset, "rate": "1", "per": "hour"}]
+    world.pools.append(
+        pool(
+            "broker-a",
+            backing="unbacked",
+            pricing={**_gpu_rates("80"), "memory": {"rates": memory}},
+        )
+    )
+    await _cycle(world)
+    (listing_id,) = await _listings(world)
+
+    # A GPU-only default shape: memory does not price it, but is recorded so a
+    # revised shape naming memory can be priced from the record.
+    listing = await _listing(world, listing_id)
+    assert listing["accepted_escrows"][0]["rates"][0]["value"] == "80"
+    assert listing["rate_structure"] == {
+        "gpu": _gpu_rates("80")["gpu"]["H100"]["rates"],
+        "memory": memory,
+    }
+
+
+async def test_a_shape_priced_listing_that_would_be_free_is_refused_and_never_posted(
+    world,
+):
+    world.set_settlement_clauses([_rateless_clause()])
+    world.pools.append(
+        pool(
+            "broker-a",
+            backing="unbacked",
+            pricing=_gpu_rates("80", asset="0x" + "33" * 20),
+        )
+    )
+
+    result = await _cycle(world)
+
+    assert result["counts"] == {"refuse": 1}
+    assert await _listings(world) == {}

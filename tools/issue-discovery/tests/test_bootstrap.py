@@ -6,6 +6,8 @@ import stat
 import subprocess
 from pathlib import Path
 
+import pytest
+
 
 def repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
@@ -23,11 +25,11 @@ def make_executable(path: Path, content: str) -> None:
 def make_fake_path(tmp_path: Path) -> Path:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    for tool in ("bash", "cut", "dirname", "getent", "pwd"):
+    for tool in ("bash", "cat", "cut", "dirname", "getent", "pwd"):
         target = shutil.which(tool)
         assert target is not None, tool
         os.symlink(target, bin_dir / tool)
-    for tool in ("curl", "git", "jq", "make", "node", "python3", "uv"):
+    for tool in ("curl", "git", "jq", "make", "node", "npm", "cargo", "rustc", "cc", "anvil", "python3", "uv"):
         make_executable(bin_dir / tool, "#!/usr/bin/env bash\nexit 0\n")
     make_executable(
         bin_dir / "docker",
@@ -117,3 +119,80 @@ def test_bootstrap_installs_node_for_alkahest_tests() -> None:
 
     assert "nodejs" in script
     assert "require_command node" in script
+
+
+@pytest.mark.parametrize("entrypoint", ["bootstrap", "make"])
+@pytest.mark.parametrize(
+    ("version", "typescript", "accepted"),
+    [("22.22.1", False, False), ("22.22.1", "strip", True),
+     ("22.22.1", "transform", True), ("20.19.0", "strip", False)],
+)
+def test_prerequisites_require_enabled_native_typescript(
+    tmp_path: Path, entrypoint: str, version: str, typescript: bool | str, accepted: bool
+) -> None:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("needs Node to evaluate the prerequisite's JavaScript")
+    env = bootstrap_env(tmp_path)
+    env.update({"PROBE_NODE": node, "PROBE_VERSION": version,
+                "PROBE_TYPESCRIPT": str(typescript)})
+    make_executable(
+        tmp_path / "bin" / "node",
+        """#!/usr/bin/env bash
+exec "$PROBE_NODE" -e 'require("node:vm").runInNewContext(process.argv[1], {
+  process: {versions: {node: process.env.PROBE_VERSION},
+    features: {typescript: process.env.PROBE_TYPESCRIPT === "False" ? false : process.env.PROBE_TYPESCRIPT},
+    exit: process.exit}
+})' "$2"
+""",
+    )
+    result = run_prerequisites(entrypoint, env)
+    assert (result.returncode == 0) == accepted, result.stdout + result.stderr
+    if not accepted:
+        assert "native TypeScript type stripping" in result.stdout
+
+
+def run_prerequisites(entrypoint: str, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    if entrypoint == "bootstrap":
+        command = [str(bootstrap_script()), "check"]
+    else:
+        make = shutil.which("make")
+        assert make is not None
+        command = [make, "-s", "-C", str(repo_root() / "domains/apicredits"),
+                   "check-middleware-toolchains"]
+    return subprocess.run(command, cwd=repo_root(), env=env, check=False,
+                          text=True, capture_output=True)
+
+
+@pytest.mark.parametrize("entrypoint", ["bootstrap", "make"])
+def test_prerequisites_require_native_compiler(tmp_path: Path, entrypoint: str) -> None:
+    env = bootstrap_env(tmp_path)
+    (tmp_path / "bin" / "cc").unlink()
+    result = run_prerequisites(entrypoint, env)
+    assert result.returncode != 0
+    assert "cc" in result.stdout
+    assert "sudo apt-get install build-essential" in result.stdout
+
+
+@pytest.mark.parametrize("entrypoint", ["bootstrap", "make"])
+def test_prerequisites_reject_unconfigured_rustup(tmp_path: Path, entrypoint: str) -> None:
+    env = bootstrap_env(tmp_path)
+    make_executable(tmp_path / "bin" / "cargo", "#!/usr/bin/env bash\nexit 1\n")
+    result = run_prerequisites(entrypoint, env)
+    assert result.returncode != 0
+    assert "working Cargo and rustc toolchain" in result.stdout
+
+
+def test_bootstrap_node_install_reuses_capability_check(tmp_path: Path) -> None:
+    env = bootstrap_env(tmp_path)
+    make_executable(tmp_path / "bin" / "node", "#!/usr/bin/env bash\nexit 1\n")
+    script = bootstrap_script().read_text(encoding="utf-8")
+    functions = script[script.index("node_supports_typescript() {"):script.index("install_rust() {")]
+    result = subprocess.run(
+        ["bash", "-c", functions + "\nlog() { echo \"$*\"; }\n"
+         "dpkg-query() { return 0; }\nneed_sudo() { echo \"$*\"; }\ninstall_node"],
+        env=env, check=False, text=True, capture_output=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "installing nodejs 22.x" in result.stdout
+    assert "apt-get install -y nodejs" in result.stdout

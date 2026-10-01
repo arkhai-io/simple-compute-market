@@ -10,6 +10,10 @@ import logging
 from functools import partial
 
 from market_storefront.services.listing_identity_carryover import carry_over_seller_state
+from market_storefront.services.publication_terms import (
+    configured_family_rate_problems,
+    retired_pricing_configuration_keys,
+)
 from market_storefront.lifecycle import (
     CAPACITY_EVENTS_POLLER,
     FULFILLMENT_RESUME,
@@ -93,6 +97,35 @@ async def _preflight_provisioning() -> None:
             "service is reachable)."
         )
     logger.error(msg + " Continuing because fail_on_unreachable=false.")
+
+
+def _require_readable_family_rates() -> None:
+    """Refuse to start with a configured family rate that cannot be read.
+
+    The configured defaults are the operator's own file: a rate in it that cannot
+    be read is a configuration error, not a pool to hold, and starting anyway
+    would hold every pool that falls through to it.
+    """
+    problems = configured_family_rate_problems()
+    if problems:
+        raise RuntimeError(
+            "configured family rates cannot be read: " + "; ".join(problems)
+        )
+
+
+def _report_retired_pricing_keys() -> None:
+    """Name pricing keys the configuration states that nothing reads any more.
+
+    They are accepted rather than refused, so an upgraded storefront starts with
+    its existing configuration; this is where an operator learns to remove them.
+    """
+    retired = retired_pricing_configuration_keys()
+    if retired:
+        logger.warning(
+            "[STARTUP] Configuration states retired pricing keys that are not "
+            "read: %s",
+            ", ".join(retired),
+        )
 
 
 def _maybe_join_zerotier_network() -> None:
@@ -356,6 +389,15 @@ async def _startup_tasks(*, registry: Any, domain: MarketDomainContract) -> None
     await run_storefront_startup_steps(
         (
             StorefrontStartupStep("join_zerotier", _maybe_join_zerotier_network),
+            StorefrontStartupStep(
+                "configured_family_rates",
+                _require_readable_family_rates,
+            ),
+            StorefrontStartupStep(
+                "retired_pricing_keys",
+                _report_retired_pricing_keys,
+                continue_on_error=True,
+            ),
             StorefrontStartupStep(
                 "negotiation_thread_store",
                 _initialize_negotiation_thread_store,

@@ -21,36 +21,37 @@ scope ends at the e2e fixtures.
       evidence, and record any other failure as a finding rather than folding
       it into this limitation.
 
-## 2. Let provisioning serve more than one storefront
+## 2. Give each storefront its own provisioning authority
 
-- [ ] 2.1 Decide whether a storefront principal implies a site binding.
-      `ProvisioningIdentityContext` holds `storefront_principal` and
-      `storefront_site_id` as single values; both have to become plural, and
-      whether they are paired or configured independently is the design
-      question.
-- [ ] 2.2 Configure a set of storefront principals, bootstrapping each into the
-      `seller` role. The authority already trusts several principals per role
-      during rotation, so this is a configuration shape rather than a trust
-      model change.
-- [ ] 2.3 Add Alice's principal to the development compose identities.
-- [ ] 2.4 Remove the skips and confirm the four stages pass.
-- [ ] 2.5 Move Alice onto projection-backed derivation: seed her inventory
-      through provisioning as Bob's is (stage `02b` stops importing a
-      storefront-local CSV), and remove `storefront.alice.toml`'s
-      `use_site_projection_for_listings = false` opt-out with the comment that
-      explains it. `pools-9-retire-local-physical-authority` deletes the path
-      she is on and depends on this change for that reason.
+Design accepted; expand these tasks with exact affected files and focused
+validation during planning, before implementation.
+
+- [x] 2.1 Select separate provisioning services for Alice and Bob. Each
+      authority retains one storefront counterparty; multiple storefronts per
+      site and reuse of rotation overlap for independent sellers are excluded.
+- [ ] 2.2 Wire Alice's separate provisioning service with isolated state,
+      authority identity, storefront trust, and callback destination.
+- [ ] 2.3 Configure Alice to trust and call her authority using the existing
+      identity protocol; retain Bob's separate authority binding.
+- [ ] 2.4 Remove explicit `06b`/`06c` skips and demonstrate the complete
+      two-storefront scenario passing, checking the runtime skip set.
+- [ ] 2.5 Seed Alice's inventory through her authority in
+      `e2e-tests/tests/e2e/roles/scenarios/vms/test_multi_registry.py` and remove
+      the local-derivation opt-out from
+      `domains/vms/storefront/storefront.alice.toml`. Verify projection-backed
+      listings before considering the pools-9 prerequisite complete.
 
 ## 3. Closeout
 
 - [ ] 3.1 **Comment hygiene.** `make check-comment-hygiene`.
 - [ ] 3.2 **Import placement.**
-- [ ] 3.3 **Documentation compliance.** Goal 1's open-gap row is this change's
-      one permanent edit; confirm it still reads true at archival, and remove
-      the row rather than leaving it pointing at an archived change.
+- [ ] 3.3 **Documentation compliance.** Promote development topology to
+      `docs/development/DEPLOYMENT_AND_CONFIG.md` and scenario coverage to
+      `docs/development/TESTING.md` after code review.
 - [ ] 3.4 **Narrative compression.**
-- [ ] 3.5 **Roadmap currency.** Goal 1's current-state paragraph should stop
-      describing a storefront as substitutable only in principle.
+- [ ] 3.5 **Roadmap currency.** Reconcile Goal 1's gap with the accepted
+      separate-authority scope; do not claim shared-site substitution or leave
+      a resolved gap pointing at an archived change.
 - [ ] 3.6 **Campaign index currency.**
 - [ ] 3.7 **Promotion.**
 
@@ -78,4 +79,5 @@ scope ends at the e2e fixtures.
 
 | Accepted decision | Permanent location |
 |---|---|
-| The provisioning service cannot presently serve two storefronts | ROADMAP Goal 1 open-gap table |
+| Alice and Bob each use their own provisioning authority | `docs/development/DEPLOYMENT_AND_CONFIG.md` |
+| Scenario evidence covers registry behavior and negotiations, not shared-site tenancy | `docs/development/TESTING.md`; `docs/development/ROADMAP.md` |

@@ -16,7 +16,10 @@ from market_hosted_settlement import (
     create_stripe_registration,
     stripe_contract_fingerprint,
 )
-from market_hosted_settlement.settlement_config import stripe_preflight
+from market_hosted_settlement.settlement_config import (
+    _stripe_rate_minor_units,
+    stripe_preflight,
+)
 from market_identity import (
     AuthorityBindingState,
     AuthorityPayerBinding,
@@ -847,3 +850,31 @@ async def test_an_enabled_configuration_that_states_no_pin_blocks_by_name(
     assert status.ready is False
     assert code in {blocker.code for blocker in status.blockers}
     assert client.read_calls == []
+
+
+def _usd_clause(rate: str) -> SettlementPublicationClause:
+    return SettlementPublicationClause(
+        mechanism="fiat.stripe.v1",
+        asset="usd",
+        rate=rate,
+        per="hour",
+        mechanism_input={
+            "funding_profile": "card.v1",
+            "interaction": "interactive",
+            "funds_flow": "separate_charges_transfers",
+        },
+    )
+
+
+def test_hosted_rate_longer_than_a_decimal_context_converts_exactly() -> None:
+    # 32 significant digits: a 28-digit Decimal context would round the product.
+    rate = "123456789012345678901234567890.12"
+    assert _stripe_rate_minor_units(
+        _usd_clause(rate), configured_currency="usd"
+    ) == int("12345678901234567890123456789012")
+
+
+def test_hosted_long_rate_below_one_minor_unit_is_refused() -> None:
+    rate = "123456789012345678901234567890.125"
+    with pytest.raises(ValueError, match="more than 2 decimal places"):
+        _stripe_rate_minor_units(_usd_clause(rate), configured_currency="usd")

@@ -13,11 +13,13 @@ from .hints import (
     CAPACITY_BACKING_POLICY_TAG,
     MAX_RESERVATION_HOLD_SECONDS_POLICY_TAG,
     LISTING_SHAPES_POLICY_TAG,
+    PRICING_POLICY_TAG,
     SLA_POLICY_TAG,
     PoolDeclarationProblem,
     pool_declaration_problems,
     validate_hold_preference,
     validate_listing_shapes,
+    validate_pricing_rates,
     validate_pool_declarations,
     validate_sla_preference,
 )
@@ -135,6 +137,7 @@ class ResourcePoolService:
             + validate_sla_preference(policy_tags)
             + validate_listing_shapes(policy_tags)
             + validate_asking_rates(policy_tags)
+            + validate_pricing_rates(policy_tags)
         )
         if problems:
             raise PoolValidationError("; ".join(problems))
@@ -532,6 +535,15 @@ class ResourcePoolService:
                             path=f"{base}.policy_tags.{ASKING_RATES_POLICY_TAG}",
                             code="invalid_asking_rates",
                             message=rate_problem,
+                        )
+                    )
+                    entry_valid = False
+                for pricing_problem in validate_pricing_rates(tags):
+                    problems.append(
+                        PoolValidationProblem(
+                            path=f"{base}.policy_tags.{PRICING_POLICY_TAG}",
+                            code="invalid_pricing_rates",
+                            message=pricing_problem,
                         )
                     )
                     entry_valid = False

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from datetime import datetime
+from market_core.schemas import RateValue, derive_settlement_option_id
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -88,6 +89,7 @@ async def _seed_listing(
     status: str = "open",
     *,
     valid_capacity_identity: bool = True,
+    settlement_options: list[dict] | None = None,
 ) -> None:
     listing_resource = {
         "gpu_model": "H200",
@@ -119,6 +121,8 @@ async def _seed_listing(
         "seller_principal": _TEST_SELLER_PRINCIPAL,
         "closed_by": "seller" if status == "closed" else None,
     }
+    if settlement_options is not None:
+        listing_kwargs["settlement_options"] = settlement_options
     if valid_capacity_identity:
         await db.upsert_listing_with_binding(
             binding=prepare_vm_listing_binding(
@@ -604,6 +608,40 @@ class TestEvaluateNegotiate:
         assert result.direction == "maximize"
         assert result.our_reference_amount > 0
         assert result.strategy  # non-empty string
+
+    async def test_a_hosted_selection_negotiates_from_the_hosted_rate(self, admin_client):
+        """On a listing offering Alkahest at 9000 and a hosted option at 1500,
+        a buyer selecting the hosted option is negotiated against 1500: the
+        rate of the option it selected, in that option's own asset."""
+        c, db = admin_client
+        rates = [RateValue(field="amount", per="hour", value=1500)]
+        hosted = {
+            "mechanism": "fiat.stripe.v1",
+            "asset": "usd",
+            "rates": [rate.model_dump(mode="json") for rate in rates],
+            "params": {},
+            "option_id": derive_settlement_option_id(
+                mechanism="fiat.stripe.v1", asset="usd", rates=rates, params={}
+            ),
+        }
+        await _seed_listing(db, "neg-eval-hosted", settlement_options=[hosted])
+        with patch(
+            "arkhai_vms_negotiation.storefront_round._load_storefront_chain",
+            return_value=_bisection_chain(),
+        ):
+            result = await c.evaluate_negotiate(
+                "neg-eval-hosted",
+                proposal={
+                    "settlement_selection": {
+                        "mechanism": hosted["mechanism"],
+                        "option_id": hosted["option_id"],
+                        "expiration_unix": 2000000000,
+                    },
+                    "fields": {"amount": 1500},
+                },
+                buyer_principal=_TEST_BUYER_SIGNER.identity,
+            )
+        assert result.our_reference_amount == 1500
 
     async def test_price_at_floor_does_not_exit(self, admin_client):
         """Buyer price at or above the seller's floor should not produce exit."""

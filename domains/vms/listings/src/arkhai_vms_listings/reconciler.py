@@ -28,7 +28,9 @@ from arkhai_vms_listings.listing_cardinality_mode import (
 )
 from arkhai_vms_listings.pool_descriptors import resolve_region, resolve_sla
 from arkhai_vms_listings.pricing_resolution import (
+    RETIRED_PRICING_KEYS,
     GpuPricingFields,
+    resolve_family_rates,
     resolve_gpu_pricing,
 )
 
@@ -179,7 +181,7 @@ def _capacity_pool_member_rows(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return conn.execute(
         f"""
         SELECT p.pool_id, p.gpu_model, p.region, p.sla,
-               p.total_gpu_count, p.min_price, p.token,
+               p.total_gpu_count,
                p.accepted_escrows, {settlements_select}, p.max_duration_seconds,
                m.resource_id, m.gpu_count, m.status, m.attributes,
                {site_select}
@@ -242,8 +244,6 @@ def _pool_rows_from_capacity_pools(
                 "total_gpu_count": 0,
                 "available_gpu_count": 0,
                 "max_member_available_gpu_count": 0,
-                "min_price": row["min_price"],
-                "token": row["token"],
                 "accepted_escrows": row["accepted_escrows"],
                 "settlements": row["settlements"],
                 "max_duration_seconds": row["max_duration_seconds"],
@@ -299,8 +299,6 @@ def _project_legacy_resource_row(
         "total_gpu_count": total_gpu_count,
         "available_gpu_count": available_gpu_count,
         "max_member_available_gpu_count": available_gpu_count,
-        "min_price": row["min_price"],
-        "token": row["token"],
         "accepted_escrows": row["accepted_escrows"] if has_accepted else None,
         "settlements": row["settlements"] if has_settlements else None,
         "max_duration_seconds": (
@@ -327,8 +325,8 @@ def _pool_rows_from_legacy_resources(
     if has_settlements:
         select_extra += ", settlements"
     rows = conn.execute(
-        f"""SELECT resource_id, resource_subtype, unit, value, state, attributes,
-                  min_price, token{select_extra}
+        f"""SELECT resource_id, resource_subtype, unit, value, state,
+                  attributes{select_extra}
            FROM resources
            WHERE resource_type = 'compute.gpu' AND state = 'available'
            ORDER BY resource_id""",
@@ -409,7 +407,7 @@ def _local_pool_pricing(conn: sqlite3.Connection) -> dict[str, sqlite3.Row]:
         str(row["pool_id"]): row
         for row in conn.execute(
             f"""
-            SELECT pool_id, gpu_model, region, sla, min_price, token,
+            SELECT pool_id, gpu_model, region, sla,
                    accepted_escrows, {settlements_select}, max_duration_seconds
             FROM compute_capacity_pools
             WHERE resource_type = 'compute.gpu' AND status = 'active'
@@ -421,7 +419,11 @@ def _local_pool_pricing(conn: sqlite3.Connection) -> dict[str, sqlite3.Row]:
 VM_OFFERING_MODE = "vm"
 
 #: The VM market's override terms, flattened beside shapes and clauses.
-VM_OVERRIDE_TERMS = ("sla", "min_price", "token", "max_duration_seconds")
+VM_OVERRIDE_TERMS = ("sla", "max_duration_seconds", "pricing")
+
+#: Override terms the VM market does not read. A stored override may carry
+#: them; derivation reports them rather than holding the pool.
+RETIRED_VM_OVERRIDE_TERMS = RETIRED_PRICING_KEYS
 
 
 def vm_override_view(
@@ -440,6 +442,9 @@ def vm_override_view(
         "settlements": settlements,
         "asking_rates": asking_rates,
         **{name: terms.get(name) for name in VM_OVERRIDE_TERMS},
+        "retired_terms": tuple(
+            name for name in RETIRED_VM_OVERRIDE_TERMS if name in terms
+        ),
     }
 
 
@@ -651,6 +656,9 @@ class _SiteDerivationReport:
     infeasible_shapes: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     undeclared_attributes: dict[str, dict[str, Any]] = field(default_factory=dict)
     legacy_overrides_in_effect: dict[str, list[str]] = field(default_factory=dict)
+    retired_pricing_keys: dict[str, list[str]] = field(default_factory=dict)
+    unreadable_family_rates: dict[str, list[str]] = field(default_factory=dict)
+    families_without_rates: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -675,6 +683,15 @@ class _SiteDerivationReport:
                 pool_id: sorted(fields)
                 for pool_id, fields in sorted(self.legacy_overrides_in_effect.items())
             },
+            "retired_pricing_keys": {
+                pool_id: sorted(set(keys))
+                for pool_id, keys in sorted(self.retired_pricing_keys.items())
+            },
+            "unreadable_family_rates": {
+                pool_id: sorted(set(problems))
+                for pool_id, problems in sorted(self.unreadable_family_rates.items())
+            },
+            "families_without_rates": dict(sorted(self.families_without_rates.items())),
         }
 
 
@@ -782,6 +799,68 @@ def _record_site_report(site_id: str, report: _SiteDerivationReport) -> None:
             pool_id,
             ", ".join(fields),
         )
+    for pool_id, keys in current["retired_pricing_keys"].items():
+        logger.warning(
+            "[PUBLICATION] site %s pool %s states retired pricing keys (%s); "
+            "they are not read",
+            site_id,
+            pool_id,
+            ", ".join(keys),
+        )
+    for pool_id, problems in current["unreadable_family_rates"].items():
+        logger.warning(
+            "[PUBLICATION] site %s pool %s states family rates the VM market "
+            "cannot read (%s); its listings are held",
+            site_id,
+            pool_id,
+            "; ".join(problems),
+        )
+    for pool_id, entries in current["families_without_rates"].items():
+        logger.info(
+            "[PUBLICATION] site %s pool %s includes families without a rate, "
+            "which are not charged: %s",
+            site_id,
+            pool_id,
+            "; ".join(
+                f"{', '.join(entry['families'])} in {entry['asset']}" for entry in entries
+            ),
+        )
+
+
+def _families_without_rates(
+    shape: "ResolvedShape",
+    family_rates: Mapping[str, Any],
+    clauses: Any,
+) -> list[dict[str, Any]]:
+    """Per clause asset, the families ``shape`` names that have no rate in it.
+
+    Reported, not refused: a family without a rate is not charged. Only a
+    shape-priced listing has anything to report, and only clauses stated as
+    mappings name their asset here.
+    """
+    if not family_rates or not isinstance(clauses, list):
+        return []
+    assets = sorted(
+        {
+            str(clause["asset"])
+            for clause in clauses
+            if isinstance(clause, Mapping) and isinstance(clause.get("asset"), str)
+        }
+    )
+    out: list[dict[str, Any]] = []
+    for asset in assets:
+        families = sorted(
+            family
+            for family in shape.shape
+            if not any(
+                entry.get("asset") == asset for entry in family_rates.get(family, ())
+            )
+        )
+        if families:
+            out.append(
+                {"shape_digest": shape.digest, "asset": asset, "families": families}
+            )
+    return out
 
 
 @dataclass(frozen=True)
@@ -797,18 +876,20 @@ class PoolHintResolutionSettings:
     being new capability a storefront must choose to enable, not a
     migration of something already trusted today.
 
-    `gpu_pricing_defaults_by_model`/`gpu_pricing_flat_default` are tier 1
-    of the pricing precedence chain (see
-    `arkhai_vms_listings.pricing_resolution`) -- no trust decision
-    involved, since config defaults are the storefront operator's own
-    values, not a site's; defaulted here only so every caller doesn't
-    need to construct empty ones.
+    `gpu_pricing_defaults_by_model`/`gpu_pricing_flat_default` and
+    `family_rate_defaults` are the lowest tier of the pricing precedence
+    chain (see `arkhai_vms_listings.pricing_resolution`) -- no trust
+    decision involved, since config defaults are the storefront operator's
+    own values, not a site's; defaulted here only so every caller doesn't
+    need to construct empty ones. `family_rate_defaults` uses the pricing
+    hint's family-grouped nesting.
     """
 
     accept_pool_declared_sla: bool = False
     default_sla: float = 0.0
     gpu_pricing_defaults_by_model: Mapping[str, Any] = None  # type: ignore[assignment]
     gpu_pricing_flat_default: Any = None
+    family_rate_defaults: Mapping[str, Any] = None  # type: ignore[assignment]
 
     def __post_init__(self) -> None:
         # dataclass(frozen=True) needs object.__setattr__ to fill in
@@ -818,6 +899,8 @@ class PoolHintResolutionSettings:
             object.__setattr__(self, "gpu_pricing_defaults_by_model", {})
         if self.gpu_pricing_flat_default is None:
             object.__setattr__(self, "gpu_pricing_flat_default", GpuPricingFields())
+        if self.family_rate_defaults is None:
+            object.__setattr__(self, "family_rate_defaults", {})
 
 
 _DEFAULT_POOL_HINT_RESOLUTION_SETTINGS = PoolHintResolutionSettings()
@@ -1003,14 +1086,16 @@ def _projected_pool_rows(
         config_default=hint_resolution.default_sla,
     )
     storefront_pricing_override = GpuPricingFields(
-        min_price=_tier("min_price"),
-        token=_tier("token"),
         max_duration_seconds=_tier("max_duration_seconds"),
         accepted_escrows=_tier("accepted_escrows"),
         settlements=_tier("settlements"),
     )
     if legacy_fields:
         report.legacy_overrides_in_effect[pool_id] = sorted(legacy_fields)
+    if override is not None and override.get("retired_terms"):
+        report.retired_pricing_keys.setdefault(pool_id, []).extend(
+            f"override terms.{name}" for name in override["retired_terms"]
+        )
 
     base_fields = {
         "site_id": site_id,
@@ -1094,6 +1179,39 @@ def _projected_pool_rows(
         )
         for model in sorted({shape.gpu_model for shape in resolution.shapes})
     }
+    # Family rates resolve per model for the same reason: the GPU family is
+    # keyed by model. They resolve on this projection path only; the local-table
+    # path is flat-priced, as overrides are inactive there.
+    family_rates_by_model: dict[str, Mapping[str, Any]] = {}
+    unreadable_rates: list[str] = []
+    for model in sorted({shape.gpu_model for shape in resolution.shapes}):
+        family = resolve_family_rates(
+            policy_tags,
+            gpu_model=model,
+            storefront_override=override.get("pricing") if override else None,
+            config_defaults=hint_resolution.family_rate_defaults,
+        )
+        family_rates_by_model[model] = family.rates
+        unreadable_rates.extend(family.problems)
+        if family.retired_keys:
+            report.retired_pricing_keys.setdefault(pool_id, []).extend(
+                f"hint {key}" for key in family.retired_keys
+            )
+    # An unreadable rate holds the pool, as an unreadable asking rate does:
+    # pricing from what remains would publish a lower tier's rate, a price
+    # nobody stated for this pool. Its listings keep their last-published terms.
+    if unreadable_rates:
+        report.unreadable_family_rates[pool_id] = sorted(set(unreadable_rates))
+        holds.add(("pool", site_id, pool_id))
+        return []
+    for shape in resolution.shapes:
+        unrated = _families_without_rates(
+            shape,
+            family_rates_by_model.get(shape.gpu_model) or {},
+            pricing_by_model[shape.gpu_model].settlements,
+        )
+        if unrated:
+            report.families_without_rates.setdefault(pool_id, []).extend(unrated)
     served: set[str] = set()
     not_feasible: dict[str, str] = {}
 
@@ -1114,6 +1232,7 @@ def _projected_pool_rows(
         "listing_shapes": resolution.shapes,
         "shape_source": resolution.source,
         "pricing_by_model": pricing_by_model,
+        "family_rates_by_model": family_rates_by_model,
         "asking_rates_by_digest": {
             digest: rate.published() for digest, rate in rates.rates.items()
         },
@@ -1562,6 +1681,7 @@ def available_compute_slices(
         if shapes is None:
             shapes = _local_table_shapes(row, declared_range=declared_range)
         pricing_by_model = row.get("pricing_by_model") or {}
+        family_rates_by_model = row.get("family_rates_by_model") or {}
         for shape in shapes:
             pricing = pricing_by_model.get(shape.gpu_model)
             candidate = {
@@ -1587,8 +1707,12 @@ def available_compute_slices(
                 "available_gpu_count": row.get("available_gpu_count"),
                 "sla": row.get("sla", 0.0),
                 "region": row.get("region"),
-                "min_price": pricing.min_price if pricing else row.get("min_price"),
-                "token": pricing.token if pricing else row.get("token"),
+                "family_rates": {
+                    family: [dict(entry) for entry in entries]
+                    for family, entries in (
+                        family_rates_by_model.get(shape.gpu_model) or {}
+                    ).items()
+                },
                 "accepted_escrows": accepted_escrows,
                 "settlements": settlements,
                 "max_duration_seconds": (

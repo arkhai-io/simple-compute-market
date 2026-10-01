@@ -351,6 +351,31 @@ def test_config_per_model_legacy_pricing_is_a_manual_conflict(
     assert path.read_bytes() == original
 
 
+def test_config_per_model_rates_and_clauses_are_not_legacy_pricing(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "storefront.toml"
+    original = (
+        b"[Pricing]\n"
+        b"\n"
+        b"[Pricing.defaults.gpu.H100]\n"
+        b'rates = [ { asset = "usd", rate = "2", per = "hour" } ]\n'
+        b"\n"
+        b"[Pricing.defaults.gpu.A100]\n"
+        b"settlements = []\n"
+        b"\n"
+        b"[Settlement.alkahest]\n"
+        b"enabled = true\n"
+    )
+    path.write_bytes(original)
+
+    result = migrate_publication_config(path, check=True)
+
+    assert result.changed is False
+    assert result.conflicts == ()
+    assert path.read_bytes() == original
+
+
 def test_config_invalid_legacy_token_is_rejected_without_mutation(
     tmp_path: Path,
 ) -> None:

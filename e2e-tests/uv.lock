@@ -401,6 +401,17 @@ wheels = [
 ]
 
 [[package]]
+name = "arkhai-kit-capability-pricing"
+version = "0.1.0"
+source = { registry = "../.dist" }
+dependencies = [
+    { name = "arkhai-kit-capability-shape" },
+]
+wheels = [
+    { path = "arkhai_kit_capability_pricing-0.1.0-py3-none-any.whl" },
+]
+
+[[package]]
 name = "arkhai-kit-capability-shape"
 version = "0.2.0"
 source = { registry = "../.dist" }
@@ -623,6 +634,7 @@ source = { registry = "../.dist" }
 dependencies = [
     { name = "arkhai-compute" },
     { name = "arkhai-core" },
+    { name = "arkhai-kit-capability-pricing" },
     { name = "arkhai-kit-capability-shape" },
     { name = "pydantic" },
 ]

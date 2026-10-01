@@ -214,8 +214,10 @@ extra_policy_paths = []
 # Structured settlement option defaults. Each entry is one complete clause;
 # inventory-row or command clauses replace this list rather than merging fields.
 settlements = []
+# Negotiation floor for a hidden-reserve listing -- one whose settlement option
+# advertises no rate -- in the payment asset's base units per hour, as decimal
+# text. It constructs no settlement option.
 default_min_price            = ""
-default_token_address        = ""
 default_max_duration_seconds = 0   # 0 means unlimited
 publish_priceless            = false
 # Whether a resource pool's own projected `sla` hint
@@ -230,22 +232,31 @@ accept_pool_declared_sla     = false
 # (compute_capacity_pools.sla) nor a trusted pool hint applies.
 default_sla                  = 0.0
 
-# Per-GPU-model pricing defaults (tier 1 of the
-# storefront-override > pool-hint > this-default precedence chain --
-# see arkhai_vms_listings.pricing_resolution). Structured as a
-# family-grouped requirement shape, reserving room for non-GPU families
-# (cpu/memory/storage) once that vocabulary is available and a pricing
-# dimension exists to key them by -- only `gpu` has entries today.
-# Add one [pricing.defaults.gpu.<model>] table per priced model; a
-# model with no table here, or a field left unset within one, falls
-# through to default_min_price/default_token_address/
-# default_max_duration_seconds above. Empty by default -- no priced
-# models ship out of the box.
+# Per-GPU-model listing-term defaults and per-family rates: the lowest tier
+# of the storefront-override > pool-hint > this-default precedence chain (see
+# arkhai_vms_listings.pricing_resolution). Empty by default.
+#
+# A [pricing.defaults.gpu.<model>] table may state that model's `settlements`
+# and `max_duration_seconds`, falling through to the settings above for any it
+# leaves unset.
+#
+# Family rates price a listing by its shape. Each `rates` entry is a rate per
+# unit of the family per `per`, in one asset's display units, and prices every
+# settlement clause paying in that asset. A listing for which any family
+# resolves rates is shape-priced: its clauses state no `rate`, and the
+# storefront composes each clause's rate from the listing's shape. A family
+# without a rate is not charged, but a listing whose composed rate would be zero
+# in a clause's asset is refused. Without family rates a clause's own `rate` is
+# the listing's rate, whatever its shape. The storefront refuses to start with a
+# rate it cannot read here.
 #
 # Example:
 # [pricing.defaults.gpu.H100]
-# min_price = "5.00"
-# token     = "0x0000000000000000000000000000000000000000"
+# rates = [ { asset = "0x0000000000000000000000000000000000000000", rate = "80", per = "hour" } ]     # per card-hour
+# [pricing.defaults.cpu]
+# rates = [ { asset = "0x0000000000000000000000000000000000000000", rate = "0.5", per = "hour" } ]    # per vCPU-hour
+# [pricing.defaults.memory]
+# rates = [ { asset = "0x0000000000000000000000000000000000000000", rate = "0.05", per = "hour" } ]   # per GiB-hour
 
 [integrations]
 # Sensitive — populated by Secret overlay.

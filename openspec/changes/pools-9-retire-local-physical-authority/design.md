@@ -151,21 +151,18 @@ so a home-site pool whose region came from the CSV needs `region` declared on
 its pool hint before upgrading; `accepted_escrows` has no equivalent other
 than a `settlements` clause list.
 
-### The cutover requires provisioning to trust a second storefront principal
+### The cutover requires both storefronts to consume projections
 
-Deleting the local path leaves the second e2e storefront with no listing
-source, and its scenario cannot be migrated to provisioning-seeded inventory
-until provisioning trusts its principal. `repair-multi-storefront-scenario`
-owns that. Narrowing the scenario to drop that storefront's inventory, or
-giving it a second provisioning service in compose, were both rejected as
-working around a scenario the repository intends to repair; storefront
-substitutability is the property this consolidation exists to deliver.
+Deleting the local path leaves Alice with no listing source until she has a
+working provisioning authority. `repair-multi-storefront-scenario` owns that
+prerequisite and uses separate provisioning services for Alice and Bob.
+Multiple storefronts per site are explicitly out of scope; this decision
+supersedes the earlier shared-authority requirement.
 
-Keep `repair-multi-storefront-scenario` separate and complete it first. Its
-acceptance must prove both storefronts are trusted by the shared provisioning
-authority, Alice derives from provisioning-seeded projections without her
-local-path opt-out, and the affected two-storefront stages run and pass. A
-configuration edit or continued skips do not satisfy this prerequisite.
+Keep that repair separate and complete it first. Acceptance must prove Alice
+derives from provisioning-seeded projections without her local-path opt-out,
+both storefronts use their respective authorities, and the two-storefront
+stages run and pass. Configuration edits or continued skips do not suffice.
 
 ### Retire the local inventory contract in one coordinated cutover
 

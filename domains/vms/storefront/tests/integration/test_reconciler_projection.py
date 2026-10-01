@@ -30,7 +30,7 @@ from market_pool_overrides import (
     pool_override_migrations,
 )
 
-from tests.unit.test_reconciler import (  # noqa: F401  (db_path is a fixture)
+from tests._reconciler_cases import (  # noqa: F401  (db_path is a fixture)
     _BIG,
     available_compute_slices,
     _SMALL_SHAPE,
@@ -201,12 +201,23 @@ def test_a_storefront_with_pricing_defaults_and_no_declaration_publishes_no_rate
         hint_resolution=PoolHintResolutionSettings(
             # Development fixture address; never used on a public network.
             gpu_pricing_flat_default=GpuPricingFields(
-                min_price="2", token="0x" + "22" * 20
+                settlements=[
+                    {"mechanism": "alkahest.v1", "asset": "0x" + "22" * 20,
+                     "rate": "2", "per": "hour"},
+                ],
             ),
+            # Family rates price a shape for negotiation; they never become an
+            # asking rate.
+            family_rate_defaults={
+                "gpu": {"H100": {"rates": [
+                    {"asset": "0x" + "22" * 20, "rate": "2", "per": "hour"},
+                ]}},
+            },
         ),
     )
 
     assert slices and all("asking_rate" not in row for row in slices)
+    assert all(row["family_rates"] for row in slices)
 
 
 def test_an_override_at_a_non_first_site_replaces_that_sites_declared_rates(db_path):

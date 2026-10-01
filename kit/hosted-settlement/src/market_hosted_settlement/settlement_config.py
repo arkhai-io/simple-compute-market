@@ -8,7 +8,6 @@ import json
 import re
 import uuid
 from collections.abc import Callable, Mapping, Sequence
-from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
@@ -42,6 +41,7 @@ from market_settlement_runtime import (
     SettlementConfigurationRegistry,
     SettlementRole,
     SettlementPublicationClause,
+    decimal_rate_to_base_units,
 )
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -836,17 +836,9 @@ def _stripe_rate_minor_units(
         else 2
     )
     try:
-        human = Decimal(clause.rate)
-    except InvalidOperation as exc:
-        raise ValueError(f"invalid hosted rate {clause.rate!r}") from exc
-    scaled = human * (Decimal(10) ** exponent)
-    if scaled != scaled.to_integral_value():
-        raise ValueError(
-            f"hosted rate {clause.rate!r} has more than {exponent} decimal places"
-        )
-    if scaled <= 0:
-        raise ValueError("hosted rate must be positive")
-    return int(scaled)
+        return decimal_rate_to_base_units(clause.rate, exponent)
+    except ValueError as exc:
+        raise ValueError(f"hosted rate {clause.rate!r}: {exc}") from exc
 
 
 def stripe_option_builder(

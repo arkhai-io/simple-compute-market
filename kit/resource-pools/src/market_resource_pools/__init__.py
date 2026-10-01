@@ -35,6 +35,7 @@ from .hints import (
     resolve_pool_declarations,
     validate_deliverable_modes,
     validate_listing_shapes,
+    validate_pricing_rates,
     validate_pool_declarations,
 )
 from .host_requirement import HostRequirement, pool_needs_host
@@ -115,6 +116,7 @@ __all__ = [
     "ResourcePoolService",
     "validate_deliverable_modes",
     "validate_listing_shapes",
+    "validate_pricing_rates",
     "ACCEPTED_ASKING_RATE_PERIODS",
     "ASKING_RATE_SOURCE_HINT",
     "ASKING_RATE_SOURCE_NONE",
