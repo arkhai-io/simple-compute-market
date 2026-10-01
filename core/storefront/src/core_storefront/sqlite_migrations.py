@@ -164,6 +164,15 @@ def _add_column_if_missing(
     conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}")
 
 
+def migrate_listing_rate_structure(conn: sqlite3.Connection) -> None:
+    """Add the listing's rate structure: a domain-owned JSON term of sale.
+
+    Nullable, and null for every listing whose domain records none, so adding
+    it changes no existing listing.
+    """
+    _add_column_if_missing(conn, "listings", "rate_structure", "TEXT")
+
+
 # ---------------------------------------------------------------------------
 # Legacy accepted_escrows backfill — synthesis is domain vocabulary.
 # ---------------------------------------------------------------------------
@@ -2057,6 +2066,11 @@ _MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260923_003_listing_closed_by",
         migrate_listing_closed_by,
+        required_tables=("listings",),
+    ),
+    Migration(
+        "20261001_001_listing_rate_structure",
+        migrate_listing_rate_structure,
         required_tables=("listings",),
     ),
 )

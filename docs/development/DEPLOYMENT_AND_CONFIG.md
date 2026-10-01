@@ -255,9 +255,16 @@ keeps it; an older reader ignores it.
 
 The storefront's VM publication runs on its own; bare-metal publication remains an
 operator-invoked command. Storefront-wide terms of sale are configuration — `[pricing].settlements` and the per-model
-`[pricing.defaults.gpu.<model>].settlements`, and `default_max_duration_seconds` —
-beneath each pool's own `pricing` declaration and the storefront's per-pool
-overrides. A change to any of them reaches open listings on the next publication
+`[pricing.defaults.gpu.<model>].settlements`, `default_max_duration_seconds`, and
+the family rates `[pricing.defaults.gpu.<model>].rates` and
+`[pricing.defaults.<family>].rates` (see "Storefront listing shapes and pool
+overrides") — beneath each pool's own `pricing` declaration and the storefront's
+per-pool overrides. `[pricing].default_min_price` is the negotiation floor for a
+selected settlement option that advertises no rate, in base units per hour as
+decimal text; a fractional number is refused when a negotiation first needs it.
+The storefront refuses to start with a configured family rate it cannot read.
+`default_token_address` and per-model `min_price` and `token` configure nothing; the
+storefront names any it finds at startup. A change to any of them reaches open listings on the next publication
 cycle; `market-storefront publish` runs or previews that cycle and takes no terms
 of its own.
 
@@ -464,8 +471,28 @@ own `listing_shapes`, the storefront operator may state its own terms for one
 pool at one site, in one offering mode, through the administrator API or
 `market-storefront pool-override` (`set --file`, `get`, `list`, and `delete`,
 with `--mode` never defaulted). An override states listing shapes, settlement
-clauses, asking rates, and the market's terms (for VM: `sla`, `min_price`,
-`token`, and `max_duration_seconds`); it cannot state region or capacity backing.
+clauses, asking rates, and the market's terms (for VM: `sla`,
+`max_duration_seconds`, and `pricing` family rates); it cannot state region or
+capacity backing. A write stating the retired `min_price` or `token` is refused; a
+stored override that still carries them keeps applying its other terms, and
+system status names the retired keys.
+
+- **Family rates price a listing by its shape.** A rate is stated per capacity
+  family in the pricing hint's nesting —
+  `pricing: {gpu: {H100: {rates: [...]}}, cpu: {rates: [...]}, memory: {rates: [...]}, storage: {rates: [...]}}`
+  — each entry an `asset`, a positive decimal-text `rate` per unit of the family
+  (per card, vCPU, or GiB), and a time unit `per`. The same nesting serves a pool's
+  `pricing` hint, an override's `pricing` term, and the storefront's
+  `[pricing.defaults]`; each family resolves from its own highest tier, whose list
+  replaces lower tiers' whole. A listing for which any family resolves rates is
+  shape-priced: its settlement clauses state no `rate`, and each clause's rate is
+  the listing's shape priced at the family rates in that clause's asset. A family
+  without a rate is not charged, and system status lists it per asset; a listing
+  whose rate would be zero in a clause's asset is refused. Without family rates a
+  clause's own `rate` is the listing's rate, whatever its shape. The provisioning
+  service refuses a pool write whose rate lists are malformed; a rate the storefront
+  still cannot read holds the pool's listings at their last-published terms and is
+  named, with its tier and family, in system status.
 
 - **Asking rates are declared per shape.** A pool states them in its
   `asking_rates` policy tag, keyed by offering mode, each entry naming the shape

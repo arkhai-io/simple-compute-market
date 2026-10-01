@@ -373,6 +373,11 @@ async def test_a_site_that_cannot_answer_is_refused_as_retryable(world, switch, 
             id="a shape outside the vocabulary",
         ),
         pytest.param(_record(terms={"sla": -1}), id="terms outside the vocabulary"),
+        pytest.param(_record(terms={"min_price": "3"}), id="a retired pricing term"),
+        pytest.param(
+            _record(terms={"pricing": {"gpu": {"H100": {"rates": "not-a-list"}}}}),
+            id="family rates that cannot be read",
+        ),
         pytest.param(
             _record(settlements=[{"mechanism": "nope", "asset": "x", "rate": "1", "per": "hour"}]),
             id="clauses that do not compile",
@@ -415,9 +420,9 @@ async def test_a_write_refusable_without_the_site_never_calls_it(world, record):
 async def test_reads_and_an_idempotent_delete(world):
     world.pools.append(_shaped())
     overrides = _overrides(world)
-    await overrides.put_pool_override(_record(terms={"min_price": "3"}))
+    await overrides.put_pool_override(_record(terms={"sla": 99.5}))
 
-    assert (await overrides.get_pool_override(SITE, "gpu", "vm")).terms == {"min_price": "3"}
+    assert (await overrides.get_pool_override(SITE, "gpu", "vm")).terms == {"sla": 99.5}
     listed = await overrides.list_pool_overrides(site_id=SITE, pool_id="gpu")
     assert [(o.pool_id, o.offering_mode) for o in listed.overrides] == [("gpu", "vm")]
 

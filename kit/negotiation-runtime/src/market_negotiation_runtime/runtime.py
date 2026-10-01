@@ -163,8 +163,11 @@ ValidateContinuationHook = Callable[
 ]
 EvaluateRoundHook = Callable[[RoundRequest], Awaitable[RoundEvaluation]]
 DetermineStrategyHook = Callable[[Any, Mapping[str, Any]], str]
+#: ``(listing, listing_record, terms, uses_scalar_amount, pinned_proposal)``. The
+#: pinned proposal is the buyer's, as recorded on the thread: the option it
+#: selects is the one whose rate the seller negotiates from.
 ReferenceAmountHook = Callable[
-    [Any, Mapping[str, Any], NegotiationTerms, bool], int
+    [Any, Mapping[str, Any], NegotiationTerms, bool, Mapping[str, Any] | None], int
 ]
 AmountFromProposalHook = Callable[[Mapping[str, Any] | None], int | None]
 ProposalFromAmountHook = Callable[
@@ -509,6 +512,7 @@ class NegotiationRuntime:
             resolved.listing_record,
             decoded_terms,
             uses_scalar_amount,
+            pinned_proposal,
         )
         agreement = hooks.agreement_terms(
             resolved.listing,

@@ -6,7 +6,6 @@ import json
 import logging
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import replace
-from decimal import Decimal
 from typing import Any
 
 from apicredits_storefront.services.capacity_client import (
@@ -17,11 +16,11 @@ from apicredits_storefront.services.capacity_client import (
 from apicredits_storefront.services.keys_lookup import lookup_key_record
 from apicredits_storefront.utils.config import CHAINS, settings
 from arkhai_apicredits.listings.models import coerce_resource_dict
-from arkhai_apicredits.listings.pricing import (
-    determine_strategy_from_order,
-    extract_unit_price_from_order,
+from arkhai_apicredits.listings.pricing import determine_strategy_from_order
+from arkhai_apicredits.negotiation.storefront_round import (
+    ApiCreditsSellerRoundHook,
+    _seller_reference_amount,
 )
-from arkhai_apicredits.negotiation.storefront_round import ApiCreditsSellerRoundHook
 from arkhai_apicredits.negotiation.terms import (
     provision_key_id,
     provision_key_mode,
@@ -317,19 +316,17 @@ def _reference_amount(
     _listing_record: Mapping[str, Any],
     terms: NegotiationTerms,
     uses_scalar_amount: bool,
+    pinned_proposal: Mapping[str, Any] | None,
 ) -> int:
+    """quantity × the rate of the option the buyer's pinned proposal selects."""
     if not uses_scalar_amount:
         return 0
-    unit = Decimal(
-        str(
-            extract_unit_price_from_order(
-                listing,
-                default_min_price=_default_min_price(),
-            )
-        )
+    return _seller_reference_amount(
+        listing,
+        provision_quantity(terms.decoded),
+        default_min_price=_default_min_price(),
+        proposal=pinned_proposal,
     )
-    quantity = provision_quantity(terms.decoded)
-    return int(unit * int(quantity if quantity is not None else 1))
 
 
 def build_api_credit_accepted_artifacts(

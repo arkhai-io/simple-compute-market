@@ -486,11 +486,13 @@ _INIT_USER_TEMPLATE = """\
 #   { mechanism = "fiat.stripe.v1", asset = "usd", rate = "2", per = "hour", mechanism_input = { funding_profile = "us_ach_debit.v1", interaction = "interactive", funds_flow = "separate_charges_transfers" } },
 # ]
 # Per-resource or command clauses replace this list; fields are never merged.
-# default_min_price = "1"                      # negotiation floor when a resource row has no min_price;
+# default_min_price = "1"                      # hidden-reserve negotiation floor, base units per hour;
                                                 # it never constructs a settlement option. Each settlement
                                                 # clause owns its explicit asset, decimal rate, and unit.
-# default_token_address = "0x..."              # demand-side token for the resource-imbalance policy only;
-                                                # it never supplies a settlement option asset or rate.
+# [pricing.defaults.gpu.H100]                  # family rates make listings shape-priced: clauses then
+# rates = [ { asset = "usd", rate = "2", per = "hour" } ]   # state no rate and each clause's rate is
+# [pricing.defaults.memory]                    # composed from the listing's shape, per card-hour,
+# rates = [ { asset = "usd", rate = "0.01", per = "hour" } ] # per GiB-hour, and so on.
 # default_max_duration_seconds = 86400         # advertised lease ceiling; 0/unset = unlimited
 # publish_priceless = false                    # allow rows without an explicit negotiation floor; settlement
                                                 # publication still requires complete typed clauses.
