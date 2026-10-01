@@ -1,4 +1,5 @@
 from __future__ import annotations
+import base64
 
 from collections.abc import Mapping
 from dataclasses import replace
@@ -142,7 +143,8 @@ class HookHarness:
                 "amount": acceptance.agreed_amount,
                 "terms": dict(acceptance.terms.wire or {}),
                 "buyer": acceptance.buyer_principal.model_dump(mode="json"),
-            }
+            },
+            "agreement_bytes": base64.b64encode(b'{"accepted":true}').decode("ascii"),
         }
 
     def event(self, component: str, event: str, **fields: Any) -> None:
@@ -365,7 +367,11 @@ async def test_accept_resumes_recorded_terms_and_builds_artifact_before_effects(
 
     assert response["accepted_artifact"]["terms"] == {"units": 7}
     assert response["accepted_artifact"]["amount"] == 12
+    assert response["agreement_bytes"] == base64.b64encode(b'{"accepted":true}').decode("ascii")
     assert repository.agreements[0]["agreed_price"] == 12
+    assert repository.agreements[0]["agreement_bytes"] == b'{"accepted":true}'
+    assert repository.agreements[0]["accepted_at"] == "2026-08-15T00:00:00Z"
+    assert repository.agreements[0]["agreed_start_utc"] == "2026-08-15T00:00:00Z"
     assert repository.threads["neg-fixed"]["terminal_state"] == "success"
     assert repository.effects[-2][0] == "hold"
     assert repository.effects[-1][0] == "artifacts"

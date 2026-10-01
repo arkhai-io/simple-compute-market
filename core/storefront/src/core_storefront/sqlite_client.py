@@ -348,6 +348,7 @@ class SQLiteClient:
                   agreed_price TEXT,
                   agreed_duration_seconds INTEGER,
                   agreed_at TEXT,
+                  agreement_bytes BLOB,
                   buyer_scheme TEXT,
                   buyer_identifier TEXT,
                   seller_scheme TEXT,
@@ -477,6 +478,12 @@ class SQLiteClient:
                     pass
             try:
                 cur.execute("ALTER TABLE negotiation_threads ADD COLUMN agreed_at TEXT")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cur.execute(
+                    "ALTER TABLE negotiation_threads ADD COLUMN agreement_bytes BLOB"
+                )
             except sqlite3.OperationalError:
                 pass
             existing_neg_cols = {
@@ -2199,6 +2206,8 @@ class SQLiteClient:
         agreed_price: int | str | float,
         agreed_duration_seconds: int,
         agreed_start_utc: str | None = None,
+        accepted_at: str | None = None,
+        agreement_bytes: bytes | None = None,
     ) -> None:
         """Record the agreement artifact that comes out of a successful negotiation.
 
@@ -2216,6 +2225,7 @@ class SQLiteClient:
 
         def _save() -> None:
             now = datetime.now().isoformat()
+            agreed_at_value = accepted_at or now
             conn = sqlite3.connect(self.db_path)
             try:
                 cur = conn.cursor()
@@ -2227,6 +2237,7 @@ class SQLiteClient:
                         agreed_duration_seconds = ?,
                         requested_start_utc = COALESCE(requested_start_utc, ?),
                         agreed_at = ?,
+                        agreement_bytes = COALESCE(?, agreement_bytes),
                         updated_at = ?
                     WHERE negotiation_id = ?
                     """,
@@ -2234,7 +2245,8 @@ class SQLiteClient:
                         agreed_price_text,
                         int(agreed_duration_seconds),
                         agreed_start_utc,
-                        now,
+                        agreed_at_value,
+                        agreement_bytes,
                         now,
                         negotiation_id,
                     ),
@@ -2341,7 +2353,7 @@ class SQLiteClient:
                            provision_terms,
                            settlement_plan,
                            agreed_price, agreed_duration_seconds, agreed_at,
-                           buyer_scheme, buyer_identifier,
+                           agreement_bytes, buyer_scheme, buyer_identifier,
                            seller_scheme, seller_identifier, matched_offer_id
                     FROM negotiation_threads WHERE negotiation_id = ?
                     """,
@@ -2368,6 +2380,7 @@ class SQLiteClient:
                     "agreed_price",
                     "agreed_duration_seconds",
                     "agreed_at",
+                    "agreement_bytes",
                     "buyer_scheme",
                     "buyer_identifier",
                     "seller_scheme",

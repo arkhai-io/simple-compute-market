@@ -9,6 +9,7 @@ from market_identity import Identity
 
 
 from market_core.schemas import (
+    Agreement,
     EscrowProposal,
     ProvisionTerms,
     SettlementPlan,
@@ -63,6 +64,8 @@ class NegotiateNewResponse(BaseModel):
     settlement_selection: SettlementSelection | None = None
     settlement_plan: SettlementPlan | None = None
     accepted_escrow_terms: list[dict[str, Any]] | None = None
+    agreement: Agreement | None = None
+    agreement_bytes: str | None = None
 
 
 class NegotiateContinueRequest(BaseModel):
@@ -85,6 +88,8 @@ class NegotiateContinueResponse(BaseModel):
     settlement_plan: SettlementPlan | None = None
     settlement_selection: SettlementSelection | None = None
     accepted_escrow_terms: list[dict[str, Any]] | None = None
+    agreement: Agreement | None = None
+    agreement_bytes: str | None = None
 
 
 class NegotiationSummary(BaseModel):

@@ -218,6 +218,7 @@ def _migrate_negotiation_amount_columns(conn: sqlite3.Connection) -> None:
         for column_name, column_sql in (
             ("buyer", "TEXT"),
             ("matched_offer_id", "TEXT"),
+            ("agreement_bytes", "BLOB"),
         ):
             _add_column_if_missing(conn, "negotiation_threads", column_name, column_sql)
 
@@ -245,6 +246,7 @@ def _migrate_negotiation_amount_columns(conn: sqlite3.Connection) -> None:
               agreed_price TEXT,
               agreed_duration_seconds INTEGER,
               agreed_at TEXT,
+              agreement_bytes BLOB,
               buyer TEXT,
               matched_offer_id TEXT
             )
@@ -257,7 +259,8 @@ def _migrate_negotiation_amount_columns(conn: sqlite3.Connection) -> None:
                 our_agent_id, their_agent_id, status, created_at,
                 updated_at, terminal_state, requested_duration_seconds,
                 requested_start_utc, buyer_escrow_proposal, provision_terms,
-                agreed_price, agreed_duration_seconds, agreed_at, buyer,
+                agreed_price, agreed_duration_seconds, agreed_at,
+                agreement_bytes, buyer,
                 matched_offer_id
             )
             SELECT negotiation_id, our_listing_id, their_listing_id,
@@ -267,7 +270,8 @@ def _migrate_negotiation_amount_columns(conn: sqlite3.Connection) -> None:
                    buyer_escrow_proposal,
                    provision_terms,
                    CASE WHEN agreed_price IS NULL THEN NULL ELSE CAST(agreed_price AS TEXT) END,
-                   agreed_duration_seconds, agreed_at, buyer, matched_offer_id
+                   agreed_duration_seconds, agreed_at, agreement_bytes,
+                   buyer, matched_offer_id
             FROM negotiation_threads__amount_migration
             """
         )

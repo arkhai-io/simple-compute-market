@@ -154,10 +154,13 @@ class BareMetalStorefrontSettlementComposition:
     ) -> dict[str, Callable[[Mapping[str, Any], Mapping[str, Any]], Any]]:
         """Curried registry dispatch for every enabled obligation-building mechanism."""
 
-        dispatch: dict[str, Callable[[Mapping[str, Any], Mapping[str, Any]], Any]] = {}
+        dispatch: dict[
+            str, Callable[[Mapping[str, Any], Mapping[str, Any]], Any] | None
+        ] = {}
         for mechanism_id in self.config.priority:
             registration = self.registry.registration(mechanism_id)
             if registration.accepted_obligation_builder is None:
+                dispatch[mechanism_id] = None
                 continue
 
             def build(

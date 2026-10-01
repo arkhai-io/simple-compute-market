@@ -185,6 +185,8 @@ class SQLiteClient(CoreSQLiteClient):
         seller_amount: int | None,
         terms: BareMetalTerms | None,
         agreed_amount: int | None,
+        agreement_bytes: bytes | None = None,
+        accepted_at: str | None = None,
     ) -> None:
         """Persist one opening under the listing's immutable domain/site binding."""
         listing_binding = await self.load_listing_binding(listing_id=listing_id)
@@ -269,7 +271,8 @@ class SQLiteClient(CoreSQLiteClient):
                     """
                     UPDATE negotiation_threads
                     SET status=?, terminal_state=?, agreed_price=?,
-                        agreed_duration_seconds=?, agreed_at=?, updated_at=?
+                        agreed_duration_seconds=?, agreed_at=?, agreement_bytes=?,
+                        updated_at=?
                     WHERE negotiation_id=?
                     """,
                     (
@@ -277,7 +280,8 @@ class SQLiteClient(CoreSQLiteClient):
                         terminal_state,
                         None if agreed_amount is None else str(agreed_amount),
                         message.duration_seconds if agreed_amount is not None else None,
-                        now if agreed_amount is not None else None,
+                        (accepted_at or now) if agreed_amount is not None else None,
+                        agreement_bytes,
                         now,
                         negotiation_id,
                     ),

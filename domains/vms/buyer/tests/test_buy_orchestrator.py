@@ -31,6 +31,7 @@ from identity_helpers import (
     BUYER_SIGNER,
     seller_principals,
     signed_response_headers,
+    with_accepted_agreement,
 )
 from market_core.schemas import (
     EscrowProposal,
@@ -285,6 +286,8 @@ def _urlopen_sequence(responses):
         if not queue:
             raise AssertionError(f"Unexpected urlopen call: {req.full_url}")
         nxt = queue.pop(0)
+        if isinstance(nxt, dict):
+            nxt = with_accepted_agreement(req, nxt)
         body = nxt if isinstance(nxt, str) else json.dumps(nxt)
         headers = (
             signed_response_headers(req, nxt)

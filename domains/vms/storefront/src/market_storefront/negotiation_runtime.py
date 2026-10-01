@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import logging
 from collections.abc import Callable, Mapping
@@ -26,6 +28,7 @@ from domains.vms.settlement.proposals import accepted_escrow_artifacts_from_prop
 from market_capacity_publication import CapacityBinding, CapacityRuntime
 from market_core import MarketDomainContract
 from market_core.schemas import (
+    Agreement,
     SettlementObligation,
     SettlementOption,
     SettlementPlan,
@@ -53,7 +56,7 @@ from market_storefront.utils.config import CHAINS, get_evm_wallet_address, setti
 logger = logging.getLogger(__name__)
 
 AcceptedObligationDispatch = Mapping[
-    str, Callable[[Mapping[str, Any], Mapping[str, Any]], Any]
+    str, Callable[[Mapping[str, Any], Mapping[str, Any]], Any] | None
 ]
 
 
@@ -378,9 +381,20 @@ def _accepted_selection_artifacts(
         or accepted.mechanism != advertised_option.mechanism
     ):
         raise OfferUnfulfillableError("settlement_selection_not_exact")
-    build_obligation = dispatch.get(accepted.mechanism)
-    if build_obligation is None:
+    if accepted.mechanism not in dispatch:
         raise OfferUnfulfillableError("settlement_mechanism_unsupported")
+    build_obligation = dispatch[accepted.mechanism]
+    if build_obligation is None:
+        return {
+            "settlement_selection": accepted.model_dump(
+                mode="json", exclude_none=True
+            ),
+            "_agreement_settlement_option": advertised_option.model_dump(
+                mode="json", exclude_none=True
+            ),
+        }
+    if accepted.expiration_unix is None:
+        raise OfferUnfulfillableError("settlement_expiration_required")
     listing_id = listing.get("listing_id")
     if not isinstance(listing_id, str) or not listing_id:
         raise OfferUnfulfillableError("selected_listing_identity_unavailable")
@@ -419,8 +433,11 @@ def _accepted_selection_artifacts(
     except (TypeError, ValueError) as exc:
         raise OfferUnfulfillableError("selected_settlement_option_not_exact") from exc
     return {
-        "settlement_selection": accepted.model_dump(),
-        "settlement_plan": plan.model_dump(),
+        "settlement_selection": accepted.model_dump(mode="json", exclude_none=True),
+        "settlement_plan": plan.model_dump(mode="json"),
+        "_agreement_settlement_option": advertised_option.model_dump(
+            mode="json", exclude_none=True
+        ),
     }
 
 
@@ -484,6 +501,70 @@ def _accepted_settlement_artifacts(
     )
 
 
+def _json_compatible(value: Any) -> Any:
+    if hasattr(value, "model_dump"):
+        return _json_compatible(value.model_dump(mode="json", exclude_none=True))
+    if isinstance(value, Mapping):
+        return {str(key): _json_compatible(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_compatible(item) for item in value]
+    if hasattr(value, "isoformat") and not isinstance(value, str):
+        return value.isoformat()
+    return value
+
+
+def _with_agreement(
+    acceptance: Acceptance,
+    artifacts: dict[str, Any],
+) -> dict[str, Any]:
+    settlement_raw = artifacts.pop("_agreement_settlement_option", None)
+    settlement = (
+        SettlementOption.model_validate(settlement_raw)
+        if settlement_raw is not None
+        else None
+    )
+    plan = artifacts.get("settlement_plan")
+    asset = settlement.asset if settlement is not None else None
+    if asset is None and isinstance(plan, Mapping):
+        obligations = plan.get("obligations")
+        if isinstance(obligations, list) and obligations and isinstance(obligations[0], Mapping):
+            raw_asset = obligations[0].get("asset")
+            asset = raw_asset if isinstance(raw_asset, str) else None
+    provision = acceptance.terms.wire
+    if provision is None and hasattr(acceptance.terms.decoded, "model_dump"):
+        provision = acceptance.terms.decoded.model_dump(mode="json", exclude_none=True)
+    provision_terms = (
+        _json_compatible(provision) if isinstance(provision, Mapping) else None
+    )
+    listing_bytes = json.dumps(
+        _json_compatible(acceptance.listing_record),
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+        allow_nan=False,
+    ).encode("utf-8")
+    if acceptance.accepted_at is None or acceptance.agreement.start_utc is None:
+        raise RuntimeError("accepted Agreement lacks fixed acceptance timestamps")
+    agreement = Agreement(
+        negotiation_id=acceptance.negotiation_id,
+        listing_id=acceptance.listing_id,
+        listing_hash=hashlib.sha256(listing_bytes).hexdigest(),
+        buyer=acceptance.buyer_principal.model_dump(mode="json"),
+        seller=acceptance.seller_principal.model_dump(mode="json"),
+        settlement=settlement,
+        amount=acceptance.agreed_amount,
+        asset=asset,
+        duration_seconds=acceptance.agreement.duration_seconds,
+        start_utc=acceptance.agreement.start_utc,
+        provision_terms=provision_terms,
+        accepted_at=acceptance.accepted_at.isoformat().replace("+00:00", "Z"),
+    )
+    agreement_bytes = agreement.model_dump_json(exclude_none=True).encode("utf-8")
+    artifacts["agreement"] = agreement
+    artifacts["agreement_bytes"] = base64.b64encode(agreement_bytes).decode("ascii")
+    return artifacts
+
+
 def _build_response_artifacts(
     domain: MarketDomainContract,
     acceptance: Acceptance,
@@ -493,20 +574,23 @@ def _build_response_artifacts(
     if not isinstance(acceptance.binding, CapacityBinding):
         raise RuntimeError("VM negotiation has no frozen capacity binding")
     if accepted:
-        return _accepted_settlement_artifacts(
-            dispatch,
-            capacity_binding=acceptance.binding,
-            negotiation_id=acceptance.negotiation_id,
-            listing_id=acceptance.listing_id,
-            domain=domain,
-            proposal=acceptance.pinned_proposal,
-            listing=acceptance.listing_record,
-            agreed_amount=acceptance.agreed_amount,
-            duration_seconds=acceptance.agreement.duration_seconds,
-            uses_scalar_amount=acceptance.uses_scalar_amount,
-            buyer_principal=acceptance.buyer_principal,
-            seller_principal=acceptance.seller_principal,
-            provision_terms=acceptance.terms.decoded,
+        return _with_agreement(
+            acceptance,
+            _accepted_settlement_artifacts(
+                dispatch,
+                capacity_binding=acceptance.binding,
+                negotiation_id=acceptance.negotiation_id,
+                listing_id=acceptance.listing_id,
+                domain=domain,
+                proposal=acceptance.pinned_proposal,
+                listing=acceptance.listing_record,
+                agreed_amount=acceptance.agreed_amount,
+                duration_seconds=acceptance.agreement.duration_seconds,
+                uses_scalar_amount=acceptance.uses_scalar_amount,
+                buyer_principal=acceptance.buyer_principal,
+                seller_principal=acceptance.seller_principal,
+                provision_terms=acceptance.terms.decoded,
+            ),
         )
     state = acceptance.policy_state
     if not isinstance(state, Mapping):

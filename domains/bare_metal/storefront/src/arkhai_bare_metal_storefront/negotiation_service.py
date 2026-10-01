@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import json
 import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -18,6 +21,7 @@ from core_storefront.models.negotiation_models import (
 from market_core import MarketDomainContract
 from market_core.schemas import (
     AcceptedEscrow,
+    Agreement,
     EscrowProposal,
     SettlementObligation,
     SettlementOption,
@@ -47,7 +51,9 @@ PlanBuilder = Callable[..., dict[str, Any]]
 # the mechanism exactly once and every obligation-shaped decision goes through
 # the registration; the domain keeps no per-mechanism conditional arm.
 AcceptedObligationDispatch = Mapping[
-    str, Callable[[Mapping[str, Any], Mapping[str, Any]], AcceptedObligationArtifacts]
+    str,
+    Callable[[Mapping[str, Any], Mapping[str, Any]], AcceptedObligationArtifacts]
+    | None,
 ]
 
 
@@ -266,7 +272,11 @@ class BareMetalNegotiationService:
             if decision.action == "accept"
             else None
         )
+        negotiation_id = f"neg_{uuid.uuid4().hex}"
         artifacts: dict[str, Any] = {}
+        agreement: Agreement | None = None
+        agreement_bytes: bytes | None = None
+        accepted_at: datetime | None = None
         if terms is not None:
             artifacts = self.build_plan(
                 proposal=proposal,
@@ -276,8 +286,25 @@ class BareMetalNegotiationService:
                 buyer_principal=buyer_principal,
                 seller_principal=self.seller_principal,
             )
+            accepted_at = datetime.now(timezone.utc)
+            agreement = self._agreement(
+                negotiation_id=negotiation_id,
+                listing_id=request.listing_id,
+                listing=listing,
+                buyer_principal=buyer_principal,
+                seller_principal=self.seller_principal,
+                settlement=None,
+                amount=agreed_amount or 0,
+                duration_seconds=terms.duration_seconds,
+                start_utc=accepted_at,
+                accepted_at=accepted_at,
+                provision_terms=request.provision_terms,
+                settlement_plan=artifacts.get("settlement_plan"),
+            )
+            agreement_bytes = agreement.model_dump_json(
+                exclude_none=True
+            ).encode("utf-8")
 
-        negotiation_id = f"neg_{uuid.uuid4().hex}"
         await self.db.persist_bare_metal_opening(
             negotiation_id=negotiation_id,
             listing_id=request.listing_id,
@@ -293,6 +320,12 @@ class BareMetalNegotiationService:
             seller_amount=seller_amount,
             terms=terms,
             agreed_amount=agreed_amount,
+            agreement_bytes=agreement_bytes,
+            accepted_at=(
+                accepted_at.isoformat().replace("+00:00", "Z")
+                if accepted_at is not None
+                else None
+            ),
         )
         settlement_plan = artifacts.get("settlement_plan")
         legacy_terms = artifacts.get("accepted_escrow_terms")
@@ -315,6 +348,12 @@ class BareMetalNegotiationService:
                 else None
             ),
             accepted_escrow_terms=legacy_terms,
+            agreement=agreement,
+            agreement_bytes=(
+                base64.b64encode(agreement_bytes).decode("ascii")
+                if agreement_bytes is not None
+                else None
+            ),
         )
 
     async def _open_exact_selection(
@@ -334,12 +373,12 @@ class BareMetalNegotiationService:
         provision a machine, and the plan's ``bare_metal.v1`` service terms.
         """
 
-        build_obligation = self.accepted_obligation_dispatch.get(selection.mechanism)
-        if build_obligation is None:
+        if selection.mechanism not in self.accepted_obligation_dispatch:
             raise NegotiationRequestError(
                 "exact settlement selection uses an unsupported mechanism",
                 status_code=400,
             )
+        build_obligation = self.accepted_obligation_dispatch[selection.mechanism]
         if (
             Identity.model_validate(listing.get("seller_principal"))
             != self.seller_principal
@@ -380,45 +419,84 @@ class BareMetalNegotiationService:
                 options=options,
                 selected_option=selected_option,
             )
-        built = self._build_accepted_obligation(
-            build_obligation,
-            selected_option=selected_option,
-            request=request,
-            buyer_principal=buyer_principal,
-            message=message,
-            selection=selection,
+        built = (
+            self._build_accepted_obligation(
+                build_obligation,
+                selected_option=selected_option,
+                request=request,
+                buyer_principal=buyer_principal,
+                message=message,
+                selection=selection,
+            )
+            if build_obligation is not None
+            else None
         )
         proposed_amount = _selection_proposal_amount(request)
-        if built.amount is not None:
+        if built is not None and built.amount is not None:
             if proposed_amount is not None and proposed_amount != built.amount:
                 raise NegotiationRequestError(
                     "settlement amount differs from the trusted accepted amount",
                     status_code=400,
                 )
-        elif proposed_amount is not None:
+        elif built is not None and proposed_amount is not None:
             raise NegotiationRequestError(
                 "selected mechanism does not negotiate a settlement amount",
                 status_code=400,
             )
-        try:
-            plan = SettlementPlan(
-                buyer_principal=buyer_principal.model_dump(mode="json"),
-                seller_principal=self.seller_principal.model_dump(mode="json"),
-                service_terms={**built.service_terms, **service_terms},
-                obligations=[SettlementObligation.model_validate(built.obligation)],
-            )
-        except (TypeError, ValueError) as exc:
-            raise NegotiationRequestError(
-                "selected listing option cannot produce an exact accepted plan"
-            ) from exc
-        agreed_amount = built.amount if built.amount is not None else 0
+        plan = None
+        if built is not None:
+            if selection.expiration_unix is None:
+                raise NegotiationRequestError(
+                    "selected mechanism requires expiration_unix",
+                    status_code=400,
+                )
+            try:
+                plan = SettlementPlan(
+                    buyer_principal=buyer_principal.model_dump(mode="json"),
+                    seller_principal=self.seller_principal.model_dump(mode="json"),
+                    service_terms={**built.service_terms, **service_terms},
+                    obligations=[SettlementObligation.model_validate(built.obligation)],
+                )
+            except (TypeError, ValueError) as exc:
+                raise NegotiationRequestError(
+                    "selected listing option cannot produce an exact accepted plan"
+                ) from exc
+        agreed_amount = (
+            built.amount
+            if built is not None and built.amount is not None
+            else proposed_amount
+            if proposed_amount is not None
+            else compute_rate_total(selected_option.rates[0], message.duration_seconds)
+            if selected_option.rates and selected_option.rates[0].per in {"hour"}
+            else 0
+        )
         proposal_payload: dict[str, Any] = {
-            "settlement_selection": selection.model_dump(mode="json"),
+            "settlement_selection": selection.model_dump(
+                mode="json", exclude_none=True
+            ),
             "fields": (
-                {"amount": str(built.amount)} if built.amount is not None else {}
+                {"amount": str(agreed_amount)} if agreed_amount else {}
             ),
         }
         negotiation_id = f"neg_{uuid.uuid4().hex}"
+        accepted_at = datetime.now(timezone.utc)
+        agreement = self._agreement(
+            negotiation_id=negotiation_id,
+            listing_id=request.listing_id,
+            listing=listing,
+            buyer_principal=buyer_principal,
+            seller_principal=self.seller_principal,
+            settlement=selected_option,
+            amount=agreed_amount,
+            duration_seconds=message.duration_seconds,
+            start_utc=accepted_at,
+            accepted_at=accepted_at,
+            provision_terms=request.provision_terms,
+            settlement_plan=(plan.model_dump(mode="json") if plan is not None else None),
+        )
+        agreement_bytes = agreement.model_dump_json(
+            exclude_none=True
+        ).encode("utf-8")
         await self.db.persist_bare_metal_opening(
             negotiation_id=negotiation_id,
             listing_id=request.listing_id,
@@ -434,13 +512,16 @@ class BareMetalNegotiationService:
             seller_amount=agreed_amount,
             terms=terms,
             agreed_amount=agreed_amount,
+            agreement_bytes=agreement_bytes,
+            accepted_at=accepted_at.isoformat().replace("+00:00", "Z"),
         )
-        await self.db.commit_settlement_plan(
-            negotiation_id=negotiation_id,
-            settlement_plan=plan.model_dump(mode="json"),
-            buyer_principal=buyer_principal,
-            seller_principal=self.seller_principal,
-        )
+        if plan is not None:
+            await self.db.commit_settlement_plan(
+                negotiation_id=negotiation_id,
+                settlement_plan=plan.model_dump(mode="json"),
+                buyer_principal=buyer_principal,
+                seller_principal=self.seller_principal,
+            )
         return NegotiateNewResponse(
             negotiation_id=negotiation_id,
             buyer_principal=buyer_principal,
@@ -450,6 +531,61 @@ class BareMetalNegotiationService:
             accepted_provision_terms=request.provision_terms,
             settlement_selection=selection,
             settlement_plan=plan,
+            agreement=agreement,
+            agreement_bytes=base64.b64encode(agreement_bytes).decode("ascii"),
+        )
+
+    @staticmethod
+    def _agreement(
+        *,
+        negotiation_id: str,
+        listing_id: str,
+        listing: Mapping[str, Any],
+        buyer_principal: Identity,
+        seller_principal: Identity,
+        settlement: SettlementOption | None,
+        amount: int,
+        duration_seconds: int,
+        start_utc: datetime,
+        accepted_at: datetime,
+        provision_terms: Any,
+        settlement_plan: Mapping[str, Any] | None,
+    ) -> Agreement:
+        encoded_listing = json.dumps(
+            listing,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+            allow_nan=False,
+        ).encode("utf-8")
+        asset = settlement.asset if settlement is not None else None
+        if asset is None and settlement_plan is not None:
+            obligations = settlement_plan.get("obligations")
+            if isinstance(obligations, list) and obligations and isinstance(
+                obligations[0], Mapping
+            ):
+                raw_asset = obligations[0].get("asset")
+                asset = raw_asset if isinstance(raw_asset, str) else None
+        provision_wire = (
+            provision_terms.model_dump(mode="json", exclude_none=True)
+            if hasattr(provision_terms, "model_dump")
+            else dict(provision_terms)
+            if isinstance(provision_terms, Mapping)
+            else None
+        )
+        return Agreement(
+            negotiation_id=negotiation_id,
+            listing_id=listing_id,
+            listing_hash=hashlib.sha256(encoded_listing).hexdigest(),
+            buyer=buyer_principal.model_dump(mode="json"),
+            seller=seller_principal.model_dump(mode="json"),
+            settlement=settlement,
+            amount=int(amount),
+            asset=asset,
+            duration_seconds=int(duration_seconds),
+            start_utc=start_utc.isoformat().replace("+00:00", "Z"),
+            provision_terms=provision_wire,
+            accepted_at=accepted_at.isoformat().replace("+00:00", "Z"),
         )
 
     async def _validate_physical_selection(

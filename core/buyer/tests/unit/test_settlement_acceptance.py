@@ -11,6 +11,7 @@ from __future__ import annotations
 import pytest
 from core_buyer.negotiation_client import _validate_settlement_acceptance
 from market_core.schemas import (
+    Agreement,
     SettlementObligation,
     SettlementOption,
     SettlementPlan,
@@ -44,6 +45,27 @@ def _advertised_option() -> SettlementOption:
         rates=[],
         params={key: dict(value) for key, value in _PARAMS.items()},
     )
+
+def _agreement(
+    option: SettlementOption,
+    *,
+    amount: int = _AMOUNT,
+    listing_id: str = "L-hosted",
+) -> Agreement:
+    return Agreement(
+        negotiation_id="neg-1",
+        listing_id=listing_id,
+        listing_hash="0" * 64,
+        buyer=_BUYER.model_dump(mode="json"),
+        seller=_SELLER.model_dump(mode="json"),
+        settlement=option,
+        amount=amount,
+        asset=option.asset,
+        duration_seconds=3600,
+        start_utc="2025-01-01T00:00:00Z",
+        accepted_at="2025-01-01T00:00:00Z",
+    )
+
 
 
 def _seller_plan(service_terms: dict) -> SettlementPlan:
@@ -79,6 +101,8 @@ def _validate(plan: SettlementPlan) -> None:
         expiration_unix=_EXPIRATION,
     )
     _validate_settlement_acceptance(
+        agreement=_agreement(_advertised_option()),
+        expected_listing_id="L-hosted",
         reply={
             "buyer_principal": _BUYER.model_dump(mode="json"),
             "seller_principal": _SELLER.model_dump(mode="json"),
@@ -172,6 +196,8 @@ def test_accepts_amountless_introduction_plan() -> None:
         expiration_unix=_EXPIRATION,
     )
     _validate_settlement_acceptance(
+        agreement=_agreement(option, amount=0, listing_id="L-contact"),
+        expected_listing_id="L-contact",
         reply={
             "buyer_principal": _BUYER.model_dump(mode="json"),
             "seller_principal": _SELLER.model_dump(mode="json"),

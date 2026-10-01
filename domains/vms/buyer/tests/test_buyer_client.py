@@ -13,6 +13,7 @@ this file just covers the HTTP loop wrapping the chain.
 
 from __future__ import annotations
 
+import base64
 import json
 from dataclasses import dataclass
 from unittest.mock import patch
@@ -25,6 +26,7 @@ from identity_helpers import (
     signed_response_headers,
 )
 from market_core.schemas import (
+    Agreement,
     EscrowProposal,
     RateValue,
     SettlementOption,
@@ -103,6 +105,20 @@ def _example_accept_reply(
     params = dict(option.params)
     params["payer_principal"] = buyer.model_dump(mode="json")
     params["claimant_principal"] = seller.model_dump(mode="json")
+    agreement = Agreement(
+        negotiation_id=negotiation_id,
+        listing_id="seller-1",
+        listing_hash="0" * 64,
+        buyer=buyer.model_dump(mode="json"),
+        seller=seller.model_dump(mode="json"),
+        settlement=option,
+        amount=amount,
+        asset=option.asset,
+        duration_seconds=3600,
+        start_utc="2025-01-01T00:00:00Z",
+        provision_terms=_provision().model_dump(mode="json"),
+        accepted_at="2025-01-01T00:00:00Z",
+    )
     return {
         "negotiation_id": negotiation_id,
         "action": "accept",
@@ -132,6 +148,10 @@ def _example_accept_reply(
             ],
             "service_terms": {},
         },
+        "agreement": agreement.model_dump(mode="json", exclude_none=True),
+        "agreement_bytes": base64.b64encode(
+            agreement.model_dump_json(exclude_none=True).encode("utf-8")
+        ).decode("ascii"),
     }
 
 
@@ -169,8 +189,64 @@ def _with_round_zero_provision(req, body):
     return body
 
 
+def _with_accepted_agreement(req, body):
+    if body.get("action") != "accept" or body.get("agreement") is not None:
+        return body
+    request_body = json.loads(req.data.decode("utf-8")) if req.data else {}
+    negotiation_id = body.get("negotiation_id") or req.full_url.rstrip("/").rsplit("/", 1)[-1]
+    listing_id = request_body.get("listing_id") or "seller-1"
+    proposal = body.get("proposal")
+    fields = proposal.get("fields") if isinstance(proposal, dict) else None
+    amount = int(fields.get("amount", 0)) if isinstance(fields, dict) else 0
+    provision_terms = body.get("accepted_provision_terms") or request_body.get("provision_terms") or _provision().model_dump(mode="json")
+    payload = provision_terms.get("payload", {}) if isinstance(provision_terms, dict) else {}
+    duration_seconds = payload.get("duration_seconds", 3600) if isinstance(payload, dict) else 3600
+    start_utc = payload.get("start_utc") if isinstance(payload, dict) else None
+    accepted_at = "2025-01-01T00:00:00Z"
+    if not isinstance(start_utc, str) or start_utc.strip().lower() in {"", "now"}:
+        start_utc = accepted_at
+    selection = body.get("settlement_selection")
+    if not isinstance(selection, dict) and isinstance(proposal, dict):
+        selection = proposal.get("settlement_selection")
+    settlement = None
+    if isinstance(selection, dict):
+        selected = SettlementSelection.model_validate(selection)
+        option = _example_option()
+        if selected.option_id == option.option_id and selected.mechanism == option.mechanism:
+            settlement = option
+    buyer = BUYER_SIGNER.identity
+    seller = seller_principals().identities[0]
+    asset = settlement.asset if settlement is not None else (
+        fields.get("token") if isinstance(fields, dict) else None
+    )
+    agreement = Agreement(
+        negotiation_id=negotiation_id,
+        listing_id=listing_id,
+        listing_hash="0" * 64,
+        buyer=buyer.model_dump(mode="json"),
+        seller=seller.model_dump(mode="json"),
+        settlement=settlement,
+        amount=amount,
+        asset=asset,
+        duration_seconds=int(duration_seconds),
+        start_utc=start_utc,
+        provision_terms=provision_terms,
+        accepted_at=accepted_at,
+    )
+    return {
+        **body,
+        "buyer_principal": buyer.model_dump(mode="json"),
+        "seller_principal": seller.model_dump(mode="json"),
+        "agreement": agreement.model_dump(mode="json", exclude_none=True),
+        "agreement_bytes": base64.b64encode(
+            agreement.model_dump_json(exclude_none=True).encode("utf-8")
+        ).decode("ascii"),
+    }
+
+
 def _signed_mock_response(req, body):
     body = _with_round_zero_provision(req, body)
+    body = _with_accepted_agreement(req, body)
     return _MockResponse(
         status=200,
         text=json.dumps(body),
@@ -185,6 +261,7 @@ def _urlopen_fake(responses):
     def _fn(req, timeout=None):
         body = next(it)
         body = _with_round_zero_provision(req, body)
+        body = _with_accepted_agreement(req, body)
         return _MockResponse(
             status=200,
             text=json.dumps(body),

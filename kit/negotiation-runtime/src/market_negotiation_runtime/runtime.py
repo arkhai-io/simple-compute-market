@@ -8,9 +8,10 @@ interprets listing, message, proposal, terms, or accepted-artifact schemas.
 
 from __future__ import annotations
 
+import base64
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any, Literal, Protocol
@@ -21,6 +22,8 @@ from market_policy.negotiation_middleware import NegotiationDecision, Negotiatio
 BuyerAction = Literal["counter", "accept", "exit"]
 ActorRole = Literal["buyer", "admin"]
 StageEventHook = Callable[..., None]
+
+
 
 
 class StorefrontPausedError(Exception):
@@ -121,6 +124,7 @@ class Acceptance:
     seller_principal: Identity
     policy_state: Any = None
     binding: Any = None
+    accepted_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -340,7 +344,11 @@ class NegotiationRuntime:
             binding=resolved.binding,
         )
         accepted = decision.action == "accept"
-        artifacts = dict(hooks.build_artifacts(acceptance, accepted))
+        if accepted:
+            acceptance = self._fix_acceptance_time(acceptance)
+            artifacts = self._accepted_artifacts(hooks, acceptance)
+        else:
+            artifacts = dict(hooks.build_artifacts(acceptance, False))
 
         await repository.create_negotiation_thread(
             negotiation_id=negotiation_id,
@@ -530,7 +538,8 @@ class NegotiationRuntime:
                 seller_principal=stored_seller,
                 binding=resolved.binding,
             )
-            artifacts = dict(hooks.build_artifacts(acceptance, True))
+            acceptance = self._fix_acceptance_time(acceptance)
+            artifacts = self._accepted_artifacts(hooks, acceptance)
             await self._append_message(
                 repository,
                 negotiation_id=negotiation_id,
@@ -652,9 +661,11 @@ class NegotiationRuntime:
             binding=resolved.binding,
         )
         accepted = decision.action == "accept"
-        artifacts = (
-            dict(hooks.build_artifacts(acceptance, True)) if accepted else {}
-        )
+        if accepted:
+            acceptance = self._fix_acceptance_time(acceptance)
+            artifacts = self._accepted_artifacts(hooks, acceptance)
+        else:
+            artifacts = {}
 
         await self._append_message(
             repository,
@@ -722,6 +733,40 @@ class NegotiationRuntime:
         if not evaluation.strategy_label:
             raise NegotiationStateError("domain policy returned no strategy label")
 
+    def _fix_acceptance_time(self, acceptance: Acceptance) -> Acceptance:
+        accepted_at = self._now()
+        if accepted_at.tzinfo is None:
+            accepted_at = accepted_at.replace(tzinfo=UTC)
+        else:
+            accepted_at = accepted_at.astimezone(UTC)
+        requested = acceptance.agreement.start_utc
+        if requested is None or requested.strip().lower() in {"", "now"}:
+            start = accepted_at
+        else:
+            try:
+                start = datetime.fromisoformat(requested.strip().replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise NegotiationStateError("accepted start_utc is not ISO-8601") from exc
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=UTC)
+            else:
+                start = start.astimezone(UTC)
+        return replace(
+            acceptance,
+            agreement=AgreementTerms(
+                duration_seconds=acceptance.agreement.duration_seconds,
+                start_utc=start.isoformat().replace("+00:00", "Z"),
+            ),
+            accepted_at=accepted_at,
+        )
+
+    def _accepted_artifacts(
+        self,
+        hooks: NegotiationDomainHooks,
+        acceptance: Acceptance,
+    ) -> dict[str, Any]:
+        return dict(hooks.build_artifacts(acceptance, True))
+
     async def _commit_acceptance(
         self,
         repository: Any,
@@ -734,6 +779,16 @@ class NegotiationRuntime:
             agreed_price=acceptance.agreed_amount,
             agreed_duration_seconds=acceptance.agreement.duration_seconds,
             agreed_start_utc=acceptance.agreement.start_utc,
+            accepted_at=(
+                acceptance.accepted_at.isoformat().replace("+00:00", "Z")
+                if acceptance.accepted_at is not None
+                else None
+            ),
+            agreement_bytes=(
+                base64.b64decode(artifacts["agreement_bytes"], validate=True)
+                if isinstance(artifacts.get("agreement_bytes"), str)
+                else None
+            ),
         )
         if hooks.place_hold is not None:
             await hooks.place_hold(repository, acceptance)
