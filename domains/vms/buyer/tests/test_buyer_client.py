@@ -17,6 +17,7 @@ import json
 from dataclasses import dataclass
 from unittest.mock import patch
 
+import pytest
 from arkhai_vms import VmProvisionTerms, make_vm_provision_terms
 from identity_helpers import (
     BUYER_SIGNER,
@@ -25,6 +26,10 @@ from identity_helpers import (
 )
 from market_core.schemas import (
     EscrowProposal,
+    RateValue,
+    SettlementOption,
+    SettlementSelection,
+    derive_settlement_option_id,
 )
 from market_policy.negotiation_middleware import load_negotiation_chain
 
@@ -62,6 +67,71 @@ def _seller_proposal(amount: int) -> dict:
         "escrow_address": "0x" + "cd" * 20,
         "fields": {"amount": int(amount), "token": "0x" + "ab" * 20},
         "expiration_unix": 1_800_000_000,
+    }
+
+
+def _example_option() -> SettlementOption:
+    seller = seller_principals().identities[0]
+    rates = [RateValue(field="amount", per="hour", value=50)]
+    params = {
+        "condition": {"kind": "vm_delivery"},
+        "claimant_principal": seller.model_dump(mode="json"),
+    }
+    return SettlementOption(
+        option_id=derive_settlement_option_id(
+            mechanism="example.payment.v1",
+            asset="usd",
+            rates=rates,
+            params=params,
+        ),
+        mechanism="example.payment.v1",
+        asset="usd",
+        rates=rates,
+        params=params,
+    )
+
+
+def _example_accept_reply(
+    *,
+    negotiation_id: str,
+    selection: SettlementSelection,
+    option: SettlementOption,
+    amount: int,
+) -> dict:
+    buyer = BUYER_SIGNER.identity
+    seller = seller_principals().identities[0]
+    params = dict(option.params)
+    params["payer_principal"] = buyer.model_dump(mode="json")
+    params["claimant_principal"] = seller.model_dump(mode="json")
+    return {
+        "negotiation_id": negotiation_id,
+        "action": "accept",
+        "buyer_principal": buyer.model_dump(mode="json"),
+        "seller_principal": seller.model_dump(mode="json"),
+        "proposal": {
+            "settlement_selection": selection.model_dump(mode="json"),
+            "fields": {"amount": amount},
+        },
+        "settlement_selection": selection.model_dump(mode="json"),
+        "settlement_plan": {
+            "buyer_principal": buyer.model_dump(mode="json"),
+            "seller_principal": seller.model_dump(mode="json"),
+            "obligations": [
+                {
+                    "payer": "buyer",
+                    "claimant": "seller",
+                    "payer_principal": buyer.model_dump(mode="json"),
+                    "claimant_principal": seller.model_dump(mode="json"),
+                    "amount": amount,
+                    "asset": option.asset,
+                    "expiration_unix": selection.expiration_unix,
+                    "conditions": [dict(option.params["condition"])],
+                    "mechanism": option.mechanism,
+                    "params": params,
+                }
+            ],
+            "service_terms": {},
+        },
     }
 
 
@@ -154,6 +224,323 @@ def test_round_0_seller_accepts_immediately(mock_urlopen):
     assert outcome.agreed_amount == 50
     assert outcome.rounds == 0
     assert outcome.negotiation_id == "neg-1"
+
+
+@patch("core_buyer.negotiation_client.urllib.request.urlopen")
+def test_round_0_example_selection_is_pinned_and_returned(mock_urlopen):
+    seen_body = {}
+    option = _example_option()
+    selection = SettlementSelection(
+        mechanism=option.mechanism,
+        option_id=option.option_id,
+        expiration_unix=1_800_000_000,
+    )
+
+    def _capture(req, timeout=None):
+        seen_body.update(json.loads(req.data.decode("utf-8")))
+        return _signed_mock_response(
+            req,
+            _example_accept_reply(
+                negotiation_id="neg-hosted",
+                selection=selection,
+                option=option,
+                amount=50,
+            ),
+        )
+
+    mock_urlopen.side_effect = _capture
+    outcome = negotiate_with_seller(
+        seller_url="http://seller:8001",
+        principal=BUYER_SIGNER.identity,
+        signer=BUYER_SIGNER,
+        resolve_seller_principals=seller_principals,
+        listing_id="seller-1",
+        initial_price=50,
+        max_price=100,
+        provision_terms=_provision(3600),
+        settlement_selection=selection,
+        policy_params={"_selected_settlement_option": option.model_dump(mode="json")},
+    )
+
+    assert seen_body["proposal"]["settlement_selection"] == selection.model_dump()
+    assert outcome.settlement_selection == selection
+    assert outcome.settlement_plan is not None
+    assert outcome.settlement_plan.obligations[0].mechanism == "example.payment.v1"
+
+
+@patch("core_buyer.negotiation_client.urllib.request.urlopen")
+def test_round_0_delegates_domain_plan_semantics_after_universal_checks(
+    mock_urlopen,
+):
+    base = _example_option()
+    params = {**base.params, "domain_binding": {"resource": "resource-1"}}
+    option = SettlementOption(
+        option_id=derive_settlement_option_id(
+            mechanism=base.mechanism,
+            asset=base.asset,
+            rates=base.rates,
+            params=params,
+        ),
+        mechanism=base.mechanism,
+        asset=base.asset,
+        rates=base.rates,
+        params=params,
+    )
+    selection = SettlementSelection(
+        mechanism=option.mechanism,
+        option_id=option.option_id,
+        expiration_unix=1_800_000_000,
+    )
+    reply = _example_accept_reply(
+        negotiation_id="neg-domain",
+        selection=selection,
+        option=option,
+        amount=50,
+    )
+    reply["settlement_plan"]["obligations"][0]["params"].pop("domain_binding")
+    reply["settlement_plan"]["service_terms"] = {
+        "domain.v1": {"resource": "resource-1"}
+    }
+    mock_urlopen.side_effect = _urlopen_fake([reply])
+    validated = []
+
+    outcome = negotiate_with_seller(
+        seller_url="http://seller:8001",
+        principal=BUYER_SIGNER.identity,
+        signer=BUYER_SIGNER,
+        resolve_seller_principals=seller_principals,
+        listing_id="seller-1",
+        initial_price=50,
+        max_price=100,
+        provision_terms=_provision(3600),
+        settlement_selection=selection,
+        policy_params={"_selected_settlement_option": option.model_dump(mode="json")},
+        validate_advertised_plan=lambda plan: validated.append(plan),
+    )
+
+    assert outcome.status == "agreed"
+    assert validated == [outcome.settlement_plan]
+
+
+@patch("core_buyer.negotiation_client.urllib.request.urlopen")
+def test_round_0_rejects_signed_seller_selection_substitution(mock_urlopen):
+    option = _example_option()
+    selection = SettlementSelection(
+        mechanism=option.mechanism,
+        option_id=option.option_id,
+        expiration_unix=1_800_000_000,
+    )
+    substituted = selection.model_copy(update={"option_id": "f" * 64})
+    reply = _example_accept_reply(
+        negotiation_id="neg-substituted",
+        selection=substituted,
+        option=option,
+        amount=50,
+    )
+    mock_urlopen.side_effect = _urlopen_fake([reply])
+
+    with pytest.raises(RuntimeError, match="settlement_selection differs"):
+        negotiate_with_seller(
+            seller_url="http://seller:8001",
+            principal=BUYER_SIGNER.identity,
+            signer=BUYER_SIGNER,
+            resolve_seller_principals=seller_principals,
+            listing_id="seller-1",
+            initial_price=50,
+            max_price=100,
+            provision_terms=_provision(3600),
+            settlement_selection=selection,
+            policy_params={
+                "_selected_settlement_option": option.model_dump(mode="json")
+            },
+        )
+
+
+@patch("core_buyer.negotiation_client.urllib.request.urlopen")
+def test_later_accept_rejects_plan_amount_substitution_before_observer(mock_urlopen):
+    option = _example_option()
+    selection = SettlementSelection(
+        mechanism=option.mechanism,
+        option_id=option.option_id,
+        expiration_unix=1_800_000_000,
+    )
+    final_reply = _example_accept_reply(
+        negotiation_id="neg-later",
+        selection=selection,
+        option=option,
+        amount=90,
+    )
+    final_reply["settlement_plan"]["obligations"][0]["amount"] = 91
+    mock_urlopen.side_effect = _urlopen_fake(
+        [
+            {
+                **_example_accept_reply(
+                    negotiation_id="neg-later",
+                    selection=selection,
+                    option=option,
+                    amount=90,
+                ),
+                "action": "counter",
+            },
+            final_reply,
+        ]
+    )
+    observed = []
+
+    with pytest.raises(RuntimeError, match="negotiated amount"):
+        negotiate_with_seller(
+            seller_url="http://seller:8001",
+            principal=BUYER_SIGNER.identity,
+            signer=BUYER_SIGNER,
+            resolve_seller_principals=seller_principals,
+            listing_id="seller-1",
+            initial_price=50,
+            max_price=100,
+            provision_terms=_provision(3600),
+            settlement_selection=selection,
+            on_round=lambda *args: observed.append(args),
+            policy_params={
+                "_selected_settlement_option": option.model_dump(mode="json")
+            },
+        )
+
+    assert len(observed) == 1
+
+
+@patch("core_buyer.negotiation_client.urllib.request.urlopen")
+def test_round_0_request_preserves_literal_fields(mock_urlopen):
+    seen_body = {}
+
+    def _capture(req, timeout=None):
+        seen_body.update(json.loads(req.data.decode("utf-8")))
+        return _signed_mock_response(
+            req,
+            {
+                "negotiation_id": "neg-1",
+                "action": "accept",
+                "proposal": _seller_proposal(50),
+            },
+        )
+
+    mock_urlopen.side_effect = _capture
+    token = "0x" + "ef" * 20
+    negotiate_with_seller(
+        seller_url="http://seller:8001",
+        principal=BUYER_SIGNER.identity,
+        signer=BUYER_SIGNER,
+        resolve_seller_principals=seller_principals,
+        listing_id="seller-1",
+        initial_price=50,
+        max_price=100,
+        provision_terms=_provision(3600),
+        escrow_proposal=EscrowProposal(
+            chain_name="anvil",
+            escrow_address="0x" + "cd" * 20,
+            fields={},
+            literal_fields={"token": token},
+            rates=[{"field": "amount", "per": "hour", "value": "50"}],
+            expiration_unix=1_800_000_000,
+        ),
+    )
+
+    proposal = seen_body["proposal"]
+    assert proposal["fields"] == {"amount": 50}
+    assert proposal["literal_fields"] == {"token": token}
+    assert seen_body["provision_terms"] == {
+        "kind": "compute.v1",
+        "version": 1,
+        "payload": {
+            "duration_seconds": 3600,
+            "ssh_public_key": "ssh-rsa AAAA",
+        },
+    }
+
+
+@patch("core_buyer.negotiation_client.urllib.request.urlopen")
+def test_round_0_request_omits_amount_for_amountless_escrow(mock_urlopen):
+    seen_body = {}
+
+    def _capture(req, timeout=None):
+        seen_body.update(json.loads(req.data.decode("utf-8")))
+        return _signed_mock_response(
+            req,
+            {
+                "negotiation_id": "neg-1",
+                "action": "accept",
+                "proposal": {
+                    "chain_name": "anvil",
+                    "escrow_address": "0x" + "cd" * 20,
+                    "fields": {},
+                    "literal_fields": {"attestationUid": "0x" + "aa" * 32},
+                    "rates": [],
+                    "expiration_unix": 1_800_000_000,
+                },
+            },
+        )
+
+    mock_urlopen.side_effect = _capture
+    negotiate_with_seller(
+        seller_url="http://seller:8001",
+        principal=BUYER_SIGNER.identity,
+        signer=BUYER_SIGNER,
+        resolve_seller_principals=seller_principals,
+        listing_id="seller-1",
+        initial_price=0,
+        max_price=0,
+        provision_terms=_provision(3600),
+        escrow_proposal=EscrowProposal(
+            chain_name="anvil",
+            escrow_address="0x" + "cd" * 20,
+            fields={},
+            literal_fields={"attestationUid": "0x" + "aa" * 32},
+            rates=[],
+            expiration_unix=1_800_000_000,
+        ),
+        chain=load_negotiation_chain(["accept_exact_listing"]),
+    )
+
+    proposal = seen_body["proposal"]
+    assert proposal["fields"] == {}
+    assert proposal["literal_fields"] == {"attestationUid": "0x" + "aa" * 32}
+
+
+@patch("core_buyer.negotiation_client.urllib.request.urlopen")
+def test_round_0_request_preserves_rates(mock_urlopen):
+    seen_body = {}
+
+    def _capture(req, timeout=None):
+        seen_body.update(json.loads(req.data.decode("utf-8")))
+        return _signed_mock_response(
+            req,
+            {
+                "negotiation_id": "neg-1",
+                "action": "accept",
+                "proposal": _seller_proposal(50),
+            },
+        )
+
+    mock_urlopen.side_effect = _capture
+    rates = [{"field": "amount", "per": "hour", "value": "50"}]
+    negotiate_with_seller(
+        seller_url="http://seller:8001",
+        principal=BUYER_SIGNER.identity,
+        signer=BUYER_SIGNER,
+        resolve_seller_principals=seller_principals,
+        listing_id="seller-1",
+        initial_price=50,
+        max_price=100,
+        provision_terms=_provision(3600),
+        escrow_proposal=EscrowProposal(
+            chain_name="anvil",
+            escrow_address="0x" + "cd" * 20,
+            fields={"token": "0x" + "ab" * 20},
+            literal_fields={"token": "0x" + "ab" * 20},
+            rates=rates,
+            expiration_unix=1_800_000_000,
+        ),
+    )
+
+    assert seen_body["proposal"]["rates"] == rates
 
 
 @patch("core_buyer.negotiation_client.urllib.request.urlopen")
@@ -332,6 +719,49 @@ def test_buyer_exits_when_seller_unreasonable(mock_urlopen):
     assert outcome.status == "exited"
     # Exit was buyer-initiated (seller priced above the buyer's bound).
     assert outcome.reason == "price_above_bound"
+
+
+@patch("core_buyer.negotiation_client.urllib.request.urlopen")
+def test_signed_requests_include_signature_and_timestamp(mock_urlopen):
+    seen_headers = []
+
+    def _capture(req, timeout=None):
+        seen_headers.append(dict(req.header_items()))
+        return _signed_mock_response(
+            req,
+            {
+                "negotiation_id": "neg-1",
+                "action": "accept",
+                "proposal": _seller_proposal(50),
+            },
+        )
+
+    mock_urlopen.side_effect = _capture
+    negotiate_with_seller(
+        seller_url="http://seller:8001",
+        principal=BUYER_SIGNER.identity,
+        signer=BUYER_SIGNER,
+        resolve_seller_principals=seller_principals,
+        listing_id="seller-1",
+        initial_price=50,
+        max_price=100,
+        provision_terms=_provision(3600),
+        escrow_proposal=_escrow_proposal(),
+    )
+    # One round, one request.
+    assert len(seen_headers) == 1
+    hdrs = seen_headers[0]
+    # urllib capitalizes — normalize.
+    hdrs_lower = {k.lower(): v for k, v in hdrs.items()}
+    assert hdrs_lower["x-market-signature-version"] == (
+        "arkhai.market-request-signature.v2"
+    )
+    assert hdrs_lower["x-market-identity-scheme"] == "ed25519"
+    assert hdrs_lower["x-market-identity-identifier"] == (
+        BUYER_SIGNER.identity.identifier
+    )
+    assert hdrs_lower["x-market-signature"]
+    assert hdrs_lower["x-market-timestamp"].isdigit()
 
 
 @patch("core_buyer.negotiation_client.urllib.request.urlopen")

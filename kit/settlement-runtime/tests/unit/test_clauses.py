@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from market_core.query_dsl import QuerySyntaxError
+from market_core.query_dsl import QuerySyntaxError, QueryValidationError
 from market_core.schemas import SettlementOption, derive_settlement_option_id
 from market_settlement_runtime import (
     ComparisonOperator,
@@ -13,8 +13,11 @@ from market_settlement_runtime import (
     MissingValueRule,
     QueryValueType,
     SettlementClauseField,
+    SettlementConfig,
     SettlementConfigurationRegistry,
     compile_settlement_clause,
+    select_settlement_candidates,
+    settlement_clause_matches,
 )
 from pydantic import BaseModel, ConfigDict
 
@@ -118,6 +121,19 @@ def _registry(*, example_compatible: bool = True) -> SettlementConfigurationRegi
     )
 
 
+def _config(
+    *,
+    priority: tuple[str, ...] = ("example.payment.v1", "alkahest.v1"),
+) -> SettlementConfig:
+    return SettlementConfig(
+        priority=priority,
+        mechanisms={
+            "example": _Section(enabled="example.payment.v1" in priority),
+            "alkahest": _Section(enabled="alkahest.v1" in priority),
+        },
+    )
+
+
 def _option(
     mechanism: str,
     asset: str,
@@ -135,6 +151,113 @@ def _option(
         asset=asset,
         params=params,
     )
+
+
+def test_compilation_normalizes_config_key_and_rejects_unknown_mechanism() -> None:
+    registry = _registry()
+
+    compiled = compile_settlement_clause(
+        "mechanism=example example.method=card",
+        registry,
+    )
+
+    assert compiled.render() == "mechanism=example.payment.v1 example.method=card"
+    with pytest.raises(QueryValidationError) as caught:
+        compile_settlement_clause("mechanism=ghost", registry)
+    assert caught.value.code == "unknown_mechanism"
+
+
+def test_one_clause_never_combines_values_from_different_options() -> None:
+    registry = _registry()
+    usd_bank = _option("example.payment.v1", "usd", methods=["bank"])
+    eur_card = _option("example.payment.v1", "eur", methods=["card"])
+    clause = compile_settlement_clause(
+        "asset=usd example.method=card",
+        registry,
+    )
+
+    result = select_settlement_candidates(
+        (usd_bank, eur_card),
+        registry=registry,
+        config=_config(priority=("example.payment.v1",)),
+        clauses=(clause,),
+    )
+
+    assert result.candidates == ()
+    assert settlement_clause_matches(clause, usd_bank, registry) is False
+    assert settlement_clause_matches(clause, eur_card, registry) is False
+
+
+def test_first_surviving_clause_precedes_mechanism_priority() -> None:
+    registry = _registry()
+    example = _option("example.payment.v1", "usd", methods=["card"])
+    alkahest = _option("alkahest.v1", "usdc", chain="base_sepolia")
+
+    result = select_settlement_candidates(
+        (example, alkahest),
+        registry=registry,
+        config=_config(),
+        clauses=(
+            "mechanism=alkahest alkahest.chain=base_sepolia",
+            "mechanism=example example.method=card",
+        ),
+    )
+
+    assert result.matched_clause_index == 0
+    assert [candidate.option for candidate in result.candidates] == [alkahest]
+
+
+def test_no_clause_preserves_priority_and_option_id_order() -> None:
+    registry = _registry()
+    example_b = _option("example.payment.v1", "usd", methods=["card"], profile="b")
+    example_a = _option("example.payment.v1", "usd", methods=["card"], profile="a")
+    alkahest = _option("alkahest.v1", "usdc", chain="base_sepolia")
+
+    result = select_settlement_candidates(
+        (alkahest, example_b, example_a),
+        registry=registry,
+        config=_config(),
+    )
+
+    assert result.matched_clause_index is None
+    assert [candidate.option.option_id for candidate in result.candidates] == [
+        *sorted((example_a.option_id, example_b.option_id)),
+        alkahest.option_id,
+    ]
+
+
+def test_missing_projection_rule_and_mechanism_qualification_are_enforced() -> None:
+    registry = _registry()
+    example = _option("example.payment.v1", "usd", methods=["card"])
+    alkahest = _option("alkahest.v1", "usdc", chain="base_sepolia")
+
+    optional = compile_settlement_clause("example.optional=anything", registry)
+    required = compile_settlement_clause("example.method=card", registry)
+
+    assert settlement_clause_matches(optional, example, registry) is True
+    assert settlement_clause_matches(optional, alkahest, registry) is False
+    assert settlement_clause_matches(required, alkahest, registry) is False
+
+
+def test_incompatible_and_disabled_options_are_removed_before_clauses() -> None:
+    example = _option("example.payment.v1", "usd", methods=["card"])
+    alkahest = _option("alkahest.v1", "usdc", chain="base_sepolia")
+
+    incompatible = select_settlement_candidates(
+        (example, alkahest),
+        registry=_registry(example_compatible=False),
+        config=_config(),
+        clauses=("asset in [usd,usdc]",),
+    )
+    disabled = select_settlement_candidates(
+        (example, alkahest),
+        registry=_registry(),
+        config=_config(priority=("alkahest.v1",)),
+        clauses=("asset in [usd,usdc]",),
+    )
+
+    assert [item.option for item in incompatible.candidates] == [alkahest]
+    assert [item.option for item in disabled.candidates] == [alkahest]
 
 
 def test_empty_clause_is_rejected_instead_of_matching_everything() -> None:

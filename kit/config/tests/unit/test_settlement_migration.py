@@ -6,11 +6,17 @@ from pathlib import Path
 
 import market_config.settlement_migration as migration
 import pytest
+import tomllib
 from market_config.settlement_migration import (
+    BUYER_MIGRATION_COMMAND,
+    STOREFRONT_MIGRATION_COMMAND,
     SettlementMigrationConflict,
     SettlementMigrationError,
     SettlementMigrationValidationError,
+    environment_renames,
+    is_legacy_settlement_path,
     migrate_settlement_config,
+    reject_legacy_settlement_path,
 )
 
 
@@ -224,3 +230,186 @@ def test_write_and_check_modes_are_strict() -> None:
         migrate_settlement_config("unused", role="buyer", write=True)
     with pytest.raises(SettlementMigrationError, match="only valid"):
         migrate_settlement_config("unused", role="buyer", check=True, backup=True)
+
+
+def test_buyer_migration_moves_priority_and_one_effective_address_book(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "buyer.toml"
+    original = _write(
+        path,
+        """# buyer comment
+[Identity]
+scheme = "ed25519"
+identifier = "public-only"
+
+[Wallet]
+address = "0xabc"
+private_key = "secret-wallet-value"
+
+[Chains.anvil]
+rpc_url = "http://127.0.0.1:8545"
+chain_id = 31337
+alkahest_address_config_path = "/run/alkahest.json" # address comment
+
+[settlement]
+mechanism_priority = ["alkahest.v1"] # order comment
+
+[unrelated]
+answer = 42
+""",
+    )
+
+    checked = migrate_settlement_config(path, role="buyer", check=True)
+
+    assert checked.changed is True
+    assert checked.written is False
+    assert path.read_bytes() == original
+    assert not path.with_name("buyer.toml.bak").exists()
+
+    written = migrate_settlement_config(
+        path,
+        role="buyer",
+        write=True,
+        backup=True,
+        validator=_accept_typed_candidate,
+    )
+    document = tomllib.loads(path.read_text())
+    assert written.written is True
+    assert document["Settlement"]["priority"] == [
+        "alkahest.v1",
+    ]
+    assert document["Settlement"]["alkahest"]["enabled"] is True
+    assert (
+        document["Settlement"]["alkahest"]["address_config_path"]
+        == "/run/alkahest.json"
+    )
+    assert "alkahest_address_config_path" not in document["Chains"]["anvil"]
+    assert document["Identity"]["identifier"] == "public-only"
+    assert document["Wallet"]["private_key"] == "secret-wallet-value"
+    assert document["unrelated"] == {"answer": 42}
+    assert "buyer comment" in path.read_text()
+    assert "address comment" in path.read_text()
+    assert "order comment" in path.read_text()
+
+
+def test_seller_migration_preserves_comments_and_maps_alkahest(tmp_path: Path) -> None:
+    path = tmp_path / "storefront.toml"
+    _write(
+        path,
+        """# file comment
+oracle_gated_listings = true # policy comment
+trusted_oracle_address = "0x111"
+interruptible_listings = false
+interruptible_oracle_address = ""
+
+[Identity]
+scheme = "ed25519"
+identifier = "seller-public"
+
+[Wallet]
+address = "0xabc"
+private_key = "wallet-secret"
+
+[Chains.one]
+rpc_url = "https://one.invalid"
+chain_id = 1
+alkahest_address_config_path = "/etc/alkahest.json"
+
+[Chains.two]
+rpc_url = "https://two.invalid"
+chain_id = 2
+alkahest_address_config_path = "/etc/alkahest.json"
+
+[unrelated]
+keep = "yes" # unrelated comment
+""",
+    )
+
+    migrate_settlement_config(
+        path,
+        role="seller",
+        write=True,
+        backup=True,
+        validator=_accept_typed_candidate,
+    )
+
+    migrated_text = path.read_text()
+    document = tomllib.loads(migrated_text)
+    assert document["Settlement"]["priority"] == [
+        "alkahest.v1",
+    ]
+    alkahest = document["Settlement"]["alkahest"]
+    assert alkahest["enabled"] is True
+    assert alkahest["oracle_gated"] is True
+    assert alkahest["trusted_oracle_addresses"] == ["0x111"]
+    assert alkahest["interruptible"] is False
+    assert alkahest["interruptible_oracle_addresses"] == []
+    assert alkahest["address_config_path"] == "/etc/alkahest.json"
+
+    assert "settlement" not in document
+    assert document["Identity"]["identifier"] == "seller-public"
+    assert document["Wallet"]["private_key"] == "wallet-secret"
+    assert document["Chains"]["one"] == {
+        "rpc_url": "https://one.invalid",
+        "chain_id": 1,
+    }
+    assert document["unrelated"] == {"keep": "yes"}
+    for comment in (
+        "file comment",
+        "policy comment",
+        "unrelated comment",
+    ):
+        assert comment in migrated_text
+
+
+def test_environment_mapping_renames_only_marketplace_consumer_aliases() -> None:
+    value = "must-not-appear"
+    renames = environment_renames(
+        {
+            "STOREFRONT_TRUSTED_ORACLE_ADDRESS": value,
+        },
+        role="seller",
+    )
+
+    assert [(item.source, item.destination) for item in renames] == [
+        (
+            "STOREFRONT_TRUSTED_ORACLE_ADDRESS",
+            "STOREFRONT_SETTLEMENT__ALKAHEST__TRUSTED_ORACLE_ADDRESSES",
+        ),
+    ]
+    assert value not in repr(renames)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "HostedSettlement.base_url",
+        "hosted_settlement.enabled",
+        "settlement.hosted",
+        "settlement.hosted.base_url",
+        "settlement.mechanism_priority",
+        "oracle_gated_listings",
+        "trusted_oracle_address",
+        "Chains.anvil.alkahest_address_config_path",
+    ],
+)
+def test_legacy_config_edit_paths_are_rejected_with_exact_command(path: str) -> None:
+    assert is_legacy_settlement_path(path) is True
+    with pytest.raises(SettlementMigrationError) as buyer_error:
+        reject_legacy_settlement_path(path, command=BUYER_MIGRATION_COMMAND)
+    with pytest.raises(SettlementMigrationError) as seller_error:
+        reject_legacy_settlement_path(path, command=STOREFRONT_MIGRATION_COMMAND)
+    assert f"`{BUYER_MIGRATION_COMMAND}`" in str(buyer_error.value)
+    assert f"`{STOREFRONT_MIGRATION_COMMAND}`" in str(seller_error.value)
+
+
+def test_new_settlement_paths_are_not_treated_as_legacy() -> None:
+    for path in (
+        "Settlement.priority",
+        "Settlement.alkahest.address_config_path",
+        "Identity.identifier",
+        "Wallet.private_key",
+        "Chains.anvil.rpc_url",
+    ):
+        assert is_legacy_settlement_path(path) is False

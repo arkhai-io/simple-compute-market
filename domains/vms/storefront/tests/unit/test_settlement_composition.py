@@ -23,6 +23,7 @@ from market_storefront.domain_runtime import (
     build_vm_storefront_registry,
 )
 from market_storefront.settlement_composition import (
+    build_storefront_settlement_registry,
     VmProjectionContext,
     _terminal_requires_lease_truncation,
     build_vm_settlement_composition,
@@ -482,3 +483,11 @@ def test_serialize_keeps_physical_and_onchain_fulfillment_ids_distinct():
     assert serialized["fulfillment_uid"] == "0xonchain"
     assert serialized["tenant_credentials"] == {"password": "secret"}
     assert "obligation_ref" not in serialized
+
+
+def test_storefront_installs_alkahest_registration():
+    registry = build_storefront_settlement_registry()
+
+    assert [registration.mechanism_id for registration in registry.registrations] == [
+        "alkahest.v1",
+    ]

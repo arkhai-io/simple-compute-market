@@ -8,16 +8,22 @@ that grants no unfunded quota hold — runs against a temporary SQLite database.
 
 from __future__ import annotations
 
+from datetime import datetime
+
 import pytest
 from apicredits_storefront.domain_runtime import get_market_domain_contract
 from apicredits_storefront.negotiation_runtime import (
     _decode_terms,
+    build_api_credit_negotiation_runtime,
 )
 from market_core.schemas import (
     EscrowProposal,
     ProvisionTerms,
 )
 from market_identity import Ed25519Signer
+from market_negotiation_runtime import OfferUnfulfillableError
+from market_policy.identity import Identity
+from market_policy.negotiation_thread import get_thread_store
 
 _BUYER_PRINCIPAL = Ed25519Signer(bytes.fromhex("11" * 32)).identity
 _SELLER_PRINCIPAL = Ed25519Signer(bytes.fromhex("22" * 32)).identity
@@ -85,6 +91,48 @@ def key_records(monkeypatch):
     return records
 
 
+@pytest.fixture
+async def db(tmp_path):
+    import market_policy.negotiation_thread as thread_module
+    from apicredits_storefront.utils.sqlite_client import SQLiteClient
+
+    client = SQLiteClient(db_path=str(tmp_path / "credits-storefront.db"))
+    thread_module._thread_store = None
+    get_thread_store(
+        sqlite_client=client,
+        identity=Identity(agent_url="http://test-seller:8002"),
+    )
+    await client.upsert_listing(
+        listing_id="L-tok",
+        status="open",
+        created_at=datetime.now().isoformat(),
+        updated_at=datetime.now().isoformat(),
+        offer_resource={
+            "kind": "api_credits.v1",
+            "service_name": "Acme Inference",
+            "openapi_url": "https://api.acme.example/openapi.json",
+            "base_url": "https://api.acme.example",
+            "resource_id": "svc-quota",
+            "capacity_site_id": "tokens",
+            "offering_mode": "api_credits",
+        },
+        accepted_escrows=[
+            {
+                "chain_name": "anvil",
+                "escrow_address": _ESCROW,
+                "literal_fields": {"token": _TOKEN},
+                "rates": [{"field": "amount", "per": "token", "value": "100"}],
+            }
+        ],
+        settlement_options=[],
+        fulfillment_resource=None,
+        max_duration_seconds=None,
+        storefront_url="http://test-seller:8002",
+        seller_principal=_SELLER_PRINCIPAL,
+    )
+    return client
+
+
 def _proposal(amount: int) -> EscrowProposal:
     return EscrowProposal(
         chain_name="anvil",
@@ -143,6 +191,144 @@ def test_normalize_api_credits_terms_rejects_unsupported_version() -> None:
     )
     with pytest.raises(ValueError, match="version"):
         _decode_terms(_DOMAIN, terms)
+
+
+async def _start(db, *, amount=300, quantity=3, key_mode="new", key_id=None):
+    return await build_api_credit_negotiation_runtime(_DOMAIN).start(
+        repository=db,
+        listing_id="L-tok",
+        buyer_principal=_BUYER_PRINCIPAL,
+        seller_principal=_SELLER_PRINCIPAL,
+        proposal=_proposal(amount),
+        terms=_terms(quantity, key_mode, key_id),
+        seller_agent_url="http://seller:8002",
+        buyer_agent_url="http://buyer:9000",
+        actor_principal=_BUYER_PRINCIPAL,
+    )
+
+
+async def test_listed_price_accept_persists_terms_without_unfunded_hold(
+    db, fake_capacity, key_records
+):
+    # quantity 3 * unit rate 100 = 300; opening at the bound accepts
+    # under the listed_price default.
+    response = await _start(db, amount=300, quantity=3)
+    assert response["action"] == "accept"
+    assert response["accepted_provision_terms"]["payload"]["quantity"] == 3
+    # Plan materialization needs a resolvable alkahest chain config (the
+    # e2e topology provides one); here the proposal echo is the artifact.
+    assert response["accepted_escrow_proposal"]["fields"]["amount"] == "300"
+
+    neg_id = response["negotiation_id"]
+    terms = await db.load_credit_terms(negotiation_id=neg_id)
+    assert terms == {
+        "negotiation_id": neg_id,
+        "quantity": 3,
+        "key_mode": "new",
+        "key_id": None,
+    }
+
+    thread = await db.load_negotiation_thread_row(negotiation_id=neg_id)
+    assert thread["terminal_state"] == "success"
+    assert int(thread["agreed_price"]) == 300
+
+    assert fake_capacity.reserved == []
+    assert await db.load_capacity_hold(negotiation_id=neg_id) is None
+
+
+async def test_quota_guard_rejects_uncovered_quantity(db, fake_capacity, key_records):
+    fake_capacity.available = 2
+    with pytest.raises(OfferUnfulfillableError) as exc:
+        await _start(db, amount=300, quantity=3)
+    assert exc.value.reason.startswith("quota_exhausted")
+    assert not fake_capacity.reserved
+
+
+async def test_existing_key_owned_by_buyer_principal(db, fake_capacity, key_records):
+    key_records["ak_mine"] = {
+        "key_id": "ak_mine",
+        "owner_scheme": _BUYER_PRINCIPAL.scheme.value,
+        "owner_id": _BUYER_PRINCIPAL.identifier,
+        "status": "active",
+    }
+    response = await _start(
+        db,
+        amount=300,
+        quantity=3,
+        key_mode="existing",
+        key_id="ak_mine",
+    )
+    assert response["action"] == "accept"
+    terms = await db.load_credit_terms(
+        negotiation_id=response["negotiation_id"],
+    )
+    assert terms["key_mode"] == "existing"
+    assert terms["key_id"] == "ak_mine"
+
+
+async def test_existing_key_rejections(db, fake_capacity, key_records):
+    key_records["ak_theirs"] = {
+        "key_id": "ak_theirs",
+        "owner_scheme": _STRANGER_PRINCIPAL.scheme.value,
+        "owner_id": _STRANGER_PRINCIPAL.identifier,
+        "status": "active",
+    }
+    with pytest.raises(OfferUnfulfillableError) as exc:
+        await _start(db, key_mode="existing", key_id="ak_theirs")
+    assert exc.value.reason.startswith("key_not_owned")
+
+    with pytest.raises(OfferUnfulfillableError) as exc:
+        await _start(db, key_mode="existing", key_id="ak_missing")
+    assert exc.value.reason.startswith("key_not_found")
+
+
+async def test_open_key_top_up_without_guarded_owner(db, fake_capacity, key_records):
+    key_records["ak_open"] = {
+        "key_id": "ak_open",
+        "owner_scheme": None,
+        "owner_id": None,
+        "status": "active",
+    }
+    response = await _start(
+        db,
+        amount=300,
+        quantity=3,
+        key_mode="existing",
+        key_id="ak_open",
+    )
+    assert response["action"] == "accept"
+
+
+async def test_bisection_counter_round_scales_by_quantity(
+    db, fake_capacity, key_records
+):
+    """Counter rounds keep the quantity-scaled reference from the terms row."""
+    from tests._settings_overrides import settings_overrides
+
+    with settings_overrides(**{"negotiation.policies": ["bisection"]}):
+        opening = await _start(db, amount=250, quantity=3)
+        assert opening["action"] == "counter"
+        neg_id = opening["negotiation_id"]
+        countered = int(opening["proposal"]["fields"]["amount"])
+        assert countered == 275  # midpoint of 250 and the 300 bound
+
+        response = await build_api_credit_negotiation_runtime(
+            _DOMAIN
+        ).continue_negotiation(
+            repository=db,
+            negotiation_id=neg_id,
+            buyer_action="accept",
+            buyer_proposal=None,
+            buyer_reason=None,
+            buyer_principal=_BUYER_PRINCIPAL,
+            seller_principal=_SELLER_PRINCIPAL,
+            actor_principal=_BUYER_PRINCIPAL,
+            actor_role="buyer",
+        )
+    assert response["action"] == "accept"
+    thread = await db.load_negotiation_thread_row(negotiation_id=neg_id)
+    assert thread["terminal_state"] == "success"
+    assert int(thread["agreed_price"]) == 275
 
 
 def test_accepted_artifacts_stamp_the_seller_recipient(monkeypatch):

@@ -55,3 +55,14 @@ def test_version_reports_domain_contract():
     assert result.exit_code == 0
     assert "compute.v1" in result.output
     assert "contract 1.0" in result.output
+
+def test_raw_settlement_utilities_are_mechanism_namespaced() -> None:
+    status = runner.invoke(app, ["settlement", "status", "--help"])
+    nested = runner.invoke(app, ["settlement", "alkahest", "escrow", "--help"])
+    legacy_escrow = runner.invoke(app, ["escrow", "--help"])
+    legacy_chain = runner.invoke(app, ["chain", "--help"])
+
+    assert status.exit_code == 0, status.output
+    assert nested.exit_code == 0, nested.output
+    assert legacy_escrow.exit_code == 2
+    assert legacy_chain.exit_code == 2

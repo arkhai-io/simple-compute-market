@@ -77,3 +77,24 @@ def test_config_invalid_legacy_token_is_rejected_without_mutation(
         "Alkahest token address must be a canonical 20-byte hexadecimal address",
     )
     assert path.read_bytes() == original
+
+
+def test_csv_accepted_escrows_without_scalar_pricing_is_a_manual_conflict(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "resources.csv"
+    original = (
+        b'resource_id,resource_type,accepted_escrows\ngpu-1,compute.gpu,"legacy=100"\n'
+    )
+    path.write_bytes(original)
+
+    result = migrate_publication_csv(
+        path,
+        storefront_config={"Settlement": {"alkahest": {"enabled": True}}},
+        check=True,
+    )
+
+    assert result.conflicts == (
+        "row 2: accepted_escrows requires manual settlement clauses",
+    )
+    assert path.read_bytes() == original
