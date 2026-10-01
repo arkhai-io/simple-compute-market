@@ -62,7 +62,7 @@ her authority behind the same optional profile.
 The multi-registry scenario seeds each storefront's authority through typed
 administration clients and refreshes its projections before listing creation.
 It proves Bob's publication to both registries, Alice's publication to only the
-public registry, deduplicated discovery, resilience to an unavailable registry,
+public registry, authority-scoped discovery, resilience to an unavailable registry,
 and independent negotiations. It does not prove shared-site tenancy.
 
 `docs/development/ROADMAP.md`, Goal 1:
@@ -71,6 +71,23 @@ establishes two projection-backed storefronts using separate authorities.
 Multiple storefronts per site remain explicitly out of scope. Retain the
 pools-9 local-authority retirement gap until its own implementation completes.
 
-No service API or authentication invariant changes, so the existing subsystem
-specifications remain authoritative without a new protocol delta. These
-changes are development composition and test coverage.
+No service API or authentication invariant changes. The accepted review also
+makes the existing buyer discovery identity and failure scope explicit in the
+registry-discovery specification and architecture companion.
+
+## Accepted discovery review decision
+
+Discovery identity is `(registry authority, listing_id)`, preserving production
+buyer behavior. Bob contributes two discovery records across independent
+registries A and B, while Alice contributes one at A. Endpoints belonging to the
+same authority deduplicate by listing ID. Publisher-chosen IDs alone do not
+establish equivalence across unrelated authorities; that broader feature is
+outside this repair.
+
+The scenario calls the production buyer fan-in entry point. Ordinary discovery
+without a resource query or explain request can retain live-registry results
+when another configured endpoint is unreachable. Query compilation and explain
+remain fail-closed; this scenario does not claim resilience for those paths.
+The unreachable URL has explicit trust configuration so the test reaches the
+network instead of failing its own pin lookup. Registry footprint reads use
+the typed client, including its 404 error contract.

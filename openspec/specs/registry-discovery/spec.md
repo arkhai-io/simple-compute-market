@@ -42,6 +42,33 @@ Every publication MUST carry a non-empty publisher-chosen `listing_id` inside th
 - **WHEN** a different publisher submits an otherwise valid publication carrying an existing `listing_id`
 - **THEN** the registry rejects the ownership conflict
 
+### Requirement: Buyer discovery preserves registry authority identity
+
+Production buyer fan-in MUST deduplicate records by `(registry authority,
+listing_id)` and retain the first record's source URL and authority. Equal
+listing IDs from independent registry authorities MUST remain separate records;
+a publisher-chosen ID alone does not establish cross-authority equivalence.
+
+#### Scenario: Multiple endpoints represent one authority
+
+- **WHEN** two configured endpoints of the same registry authority return the same listing ID
+- **THEN** buyer discovery retains one record with the first endpoint's provenance
+
+#### Scenario: Independent authorities return the same listing ID
+
+- **WHEN** two independent registry authorities return the same listing ID
+- **THEN** buyer discovery retains both authority-scoped records and their respective provenance
+
+#### Scenario: An endpoint is unavailable during ordinary discovery
+
+- **WHEN** discovery without a resource query or explain request encounters an unreachable configured endpoint
+- **THEN** it reports the read failure and retains results from reachable registries
+
+#### Scenario: Query preparation cannot complete
+
+- **WHEN** a resource query or explain request cannot prepare an authenticated query for every configured registry
+- **THEN** discovery fails rather than silently selecting a subset of registries
+
 ### Requirement: Filter-spec consistency
 The registry MUST identify a filter-spec version with an ETag and MUST reject a listing query carrying a stale `If-Match` value rather than evaluate it under different filter semantics.
 

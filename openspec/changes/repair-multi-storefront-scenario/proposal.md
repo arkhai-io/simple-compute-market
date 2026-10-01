@@ -56,3 +56,17 @@ Alice and Bob each use their own provisioning authority. The scenario proves
 registry isolation, fan-in, and distinct negotiations with projection-backed
 listings. It does not demonstrate multiple storefronts sharing a site or
 shared-hardware storefront substitution.
+
+## Accepted review scope
+
+Discovery assertions use the production buyer entry point and preserve its
+registry-authority/listing-ID identity. Bob has one record per independent
+registry and Alice has one at A. Same-authority endpoint deduplication is
+covered by the buyer suite. Typed registry reads own publication footprint
+checks, including expected 404s. Resilience evidence covers ordinary discovery
+only; resource-query and explain preparation remain fail-closed.
+
+Permanent documentation also clarifies this existing behavior in
+`openspec/specs/registry-discovery/spec.md`, its architecture companion,
+`docs/buyer-quickstart.md`, and `docs/roles.md`. Cross-authority advertisement
+equivalence is outside scope. No service authentication protocol changes.

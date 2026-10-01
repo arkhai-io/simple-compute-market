@@ -2,7 +2,7 @@
 
 ## Implementation status
 
-**Code and validation ready for review.** Separate authorities are implemented;
+**Review corrections implemented and validated; ready for re-review.** Separate authorities are implemented;
 permanent documentation promotion remains pending post-code-review.
 
 ## 1. Declare the limitation
@@ -59,6 +59,29 @@ Implementation files and validation:
       `domains/vms/storefront/storefront.alice.toml`. Verify projection-backed
       listings before considering the pools-9 prerequisite complete.
 
+## 2a. Accepted review corrections
+
+- [x] 2a.1 In `e2e-tests/tests/e2e/roles/scenarios/vms/test_multi_registry.py`,
+  replace test-local fan-in with `core_buyer.orchestrator.query_registry_for_matches_multi`.
+  Expect Bob at each independent authority and Alice only at A; configure the
+  unreachable endpoint's trust binding and observe its connection failure.
+- [x] 2a.2 In the same scenario, use `SyncRegistryClient.get_listing` for
+  presence/absence and assert the typed error's status for the expected 404.
+- [x] 2a.3 Correct Redis comments in `domains/vms/compose.yml`; retain the
+  existing service without describing it as provisioning's job queue.
+- [x] 2a.4 Extend `core/buyer/tests/unit/test_orchestrator.py` to distinguish
+  same-authority mirrors from unrelated authorities. Correct the description
+  in `domains/vms/buyer/src/arkhai_vms_buyer/buy_cli.py`,
+  `domains/vms/buyer/src/arkhai_vms_buyer/listing_cli.py`,
+  `docs/buyer-quickstart.md`, and `docs/roles.md`.
+- [x] 2a.5 Record authority-scoped discovery in
+  `openspec/specs/registry-discovery/spec.md` and its architecture companion;
+  amend the prepared testing text in this change. Cross-authority advertisement
+  equivalence remains separate future design work.
+- [x] 2a.6 Run the buyer suite, focused multi-registry scenario, full local
+  end-to-end target, then packaging, comment hygiene and citation checks.
+  Earlier green scenario results did not prove production fan-in behavior.
+
 ## 3. Closeout
 
 - [x] 3.1 **Comment hygiene.** `make check-comment-hygiene`.
@@ -98,6 +121,27 @@ Implementation files and validation:
       the root declaration.
 ## Validation evidence
 
+Review correction validation (2026-10-01):
+
+- Buyer unit suite: 126 passed, including both same-authority mirrors and
+  independent authorities with equal listing IDs.
+- Deployment contract suites: 25 passed.
+- Typed registry presence checks initially used `listing_id` instead of the
+  client model's `id`; corrected after the live run. The typed 404 check passed.
+  Reusing that run's state correctly produced listing conflicts; subsequent
+  validation uses a clean stack.
+- Corrected full local pipeline passed: VM/API-credit lane 127 passed,
+  275 deselected; bare-metal lane 11 passed, 391 deselected; no skips. All 21
+  multi-registry stages now exercise production fan-in and typed registry reads.
+  Command: `make -C e2e-tests test-e2e NETWORK=simple-compute-market_default`.
+- `make check-packaging` passes after that pipeline; comment hygiene, scoped
+  citations, citations in all four touched permanent documents, and whitespace
+  checks pass. Strict OpenSpec CLI validation remains unavailable.
+- Earlier green results below prove topology/publication/negotiation, but their
+  test-local merge did not establish production discovery or dead-endpoint handling.
+
+Earlier topology validation:
+
 - Deployment contracts: 25 passed across multi-storefront, hosted Compose,
   and hosted run-target tests.
 - Focused Docker multi-registry scenario: 21 passed, 381 deselected, no skips
@@ -125,3 +169,4 @@ Implementation files and validation:
 | Scenario evidence covers registry behavior and negotiations, not shared-site tenancy | `docs/development/TESTING.md`; `docs/development/ROADMAP.md` | Coverage text prepared; roadmap gap scope reconciled, final closeout pending |
 | Public deterministic authority credential | `dev-env/identities/README.md` | Documented with fixture |
 | Review readiness and pools-9 prerequisite gate | `openspec/changes/README.md` | Current |
+| Buyer discovery identity and failure scope | `openspec/specs/registry-discovery/spec.md`; `openspec/specs/registry-discovery/architecture.md`; `docs/buyer-quickstart.md`; `docs/roles.md` | Existing production behavior clarified under the accepted review decision |

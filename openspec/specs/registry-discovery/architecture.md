@@ -93,3 +93,18 @@ Preserving publisher and listing identifiers avoids turning an identity-format c
 - [Market composition](../market-composition/spec.md)
 - [Storefront publication](../storefront-publication/spec.md)
 - [Buyer orchestration](../buyer-orchestration/spec.md)
+
+## Buyer fan-in identity
+
+Buyer discovery retains registry provenance because subsequent publisher-trust
+refreshes resolve through the selected authority. Its merge key is the stable
+registry authority plus publisher-chosen listing ID, not the URL or listing ID
+alone. Multiple endpoints for one authority can represent the same record;
+independent registries do not establish shared ownership merely by returning
+equal IDs. Cross-authority advertisement equivalence requires a separate trust
+contract and is not inferred by discovery.
+
+Ordinary discovery can report an unavailable registry and retain other results.
+Resource-query and explain paths require all authenticated query preparations
+to succeed, preventing an unavailable or incompatible registry from silently
+changing the requested search scope.

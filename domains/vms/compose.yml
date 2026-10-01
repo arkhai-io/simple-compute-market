@@ -1,7 +1,7 @@
 # VM compute (vms.compute) market — domain stack.
 #
 # The seller side of the VM compute market: two registry/indexer instances,
-# Bob's and Alice's storefronts, the Redis job queue, and provisioning. The
+# Bob's and Alice's storefronts and their provisioning authorities. The
 # domain stack has no unconditional chain dependency. An explicit Alkahest
 # storefront profile may add Anvil through the root development overlay;
 # a hosted-only profile composes without it.
@@ -174,7 +174,8 @@ services:
       retries: 6
       start_period: 10s
 
-  # 3. Redis (job queue for provisioning service)
+  # 3. Retained Redis service. Provisioning uses process-local job queues
+  # and does not consume this service.
   redis:
     image: redis:7-alpine
     ports:
