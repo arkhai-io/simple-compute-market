@@ -224,7 +224,7 @@ class MechanismRegistration:
     config_model: type[BaseModel]
     roles: frozenset[SettlementRole]
     preflight: PreflightCallback
-    client_factory: ClientFactory
+    client_factory: ClientFactory | None
     option_builder: OptionBuilder
     buyer_compatibility: BuyerCompatibilityHook
     clause_fields: tuple[SettlementClauseField, ...]
@@ -675,7 +675,7 @@ class SettlementConfigurationRegistry:
         role: SettlementRole,
         resources: Mapping[str, Any] | None = None,
     ) -> ConditionalEscrowClient:
-        """Dispatch one installed client factory without checking enabled/readiness."""
+        """Dispatch one installed conditional-servicing client factory."""
         registration = self.registration(mechanism_id)
         if role not in registration.roles:
             raise SettlementConfigurationError(
@@ -686,6 +686,10 @@ class SettlementConfigurationRegistry:
             raise SettlementConfigurationError(
                 f"settlement mechanism {mechanism_id!r} has no configured section"
             )
+        if registration.client_factory is None:
+            raise SettlementConfigurationError(
+                f"settlement mechanism {mechanism_id!r} has no runtime client"
+            )
         return registration.client_factory(section, resources or {}, role)
 
     def runtime_clients(
@@ -695,7 +699,7 @@ class SettlementConfigurationRegistry:
         role: SettlementRole,
         resources: Mapping[str, Any] | None = None,
     ) -> dict[str, ConditionalEscrowClient]:
-        """Build the existing runtime client map, including disabled sections."""
+        """Build clients only for mechanisms that own conditional servicing."""
         self.validate(config, role=role)
         return {
             registration.mechanism_id: self.create_client(
@@ -703,7 +707,9 @@ class SettlementConfigurationRegistry:
             )
             for registration in self.ordered_registrations(config, role=role)
             if registration.config_key in config.mechanisms
+            and registration.client_factory is not None
         }
+
 
     def build_option(
         self,

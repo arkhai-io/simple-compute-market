@@ -18,6 +18,14 @@ from market_settlement_runtime import (
     SettlementPublicationClause,
 )
 
+from .arkhai_payments import (
+    ARKHAI_PAYMENTS_CONFIG_KEY,
+    ARKHAI_PAYMENTS_MECHANISM,
+    ArkhaiPaymentsConfig,
+    BareMetalArkhaiPaymentsStage,
+    create_arkhai_payments_registration,
+)
+
 ALKAHEST_MECHANISM = "alkahest.v1"
 
 
@@ -28,13 +36,14 @@ def build_bare_metal_settlement_registry() -> SettlementConfigurationRegistry:
         (
             create_alkahest_registration(),
             create_contact_exchange_registration(),
+            create_arkhai_payments_registration(),
         )
     )
 
 
 @dataclass(frozen=True, slots=True)
 class BareMetalStorefrontSettlementComposition:
-    """Typed seller composition for Alkahest."""
+    """Typed seller composition for the supported settlement mechanisms."""
 
     registry: SettlementConfigurationRegistry
     config: SettlementConfig
@@ -62,6 +71,29 @@ class BareMetalStorefrontSettlementComposition:
     def enabled_mechanisms(self) -> tuple[str, ...]:
         return self.config.priority
 
+    def arkhai_payments_stage(self) -> BareMetalArkhaiPaymentsStage | None:
+        section = self.config.mechanisms.get(ARKHAI_PAYMENTS_CONFIG_KEY)
+        if section is None:
+            return None
+        config = ArkhaiPaymentsConfig.model_validate(section)
+        if not config.enabled:
+            return None
+        return BareMetalArkhaiPaymentsStage(
+            config=config,
+            api_key=self.resources.get("arkhai_payments_api_key"),
+            development_account=self.resources.get(
+                "arkhai_payments_development_account"
+            ),
+        )
+
+    def settlement_mandate_dispatch(
+        self,
+    ) -> dict[str, Callable[[Mapping[str, Any]], Mapping[str, Any]]]:
+        stage = self.arkhai_payments_stage()
+        if stage is None:
+            return {}
+        return {ARKHAI_PAYMENTS_MECHANISM: stage.mandate_for_agreement}
+
     async def readiness(
         self,
         *,
@@ -87,7 +119,7 @@ class BareMetalStorefrontSettlementComposition:
         demands: Sequence[Mapping[str, Any]] = (),
         max_duration_seconds: int | None = None,
     ) -> PublicationPayload:
-        """Build ready Alkahest publication alternatives."""
+        """Build ready settlement publication alternatives."""
 
         readiness = await self.readiness(clauses=clauses)
         readiness_by_mechanism = {item.mechanism: item for item in readiness}
@@ -141,7 +173,7 @@ class BareMetalStorefrontSettlementComposition:
         )
 
     def runtime_clients(self) -> dict[str, Any]:
-        """Build clients for configured Alkahest settlement."""
+        """Build clients for configured conditional settlement mechanisms."""
 
         return self.registry.runtime_clients(
             self.config,
@@ -151,8 +183,8 @@ class BareMetalStorefrontSettlementComposition:
 
     def accepted_obligation_dispatch(
         self,
-    ) -> dict[str, Callable[[Mapping[str, Any], Mapping[str, Any]], Any]]:
-        """Curried registry dispatch for every enabled obligation-building mechanism."""
+    ) -> dict[str, Callable[[Mapping[str, Any], Mapping[str, Any]], Any] | None]:
+        """Curried registry dispatch for obligation-building mechanisms."""
 
         dispatch: dict[
             str, Callable[[Mapping[str, Any], Mapping[str, Any]], Any] | None

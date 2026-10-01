@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
 from market_core.schemas import EscrowProposal, SettlementPlan
-from market_settlement_runtime import SettlementRuntime
 from market_identity import Identity
+from market_settlement_runtime import SettlementRuntime
 
+from .arkhai_payments import ARKHAI_PAYMENTS_MECHANISM, BareMetalArkhaiPaymentsStage
 from .models import (
     BareMetalSettleRequest,
     BareMetalSettleResponse,
@@ -32,12 +34,13 @@ PlanBuilder = Callable[..., dict[str, Any]]
 @dataclass(frozen=True)
 class BareMetalSettlementService:
     db: SQLiteClient
-    seller_wallet: str
+    seller_wallet: str | None
     chain_clients: Mapping[str, Any]
     chain_config_paths: Mapping[str, str | None]
     build_plan: PlanBuilder
     verify_escrow: VerifyEscrow
     settlement_runtime: SettlementRuntime
+    arkhai_payments_stage: BareMetalArkhaiPaymentsStage | None = None
 
     @staticmethod
     def _response(
@@ -70,6 +73,82 @@ class BareMetalSettlementService:
         if Identity.model_validate(thread.get("buyer_principal")) != buyer_principal:
             raise SettlementRequestError("negotiation buyer mismatch", status_code=403)
         return thread
+
+    async def _verify_arkhai_payment(
+        self,
+        *,
+        escrow_uid: str,
+        request: BareMetalSettleRequest,
+        thread: Mapping[str, Any],
+        existing: Mapping[str, Any] | None,
+        buyer_principal: Identity,
+    ) -> BareMetalSettleResponse:
+        stage = self.arkhai_payments_stage
+        transaction = request.transaction_id
+        if stage is None or transaction is None or request.buyer_evm_address is not None:
+            raise SettlementRequestError("Arkhai payment settlement is not configured")
+        if escrow_uid != transaction:
+            raise SettlementRequestError("settlement handle must equal the payment transaction ID")
+        agreement_bytes = thread.get("agreement_bytes")
+        if not isinstance(agreement_bytes, (bytes, bytearray)):
+            raise SettlementRequestError("accepted Agreement bytes are unavailable")
+        try:
+            agreement = json.loads(agreement_bytes)
+            settlement = agreement.get("settlement")
+            if (
+                agreement.get("negotiation_id") != request.negotiation_id
+                or agreement.get("listing_id") != thread.get("our_listing_id")
+                or agreement.get("buyer") != buyer_principal.model_dump(mode="json")
+                or agreement.get("seller")
+                != Identity.model_validate(thread["seller_principal"]).model_dump(mode="json")
+                or agreement.get("amount") != thread.get("agreed_price")
+                or agreement.get("duration_seconds") != thread.get("agreed_duration_seconds")
+                or not isinstance(settlement, Mapping)
+                or settlement.get("mechanism") != ARKHAI_PAYMENTS_MECHANISM
+            ):
+                raise ValueError("stored Agreement does not match the accepted negotiation")
+            await stage.verify_receipt(transaction=transaction, agreement=agreement)
+        except Exception as exc:
+            raise SettlementRequestError(
+                "payment receipt does not prove the accepted Agreement",
+                status_code=400,
+            ) from exc
+        primary = await self.db.load_primary_escrow_for_negotiation(
+            negotiation_id=request.negotiation_id
+        )
+        if primary is not None and primary.get("escrow_uid") != escrow_uid:
+            raise SettlementRequestError("negotiation already has a primary settlement")
+        if existing is not None and (
+            existing.get("negotiation_id") != request.negotiation_id
+            or existing.get("status") != "settlement_verified"
+            or existing.get("chain_name") != ARKHAI_PAYMENTS_MECHANISM
+            or existing.get("escrow_address") != transaction
+        ):
+            raise SettlementRequestError("payment transaction already belongs to another state")
+        if existing is None:
+            inserted = await self.db.insert_escrow(
+                escrow_uid=escrow_uid,
+                negotiation_id=request.negotiation_id,
+                chain_name=ARKHAI_PAYMENTS_MECHANISM,
+                escrow_address=transaction,
+                is_primary=True,
+                status="settlement_verified",
+            )
+            if not inserted:
+                raced = await self.db.load_escrow(escrow_uid=escrow_uid)
+                if not raced or (
+                    raced.get("negotiation_id") != request.negotiation_id
+                    or raced.get("chain_name") != ARKHAI_PAYMENTS_MECHANISM
+                    or raced.get("escrow_address") != transaction
+                    or raced.get("status") != "settlement_verified"
+                ):
+                    raise SettlementRequestError("conflicting payment settlement evidence")
+        return self._response(
+            escrow_uid=escrow_uid,
+            negotiation_id=request.negotiation_id,
+            buyer_principal=buyer_principal,
+            seller_principal=Identity.model_validate(thread["seller_principal"]),
+        )
 
     async def verify(
         self,
@@ -113,6 +192,16 @@ class BareMetalSettlementService:
             raise SettlementRequestError(
                 "bare-metal agreement no longer matches its listing"
             )
+        if request.transaction_id is not None:
+            return await self._verify_arkhai_payment(
+                escrow_uid=escrow_uid,
+                request=request,
+                thread=thread,
+                existing=existing,
+                buyer_principal=buyer_principal,
+            )
+        if request.buyer_evm_address is None:
+            raise SettlementRequestError("Alkahest settlement requires buyer_evm_address")
         proposal = EscrowProposal.model_validate(thread.get("buyer_escrow_proposal"))
         primary = await self.db.load_primary_escrow_for_negotiation(
             negotiation_id=request.negotiation_id,
@@ -137,7 +226,7 @@ class BareMetalSettlementService:
                 duration_seconds=terms.duration_seconds,
                 buyer_principal=buyer_principal,
                 seller_principal=Identity.model_validate(thread["seller_principal"]),
-                seller_wallet_address=self.seller_wallet,
+                seller_wallet_address=self.seller_wallet or "",
                 chain_config_paths=self.chain_config_paths,
             )
             plan = SettlementPlan.model_validate(artifacts.get("settlement_plan"))
@@ -198,7 +287,7 @@ class BareMetalSettlementService:
         try:
             matched_index = await self.verify_escrow(
                 escrow_uid=escrow_uid,
-                seller_wallet=self.seller_wallet,
+                seller_wallet=self.seller_wallet or "",
                 agreed_price=int(agreed_amount),
                 agreed_duration_seconds=terms.duration_seconds,
                 listing=listing,
@@ -294,6 +383,20 @@ class BareMetalSettlementService:
             negotiation_id=str(escrow["negotiation_id"]),
             buyer_principal=buyer_principal,
         )
+        if escrow.get("chain_name") == ARKHAI_PAYMENTS_MECHANISM:
+            if escrow.get("status") != "settlement_verified":
+                raise SettlementRequestError("payment receipt has not been verified")
+            thread = await self._owned_thread(
+                negotiation_id=str(escrow["negotiation_id"]),
+                buyer_principal=buyer_principal,
+            )
+            return BareMetalSettleStatusResponse(
+                escrow_uid=escrow_uid,
+                negotiation_id=str(escrow["negotiation_id"]),
+                buyer_principal=buyer_principal,
+                seller_principal=Identity.model_validate(thread["seller_principal"]),
+                status="settlement_verified",
+            )
         try:
             aggregate = await self.settlement_runtime.get_status(
                 str(escrow["negotiation_id"])

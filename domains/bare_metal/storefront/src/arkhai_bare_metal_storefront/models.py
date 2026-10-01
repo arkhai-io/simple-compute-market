@@ -103,7 +103,8 @@ class BareMetalSettleRequest(BaseModel):
 
     negotiation_id: str
     buyer_principal: Identity
-    buyer_evm_address: str
+    buyer_evm_address: str | None = None
+    transaction_id: str | None = None
 
 
 class BareMetalSettleResponse(BaseModel):

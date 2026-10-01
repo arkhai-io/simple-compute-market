@@ -115,20 +115,37 @@ class BareMetalStorefrontRuntime:
                 if self.settlement_composition is not None
                 else {}
             ),
+            settlement_mandate_dispatch=(
+                self.settlement_composition.settlement_mandate_dispatch()
+                if self.settlement_composition is not None
+                else {}
+            ),
         )
 
     def settlement_service(self) -> BareMetalSettlementService:
         """Build commercial verification from explicitly configured chains."""
-        if not self.seller_evm_address:
+        alkahest_enabled = (
+            self.settlement_composition is None
+            or ALKAHEST_MECHANISM in self.settlement_composition.enabled_mechanisms
+        )
+        if alkahest_enabled and not self.seller_evm_address:
             raise RuntimeError("Alkahest settlement is not configured")
+        arkhai_payments_stage = (
+            self.settlement_composition.arkhai_payments_stage()
+            if self.settlement_composition is not None
+            else None
+        )
+        if not alkahest_enabled and arkhai_payments_stage is None:
+            raise RuntimeError("no bare-metal settlement mechanism is configured")
         return BareMetalSettlementService(
             db=self.db,
-            seller_wallet=self.seller_evm_address,
+            seller_wallet=self.seller_evm_address or None,
             chain_clients=self.chain_clients,
             chain_config_paths=self.chain_config_paths,
             build_plan=self.plan_builder,
             verify_escrow=self.escrow_verifier,
             settlement_runtime=self.settlement_runtime,
+            arkhai_payments_stage=arkhai_payments_stage,
         )
 
     def fulfillment_service(self) -> BareMetalFulfillmentService:
@@ -295,6 +312,12 @@ def build_runtime_from_environment(
                     resources={
                         "marketplace_signer": signer,
                         "claimant_principal": identity_config.principal,
+                        "arkhai_payments_api_key": os.environ.get(
+                            "ARKHAI_PAYMENTS_API_KEY"
+                        ),
+                        "arkhai_payments_development_account": os.environ.get(
+                            "ARKHAI_PAYMENTS_DEVELOPMENT_ACCOUNT"
+                        ),
                     },
                 )
             )
@@ -330,6 +353,12 @@ def build_runtime_from_environment(
                     "wallet_ready": bool(seller_evm_address),
                     "clients": chain_clients,
                     "chains": raw_chains,
+                    "arkhai_payments_api_key": os.environ.get(
+                        "ARKHAI_PAYMENTS_API_KEY"
+                    ),
+                    "arkhai_payments_development_account": os.environ.get(
+                        "ARKHAI_PAYMENTS_DEVELOPMENT_ACCOUNT"
+                    ),
                 },
             )
         )

@@ -8,6 +8,7 @@ import json
 import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any
 
 from arkhai_bare_metal import (
@@ -47,6 +48,7 @@ class NegotiationRequestError(ValueError):
 
 
 PlanBuilder = Callable[..., dict[str, Any]]
+AcceptedAgreementBuilder = Callable[[Mapping[str, Any]], Mapping[str, Any]]
 # One curried registry dispatch per composed mechanism: the selection resolves
 # the mechanism exactly once and every obligation-shaped decision goes through
 # the registration; the domain keeps no per-mechanism conditional arm.
@@ -184,6 +186,9 @@ class BareMetalNegotiationService:
     round_hook: BareMetalSellerRoundHook
     build_plan: PlanBuilder
     accepted_obligation_dispatch: AcceptedObligationDispatch = field(
+        default_factory=dict
+    )
+    settlement_mandate_dispatch: Mapping[str, AcceptedAgreementBuilder] = field(
         default_factory=dict
     )
 
@@ -493,10 +498,16 @@ class BareMetalNegotiationService:
             accepted_at=accepted_at,
             provision_terms=request.provision_terms,
             settlement_plan=(plan.model_dump(mode="json") if plan is not None else None),
+            settlement_params=selection.params,
         )
         agreement_bytes = agreement.model_dump_json(
             exclude_none=True
         ).encode("utf-8")
+
+        settlement_mandate = None
+        mandate_builder = self.settlement_mandate_dispatch.get(selection.mechanism)
+        if mandate_builder is not None:
+            settlement_mandate = dict(mandate_builder(json.loads(agreement_bytes)))
         await self.db.persist_bare_metal_opening(
             negotiation_id=negotiation_id,
             listing_id=request.listing_id,
@@ -533,6 +544,7 @@ class BareMetalNegotiationService:
             settlement_plan=plan,
             agreement=agreement,
             agreement_bytes=base64.b64encode(agreement_bytes).decode("ascii"),
+            settlement_mandate=settlement_mandate,
         )
 
     @staticmethod
@@ -550,6 +562,7 @@ class BareMetalNegotiationService:
         accepted_at: datetime,
         provision_terms: Any,
         settlement_plan: Mapping[str, Any] | None,
+        settlement_params: Mapping[str, Any] | None = None,
     ) -> Agreement:
         encoded_listing = json.dumps(
             listing,
@@ -580,6 +593,11 @@ class BareMetalNegotiationService:
             buyer=buyer_principal.model_dump(mode="json"),
             seller=seller_principal.model_dump(mode="json"),
             settlement=settlement,
+            settlement_params=(
+                dict(settlement_params)
+                if settlement_params is not None
+                else None
+            ),
             amount=int(amount),
             asset=asset,
             duration_seconds=int(duration_seconds),
