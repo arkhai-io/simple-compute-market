@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import uuid
 from dataclasses import dataclass
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import datetime
 from typing import Any
 
@@ -73,6 +73,10 @@ class DerivedVmListing:
     listing: Any
     clauses: tuple[SettlementPublicationClause, ...]
     binding: Any
+    #: A shape-priced listing's resolved family rates, recorded beside the
+    #: listing as a term of sale and never sent to a registry; ``None`` for a
+    #: flat-priced listing.
+    rate_structure: Mapping[str, Any] | None = None
 
     def publication_clauses(self) -> list[dict[str, Any]]:
         return [
@@ -655,6 +659,7 @@ class ListingService:
                 seller_principal=listing.seller_principal,
                 oracle_address=listing_dict.get("oracle_address"),
                 paused=paused,
+                rate_structure=derived.rate_structure,
             )
         except Exception as exc:
             conflict = await self._describe_source_conflict(binding, exc)

@@ -52,9 +52,9 @@ None.
 
 ## Non-Goals
 
-- Pricing a shape. `capacity-shape-pricing` delivers the rate structure, its
-  evaluation, and the seller's commercial feasibility guard; this change
-  consumes them. Any revised-terms content is limited to what that policy can
+- Pricing a shape. `capacity-shape-pricing` delivers the rate structure and its
+  evaluation; this change consumes them, and owns the seller's check of a
+  requested shape ahead of pricing it. Any revised-terms content is limited to what that policy can
   price: an unexamined field that passes content through unchecked risks a
   buyer claiming resources the seller never agreed to give away.
 - Calling `resize_reservation`. Both storefronts place no hold before
@@ -107,8 +107,9 @@ None.
 
 ## Dependencies and Related Changes
 
-- Depends on `capacity-shape-pricing` for the rate structure, its evaluation,
-  and the seller's commercial feasibility guard.
+- Depends on `capacity-shape-pricing` for the rate structure, the recorded
+  structure that prices a revised shape, its evaluation, and the selected-option
+  reference amount the multiplier reinterprets.
 - Consumes `capacity-shape-envelope` and `negotiation-capacity-feasibility-probe`
   where a domain composes them; neither blocks this change.
 - Builds on `fix-vm-fulfillment-capacity-boundary`: the committed reservation is

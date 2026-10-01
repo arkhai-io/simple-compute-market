@@ -91,6 +91,7 @@ from .runtime import (
 from .publication import (
     SettlementPublicationClause,
     compile_settlement_publication_clause,
+    decimal_rate_to_base_units,
 )
 from .servicing import (
     EventCallback,
@@ -184,6 +185,7 @@ __all__ = [
     "settlement_migrations",
     "settlement_operation_ref",
     "compile_settlement_publication_clause",
+    "decimal_rate_to_base_units",
     "compile_settlement_clause",
     "select_settlement_candidates",
     "settlement_clause_descriptors",

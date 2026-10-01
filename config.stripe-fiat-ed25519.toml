@@ -48,7 +48,6 @@ policies = ["has_matching_inventory_guard", "escrow_shape_guard", "bisection"]
 
 [pricing]
 default_min_price = "100"
-default_token_address = ""
 default_max_duration_seconds = 0
 settlements = [
   { mechanism = "fiat.stripe.v1", asset = "usd", rate = "100", per = "hour", mechanism_input = { funding_profile = "card.v1", interaction = "interactive", funds_flow = "separate_charges_transfers" } },

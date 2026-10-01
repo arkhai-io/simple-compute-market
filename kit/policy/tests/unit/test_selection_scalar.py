@@ -14,6 +14,7 @@ from market_policy.negotiation_middleware import (
     NegotiationRound,
 )
 from market_policy.scalar_policies import (
+    selected_settlement_artifact,
     accept_exact_listing_middleware,
     buyer_counter_guard,
     option_uses_scalar_amount,
@@ -180,3 +181,32 @@ def test_buyer_counter_guard_still_rejects_scalar_counter_without_amount() -> No
     assert decision is not None
     assert decision.action == "reject"
     assert decision.reason == "counter_missing_amount"
+
+
+# -- selected_settlement_artifact ---------------------------------------------
+
+_ESCROW_A = {"chain_name": "anvil", "escrow_address": "0x" + "aa" * 20, "rates": []}
+_ESCROW_B = {"chain_name": "anvil", "escrow_address": "0x" + "bb" * 20, "rates": []}
+_OPTION = {"option_id": "o" * 64, "mechanism": "fiat.stripe.v1", "rates": []}
+_TWO_ESCROWS = {"accepted_escrows": [_ESCROW_A, _ESCROW_B], "settlement_options": [_OPTION]}
+
+
+def test_a_settlement_selection_selects_its_option():
+    proposal = {"settlement_selection": {"option_id": "o" * 64, "mechanism": "fiat.stripe.v1"}}
+    assert selected_settlement_artifact(_TWO_ESCROWS, proposal) == _OPTION
+
+
+def test_an_escrow_proposal_selects_its_escrow_not_the_first():
+    proposal = {"chain_name": "anvil", "escrow_address": ("0x" + "bb" * 20).upper()}
+    assert selected_settlement_artifact(_TWO_ESCROWS, proposal) == _ESCROW_B
+
+
+def test_nothing_selected_is_none():
+    assert selected_settlement_artifact(_TWO_ESCROWS, None) is None
+    assert selected_settlement_artifact(
+        _TWO_ESCROWS, {"chain_name": "anvil", "escrow_address": "0x" + "cc" * 20}
+    ) is None
+    assert selected_settlement_artifact(
+        _TWO_ESCROWS,
+        {"settlement_selection": {"option_id": "x" * 64, "mechanism": "fiat.stripe.v1"}},
+    ) is None

@@ -112,3 +112,27 @@ def test_every_vm_dimension_is_an_identity_field():
     # Identity is what a listing is and where; the dimensions are listed once,
     # from the domain vocabulary.
     assert len(IDENTITY_FIELDS) == len(set(IDENTITY_FIELDS))
+
+
+def test_a_changed_rate_structure_is_a_term_not_identity():
+    structure = {"gpu": [{"asset": "usd", "rate": "2", "per": "hour"}]}
+    changed = {"gpu": [{"asset": "usd", "rate": "3", "per": "hour"}]}
+
+    comparison = _compare(
+        stored_terms={**_TERMS, "rate_structure": structure},
+        fresh_terms={**_TERMS, "rate_structure": changed},
+    )
+
+    assert comparison.outcome == TERMS_DIFFER
+    assert comparison.differing_fields == ("rate_structure",)
+
+
+def test_a_listing_becoming_flat_priced_is_a_term_change():
+    structure = {"gpu": [{"asset": "usd", "rate": "2", "per": "hour"}]}
+
+    comparison = _compare(
+        stored_terms={**_TERMS, "rate_structure": structure},
+        fresh_terms={**_TERMS, "rate_structure": None},
+    )
+
+    assert comparison.outcome == TERMS_DIFFER

@@ -22,9 +22,11 @@ Verified against the tree at planning time; re-verify before implementing.
   generated deterministically from an accepted total, duration, and schedule.
 - `capacity-shape-pricing` lets a seller state per-family rates under the family
   each prices, resolved through the site-scoped pool override, the pool hint, and
-  the configured default, with an exact aggregator callable outside the negotiation
-  path. A shape-priced listing's rates are a storefront term of sale; the registry
-  receives only each option's composed rate. `negotiation-driven-capacity-resize` makes the
+  the configured default, with an exact aggregator in `kit/capability-pricing`
+  callable outside the negotiation path. A family without a rate is not charged,
+  and a listing that would be free is refused. A shape-priced listing records every
+  resolved family's rates as a storefront term of sale; the registry receives only
+  each option's composed rate. `negotiation-driven-capacity-resize` makes the
   negotiated quantity a multiplier over that structure in basis points, with every
   derived amount an exact integer.
 - `kit/alkahest` has no standing-account abstraction; "account" means an EOA

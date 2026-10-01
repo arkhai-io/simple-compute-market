@@ -1119,6 +1119,68 @@ pools:
         assert refused and refused[0].path.endswith(".policy_tags.asking_rates")
 
 
+class TestPricingRatesValidationOnEveryWriteSurface:
+    """A malformed `pricing` rate list is refused on create, patch, and bulk
+    import, nothing is stored, and a valid one is kept verbatim."""
+
+    MALFORMED = {"pricing": {"memory": {"rates": [
+        {"asset": "usd", "rate": 0.05, "per": "hour"},
+    ]}}}
+    VALID = {"pricing": {
+        "gpu": {"H100": {"rates": [{"asset": "usd", "rate": "2", "per": "hour"}]}},
+        "memory": {"rates": [{"asset": "usd", "rate": "0.05", "per": "hour"}]},
+    }}
+
+    def _create(self, svc, tags):
+        return svc.create_pool(
+            PoolCreate(
+                id="priced",
+                label="Priced",
+                provider="ansible",
+                policy_tags=_declared(tags),
+                provider_config=_ANSIBLE_CONFIG,
+            )
+        )
+
+    def test_create_refuses_and_stores_nothing(self, svc):
+        with pytest.raises(PoolValidationError) as refused:
+            self._create(svc, self.MALFORMED)
+        assert "pricing.memory.rates[0].rate" in str(refused.value)
+        assert svc.list_pools() == []
+
+    def test_create_keeps_a_valid_declaration_verbatim(self, svc):
+        assert self._create(svc, self.VALID).policy_tags == _declared(self.VALID)
+
+    def test_patch_refuses_and_keeps_stored_metadata(self, svc):
+        self._create(svc, self.VALID)
+        with pytest.raises(PoolValidationError):
+            svc.update_pool("priced", PoolUpdate(policy_tags=_declared(self.MALFORMED)))
+        assert svc.get_pool("priced").policy_tags == _declared(self.VALID)
+
+    def test_bulk_import_refuses_with_path_and_code(self, svc):
+        response = svc.validate_pools("""
+pools:
+  - id: default
+    label: Default Pool
+    provider: ansible
+    policy_tags:
+      advertisable_modes: []
+      capacity_backing: backed
+      pricing:
+        cpu:
+          rates:
+            - {asset: usd, rate: "0.5", per: hour}
+            - {asset: usd, rate: "0.6", per: hour}
+    provider_config:
+      playbook_path: playbooks/vm-operations.yaml
+      inventory_group: kvm_hosts
+""")
+        assert response.valid is False
+        refused = [p for p in response.problems if p.code == "invalid_pricing_rates"]
+        assert refused and refused[0].path.endswith(".policy_tags.pricing")
+        assert "appears more than once" in refused[0].message
+
+
 class _StubPoolConfigHandler:
     def __init__(self, provider: str) -> None:
         self.provider = provider

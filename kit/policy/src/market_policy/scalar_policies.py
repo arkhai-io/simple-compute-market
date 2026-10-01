@@ -21,6 +21,7 @@ re-exports every name from here, so existing import paths keep working.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import Any, Optional
 
 from market_policy.negotiation_middleware import (
@@ -632,6 +633,29 @@ def _settlement_option_for_selection(
     return None
 
 
+def selected_settlement_artifact(
+    listing: Mapping[str, Any],
+    proposal: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    """The accepted escrow or settlement option a buyer's proposal selects.
+
+    A proposal carrying a ``settlement_selection`` selects the listing's option
+    with that identity and mechanism; any other proposal selects the accepted
+    escrow on its chain at its escrow address. None when ``proposal`` is absent
+    or selects nothing the listing offers. A seller negotiates from the selected
+    artifact's rate, so every domain answers this question the same way.
+    """
+    if not isinstance(proposal, Mapping):
+        return None
+    listing_dict = dict(listing)
+    proposal_dict = dict(proposal)
+    selection = proposal_dict.get("settlement_selection")
+    if isinstance(selection, Mapping):
+        proposal_dict["settlement_selection"] = dict(selection)
+        return _settlement_option_for_selection(listing_dict, proposal_dict)
+    return _accepted_escrow_for_proposal(listing_dict, proposal_dict)
+
+
 def option_uses_scalar_amount(option: dict[str, Any] | None) -> bool:
     """Whether a published settlement option bargains a scalar ``amount``.
 
@@ -1149,6 +1173,7 @@ def buyer_escrow_shape_guard(
 
 __all__ = [
     "_amount_from_proposal",
+    "selected_settlement_artifact",
     "NegotiationAmountError",
     "format_wire_amount",
     "parse_wire_amount",
