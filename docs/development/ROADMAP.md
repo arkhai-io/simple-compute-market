@@ -40,6 +40,12 @@ Sellable capacity is declared in the site authority, across every dimension a re
 
 Host records are used only where a connection is made. The resource-pool projection is built from capacity declarations alone and carries no host connection identity, and execution renders its inventory solely from the registered host record the work names, refusing a host with none. An inventory file seeds the host registry at first boot and is never read at execution.
 
+The VM development scenario runs two storefronts against separate provisioning
+authorities. Both derive listings from their respective site projections, and
+the scenario covers registry publication, buyer discovery, and negotiations.
+This establishes a working two-storefront topology. Multiple storefronts per
+site remain outside its scope.
+
 | Open gap | Owned by |
 |---|---|
 | The VM storefront retains local physical tables, the local-table derivation path, CSV import and its deployment contract, and a legacy home-site override record beneath the site-scoped override store | [`pools-9-retire-local-physical-authority`](../../openspec/changes/pools-9-retire-local-physical-authority/) |
@@ -48,7 +54,6 @@ Host records are used only where a connection is made. The resource-pool project
 | The relay path is implemented but unverified on a rented host: reload preservation of live sessions, the port window, teardown release, and relay deletion under live leases remain to be proved or decided | [`relay-vm-access-without-a-dashboard`](../../openspec/changes/relay-vm-access-without-a-dashboard/) |
 | Host inventory seeds the host registry only when it is empty and is never reconciled against its file, so editing a running deployment's inventory changes nothing | [`bring-host-inventory-under-definition-documents`](../../openspec/changes/bring-host-inventory-under-definition-documents/) |
 | One SSH key reaches every host in an environment, so a host prepared by another party cannot be registered with its own credential | [`contain-embedded-host-key-material`](../../openspec/changes/contain-embedded-host-key-material/) |
-| The two-storefront scenario repair uses separate provisioning authorities and has passing local end-to-end evidence; review and documentation promotion remain before closing the gap. Multiple storefronts per site are out of scope | [`repair-multi-storefront-scenario`](../../openspec/changes/repair-multi-storefront-scenario/) |
 
 A schema drop of the frozen columns is deliberately excluded from the retirement and belongs to a later follow-up, after a deployment cycle confirms the freeze never needed rolling back.
 

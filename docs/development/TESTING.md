@@ -258,6 +258,16 @@ than skipping. The release-qualified bare-metal deal needs a real whole host to
 reach and revoke access on, which the pipeline never has, so neither lane
 selects it; a mock-profile site proves the services compose, not real delivery.
 
+The VM multi-registry scenario seeds Bob's and Alice's separate provisioning
+authorities through typed administration clients and refreshes both site
+projections before listing creation. It checks Bob's publication to two
+registries, Alice's publication to one, production buyer discovery retaining
+one record per independent registry authority, ordinary discovery with an
+unavailable endpoint, and independent negotiations. Registry footprint checks
+use the typed registry client; the scenario does not establish that multiple
+storefronts can share a site authority. Resource-query and explain preparation
+have separate fail-closed behavior.
+
 To run both lanes in GitHub Actions, push the current branch and run
 `make run-e2e` with an authenticated `gh` CLI on PATH. Then run
 `make fetch-e2e-logs E2E_RUN_ID=<run-id>` to wait for that run and download its

@@ -2,8 +2,9 @@
 
 ## Implementation status
 
-**Review corrections implemented and validated; ready for re-review.** Separate authorities are implemented;
-permanent documentation promotion remains pending post-code-review.
+**Implementation and post-review promotion complete.** Separate authorities are
+implemented; the accepted discovery contract and development scenario are
+documented in their permanent owners.
 
 ## 1. Declare the limitation
 
@@ -87,17 +88,19 @@ Implementation files and validation:
 - [x] 3.1 **Comment hygiene.** `make check-comment-hygiene`.
 - [x] 3.2 **Import placement.** Added client imports are module-level; moved
       the touched storefront-client imports to module scope and verified live.
-- [ ] 3.3 **Documentation compliance.** Promote development topology to
-      `docs/development/DEPLOYMENT_AND_CONFIG.md` and scenario coverage to
-      `docs/development/TESTING.md` after code review.
+- [x] 3.3 **Documentation compliance.** The development topology is in
+      `docs/development/DEPLOYMENT_AND_CONFIG.md`, scenario coverage is in
+      `docs/development/TESTING.md`, and authority-scoped buyer discovery is
+      in `openspec/specs/registry-discovery/{spec,architecture}.md`.
 - [x] 3.4 **Narrative compression.** Replaced obsolete shared-authority
       discussion with the accepted topology and concise containment history.
-- [ ] 3.5 **Roadmap currency.** Reconcile Goal 1's gap with the accepted
-      separate-authority scope; do not claim shared-site substitution or leave
-      a resolved gap pointing at an archived change.
-- [x] 3.6 **Campaign index currency.** Index records passing validation and
-      review/promotion pending; pools-9 remains gated on closeout.
-- [ ] 3.7 **Promotion.**
+- [x] 3.5 **Roadmap currency.** Goal 1 records the separate-authority
+      evidence and its shared-site limit; the resolved repair gap is removed.
+      The independent pools-9 retirement gap remains.
+- [x] 3.6 **Campaign index currency.** The repair is implemented and the
+      pools-9 prerequisite is recorded as satisfied.
+- [x] 3.7 **Promotion.** Decisions and validation boundaries are recorded in
+      the permanent destinations listed below.
 
 - [x] 3.8 **Documentation citations.** Run
       `make check-doc-citations CHANGE=repair-multi-storefront-scenario` and resolve every match.
@@ -121,52 +124,29 @@ Implementation files and validation:
       the root declaration.
 ## Validation evidence
 
-Review correction validation (2026-10-01):
-
-- Buyer unit suite: 126 passed, including both same-authority mirrors and
-  independent authorities with equal listing IDs.
+- Buyer unit suite: 126 passed, covering same-authority mirrors and independent
+  authorities with equal listing IDs.
+- API-credit buyer suite: 17 passed, including CLI help construction after both
+  descriptions were corrected.
 - Deployment contract suites: 25 passed.
-- Typed registry presence checks initially used `listing_id` instead of the
-  client model's `id`; corrected after the live run. The typed 404 check passed.
-  Reusing that run's state correctly produced listing conflicts; subsequent
-  validation uses a clean stack.
-- Corrected full local pipeline passed: VM/API-credit lane 127 passed,
-  275 deselected; bare-metal lane 11 passed, 391 deselected; no skips. All 21
-  multi-registry stages now exercise production fan-in and typed registry reads.
-  Command: `make -C e2e-tests test-e2e NETWORK=simple-compute-market_default`.
-- `make check-packaging` passes after that pipeline; comment hygiene, scoped
-  citations, citations in all four touched permanent documents, and whitespace
-  checks pass. Strict OpenSpec CLI validation remains unavailable.
-- Earlier green results below prove topology/publication/negotiation, but their
-  test-local merge did not establish production discovery or dead-endpoint handling.
-
-Earlier topology validation:
-
-- Deployment contracts: 25 passed across multi-storefront, hosted Compose,
-  and hosted run-target tests.
-- Focused Docker multi-registry scenario: 21 passed, 381 deselected, no skips
-  (2026-10-01). Both authorities accepted provisioning seed requests, both
-  storefronts loaded projections, and both negotiations reached round-0 counters.
-- Packaging, comment hygiene, scoped documentation citations, and whitespace
-  checks pass. Strict OpenSpec CLI validation remains unrun: CLI unavailable.
-- Full local pipeline on 2026-10-01:
-  `make -C e2e-tests test-e2e NETWORK=simple-compute-market_default` passed:
-  VM/API-credit lane 127 passed, 275 deselected; bare-metal lane 11 passed,
-  391 deselected; no skips. This is local pipeline evidence, not a CI run.
-- Final focused run after correcting Alice's database environment prefix and
-  removing an unused Redis service: 21 passed, 381 deselected, no skips.
-- The checkout's Compose project name requires a matching `NETWORK` argument;
-  the first focused runner attempt failed before collection using its stale
-  default network name. No product failure was involved.
-- Permanent topology/coverage promotion remains pending post-code-review.
-  Development credential provenance is already documented alongside its fixture.
+- Full local end-to-end pipeline on 2026-10-01:
+  `make -C e2e-tests test-e2e NETWORK=simple-compute-market_default` passed.
+  VM/API-credit lane: 127 passed; bare-metal lane: 11 passed; no skips.
+  The 21-stage multi-registry scenario passed. Phase 4 used typed registry
+  reads, Phase 5 exercised production buyer fan-in, and the remaining stages
+  covered separate provisioning authorities, projections, publication, and
+  negotiations. This is local pipeline evidence, not a CI run.
+- `make check-packaging`, comment hygiene, scoped documentation citations,
+  citations in touched permanent documents, and whitespace checks passed.
+  Strict OpenSpec CLI validation was unavailable in this environment.
 
 ## Design promotion record
 
 | Accepted decision | Permanent location | Status |
 |---|---|---|
-| Alice and Bob each use their own provisioning authority | `docs/development/DEPLOYMENT_AND_CONFIG.md` | Prepared in design; post-review promotion pending |
-| Scenario evidence covers registry behavior and negotiations, not shared-site tenancy | `docs/development/TESTING.md`; `docs/development/ROADMAP.md` | Coverage text prepared; roadmap gap scope reconciled, final closeout pending |
+| Alice and Bob each use their own provisioning authority | `docs/development/DEPLOYMENT_AND_CONFIG.md` | Promoted |
+| Scenario evidence covers registry behavior and negotiations, not shared-site tenancy | `docs/development/TESTING.md`; `docs/development/ROADMAP.md` | Promoted; resolved roadmap gap removed |
 | Public deterministic authority credential | `dev-env/identities/README.md` | Documented with fixture |
-| Review readiness and pools-9 prerequisite gate | `openspec/changes/README.md` | Current |
-| Buyer discovery identity and failure scope | `openspec/specs/registry-discovery/spec.md`; `openspec/specs/registry-discovery/architecture.md`; `docs/buyer-quickstart.md`; `docs/roles.md` | Existing production behavior clarified under the accepted review decision |
+| Implemented status and satisfied pools-9 prerequisite | `openspec/changes/README.md` | Current |
+| Buyer discovery identity and failure scope | `openspec/specs/registry-discovery/spec.md`; `openspec/specs/registry-discovery/architecture.md`; `docs/buyer-quickstart.md`; `docs/roles.md` | Promoted existing production behavior |
+| Shared buyer CLI discovery descriptions | `domains/vms/buyer/src/arkhai_vms_buyer/{buy_cli,listing_cli}.py`; `domains/apicredits/buyer/src/arkhai_apicredits_buyer/{buy_cli,listing_cli}.py` | Aligned with authority-scoped discovery |
