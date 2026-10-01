@@ -20,9 +20,11 @@ VM's. What stands in the way:
   negotiation runtime, so it has no multi-round negotiation or force-accept.
 - **The storefront lacks the deal controls** VM's scenario drives: stage events,
   evaluate-negotiate, force-accept, settle verify and evaluate, settle wait, admin
-  reserve, and the capacity-released callback.
+  reserve, and the capacity-released callback. Where VM has them, force-accept bypasses
+  the runtime's acceptance hooks and evaluate-negotiate skips the opening's own guards.
 - **Fulfillment never starts on the Alkahest path**; it waits for a buyer call no buyer
-  makes.
+  makes, and the settlement-servicing worker that would retry it exists only with hosted
+  settlement.
 - **Release has two owners and bypasses the fulfillment aggregate**: lease expiry submits
   a raw reclaim job, and buyer teardown makes the storefront release site capacity itself.
 - **No scenario exists**, and stage definitions are VM's alone.
@@ -32,18 +34,23 @@ API-credit deal runs inside the VM lane.
 
 ## What Changes
 
-- Extract the mock rule-and-gate mechanism into a new kit, `kit/compute-executor-mock`,
-  and rebuild VM's programmable mock on it. Route executor actions through an
-  action-keyed table in the job service, and give the bare-metal adapter its own mock
+- Give compute provisioning an executor table keyed by `(offering_mode, action)` that
+  adapter bundles populate and VM's job service resolves through. Move the mock
+  rule-and-gate mechanism into a compute-family module, `compute_provisioning.executor_mock`,
+  rebuild VM's programmable mock on it, and give the bare-metal adapter its own mock
   under the mock profile, with its own `/test/bare-metal` rule routes.
 - Compose bare metal onto `kit/negotiation-runtime` through its existing routes and
   delete its domain-local negotiation (migrated from `bare-metal-and-credits-domain-stacks`
   4a.1, 4a.2, and the runtime half of 4a.3).
 - Move the deal controls into kit as framework-free route services, bound by every
-  storefront that has or needs them, with wire paths and client methods unchanged
-  (implemented in place of the corresponding part of `kit-owned-storefront-shell`).
-- Start bare-metal fulfillment when settlement verifies the escrow, resume unstarted
-  fulfillment from settlement servicing, and retire `POST /api/v1/fulfillments/begin`.
+  storefront that has or needs them (implemented in place of the corresponding part of
+  `kit-owned-storefront-shell`). Force-accept goes through a new administrative
+  acceptance on the negotiation runtime, so domain holds and artifacts are always
+  recorded; evaluate-negotiate becomes a side-effect-free preview of the full opening,
+  taking the opening request as its body.
+- Start bare-metal fulfillment when settlement verifies the escrow through the kit
+  settlement-servicing worker, composed for every mechanism rather than only hosted
+  settlement, and retire `POST /api/v1/fulfillments/begin`.
 - Make the lease lifecycle the only owner of release for every offering mode: lease
   release delegates to durable fulfillment teardown, buyer teardown goes through lease
   termination, and the storefront's direct site release is removed.
@@ -65,13 +72,15 @@ None.
 ### Modified Capabilities
 
 - `test-compatibility`: a deployable domain's deal runs on every pipeline run against
-  mock provisioning; compute domains share deal stages; every lane runs on images
+  its ordinary local authorities, with compute provisioning in its mock profile where
+  delivery crosses it; compute domains share deal stages; every lane runs on images
   built once; bare-metal storefront restart recovery is proven at integration level.
-- `market-composition`: storefront deal controls are kit-owned route services; mock
-  executors share a compute-family kit.
+- `market-composition`: storefront deal controls are kit-owned route services;
+  administrative acceptance and opening previews go through the negotiation runtime;
+  compute mock executors share one compute-family mechanism.
 - `physical-provisioning`: lease release delegates to durable fulfillment teardown for
-  every offering mode; storefront teardown goes through lease termination; executor
-  actions route to the owning adapter's executor.
+  every offering mode; storefront teardown goes through lease termination; job execution
+  resolves its executor by offering mode and action from a compute-provisioning table.
 - `storefront-publication`: bare-metal fulfillment starts at settlement verification,
   and bare-metal teardown releases capacity through the site's lease lifecycle.
 
@@ -89,12 +98,16 @@ None.
 
 ## Impact
 
-- New `kit/compute-executor-mock`; the VM adapter's mock, test controller, and job
-  service; the bare-metal provisioning adapter's runtime, mock, routes, and release.
-- `provisioning/compute`: provider-neutral release executor and job port, release
+- The VM adapter's mock, test controller, and job service; the bare-metal provisioning
+  adapter's runtime, mock, routes, and release.
+- `provisioning/compute`: the `(offering_mode, action)` executor table, the
+  compute-family mock mechanism, provider-neutral release executor and job port, release
   dispatcher composition, and the provisioning client's route contracts.
-- `kit/negotiation-runtime`, `kit/settlement-runtime`, `kit/capacity-publication`, and
-  `kit/storefront`: deal-control route services and the evaluate-settle hook.
+- `kit/negotiation-runtime`: administrative acceptance and opening preview.
+  `kit/settlement-runtime`, `kit/capacity-publication`, and `kit/storefront`:
+  deal-control route services and the evaluate-settle hook. `core/storefront`: the
+  bypassing `NegotiationService.force_accept` removed; `core/storefront-client`:
+  `evaluate_negotiate` takes the opening request.
 - `domains/vms/storefront` and `domains/apicredits/storefront`: rebinding to the kit
   route services and removing their copies.
 - `domains/bare_metal/storefront`: negotiation on the kit runtime, deal controls,
@@ -110,9 +123,9 @@ None.
 
 ## Permanent documentation impact
 
-- [x] `docs/development/ARCHITECTURE.md` — kit layers (`kit/compute-executor-mock`, the
-      deal-control route services), release ownership, and the bare-metal fulfillment
-      hook statement, which is stale today.
+- [x] `docs/development/ARCHITECTURE.md` — the deal-control route services in the kit
+      layers, the compute-provisioning executor table and mock mechanism, release
+      ownership, and the bare-metal fulfillment hook statement, which is stale today.
 - [x] `docs/development/TESTING.md` — three lanes on shared images, the loop table's
       bare-metal publication dry run, shared compute deal stages, the mock profile's
       per-adapter executors, and the stale "blocked—not mocked" bare-metal statement.
@@ -123,11 +136,16 @@ None.
 
 ### Knowledge to promote
 
-- A deployable domain's deal runs on every pipeline run against mock provisioning;
-  compute domains share deal stages; lanes run on images built once —
+- A deployable domain's deal runs on every pipeline run against its ordinary local
+  authorities, with compute provisioning mocked where delivery crosses it; compute
+  domains share deal stages; lanes run on images built once —
   `openspec/specs/test-compatibility/spec.md`, `docs/development/TESTING.md`.
-- Storefront deal controls are kit-owned route services; mock executors share
-  `kit/compute-executor-mock` — `openspec/specs/market-composition/spec.md`,
+- Storefront deal controls are kit-owned route services; administrative acceptance and
+  opening previews go through the negotiation runtime; compute mock executors share
+  `compute_provisioning.executor_mock` — `openspec/specs/market-composition/spec.md`,
+  `docs/development/ARCHITECTURE.md`.
+- Job execution resolves its executor by `(offering_mode, action)` from a
+  compute-provisioning table — `openspec/specs/physical-provisioning/spec.md`,
   `docs/development/ARCHITECTURE.md`.
 - Lease release delegates to durable fulfillment teardown for every offering mode, and
   storefront teardown goes through lease termination —

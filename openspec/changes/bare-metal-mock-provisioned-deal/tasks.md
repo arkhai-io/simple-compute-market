@@ -46,8 +46,9 @@ migrated from three sibling changes; `design.md` records each decision.
       ("The lease lifecycle owns release for every offering mode").
 - [x] 1.11 **Decision gate.** Decide the executor seam and where the mock mechanism lives.
       Decided: an action-keyed executor table in the job service and
-      `kit/compute-executor-mock` ("Executors are routed by action, and each adapter owns
-      its mock").
+      `kit/compute-executor-mock`. Amended by 1.16: a `(offering_mode, action)` table in
+      compute provisioning and `compute_provisioning.executor_mock` ("Executors are
+      selected by offering mode and action, and each adapter owns its mock").
 - [x] 1.12 **Decision gate.** Decide where restart recovery is proven. Decided: storefront
       integration tests, as VM's is ("Restart recovery is proven at integration level, as
       VM's is").
@@ -59,6 +60,15 @@ migrated from three sibling changes; `design.md` records each decision.
 - [x] 1.15 **Decision gate.** Decide the real-host scenario's disposition. Decided: kept,
       deactivated, under a marker no lane selects ("The real-host scenario stays,
       deactivated").
+- [x] 1.16 **Decision gate.** Resolve the 2026-10-01 design review. Decided with the
+      maintainer: administrative acceptance and opening previews go through
+      `NegotiationRuntime`, with the opening request as the preview's body; executor
+      selection moves to compute provisioning keyed by `(offering_mode, action)`; the mock
+      mechanism is a compute-family module in `compute_provisioning`, not a foundation
+      kit; the deal-on-every-run requirement applies compute provisioning only where
+      delivery crosses it; the kit settlement-servicing worker, composed for every
+      mechanism, starts and retries bare-metal fulfillment. Sections 4–7 were replanned
+      accordingly, and every section now ends at its own gate.
 
 ## 3. Buyer-side deal requirements
 
@@ -80,63 +90,63 @@ Former tasks 3.5–3.6 are storefront behaviour proven at integration level.
       application over the same database file and a fake site after settlement commit
       and after teardown acceptance; the buyer retrieves the same operation with no
       second obligation, mechanism selection, or teardown, and duplicate polling and
-      result reads are idempotent. Planned in 8.6.
+      result reads are idempotent. Planned in 7.7.
 - [ ] 3.6 **Pause survives restart.** In the same suite, an authenticated trading pause
       remains active across the rebuild and new negotiations are refused until an
-      authenticated resume. Planned in 8.6.
+      authenticated resume. Planned in 7.7.
 
-## 4. Compute executor mock kit and the executor seam
+## 4. Executor selection and the compute mock mechanism
 
-Decision: "Executors are routed by action, and each adapter owns its mock". VM's lane
-must stay green at the end of this section with no scenario change.
+Decision: "Executors are selected by offering mode and action, and each adapter owns its
+mock". Reviewable alone: provisioning only, no storefront or scenario change.
 
-- [ ] 4.1 Create `kit/compute-executor-mock` (`arkhai-kit-compute-executor-mock`,
-      `market_compute_executor_mock`), standard library and pydantic only:
-      `pyproject.toml`, `Makefile`, `src/market_compute_executor_mock/__init__.py`,
-      `rules.py` (the rule model, store, and matching now in VM's `MockRule` and
-      `ProgrammableMockAnsibleService`), `gates.py` (pause gates and job-done events),
-      `evaluate.py` (the evaluate-job dry run), `routes.py` (a framework-free route
-      service for add, list, delete, resume, and evaluate, raising an HTTP-shaped error
-      as `market_storefront_kit.LifecycleRouteError` does). Unit tests in
-      `tests/unit/test_rules.py`, `test_gates.py`, `test_routes.py`, moved from
-      `provisioning/compute/service/tests/unit/services/test_programmable_mock.py`
-      where they test mechanism rather than VM output.
-- [ ] 4.2 Register the kit in `kit/Makefile` (`test-compute-executor-mock`,
-      `dist-compute-executor-mock`, both added to `test` and `dist-ci`).
-- [ ] 4.3 Give the job service an executor table:
+- [ ] 4.1 Add the executor table to `provisioning/compute/src/compute_provisioning/`:
+      `executors.py` with an `ActionExecutorRegistry` keyed by `(offering_mode, action)`
+      that rejects duplicate keys, and the narrow resolver port a job service depends on.
+      Adapter bundles (`compute_provisioning.adapters`' bundle contract) declare their
+      action executors; `compose_adapter_bundles` registers them. Unit tests in
+      `provisioning/compute/tests/unit/test_executors.py` (selection, duplicate refusal,
+      unknown key).
+- [ ] 4.2 Add `compute_provisioning/executor_mock.py`: the rule model, store, and matching
+      over an opaque job-parameter mapping, pause gates and job-done events, the
+      evaluate-job dry run, and a framework-free route service raising an HTTP-shaped
+      error, extracted from VM's `MockRule` and `ProgrammableMockAnsibleService`. Unit
+      tests in `provisioning/compute/tests/unit/test_executor_mock.py`, moved from
+      `provisioning/compute/service/tests/unit/services/test_programmable_mock.py` where
+      they test mechanism rather than VM output.
+- [ ] 4.3 Resolve executors in VM's job service:
       `domains/vms/provisioning/adapter/src/vm_provisioning_adapter/services/job_service.py`
-      gains `register_executor(actions, executor)`; `_process_job` selects by
-      `params.action` with the constructor's Ansible service as the default, and
+      takes the resolver port and selects each job's executor from its persisted
+      `offering_mode` and action; its `bare_metal` special case is removed;
       `notify_job_done` goes to the executor that ran the job. Persistence, host
-      validation, inventory rendering, and `parse_playbook_result` are unchanged.
-      Focused tests in `provisioning/compute/service/tests/unit/services/test_job_service.py`.
-- [ ] 4.4 Rebuild VM's mock on the kit:
+      validation, inventory rendering, and `parse_playbook_result` are unchanged. The VM
+      bundle (`vm_provisioning_adapter/bundle.py`, `runtime.py`) registers the real
+      Ansible service, or under the mock profile VM's mock, for its actions. Tests in
+      `provisioning/compute/service/tests/unit/services/test_job_service.py`.
+- [ ] 4.4 Rebuild VM's mock on the mechanism:
       `vm_provisioning_adapter/services/mock_ansible_service.py` keeps its VM default
-      output and composes the kit's rules and gates;
-      `vm_provisioning_adapter/controllers/test_controller.py` binds the kit route
-      service at the unchanged `/test/mock-rules` paths and keeps the shared
-      `/test/jobs/*` routes; `domains/vms/provisioning/adapter/pyproject.toml` depends on
-      the kit. VM-specific cases stay in `test_programmable_mock.py`;
+      output; `vm_provisioning_adapter/controllers/test_controller.py` binds the
+      mechanism's route service at the unchanged `/test/mock-rules` paths and keeps the
+      shared `/test/jobs/*` routes. VM-specific cases stay in `test_programmable_mock.py`;
       `provisioning/compute/service/tests/integration/test_test_controller.py` passes
       unchanged.
 - [ ] 4.5 Add the bare-metal mock:
-      `domains/bare_metal/provisioning/adapter/src/bare_metal_provisioning_adapter/services/bare_metal_mock_executor.py`
-      on the kit, whose default grant emits `node_grant_access_data` (tenant user and
-      SSH port; tenant address from the registered host record, as a real run's) and
-      whose default reclaim emits `node_reclaim_access_data`;
-      `bare_metal_provisioning_adapter/runtime.py` registers the real Ansible service,
-      or under the mock profile the mock, for `NODE_GRANT_ACCESS_ACTION` and
-      `NODE_RECLAIM_ACCESS_ACTION`; new `controllers/test_controller.py` binds the kit
-      route service at `/test/bare-metal/mock-rules`; `routers.py` exposes it;
-      `pyproject.toml` depends on the kit. Tests in
+      `domains/bare_metal/provisioning/adapter/src/bare_metal_provisioning_adapter/services/bare_metal_mock_executor.py`,
+      whose default grant emits `node_grant_access_data` (tenant user and SSH port;
+      tenant address from the registered host record, as a real run's) and whose default
+      reclaim emits `node_reclaim_access_data`; `bundle.py` and `runtime.py` register the
+      real Ansible service, or under the mock profile the mock, for
+      `(bare_metal, NODE_GRANT_ACCESS_ACTION)` and `(bare_metal, NODE_RECLAIM_ACCESS_ACTION)`;
+      new `controllers/test_controller.py` binds the route service at
+      `/test/bare-metal/mock-rules`; `routers.py` exposes it. Tests in
       `domains/bare_metal/provisioning/adapter/tests/test_bare_metal_mock_executor.py`:
       default output parses through the real result path into the credentials
       `BareMetalFulfillmentProvider.fetch_credentials` reads; a bare-metal rule never
       matches a VM job and the reverse.
 - [ ] 4.6 Compose it: `provisioning/compute/service/src/compute_provisioning_service/container.py`
-      registers the bare-metal executor on the VM runtime's job service;
+      builds the table from both bundles and passes the resolver to the job service;
       `main.py` mounts the bare-metal test router under the mock profile beside VM's.
-      Provisioning readiness reports each adapter's executor mode
+      Provisioning readiness reports each offering mode's executor mode
       (`domains/vms/provisioning/client/src/vm_provisioning_operator/models.py` and the
       status service that fills it). Integration test
       `provisioning/compute/service/tests/integration/test_bare_metal_mock_profile.py`: a
@@ -147,47 +157,74 @@ must stay green at the end of this section with no scenario change.
       `e2e-tests/src/e2e_harness/provisioning_test_client.py` gains the bare-metal rule
       methods; `provisioning/compute/service/tests/integration/test_provisioning_client_endpoint_coverage.py`
       covers them.
-- [ ] 4.8 Relock every project whose dependencies changed (`make lock PROJECTS=...` for
-      the two adapters, `provisioning/compute/service`, and `kit/compute-executor-mock`)
-      and run the provisioning service, both adapters', and the kit's suites.
+- [ ] 4.8 **Gate.** Relock the changed projects (`make lock PROJECTS=...` for
+      `provisioning/compute`, `provisioning/compute/service`, and both adapters); the
+      provisioning, provisioning-service, and both adapters' suites pass; the VM lane
+      passes unchanged.
 
-## 5. Deal controls as kit route services
+## 5. Negotiation runtime operations and deal-control route services
 
-Decision: "Deal controls are kit-owned route services". Wire paths and canonical client
-methods are unchanged; VM and API credits rebind before bare metal binds (Section 6).
+Decisions: "Deal controls are kit-owned route services", "Administrative acceptance goes
+through the runtime", "Evaluate-negotiate previews the real opening". Reviewable alone:
+kits, core, and the VM and API-credit storefronts; bare metal binds in Sections 6–7.
 
-- [ ] 5.1 `kit/storefront/src/market_storefront_kit/deal_control_routes.py`: the
+- [ ] 5.1 `kit/negotiation-runtime/src/market_negotiation_runtime/runtime.py`: add
+      `accept_administratively` (load the recorded thread and binding, build the
+      `Acceptance` through the domain hooks at the administrator's amount, append the
+      administrator's accept message, commit through `_commit_acceptance`) and
+      `preview_opening` (the `start` pipeline up to and including round-zero evaluation,
+      with no persistence, hold, or event). Unit tests in
+      `kit/negotiation-runtime/tests/unit/test_administrative_acceptance.py` and
+      `test_opening_preview.py`: hooks run on administrative acceptance; preview refuses
+      every opening `start` refuses and writes nothing.
+- [ ] 5.2 `kit/storefront/src/market_storefront_kit/deal_control_routes.py`: the
       stage-event read over `core_storefront.stage_log` (filters and streaming as VM's
-      `system_controller.stream_events`), evaluate-negotiate over an injected round-zero
-      policy callable, and force-accept over core `NegotiationService.force_accept`.
-      Unit tests in `kit/storefront/tests/unit/test_deal_control_routes.py`.
-- [ ] 5.2 `kit/settlement-runtime/src/market_settlement_runtime/admin_routes.py`: settle
+      `system_controller.stream_events`), evaluate-negotiate over `preview_opening`, and
+      force-accept over `accept_administratively`. Unit tests in
+      `kit/storefront/tests/unit/test_deal_control_routes.py`.
+- [ ] 5.3 `kit/settlement-runtime/src/market_settlement_runtime/admin_routes.py`: settle
       verify over the mechanism adapter's escrow read with no adoption, evaluate-settle
       over a new `FulfillmentPreviewHook` port in `ports.py`, and settle wait as a
       bounded long-poll over an injected settle-status reader and terminal predicate.
       Unit tests in `kit/settlement-runtime/tests/unit/test_admin_routes.py`.
-- [ ] 5.3 `kit/capacity-publication/src/market_capacity_publication/admin_routes.py`:
+- [ ] 5.4 `kit/capacity-publication/src/market_capacity_publication/admin_routes.py`:
       admin reserve through a listing's capacity binding, and the capacity-released
       callback dispatching to an injected domain release hook. Unit tests in
       `kit/capacity-publication/tests/unit/test_admin_routes.py`.
-- [ ] 5.4 Rebind VM: `domains/vms/storefront/src/market_storefront/controllers/system_controller.py`
-      (events), `listings_controller.py` (evaluate-negotiate),
+- [ ] 5.5 Wire models and client: `core/storefront/src/core_storefront/models/listing_models.py`'s
+      `EvaluateNegotiateRequest` becomes the opening request and the response reports
+      refusals before policy; `core/storefront-client/src/storefront_client/client.py`'s
+      async and sync `evaluate_negotiate` take it.
+- [ ] 5.6 Verify hold idempotency before rebinding: VM's `place_hold`
+      (`domains/vms/storefront/src/market_storefront/negotiation_runtime.py`) and API
+      credits' `_place_quota_hold` (`domains/apicredits/storefront/src/apicredits_storefront/negotiation_runtime.py`)
+      tolerate a second call for a negotiation that already holds; make them so where
+      they do not, with focused tests beside each.
+- [ ] 5.7 Rebind VM: `controllers/system_controller.py` (events),
+      `listings_controller.py` (evaluate-negotiate over the preview; remove
+      `ListingService.evaluate_negotiate` and its round-zero helper's admin use),
       `negotiations_controller.py` (force-accept), `settle_controller.py` (verify,
       evaluate, wait), `admin_controller.py` (portfolio reservations, capacity-released);
       VM's evaluate-settle job-spec build becomes its `FulfillmentPreviewHook` from
       `services/admin_settle_service.py`, whose remaining code is removed;
-      `middleware/admin_identity.py` keeps its route recognition. Existing VM storefront
-      suites pass unchanged.
-- [ ] 5.5 Rebind API credits: `domains/apicredits/storefront/src/apicredits_storefront/controllers/system_controller.py`
-      (events), `negotiations_controller.py` (force-accept), `settle_controller.py`
-      (wait). Existing API-credit suites pass unchanged.
-- [ ] 5.6 Bump and relock the three kits and their consumers; run the kit, VM storefront,
-      and API-credit storefront suites. The VM lane passes unchanged.
+      `middleware/admin_identity.py` keeps its route recognition. VM storefront suites
+      pass, with force-accept tests now asserting the committed settlement plan and hold.
+- [ ] 5.8 Rebind API credits: `controllers/system_controller.py` (events),
+      `negotiations_controller.py` (force-accept), `settle_controller.py` (wait).
+      API-credit suites pass, with force-accept asserting the quota hold.
+- [ ] 5.9 Remove `NegotiationService.force_accept` from
+      `core/storefront/src/core_storefront/services/negotiation_service.py` and its tests.
+- [ ] 5.10 VM's stage 05a in `e2e-tests/tests/e2e/roles/scenarios/vms/test_full_deal.py`
+      sends the opening request it later sends to `negotiate_new`.
+- [ ] 5.11 **Gate.** Bump and relock the changed kits, core packages, and consumers; the
+      kit, core, VM storefront, and API-credit storefront suites pass; the VM lane passes,
+      including 05a on the new body and 06b with the runtime acceptance.
 
 ## 6. Bare metal on the kit negotiation runtime
 
 Decision: "Bare metal negotiates through the kit runtime" (migrated
-`bare-metal-and-credits-domain-stacks` 4a.1, 4a.2, runtime half of 4a.3).
+`bare-metal-and-credits-domain-stacks` 4a.1, 4a.2, runtime half of 4a.3). Reviewable
+alone: the bare-metal storefront's negotiation surface.
 
 - [ ] 6.1 Re-verify (former 4a.1) that `negotiation_service.py`, `negotiation.py`, the
       negotiate routes in `api.py`, and thread persistence in `sqlite_client.py` are
@@ -197,9 +234,10 @@ Decision: "Bare metal negotiates through the kit runtime" (migrated
       the closed `bare_metal.v1` demand and calling `opening_guard.py`'s domain function;
       physical selection and exact settlement-option validation as `evaluate_round`
       inputs; `agreement_terms`; `build_artifacts` producing the accepted obligation the
-      settlement runtime consumes; `place_hold` as today. The seller policy in
-      `negotiation.py` stays as the domain's policy, now evaluated by the runtime for
-      every round.
+      settlement runtime consumes; `persist_artifacts` saving `BareMetalTerms` and the
+      settlement plan; `place_hold` as today, idempotent per negotiation. The seller
+      policy in `negotiation.py` stays as the domain's policy, now evaluated by the
+      runtime for every round.
 - [ ] 6.3 Serve the existing negotiate and listing-negotiation routes in `api.py` over the
       runtime, compose it in `runtime.py`, and bind the Section 5 storefront-kit route
       services (events, evaluate-negotiate, force-accept). Tombstone
@@ -207,23 +245,31 @@ Decision: "Bare metal negotiates through the kit runtime" (migrated
       persistence from `sqlite_client.py`, with a migration in `migrations.py` if the
       runtime's tables differ.
 - [ ] 6.4 Tests (with former 4a.6's focused cases): rewrite `test_negotiation.py` and
-      `test_http_negotiation.py` for multi-round negotiation, force-accept, and
-      evaluate-negotiate; opening refusal for each forbidden demand field; terms-mismatch
-      refusal; the conformance matrix `multi-domain-storefront-composition` added, run
-      under the bare-metal contract.
+      `test_http_negotiation.py` for multi-round negotiation; force-accept recording
+      `BareMetalTerms` and the hold; evaluate-negotiate refusing what `negotiate/new`
+      refuses; opening refusal for each forbidden demand field; terms-mismatch refusal;
+      the conformance matrix `multi-domain-storefront-composition` added, run under the
+      bare-metal contract.
+- [ ] 6.5 **Gate.** The bare-metal storefront suite passes; the bare-metal lane's
+      publication scenario passes unchanged.
 
 ## 7. Bare-metal settlement, fulfillment, and release
 
 Decisions: "Settlement starts fulfillment", "The lease lifecycle owns release for every
 offering mode", "The Alkahest path commits the lease window and registers the lease",
-"Bare-metal publication has a dry run".
+"Bare-metal publication has a dry run", "Restart recovery is proven at integration level,
+as VM's is". Reviewable alone: the bare-metal storefront's settlement and fulfillment
+paths and provider-neutral release in provisioning.
 
-- [ ] 7.1 Settlement starts fulfillment: `settlement_service.py` invokes the fulfill hook
-      once after `verify` adopts the obligation and drops `status`'s no-fulfillment
-      assertion; `settlement_composition.py` resumes verified obligations with no started
-      fulfillment each servicing cycle; `domain_runtime.py` keeps `fulfill_bare_metal`
-      as the hook. Remove `POST /api/v1/fulfillments/begin` from `api.py` and
-      `BareMetalFulfillRequest` from `models.py`; remove `begin()` from
+- [ ] 7.1 Servicing worker for every mechanism: `runtime.py` composes
+      `SettlementServicingWorker` whenever a settlement mechanism is registered, not only
+      `fiat.stripe.v1`; its `on_ready` dispatches by the obligation's mechanism, hosted
+      to the existing lifecycle callbacks and Alkahest to `fulfillment_service.py`;
+      `lifecycle_steps.py` then registers the settlement-servicing step on the Alkahest
+      path too. `settlement_service.py`'s `verify` wakes the worker for the adopted
+      obligation and steps it once through the worker, and `status` drops its
+      no-fulfillment assertion. Remove `POST /api/v1/fulfillments/begin` from `api.py`
+      and `BareMetalFulfillRequest` from `models.py`; remove `begin()` from
       `domains/bare_metal/buyer/src/arkhai_bare_metal_buyer/fulfillment.py`.
 - [ ] 7.2 Commit and register: `fulfillment_service.py` commits the reservation with the
       materialized lease window before scheduling, as `hosted_lifecycle.py` does, and
@@ -234,8 +280,8 @@ offering mode", "The Alkahest path commits the lease window and registers the le
 - [ ] 7.3 Provider-neutral release: move `VmReleaseExecutor`, `FulfillmentTeardownPort`,
       `FulfillmentServiceTeardownPort`, and `VmFulfillmentReleaseJobPort` from
       `domains/vms/provisioning/adapter/src/vm_provisioning_adapter/release.py` into
-      `provisioning/compute/src/compute_provisioning/release.py`
-      as `FulfillmentReleaseExecutor` and `FulfillmentReleaseJobPort`; tombstone
+      `provisioning/compute/src/compute_provisioning/release.py` as
+      `FulfillmentReleaseExecutor` and `FulfillmentReleaseJobPort`; tombstone
       `domains/bare_metal/provisioning/adapter/src/bare_metal_provisioning_adapter/release.py`
       after moving `get_physical_host_id` to its remaining caller's module; both
       adapters' `runtime.py` and `bundle.py` register the shared components;
@@ -257,17 +303,26 @@ offering mode", "The Alkahest path commits the lease window and registers the le
       `publication` reporting the opens, closes, refreshes, and holds one pass would
       make; `publication_composition.py` and `publication.py` expose the non-publishing
       pass it needs.
-- [ ] 7.6 Tests: `test_settlement.py` and `test_http_settlement.py` (settle starts
-      fulfillment once; servicing resumes an unstarted one; `begin` is gone);
-      `test_fulfillment_service.py` (commit with window, lease registration, teardown
-      through terminate, repeated teardown returns the same lease, release only on
-      callback); `test_site_clients.py`; `test_publication_cycle.py` (preview applies
-      nothing); `test_app_composition.py`; `domains/bare_metal/buyer/tests/test_buyer_composition.py`.
+- [ ] 7.6 Tests: `test_settlement.py` and `test_http_settlement.py` (verify wakes and
+      steps the worker; a failed first attempt is retried by the worker's schedule and
+      by nothing else; an Alkahest-only storefront has a settlement-servicing step;
+      `begin` is gone); `test_fulfillment_service.py` (commit with window, lease
+      registration, teardown through terminate, repeated teardown returns the same
+      lease, release only on callback); `test_hosted_lifecycle.py` (hosted dispatch
+      unchanged); `test_site_clients.py`; `test_publication_cycle.py` (preview applies
+      nothing); `test_app_composition.py`;
+      `domains/bare_metal/buyer/tests/test_buyer_composition.py`.
+- [ ] 7.7 Restart integration tests (tasks 3.5, 3.6):
+      `domains/bare_metal/storefront/tests/test_restart_recovery.py` rebuilds the
+      production application over one database file with a loopback site
+      (`tests/loopback.py`).
+- [ ] 7.8 **Gate.** The bare-metal storefront, buyer, provisioning, and
+      provisioning-service suites pass; the VM and bare-metal lanes pass unchanged.
 
 ## 8. Shared compute deal stages and the VM scenario
 
-Decision: "Compute deal stages are shared". Behaviour-neutral for VM; the VM lane is the
-gate.
+Decision: "Compute deal stages are shared". Behaviour-neutral for VM. Reviewable alone:
+e2e-tests only.
 
 - [ ] 8.1 Move shared helpers out of `e2e-tests/tests/e2e/roles/scenarios/vms/`: the
       escrow helper to `tests/e2e/roles/helpers/escrow.py` (tombstone
@@ -292,15 +347,12 @@ gate.
 - [ ] 8.4 Unit test `tests/unit/test_compute_deal_stages.py`: stage subclasses keep
       definition order, the base classes are not collected, and every state field has
       a consumer.
-- [ ] 8.5 Gate: the VM lane passes with the rewritten scenario.
-- [ ] 8.6 Restart integration tests (tasks 3.5, 3.6):
-      `domains/bare_metal/storefront/tests/test_restart_recovery.py` rebuilds the
-      production application over one database file with a loopback site
-      (`tests/loopback.py`).
+- [ ] 8.5 **Gate.** The VM lane passes with the rewritten scenario.
 
 ## 9. The bare-metal mock-provisioned deal
 
-Decision: "The scenario is VM's deal, stage for stage".
+Decision: "The scenario is VM's deal, stage for stage". Reviewable alone: e2e-tests and
+lane configuration; depends on Sections 4–8.
 
 - [ ] 9.1 Add `scenarios/bare_metal/compute_deal_driver.py`: backed pool, host record,
       and whole-host capacity declaration; publication preview then step; bare-metal
@@ -324,12 +376,13 @@ Decision: "The scenario is VM's deal, stage for stage".
       `dev-env/bare-metal/`; the bare-metal storefront's service-peer trust for the
       site's capacity-released callback in the lane's environment
       (`make e2e-bare-metal-dev-env` in the root `Makefile`).
-- [ ] 9.6 Gate: the bare-metal lane passes with publication and the mock deal.
+- [ ] 9.6 **Gate.** The bare-metal lane passes with publication and the mock deal.
 
 ## 10. Pipeline: images built once and an API-credit lane
 
 Decisions: "Lanes run on images built once", "API credits runs in its own lane", "Lane
-composition files".
+composition files". Reviewable alone: compose files, Make targets, and the workflow; no
+service code.
 
 - [ ] 10.1 Split the overlay: `compose.vms-local.yml` (VM bindings) and
       `compose.apicredits-local.yml` (API-credit bindings, including the storefront EVM
@@ -352,13 +405,15 @@ composition files".
       `e2e-vm`, `e2e-bare-metal`, and new `e2e-apicredits` jobs `needs: e2e-images`,
       download, load, run their target, and collect logs and tear down with their own
       compose files.
-- [ ] 10.4 Gate: all three lanes pass from one build; record each job's duration beside
+- [ ] 10.4 **Gate.** All three lanes pass from one build; record each job's duration beside
       the previous single-lane build time.
 
 ## 11. Permanent documentation
 
-- [ ] 11.1 `docs/development/ARCHITECTURE.md`: kit layers gain `kit/compute-executor-mock`
-      and the deal-control route services; "Release" states that every offering mode
+- [ ] 11.1 `docs/development/ARCHITECTURE.md`: kit layers gain the deal-control route
+      services and the negotiation runtime's administrative acceptance and opening
+      preview; the compute provisioning description gains the `(offering_mode, action)`
+      executor table and the compute-family mock mechanism; "Release" states that every offering mode
       releases through the fulfillment aggregate and that storefront teardown goes
       through lease termination; the fulfillment-hook paragraph states that bare metal's
       settle path starts fulfillment.
@@ -416,9 +471,10 @@ composition files".
 | Each domain runs in its own lane on images built once | `openspec/specs/test-compatibility/spec.md` — "Each domain runs in its own lane on images built once"; `docs/development/TESTING.md` |
 | Bare-metal restart recovery is proven at integration level | `openspec/specs/test-compatibility/spec.md` — "Bare-metal storefront restart recovery is proven at integration level" |
 | Deal controls are kit-owned route services | `openspec/specs/market-composition/spec.md` — "Storefront deal controls are kit-owned route services"; `docs/development/ARCHITECTURE.md` kit layers |
-| Mock executors share `kit/compute-executor-mock`; executors are routed by action | `openspec/specs/market-composition/spec.md` — "Mock executors share one compute-family kit"; `openspec/specs/physical-provisioning/spec.md` — "Executor actions route to the owning adapter's executor"; `docs/development/TESTING.md` |
+| Compute mock executors share `compute_provisioning.executor_mock`; job execution resolves its executor by `(offering_mode, action)` | `openspec/specs/market-composition/spec.md` — "Compute mock executors share one compute-family mechanism"; `openspec/specs/physical-provisioning/spec.md` — "Job execution resolves its executor by offering mode and action"; `docs/development/ARCHITECTURE.md`; `docs/development/TESTING.md` |
+| Administrative acceptance and opening previews go through the negotiation runtime | `openspec/specs/market-composition/spec.md` — "Kit-owned synchronous negotiation runtime" and "Storefront deal controls are kit-owned route services"; `docs/development/ARCHITECTURE.md` kit layers |
 | Bare metal composes the kit negotiation runtime | `openspec/specs/market-composition/spec.md` — "Kit-owned synchronous negotiation runtime" |
 | Lease release delegates to durable fulfillment teardown for every offering mode; storefront teardown goes through lease termination | `openspec/specs/physical-provisioning/spec.md` — "Lease release delegates to durable fulfillment teardown", "Storefront teardown goes through lease termination"; `docs/development/ARCHITECTURE.md` "Release" |
-| Settlement starts bare-metal fulfillment; the Alkahest path commits and registers its lease | `openspec/specs/storefront-publication/spec.md` — "Complete bare-metal seller lifecycle"; `docs/development/ARCHITECTURE.md` |
+| Settlement starts bare-metal fulfillment through the kit servicing worker, composed for every mechanism; the Alkahest path commits and registers its lease | `openspec/specs/storefront-publication/spec.md` — "Complete bare-metal seller lifecycle"; `docs/development/ARCHITECTURE.md` |
 | Lane composition files split per market | `docs/development/DEPLOYMENT_AND_CONFIG.md`; `docs/development/TESTING.md` |
 | Scope migrations, the real-host scenario's disposition, and why the scenario uses typed clients | This change's `design.md` |

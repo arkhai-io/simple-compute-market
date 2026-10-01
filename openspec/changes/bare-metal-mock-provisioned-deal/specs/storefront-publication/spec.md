@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Complete bare-metal seller lifecycle
-A bare-metal storefront MUST validate listing, negotiation-message, agreed-terms, settlement materialization, receipt, and access-result artifacts through its installed domain contract. The listing binding MUST freeze the trusted `site_id`, Physical Resource identity, `bare_metal` offering mode, and contract identity/version; the accepted negotiation MUST copy that binding before persisting domain artifacts. Settlement and fulfillment MUST reload that binding and MUST NOT infer a site, executor, URL, credential, or domain from buyer payload data. Fulfillment MUST start when settlement verifies the escrow, through the domain's fulfill hook, and MUST NOT wait for a buyer request to begin it.
+A bare-metal storefront MUST validate listing, negotiation-message, agreed-terms, settlement materialization, receipt, and access-result artifacts through its installed domain contract. The listing binding MUST freeze the trusted `site_id`, Physical Resource identity, `bare_metal` offering mode, and contract identity/version; the accepted negotiation MUST copy that binding before persisting domain artifacts. Settlement and fulfillment MUST reload that binding and MUST NOT infer a site, executor, URL, credential, or domain from buyer payload data. Fulfillment MUST start when settlement verifies the escrow, through the kit settlement-servicing worker's ready hook, which the storefront composes for every registered settlement mechanism, and MUST NOT wait for a buyer request to begin it or be retried by any other path.
 
 #### Scenario: Buyer accepts a bare-metal listing
 - **WHEN** authenticated negotiation accepts valid terms for a trusted listing
@@ -9,12 +9,12 @@ A bare-metal storefront MUST validate listing, negotiation-message, agreed-terms
 
 #### Scenario: Accepted bare-metal agreement is fulfilled
 - **WHEN** settlement verifies the escrow
-- **THEN** the storefront invokes its fulfill hook once, which reserves at the recorded site, commits the reservation with the agreed lease window, schedules the accepted Physical Resource, invokes the recorded bare-metal executor, and persists its reservation, settlement-resource, fulfillment, receipt, and result correlations
+- **THEN** the storefront wakes the settlement-servicing worker for that obligation, whose ready hook dispatches by mechanism to the bare-metal fulfillment, which reserves at the recorded site, commits the reservation with the agreed lease window, schedules the accepted Physical Resource, invokes the recorded bare-metal executor, and persists its reservation, settlement-resource, fulfillment, receipt, and result correlations
 - **AND** once the fulfillment is active the storefront registers the lease at the site, so lease expiry and termination find it
 
 #### Scenario: Fulfillment start is interrupted
 - **WHEN** settlement was verified but fulfillment did not start
-- **THEN** the settlement-servicing cycle starts it for the recorded obligation, without a second reservation or a buyer request
+- **THEN** the settlement-servicing worker's next cycle for that obligation starts it, without a second reservation or a buyer request
 
 #### Scenario: Buyer supplies conflicting routing material
 - **WHEN** a request or domain artifact asserts a provisioning URL, credential, different site, Physical Resource, machine, or physical-host identity

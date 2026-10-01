@@ -32,6 +32,22 @@ What the codebase does today, verified 2026-10-01:
   controllers; API credits has its own copies of the events read, settle wait, and
   force-accept. `kit-owned-storefront-shell`, in design and unplanned, would extract the
   route set wholesale.
+- **Administrative negotiation bypasses the runtime.** VM's and API credits'
+  force-accept call core `NegotiationService.force_accept`, which records the accept and
+  commits agreed price and duration but never runs the domain's `place_hold` or
+  `persist_artifacts`; VM's force-accepted thread therefore has no committed settlement
+  plan today. VM's evaluate-negotiate checks the listing binding and runs round-zero
+  policy only, skipping opening decode, `validate_opening`, principal checks, and
+  settlement-selection validation, so it can approve an opening the real call refuses.
+- **The settlement-servicing worker exists only with hosted settlement.** The bare-metal
+  runtime composes `SettlementServicingWorker`, whose `on_ready` hook starts fulfillment
+  for a ready obligation with none, only when Stripe hosted settlement is registered. An
+  Alkahest-only storefront has no servicing loop at all.
+- **Executor dispatch already has a compute-provisioning registry.**
+  `compute_provisioning.adapters.ExecutorAdapterRegistry` selects an adapter by offering
+  mode, validates its actions, and rejects duplicates; jobs persist their
+  `offering_mode`. Playbook execution below it is VM's job service, which special-cases
+  `bare_metal`.
 - **Fulfillment never starts on the Alkahest path.** The `fulfill_bare_metal` hook is
   registered in the domain contract, but settlement only adopts the obligation; delivery
   waits for `POST /api/v1/fulfillments/begin`, which no buyer code calls. Settle status
@@ -121,44 +137,74 @@ The implementation satisfies `bare-metal-and-credits-domain-stacks`' delta
 Decided with the maintainer: the parts of `kit-owned-storefront-shell` this scenario needs
 are implemented here, in place, rather than blocking on the shell or splitting a new
 change. Each control becomes a framework-free route service, following the precedent
-`kit-owned-storefront-loop-lifecycle` and `kit/pool-overrides` set, living in the kit that
-owns the mechanism it exposes and bound by each storefront behind its own
-authentication:
+`kit-owned-storefront-loop-lifecycle` and `kit/pool-overrides` set, bound by each
+storefront behind its own authentication:
 
 | Control | Route service lives in | Over | Bound by |
 |---|---|---|---|
 | Stage-event read (`/api/v1/system/events`) | `kit/storefront` | core stage log | VM, API credits, bare metal |
-| Evaluate-negotiate | `kit/storefront` | the domain's round-zero seller-policy hook | VM, bare metal |
-| Force-accept | `kit/storefront` | core `NegotiationService.force_accept` | VM, API credits, bare metal |
+| Evaluate-negotiate | `kit/storefront` | `NegotiationRuntime.preview_opening` | VM, bare metal |
+| Force-accept | `kit/storefront` | `NegotiationRuntime`'s administrative acceptance | VM, API credits, bare metal |
 | Settle verify (dry run) | `kit/settlement-runtime` | the mechanism adapter's escrow read | VM, bare metal |
 | Evaluate-settle (dry run) | `kit/settlement-runtime` | a new per-domain fulfillment-preview hook | VM, bare metal |
 | Settle wait | `kit/settlement-runtime` | the domain's settle-status reader | VM, API credits, bare metal |
 | Admin reserve | `kit/capacity-publication` | a listing's capacity binding | VM, bare metal |
 | Capacity-released callback | `kit/capacity-publication` | a domain release hook | VM, bare metal |
 
-Wire paths and canonical client methods are unchanged, so VM's scenario and every
-existing caller keep working. Per "An extracted concern leaves no domain-local
-implementation", every domain that carries a copy rebinds in this change and its copy
-is removed; a domain that lacked the control gains it by composition. API credits gains
-only what it already has a copy of: it has no evaluate-negotiate, settle dry runs, admin
-reserve, or capacity-released callback today, and nothing here requires them.
+Wire paths and canonical client methods are unchanged except evaluate-negotiate's body
+(below). Per "An extracted concern leaves no domain-local implementation", every domain
+that carries a copy rebinds in this change and its copy is removed; a domain that lacked
+the control gains it by composition. API credits gains only what it already has a copy
+of: it has no evaluate-negotiate, settle dry runs, admin reserve, or capacity-released
+callback today, and nothing here requires them. The shell, when planned, mounts these
+route services rather than extracting them again. `kit/settlement-runtime` already holds
+framework-free routes (`hosted_routes.py`).
 
-The shell, when planned, mounts these route services rather than extracting them again.
-Placement was fixed in planning: evaluate-negotiate and force-accept sit in
-`kit/storefront`, which composes the core shell with domain hooks, because force-accept
-is core's `NegotiationService.force_accept` rather than a runtime method;
-`kit/settlement-runtime` already holds framework-free routes (`hosted_routes.py`).
+### Administrative acceptance goes through the runtime
+
+Decided with the maintainer after design review. `NegotiationRuntime` gains an
+administrative acceptance operation: it loads the recorded thread and its domain binding,
+builds the `Acceptance` through the domain's hooks at the administrator's amount, records
+the administrator as the accepting author, and commits through the same
+`_commit_acceptance` path a negotiated acceptance takes, so `place_hold` and
+`persist_artifacts` always run. The force-accept route service calls it; VM and API
+credits rebind to it; core `NegotiationService.force_accept` has no remaining caller and
+is removed.
+
+This changes VM's force-accept behaviour: a force-accepted VM thread now carries its
+hold and committed settlement plan. Where a domain's round-zero opening already placed a
+hold, `place_hold` must be idempotent for the same negotiation; planning verifies VM's
+and API credits' hooks and makes them so where they are not.
+
+### Evaluate-negotiate previews the real opening
+
+Decided with the maintainer after design review. `NegotiationRuntime` gains
+`preview_opening`, which runs the same opening pipeline as `start` — domain decode,
+`validate_opening`, principal and listing checks, settlement-selection validation, and
+round-zero policy — and stops before anything is persisted, held, or recorded. The dry run
+differs from the real operation only by its effects. Its request body is therefore the
+`negotiate/new` opening itself rather than `{proposal, requested_duration_seconds}`: the
+canonical client's `evaluate_negotiate` and VM's stage 05a change with it.
 
 ### Settlement starts fulfillment
 
-Decided in `bare-metal-listing-shapes`, implemented here. Once settlement verifies the
-escrow, bare metal's settle path invokes its `fulfill` hook once, and the
-settlement-servicing cycle resumes any verified obligation whose fulfillment has not
-started, so retries stay in the seller's durable loop. Settle status stops asserting
-that no fulfillment is bound. `POST /api/v1/fulfillments/begin` and
-`BareMetalFulfillmentTransport.begin()` are retired. The buyer makes one call, as in
-every domain, and the settlement request names the negotiation, the buyer, and the EVM
-address only.
+Decided in `bare-metal-listing-shapes`, implemented here; refined after design review.
+Every bare-metal storefront with a settlement mechanism composes the kit
+`SettlementServicingWorker`, not only one with hosted settlement. Its `on_ready` hook
+dispatches by the obligation's mechanism: hosted obligations to the existing hosted
+lifecycle callbacks, Alkahest obligations to the fulfillment service. When `verify`
+adopts an obligation it wakes the worker and steps that obligation once through the
+worker's own path, so the settle response normally reports fulfillment started; if that
+attempt fails, the worker's schedule retries it. The domain supplies what fulfillment
+means; the kit worker alone decides when an unstarted ready obligation is retried, so no
+second retry path exists in the domain.
+
+Settle status stops asserting that no fulfillment is bound.
+`POST /api/v1/fulfillments/begin` and `BareMetalFulfillmentTransport.begin()` are
+retired. The buyer makes one call, as in every domain, and the settlement request names
+the negotiation, the buyer, and the EVM address only. With the worker composed on the
+Alkahest path, the settlement-servicing step VM's stage 09bb advances has its bare-metal
+counterpart.
 
 ### The lease lifecycle owns release for every offering mode
 
@@ -183,26 +229,38 @@ kind-agnostic lease lifecycle and already reads and backdates a bare-metal
 reservation, so the bare-metal lease routes gain nothing; its VM-named fields are
 blank for bare metal.
 
-### Executors are routed by action, and each adapter owns its mock
+### Executors are selected by offering mode and action, and each adapter owns its mock
 
-Decided with the maintainer. The job service gains an executor table keyed by action.
-The bare-metal adapter contributes the executor for its access actions: the real
-Ansible service in production, a bare-metal mock under the mock profile. The job record,
-host check, inventory rendering, and result parsing stay where they are, so the mock's
-playbook output is parsed by the same `node_grant_access_data` and
-`node_reclaim_access_data` path as a real run. A default grant returns a tenant user and
-SSH port, with the tenant address taken from the registered host record as a real run's
-is; a default reclaim succeeds. Job-done notification goes to the executor that ran the
-job.
+Decided with the maintainer; placement corrected after design review. Executor selection
+authority belongs to compute provisioning, keyed the way "Validated executor
+registration" requires:
+
+- `compute_provisioning` gains an action-executor table keyed by
+  `(offering_mode, action)`, beside `ExecutorAdapterRegistry`, rejecting duplicate
+  registrations at startup. Each adapter bundle registers its executors there.
+- VM's job service receives a narrow resolver port and owns no routing decision. It
+  resolves a job's executor from the job's persisted `offering_mode` and action. Job
+  storage stays in the VM adapter behind that port; moving it is out of scope, but no
+  new cross-domain authority is added there.
+- The bare-metal bundle registers its access actions: the real Ansible service in
+  production, the bare-metal mock under the mock profile. The job record, host check,
+  inventory rendering, and result parsing are unchanged, so the mock's playbook output is
+  parsed by the same `node_grant_access_data` and `node_reclaim_access_data` path as a
+  real run. A default grant returns a tenant user and SSH port, with the tenant address
+  taken from the registered host record as a real run's is; a default reclaim succeeds.
+  Job-done notification goes to the executor that ran the job.
 
 The rule store, pause gates, matching, job-done events, evaluate-job dry run, and a
-framework-free `/test` route service are extracted into a new foundation kit,
-`kit/compute-executor-mock` (`market_compute_executor_mock`), on which both the VM
-programmable mock and the bare-metal mock are built. It is compute-family only: an
-API-credit or inference executor mock would be a separate package. VM keeps its rule
-routes at `/test/mock-rules`; the bare-metal adapter mounts its own under
-`/test/bare-metal/mock-rules`, with route contracts and test-client methods. The job
-routes (`/test/jobs/drain`, `/test/jobs/{id}/wait`) stay shared.
+framework-free `/test` route service move out of the VM mock into a compute-family module,
+`compute_provisioning.executor_mock`, on which the VM programmable mock and the
+bare-metal mock are both built. It is not a foundation kit: it serves the compute family
+only, and a foundation kit knows no family. `compute_provisioning` is a compute-family
+library both adapters already depend on, which makes it the home for now; if that package
+is re-homed as a compute-family kit, the module moves with it. An API-credit or inference
+executor mock would not live there. VM keeps its rule routes at `/test/mock-rules`; the
+bare-metal adapter mounts its own under `/test/bare-metal/mock-rules`, with route
+contracts and test-client methods. The job routes (`/test/jobs/drain`,
+`/test/jobs/{id}/wait`) stay shared.
 
 ### Bare-metal publication has a dry run
 
@@ -306,22 +364,41 @@ stack's two registries and stays in the VM lane.
 
 ## Superseded decisions
 
+Superseded after the 2026-10-01 design review:
+
+- **Force-accept over core `NegotiationService.force_accept`** → "Administrative
+  acceptance goes through the runtime".
+- **Evaluate-negotiate over a round-zero policy callable** → "Evaluate-negotiate previews
+  the real opening".
+- **An executor table keyed by action inside VM's job service** and **a
+  `kit/compute-executor-mock` foundation kit** → "Executors are selected by offering mode
+  and action, and each adapter owns its mock".
+- **The settle path invoking the fulfill hook directly, with domain-local resumption** →
+  "Settlement starts fulfillment" as refined.
+
+Earlier:
+
 - **"Mock provisioning gets bare-metal results, not a second mock"** was superseded
   before planning by "The bare-metal mock is the bare-metal adapter's own", now
-  "Executors are routed by action, and each adapter owns its mock", which also settles
-  the rule mechanism as a kit.
+  "Executors are selected by offering mode and action, and each adapter owns its mock",
+  which also places the shared rule mechanism.
 - **"The real-host scenario stays until its replacement is written"** is settled by
   "The real-host scenario stays, deactivated".
 - **Restart in the lane** (former tasks 3.5–3.6) is replaced by integration tests.
 
 ## Risks / Trade-offs
 
-- **Scope.** The change now carries three kit extractions, a negotiation composition,
+- **Scope.** The change now carries kit route-service extractions, two new runtime
+  operations, a compute-provisioning executor table, a negotiation composition,
   a release-ownership change, and pipeline restructuring. Accepted deliberately over
-  managing further changes. Mitigation: sections land in an order that keeps every lane
-  green — kit extractions with VM and API-credit rebinding first, then bare-metal
-  behaviour, then the shared stages with VM moved onto them, then the bare-metal
-  scenario, then the pipeline.
+  managing further changes. Mitigation: each section is a reviewable unit that ends at a
+  green gate, and sections land in an order that keeps every lane green — the executor
+  seam and kit and runtime operations with VM and API-credit rebinding first, then
+  bare-metal behaviour, then the shared stages with VM moved onto them, then the
+  bare-metal scenario, then the pipeline.
+- **VM's force-accept starts placing holds and committing plans** → a behaviour change
+  in VM's deal path; its hold idempotency is checked before rebinding, and VM's lane is
+  the gate.
 - **VM regression through shared stages and rebinding** → VM moves onto the shared
   stages before any bare-metal driver exists, and each rebinding keeps wire paths and
   client methods.

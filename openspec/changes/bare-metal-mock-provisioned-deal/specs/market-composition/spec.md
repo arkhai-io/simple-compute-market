@@ -6,10 +6,12 @@ The storefront's deal controls MUST be framework-free route services in the kit 
 composes or owns the mechanism each exposes, bound by every storefront behind its own
 authentication: the stage-event read, evaluate-negotiate, and force-accept (storefront
 kit); settle verify, evaluate-settle, and settle wait (settlement runtime kit); and admin
-reserve and the capacity-released callback (capacity and publication kit). Evaluate-negotiate MUST run the domain's own seller policy for round
-zero; evaluate-settle MUST call a per-domain fulfillment-preview hook; both, and settle
-verify, MUST make no durable write. Wire paths and canonical client methods MUST be the
-same for every domain that binds a control. A storefront MUST NOT carry a domain-local
+reserve and the capacity-released callback (capacity and publication kit).
+Evaluate-negotiate MUST call the negotiation runtime's opening preview and force-accept
+its administrative acceptance; neither may record negotiation state through any other
+path. Evaluate-settle MUST call a per-domain fulfillment-preview hook. Evaluate-negotiate,
+evaluate-settle, and settle verify MUST make no durable write. Wire paths and canonical
+client methods MUST be the same for every domain that binds a control. A storefront MUST NOT carry a domain-local
 implementation of a control it binds.
 
 #### Scenario: A storefront previews settlement
@@ -25,14 +27,15 @@ implementation of a control it binds.
 - **THEN** it binds the kit route service and reaches it through the canonical client
   method every other domain uses
 
-### Requirement: Mock executors share one compute-family kit
+### Requirement: Compute mock executors share one compute-family mechanism
 
 Under the provisioning mock profile, each compute provisioning adapter MUST supply its
-own mock executor for its own actions, built on one compute-family kit that owns rule
-matching, pause gates, job-done events, the evaluate-job dry run, and a framework-free
-test route service. Each adapter MUST mount its rule routes under its own prefix; job
-draining and waiting MUST stay shared. A non-compute domain's executor mock MUST NOT be
-added to that kit.
+own mock executor for its own actions, built on one compute-family mechanism owned by
+compute provisioning: rule matching, pause gates, job-done events, the evaluate-job dry
+run, and a framework-free test route service. That mechanism MUST NOT be presented as a
+foundation kit, and a non-compute domain's executor mock MUST NOT be added to it. Each
+adapter MUST mount its rule routes under its own prefix; job draining and waiting MUST
+stay shared.
 
 #### Scenario: A bare-metal grant runs under the mock profile
 
@@ -51,7 +54,8 @@ added to that kit.
 The signed synchronous negotiation lifecycle MUST live in a foundation kit and MUST be
 composed by storefront domain roots. The kit MUST own round ordering, canonical-principal
 checks, transcript persistence, terminal-state transitions, exact continuation recovery,
-and the acceptance chokepoint. A domain MUST inject its listing resolver, schema codecs,
+and the acceptance chokepoint, through which administrative acceptance also passes, and
+MUST offer a side-effect-free preview of an opening. A domain MUST inject its listing resolver, schema codecs,
 seller policy, configuration-derived values, accepted-artifact builder, and domain
 persistence/effect hooks; neither the kit nor core may import a concrete domain or infer a
 domain by inspecting terms, proposals, listings, or persisted payloads.
@@ -80,3 +84,17 @@ domain by inspecting terms, proposals, listings, or persisted payloads.
 
 - **WHEN** the domain supplies the negotiation resolver and complete domain hook set
 - **THEN** it obtains the same protocol guards without copying a VM or API-credit runtime
+
+#### Scenario: An administrator force-accepts a negotiation
+
+- **WHEN** an authenticated administrator accepts a non-terminal negotiation at an amount
+- **THEN** the runtime builds the acceptance through the recorded domain's hooks, records
+  the administrator as the accepting author, and commits through the same acceptance path
+  as a negotiated acceptance, so the domain's hold and accepted artifacts are recorded
+
+#### Scenario: An opening is previewed
+
+- **WHEN** an administrator previews a negotiation opening
+- **THEN** the runtime runs the same decode, opening validation, principal, listing,
+  settlement-selection, and round-zero policy steps as a real opening and records no
+  thread, message, hold, or artifact

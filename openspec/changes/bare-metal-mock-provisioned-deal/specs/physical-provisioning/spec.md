@@ -19,19 +19,27 @@ MUST learn that capacity was released only from the site's capacity-released cal
 - **WHEN** the storefront repeats termination for a lease already releasing or released
 - **THEN** the site returns that lease unchanged and starts no second teardown
 
-### Requirement: Executor actions route to the owning adapter's executor
+### Requirement: Job execution resolves its executor by offering mode and action
 
-The provisioning job service MUST select the executor for a job by its action from a
-table each adapter contributes to, and MUST keep job persistence, host validation,
-inventory rendering, and result parsing independent of which executor runs. Job-done
-notification MUST reach the executor that ran the job. Under the mock profile an adapter
-MUST contribute its mock executor for its own actions only.
+Compute provisioning MUST own the table that selects the executor running a job, keyed by
+the job's `offering_mode` and action, populated by adapter bundles, and MUST reject a
+duplicate `(offering_mode, action)` registration at startup. A job service MUST resolve
+each job's executor through that table and MUST NOT hold its own routing for another
+adapter's actions. Job persistence, host validation, inventory rendering, and result
+parsing MUST be independent of which executor runs, and job-done notification MUST reach
+the executor that ran the job. Under the mock profile an adapter MUST register its mock
+executor for its own offering mode only.
 
 #### Scenario: A bare-metal access job runs
 
-- **WHEN** the job service runs a bare-metal grant or reclaim job
-- **THEN** it runs through the bare-metal adapter's executor and its result is parsed by
-  the same bare-metal result path whether that executor is real or mock
+- **WHEN** a job with offering mode `bare_metal` and a grant or reclaim action runs
+- **THEN** it runs through the executor the bare-metal bundle registered, and its result
+  is parsed by the same bare-metal result path whether that executor is real or mock
+
+#### Scenario: Two bundles claim the same executor key
+
+- **WHEN** two adapter bundles register an executor for the same offering mode and action
+- **THEN** compute provisioning refuses to start
 
 ## MODIFIED Requirements
 
