@@ -47,13 +47,30 @@ def bare_metal_executor_ref(
     return ref
 
 
+class BareMetalAskingRate(BaseModel):
+    """A seller's asking price for one machine's whole shape.
+
+    A listing attribute from which nothing is constructed: no settlement option,
+    escrow term, or obligation is derived from it. The parts travel together
+    because an amount means nothing without the asset and period it is quoted
+    in; the storefront validates the declaration it came from.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    amount: str = Field(min_length=1)
+    asset: str = Field(min_length=1)
+    period: str = Field(min_length=1)
+
+
 class BareMetalListing(BaseModel):
     """Bare-metal domain payload carried by a registry listing.
 
     A listing offers one whole machine. Its hardware is the Physical Resource's
     declared shape, published under the compute family's flat names so the
-    compute registry schema's dimension filters read it; the fields below are
-    exactly that schema's flat names, and nothing else may be added beside them.
+    compute registry schema's dimension filters read it; the hardware fields
+    below are exactly that schema's flat names, and no other hardware field may
+    be added beside them. ``asking_rate`` is a term of sale, not hardware.
     See openspec/specs/storefront-publication/spec.md, "A bare-metal listing's
     shape is derived from its declaration".
     """
@@ -93,6 +110,10 @@ class BareMetalListing(BaseModel):
         description="The region the machine's pool declares.",
     )
     gpu_count: int = Field(ge=1, description="GPUs the machine contains.")
+    asking_rate: BareMetalAskingRate | None = Field(
+        default=None,
+        description="The seller's asking price for this machine; absent when unpriced.",
+    )
     gpu_model: str = Field(min_length=1, description="The machine's GPU model.")
     vcpu_count: int | None = Field(default=None, ge=1, description="vCPUs the machine contains.")
     ram_gb: int | None = Field(default=None, ge=1, description="Memory, in GiB.")

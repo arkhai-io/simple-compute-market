@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Wait for a GitHub Actions E2E run and download its diagnostic logs."""
+"""Wait for a GitHub Actions E2E run, download its logs, and zip the directory."""
 
 from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -195,6 +196,13 @@ def fetch_logs(
         )
 
     print(f"Fetched E2E run {selected_run} ({conclusion}) logs into {output_dir}.")
+    try:
+        archive = shutil.make_archive(
+            str(output_dir), "zip", root_dir=output_dir.parent, base_dir=output_dir.name
+        )
+    except OSError as exc:
+        raise FetchError(f"could not create E2E log archive for {output_dir}: {exc}") from exc
+    print(f"Created E2E log archive {archive}.")
     return output_dir
 
 

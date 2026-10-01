@@ -111,10 +111,14 @@ before it has.
       including delivery.
 - [ ] 6.4 **System.** Backed and unbacked VM listings from one storefront are returned
       by one buyer query across running services, and an unbacked one reaches a
-      usable introduction. Needs Sections 1–3: until introduction is composed for VM,
-      an unbacked VM listing has no settlement option it may publish. Transferred
-      from `unbacked-listing-publication` (its 6.7), which implemented the listings
-      but could not run them in a stack.
+      usable introduction. The query is bounded by asking rate, naming its asset and
+      period, so it also proves unbacked supply is comparable on price with backed
+      supply, and a listing publishing no rate is excluded. Needs Sections 1–3: until
+      introduction is composed for VM, an unbacked VM listing has no settlement
+      option it may publish. Transferred from `unbacked-listing-publication` (its
+      6.7), which implemented the listings but could not run them in a stack; the
+      rate bound is transferred from `publish-indicative-listing-rates` (its 7.13),
+      which proved the asking-rate path on backed supply.
 - [ ] 6.5 **System.** Two seller sites publishing unbacked supply to one storefront
       retain distinct origin and source identity, and each introduction reveals its
       own seller's contact. Needs 3b. Transferred from `unbacked-listing-publication`

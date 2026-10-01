@@ -114,6 +114,8 @@ class BareMetalHealthResponse(BaseModel):
     # Reported per site and outside ``checks``: one site's projection being
     # unavailable is not a storefront-wide degradation.
     site_projections: dict[str, dict[str, ProjectionFamilyStatus]] | None = None
+    # Each stored pool override's address and state; administrator status only.
+    pool_overrides: list[dict[str, str]] | None = None
 
 
 class BareMetalFulfillRequest(BaseModel):

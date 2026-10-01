@@ -48,6 +48,8 @@ from .inventory_guard import (
     recheck_bare_metal_listing_source,
 )
 from .shapes import (
+    bare_metal_shape_digest,
+    bare_metal_shape_problems,
     UNITS_DIMENSION,
     BareMetalShapeError,
     derive_bare_metal_shape,
@@ -72,6 +74,7 @@ from .schema import (
     BareMetalAccessResult,
     BareMetalLeaseCreate,
     BareMetalLeaseView,
+    BareMetalAskingRate,
     BareMetalListing,
     BareMetalMaterialization,
     BareMetalMessage,
@@ -102,6 +105,8 @@ from .storefront_publication import (
 )
 
 __all__ = [
+    "bare_metal_shape_digest",
+    "bare_metal_shape_problems",
     "BareMetalListingComparison",
     "BareMetalSiteClassification",
     "CANDIDATE",
@@ -148,6 +153,7 @@ __all__ = [
     "BareMetalLeaseReadyResult",
     "BareMetalLeaseCreate",
     "BareMetalLeaseView",
+    "BareMetalAskingRate",
     "BareMetalListing",
     "BareMetalBuyerDemand",
     "BareMetalHostedOption",

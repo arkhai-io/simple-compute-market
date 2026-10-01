@@ -181,6 +181,7 @@ dependencies = [
     { name = "arkhai-kit-hosted-settlement" },
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-policy" },
+    { name = "arkhai-kit-pool-overrides" },
     { name = "arkhai-kit-resource-pools" },
     { name = "arkhai-kit-settlement-runtime" },
     { name = "arkhai-kit-site-client" },

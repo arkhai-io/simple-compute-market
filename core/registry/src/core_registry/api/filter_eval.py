@@ -55,6 +55,7 @@ the spec-loader edge (one parse per filter at startup).
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from functools import lru_cache
 from typing import Any
 
@@ -70,8 +71,8 @@ from core_registry.api.filter_spec import FilterDecl, FilterSpec
 
 @dataclass(frozen=True)
 class _Range:
-    min: float | int | None
-    max: float | int | None
+    min: float | int | Decimal | None
+    max: float | int | Decimal | None
     min_inclusive: bool
     max_inclusive: bool
 
@@ -97,6 +98,7 @@ class Criterion:
     path_expr: Any  # parsed jsonpath-ng expression
     on_missing: str  # "fail" | "pass"
     op: str         # "in" | "not_in" | "range" | "exists"
+    value_type: str = "string"  # drives decimal_text resolved-value coercion
     values: tuple[Any, ...] | None = None  # for in / not_in
     range_: _Range | None = None
     exists_target: bool | None = None
@@ -112,6 +114,21 @@ class FilterParamError(ValueError):
 # ---------------------------------------------------------------------------
 # Value coercion (string-from-URL → typed value the path resolves to)
 # ---------------------------------------------------------------------------
+
+
+def _finite_decimal(raw: str) -> Decimal | None:
+    """``raw`` as a finite exact decimal, or None.
+
+    ``Decimal`` also parses ``NaN``, ``sNaN``, and the infinities. None of them
+    is a value a bound can compare against: ordering a NaN raises, and an
+    infinity would match or exclude everything. They are refused as a query
+    bound and read as no value in a listing.
+    """
+    try:
+        parsed = Decimal(raw)
+    except InvalidOperation:
+        return None
+    return parsed if parsed.is_finite() else None
 
 
 def _coerce_scalar(raw: str, value_type: str, filter_name: str) -> Any:
@@ -131,6 +148,13 @@ def _coerce_scalar(raw: str, value_type: str, filter_name: str) -> Any:
             raise FilterParamError(
                 f"{filter_name}: expected number, got {raw!r}"
             ) from exc
+    if value_type == "decimal_text":
+        parsed = _finite_decimal(raw)
+        if parsed is None:
+            raise FilterParamError(
+                f"{filter_name}: expected finite decimal text, got {raw!r}"
+            )
+        return parsed
     if value_type == "boolean":
         if raw.lower() in ("true", "1", "yes"):
             return True
@@ -249,13 +273,13 @@ def _build_criterion(
             values = _parse_value_list(payload, decl.value_type, decl.name)
             return Criterion(
                 name=decl.name, path_expr=parsed, on_missing=on_missing,
-                op=op_token, values=values,
+                op=op_token, value_type=decl.value_type, values=values,
             )
         if op_token == "range":
             rng = _parse_interval(payload, decl.value_type, decl.name)
             return Criterion(
                 name=decl.name, path_expr=parsed, on_missing=on_missing,
-                op="range", range_=rng,
+                op="range", value_type=decl.value_type, range_=rng,
             )
         if op_token == "exists":
             wants = _coerce_scalar(payload, "boolean", decl.name)
@@ -271,7 +295,7 @@ def _build_criterion(
         coerced = _coerce_scalar(raw, decl.value_type, decl.name)
         return Criterion(
             name=decl.name, path_expr=parsed, on_missing=on_missing,
-            op="in", values=(coerced,),
+            op="in", value_type=decl.value_type, values=(coerced,),
         )
     if decl.op == "range":
         coerced = _coerce_scalar(raw, decl.value_type, decl.name)
@@ -286,7 +310,7 @@ def _build_criterion(
             )
         return Criterion(
             name=decl.name, path_expr=parsed, on_missing=on_missing,
-            op="range", range_=rng,
+            op="range", value_type=decl.value_type, range_=rng,
         )
     if decl.op in ("not_in", "exists"):
         raise FilterParamError(
@@ -337,6 +361,17 @@ def build_criteria(
     by_name = {f.name: f for f in spec.filters}
     real_params, overrides = _extract_strict_overrides(by_name, query_params)
 
+    supplied = {name for name, raw in real_params.items() if raw not in (None, "")}
+    for name in supplied:
+        decl = by_name.get(name)
+        if decl is None:
+            continue  # reported below, at the point each filter is built
+        missing = [target for target in decl.requires if target not in supplied]
+        if missing:
+            raise FilterParamError(
+                f"{name}: requires {', '.join(missing)} to also be supplied"
+            )
+
     out: list[Criterion] = []
     for name, raw in real_params.items():
         if raw is None or raw == "":
@@ -377,6 +412,20 @@ def _resolve(listing: dict[str, Any], crit: Criterion) -> list[Any]:
     return [m.value for m in crit.path_expr.find(listing) if m.value is not None]
 
 
+def _coerce_resolved_decimal(value: Any) -> Decimal | None:
+    """Parse a resolved listing value as finite decimal text; None otherwise.
+
+    A `decimal_text` field's wire and stored representation is a JSON string
+    (e.g. `"16.00"`), unlike `number`'s native JSON number. Only a string
+    coerces here; a listing value of the wrong shape (a number, a bool, a
+    list) or a non-finite one is treated as absent rather than raised on, so a
+    malformed stored listing cannot fail a query.
+    """
+    if not isinstance(value, str):
+        return None
+    return _finite_decimal(value)
+
+
 def evaluate(listing: dict[str, Any], crit: Criterion) -> bool:
     """Apply one criterion to one listing dict, return pass/fail.
 
@@ -387,6 +436,12 @@ def evaluate(listing: dict[str, Any], crit: Criterion) -> bool:
 
     if not resolved:
         return crit.on_missing == "pass"
+
+    if crit.value_type == "decimal_text" and crit.op in ("in", "not_in", "range"):
+        coerced = [_coerce_resolved_decimal(v) for v in resolved]
+        resolved = [v for v in coerced if v is not None]
+        if not resolved:
+            return crit.on_missing == "pass"
 
     if crit.op == "in":
         # passes iff at least one resolved value matches any set member
@@ -400,7 +455,11 @@ def evaluate(listing: dict[str, Any], crit: Criterion) -> bool:
     if crit.op == "range":
         rng = crit.range_
         assert rng is not None
-        return any(rng.contains(v) for v in resolved if isinstance(v, (int, float)))
+        return any(
+            rng.contains(v)
+            for v in resolved
+            if isinstance(v, (int, float, Decimal))
+        )
 
     if crit.op == "exists":
         # resolved is non-empty here (handled above); empty case handled above

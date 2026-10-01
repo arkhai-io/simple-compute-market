@@ -1019,7 +1019,7 @@ run-e2e: ## Run the E2E GitHub Actions workflow on the current branch.
 E2E_LOG_DIR ?= $(CURDIR)/.snapshot/e2e-logs
 E2E_RUN_ID ?=
 
-fetch-e2e-logs: ## Wait for an E2E run, then fetch its Actions and compose logs.
+fetch-e2e-logs: ## Wait for an E2E run, fetch its logs, and zip the resulting directory.
 	@$(CURDIR)/scripts/fetch-e2e-logs.py \
 		--output-dir "$(E2E_LOG_DIR)" \
 		$(if $(strip $(E2E_RUN_ID)),--run-id "$(E2E_RUN_ID)")

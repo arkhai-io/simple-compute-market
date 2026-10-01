@@ -82,6 +82,10 @@ def vm_listing_resource_for_listing(
     }
     if candidate.get("resource_id"):
         listing_resource["resource_id"] = candidate["resource_id"]
+    # The seller's asking price for this shape: a listing attribute from which
+    # nothing is constructed, published only when something prices the shape.
+    if candidate.get("asking_rate") is not None:
+        listing_resource["asking_rate"] = dict(candidate["asking_rate"])
     if interruptible:
         listing_resource["interruptible"] = True
         listing_resource["settlement_model"] = "splitter_refund"

@@ -30,6 +30,10 @@ from market_pool_overrides.records import (
     ProjectionGeneration,
     ShapeFeasibility,
 )
+from market_pool_overrides.route_service import (
+    PoolOverrideRouteError,
+    PoolOverrideRouteService,
+)
 from market_pool_overrides.service import (
     OVERRIDE_APPLIED,
     OVERRIDE_INACTIVE,
@@ -49,6 +53,8 @@ from market_pool_overrides.store import (
 )
 
 __all__ = [
+    "PoolOverrideRouteError",
+    "PoolOverrideRouteService",
     "OVERRIDE_APPLIED",
     "OVERRIDE_INACTIVE",
     "OVERRIDE_ORPHANED",

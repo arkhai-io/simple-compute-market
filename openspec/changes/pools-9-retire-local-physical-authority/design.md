@@ -64,6 +64,16 @@ capacity-backed.
 and capacity-definition documents accept every dimension a resource names, so
 the CSV path is not the only expression of it.
 
+**Local inventory still has diagnostics and cleanup consumers.**
+`SystemService.get_health` reports `resource_count` through both health models.
+The "Operator-visible acceptance state" requirement in
+`openspec/specs/storefront-publication/spec.md` prescribes it, and the smoke
+test, both VM full-deal scenarios, `docs/seller-quickstart.md`, and
+`docs/development/VALIDATION_RUNBOOK.md` use it to diagnose CSV seeding.
+`release_reservations` normalizes local held resource rows beside its
+authoritative site-ledger release operation, and e2e cleanup calls that route.
+Those consumers retire with this change's local-inventory cutover.
+
 ## Goals / Non-Goals
 
 **Goals:** one listing source; no storefront physical authority; one storefront
@@ -161,6 +171,28 @@ signal to gate on. Work that lands alone — fixing a pool's provider at
 creation, and removing the storefront's zero-caller physical surfaces — is
 not held behind it; each is its own change.
 
+### Local diagnostics and cleanup retire with the cutover
+
+The design review of `remove-dead-storefront-physical-surfaces` transferred
+`resource_count` removal and the local-row half of `release_reservations`
+here. Both remain supported while the local listing path and CSV import
+remain supported. Their removal belongs to the same operator and test
+migration as their inventory source; the site-ledger release operation
+continues to own authoritative cleanup.
+
+Removing them in the independent cleanup change was rejected. The count is
+required by a current permanent scenario and read by running e2e checks,
+and removing the local cleanup loop while local derivation remains available
+would discard an existing recovery operation before its inventory retires.
+
+The replacement diagnostic has not been chosen. Projection load state proves
+whether a generation is known, but reports no inventory quantity; a loaded
+empty generation and loaded usable inventory both have state `loaded`.
+The cutover review must decide what operator evidence distinguishes a healthy
+empty site, unavailable inventory, and successfully seeded sellable supply.
+That decision must revise the current normative scenario and its consumers
+before field removal is implementation-ready.
+
 ## Risks / Trade-offs
 
 - **An operator upgrades with legacy values still in effect** → a silent
@@ -188,5 +220,11 @@ Rollback at any step is a code revert; no `DROP` has happened.
 
 ## Open Questions
 
-None. The start trigger is a decision outside this document, not an open
-design question.
+- What operator evidence replaces resource-count diagnosis when local CSV
+  inventory retires? Existing projection load state plus catalogue checks may
+  suffice, or projection diagnostics may need additional public information.
+  Resolve this during cutover design review, then reconcile the delta spec,
+  smoke/deal checks, quickstart, and validation runbook before implementing
+  the transferred removal. No existing task chooses a replacement.
+
+The start trigger remains a decision outside this document.

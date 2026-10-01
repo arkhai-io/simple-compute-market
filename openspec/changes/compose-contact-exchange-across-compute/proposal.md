@@ -96,6 +96,13 @@ None.
 
 ## Dependencies and Related Changes
 
+- **Owns the VM half of `publish-indicative-listing-rates`' unbacked-supply system
+  evidence** (its 7.13, carried in task 6.4): the buyer query that returns backed and
+  unbacked VM listings together is bounded by asking rate, naming asset and period,
+  and excludes a listing publishing no rate. That change proved the asking-rate path
+  on backed supply and through the registry for a listing whose only option is a
+  rateless introduction; what it could not supply is the unbacked VM listing this
+  change first makes publishable.
 - **Owns the system evidence for `unbacked-listing-publication`** (tasks 6.4 and
   6.5). That change made unbacked listings derivable, bound, and published through
   the storefront's loop, but VM composes no settlement option an unbacked listing

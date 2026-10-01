@@ -3,10 +3,16 @@
 ### Requirement: The filter grammar can compare exact decimal values
 
 The filter specification MUST support a declared value type whose wire and stored
-representation is a decimal-text string and whose comparison domain is exact
-decimal. Range bounds declared under it MUST be parsed as exact decimals, resolved
-listing values MUST be accepted when they are decimal text, and comparison MUST
-NOT pass through a binary floating-point representation at any point.
+representation is a decimal-text string and whose comparison domain is finite
+exact decimal. Range bounds declared under it MUST be parsed as exact decimals,
+resolved listing values MUST be accepted when they are decimal text, and comparison
+MUST NOT pass through a binary floating-point representation at any point.
+
+Only finite values are decimal values of this type. A query bound that parses as a
+non-number or an infinity MUST be refused as an invalid parameter, never evaluated.
+A listing value that does MUST be treated as no value, so `on_missing` decides it:
+because the registry validates the full listing shape only in its dry run, a
+malformed stored listing must not be able to fail a query.
 
 The type is domain-neutral: it names no market, field, or unit, and any
 specification may declare it for any decimal quantity.
@@ -36,6 +42,17 @@ MUST resolve its type from the specification like any other.
 
 - **WHEN** a listing's decimal-text value equals an inclusive bound exactly
 - **THEN** it matches, and it does not match an exclusive bound of the same value
+
+#### Scenario: A query bound is not finite
+
+- **WHEN** a request bounds a decimal-text filter by a non-number or an infinity
+- **THEN** the registry refuses the parameter rather than evaluating the query
+
+#### Scenario: A stored listing value is not finite
+
+- **WHEN** a listing's decimal-text value is a non-number or an infinity and a query
+  bounds that field
+- **THEN** the listing is treated as publishing no value, and the query completes
 
 #### Scenario: A registry is given a specification it cannot honour
 
@@ -161,6 +178,10 @@ A listing publishing no rate MUST be excluded from a rate-bounded query rather t
 matching it, consistent with every other filter over the published listing shape. An
 unstated rate has not been shown to satisfy a stated bound.
 
+The upper bound's query name MUST be the bare `asking_rate`, and the lower bound's
+`asking_rate_min`, following the bound-naming rule below: a buyer searches a price
+from above.
+
 #### Scenario: A buyer bounds a query by rate
 
 - **WHEN** a buyer queries for listings at or below a rate in a named asset and period
@@ -191,3 +212,30 @@ unstated rate has not been shown to satisfy a stated bound.
 - **WHEN** a listing's asking amount carries more significant digits than a binary
   double represents exactly and a buyer bounds a query near it
 - **THEN** the listing is matched or excluded on its exact value
+
+### Requirement: A bound filter's bare query name is the bound a buyer searches by
+
+When a filter specification declares a bound over a field, the field's bare query
+name MUST name the bound a buyer searching that field would mean by default, and
+any other bound over the same field MUST carry a suffixed name. For a field where
+more is at least as good for the buyer, such as a capacity dimension, that is the
+lower bound; for a field where less is better, such as a price, it is the upper
+bound.
+
+This is a rule for filter authors choosing query names, not a behaviour the engine
+enforces: each declaration states which bound it carries, so evaluation never
+depends on the name. It exists so a buyer reading the vocabulary can predict what
+a bare name means from what the field measures, and so the first field where more
+is not better does not have to be reasoned about afresh.
+
+#### Scenario: A capacity field declares a lower bound
+
+- **WHEN** a specification declares a lower bound over a capacity field
+- **THEN** the bound carries the field's bare query name
+
+#### Scenario: A price field declares both bounds
+
+- **WHEN** a specification declares an upper and a lower bound over a price
+- **THEN** the upper bound carries the field's bare query name and the lower bound a
+  suffixed one
+

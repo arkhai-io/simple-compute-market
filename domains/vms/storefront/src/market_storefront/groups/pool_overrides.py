@@ -63,7 +63,8 @@ def pool_override_set(
         dir_okay=False,
         help=(
             "JSON document holding the whole override: site_id, pool_id, "
-            "offering_mode, and any of listing_shapes, settlements, and terms."
+            "offering_mode, and any of listing_shapes, settlements, "
+            "asking_rates, and terms."
         ),
     ),
     storefront_url: str | None = _STOREFRONT_URL,

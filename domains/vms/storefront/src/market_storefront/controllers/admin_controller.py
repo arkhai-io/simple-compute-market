@@ -75,12 +75,12 @@ from market_storefront.lifecycle import (
 )
 from market_storefront.server import _set_globally_paused, _set_loops_paused
 from market_pool_overrides import (
-    PoolOverrideAddress,
     PoolOverrideDeleteResponse,
     PoolOverrideListResponse,
     PoolOverrideRecord,
-    PoolOverrideRefused,
     PoolOverrideResponse,
+    PoolOverrideRouteError,
+    PoolOverrideRouteService,
     PoolOverrideWriteResponse,
 )
 from market_capacity_publication import (
@@ -607,13 +607,12 @@ class AdminController:
     # restriction, so they travel in the body or query, never the path.
 
     @staticmethod
-    def _pool_overrides() -> Any:
-        service = _container.resolved_pool_override_service
-        if service is None:
-            raise HTTPException(
-                status_code=503, detail="storefront pool overrides are unavailable"
-            )
-        return service
+    def _pool_overrides() -> PoolOverrideRouteService:
+        return PoolOverrideRouteService(_container.resolved_pool_override_service)
+
+    @staticmethod
+    def _http(exc: PoolOverrideRouteError) -> HTTPException:
+        return HTTPException(status_code=exc.status_code, detail=exc.detail)
 
     @router.put(
         "/pool-overrides",
@@ -631,10 +630,9 @@ class AdminController:
         shape no member is feasible for is reported, not refused.
         """
         try:
-            result = await self._pool_overrides().replace(record)
-        except PoolOverrideRefused as exc:
-            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
-        return PoolOverrideWriteResponse.model_validate(result)
+            return await self._pool_overrides().replace(record)
+        except PoolOverrideRouteError as exc:
+            raise self._http(exc) from exc
 
     @router.get(
         "/pool-overrides",
@@ -649,22 +647,12 @@ class AdminController:
     ) -> PoolOverrideResponse | PoolOverrideListResponse:
         """With a site, pool, and offering mode, one override; otherwise a list,
         optionally narrowed to a site or to one site's pool."""
-        service = self._pool_overrides()
-        if site_id is not None and pool_id is not None and offering_mode is not None:
-            address = PoolOverrideAddress(
+        try:
+            return await self._pool_overrides().read(
                 site_id=site_id, pool_id=pool_id, offering_mode=offering_mode
             )
-            override = await service.get(address)
-            if override is None:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"no override for site {site_id!r} pool {pool_id!r} "
-                    f"mode {offering_mode!r}",
-                )
-            return PoolOverrideResponse.model_validate({"override": override})
-        return PoolOverrideListResponse.model_validate(
-            {"overrides": await service.list(site_id=site_id, pool_id=pool_id)}
-        )
+        except PoolOverrideRouteError as exc:
+            raise self._http(exc) from exc
 
     @router.delete(
         "/pool-overrides",
@@ -677,11 +665,12 @@ class AdminController:
         pool_id: str = Query(),  # noqa: B008
         offering_mode: str = Query(),  # noqa: B008
     ) -> PoolOverrideDeleteResponse:
-        address = PoolOverrideAddress(
-            site_id=site_id, pool_id=pool_id, offering_mode=offering_mode
-        )
-        deleted = await self._pool_overrides().delete(address)
-        return PoolOverrideDeleteResponse(**address.model_dump(), deleted=deleted)
+        try:
+            return await self._pool_overrides().delete(
+                site_id=site_id, pool_id=pool_id, offering_mode=offering_mode
+            )
+        except PoolOverrideRouteError as exc:
+            raise self._http(exc) from exc
 
     @router.post(
         "/portfolio/resources/import",

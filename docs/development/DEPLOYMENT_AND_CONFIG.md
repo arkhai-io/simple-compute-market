@@ -456,8 +456,18 @@ own `listing_shapes`, the storefront operator may state its own terms for one
 pool at one site, in one offering mode, through the administrator API or
 `market-storefront pool-override` (`set --file`, `get`, `list`, and `delete`,
 with `--mode` never defaulted). An override states listing shapes, settlement
-clauses, and the market's terms (for VM: `sla`, `min_price`, `token`, and
-`max_duration_seconds`); it cannot state region or capacity backing.
+clauses, asking rates, and the market's terms (for VM: `sla`, `min_price`,
+`token`, and `max_duration_seconds`); it cannot state region or capacity backing.
+
+- **Asking rates are declared per shape.** A pool states them in its
+  `asking_rates` policy tag, keyed by offering mode, each entry naming the shape
+  it prices with an `amount` (positive decimal text, no exponent), an `asset`,
+  and a `period` (`hour`). A listing publishes the rate for its own shape, or
+  none. An override's `asking_rates` replace the pool's list whole; an empty list
+  withholds every rate. No storefront setting supplies a rate. A declaration or
+  override the storefront cannot read holds that pool's listings and is named in
+  system status, as is a rate for a shape the pool does not publish. A changed or
+  withdrawn rate refreshes the listing in place.
 
 - **A write needs its site reachable.** It is checked against the site's live
   projection: a pool the site does not project is refused, an unreachable or
@@ -482,6 +492,32 @@ Upgrading to listing shapes is fail-forward. Every VM listing's identity now
 includes its shape, so the first publication cycle after upgrade closes each
 listing and publishes its successor once; a seller's close and pause carry to the
 successor, and system status reports the carry-over.
+
+A bare-metal storefront serves the same administrator operations, through
+`bare-metal-storefront pool-override` (`set --file`, `get`, `list`, `delete`,
+with `--mode` never defaulted). The command calls the administrator API, never
+the database. It signs as the storefront itself, from
+`BARE_METAL_STOREFRONT_IDENTITY_SCHEME`, `BARE_METAL_STOREFRONT_IDENTITY_IDENTIFIER`,
+and `ARKHAI_IDENTITY_CREDENTIAL`, so that identity must be listed in
+`BARE_METAL_STOREFRONT_ADMIN_IDENTITIES`. It connects to `--storefront-url`, else
+`BARE_METAL_STOREFRONT_PUBLIC_URL`, else `http://localhost:8000`.
+
+- **A bare-metal override states no shapes.** It states settlement clauses, which
+  replace `BARE_METAL_STOREFRONT_PUBLICATION_CLAUSES` for that pool whole;
+  asking rates; and the terms `min_duration_seconds` and `max_duration_seconds`.
+- **Each lease bound replaces its configured counterpart on its own.** The pair a
+  listing would publish must still be ordered: a minimum above the effective
+  maximum (the override's, else `BARE_METAL_STOREFRONT_MAX_DURATION_SECONDS`) is
+  refused at the write. If configuration later falls below an accepted minimum,
+  the next publication run holds that pool as `pool_override_terms_conflict`
+  rather than publishing; raise the maximum or correct the override.
+- **A write takes effect at the next publication run,** from the server's
+  administrator step or `bare-metal-storefront publish`; bare metal has no
+  publication loop to wake.
+- **Status is judged against the last generation a run accepted.** Every run
+  records, per site, the pools it accepted, durably, so status survives restarts
+  and command-line runs. Before any run has accepted a site, its overrides read
+  `unknown`.
 
 ## Settlement consumer configuration and cutover
 

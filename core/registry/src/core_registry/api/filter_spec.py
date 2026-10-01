@@ -48,7 +48,7 @@ from core_registry.db.database import get_db
 # Spec models
 # ---------------------------------------------------------------------------
 
-ValueType = Literal["string", "integer", "number", "boolean", "address"]
+ValueType = Literal["string", "integer", "number", "boolean", "address", "decimal_text"]
 Op = Literal["in", "range", "not_in", "exists"]
 AliasKind = Literal["lower_bound", "upper_bound"]
 OnMissing = Literal["fail", "pass"]
@@ -80,6 +80,16 @@ class FilterDecl(BaseModel):
     alias_kind: AliasKind | None = None
     on_missing: OnMissing = "fail"
     indexed: bool = False  # reserved for (a2); registry ignores today
+    requires: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Other declared filter names that must accompany this one in a "
+            "query. One-directional: a co-requirement target may be supplied "
+            "alone. Omitted from the served body and the etag input when "
+            "empty, so declaring no co-requirement never changes a spec's "
+            "serialization or etag."
+        ),
+    )
 
 
 class SchemaIdentity(BaseModel):
@@ -134,7 +144,7 @@ def compute_etag(spec: FilterSpec) -> str:
     body: dict[str, Any] = {
         "version": spec.version,
         "listing_shape": spec.listing_shape,
-        "filters": [f.model_dump(exclude_none=False) for f in spec.filters],
+        "filters": [_dump_filter(f) for f in spec.filters],
     }
     if spec.schema_identity is not None:
         body["schema"] = spec.schema_identity.model_dump()
@@ -181,7 +191,55 @@ def load_filter_spec(path: Path | None = None) -> FilterSpec:
             if query_name in seen_queries:
                 raise ValueError(f"duplicate query name in spec: {query_name!r}")
             seen_queries.add(query_name)
+
+    by_name = {declaration.name: declaration for declaration in spec.filters}
+    for declaration in spec.filters:
+        for target in declaration.requires:
+            if target == declaration.name:
+                raise ValueError(
+                    f"{declaration.name!r} declares requires on itself"
+                )
+            if target not in by_name:
+                raise ValueError(
+                    f"{declaration.name!r} requires undeclared filter {target!r}"
+                )
+    _check_requires_acyclic(by_name)
     return spec
+
+
+def _check_requires_acyclic(by_name: dict[str, "FilterDecl"]) -> None:
+    """Raise if the ``requires`` graph over ``by_name`` contains a cycle."""
+    WHITE, GRAY, BLACK = 0, 1, 2
+    color: dict[str, int] = dict.fromkeys(by_name, WHITE)
+
+    def visit(name: str, path: list[str]) -> None:
+        color[name] = GRAY
+        for target in by_name[name].requires:
+            if color.get(target) == GRAY:
+                cycle = " -> ".join([*path, name, target])
+                raise ValueError(f"cycle in filter requires: {cycle}")
+            if color.get(target) == WHITE:
+                visit(target, [*path, name])
+        color[name] = BLACK
+
+    for name in by_name:
+        if color[name] == WHITE:
+            visit(name, [])
+
+
+def _dump_filter(declaration: FilterDecl) -> dict[str, Any]:
+    """Serialize one filter, omitting ``requires`` entirely when empty.
+
+    Every other field keeps ``exclude_none=False`` semantics so an absent
+    optional field still serializes as ``null`` — unaffected by this.
+    ``requires`` is the one field whose mere presence as a key would rotate
+    the etag of every spec that never declares it, so it is dropped rather
+    than dumped as ``[]``.
+    """
+    dumped = declaration.model_dump(exclude_none=False)
+    if not dumped.get("requires"):
+        dumped.pop("requires", None)
+    return dumped
 
 
 @lru_cache(maxsize=1)
@@ -207,7 +265,7 @@ def _spec_body(spec: FilterSpec) -> dict[str, Any]:
         "version": spec.version,
         "etag": compute_etag(spec),
         "listing_shape": spec.listing_shape,
-        "filters": [f.model_dump(exclude_none=False) for f in spec.filters],
+        "filters": [_dump_filter(f) for f in spec.filters],
     }
     if spec.schema_identity is not None:
         body["schema"] = spec.schema_identity.model_dump()

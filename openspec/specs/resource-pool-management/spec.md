@@ -506,6 +506,42 @@ apply the same check: the bulk pool-document import path and the individual pool
 - **THEN** Resource Pool validation accepts it, and the VM storefront reports the pool's
   shapes as unreadable when it derives listings
 
+### Requirement: Asking-rate hint validation
+
+Resource Pool policy metadata MUST support a domain-neutral `asking_rates` key
+carrying, per offering mode, the rates a site asks for the shapes its listings are
+sold in. It is a key of its own rather than a value inside `pricing`, because every
+compute-family domain reads it through one shared reader and one structural check,
+as `listing_shapes` is read.
+
+A Resource Pool management surface that accepts `asking_rates` MUST require a mapping
+from offering mode to a list of entries. Each entry MUST carry a `shape` that is a
+structurally well-formed family-grouped capability shape, checked by the shared
+structural check the capability shape utility provides; an `amount` that is positive
+decimal text without an exponent; an `asset` that is a trimmed, non-empty string; and
+a `period` that is a canonical lowercase unit token. An empty list MUST be accepted.
+
+The check MUST NOT depend on any domain's family or field names, and MUST NOT restrict
+which periods are accepted: which families and fields are meaningful, and which
+periods a published rate may use, MUST be validated by the domain that reads the hint.
+Every surface capable of persisting a Resource Pool's `policy_tags` MUST apply the
+same check: the bulk pool-document import path and the individual pool admin API
+(`create`/`replace`/`update`). The value MUST be projected verbatim.
+
+#### Scenario: Operator supplies a malformed asking rate
+
+- **WHEN** an operator submits an `asking_rates` entry whose amount is a JSON number,
+  whose asset is blank, or whose shape holds a family that is not a mapping, through
+  any pool-write surface
+- **THEN** Resource Pool validation rejects the update without changing the stored
+  policy metadata
+
+#### Scenario: Operator quotes a period no domain accepts
+
+- **WHEN** an operator submits a structurally well-formed entry quoted per `month`
+- **THEN** Resource Pool validation accepts it, and a storefront that accepts only
+  `hour` holds the pool's listings and reports the declaration unreadable
+
 ## Evidence
 
 - Domain-neutral hint keys, typed deliverable-mode resolution and membership, advertisement and backing declaration shape, both cross-tag rules, and the strict resolver including absent-versus-malformed discrimination: `kit/resource-pools/tests/unit/test_hints.py`.
@@ -518,6 +554,7 @@ apply the same check: the bulk pool-document import path and the individual pool
 - Both declarations on every projected pool, each resolving through the shared resolver: `provisioning/compute/service/tests/integration/test_capacity_api.py`.
 - Migration ordering, legacy host backfill, and schema-drift rejection: `provisioning/compute/service/tests/unit/test_database.py`.
 - `listing_shapes` hint structure, validated identically on create, replace, patch, and bulk import: `kit/resource-pools/tests/unit/test_hints.py` and `kit/resource-pools/tests/integration/test_resource_pool_service.py`; refused and projected verbatim by the provisioning service: `provisioning/compute/service/tests/integration/test_pools_api.py` and `test_capacity_api.py`.
+- `asking_rates` structure, including the unit-token period and a stated null, and its validation identically on every pool-write surface: `kit/resource-pools/tests/unit/test_asking_rates.py` and `kit/resource-pools/tests/integration/test_resource_pool_service.py`.
 
 ## Scheduling membership and draining
 

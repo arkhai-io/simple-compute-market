@@ -42,6 +42,7 @@ from market_contact_exchange import (
 )
 from market_settlement_runtime import settlement_migrations
 from market_identity import Identity
+from market_pool_overrides import pool_override_migrations
 from pydantic import BaseModel
 
 from .domain_runtime import get_market_domain_contract
@@ -89,6 +90,7 @@ class SQLiteClient(CoreSQLiteClient):
         return (
             *settlement_migrations(),
             *CONTACT_EXCHANGE_MIGRATIONS,
+            *pool_override_migrations(),
             *BARE_METAL_STOREFRONT_MIGRATIONS,
         )
 

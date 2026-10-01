@@ -8,6 +8,7 @@ from pathlib import Path
 import subprocess
 import sys
 from typing import IO, Sequence
+from zipfile import ZipFile
 
 import pytest
 
@@ -102,6 +103,10 @@ def test_latest_current_branch_run_is_waited_for_and_downloaded(
     assert (run_dir / "actions.log").read_text("utf-8") == "actions log\n"
     for artifact in ("e2e-vm-logs", "e2e-bare-metal-logs"):
         assert (run_dir / artifact / "compose-logs.txt").read_text("utf-8") == f"{artifact}\n"
+    with ZipFile(tmp_path / "42.zip") as archive:
+        assert archive.read("42/actions.log") == b"actions log\n"
+        for artifact in ("e2e-vm-logs", "e2e-bare-metal-logs"):
+            assert archive.read(f"42/{artifact}/compose-logs.txt") == f"{artifact}\n".encode()
     assert ["gh", "run", "watch", "42"] in runner.commands
 
 
@@ -114,6 +119,8 @@ def test_explicit_run_id_skips_branch_lookup_and_tolerates_missing_artifact(
     assert fetcher.main(["--output-dir", str(tmp_path), "--run-id", "77"]) == 0
 
     assert (tmp_path / "77" / "actions.log").is_file()
+    with ZipFile(tmp_path / "77.zip") as archive:
+        assert archive.read("77/actions.log") == b"actions log\n"
     assert not any(command[0] == "git" for command in runner.commands)
     assert not any(command[:3] == ["gh", "run", "list"] for command in runner.commands)
 
@@ -174,8 +181,12 @@ def test_repeated_fetch_reuses_each_lane_log(
     monkeypatch.setattr(fetcher.subprocess, "run", runner)
     args = ["--output-dir", str(tmp_path), "--run-id", "77"]
     assert fetcher.main(args) == 0
+    compose_log = tmp_path / "77" / "e2e-vm-logs" / "compose-logs.txt"
+    compose_log.write_text("updated compose log\n", "utf-8")
     runner.commands.clear()
     assert fetcher.main(args) == 0
+    with ZipFile(tmp_path / "77.zip") as archive:
+        assert archive.read("77/e2e-vm-logs/compose-logs.txt") == b"updated compose log\n"
     assert not any(command[:3] == ["gh", "run", "download"] for command in runner.commands)
 
 
@@ -187,3 +198,4 @@ def test_no_available_logs_fails(
 
     assert fetcher.main(["--output-dir", str(tmp_path), "--run-id", "77"]) == 1
     assert "no logs could be fetched" in capsys.readouterr().err
+    assert not (tmp_path / "77.zip").exists()

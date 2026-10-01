@@ -289,6 +289,16 @@ coercion branch and the range domain. The buyer side already renders `Decimal`
 exactly, so it needs one mapping entry to `QueryValueType.DECIMAL` and no rendering
 change.
 
+**Only finite values are decimal values.** Python's `Decimal` also parses `NaN`,
+`sNaN`, and the infinities. Ordering a NaN raises, and an infinity matches or
+excludes everything, so neither is a price a bound can compare against. A
+non-finite query bound is refused as an invalid parameter; a non-finite listing
+value reads as no value, so `on_missing` decides it. The listing side matters
+more than it looks: the registry validates the full listing shape only in its dry
+run, so a malformed stored listing must not be able to turn a query into a server
+error. Found in review; left implicit in the first design, which let the parsing
+library decide.
+
 A registry running the current engine, handed a filter spec declaring
 `decimal_text`, fails to load that spec rather than ignoring the unknown type,
 because `FilterDecl` forbids extras and `ValueType` is closed. The engine ships
@@ -479,6 +489,12 @@ dropping a price the seller believes they advertised, and unlike `min_price` thi
 value is public buyer-facing information. An absent declaration and a malformed one
 stay distinct.
 
+A stated `null`, for the whole tag or for one mode, is malformed, not absent. The
+write path already refuses it; the reader must too, because the reader exists for
+data the write path did not produce: older or skewed producers and corrupt rows.
+The reader therefore tests whether a key is present rather than whether its value
+is `None`. Found in review.
+
 ### A rate is a term of sale, so a change refreshes the listing in place
 
 Under `storefront-publication`'s "A listing's identity is the physical resource it
@@ -645,10 +661,12 @@ follows.
   - it must publish unbacked listings at all — `unbacked-bare-metal-listings` — for
     the supply Goal 7 exists to serve to carry a rate.
 
-Implementation of this change therefore waits on the first two. Its system
-evidence for unbacked supply waits on `unbacked-bare-metal-listings` for bare
-metal and `compose-contact-exchange-across-compute` for VM. The registry primitives
-have no domain dependency and may land first.
+Implementation of this change therefore waits on the first two. The system
+evidence that unbacked supply carries a comparable rate belongs to the changes that
+make unbacked supply publishable, `unbacked-bare-metal-listings` for bare metal and
+`compose-contact-exchange-across-compute` for VM, because the rate path is
+independent of backing and what is missing is the unbacked listing itself. The
+registry primitives have no domain dependency and may land first.
 
 ### Bare metal joins the site-scoped override store
 
@@ -672,6 +690,18 @@ A bare-metal override states no shapes: a whole machine has no shape to choose, 
 replace the configured `BARE_METAL_STOREFRONT_PUBLICATION_CLAUSES` for that site's
 pool as a whole. Its duration bounds replace the configured bounds. Region and backing
 remain the site's.
+
+**Duration bounds combine by overlay precedence.** Each override bound replaces its
+configured counterpart independently, as configuration overlays do. Replacing the
+pair as a unit was the alternative: an override stating only a minimum would then
+drop the configured maximum, changing meaning by omission. Independent replacement
+can produce an unordered effective pair, since configuration states a maximum and no
+minimum. The write is therefore checked against the configured maximum the server
+holds, and publication checks the pair again, because configuration can change after
+the write. A conflict found there holds the pool under its own reason,
+`pool_override_terms_conflict`, distinct from an unreadable override: the stored
+record is valid, and its combination with current configuration is not. Found in
+review.
 
 **One route service, bound per storefront.** The override HTTP handling moves out of
 VM's admin controller into `kit/pool-overrides` as a framework-free
@@ -722,6 +752,67 @@ copying it would add dead behaviour to make a future merge mechanical.
 **The combined compute-family shell** registers no `bare_metal` override
 contribution. It does not run bare-metal publication, so it keeps refusing
 `bare_metal` writes as a mode no market serves until it does.
+
+### Storefront precedence sits beside the pool declaration's parser
+
+`kit/resource-pools` both reads a pool's `asking_rates` and states the three-tier
+precedence: override, then pool, then none. Precedence is storefront authority, not
+resource-pool authority, so a split into "read this pool's rates" and a separate
+precedence rule would draw that boundary more cleanly.
+
+It is not split, because both places it could move cost more than they buy. In
+`kit/pool-overrides` it would need the resource-pool kit to parse the pool tier,
+adding a dependency that kit deliberately does not have. In each domain it would be
+two copies of one rule. The dependency direction is already legal: the override
+arrives as plain data and the kit imports no storefront.
+
+**Revisit trigger:** a second consumer of pool-declared rates that is not a
+storefront, which would make the storefront precedence an imposition on it.
+
+### Where the evidence for unbacked and multi-seller supply lives
+
+The asking-rate path does not depend on backing. This change proves it through
+running services on backed supply and, at the registry, for a listing whose only
+option is a rateless introduction, which is what unbacked supply publishes. What
+it cannot supply is an unbacked listing, which two other changes first make
+publishable. The system scenario that returns backed and unbacked supply together
+in one rate-bounded query therefore belongs to them:
+`compose-contact-exchange-across-compute` (VM) and `unbacked-bare-metal-listings`
+(bare metal), each of which already owns a scenario querying both kinds of supply.
+Holding this change open for them would have left behaviour that is already true
+unpromoted behind a prerequisite with no work begun.
+
+Multi-seller provenance is proven at integration, not system. It is the
+storefront keying rates by site and pool inside one application, and the two
+service crossings a rate makes, site to storefront and storefront to registry, are
+proven by the single-site end-to-end scenario. A two-seller system lane would add
+no crossing.
+
+### The override kit keeps its version
+
+`kit/pool-overrides` gains a route service, optional after-write effects, and an
+`asking_rates` column, all backward compatible, and its own requirements do not
+change. A same-version wheel is what the build reinstalls and the lock check
+accepts. A version bump would have forced relocking every consumer for no change
+in behaviour.
+
+### The override store's `NULL` and `"null"` stay one state
+
+The asking-rate reader distinguishes a stated `null` from an absent declaration,
+and the bare-metal override reader refuses stored `terms` that are not a mapping.
+The override kit's store does not distinguish SQL `NULL` from stored JSON
+`"null"`: both read as unset. It writes `NULL` for every unset field, so `"null"`
+text can arise only from corruption, and separating them is a store-wide change
+governing every market's override fields, outside this change.
+
+### A later registry change may move the asking rate's validation
+
+`store-registry-listings-as-published`, in design, would stop the registry
+discarding listing content it acknowledges, and one of its candidate designs
+enforces the filter specification at the publish boundary. This change's
+`registry-discovery` requirement states that the registry validates the asking
+rate only in its dry run, which is true when this change lands. If that change
+enforces at publish, amending the statement is its delta's work.
 
 ## Risks / Trade-offs
 

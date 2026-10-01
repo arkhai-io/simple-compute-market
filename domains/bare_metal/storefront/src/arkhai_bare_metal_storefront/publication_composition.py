@@ -3,8 +3,8 @@
 The publication command and the administrator's publication step both compose
 their cycle here, so the two cannot run different cycles. Each trusted site's
 own capacity client and the one configured registry come from the storefront
-runtime and the process environment; terms of sale come only from durable
-configuration.
+runtime and the process environment; terms of sale come from durable
+configuration, replaced for one site's pool by the storefront's stored override.
 """
 
 from __future__ import annotations
@@ -18,6 +18,11 @@ from typing import Any
 from core_storefront.publication_runner import PublicationPayload
 from market_settlement_runtime import SettlementPublicationClause
 
+from .pool_overrides import (
+    MAX_DURATION_SECONDS_ENV,
+    compile_publication_clauses,
+    configured_max_duration_seconds,
+)
 from .publication import BareMetalPublicationCycle
 from .publication_service import BareMetalRegistryConfiguration
 from .runtime import BareMetalStorefrontRuntime
@@ -70,17 +75,28 @@ def publication_payload_builder(
     fulfillment_deadline = _instant(
         environ, "BARE_METAL_STOREFRONT_FULFILLMENT_DEADLINE"
     )
-    max_duration = int(environ["BARE_METAL_STOREFRONT_MAX_DURATION_SECONDS"])
+    max_duration = configured_max_duration_seconds(environ)
+    if max_duration is None:
+        raise RuntimeError(f"{MAX_DURATION_SECONDS_ENV} is required for publication")
 
     async def build(candidate: dict[str, Any]) -> PublicationPayload:
+        # A pool's storefront override replaces the configured clauses and
+        # bound for that pool's listings only.
+        override_clauses = candidate.get("override_clauses")
         return await composition.publication_payload(
             candidate=candidate,
-            clauses=clauses,
+            clauses=(
+                compile_publication_clauses(override_clauses)
+                if override_clauses is not None
+                else clauses
+            ),
             option_expires_at=option_expiry,
             funding_deadlines=funding_deadlines,
             fulfillment_deadline=fulfillment_deadline,
             demands=demands,
-            max_duration_seconds=max_duration,
+            max_duration_seconds=candidate.get(
+                "override_max_duration_seconds", max_duration
+            ),
         )
 
     return build
@@ -115,6 +131,7 @@ def build_publication_cycle(
         storefront_url=runtime.storefront_url,
         seller_principal=runtime.seller_principal,
         build_payload=publication_payload_builder(runtime, environ),
+        configured_max_duration_seconds=configured_max_duration_seconds(environ),
     )
 
 

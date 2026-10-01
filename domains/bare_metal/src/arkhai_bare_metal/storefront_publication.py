@@ -35,6 +35,7 @@ from market_capability_shape import FieldKind, shape_digest
 
 from .projections import TrustedBareMetalProjection, TrustedBareMetalResource
 from .publication import available_bare_metal_listings
+from .schema import BareMetalAskingRate
 from .shapes import BareMetalShapeError, derive_bare_metal_shape
 
 # How a storefront's reading of a pool's declarations admits bare metal.
@@ -118,6 +119,7 @@ def classify_bare_metal_resources(
     *,
     pool_admission: Mapping[str, str],
     pool_regions: Mapping[str, str | None],
+    pool_asking_rates: Mapping[str, Mapping[str, Mapping[str, str]]] | None = None,
 ) -> BareMetalSiteClassification:
     """Classify every bare-metal resource in one accepted site generation.
 
@@ -125,7 +127,9 @@ def classify_bare_metal_resources(
     :data:`POOL_HELD`, or :data:`POOL_NOT_ADMITTED`, as the caller read the
     pool's declarations; a pool it does not name admits nothing. A pool
     ``pool_regions`` gives no region is held: the compute schema requires a
-    region and there is no other source for one.
+    region and there is no other source for one. ``pool_asking_rates`` maps a
+    pool to its published rates by shape digest; a candidate takes its own
+    shape's rate, or publishes none.
     """
     candidates: list[dict[str, Any]] = []
     classified: list[ClassifiedBareMetalResource] = []
@@ -159,6 +163,9 @@ def classify_bare_metal_resources(
             continue
         assert region is not None and digest is not None  # guaranteed by _classify
         (listing,) = available_bare_metal_listings([resource], region=region)
+        rate = ((pool_asking_rates or {}).get(resource.pool_id) or {}).get(digest)
+        if rate is not None:
+            listing = listing.model_copy(update={"asking_rate": BareMetalAskingRate(**rate)})
         candidates.append(
             {
                 "site_id": generation.site_id,
@@ -196,6 +203,9 @@ TERM_RESOURCE_FIELDS = (
     "min_duration_seconds",
     "max_duration_seconds",
     "capacity_backing",
+    # A price change refreshes the listing in place; the rate is outside the
+    # shape digest, so it can never change a listing's identity.
+    "asking_rate",
 )
 TERM_LISTING_FIELDS = (
     "accepted_escrows",
