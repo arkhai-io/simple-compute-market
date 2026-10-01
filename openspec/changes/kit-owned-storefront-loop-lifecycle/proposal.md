@@ -134,7 +134,8 @@ None.
 
 - One kit-owned loop controller per storefront process; every timer loop registers
   with it, paired with its step — `openspec/specs/market-composition/spec.md`.
-- A loop's reported state is established by the loop, and a loop waits, gates, then
-  works — `openspec/specs/market-composition/spec.md`.
+- A loop's reported state is established by the loop, and a loop gates on entry,
+  works when due, then waits through the controller —
+  `openspec/specs/market-composition/spec.md`.
 - The pause-and-step convention is composed rather than reimplemented —
   `docs/development/TESTING.md`'s loop table and `docs/development/ARCHITECTURE.md`.

@@ -154,14 +154,18 @@ drives transitions instead of waiting for a timer:
 |---|---|---|
 | Lease watchdog | `POST /api/v1/system/lease-watchdog/pause` | `POST /api/v1/system/check-leases` |
 | Fulfillment convergence | `POST /api/v1/system/fulfillment-convergence/pause` | `POST /api/v1/system/fulfillment-convergence/advance-cycle` |
-| VM storefront loops (`publication`, `capacity-events`, `site-projections`, `settlement-servicing`, `fulfillment-resume`) | `POST /api/v1/admin/lifecycle/pause`, which holds them all | `POST /api/v1/admin/lifecycle/<loop>/run-cycle`, previewed by `.../<loop>/dry-run` |
+| VM storefront loops (`publication`, `capacity-events`, `site-projections`, `settlement-servicing`, `fulfillment-resume`, `negotiation-watchdog`) | `POST /api/v1/admin/lifecycle/pause`, which holds them all | `POST /api/v1/admin/lifecycle/<loop>/run-cycle`, previewed by `.../<loop>/dry-run` for `publication` and `capacity-events` |
+| Bare-metal storefront loops (`settlement-servicing`, `negotiation-watchdog`) | `POST /api/v1/admin/lifecycle/pause`, which holds them all | `POST /api/v1/admin/lifecycle/<loop>/run-cycle` |
 | Bare-metal storefront publication | none: publication has no timer, and each pass is operator-invoked | `POST /api/v1/admin/lifecycle/publication/run-cycle`, the same pass the `bare-metal-storefront publish` command runs |
+| API-credit storefront loops (`capacity-events`, `settlement-servicing`, `negotiation-watchdog`) | `POST /api/v1/admin/lifecycle/pause`, which holds them all | `POST /api/v1/admin/lifecycle/<loop>/run-cycle`, previewed by `.../capacity-events/dry-run` |
 
-The VM storefront's loops hold no claim between cycles, so their `run-cycle`
-is a step: it runs exactly the cycle the timer runs, whether or not the
-loops are held.
+Every storefront composes its loops onto the one kit loop controller in
+`kit/storefront`, so the routes, response shapes, and the canonical
+`StorefrontClient` methods are the same for every storefront. The storefront
+loops hold no claim between cycles, so their `run-cycle` is a step: it runs
+exactly the cycle the timer runs, whether or not the loops are held.
 
-Two traps this has already sprung, both worth checking for a new loop:
+Traps this has already sprung, worth checking for a new loop:
 
 - **A loop with no pause is not paused.** Convergence ran a 30s timer
   with no gate while the scenario around it believed everything was
@@ -176,6 +180,13 @@ Two traps this has already sprung, both worth checking for a new loop:
   claims first; `run-cycle` is the production cycle and does not. If a
   test needs several steps to make one transition, suspect the step
   rather than adding a sleep.
+- **A loop that sleeps its interval is held late.** A loop gated at the
+  top of each cycle but waiting with a plain sleep reaches its gate only
+  when the sleep ends, so a pause landing in a 30-second interval outlasts
+  the pause's 5-second bounded wait and reports the loop `pausing`. Every
+  loop waits through the controller's `idle`, which returns on a pause
+  request, and the kit runners refuse a gate without such a wait. Test it
+  with the real loop body and an interval far longer than the test waits.
 - **Scope the pause to the module that owns the advances.** A pause in
   a shared `conftest.py` reaches every scenario in that directory, and a
   scenario that legitimately relies on the timer — one that arms an

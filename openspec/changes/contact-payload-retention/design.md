@@ -2,227 +2,381 @@
 
 ## Context
 
-The mechanism's PII posture was designed carefully and is mostly implemented. Its
-own design records the reasoning: options and listings carry prose terms and a
-channel descriptor only, because "the registry is public and scrapable, and a
-contact-bearing listing is a spam directory"; payloads persist only for deals
-whose introduction has been started, so a deal that never starts persists no
-contact data at all; both payloads persist atomically at start so that "available
-to both parties" is a well-defined terminal condition.
+The mechanism's PII posture was designed carefully and is mostly implemented. Options
+and listings carry prose terms and a channel descriptor only, because a public,
+scrapable registry carrying contact details would be a spam directory; payloads
+persist only for deals whose introduction has been started; and both payloads persist
+atomically at start, so "available to both parties" is a well-defined terminal
+condition. The end of that lifecycle is the part left as a requirement without an
+implementation.
 
-The one part left as a requirement without an implementation is the end of that
-lifecycle. The same design named it as a risk — "Contact payloads are deliberate
-PII persistence. Bound the size, record the retention posture in the capability
-spec, and treat deletion as part of the deal lifecycle rather than an
-afterthought" — and the first two were done. The third was not.
+What exists, read against the code:
 
-**More of the third exists than the proposal originally claimed, and the
-correction shrinks this change.** `delete_introduction(conn, obligation_ref)` is
-already in `kit/contact-exchange/src/market_contact_exchange/migrations.py`,
-alongside `insert_introduction` and `load_introduction`, exported from the kit's
-`__init__.py`, and unit-tested for exactly the idempotency wanted here — the test
-asserts `True` then `False` across a repeat. The `contact_introductions` table
-already carries `created_at`.
-
-Neither has a production caller. So this change is not building a deletion path;
-it is building everything that would invoke one, and adding the select-by-age
-query beside the delete.
+- **The deletion primitive removes the row.** `delete_introduction(conn,
+  obligation_ref)` in `kit/contact-exchange/src/market_contact_exchange/migrations.py`
+  runs `DELETE FROM contact_introductions`. It is exported and unit-tested for
+  returning `True` then `False` across a repeat, and has no production caller.
+- **The route service reads a missing row as "never started".**
+  `IntroductionRouteService.read` answers 409 "introduction has not been started" when
+  `load` returns nothing. `start` checks for an existing row only to decide whether to
+  deliver, then persists. After a row delete, a buyer's repeat start with a fresh
+  request id therefore persists a new contact pair and delivers to the seller again.
+- **Re-delivery reads the same table.** The bare-metal `redeliver-introduction`
+  command loads the stored record and refuses only when none exists.
+- **`created_at` exists and is never read.** It is set by SQLite at first persist,
+  which is the reveal.
+- **Only bare metal composes the mechanism.** `market_contact_exchange` is imported by
+  the bare-metal storefront and buyer and nowhere else; VM has no introductions table.
+- **The seller's configuration is typed and kit-owned.** `ContactSettlementConfig`
+  holds `contact_payload` and `profiles` under the `[Settlement.contact]` root,
+  tagged with the seller role, and generates role templates and schema fragments.
+- **Bare metal has no loop pause.** It starts its negotiation watchdog and
+  settlement-servicing worker with no predicate and steps only publication.
+  `kit-owned-storefront-loop-lifecycle` supplies the controller every storefront will
+  register its loops with.
+- **No end-to-end scenario reaches an introduction**, and the bare-metal lane does not
+  configure contact exchange.
+- **The authenticated replay store keeps response bodies.** `core_storefront`'s
+  `auth_replay_reservations.response_body` records the body of every authenticated
+  first-dispatch response so an exact retry can be answered identically. Reveal
+  responses carry the counterparty's contact, so each reveal leaves a copy there. The
+  table records no operation or resource, and nothing prunes it.
 
 ## Goals / Non-Goals
 
-**Goals.** Make the existing retention requirement executable. Let a party find
-out the window before committing contact data, and confirm it at reveal. Keep the
-deal intact when its payloads go.
+**Goals.** Make the existing retention requirement executable and safe: a deletion no
+party can undo, a window a party can read before committing contact data and again at
+reveal, and a deal that stays intact when its payloads go.
 
-**Non-Goals.** No change to the reveal surface, no aliasing, no change to what is
-persisted at start, no registry or listing-shape change.
+**Non-Goals.** No aliasing, no change to what is persisted at start, no registry or
+listing-shape change, no VM composition.
 
 ## Decisions
 
+### Placement: kit first
+
+A compute-family storefront serving several domains, as the provisioning service
+already serves several, is the long-term direction. Anything this change adds that is
+not truly bare-metal-only therefore lands in `kit/contact-exchange`:
+
+- redaction, the tombstone column, the triggers, and the select-expired query;
+- the `retention_seconds` configuration field;
+- the one deletion operation, the sweep cycle, and the sweep loop runner;
+- a framework-free retention admin service — delete one introduction, run one sweep,
+  preview the next sweep — following the precedent `kit/pool-overrides` set, which
+  each storefront binds into its own router behind its own administrator
+  authentication;
+- the disclosure model, and the route service's behaviour after deletion.
+
+Bare metal keeps only wiring: its persistence wrappers, embedding the disclosure
+object in its readiness response, binding the admin service into its router,
+registering the sweep loop with the kit loop controller, and refusing re-delivery
+through the kit's projection.
+
+The sweep loop runner takes a `paused` gate and an injected wait rather than importing
+the loop controller, because `kit/storefront` depends on Alkahest and the mechanism
+kit's boundary test forbids that dependency.
+
+### Ordering: retention on bare metal now; VM inherits it
+
+Reversing the dependency — composing VM first and adding retention once over both
+domains — was considered and rejected. Almost all of retention is kit work, which is
+where `compose-contact-exchange-across-compute` already places its promoted glue, so
+doing retention first causes no later move. What VM then adds is wiring: registering
+the sweep loop, binding the admin service, and embedding the disclosure. That
+composition change owns it, alongside composing the mechanism.
+
+Reversing would also ship VM holding contact data with no deletion path, against that
+change's own recorded gate, and would put the larger change, whose system evidence
+depends on the VM lane, at the head of Goal 7's critical path.
+
+So that a later composing domain cannot omit retention, the specification requires it
+of every storefront that composes the mechanism.
+
+### Deletion redacts in place and leaves a tombstone
+
+Deleting the row is what makes deletion unsafe: the row's existence is the only
+record that the introduction was revealed, so removing it erases the fact as well as
+the payloads, and the next start reveals again.
+
+The row is therefore kept. Redaction sets an additive `payloads_deleted_at` column and
+empties both contact columns in one statement, so a concurrent read sees either the
+whole introduction or the tombstone and never a partial record. The agreed
+`introduction_package` is kept: it is a copy of the accepted plan's service terms,
+which persist in the negotiation thread regardless, so removing it here would remove
+nothing.
+
+Alternatives rejected:
+
+- **A separate tombstone table** keeps two tables that must agree and adds a read to
+  every reveal.
+- **Inferring deletion from obligation state** (collected but no row) fails when
+  `persist` succeeded and `complete` did not: the obligation is not collected, the row
+  is gone, and a later start reveals again.
+
+The existing primitive is replaced rather than joined by a second implementation. It
+has no production caller, so it is renamed to say what it now does:
+`delete_introduction_payloads`. It returns `True` when it redacts and `False` for an
+already-redacted or absent row.
+
+### The active part of the table is append-only, enforced by triggers
+
+A row is inserted once at reveal and changed at most once, by redaction. Triggers make
+that mechanical, as the storefront's listing-binding triggers already do for backing
+and closure reasons:
+
+- an update is refused unless it is the one-way redaction: `payloads_deleted_at` goes
+  from null to a value, both contacts become empty, and nothing else changes;
+- deleting a row whose payloads have not been deleted is refused.
+
+Removing a payload can then only go through redaction, which leaves the tombstone.
+Deleting a tombstone stays permitted, because that is how state growth will
+eventually be managed.
+
+**Tombstone removal is anticipated and unowned.** A tombstone may be removed only once
+its deal can no longer be revealed again — that is, once the accepted negotiation
+thread that `prepare` resolves is itself gone. Removing one earlier reopens the
+re-reveal this decision closes. No change owns that cleanup.
+
+### What every surface does after deletion
+
+- **Read** answers 410 with the stable code `introduction_payloads_deleted` and the
+  time of deletion. It never returns a partial introduction.
+- **Start** still drives the obligation to collected, which is idempotent and lets a
+  deal whose earlier completion failed converge, then answers the same 410. It
+  persists nothing and delivers nothing.
+- **The projection** used by read, start, and re-delivery refuses a redacted record,
+  so no surface can emit an empty contact as though it were a reveal.
+- **Re-delivery** refuses a deleted introduction and delivers nothing.
+- **The buyer** reports the deleted outcome as its own result rather than as a
+  generic failure.
+
 ### Retention is an aggregate policy over the storefront's dataset
 
-The window is a property of the storefront's data holdings, not a term of any
-deal. Nothing in the settlement plan, the obligation, or `service_terms` carries
-it; it is not negotiated, not agreed, and not something a counterparty consents
-to.
+The window is a property of the storefront's data holdings, not a term of any deal.
+Nothing in the settlement plan, the obligation, or `service_terms` carries it; it is
+not negotiated or agreed. The storefront pays for the storage and carries the
+liability for holding the data, so the storefront sets the policy, and parties
+exercise choice by selecting a storefront whose retention they accept — which is why
+the window must be discoverable.
 
-That matters because it settles who decides. The storefront pays for the storage
-and carries the liability for holding the data, so the storefront sets the policy.
-Parties exercise choice by selecting a storefront whose retention they find
-acceptable — which is why the window has to be discoverable, and is the whole
-reason for the disclosure decision below — rather than by negotiating a window
-per deal.
+**Rejected: recording the window on each row at reveal and enforcing the recorded
+value.** An operator who shortens the policy — for cost, an incident, or a legal
+instruction — would find it does not apply to the data they most want gone, and the
+operator can delete any row directly regardless, so a per-row pin protects nothing.
 
-It also settles a mechanism question. An earlier version of this design proposed
-recording the effective window on each row at reveal and having the sweep enforce
-the recorded value, on the reasoning that the disclosed window and the enforced
-window would then agree by construction. **Rejected.** An operator who shortens
-the policy — for cost, an incident, or a legal instruction — would find the new
-policy does not apply to the data they most want gone, which inverts the purpose
-of having a policy. And the operator can delete any row directly regardless, so a
-per-row pin protects nothing: it is performative for the parties and an obstacle
-for the operator. The window is therefore read live at sweep time and applies to
-the dataset in aggregate.
+The window is read from the running configuration at each sweep and each disclosure.
+A change takes effect when the storefront restarts with it and applies to every
+existing row. Setting a finite window is consent to delete existing rows past it;
+setting `indefinite` stops deletion.
 
-Setting a finite window is consent to delete existing rows past it. Unsetting it
-stops deletion. Both are the operator's to choose.
+### The window is mechanism configuration with a 30-day default
 
-### The default is 30 days, and unset means indefinite
+`retention_seconds` joins `ContactSettlementConfig`, tagged with the seller role, as a
+positive integer or the literal `"indefinite"`, defaulting to `2592000` (30 days).
+Zero is refused, so a typo cannot delete introductions moments after they are
+revealed.
 
-30 days is an unremarkable retention period for transactional contact data, so it
-is a defensible default rather than an arbitrary one. Nothing here is released,
-so no deployment holds historical payloads that a first sweep would delete — the
-upgrade-deletion problem a shipped default would otherwise raise does not arise,
-and defending against it would be defending against a case that cannot occur.
+The mechanism's typed configuration already holds the seller's contact payload, so
+the policy governing that payload sits beside it, and VM inherits the setting through
+the same `[Settlement.contact]` root with no per-domain parsing. A literal sentinel
+rather than a null is needed because TOML, which VM's configuration uses, has no null.
+Generated templates and schema fragments regenerate with the field.
 
-An operator wanting indefinite retention unsets the value. That is a different and
-better state than an implicit unbounded default, which reads as the absence of a
-policy and is what exists today.
+30 days is an unremarkable retention period for transactional contact data. Nothing
+is released, so no deployment holds historical payloads a first sweep would delete.
 
-### Both invocation paths, one handler
+### A row is eligible when its reveal is older than the window
 
-The sweep runs unattended on a configurable interval and an operator can invoke
-deletion for a single introduction on request. Neither substitutes for the other:
-a policy honoured only when an operator remembers is the hand-written-SQL status
-quo with a nicer interface, and an unattended sweep cannot serve an
-out-of-schedule deletion request for one party.
+An introduction is eligible for deletion when `now ≥ created_at + window`.
+`created_at` is set at first persist, which is the reveal.
 
-Both call the same underlying operation. `ARCHITECTURE.md`'s operator lifecycle
-rule requires it — a manual cycle must invoke the same production handler as the
-timer-driven worker — and `kit/storefront`'s negotiation watchdog is the shape to
-follow: `sweep_stale_negotiations` performs one cycle and returns a count, and
-`run_negotiation_watchdog` loops over it after an initial delay. Both composing
-storefronts already start that watchdog unconditionally from configuration, so the
-scheduling seam and its configuration pattern exist. Like every other loop, the
-sweep is holdable and steppable under the pause-and-step convention, so an
-end-to-end scenario can advance it deterministically.
+### Both invocation paths, one operation
+
+The sweep runs unattended on a configurable interval, and an operator can delete one
+introduction on request. Neither substitutes for the other: a policy honoured only
+when an operator remembers is the hand-written-SQL status quo, and an unattended sweep
+cannot serve an out-of-schedule request for one party.
+
+Both call `delete_introduction_payloads`. The sweep cycle selects eligible rows and
+redacts each, returning a count; the loop runner repeats that cycle. The admin
+service's single deletion calls the operation directly, its sweep step calls the same
+cycle the timer calls, as `ARCHITECTURE.md`'s operator lifecycle rule requires, and
+its preview reports what the next cycle would delete without deleting it. A
+partially failed sweep converges on retry because redacting an already-redacted row
+returns `False` rather than raising.
+
+The sweep loop registers with the kit loop controller, so the lifecycle pause holds
+it and its step and preview are reachable while held.
+
+### Disclosure: one machine-readable object, before commitment and at reveal
+
+Disclosure at reveal alone is too late to inform a choice: the buyer's contact
+payload accompanies the start request, so a party reading the policy in the reveal
+learns it just after the point they could have declined.
+
+The kit defines one disclosure object:
+
+```json
+{"window_seconds": 2592000, "basis": "current_policy", "scope": "introduction_record"}
+```
+
+`window_seconds` is `null` for `indefinite`. `basis` says the value is current
+storefront policy rather than a commitment: the operator may change the window or
+delete a row directly at any time. `scope` says it governs the storefront's
+introduction record — not copies each side's delivery sinks or the buyer's own tooling
+already hold, and not responses the storefront recorded for exact retry (see "The
+authenticated replay store is out of scope"). Enumerated values carry both statements
+without prose that could drift between storefronts.
+
+The object appears:
+
+- on the storefront's public readiness projection, which bare metal serves at
+  `/health` and `/api/v1/system/health`, nested so operator tooling parsing the
+  readiness shape is unaffected and later disclosures have one place to land;
+- in the reveal projection both parties read.
+
+Both read the same running configuration, so they agree. It is present only when the
+mechanism is enabled. `/api/v1/system/status` is not usable: it is admin-gated, and a
+buyer cannot read it. An exact-retry replay before deletion returns the response
+recorded at first dispatch, including the disclosure as it then stood; that is
+accepted, and so, until the replay store is bounded, is a replay after deletion.
+
+**Rejected: publishing the window into the registry** on the settlement option's
+published parameters. It would put a storefront-scoped value on every listing to serve
+a minority use case.
+
+**Rejected for now: publisher-level registry metadata.** That is the right scope — the
+registry's `Publisher` row already holds one storefront-scoped attribute — and where a
+filterable storefront-policy facility should eventually live, but it needs a
+publish-payload field, indexer handling, a read surface, and a capability that is not
+this one. The readiness projection is the minimal step toward it.
 
 ### Deletion preserves the obligation record
 
-This is already the requirement's wording and it is worth restating why. The
-settled obligation record is the deal's durable identity: `obligation_ref` is the
-universal deal-settlement identity, and cross-mechanism status and tooling
-correlate deals by it. Removing it to remove contact data would erase the deal
-rather than its payloads, and would break correlation for a deal that legitimately
-happened.
+The settled obligation record is the deal's durable identity: `obligation_ref` is the
+universal deal-settlement identity that cross-mechanism status and tooling correlate
+by. Removing it to remove contact data would erase the deal rather than its payloads.
+Redaction touches only `contact_introductions`; the introduction remains a settled
+deal with a terminal state that no longer carries anyone's contact details.
 
-So deletion is scoped to the payload columns, which is what the existing
-primitive already does. The introduction remains a real settled deal with a
-terminal state; what it no longer carries is anyone's contact details.
+### Obligation servicing does not depend on the payloads
 
-### Deletion is idempotent
+Nothing after the reveal re-reads the payloads to service the obligation: completion
+runs within start, and the only other readers are read and re-delivery. The window
+therefore has no functional floor; it is purely policy.
 
-The reveal path is already built on idempotency — the read is idempotent, the
-start converges on retry, and the mechanism's persistence contract is written so
-a retried operation converges rather than failing. The existing
-`delete_introduction` already returns a boolean rather than raising on a missing
-row, so this decision is about preserving a property rather than adding one. A
-sweep that failed on an already-deleted row would be the one operation in this
-surface that does not converge, and a partially-failed sweep is exactly when a
-retry happens.
+### The first introduction scenario runs on the bare-metal lane
 
-### The window is queryable from the storefront, and disclosed again at reveal
+No end-to-end scenario reaches an introduction today, so this change adds one. The
+lane configures contact exchange with a short window. The scenario reveals an
+introduction and checks both disclosures; deletes one introduction through the admin
+path and observes the deleted outcome on read, start, and re-delivery; and expires
+another by polling the retention preview until it reports the introduction, then
+stepping the sweep. Polling the preview synchronizes on an observable transition
+rather than a blind sleep. `unbacked-bare-metal-listings` can build its own
+introduction evidence on this scenario.
 
-Disclosure at reveal alone is too late to be useful for choice. The buyer's
-contact payload accompanies the start request — `IntroductionStart.contact_payload`
-is required on the route that reveals — so a party reading the retention policy in
-the reveal projection learns it immediately after the point they could have
-declined.
+### The authenticated replay store is out of scope
 
-So the effective window is readable from the storefront before a buyer negotiates,
-on the storefront's existing public readiness projection, which both composing
-storefronts already serve at `/health` and `/api/v1/system/health`. That
-projection is already a public storefront self-description rather than a bare
-liveness check — bare metal's carries the seller principal, its sites, and a
-resource count — so a policy field belongs there without inventing a surface. It
-goes in a nested object rather than as a flat field, so operator tooling parsing
-the readiness shape is unaffected and later storefront-configuration disclosures
-have one place to land.
+Every reveal response, carrying the counterparty's contact, is also recorded in
+`core_storefront`'s `auth_replay_reservations.response_body` so that an exact retry is
+answered identically, and is kept indefinitely. Redaction does not reach it: the table
+records no operation or resource, so its rows cannot be attributed to an introduction.
 
-`/api/v1/system/status` was the obvious candidate and is **not** usable: it is
-admin-gated in both domains, through `_admin(...)` on bare metal and through the
-admin-identity and service-peer middleware on VM. A buyer cannot read it.
+The rows cannot simply be pruned after a freshness horizon either. Replay identity
+deliberately excludes the timestamp and proof so that a caller can re-sign the same
+request after a restart, which is how buyer run recovery resumes, so a row remains
+consultable — and remains the evidence for refusing a changed reuse of its request id
+— for as long as a caller may recover.
 
-The reveal-time disclosure stays as well. It costs nothing, both parties read that
-projection, and it reads the same live value, so the two agree by construction.
+Attributing replay rows, recording a contact-free body for introduction operations, or
+linking reveal responses to their introductions would each solve the subset of rows
+this mechanism produces. How long recorded outcomes are kept and what they may hold is
+a question about every authenticated response in every storefront, and the replay
+stores of other authorities are about to retain outcomes as well
+(`retain-authenticated-request-outcomes`). It deserves one cohesive answer rather than
+a mechanism-specific exception, so this change does not attempt it and records it as
+unowned work.
 
-**Rejected: publishing the window into the registry.** The natural carriers were
-the settlement option's published parameters, which already project `profile`,
-`channel`, and `terms` from storefront-wide profile configuration into every
-listing's `settlement_options`. That would be in the registry, pre-negotiation,
-and filterable. Rejected because it puts a storefront-scoped value on every row a
-storefront publishes to serve a minority use case, and buyer-side filtering on
-storefront configuration is a facility that wants a storefront metadata surface
-rather than a field smeared across listings.
-
-**Rejected for now: publisher-level registry metadata.** This is the right scope —
-the registry's `Publisher` row already holds one storefront-scoped attribute,
-`storefront_url`, set from the publish payload on first sighting — and it is where
-a filterable storefront-configuration facility should eventually live, so a buyer
-could exclude listings by storefront policy at query time. It needs a
-publish-payload field, indexer handling, a read surface, and a capability that is
-not `contact-exchange-settlement`. Out of scope here; recorded so a later reader
-knows the storefront-query answer was chosen as the minimal step toward it rather
-than instead of it.
-
-**Disclosure must be accurate about what it is.** It states current storefront
-policy, not a commitment: the operator may change the window or delete a row
-directly at any time, and nothing binds them to the value a party read. It is also
-scoped to storefront retention specifically — delivery sinks hand each side a copy
-of the reveal at settlement, dispatched to whatever file, webhook, mail, or local
-program the operator configured, and deleting the storefront's copy does not reach
-those. Wording that implied either a guarantee or total coverage would be a false
-statement about where the data is and who controls it.
+The consequence is stated rather than hidden. The retention window governs the
+introduction record. The disclosure's `scope` says exactly that, so it makes no claim
+about the replay store; an exact retry of a request answered before deletion may still
+return the response recorded at the time, contact included, until the replay store is
+bounded.
 
 ### Aliasing is adjacent and out of scope
 
-A seller's exposure at their revealed address is a real concern and the natural
-mitigation is a severable alias. Two observations, neither of which makes it this
-change's work:
+A per-storefront alias needs no code — the seller's payload is configuration. A
+per-deal alias needs the payload to become a resolver, the same hook per-origin
+resolution in `compose-contact-exchange-across-compute` adds. Neither is retention.
 
-A per-storefront alias needs no code at all — the seller's contact payload is
-bound from configuration, so an operator can put an alias there today. Only a
-per-deal alias needs a change, and it needs the payload to become a resolver
-rather than a static value, which is the same hook that a storefront serving
-several sellers would need. That coupling means the two should be designed
-together, and neither is retention.
+### Planning decisions
+
+Settled while planning, from the code each touches.
+
+- **The sweep interval is mechanism configuration too.** `retention_sweep_interval_seconds`
+  joins `retention_seconds` in `ContactSettlementConfig`, seller role, a positive
+  integer defaulting to `3600`, so VM inherits it with the window.
+- **Operator deletion has one route and one client method.** `DELETE
+  /api/v1/admin/introductions/{obligation_ref}/payloads`, signed as
+  `admin_delete_introduction_payloads` over the obligation reference, answering the
+  reference, whether this call redacted, and the deletion time. The canonical
+  `StorefrontClient` gains the method in both its async and sync forms, as the parity
+  rule requires. Sweep step and preview use the lifecycle routes under the route name
+  `introduction-retention`; the step answers the deleted count and the preview the
+  eligible references.
+- **The buyer recognises the deleted outcome from a typed error.** An authenticated
+  non-success answer reaches the buyer today as an untyped `RuntimeError` carrying only
+  text. `core_buyer` gains an error type carrying the verified status and body, still a
+  `RuntimeError`, so existing callers are unaffected. The introduction transport maps
+  410 `introduction_payloads_deleted` to its own error, and the bare-metal buyer's
+  `start-introduction` and `introduction` commands print it as an outcome with
+  `revealed: false` and the deletion time.
+- **Readiness nests the object under `disclosures.introduction_retention`.** The
+  `disclosures` key is where later storefront-configuration disclosures land.
+- **The triggers state the redaction exactly.** An update is permitted only when
+  `payloads_deleted_at` goes from null to a value, both contact columns become `{}`, and
+  every other column is unchanged; a delete only when `payloads_deleted_at` is set.
+  Eligibility compares `created_at` against `now − window` rendered in the column's own
+  UTC second-precision text form, so the comparison is a string comparison SQLite can
+  index.
+- **The scenario offers introduction through a pool override.** Enabling contact
+  exchange in the lane's settlement configuration adds no option to any listing, because
+  options come from clauses. The scenario declares its own pool and sets a bare-metal
+  pool override whose clauses are a single introduction option, so the existing
+  publication and deal scenarios' listings and assertions are untouched.
 
 ## Risks / Trade-offs
 
-- **[Deletion races an in-flight read]** → The read is idempotent and
-  authenticated; a read arriving after deletion must return a clean
-  already-deleted outcome rather than a partially populated record. Cover the
-  interleaving directly.
-- **[A party is told one window and the policy changes]** → Accepted, and the
-  reason the disclosure is worded as current policy rather than a guarantee. The
-  operator owns the data and can delete it at any time, so no wording the
-  storefront could offer would bind them; claiming otherwise would mislead the
-  party rather than protect them.
-- **[Disclosure is read as covering delivered copies]** → The reason the
-  disclosure text is scoped explicitly rather than left to the reader.
-- **[The window is only discoverable per storefront, not filterable]** → A buyer
-  comparing many storefronts must query each one after finding its listings, which
-  is workable for a minority use case and poor as a general facility. Accepted for
-  this version; the publisher-metadata surface above is the eventual answer.
-- **[A sweep deletes payloads for a deal still being serviced]** → The obligation
-  lifecycle and the retention window are independent, and a long-running
-  servicing path could in principle outlive a short window. Confirm the servicing
-  path never re-reads the payloads after the reveal; if it does, the window's
-  floor is a real constraint rather than an operator preference.
+- **[A party is told one window and the policy changes]** → Accepted, and why the
+  disclosure states current policy. The operator owns the data; no wording binds them.
+- **[Disclosure is read as covering copies held elsewhere]** → Why `scope` is stated
+  explicitly and names only the introduction record.
+- **[Recorded replay responses outlive the window]** → Accepted for this change and
+  recorded as unowned work: the replay store needs one bound for every authenticated
+  response, not an exception for this mechanism.
+- **[The window is discoverable per storefront, not filterable]** → Accepted for this
+  version; publisher metadata is the eventual answer.
+- **[Tombstones accumulate]** → One small row per revealed introduction. Removal is
+  anticipated with its precondition stated above.
+- **[A trigger blocks a legitimate repair]** → An operator with database access can
+  drop and recreate a trigger; the triggers exist to stop code paths, not the
+  database owner.
 
 ## Open questions
 
-None. The sweep's invocation model, the default, and the disclosure surface are
-all decided above.
+None.
 
 ## Migration Plan
 
-1. Add the select-by-age query beside the existing deletion primitive, and confirm
-   the primitive's idempotency and the read-after-delete outcome.
-2. Add the configured window with its 30-day default, expose it on the public
-   readiness projection, and disclose it at reveal.
-3. Add the operator-invoked path and the scheduled sweep over the shared handler.
+1. Land `kit-owned-storefront-loop-lifecycle`.
+2. Replace the primitive with redaction, add the tombstone column and triggers, and
+   change every surface's post-deletion behaviour.
+3. Add the configuration field, the sweep, the admin service, and the disclosure
+   object in the kit.
+4. Compose them into bare metal and add the end-to-end scenario.
 
-Nothing here is released, so there is no historical payload set for a first sweep
-to act on and no deployment whose behaviour changes on upgrade. An operator who
-wants indefinite retention unsets the window before enabling the sweep.
+The tombstone column and triggers are additive. Nothing is released, so there is no
+historical payload set for a first sweep to act on and no deployment whose behaviour
+changes on upgrade.

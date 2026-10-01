@@ -1,7 +1,6 @@
 # Tasks — kit-owned storefront loop lifecycle
 
-Implemented; awaiting code review, then the end-to-end pipeline and promotion. No
-blocking dependency. Prerequisite of `contact-payload-retention` and
+Complete and promoted; awaiting archival. No blocking dependency. Prerequisite of `contact-payload-retention` and
 `bare-metal-mock-provisioned-deal`.
 
 Validation levels follow `docs/development/TESTING.md`. The controller and route
@@ -204,6 +203,43 @@ routes use the canonical `StorefrontClient` over `ASGITransport`.
       `test_buyer_deployment_mounts_separate_profile_state_and_credential`, asserting on
       `docker-compose.yml`, which this change does not touch.
 
+## 9. Closeout
+
+- [x] 9.1 **Comment hygiene.** Run `make check-comment-hygiene` and resolve every
+      match. Keep the rationale for flag-not-cancel, acknowledge-in-gate, the held
+      poll, and declared names at the controller, not at each consumer.
+- [x] 9.2 **Import placement.** Review imports this change added or touched; VM's
+      function-local import of the pause flag is removed rather than moved. Verify
+      against the real suites. VM's step imports moved to module level. Two bare-metal
+      step imports and one API-credit step import stay local, each a circular import
+      verified by attempting the move.
+- [x] 9.3 **Documentation compliance.** Re-check accepted decisions against
+      `openspec/README.md`'s placement table. Confirm the controller contract and the
+      loop-state semantics landed as `market-composition` requirements.
+- [x] 9.4 **Narrative compression.** Shorten completed-task notes to final behaviour
+      and material evidence.
+- [x] 9.5 **Roadmap currency.** Goal 4's timer-loop row leaves the table in
+      `docs/development/ROADMAP.md`, and its result joins Goal 4's current-state prose.
+- [x] 9.6 **Campaign index currency.** Update this change's row and Goal 4's graph in
+      `openspec/changes/README.md`, and the rows of the changes it unblocks.
+- [x] 9.7 **Documentation citations.** Run
+      `make check-doc-citations CHANGE=kit-owned-storefront-loop-lifecycle` and resolve
+      every match.
+- [x] 9.8 **Packaging.** Run `make check-packaging` and resolve every failure it
+      reports. Passed.
+- [x] 9.9 **End-to-end pipeline.** Both lanes passed on GitHub Actions run 36897640829
+      (2026-10-01): VM 128 passed and 2 skipped, the skips being the statically
+      skipped multi-storefront stages of `test_multi_registry.py`; bare metal 11
+      passed. Every VM lifecycle pause in the run reported every loop `paused` through
+      the migrated controller, and the bare-metal publication step answered through
+      the kit route service.
+- [x] 9.10 **Promotion.** Completed per the design-promotion record below: the
+      `market-composition` requirements, `ARCHITECTURE.md`'s kit layers and operator
+      lifecycle controls, `TESTING.md`'s loop table and a new trap for loops that
+      sleep their interval, and the roadmap and index currency of 9.5 and 9.6. The
+      dependent changes `contact-payload-retention` and
+      `bare-metal-mock-provisioned-deal` are recorded as unblocked.
+
 ## 10. Review follow-up
 
 - [x] 10.1 Every registered or declared loop waits through the controller. VM's
@@ -230,41 +266,9 @@ routes use the canonical `StorefrontClient` over `ASGITransport`.
       test, its old path tombstoned. Production-application coverage and a lane of
       its own belong to `apicredits-end-to-end-lane`.
 - [x] 10.6 Stale descriptions of the rejected wait-first order removed from the
-      design, tasks, the kit controller's comment, and the change index.
-
-## 9. Closeout
-
-- [x] 9.1 **Comment hygiene.** Run `make check-comment-hygiene` and resolve every
-      match. Keep the rationale for flag-not-cancel, acknowledge-in-gate, the held
-      poll, and declared names at the controller, not at each consumer.
-- [x] 9.2 **Import placement.** Review imports this change added or touched; VM's
-      function-local import of the pause flag is removed rather than moved. Verify
-      against the real suites. VM's step imports moved to module level. Two bare-metal
-      step imports and one API-credit step import stay local, each a circular import
-      verified by attempting the move.
-- [x] 9.3 **Documentation compliance.** Re-check accepted decisions against
-      `openspec/README.md`'s placement table. Confirm the controller contract and the
-      loop-state semantics landed as `market-composition` requirements.
-- [x] 9.4 **Narrative compression.** Shorten completed-task notes to final behaviour
-      and material evidence.
-- [ ] 9.5 **Roadmap currency.** Goal 4's timer-loop row leaves the table in
-      `docs/development/ROADMAP.md`, and its result joins Goal 4's current-state prose.
-- [ ] 9.6 **Campaign index currency.** Update this change's row and Goal 4's graph in
-      `openspec/changes/README.md`, and the rows of the changes it unblocks.
-- [x] 9.7 **Documentation citations.** Run
-      `make check-doc-citations CHANGE=kit-owned-storefront-loop-lifecycle` and resolve
-      every match.
-- [x] 9.8 **Packaging.** Run `make check-packaging` and resolve every failure it
-      reports. Passed.
-- [ ] 9.9 **End-to-end pipeline.** Not yet run: it runs in GitHub Actions from a pushed
-      branch, after review. Confirm both lanes pass and record the run: the VM
-      lane's lifecycle-paused scenarios exercise the migrated VM binding, and the
-      bare-metal lane's publication scenario exercises the bare-metal publication step
-      through the kit route service. If the pipeline cannot run for a reason unrelated
-      to this change, record the blocker and treat its validations as unrun.
-- [ ] 9.10 **Promotion.** Complete the design-promotion record below, after code
-      review: the `market-composition` delta, `ARCHITECTURE.md`, `TESTING.md`'s loop
-      table, and the roadmap and index currency of 9.5 and 9.6.
+      design, tasks, proposal, the kit controller's comment, and the change index; the
+      API-credit component test's docstring states current coverage rather than
+      planned work.
 
 ## Design promotion record
 
@@ -276,4 +280,6 @@ routes use the canonical `StorefrontClient` over `ASGITransport`.
 | The loop pause is process-local | `openspec/specs/market-composition/spec.md` |
 | `kit/storefront` owns the loop controller beside the shell seams | `docs/development/ARCHITECTURE.md#kit-layers`, `docs/development/ARCHITECTURE.md#operator-lifecycle-controls` |
 | Every storefront's loops are held and stepped through the kit controller | `docs/development/TESTING.md` loop table |
-| Goal 4's timer-loop gap closes | `docs/development/ROADMAP.md` Goal 4 |
+| The loop table covers every storefront; a loop that sleeps its interval is held late | `docs/development/TESTING.md` |
+| Goal 4's timer-loop gap closed; the API-credit lane gap recorded | `docs/development/ROADMAP.md` Goal 4 |
+| This change complete; its dependants unblocked; `apicredits-end-to-end-lane` added | `openspec/changes/README.md` Goals 4, 6, and 7 |

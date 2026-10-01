@@ -1,7 +1,9 @@
 # Tasks — bare-metal mock-provisioned deal
 
-Design decided; not yet planned. Unblocked: `bare-metal-publication-reads-pool-declarations`,
+Design decided; not yet planned. `bare-metal-publication-reads-pool-declarations`,
 which built the bare-metal end-to-end lane this change's scenario runs on, is complete.
+`kit-owned-storefront-loop-lifecycle`, which built the bare-metal lifecycle pause and
+steps decision 1.4 calls for, is complete.
 
 ## 1. Design
 
@@ -14,7 +16,7 @@ which built the bare-metal end-to-end lane this change's scenario runs on, is co
       parked or is removed, and record the consequence for the permanent protected-lane
       requirement.
 - [x] 1.4 **Decision gate.** Decide which loops the lifecycle pause holds and which get a
-      step, and record it.
+      step, and record it. Implemented by `kit-owned-storefront-loop-lifecycle`.
 - [ ] 1.5 Plan the implementation, naming the files each decision touches, the focused
       and integration suites, and the permanent documentation destinations. Include
       Section 3's migrated requirements in the plan.
@@ -49,7 +51,8 @@ it, and each has a delta in `specs/buyer-orchestration/spec.md` or
       restart the storefront after settlement commit and again after teardown
       acceptance; on resume the buyer retrieves the same operation with no second
       obligation, mechanism selection, or teardown. Duplicate polling and duplicate
-      result reads are idempotent.
+      result reads are idempotent. The loop pause is process-local, so the scenario
+      holds the loops again after each restart.
 - [ ] 3.6 **Pause survives restart.** An authenticated pause remains active across a
       storefront restart and new negotiations are refused until an authenticated
       resume.

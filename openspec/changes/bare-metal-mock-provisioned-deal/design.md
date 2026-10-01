@@ -64,6 +64,11 @@ publication step. A step runs exactly the cycle the timer runs, whether or not t
 loops are held, so a scenario advances production behaviour rather than a test path;
 the pause holds every loop at once, as VM's does.
 
+The controls are built by `kit-owned-storefront-loop-lifecycle`, which extracts VM's
+loop lifecycle into one kit controller and composes it into every storefront, bare
+metal included. A bare-metal-local copy would have been the shell extraction's to
+remove. This change consumes the controls and keeps the scenario that relies on them.
+
 ### The scenario uses typed clients only
 
 Discovery goes through the registry client, and the seller side through
@@ -127,7 +132,8 @@ replacement lands.
 
 ### Pause holds every loop; every transition is stepped
 
-Decided with the maintainer, following VM's convention. The lifecycle pause holds every
+Decided with the maintainer, following VM's convention, and implemented by
+`kit-owned-storefront-loop-lifecycle`. The lifecycle pause holds every
 loop the bare-metal storefront runs — the negotiation watchdog and the settlement-
 servicing worker — and each loop has its own step, alongside the publication step. The
 scenario pauses once at the start, as VM's session fixture does, and deliberately

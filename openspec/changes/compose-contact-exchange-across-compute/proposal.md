@@ -88,7 +88,9 @@ None.
 - Affected code: the bare-metal storefront's introduction composition, a new
   module and one boundary-test line in `kit/contact-exchange`, and the VM
   storefront's settlement composition, introduction persistence, migration tuple,
-  and delivery wiring.
+  delivery wiring, and retention wiring — the sweep loop, the admin deletion routes,
+  and the readiness disclosure `contact-payload-retention` requires of every
+  composing storefront.
 - Affected specification: `openspec/specs/contact-exchange-settlement/spec.md`,
   `openspec/specs/introduction-delivery/spec.md`.
 - Not affected: the mechanism kit's registration, option builder, settlement
@@ -112,7 +114,8 @@ None.
 - **Depends on `contact-payload-retention`.** Composing the mechanism more widely
   multiplies the number of deployments holding contact payloads, and the
   retention obligation is currently satisfied only in principle. The dependency is
-  a gate, not a coordination note.
+  a gate, not a coordination note. That change implements retention in the kit and
+  composes it into bare metal; this change composes it into VM with the mechanism.
 - No longer coupled to `bare-metal-and-credits-domain-stacks` or
   `kit-storefront-composition-seam` for placement. Those own where kit-owned
   *storefront* runtime sits; the promoted glue is mechanism-shaped and lands in the

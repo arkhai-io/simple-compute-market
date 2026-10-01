@@ -163,6 +163,12 @@ its own negotiate and listing routes beside the negotiation kit. `kit/policy`,
 `kit/identity`, `kit/fulfillment`, `kit/config`, and `kit/alkahest` likewise
 carry no domain vocabulary.
 
+The storefront kit also owns the timer-loop lifecycle. Each VM, bare-metal, and
+API-credit storefront holds its loops with one kit loop controller, under one
+pause and a step per loop served on the same routes, so a scenario can hold and
+advance any storefront through the canonical client; the capacity kit owns the
+per-site poller aggregate both capacity-publishing storefronts compose.
+
 Beneath the extracted runtimes each storefront still duplicates its shell — a
 route set over the same core models, executable assembly, health, and timer
 loops — its seller listing lifecycle and restart-safe fulfillment convergence,
@@ -188,7 +194,6 @@ The domain layer's own structure is better than the duplication suggests. All th
 | Open gap | Owned by |
 |---|---|
 | The bare-metal storefront negotiates through a domain-local service and routes rather than the negotiation kit every other domain composes | [`bare-metal-and-credits-domain-stacks`](../../openspec/changes/bare-metal-and-credits-domain-stacks/) |
-| Only VM's timer loops can be held and stepped, through a domain-local copy; bare metal and API credits run loops nothing can hold | [`kit-owned-storefront-loop-lifecycle`](../../openspec/changes/kit-owned-storefront-loop-lifecycle/) |
 | API credits has no end-to-end lane of its own — its scenario rides the VM lane — and its storefront has no test that runs the production application | [`apicredits-end-to-end-lane`](../../openspec/changes/apicredits-end-to-end-lane/) |
 | Every storefront carries its own route set, executable assembly, and health service | [`kit-owned-storefront-shell`](../../openspec/changes/kit-owned-storefront-shell/) |
 | Every storefront reimplements the seller listing lifecycle and restart-safe fulfillment convergence; VM keeps its own per-site projection cache | [`kit-owned-listing-and-fulfillment-lifecycles`](../../openspec/changes/kit-owned-listing-and-fulfillment-lifecycles/) |

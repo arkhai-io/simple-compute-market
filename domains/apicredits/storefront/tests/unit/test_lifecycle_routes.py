@@ -6,8 +6,8 @@ authentication over a real SQLite replay store, on an application it assembles
 itself, and starts the loops itself rather than through the storefront's
 lifespan. The watchdog and settlement-servicing loops are the production
 runners; the capacity fan-out is a stand-in that gates and waits like the kit's.
-A production-application test needs the credits service and a capacity
-authority, which the API-credit end-to-end change provides.
+Production-application coverage requires the credits service and a capacity
+authority, and is not provided by this component test.
 
 Every interleaving is coordinated with events; nothing here waits on time.
 """

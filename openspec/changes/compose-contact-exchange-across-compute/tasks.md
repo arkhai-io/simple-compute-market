@@ -53,14 +53,35 @@ before it has.
       `unbacked-listing-publication` added; that declaration is what lets an unbacked VM
       listing carry the option.
 - [ ] 3.2 Add VM's introduction persistence as thin wrappers over the kit's
-      `insert_introduction` and `load_introduction`, matching the shape the promoted
-      contract expects. VM's SQLite client already exposes
+      `insert_introduction`, `load_introduction`, and the retention persistence
+      `contact-payload-retention` adds (`delete_introduction_payloads` and the
+      select-expired query), matching the shape the promoted contract expects. VM's SQLite client already exposes
       `load_negotiation_thread_row` with the signature the promoted glue calls.
 - [ ] 3.2a Add the contact-exchange migrations to VM's migration tuple at the same
       seam that already composes `*settlement_migrations()`.
 - [ ] 3.3 Confirm composition is independent of whether a listing is
       capacity-backed, in both directions: a backed listing may settle by
       introduction, and an unbacked listing is not required to.
+
+## 3a. Retention
+
+`contact-payload-retention` implements retention in the mechanism kit and composes it
+into bare metal only, and requires every storefront composing the mechanism to run it.
+VM inherits the kit parts; this section is VM's wiring of them. The configuration
+needs no VM work: `retention_seconds` arrives through the same `[Settlement.contact]`
+root as the seller's contact payload.
+
+- [ ] 3a.1 Register the kit retention sweep loop with VM's loop controller, with its
+      step and preview, on a configurable interval.
+- [ ] 3a.2 Bind the kit retention admin service into VM's administrator routes behind
+      VM's administrator authentication.
+- [ ] 3a.3 Embed the kit disclosure object in VM's readiness response at `/health` and
+      `/api/v1/system/health`, nested and present only when the mechanism is enabled,
+      exactly as bare metal does.
+- [ ] 3a.4 **Integration.** Through VM's canonical typed client: the readiness
+      disclosure matches the reveal's; admin deletion leaves the obligation resolvable;
+      read, start, and re-delivery answer the deleted outcome; the sweep step and
+      preview work while the loops are held.
 
 ## 3b. Per-origin contact resolution
 
@@ -105,8 +126,8 @@ before it has.
 ## 6. Validation
 
 - [ ] 6.1 Mechanism-kit boundary and unit suites.
-- [ ] 6.2 Per-domain introduction reveal coverage, including retry convergence and
-      the mismatch refusal.
+- [ ] 6.2 Per-domain introduction reveal coverage, including retry convergence, the
+      mismatch refusal, and the post-deletion outcomes.
 - [ ] 6.3 An end-to-end deal settling by introduction in a newly composing domain,
       including delivery.
 - [ ] 6.4 **System.** Backed and unbacked VM listings from one storefront are returned
