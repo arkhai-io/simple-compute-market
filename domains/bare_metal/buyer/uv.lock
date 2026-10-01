@@ -211,6 +211,7 @@ dependencies = [
     { name = "arkhai-core-buyer" },
     { name = "arkhai-core-registry-client" },
     { name = "arkhai-kit-alkahest" },
+    { name = "arkhai-kit-arkhai-payments" },
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-contact-exchange" },
     { name = "arkhai-kit-delivery" },
@@ -233,6 +234,7 @@ requires-dist = [
     { name = "arkhai-core-buyer", specifier = "==0.3.2" },
     { name = "arkhai-core-registry-client", specifier = "==0.11.0" },
     { name = "arkhai-kit-alkahest" },
+    { name = "arkhai-kit-arkhai-payments", specifier = "==0.1.0" },
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-contact-exchange", specifier = "==0.1.2" },
     { name = "arkhai-kit-delivery", specifier = "==0.1.0" },
@@ -260,7 +262,7 @@ wheels = [
 [[package]]
 name = "arkhai-core-buyer"
 version = "0.3.2"
-source = { registry = "../../../.dist" }
+source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
 dependencies = [
     { name = "arkhai-core" },
     { name = "arkhai-core-registry-client" },
@@ -272,8 +274,9 @@ dependencies = [
     { name = "rich" },
     { name = "typer" },
 ]
+sdist = { url = "https://mirrors.aliyun.com/pypi/packages/6e/8c/41972cea336370ae0b451826832fed61eb361c2f5a7ffee3ac108bd8f575/arkhai_core_buyer-0.3.2.tar.gz", hash = "sha256:6591458b9149eef7d81ece311f215d27da7ec3fdec73acf2bb8dcf93e07d640b" }
 wheels = [
-    { path = "arkhai_core_buyer-0.3.2-py3-none-any.whl" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/b8/7e/b4b650dc962e804318feb16d73316903be2fc745119b8532f6cac4d04d72/arkhai_core_buyer-0.3.2-py3-none-any.whl", hash = "sha256:234eb14e83769e709632e5bd643e3dec113892429fb11efec9dc5db113bf6291" },
 ]
 
 [[package]]
@@ -292,15 +295,32 @@ wheels = [
 [[package]]
 name = "arkhai-kit-alkahest"
 version = "0.2.1"
-source = { registry = "../../../.dist" }
+source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
 dependencies = [
     { name = "alkahest-py" },
     { name = "arkhai-kit-settlement-runtime" },
     { name = "pydantic" },
     { name = "web3" },
 ]
+sdist = { url = "https://mirrors.aliyun.com/pypi/packages/46/28/6c9c3722e302b93ea0cb350ac93f3d3cdcb361a6b32f3c5f993b62b3b918/arkhai_kit_alkahest-0.2.1.tar.gz", hash = "sha256:2e1ea20c40334b6279e6e7c7d7e0b92e0267e7292306353924ec5ced15a7da03" }
 wheels = [
-    { path = "arkhai_kit_alkahest-0.2.1-py3-none-any.whl" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/46/9b/0d6550d5aadd1e7676e56246dd2137d945fe1993d82d5cb487eed696ab9f/arkhai_kit_alkahest-0.2.1-py3-none-any.whl", hash = "sha256:45021f504277331b6105b09e42963911665592d518327d0d9e2714b62bf06e6e" },
+]
+
+[[package]]
+name = "arkhai-kit-arkhai-payments"
+version = "0.1.0"
+source = { registry = "../../../.dist" }
+dependencies = [
+    { name = "arkhai-core" },
+    { name = "arkhai-kit-identity" },
+    { name = "arkhai-kit-settlement-runtime" },
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "rfc8785" },
+]
+wheels = [
+    { path = "arkhai_kit_arkhai_payments-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]

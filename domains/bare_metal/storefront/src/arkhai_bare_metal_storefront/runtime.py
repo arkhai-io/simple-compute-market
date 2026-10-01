@@ -115,8 +115,8 @@ class BareMetalStorefrontRuntime:
                 if self.settlement_composition is not None
                 else {}
             ),
-            settlement_mandate_dispatch=(
-                self.settlement_composition.settlement_mandate_dispatch()
+            settlement_data_dispatch=(
+                self.settlement_composition.settlement_data_dispatch()
                 if self.settlement_composition is not None
                 else {}
             ),
@@ -312,12 +312,6 @@ def build_runtime_from_environment(
                     resources={
                         "marketplace_signer": signer,
                         "claimant_principal": identity_config.principal,
-                        "arkhai_payments_api_key": os.environ.get(
-                            "ARKHAI_PAYMENTS_API_KEY"
-                        ),
-                        "arkhai_payments_development_account": os.environ.get(
-                            "ARKHAI_PAYMENTS_DEVELOPMENT_ACCOUNT"
-                        ),
                     },
                 )
             )
@@ -353,12 +347,6 @@ def build_runtime_from_environment(
                     "wallet_ready": bool(seller_evm_address),
                     "clients": chain_clients,
                     "chains": raw_chains,
-                    "arkhai_payments_api_key": os.environ.get(
-                        "ARKHAI_PAYMENTS_API_KEY"
-                    ),
-                    "arkhai_payments_development_account": os.environ.get(
-                        "ARKHAI_PAYMENTS_DEVELOPMENT_ACCOUNT"
-                    ),
                 },
             )
         )

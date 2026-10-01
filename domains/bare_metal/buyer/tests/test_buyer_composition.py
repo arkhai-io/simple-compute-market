@@ -149,7 +149,7 @@ def test_introduction_commands_are_registered() -> None:
     from arkhai_bare_metal_buyer.cli import bare_metal_app
 
     names = {command.name for command in bare_metal_app.registered_commands}
-    assert {"request-introduction", "introduce", "introduction"} <= names
+    assert {"request-introduction", "buy", "introduce", "introduction"} <= names
 
 
 def test_the_reveal_is_printed_before_it_is_delivered(capsys, tmp_path) -> None:

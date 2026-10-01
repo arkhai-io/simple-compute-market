@@ -12,6 +12,8 @@ from core_buyer import (
     resolve_fresh_buyer_identity,
     resolve_recovery_buyer_identity,
 )
+from market_arkhai_payments import ArkhaiPaymentsConfig
+from market_arkhai_payments.models import AccountId
 from market_identity import Identity, TrustedIdentitySet
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from registry_client import SyncRegistryClient
@@ -30,6 +32,15 @@ class BareMetalBuyerConfig(BaseModel):
     default_duration_seconds: int = Field(default=3600, gt=0)
     default_max_rounds: int = Field(default=10, ge=1, le=100)
     timeout_seconds: float = Field(default=30.0, gt=0.0, le=600.0)
+    payer_account: str | None = None
+    arkhai_payments: ArkhaiPaymentsConfig | None = None
+
+    @field_validator("payer_account")
+    @classmethod
+    def validate_payer_account(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return AccountId.model_validate(value).root
 
     @field_validator("registry_url")
     @classmethod

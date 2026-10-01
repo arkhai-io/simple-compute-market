@@ -15,7 +15,7 @@ BARE_METAL_MIGRATION_IDS = (
     "bare-metal-storefront-0005-fulfillment-lifecycle",
     "bare-metal-storefront-0006-common-domain-bindings",
     "bare-metal-storefront-0007-selected-site-immutability",
-    "bare-metal-storefront-0008-hosted-physical-lifecycle",
+    "bare-metal-storefront-0008-settlement-records",
 )
 MIGRATION_IDS = (*SETTLEMENT_MIGRATION_IDS, *BARE_METAL_MIGRATION_IDS)
 

@@ -64,7 +64,7 @@ class BareMetalFulfillRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     negotiation_id: str = Field(min_length=1)
-    escrow_uid: str = Field(min_length=1)
+    escrow_uid: str | None = Field(default=None, min_length=1)
     buyer_principal: Identity
 
 
@@ -104,7 +104,14 @@ class BareMetalSettleRequest(BaseModel):
     negotiation_id: str
     buyer_principal: Identity
     buyer_evm_address: str | None = None
-    transaction_id: str | None = None
+
+
+class BareMetalSettlePendingResponse(BaseModel):
+    negotiation_id: str
+    escrow_uid: str
+    buyer_principal: Identity
+    seller_principal: Identity
+    status: Literal["settlement_pending"] = "settlement_pending"
 
 
 class BareMetalSettleResponse(BaseModel):

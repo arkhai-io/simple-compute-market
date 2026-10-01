@@ -188,7 +188,7 @@ class BareMetalNegotiationService:
     accepted_obligation_dispatch: AcceptedObligationDispatch = field(
         default_factory=dict
     )
-    settlement_mandate_dispatch: Mapping[str, AcceptedAgreementBuilder] = field(
+    settlement_data_dispatch: Mapping[str, AcceptedAgreementBuilder] = field(
         default_factory=dict
     )
 
@@ -306,9 +306,9 @@ class BareMetalNegotiationService:
                 provision_terms=request.provision_terms,
                 settlement_plan=artifacts.get("settlement_plan"),
             )
-            agreement_bytes = agreement.model_dump_json(
-                exclude_none=True
-            ).encode("utf-8")
+            agreement_bytes = agreement.model_dump_json(exclude_none=True).encode(
+                "utf-8"
+            )
 
         await self.db.persist_bare_metal_opening(
             negotiation_id=negotiation_id,
@@ -479,9 +479,7 @@ class BareMetalNegotiationService:
             "settlement_selection": selection.model_dump(
                 mode="json", exclude_none=True
             ),
-            "fields": (
-                {"amount": str(agreed_amount)} if agreed_amount else {}
-            ),
+            "fields": ({"amount": str(agreed_amount)} if agreed_amount else {}),
         }
         negotiation_id = f"neg_{uuid.uuid4().hex}"
         accepted_at = datetime.now(timezone.utc)
@@ -497,17 +495,17 @@ class BareMetalNegotiationService:
             start_utc=accepted_at,
             accepted_at=accepted_at,
             provision_terms=request.provision_terms,
-            settlement_plan=(plan.model_dump(mode="json") if plan is not None else None),
+            settlement_plan=(
+                plan.model_dump(mode="json") if plan is not None else None
+            ),
             settlement_params=selection.params,
         )
-        agreement_bytes = agreement.model_dump_json(
-            exclude_none=True
-        ).encode("utf-8")
+        agreement_bytes = agreement.model_dump_json(exclude_none=True).encode("utf-8")
 
-        settlement_mandate = None
-        mandate_builder = self.settlement_mandate_dispatch.get(selection.mechanism)
-        if mandate_builder is not None:
-            settlement_mandate = dict(mandate_builder(json.loads(agreement_bytes)))
+        settlement_data = None
+        data_builder = self.settlement_data_dispatch.get(selection.mechanism)
+        if data_builder is not None:
+            settlement_data = dict(data_builder(json.loads(agreement_bytes)))
         await self.db.persist_bare_metal_opening(
             negotiation_id=negotiation_id,
             listing_id=request.listing_id,
@@ -524,6 +522,10 @@ class BareMetalNegotiationService:
             terms=terms,
             agreed_amount=agreed_amount,
             agreement_bytes=agreement_bytes,
+            settlement_data=settlement_data,
+            settlement_mechanism=(
+                selection.mechanism if settlement_data is not None else None
+            ),
             accepted_at=accepted_at.isoformat().replace("+00:00", "Z"),
         )
         if plan is not None:
@@ -544,7 +546,7 @@ class BareMetalNegotiationService:
             settlement_plan=plan,
             agreement=agreement,
             agreement_bytes=base64.b64encode(agreement_bytes).decode("ascii"),
-            settlement_mandate=settlement_mandate,
+            settlement_data=settlement_data,
         )
 
     @staticmethod
@@ -574,8 +576,10 @@ class BareMetalNegotiationService:
         asset = settlement.asset if settlement is not None else None
         if asset is None and settlement_plan is not None:
             obligations = settlement_plan.get("obligations")
-            if isinstance(obligations, list) and obligations and isinstance(
-                obligations[0], Mapping
+            if (
+                isinstance(obligations, list)
+                and obligations
+                and isinstance(obligations[0], Mapping)
             ):
                 raw_asset = obligations[0].get("asset")
                 asset = raw_asset if isinstance(raw_asset, str) else None
@@ -594,9 +598,7 @@ class BareMetalNegotiationService:
             seller=seller_principal.model_dump(mode="json"),
             settlement=settlement,
             settlement_params=(
-                dict(settlement_params)
-                if settlement_params is not None
-                else None
+                dict(settlement_params) if settlement_params is not None else None
             ),
             amount=int(amount),
             asset=asset,

@@ -38,6 +38,7 @@ from .models import (
     BareMetalHealthResponse,
     BareMetalSettleRequest,
     BareMetalSettleResponse,
+    BareMetalSettlePendingResponse,
     BareMetalSettleStatusResponse,
 )
 from .negotiation_service import NegotiationRequestError
@@ -338,7 +339,9 @@ async def list_negotiations(
         )
     try:
         buyer_principal = (
-            Identity.model_validate({"scheme": buyer_scheme, "identifier": buyer_identifier})
+            Identity.model_validate(
+                {"scheme": buyer_scheme, "identifier": buyer_identifier}
+            )
             if buyer_scheme is not None and buyer_identifier is not None
             else None
         )
@@ -382,13 +385,13 @@ async def get_negotiation(
 
 @router.post(
     "/api/v1/settle/{escrow_uid}",
-    response_model=BareMetalSettleResponse,
+    response_model=BareMetalSettleResponse | BareMetalSettlePendingResponse,
 )
 async def settle(
     escrow_uid: str,
     body: BareMetalSettleRequest,
     request: Request,
-) -> BareMetalSettleResponse:
+) -> BareMetalSettleResponse | BareMetalSettlePendingResponse:
     runtime = _runtime(request)
     try:
         identity = await _buyer(
@@ -419,10 +422,16 @@ async def settle_status(
     runtime = _runtime(request)
     try:
         escrow = await runtime.db.load_escrow(escrow_uid=escrow_uid)
-        if escrow is None:
-            raise SettlementRequestError("escrow not found", status_code=404)
+        record = await runtime.db.load_bare_metal_settlement_record_by_ref(
+            settlement_ref=escrow_uid
+        )
+        if escrow is None and record is None:
+            raise SettlementRequestError("settlement not found", status_code=404)
+        negotiation_id = str(
+            escrow["negotiation_id"] if escrow is not None else record["negotiation_id"]
+        )
         thread = await runtime.db.load_negotiation_thread_row(
-            negotiation_id=str(escrow["negotiation_id"]),
+            negotiation_id=negotiation_id
         )
         if thread is None:
             raise SettlementRequestError("negotiation not found", status_code=404)
@@ -481,7 +490,7 @@ async def begin_fulfillment(
             operation="bare_metal_fulfillment_begin",
             resource=body.negotiation_id,
             expected_principal=body.buyer_principal,
-            body=body.model_dump(mode="json"),
+            body=body.model_dump(mode="json", exclude_none=True),
         )
         lifecycle = await runtime.fulfillment_service().begin(
             negotiation_id=body.negotiation_id,

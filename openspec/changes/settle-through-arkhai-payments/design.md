@@ -42,6 +42,8 @@ The payments service never parses the agreement, so the two can evolve independe
 
 The transaction id is `sha256(JCS(mandate))`, so both sides know it before approval. The buyer's kit checks the mandate against the agreement and its own policy (payee, amount, hold, `deal`) and approves it, attaching the agreement. Both sides poll `GET /transactions/{id}`; the seller provisions once the receipt matches. A push hook from the payments service is expected to replace polling (see Resolved Questions).
 
+For bare-metal, the buyer calls seller settlement with only the negotiation ID. The seller derives the deterministic transaction ID from the accepted mandate and polls the payments service. Acceptance stores the mandate with a digest of the exact Agreement bytes; receipt verification atomically records the transaction ID and signed receipt as `settlement_verified`. This is a domain-owned evidence record, not an escrow row or `SettlementPlan`. Fulfillment resolves the same record by negotiation ID and still uses the accepted selected-site binding before any provisioning effect.
+
 ### Depositing the agreement
 
 Approval may carry the agreement as an attachment, which the service checks against `deal` and keeps for disputes. If the seller's kit is set to deposit and the snapshot shows no agreement, it attaches it itself. The listing option declares the setting, so buyers can see it and filter on it: it gives the deal Arkhai's dispute fast path, which sellers without a reputation can advertise. Any party could deposit on its own, so a buyer's protection is this transparency, not a veto.
@@ -71,3 +73,10 @@ Built on `fiat.stripe.v1` and `kit/hosted-settlement`: `consume-expanded-stripe-
 - `kit/settlement-runtime` stays where it is for now: Alkahest, contact exchange, core and the domains all use it. Arkhai payments keeps no client-side servicing state and bypasses it, producing no settlement plan or obligation; moving escrow semantics out of core is a follow-up change.
 - Both kits poll the payments service by transaction ID; the storefront relays nothing. A push hook from the payments service is tracked as an idea in arkhai-payments (`transaction-webhooks`) and is expected to replace polling.
 - The SDK's default window is `P7D`. The payments service enforces no minimum; chargeback exposure is covered by its cash reserve.
+
+## Design promotion record
+
+| Accepted decision | Permanent location |
+|---|---|
+| Bare-metal stores the seller-derived mandate and matching signed receipt in a negotiation-scoped evidence record; the transaction ID is not an escrow obligation. | `openspec/specs/settlement-servicing/spec.md`, `openspec/specs/physical-provisioning/spec.md` |
+| Bare-metal invokes selected-site fulfillment only after that receipt record is verified. | `openspec/specs/physical-provisioning/spec.md`, `docs/development/ARCHITECTURE.md#fulfillment` |

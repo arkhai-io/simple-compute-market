@@ -310,6 +310,26 @@ def _migrate_common_domain_bindings(conn: sqlite3.Connection) -> None:
     conn.execute("DROP TABLE bare_metal_agreement_payloads")
 
 
+def _add_bare_metal_settlement_records(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE bare_metal_settlement_records (
+          negotiation_id TEXT PRIMARY KEY,
+          mechanism TEXT NOT NULL,
+          agreement_sha256 TEXT NOT NULL,
+          settlement_data_json TEXT NOT NULL,
+          settlement_ref TEXT UNIQUE,
+          status TEXT NOT NULL CHECK (status IN ('accepted', 'settlement_verified')),
+          receipt_json TEXT,
+          created_at TEXT NOT NULL
+            DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
+          updated_at TEXT NOT NULL
+            DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        )
+        """
+    )
+
+
 BARE_METAL_STOREFRONT_MIGRATIONS = (
     Migration(
         id="bare-metal-storefront-0001-agreement-payloads",
@@ -338,5 +358,9 @@ BARE_METAL_STOREFRONT_MIGRATIONS = (
     Migration(
         id="bare-metal-storefront-0007-selected-site-immutability",
         apply=_add_selected_site_immutability,
+    ),
+    Migration(
+        id="bare-metal-storefront-0008-settlement-records",
+        apply=_add_bare_metal_settlement_records,
     ),
 )

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import sqlite3
 from collections.abc import Callable, Mapping
@@ -187,8 +188,28 @@ class SQLiteClient(CoreSQLiteClient):
         agreed_amount: int | None,
         agreement_bytes: bytes | None = None,
         accepted_at: str | None = None,
+        settlement_data: Mapping[str, Any] | None = None,
+        settlement_mechanism: str | None = None,
     ) -> None:
         """Persist one opening under the listing's immutable domain/site binding."""
+        if (settlement_data is None) != (settlement_mechanism is None):
+            raise ValueError("settlement data and mechanism must be supplied together")
+        if settlement_data is not None and seller_action != "accept":
+            raise ValueError("settlement data is only valid for accepted agreements")
+        settlement_data_json = None
+        agreement_sha256 = None
+        if settlement_data is not None:
+            if agreement_bytes is None:
+                raise ValueError("settlement data requires retained Agreement bytes")
+            settlement_data_json = json.dumps(
+                dict(settlement_data),
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+                allow_nan=False,
+            )
+            agreement_sha256 = hashlib.sha256(agreement_bytes).hexdigest()
+
         listing_binding = await self.load_listing_binding(listing_id=listing_id)
         if listing_binding is None:
             raise RuntimeError(
@@ -286,6 +307,33 @@ class SQLiteClient(CoreSQLiteClient):
                         negotiation_id,
                     ),
                 )
+                if settlement_data_json is not None:
+                    assert settlement_mechanism is not None
+                    assert agreement_sha256 is not None
+                    conn.execute(
+                        "INSERT OR IGNORE INTO bare_metal_settlement_records("
+                        "negotiation_id, mechanism, agreement_sha256, "
+                        "settlement_data_json, status) VALUES (?, ?, ?, ?, 'accepted')",
+                        (
+                            negotiation_id,
+                            settlement_mechanism,
+                            agreement_sha256,
+                            settlement_data_json,
+                        ),
+                    )
+                    stored = conn.execute(
+                        "SELECT mechanism, agreement_sha256, settlement_data_json "
+                        "FROM bare_metal_settlement_records WHERE negotiation_id = ?",
+                        (negotiation_id,),
+                    ).fetchone()
+                    if stored != (
+                        settlement_mechanism,
+                        agreement_sha256,
+                        settlement_data_json,
+                    ):
+                        raise RuntimeError(
+                            "accepted settlement data conflicts with stored state"
+                        )
                 conn.execute(
                     """
                     INSERT OR IGNORE INTO negotiation_messages(
@@ -760,6 +808,128 @@ class SQLiteClient(CoreSQLiteClient):
                 ).fetchone()
                 assert row is not None
                 return dict(row)
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_save)
+
+    @staticmethod
+    def _decode_bare_metal_settlement_record(row: sqlite3.Row) -> dict[str, Any]:
+        record = dict(row)
+        record["settlement_data"] = json.loads(record.pop("settlement_data_json"))
+        receipt_json = record.pop("receipt_json")
+        record["receipt"] = (
+            json.loads(receipt_json) if receipt_json is not None else None
+        )
+        return record
+
+    async def load_bare_metal_settlement_record(
+        self, *, negotiation_id: str
+    ) -> dict[str, Any] | None:
+        def _load() -> dict[str, Any] | None:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                row = conn.execute(
+                    "SELECT * FROM bare_metal_settlement_records WHERE negotiation_id = ?",
+                    (negotiation_id,),
+                ).fetchone()
+                return (
+                    self._decode_bare_metal_settlement_record(row)
+                    if row is not None
+                    else None
+                )
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
+
+    async def load_bare_metal_settlement_record_by_ref(
+        self, *, settlement_ref: str
+    ) -> dict[str, Any] | None:
+        def _load() -> dict[str, Any] | None:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                row = conn.execute(
+                    "SELECT * FROM bare_metal_settlement_records WHERE settlement_ref = ?",
+                    (settlement_ref,),
+                ).fetchone()
+                return (
+                    self._decode_bare_metal_settlement_record(row)
+                    if row is not None
+                    else None
+                )
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
+
+    async def mark_bare_metal_settlement_verified(
+        self,
+        *,
+        negotiation_id: str,
+        settlement_ref: str,
+        mechanism: str,
+        agreement_sha256: str,
+        settlement_data: Mapping[str, Any],
+        receipt: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        data_json = json.dumps(
+            dict(settlement_data),
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+            allow_nan=False,
+        )
+        receipt_json = json.dumps(
+            dict(receipt),
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+            allow_nan=False,
+        )
+
+        def _save() -> dict[str, Any]:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                with conn:
+                    conn.execute(
+                        "UPDATE bare_metal_settlement_records SET settlement_ref = ?, "
+                        "status = 'settlement_verified', receipt_json = ?, "
+                        "updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now') "
+                        "WHERE negotiation_id = ? AND mechanism = ? "
+                        "AND agreement_sha256 = ? AND settlement_data_json = ? "
+                        "AND status IN ('accepted', 'settlement_verified')",
+                        (
+                            settlement_ref,
+                            receipt_json,
+                            negotiation_id,
+                            mechanism,
+                            agreement_sha256,
+                            data_json,
+                        ),
+                    )
+                row = conn.execute(
+                    "SELECT * FROM bare_metal_settlement_records WHERE negotiation_id = ?",
+                    (negotiation_id,),
+                ).fetchone()
+                if row is None:
+                    raise RuntimeError("accepted settlement record is missing")
+                record = self._decode_bare_metal_settlement_record(row)
+                if (
+                    record["mechanism"] != mechanism
+                    or record["agreement_sha256"] != agreement_sha256
+                    or record["settlement_data"] != dict(settlement_data)
+                    or record["settlement_ref"] != settlement_ref
+                    or record["status"] != "settlement_verified"
+                    or record["receipt"] != dict(receipt)
+                ):
+                    raise RuntimeError(
+                        "settlement evidence conflicts with accepted state"
+                    )
+                return record
             finally:
                 conn.close()
 

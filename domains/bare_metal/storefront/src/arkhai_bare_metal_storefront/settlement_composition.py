@@ -18,13 +18,14 @@ from market_settlement_runtime import (
     SettlementPublicationClause,
 )
 
-from .arkhai_payments import (
+from market_arkhai_payments import (
     ARKHAI_PAYMENTS_CONFIG_KEY,
     ARKHAI_PAYMENTS_MECHANISM,
     ArkhaiPaymentsConfig,
-    BareMetalArkhaiPaymentsStage,
     create_arkhai_payments_registration,
 )
+
+from .arkhai_payments import BareMetalArkhaiPaymentsStage
 
 ALKAHEST_MECHANISM = "alkahest.v1"
 
@@ -78,15 +79,9 @@ class BareMetalStorefrontSettlementComposition:
         config = ArkhaiPaymentsConfig.model_validate(section)
         if not config.enabled:
             return None
-        return BareMetalArkhaiPaymentsStage(
-            config=config,
-            api_key=self.resources.get("arkhai_payments_api_key"),
-            development_account=self.resources.get(
-                "arkhai_payments_development_account"
-            ),
-        )
+        return BareMetalArkhaiPaymentsStage(config=config)
 
-    def settlement_mandate_dispatch(
+    def settlement_data_dispatch(
         self,
     ) -> dict[str, Callable[[Mapping[str, Any]], Mapping[str, Any]]]:
         stage = self.arkhai_payments_stage()

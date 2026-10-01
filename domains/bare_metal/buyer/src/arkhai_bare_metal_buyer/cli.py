@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import base64
 import os
 import time
 import webbrowser
@@ -29,7 +30,12 @@ from core_buyer.deal_helpers import (
 from core_buyer.negotiation_client import negotiate_with_seller
 from core_buyer.run_log import RunLog
 from market_contact_exchange import MECHANISM as CONTACT_MECHANISM
-from market_core.schemas import SettlementOption, SettlementPlan, SettlementSelection
+from market_core.schemas import (
+    SettlementOption,
+    SettlementPlan,
+    SettlementSelection,
+    compute_rate_total,
+)
 from market_identity import TrustedIdentitySet
 from market_settlement_runtime import derive_obligation_ref
 from pydantic_core import to_jsonable_python
@@ -41,6 +47,7 @@ from .config import (
     registry_client,
 )
 from .fulfillment import BareMetalFulfillmentTransport
+from .arkhai_payments import BareMetalArkhaiPaymentsBuyer, BareMetalSettlementTransport
 
 bare_metal_app = typer.Typer(
     no_args_is_help=True, help="Discover and settle trusted bare-metal listings."
@@ -248,6 +255,173 @@ def _recovered_introduction(
         resolve_seller_principals=trust,
     )
     return deal, identity, transport, obligation_ref
+
+
+@bare_metal_app.command("buy")
+def buy_bare_metal(
+    listing_id: str,
+    option_id: str = typer.Option(...),
+    ssh_public_key: str = typer.Option(..., "--ssh-public-key"),
+    duration_seconds: int = typer.Option(3600, min=1),
+    payment_timeout_seconds: float = typer.Option(300.0, min=1.0, max=3600.0),
+    config: str | None = typer.Option(None, "--config"),
+) -> None:
+    """Approve one exact Arkhai option and provision after its receipt verifies."""
+    buyer_config = load_bare_metal_buyer_config(config)
+    if buyer_config.payer_account is None:
+        raise typer.BadParameter("bare-metal buyer config requires payer_account")
+    if buyer_config.arkhai_payments is None or not buyer_config.arkhai_payments.enabled:
+        raise typer.BadParameter(
+            "bare-metal buyer config requires enabled arkhai_payments"
+        )
+    identity = fresh_identity()
+    with registry_client(buyer_config, identity) as client:
+        listing = client.get_listing(listing_id)
+    if not listing.storefront_url or listing.publisher_principals is None:
+        raise typer.BadParameter("listing has no trusted storefront identity")
+    options = [
+        SettlementOption.model_validate(item) for item in listing.settlement_options
+    ]
+    matches = [option for option in options if option.option_id == option_id]
+    if len(matches) != 1:
+        raise typer.BadParameter("option_id must identify one advertised option")
+    selected = matches[0]
+    if selected.mechanism != "arkhai.payments.v1" or len(selected.rates) != 1:
+        raise typer.BadParameter("buy requires one priced arkhai.payments.v1 option")
+    rate = selected.rates[0]
+    if rate.per != "hour":
+        raise typer.BadParameter(
+            "bare-metal purchase currently requires an hourly option"
+        )
+    amount = compute_rate_total(rate, duration_seconds)
+    run_log = RunLog.start(
+        profile_id=identity.profile_id,
+        principal=identity.principal,
+        domain="bare_metal",
+        listing_id=listing_id,
+        option_id=option_id,
+        duration_seconds=duration_seconds,
+        seller_url=listing.storefront_url,
+        storefront_url=listing.storefront_url,
+        publisher_id=str(listing.publisher_id),
+        publisher_principals=[
+            principal.model_dump(mode="json")
+            for principal in listing.publisher_principals.identities
+        ],
+        source_registry_url=buyer_config.registry_url,
+        source_registry_authority=buyer_config.registry_authority,
+    )
+    selection = SettlementSelection(
+        mechanism=selected.mechanism,
+        option_id=selected.option_id,
+        params={"payer_account": buyer_config.payer_account},
+    )
+    outcome = negotiate_with_seller(
+        seller_url=listing.storefront_url,
+        principal=identity.principal,
+        signer=identity.signer,
+        listing_id=listing_id,
+        resolve_seller_principals=lambda: listing.publisher_principals,
+        initial_price=amount,
+        max_price=amount,
+        unit_count=duration_seconds / 3600,
+        provision_terms=BareMetalProvisionTerms(
+            payload={
+                "duration_seconds": duration_seconds,
+                "access_method": "ssh",
+                "ssh_public_key": ssh_public_key,
+            },
+        ),
+        settlement_selection=selection,
+        max_rounds=buyer_config.default_max_rounds,
+    )
+    if outcome.status != "agreed" or outcome.negotiation_id is None:
+        run_log.end("exited", reason=outcome.reason)
+        _json({"run_id": run_log.run_id, **outcome.to_dict()})
+        return
+    if (
+        outcome.agreement is None
+        or outcome.settlement_data is None
+        or not outcome.agreement_bytes
+    ):
+        raise RuntimeError(
+            "accepted payment negotiation omitted its Agreement or mandate"
+        )
+    agreement_bytes = base64.b64decode(outcome.agreement_bytes, validate=True)
+    agreement = json.loads(agreement_bytes)
+    run_log.event(
+        "agreement_accepted",
+        negotiation_id=outcome.negotiation_id,
+        agreement_ref=outcome.negotiation_id,
+        settlement_data=outcome.settlement_data,
+        agreement_bytes=outcome.agreement_bytes,
+        **settlement_acceptance_fields(
+            negotiation_id=outcome.negotiation_id,
+            selection=outcome.settlement_selection,
+            plan=outcome.settlement_plan,
+        ),
+    )
+    payment_buyer = BareMetalArkhaiPaymentsBuyer(
+        config=buyer_config.arkhai_payments,
+        payer_account=buyer_config.payer_account,
+    )
+    transaction = payment_buyer.approve(
+        agreement=agreement,
+        settlement_data=outcome.settlement_data,
+        timeout=payment_timeout_seconds,
+    )
+    run_log.event("payment_approved", transaction_id=transaction)
+    settlement = BareMetalSettlementTransport(
+        seller_url=listing.storefront_url,
+        principal=identity.principal,
+        signer=identity.signer,
+        resolve_seller_principals=lambda: listing.publisher_principals,
+        timeout=buyer_config.timeout_seconds,
+    )
+    deadline = time.monotonic() + payment_timeout_seconds
+    while True:
+        settled = settlement.settle(outcome.negotiation_id)
+        if settled.get("status") == "settlement_verified":
+            if settled.get("escrow_uid") != transaction:
+                raise RuntimeError("seller verified a different payment transaction")
+            break
+        if settled.get("status") != "settlement_pending":
+            raise RuntimeError("seller returned an unexpected settlement status")
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("seller has not observed the verified payment receipt")
+        time.sleep(min(1.0, remaining))
+    fulfillment = BareMetalFulfillmentTransport(
+        seller_url=listing.storefront_url,
+        principal=identity.principal,
+        signer=identity.signer,
+        resolve_seller_principals=lambda: listing.publisher_principals,
+        timeout=buyer_config.timeout_seconds,
+    ).begin(outcome.negotiation_id)
+    run_log.end(
+        "agreed",
+        negotiation_id=outcome.negotiation_id,
+        agreed_amount=outcome.agreed_amount,
+        transaction_id=transaction,
+        fulfillment=fulfillment,
+        accepted_provision_terms=(
+            outcome.accepted_provision_terms.model_dump(mode="json")
+            if outcome.accepted_provision_terms is not None
+            else None
+        ),
+        **settlement_acceptance_fields(
+            negotiation_id=outcome.negotiation_id,
+            selection=outcome.settlement_selection,
+            plan=outcome.settlement_plan,
+        ),
+    )
+    _json(
+        {
+            "run_id": run_log.run_id,
+            "transaction_id": transaction,
+            "fulfillment": fulfillment,
+        }
+    )
 
 
 @bare_metal_app.command("request-introduction")
