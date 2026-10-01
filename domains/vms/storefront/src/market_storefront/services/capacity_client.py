@@ -19,7 +19,6 @@ lease tails — is the ledger's.
 
 from __future__ import annotations
 
-import asyncio
 import functools
 import logging
 from collections.abc import Callable, Iterable, Mapping
@@ -40,6 +39,7 @@ from core_storefront.aggregation import (
     most_available,
 )
 from market_capacity_publication import (
+    run_capacity_event_pollers,
     CapacityReconcileContext,
     CapacityRuntime,
     CapacitySite,
@@ -564,20 +564,21 @@ def site_capacity_buckets() -> dict[str, list[dict[str, Any]]]:
     return result
 
 
-#: Cadence for re-reading a held gate; idle work only.
-_PAUSED_POLL_SECONDS = 0.05
-
-#: How often the aggregate loop returns to its gate. It performs no work -- the
-#: site pollers do the polling -- so this is purely how soon a pause is
-#: observed, and it must be well inside the pause's own bounded wait. Tying it
-#: to the poll interval instead made observation as slow as the slowest
-#: deployment's polling, which is a different concern entirely.
-_AGGREGATE_GATE_SECONDS = 0.5
-
-
 async def capacity_events_poller_loop(sqlite_client: Any) -> None:
-    """Delegate multi-site event delivery and reconciliation to the kit."""
+    """Delegate multi-site event delivery and reconciliation to the kit.
+
+    The aggregate name is what the admin advance route addresses and what a
+    storefront with no site configured still reports; the per-site gates are
+    what actually hold the pollers, since the kit owns their fan-out.
+    """
     from market_storefront.utils import config
+    from market_storefront.lifecycle import (
+        CAPACITY_EVENTS_POLLER,
+        capacity_site_loop_name,
+        declare_and_gate,
+        gate,
+        idle,
+    )
 
     interval = float(
         getattr(
@@ -587,39 +588,10 @@ async def capacity_events_poller_loop(sqlite_client: Any) -> None:
         )
         or 5
     )
-    from market_storefront.lifecycle import (
-        CAPACITY_EVENTS_POLLER,
-        capacity_site_loop_name,
-        declare_and_gate,
-        gate,
+    runtime = build_capacity_runtime(lambda: sqlite_client)
+    await run_capacity_event_pollers(
+        functools.partial(runtime.poll_events, interval_seconds=interval),
+        gate=functools.partial(gate, CAPACITY_EVENTS_POLLER),
+        site_gate=lambda site: declare_and_gate(capacity_site_loop_name(site)),
+        wait=idle,
     )
-
-    # The aggregate name is what the admin advance route addresses and what a
-    # storefront with no site configured still reports; the per-site gates are
-    # what actually hold the pollers, since the kit owns their fan-out.
-    #
-    # `poll_events` gathers the site pollers and never returns, so awaiting it
-    # here would let this loop gate exactly once and then sit inside a call
-    # forever -- reaching its gate once is enough to be acknowledged, and not
-    # enough to ever observe a pause. It runs as its own task and this loop
-    # gates and idles, which is also what keeps a storefront with no site
-    # configured reporting a capacity loop at all.
-    pollers = asyncio.create_task(
-        build_capacity_runtime(lambda: sqlite_client).poll_events(
-            interval_seconds=interval,
-            paused=lambda site: declare_and_gate(capacity_site_loop_name(site)),
-        )
-    )
-    try:
-        while True:
-            if gate(CAPACITY_EVENTS_POLLER):
-                await asyncio.sleep(_PAUSED_POLL_SECONDS)
-                continue
-            if pollers.done():
-                # Surface the fan-out's failure rather than idling over it: an
-                # ended loop is the state reserved for one whose failure
-                # warrants replacing the process.
-                await pollers
-            await asyncio.sleep(_AGGREGATE_GATE_SECONDS)
-    finally:
-        pollers.cancel()

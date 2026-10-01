@@ -20,9 +20,11 @@ Design phase; not planned.
 - The provisioning service composes `vm_adapter_bundle` and `bare_metal_adapter_bundle`
   into one process through `compose_adapter_bundles`; a bundle contributes handlers,
   not a server.
-- `lifecycle.py` (VM) holds the timer loops and the pause flag; `TESTING.md` requires
-  every loop an end-to-end test advances to be holdable and steppable;
-  `bare-metal-mock-provisioned-deal` adds bare metal's controls.
+- The timer-loop lifecycle is extracted ahead of this change by
+  `kit-owned-storefront-loop-lifecycle`: one kit controller per storefront process,
+  composed by all three storefronts, with a framework-free lifecycle route service
+  each binds. What remains here is moving that registration into the kit composition
+  root.
 
 ## Questions to settle before planning
 
@@ -60,9 +62,9 @@ Design phase; not planned.
   - Alkahest-path fulfillment starts when settlement is verified, which
     `bare-metal-mock-provisioned-deal` implements for bare metal.
   The shared settle route adopts both, so neither is a drift to decide.
-- **Loop registration.** Whether a domain registers loops by name with the kit
-  lifecycle, or the kit runtimes register their own loops and the domain supplies
-  only timings.
+- **Loop registration.** Whether a domain keeps registering its loops with the kit
+  loop controller, or the kit runtimes register their own loops and the domain
+  supplies only timings.
 
 ## Decisions
 

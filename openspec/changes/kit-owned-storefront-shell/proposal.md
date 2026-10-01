@@ -5,8 +5,8 @@ request and response models — listings, negotiate, negotiations, settle, syste
 hosted-settlement controllers (1,370 lines in the VM storefront, 1,093 in API credits,
 `api.py` at 863 in bare metal) — its own executable assembly (`server`, `startup`,
 `container`, and configuration loading: 1,978, 1,083, and 680 lines), its own health
-and system service, and its own timer loops (`lifecycle.py` at 420 lines in VM; bare
-metal gains pause and step controls of its own). Core already owns the shell's
+and system service. The timer-loop lifecycle, which VM alone carried as a 420-line
+`lifecycle.py`, is extracted ahead of this change by `kit-owned-storefront-loop-lifecycle`. Core already owns the shell's
 foundation — `app_composition`, `domain_registry`, `domain_plugins`, `app_lifecycle` —
 and the provisioning service already shows the target shape: one executable that
 composes adapter bundles, where an adapter is codecs and hooks, not a second server.
@@ -26,11 +26,9 @@ domain; and a fourth compute domain would begin by copying a shell.
   domain registry, assembles the container, applies the middleware set, mounts the
   shared routes and each contribution's extra routes, and runs the lifespan. A domain
   storefront becomes a contribution plus an entry point.
-- Move the health and system service and the timer-loop runtime into kit: every loop
-  a domain runs (publication, negotiation watchdog, settlement servicing, fulfillment
-  convergence) is registered with the kit's lifecycle, held by one pause, and stepped
-  by one control, so the pause-and-step convention is composed rather than
-  reimplemented.
+- Move the health and system service into kit, and have the kit composition root
+  own the loop controller `kit-owned-storefront-loop-lifecycle` extracts, so a domain
+  supplies its loops and timings rather than registering them itself.
 - Compose all three domains onto the kit shell and remove every domain-local copy in
   this change, per the extraction rule.
 - Record, per concern, where the three copies already diverged and which behavior was
@@ -60,8 +58,8 @@ None.
 ## Impact
 
 - Code: every domain storefront's `controllers/`, `server.py`, `startup.py`,
-  `container.py`, `services/system_service.py`, and `lifecycle.py` or equivalent;
-  `kit/storefront` gains the shell.
+  `container.py`, and `services/system_service.py`, and VM's binding of the kit loop
+  controller; `kit/storefront` gains the shell.
 - Tests: three domains' controller and startup suites collapse into kit suites plus
   per-domain contribution conformance.
 - Deployment: entry points and images for each storefront point at the kit
@@ -71,13 +69,15 @@ None.
 
 - [x] `docs/development/ARCHITECTURE.md` — role map and package layers.
 - [x] Existing subsystem specification — `openspec/specs/market-composition/spec.md`.
-- [x] `docs/development/TESTING.md` — the loop table names the kit lifecycle.
+- [ ] `docs/development/TESTING.md` — the loop table already names the kit loop
+      controller once `kit-owned-storefront-loop-lifecycle` lands; re-confirm.
 - [ ] New subsystem specification
 
 ### Knowledge to promote
 
-- The storefront route set, executable assembly, health, and timer-loop lifecycle
-  are kit-owned; a domain contributes codecs, hooks, and timings —
+- The storefront route set, executable assembly, and health are kit-owned, and the
+  kit composition root owns the loop controller; a domain contributes codecs, hooks,
+  and timings —
   `openspec/specs/market-composition/spec.md`.
 
 ## Dependencies and Related Changes
@@ -85,6 +85,8 @@ None.
 - Depends on `kit-storefront-composition-seam` for the seam and the extraction rule,
   and on the negotiation, settlement, and capacity/publication kits, whose hooks the
   shared routes dispatch to.
+- Depends on `kit-owned-storefront-loop-lifecycle`, carved out of this change, for the
+  kit loop controller and lifecycle route service.
 - Sequenced first of the three follow-on extractions:
   `kit-owned-listing-and-fulfillment-lifecycles` and
   `kit-owned-storefront-auth-and-persistence` land as contributions to this shell.

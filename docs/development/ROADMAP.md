@@ -163,9 +163,15 @@ its own negotiate and listing routes beside the negotiation kit. `kit/policy`,
 `kit/identity`, `kit/fulfillment`, `kit/config`, and `kit/alkahest` likewise
 carry no domain vocabulary.
 
+The storefront kit also owns the timer-loop lifecycle. Each VM, bare-metal, and
+API-credit storefront holds its loops with one kit loop controller, under one
+pause and a step per loop served on the same routes, so a scenario can hold and
+advance any storefront through the canonical client; the capacity kit owns the
+per-site poller aggregate both capacity-publishing storefronts compose.
+
 Beneath the extracted runtimes each storefront still duplicates its shell — a
-route set over the same core models, executable assembly, health, and timer
-loops — its seller listing lifecycle and restart-safe fulfillment convergence,
+route set over the same core models, executable assembly, and health — its
+seller listing lifecycle and restart-safe fulfillment convergence,
 its authentication middleware, and a persistence client beside core's. Those are
 the next wave of extraction; each follows the rule that an extracted concern
 leaves no domain-local copy.
@@ -188,7 +194,8 @@ The domain layer's own structure is better than the duplication suggests. All th
 | Open gap | Owned by |
 |---|---|
 | The bare-metal storefront negotiates through a domain-local service and routes rather than the negotiation kit every other domain composes | [`bare-metal-and-credits-domain-stacks`](../../openspec/changes/bare-metal-and-credits-domain-stacks/) |
-| Every storefront carries its own route set, executable assembly, health service, and timer loops | [`kit-owned-storefront-shell`](../../openspec/changes/kit-owned-storefront-shell/) |
+| API credits has no end-to-end lane of its own — its scenario rides the VM lane — and its storefront has no test that runs the production application | [`apicredits-end-to-end-lane`](../../openspec/changes/apicredits-end-to-end-lane/) |
+| Every storefront carries its own route set, executable assembly, and health service | [`kit-owned-storefront-shell`](../../openspec/changes/kit-owned-storefront-shell/) |
 | Every storefront reimplements the seller listing lifecycle and restart-safe fulfillment convergence; VM keeps its own per-site projection cache | [`kit-owned-listing-and-fulfillment-lifecycles`](../../openspec/changes/kit-owned-listing-and-fulfillment-lifecycles/) |
 | Every storefront carries its own authentication middleware and a persistence client whose boundary with core's is unstated | [`kit-owned-storefront-auth-and-persistence`](../../openspec/changes/kit-owned-storefront-auth-and-persistence/) |
 | No bare-metal deal runs in the pipeline: the only complete-deal scenario needs a real host and a hosted authority | [`bare-metal-mock-provisioned-deal`](../../openspec/changes/bare-metal-mock-provisioned-deal/) |
@@ -266,7 +273,8 @@ What deliberately remains: the `escrows` table and the `/api/v1/settle/{escrow_u
 
 | Open gap | Owned by |
 |---|---|
-| The retention window exists as a requirement with no implementation: no configured window, no deletion path, no disclosure to either party | [`contact-payload-retention`](../../openspec/changes/contact-payload-retention/) |
+| The retention window exists as a requirement with no implementation: no configured window, no disclosure to either party, and no safe deletion path — the existing primitive removes the row, so a deleted introduction can be revealed again | [`contact-payload-retention`](../../openspec/changes/contact-payload-retention/) |
+| Recorded responses kept for exact retry — reveal responses included — are never bounded, so a revealed contact outlives any introduction retention window there | Unowned — needs a new change. One bound for every authenticated response rather than a mechanism exception; to be designed with [`retain-authenticated-request-outcomes`](../../openspec/changes/retain-authenticated-request-outcomes/), which adds outcome retention elsewhere |
 | Contact exchange is composed on bare metal only, and its accepted-state interpretation lives in that domain rather than having one implementation | [`compose-contact-exchange-across-compute`](../../openspec/changes/compose-contact-exchange-across-compute/) |
 | A second delivery event producer (a settled charge, a completed escrow) | Unowned — needs a new change. Delivery sinks are event-driven and non-authoritative: a sink consumes a durable delivery event and re-delivery reads the persisted reveal, so a second producer adds an event source, not a second delivery path |
 

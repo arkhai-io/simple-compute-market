@@ -282,6 +282,7 @@ async def site_events_poller(
     *,
     full_reconcile: Callable[[], Awaitable[None]],
     paused: Callable[[], bool] | None = None,
+    wait: Callable[[float], Awaitable[None]] | None = None,
 ) -> None:
     """Tail one site authority's capacity-event feed into the local bus.
 
@@ -298,7 +299,14 @@ async def site_events_poller(
     and a poller interrupted mid-cycle would either replay or skip events.
     Core supplies no gate of its own -- the caller owns the pause, because only
     it knows what the loop is registered as.
+
+    ``wait`` waits out the interval between cycles and must return early when a
+    pause is requested, so a pause reaches the gate without waiting out the
+    interval. A gated poller requires one: gated but uninterruptible is the
+    combination that lets a pause outlast its own bounded wait.
     """
+    if paused is not None and wait is None:
+        raise TypeError("a gated site poller requires an interruptible wait")
     cursor = site_event_cursor(site_name)
     logger.info(
         "[CAPACITY] Event poller started for site %r at %s (interval=%ss)",
@@ -315,5 +323,5 @@ async def site_events_poller(
             full_reconcile=full_reconcile,
         )
         if cycle.truncated:
-            continue  # truncated page — keep draining before sleeping
-        await asyncio.sleep(interval)
+            continue  # truncated page — keep draining before waiting
+        await (wait(interval) if wait is not None else asyncio.sleep(interval))

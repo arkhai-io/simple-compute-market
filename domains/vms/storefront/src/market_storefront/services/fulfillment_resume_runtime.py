@@ -37,6 +37,7 @@ from market_storefront.services.vm_fulfillment_service import (
     persist_escrow_fields_with_retry,
 )
 from market_storefront.utils.sqlite_client import SQLiteClient
+from market_storefront.lifecycle import FULFILLMENT_RESUME, gate, idle
 
 logger = logging.getLogger(__name__)
 
@@ -747,7 +748,6 @@ _PAUSED_POLL_SECONDS = 0.05
 
 async def fulfillment_resume_loop(sqlite_client: SQLiteClient) -> None:
     """Periodically sweep unfinished accepted VM escrows."""
-    from market_storefront.lifecycle import FULFILLMENT_RESUME, gate
     from market_storefront.utils.config import settings
 
     interval = float(getattr(settings, "fulfillment_resume_sweep_interval", 30))
@@ -771,4 +771,6 @@ async def fulfillment_resume_loop(sqlite_client: SQLiteClient) -> None:
             # -- which would otherwise stop the resume worker for the life of
             # the process with no further sweep and no recovery.
             logger.exception("[FULFILLMENT_RESUME] sweep failed; continuing")
-        await asyncio.sleep(interval)
+        # Through the controller, so a pause requested during the interval
+        # reaches the gate at once rather than after it.
+        await idle(interval)

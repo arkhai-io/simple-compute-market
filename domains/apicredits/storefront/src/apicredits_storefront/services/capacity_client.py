@@ -1,17 +1,20 @@
 """API-credit configuration and candidate hooks for kit-owned capacity."""
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass
 from typing import Any, Callable
 
 from core_storefront.aggregation import PLACEMENT_POLICIES, AggregateCapacityClient
 from market_capacity_publication import (
+    run_capacity_event_pollers,
     CapacityBinding,
     CapacityReconcileContext,
     CapacityRuntime,
     CapacitySite as KitCapacitySite,
 )
 from market_identity import Identity, TrustedIdentitySet
+from market_storefront_kit import StorefrontLoopController
 
 SQLiteClientFactory = Callable[[], Any]
 
@@ -106,8 +109,25 @@ def capacity_binding_from_listing_resource(listing_resource: dict[str, Any] | st
     )
 
 
-async def capacity_events_poller_loop() -> None:
+async def capacity_events_poller_loop(loops: StorefrontLoopController) -> None:
+    """Tail every quota authority's capacity-event feed under the loop controller.
+
+    The aggregate name is what the advance route addresses; each site's poller
+    gates under its own declared name, since the kit owns the fan-out.
+    """
+    # Imported when the loop starts: the steps module imports this one for the
+    # capacity runtime its step drains.
+    from apicredits_storefront.lifecycle_steps import (
+        CAPACITY_EVENTS_POLLER,
+        capacity_site_loop_name,
+    )
     from apicredits_storefront.utils import config
     from apicredits_storefront.utils.sqlite_client import get_sqlite_client
     interval = float(config.settings.get("capacity.poll_interval", 5) or 5)
-    await build_capacity_runtime(get_sqlite_client).poll_events(interval_seconds=interval)
+    runtime = build_capacity_runtime(get_sqlite_client)
+    await run_capacity_event_pollers(
+        functools.partial(runtime.poll_events, interval_seconds=interval),
+        gate=loops.loop_gate(CAPACITY_EVENTS_POLLER),
+        site_gate=lambda site: loops.declare(capacity_site_loop_name(site)),
+        wait=loops.idle,
+    )

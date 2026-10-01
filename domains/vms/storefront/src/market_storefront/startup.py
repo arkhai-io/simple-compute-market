@@ -21,6 +21,7 @@ from market_storefront.lifecycle import (
     SETTLEMENT_SERVICING,
     PUBLICATION,
     SITE_PROJECTION_POLLER,
+    idle,
     loop_gate,
     start_registered_loop,
 )
@@ -216,6 +217,7 @@ def _start_negotiation_watchdog(sqlite_client: Any) -> None:
                 emit_stage_event=stage_event,
                 logger=logger,
                 paused=loop_gate(NEGOTIATION_WATCHDOG),
+                wait=idle,
             ),
             log_message=(
                 "[STARTUP] Negotiation watchdog started (interval=%ds, timeout=%ds)"
@@ -270,7 +272,9 @@ def _start_settlement_servicing() -> None:
         StorefrontBackgroundTask(
             name=SETTLEMENT_SERVICING,
             task_factory=partial(
-                composition.worker.run, paused=loop_gate(SETTLEMENT_SERVICING)
+                composition.worker.run,
+                paused=loop_gate(SETTLEMENT_SERVICING),
+                wait=idle,
             ),
             log_message="[STARTUP] Settlement servicing started (interval=%ss)",
             log_args=(getattr(settings, "claims_sweep_interval", 30),),

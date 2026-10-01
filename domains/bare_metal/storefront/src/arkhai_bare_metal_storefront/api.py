@@ -30,7 +30,6 @@ from market_contact_exchange import (
 )
 from market_contact_exchange import MECHANISM as CONTACT_MECHANISM
 from market_identity import EMPTY_BODY, Identity
-from pydantic_core import to_jsonable_python
 from market_pool_overrides import (
     POOL_OVERRIDES_PATH,
     PoolOverrideContractError,
@@ -42,7 +41,11 @@ from market_pool_overrides import (
     PoolOverrideWriteResponse,
     pool_override_contract,
 )
-from market_storefront_kit import get_storefront_container
+from market_storefront_kit import (
+    LifecycleRouteError,
+    StorefrontLifecycleRouteService,
+    get_storefront_container,
+)
 from market_settlement_runtime import (
     HostedSettlementRouteError,
     HostedSettlementStart,
@@ -59,7 +62,6 @@ from .models import (
 )
 from .fulfillment_service import BareMetalFulfillmentError
 from .negotiation_service import NegotiationRequestError
-from .publication_composition import compose_publication_cycle
 from .runtime import BareMetalStorefrontRuntime
 from .settlement_service import SettlementRequestError
 from .hosted_routes import build_bare_metal_hosted_route_service
@@ -972,14 +974,51 @@ async def resume(request: Request) -> AdminPauseResponse:
     return AdminPauseResponse(paused=False, message="storefront resumed")
 
 
-# The one lifecycle loop this storefront steps. Publication has no timer, so it
-# is stepped rather than paused: each step is one operator-invoked pass.
-PUBLICATION_LOOP = "publication"
+# Lifecycle controls: one pause holding the timer loops, and one step per loop.
+# Publication has no timer, so it is stepped and never held. The signed
+# operations and resources are the canonical storefront client's, so one
+# administrator client drives every storefront.
+
+
+def _lifecycle_routes(runtime: BareMetalStorefrontRuntime) -> StorefrontLifecycleRouteService:
+    return StorefrontLifecycleRouteService(runtime.loops)
+
+
+def _lifecycle_http_error(exc: LifecycleRouteError) -> HTTPException:
+    return HTTPException(status_code=exc.status_code, detail=exc.detail)
+
+
+@router.post("/api/v1/admin/lifecycle/pause")
+async def pause_lifecycle_loops(request: Request) -> dict[str, Any]:
+    """Hold every timer loop at its next cycle boundary; trading is unaffected."""
+    runtime = _runtime(request)
+    await _admin(
+        request=request,
+        runtime=runtime,
+        operation="admin_pause_lifecycle_loops",
+        resource="lifecycle",
+        body=await _request_body(request),
+    )
+    return await _lifecycle_routes(runtime).pause()
+
+
+@router.post("/api/v1/admin/lifecycle/resume")
+async def resume_lifecycle_loops(request: Request) -> dict[str, Any]:
+    """Return every timer loop to work."""
+    runtime = _runtime(request)
+    await _admin(
+        request=request,
+        runtime=runtime,
+        operation="admin_resume_lifecycle_loops",
+        resource="lifecycle",
+        body=await _request_body(request),
+    )
+    return await _lifecycle_routes(runtime).resume()
 
 
 @router.post("/api/v1/admin/lifecycle/{loop}/run-cycle")
 async def run_lifecycle_cycle(loop: str, request: Request) -> dict[str, Any]:
-    """Run one pass of a lifecycle loop and return what it reports.
+    """Run one cycle of a lifecycle loop and return what it reports.
 
     The publication pass is exactly the one the publication command runs,
     composed the same way. Passes are serialized within this process.
@@ -992,13 +1031,24 @@ async def run_lifecycle_cycle(loop: str, request: Request) -> dict[str, Any]:
         resource=loop,
         body=await _request_body(request),
     )
-    if loop != PUBLICATION_LOOP:
-        raise HTTPException(status_code=404, detail=f"no lifecycle loop {loop!r}")
-    factory = runtime.publication_cycle_factory or compose_publication_cycle
-    async with runtime.publication_lock:
-        try:
-            cycle = factory(runtime)
-        except RuntimeError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-        report = await cycle.run()
-    return to_jsonable_python(report)
+    try:
+        return dict(await _lifecycle_routes(runtime).run_cycle(loop))
+    except LifecycleRouteError as exc:
+        raise _lifecycle_http_error(exc) from exc
+
+
+@router.post("/api/v1/admin/lifecycle/{loop}/dry-run")
+async def dry_run_lifecycle_cycle(loop: str, request: Request) -> dict[str, Any]:
+    """Report one cycle of a lifecycle loop without applying it, where it offers a preview."""
+    runtime = _runtime(request)
+    await _admin(
+        request=request,
+        runtime=runtime,
+        operation="admin_dry_run_lifecycle_cycle",
+        resource=loop,
+        body=await _request_body(request),
+    )
+    try:
+        return dict(await _lifecycle_routes(runtime).dry_run(loop))
+    except LifecycleRouteError as exc:
+        raise _lifecycle_http_error(exc) from exc

@@ -34,10 +34,10 @@ Three things stand in the way:
   reads, a reclaim succeeds, and when→then rules can override either, as VM's mock
   allows. Bare-metal execution, which runs inside the VM adapter today, gains the seam
   that mock needs.
-- Add lifecycle controls to the bare-metal storefront matching the canonical storefront
-  client: a pause that holds its loops, a resume, and an explicit single step per loop
-  that runs exactly the cycle its timer runs, alongside the publication step
-  `bare-metal-publication-reads-pool-declarations` adds.
+- Drive the scenario through the bare-metal storefront's lifecycle controls — a pause
+  that holds its loops, a resume, and an explicit single step per loop that runs
+  exactly the cycle its timer runs, alongside the publication step — which
+  `kit-owned-storefront-loop-lifecycle` supplies.
 - Add a mock-provisioned complete-deal scenario to the bare-metal lane, driven through
   typed clients only: discovery, negotiation, Alkahest settlement on the lane's dev
   chain, fulfillment through the mock, the buyer-safe result and access view, teardown,
@@ -78,8 +78,8 @@ None.
 
 - The bare-metal provisioning adapter (its own mock) and the VM adapter's job service,
   which executes bare-metal actions today (the seam that mock needs).
-- `domains/bare_metal/storefront/`: lifecycle pause, resume, and step routes; its
-  negotiation watchdog and settlement-servicing worker become holdable.
+- `domains/bare_metal/storefront/`: none for lifecycle controls, which
+  `kit-owned-storefront-loop-lifecycle` composes there.
 - `e2e-tests/`: the deal scenario on the bare-metal lane, and whatever shared domain-deal
   helpers it needs generalized.
 - `openspec/changes/bare-metal-and-credits-domain-stacks/`: its bare-metal deal path is
@@ -98,8 +98,6 @@ None.
 - A deployable domain's deal path runs on every end-to-end run against mock
   provisioning, distinct from protected real-host evidence —
   `openspec/specs/test-compatibility/spec.md`.
-- The bare-metal storefront's loops follow the pause-and-step convention —
-  `docs/development/TESTING.md`'s loop table.
 - The bare-metal demand is exact and buyer-bounded; public result and evidence decode
   strictly; teardown is authenticated and idempotent —
   `openspec/specs/buyer-orchestration/spec.md`.
@@ -108,7 +106,8 @@ None.
 
 Depends on `bare-metal-publication-reads-pool-declarations`, which builds the bare-metal
 end-to-end lane, splits the pipeline into VM and bare-metal jobs, and adds the
-publication step. Supplies the bare-metal deal-path evidence
+publication step. Depends on `kit-owned-storefront-loop-lifecycle` for the bare-metal
+lifecycle pause and steps its scenario uses. Supplies the bare-metal deal-path evidence
 `bare-metal-and-credits-domain-stacks` requires for Goal 4, short of real access, which
 stays with the protected lane.
 

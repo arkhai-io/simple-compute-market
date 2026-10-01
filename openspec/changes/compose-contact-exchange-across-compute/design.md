@@ -174,6 +174,16 @@ exists multiplies the number of deployments holding personal contact details
 against an obligation satisfied only in principle, and the multiplication is the
 whole point of this change.
 
+That change places retention in the mechanism kit — redaction leaving a tombstone,
+the `retention_seconds` setting, the sweep and its loop runner, a framework-free
+admin service, and the disclosure object — and composes it into bare metal only,
+while requiring every composing storefront to run it. VM therefore inherits the kit
+parts and the configuration with the mechanism, and this change owns only VM's
+wiring: registering the sweep loop, binding the admin service, and embedding the
+disclosure in VM's readiness response. VM's loops are held by the kit loop controller
+`kit-owned-storefront-loop-lifecycle` provides, so the sweep is held and stepped like
+every other VM loop.
+
 ## Risks / Trade-offs
 
 - **[Promotion changes behaviour subtly]** → The glue's checks are security checks

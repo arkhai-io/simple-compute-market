@@ -14,6 +14,7 @@ from .capacity import (
     UnbackedBinding,
     publication_binding,
     remote_site_clients,
+    run_capacity_event_pollers,
 )
 from .cycle import (
     PublicationCycleDriver,
@@ -31,6 +32,7 @@ from .publication import (
 )
 
 __all__ = [
+    "run_capacity_event_pollers",
     "BoundListing",
     "capacity_availability",
     "CapacityBinding",

@@ -92,3 +92,6 @@ None.
 - **Carries** the bare-metal half of `publish-indicative-listing-rates`' unbacked
   supply system evidence, transferred here because this change creates the listing it
   needs.
+- **Builds on `contact-payload-retention`'s bare-metal introduction scenario**, the
+  first end-to-end scenario to reach an introduction, rather than writing its own
+  introduction flow.
