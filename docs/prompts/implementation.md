@@ -1,10 +1,15 @@
 # Implementation session prompt
 
 This session we'll be working on the simple-compute-market project and
-implementing `<change or section>`. `AGENTS.md` and the documents it
-requires reading — `docs/development/ARCHITECTURE.md`,
-`docs/development/TESTING.md`, `docs/development/DEPLOYMENT_AND_CONFIG.md`,
-and `openspec/README.md` — have very important context you should study.
+implementing `<change or section>`.
+
+## Required context documents
+
+AGENTS.md and the documents it requires reading have very important context you should study:
+* `docs/development/ARCHITECTURE.md`
+* `docs/development/TESTING.md`
+* `docs/development/DEPLOYMENT_AND_CONFIG.md`
+* `openspec/README.md`
 
 ## Documentation and implementation workflow
 
