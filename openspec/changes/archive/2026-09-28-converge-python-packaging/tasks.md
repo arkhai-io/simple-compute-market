@@ -465,7 +465,7 @@ Per `openspec/README.md#plan-closeout-requirements`.
       `[tool.uv.sources]` block; relock with `make lock PROJECTS=
       domains/bare_metal/provisioning/adapter`; its suite passes against `.dist` wheels.
       *The adapter's lock resolves all seven siblings from the wheelhouse; its suite passes.*
-- [x] 9.2 Record the transfer in `openspec/changes/remove-relative-uv-sources/tasks.md`:
+- [x] 9.2 Record the transfer in `openspec/changes/archive/2026-09-28-remove-relative-uv-sources/tasks.md`:
       its open sections 1–3 now belong to this change. Done at planning, 2026-09-27.
 
 ### 10. Layout check and documentation

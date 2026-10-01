@@ -37,7 +37,17 @@ Earlier buyer/registry/storefront projects now consume internal wheels correctly
   carries the host's authoritative pool binding. Clean-wheel CI exposed the
   stale projection; this restores the existing physical-provisioning contract
   rather than adding a new API field.
-- State: **Planned and first in the release-readiness campaign; scope reduced 2026-08-06 to one confirmed project plus one to re-identify.**
+- State: **Superseded and archived 2026-09-28.**
+
+## Archive disposition (2026-09-28)
+
+Superseded by `converge-python-packaging`, which took over the remaining package
+cutover, project-layout guard, and environment-refresh conventions. The CI
+wheelhouse repair in this change was completed separately. The open closeout
+tasks in `tasks.md` were not completed before archival; they are retained as
+history, not active work. Do not sync this change's delta specs: the permanent
+packaging contract now reflects the superseding change, and the bare-metal
+pool-binding requirement is already present in the main specification.
 
 ## Capabilities
 

@@ -2,6 +2,8 @@ Sections 1–3 were transferred to `converge-python-packaging` when it was plann
 2026-09-27: its `check-project-layout` is the path-source guard, its slice 2 removes the
 remaining relative sources, and its `check-uv-setup` rule decides which projects are owed
 a `reinit`. They are closed here and tracked there. Section 4 is this change's own work.
+This change was archived as superseded on 2026-09-28. The open section 5 tasks
+below were not completed as part of this change.
 
 ## 1. Inventory and guard
 
