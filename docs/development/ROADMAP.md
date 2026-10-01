@@ -170,8 +170,8 @@ advance any storefront through the canonical client; the capacity kit owns the
 per-site poller aggregate both capacity-publishing storefronts compose.
 
 Beneath the extracted runtimes each storefront still duplicates its shell — a
-route set over the same core models, executable assembly, health, and timer
-loops — its seller listing lifecycle and restart-safe fulfillment convergence,
+route set over the same core models, executable assembly, and health — its
+seller listing lifecycle and restart-safe fulfillment convergence,
 its authentication middleware, and a persistence client beside core's. Those are
 the next wave of extraction; each follows the rule that an extracted concern
 leaves no domain-local copy.

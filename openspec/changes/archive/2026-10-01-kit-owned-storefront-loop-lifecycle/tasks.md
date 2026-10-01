@@ -1,6 +1,6 @@
 # Tasks — kit-owned storefront loop lifecycle
 
-Complete and promoted; awaiting archival. No blocking dependency. Prerequisite of `contact-payload-retention` and
+Complete, promoted, and archived 2026-10-01. Prerequisite of `contact-payload-retention` and
 `bare-metal-mock-provisioned-deal`.
 
 Validation levels follow `docs/development/TESTING.md`. The controller and route

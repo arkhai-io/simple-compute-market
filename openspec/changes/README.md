@@ -112,7 +112,7 @@ kit-storefront-composition-seam
 bare-metal-mock-provisioned-deal ──────────────────────┘ (pipeline deal evidence)
 
 Next wave:
-kit-owned-storefront-loop-lifecycle (complete) ──► kit-owned-storefront-shell ──┬──► kit-owned-listing-and-fulfillment-lifecycles
+kit-owned-storefront-loop-lifecycle (archived) ──► kit-owned-storefront-shell ──┬──► kit-owned-listing-and-fulfillment-lifecycles
      │                                                               └──► kit-owned-storefront-auth-and-persistence
      ├──► contact-payload-retention (Goal 6)
      └──► bare-metal-mock-provisioned-deal (Goal 7 section)
@@ -125,7 +125,7 @@ kit-owned-settlement-runtime archived 2026-08-10
 | [`kit-storefront-composition-seam`](kit-storefront-composition-seam/) | implemented and promoted; validation and closeout remain | Defines where kit-owned storefront runtime sits and proves it with the two smallest duplicated concerns, composing all three domains. Establishes the rule that an extracted concern leaves no domain-local copy |
 | [`kit-owned-negotiation-runtime`](kit-owned-negotiation-runtime/) | implemented and promoted for VM and API credits; validation and closeout remain | Extracts the synchronous negotiation runtime; VM and API credits inject domain hooks and retain no lifecycle copy. Bare metal's composition onto it is `bare-metal-and-credits-domain-stacks` 4a |
 | [`kit-owned-capacity-and-publication`](kit-owned-capacity-and-publication/) | implemented and promoted for all three domains; validation and closeout remain | Extracts the storefront capacity client and publication runtime; all three storefronts compose them |
-| [`kit-owned-storefront-loop-lifecycle`](kit-owned-storefront-loop-lifecycle/) | complete; promoted; awaiting archival. Carved out of `kit-owned-storefront-shell`; prerequisite of `contact-payload-retention` and `bare-metal-mock-provisioned-deal` | One instance-scoped kit loop controller per storefront process and a framework-free lifecycle route service, adopting VM's pause, step, quiescence, and loop-state semantics unchanged. VM binds its lifecycle module to it with every imported name preserved; bare metal and API credits gain pause and a step for every loop by composition. Every timer loop gates on entry, works when due, and waits through the controller, so a pause is observed within its bound whatever the interval. Wire paths and the canonical client are unchanged |
+| [`kit-owned-storefront-loop-lifecycle`](archive/2026-10-01-kit-owned-storefront-loop-lifecycle/) | **archived** 2026-10-01. Promoted to `market-composition`, `ARCHITECTURE.md`'s kit layers and operator lifecycle controls, and `TESTING.md`'s loop table; both end-to-end lanes passed. Carved out of `kit-owned-storefront-shell`; prerequisite of `contact-payload-retention` and `bare-metal-mock-provisioned-deal` | One instance-scoped kit loop controller per storefront process and a framework-free lifecycle route service, adopting VM's pause, step, quiescence, and loop-state semantics unchanged. VM binds its lifecycle module to it with every imported name preserved; bare metal and API credits gain pause and a step for every loop by composition. Every timer loop gates on entry, works when due, and waits through the controller, so a pause is observed within its bound whatever the interval. Wire paths and the canonical client are unchanged |
 | [`apicredits-end-to-end-lane`](apicredits-end-to-end-lane/) | design phase; not planned; no blocking dependency | Gives API credits an end-to-end lane of its own, as a separate pipeline job rather than a seat in the VM lane, with its loops held and stepped through the canonical client, and gives its storefront production-application integration tests, which it has never had. Found by `kit-owned-storefront-loop-lifecycle` |
 | [`kit-owned-storefront-shell`](kit-owned-storefront-shell/) | design phase; not planned; depends on the seam, the three runtime kits, and `kit-owned-storefront-loop-lifecycle` | Extracts what every storefront still duplicates beneath the runtimes: the route set over the core models, executable assembly, and health, with the kit composition root owning the loop controller. A domain contributes codecs, hooks, extra routes, and timings, not a controller or a server. The other two next-wave changes land as contributions to it |
 | [`kit-owned-listing-and-fulfillment-lifecycles`](kit-owned-listing-and-fulfillment-lifecycles/) | design phase; not planned; depends on the shell | Extracts the seller listing lifecycle over the common binding (close, pause, reopen, successor carry-over) and restart-safe fulfillment convergence (obligation resumption, terminal-state driving, executor-result reconciliation), and replaces the VM per-site projection cache with the capacity kit's state |
@@ -158,7 +158,7 @@ requirements are live in `openspec/specs/`).
 Two changes now own what that goal recorded as its remaining gap.
 
 ```text
-kit-owned-storefront-loop-lifecycle (Goal 4, complete) ──► contact-payload-retention ──► compose-contact-exchange-across-compute
+kit-owned-storefront-loop-lifecycle (Goal 4, archived) ──► contact-payload-retention ──► compose-contact-exchange-across-compute
 ```
 
 | Change | Status | Acceptance boundary |
@@ -221,8 +221,8 @@ pool-declared-advertisement-and-backing (archived) ─────────�
 
 bare-metal-publication-reads-pool-declarations (archived) ──► bare-metal-listing-shapes (archived) ──► unbacked-bare-metal-listings
 bare-metal-publication-reads-pool-declarations (archived) ──► bare-metal-mock-provisioned-deal
-kit-owned-storefront-loop-lifecycle (Goal 4, complete) ───────► bare-metal-mock-provisioned-deal (lifecycle controls)
-kit-owned-storefront-loop-lifecycle (Goal 4, complete) ──► contact-payload-retention ──► compose-contact-exchange-across-compute (Sections 1–3, 3b) ──► unbacked-bare-metal-listings
+kit-owned-storefront-loop-lifecycle (Goal 4, archived) ───────► bare-metal-mock-provisioned-deal (lifecycle controls)
+kit-owned-storefront-loop-lifecycle (Goal 4, archived) ──► contact-payload-retention ──► compose-contact-exchange-across-compute (Sections 1–3, 3b) ──► unbacked-bare-metal-listings
 bare-metal-and-credits-domain-stacks §4a (Goal 4; bare metal on the kit negotiation runtime) ──┘
 
 publish-indicative-listing-rates (archived)
