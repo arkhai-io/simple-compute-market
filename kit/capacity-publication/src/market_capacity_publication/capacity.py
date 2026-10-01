@@ -458,3 +458,46 @@ class CapacityRuntime:
                 for site_id in self.site_ids
             )
         )
+
+
+#: How often the aggregate capacity-event loop returns to its gate. It performs
+#: no work -- the site pollers do the polling -- so this is purely how soon a
+#: pause is observed, and it must be well inside a pause's own bounded wait.
+#: Tying it to the poll interval instead would make observation as slow as the
+#: slowest deployment's polling, which is a different concern entirely.
+AGGREGATE_GATE_SECONDS = 0.5
+
+_AGGREGATE_HELD_POLL_SECONDS = 0.05
+
+
+async def run_capacity_event_pollers(
+    poll_events: Callable[..., Awaitable[None]],
+    *,
+    gate: Callable[[], bool],
+    site_gate: Callable[[str], Callable[[], bool]],
+    gate_seconds: float = AGGREGATE_GATE_SECONDS,
+) -> None:
+    """Run the per-site capacity-event pollers under one gated aggregate loop.
+
+    ``poll_events`` is a runtime's ``poll_events`` with its interval bound; it
+    receives ``site_gate`` as its per-site gate factory. It gathers the site
+    pollers and never returns while a site is configured, so awaiting it from a
+    gated loop would let that loop gate exactly once and then sit inside the
+    call forever -- reaching its gate once is enough to be acknowledged and not
+    enough to ever observe a pause. It therefore runs as its own task, and this
+    loop gates and waits beside it, which also keeps a storefront with no site
+    configured reporting a capacity loop at all. A fan-out that fails is
+    surfaced here rather than idled over, so the aggregate loop ends with it.
+    """
+
+    pollers = asyncio.create_task(poll_events(paused=site_gate))
+    try:
+        while True:
+            if gate():
+                await asyncio.sleep(_AGGREGATE_HELD_POLL_SECONDS)
+                continue
+            if pollers.done():
+                await pollers
+            await asyncio.sleep(gate_seconds)
+    finally:
+        pollers.cancel()

@@ -66,14 +66,10 @@ from market_storefront.models.capacity_admin_models import (
     ResourcePatchResponse,
     UsageStartedEventRequest,
 )
-from market_storefront.lifecycle import (
-    CAPACITY_EVENTS_POLLER,
-    FULFILLMENT_RESUME,
-    PUBLICATION,
-    SETTLEMENT_SERVICING,
-    SITE_PROJECTION_POLLER,
-)
-from market_storefront.server import _set_globally_paused, _set_loops_paused
+from market_storefront import lifecycle as _lifecycle
+from market_storefront import lifecycle_steps as _lifecycle_steps  # noqa: F401 - registers the steps
+from market_storefront.server import _set_globally_paused
+from market_storefront_kit import LifecycleRouteError, StorefrontLifecycleRouteService
 from market_pool_overrides import (
     PoolOverrideDeleteResponse,
     PoolOverrideListResponse,
@@ -153,13 +149,8 @@ def require_reservation_fields(
     )
 
 
-ADVANCE_LOOP_NAMES = {
-    "settlement-servicing": SETTLEMENT_SERVICING,
-    "fulfillment-resume": FULFILLMENT_RESUME,
-    "site-projections": SITE_PROJECTION_POLLER,
-    "capacity-events": CAPACITY_EVENTS_POLLER,
-    "publication": PUBLICATION,
-}
+def _lifecycle_routes() -> StorefrontLifecycleRouteService:
+    return StorefrontLifecycleRouteService(_lifecycle.controller())
 
 
 @cbv(router)
@@ -380,19 +371,11 @@ class AdminController:
         )
 
     # ------------------------------------------------------------------
-    # One cycle of one loop, while the timers are held.
+    # Holding the timer loops, and one cycle of one loop while they are held.
     #
-    # Each route reports the loop's registered name from `lifecycle` rather
-    # than a literal. A literal is a third place a loop's name is spelled --
-    # after the registration and the gate call -- and this one had already
-    # drifted: the route was still called `claims` and a caller still expected
-    # `claims_engine` after the claims engine became settlement servicing.
-    #
-    # Each route calls the operation the timer was already invoking and returns
-    # what that operation returns. None drives an iteration of the loop itself,
-    # and none implements a transition the loop does not: a manual cycle that
-    # behaved differently from the timer would prove nothing about production.
-    # Running while paused is the entire purpose.
+    # Each step is the operation the loop's timer invokes, registered with the
+    # loop controller beside the loop (`market_storefront.lifecycle_steps`), and
+    # returns what that operation returns. Running while held is the purpose.
     # ------------------------------------------------------------------
 
     @router.post(
@@ -405,17 +388,16 @@ class AdminController:
         Two controls, deliberately separate. `/admin/pause` stops the
         storefront accepting new negotiations; this stops the loops
         reconciling behind a caller's back. A scenario needs deterministic
-        reconciliation *and* a deal to agree, so anything that did both at once
-        would make the second impossible -- which is exactly what conflating
-        them produced: `negotiate/new` refused with `paused/global`.
+        reconciliation *and* a deal to agree, so a control that did both would
+        make the second impossible.
 
         Loops are held rather than stopped: nothing is torn down, no cycle is
         cut part-way, and a poller keeps its feed position. Each loop's work
         stays reachable through its own run-cycle route while held.
         """
-        loops = await _set_loops_paused(True)
-        logger.info("[ADMIN] Timer loops paused: %s", loops)
-        return {"paused": True, "loops": loops}
+        result = await _lifecycle_routes().pause()
+        logger.info("[ADMIN] Timer loops paused: %s", result["loops"])
+        return result
 
     @router.post(
         "/lifecycle/resume",
@@ -423,148 +405,31 @@ class AdminController:
     )
     async def resume_lifecycle_loops(self) -> dict:
         """Return the loops to work; each performs its next cycle."""
-        loops = await _set_loops_paused(False)
-        logger.info("[ADMIN] Timer loops resumed: %s", loops)
-        return {"paused": False, "loops": loops}
-
-    @router.post(
-        "/lifecycle/settlement-servicing/run-cycle",
-        summary="Run one settlement-servicing sweep now (admin)",
-    )
-    async def run_settlement_servicing_cycle(self) -> dict:
-        import market_storefront.container as _container
-
-        composition = _container.resolved_settlement_composition
-        if composition is None:
-            raise HTTPException(
-                status_code=503, detail="settlement composition is not initialized"
-            )
-        processed = await composition.worker.run_once()
-        return {
-            "loop": ADVANCE_LOOP_NAMES["settlement-servicing"],
-            "processed": int(processed),
-        }
-
-    @router.post(
-        "/lifecycle/fulfillment-resume/run-cycle",
-        summary="Run one fulfillment-resume sweep now (admin)",
-    )
-    async def run_fulfillment_resume_cycle(self) -> dict:
-        from market_storefront.services.fulfillment_resume_runtime import (
-            resume_incomplete_fulfillments_once,
-        )
-
-        await resume_incomplete_fulfillments_once(sqlite_client=self._db)
-        return {"loop": ADVANCE_LOOP_NAMES["fulfillment-resume"]}
-
-    @router.post(
-        "/lifecycle/site-projections/run-cycle",
-        summary="Pull site-authority projections now (admin)",
-    )
-    async def run_site_projection_cycle(self) -> dict:
-        """The projection poller's own cycle, named as a loop advance.
-
-        Same work as `/capacity/projections/refresh`, which predates the
-        lifecycle controls and is kept because callers use it. This one is
-        reachable by loop name like every other advance.
-        """
-        from market_storefront.services.site_projection_cache import (
-            load_site_projections,
-            projection_status_summary,
-        )
-
-        await load_site_projections(self._db)
-        return {
-            "loop": ADVANCE_LOOP_NAMES["site-projections"],
-            "sites": projection_status_summary(),
-        }
-
-    @router.post(
-        "/lifecycle/capacity-events/dry-run",
-        summary="Report what one capacity-event cycle would do (admin)",
-    )
-    async def dry_run_capacity_events_cycle(self) -> dict:
-        """Read each site's feed and report the cycle without running it.
-
-        The read half of stepping this loop. Capacity deltas are what close
-        and reopen derived listings, so an advance changes what buyers can
-        discover; a caller that can see the pending events first can assert
-        on the cause before committing to the effect, which is what the
-        evaluate routes do for a negotiation and a settlement.
-
-        Emits nothing, reconciles nothing, and leaves every cursor where it
-        was -- two consecutive dry runs report the same thing.
-        """
-        runtime = self._runtime()
-        sites = [
-            (await runtime.preview_events_once(site_id)).to_dict()
-            for site_id in runtime.site_ids
-        ]
-        return {
-            "loop": ADVANCE_LOOP_NAMES["capacity-events"],
-            "dry_run": True,
-            "sites": sites,
-            "pending_count": sum(int(site["pending_count"]) for site in sites),
-        }
-
-    @router.post(
-        "/lifecycle/capacity-events/run-cycle",
-        summary="Drain one capacity-event cycle per site now (admin)",
-    )
-    async def run_capacity_events_cycle(self) -> dict:
-        """Run exactly one cycle of each site's capacity-event feed.
-
-        One cycle per site per call, not a drain to the head: a truncated page
-        reports `truncated` so a caller advancing deliberately can step again
-        and see each page separately, rather than having the route decide how
-        far to go.
-
-        Addresses the same per-site cursor the running poller holds. Intended
-        to be called while the loop is held -- a cycle either runs completely
-        or never starts, so an advance under the pause has the feed to itself.
-        """
-        runtime = self._runtime()
-        sites = [
-            (await runtime.drain_events_once(site_id)).to_dict()
-            for site_id in runtime.site_ids
-        ]
-        logger.info("[ADMIN] Capacity-event cycle advanced: %s", sites)
-        return {
-            "loop": ADVANCE_LOOP_NAMES["capacity-events"],
-            "sites": sites,
-            "applied_count": sum(int(site["applied_count"]) for site in sites),
-        }
-
-    @router.post(
-        "/lifecycle/publication/dry-run",
-        summary="Report what one publication cycle would do (admin)",
-    )
-    async def dry_run_publication_cycle(self) -> dict:
-        """Derive the next cycle's actions and apply none of them.
-
-        Reports every publish, refresh, close, reopen, hold, and refusal the
-        cycle would perform, with its reason. It writes no listing, binding, or
-        registry state, so two consecutive dry runs report the same thing.
-        """
-        from market_storefront.services.publication_loop import (
-            run_publication_cycle_once,
-        )
-
-        return await run_publication_cycle_once(dry_run=True)
-
-    @router.post(
-        "/lifecycle/publication/run-cycle",
-        summary="Run one publication cycle now (admin)",
-    )
-    async def run_publication_cycle(self) -> dict:
-        """Run exactly the cycle the timer runs, whether or not loops are held."""
-        from market_storefront.services.publication_loop import (
-            run_publication_cycle_once,
-        )
-
-        result = await run_publication_cycle_once(dry_run=False)
-        logger.info("[ADMIN] Publication cycle advanced: %s", result["counts"])
+        result = await _lifecycle_routes().resume()
+        logger.info("[ADMIN] Timer loops resumed: %s", result["loops"])
         return result
+
+    @router.post(
+        "/lifecycle/{loop}/run-cycle",
+        summary="Run one cycle of one lifecycle loop now (admin)",
+    )
+    async def run_lifecycle_cycle(self, loop: str) -> dict:
+        """Run exactly the cycle the loop's timer runs, whether or not loops are held."""
+        try:
+            return dict(await _lifecycle_routes().run_cycle(loop))
+        except LifecycleRouteError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+    @router.post(
+        "/lifecycle/{loop}/dry-run",
+        summary="Report what one cycle of one lifecycle loop would do (admin)",
+    )
+    async def dry_run_lifecycle_cycle(self, loop: str) -> dict:
+        """Report the loop's next cycle without applying it, where it offers a preview."""
+        try:
+            return dict(await _lifecycle_routes().dry_run(loop))
+        except LifecycleRouteError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
     @router.post(
         "/capacity/projections/refresh",

@@ -27,6 +27,7 @@ from market_pool_overrides import PoolOverrideService, SQLitePoolOverrideStore
 from market_storefront_kit import (
     AlkahestChain,
     AlkahestClientPolicy,
+    StorefrontLoopController,
     build_alkahest_clients,
 )
 
@@ -42,6 +43,7 @@ from .hosted_routes import (
     BareMetalHostedDomainCallbacks,
     lifecycle_domain_callbacks,
 )
+from .lifecycle_steps import register_bare_metal_lifecycle_steps
 from .delivery import (
     build_introduction_delivery,
     load_storefront_delivery_sinks,
@@ -146,6 +148,11 @@ class BareMetalStorefrontRuntime:
     publication_lock: asyncio.Lock = field(
         default_factory=asyncio.Lock, repr=False, compare=False
     )
+    # The process's one loop controller: it holds this storefront's timer loops
+    # under one pause and steps each loop's cycle on request.
+    loops: StorefrontLoopController = field(
+        default_factory=StorefrontLoopController, init=False, repr=False, compare=False
+    )
     settlement_repository: SettlementSQLiteRepository = field(init=False, repr=False)
     settlement_clients: Mapping[str, Any] = field(init=False, repr=False)
     settlement_runtime: SettlementRuntime = field(init=False, repr=False)
@@ -167,6 +174,7 @@ class BareMetalStorefrontRuntime:
             "settlement_runtime",
             SettlementRuntime(repository, clients),
         )
+        register_bare_metal_lifecycle_steps(self)
 
     def negotiation_service(self) -> BareMetalNegotiationService:
         """Build the request-scoped bare-metal negotiation orchestrator."""

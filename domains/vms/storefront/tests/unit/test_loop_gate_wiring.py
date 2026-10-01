@@ -31,16 +31,17 @@ from functools import partial
 
 import pytest
 
-from market_storefront import lifecycle, server
+from market_capacity_publication.capacity import AGGREGATE_GATE_SECONDS
+from market_storefront import lifecycle
 
 
 @pytest.fixture(autouse=True)
 async def _clean_registry():
-    server._LOOPS_PAUSED = False
+    lifecycle.controller().request_pause(False)
     lifecycle.reset_for_tests()
     yield
     lifecycle.reset_for_tests()
-    server._LOOPS_PAUSED = False
+    lifecycle.controller().request_pause(False)
     await asyncio.sleep(0)
 
 
@@ -57,7 +58,7 @@ async def _run_briefly(coro_factory, name: str, *, seconds: float = 0.2) -> None
     reclaiming a coroutine designed never to return.
     """
     task = asyncio.create_task(coro_factory())
-    lifecycle._HANDLES[name] = task
+    lifecycle.controller()._handles[name] = task
     try:
         await asyncio.sleep(seconds)
     finally:
@@ -70,7 +71,7 @@ async def _run_briefly(coro_factory, name: str, *, seconds: float = 0.2) -> None
 
 def _acknowledged(name: str) -> bool:
     """Whether this exact name reached its gate at least once."""
-    return bool(lifecycle._GATE_CALLS.get(name))
+    return bool(lifecycle.controller()._gate_calls.get(name))
 
 
 def _gate_calls(name: str) -> int:
@@ -83,7 +84,7 @@ def _gate_calls(name: str) -> int:
     that -- one awaited a call that never returns, the other slept its startup
     delay after gating.
     """
-    return int(lifecycle._GATE_CALLS.get(name, 0))
+    return int(lifecycle.controller()._gate_calls.get(name, 0))
 
 
 class TestRegisteredNamesAreTheGatedNames:
@@ -298,7 +299,7 @@ class TestEachProductionLoopAcknowledges:
             cycles.append(dry_run)
             return {}
 
-        server._LOOPS_PAUSED = True
+        lifecycle.controller().request_pause(True)
         await _run_briefly(
             partial(publication_loop, _cycle),
             lifecycle.PUBLICATION,
@@ -324,12 +325,12 @@ class TestEachProductionLoopAcknowledges:
             return {}
 
         task = asyncio.create_task(publication_loop(_cycle))
-        lifecycle._HANDLES[lifecycle.PUBLICATION] = task
+        lifecycle.controller()._handles[lifecycle.PUBLICATION] = task
         try:
             await asyncio.wait_for(first_cycle.wait(), timeout=1.0)
             loop = asyncio.get_running_loop()
             started = loop.time()
-            states = await server._set_loops_paused(True)
+            states = await lifecycle.controller().pause()
 
             assert states[lifecycle.PUBLICATION] == "paused"
             assert loop.time() - started < 1.0
@@ -357,7 +358,7 @@ class TestEachProductionLoopAcknowledges:
             return {}
 
         task = asyncio.create_task(publication_loop(_cycle))
-        lifecycle._HANDLES[lifecycle.PUBLICATION] = task
+        lifecycle.controller()._handles[lifecycle.PUBLICATION] = task
         try:
             await asyncio.wait_for(ran.wait(), timeout=1.0)
             ran.clear()
@@ -411,7 +412,7 @@ class TestEachProductionLoopAcknowledges:
         await _run_briefly(
             partial(cc.capacity_events_poller_loop, object()),
             lifecycle.CAPACITY_EVENTS_POLLER,
-            seconds=cc._AGGREGATE_GATE_SECONDS * 2.5,
+            seconds=AGGREGATE_GATE_SECONDS * 2.5,
         )
 
         assert _acknowledged(lifecycle.CAPACITY_EVENTS_POLLER)
@@ -461,7 +462,7 @@ class TestEachProductionLoopAcknowledges:
 
         for site in ("site-a", "site-b"):
             name = lifecycle.capacity_site_loop_name(site)
-            assert name in lifecycle._DECLARED, (
+            assert name in lifecycle.controller()._declared, (
                 f"{site} has no declared gate, so it cannot be waited on"
             )
             assert _acknowledged(name), f"{site} never acknowledged its own gate"
@@ -491,10 +492,10 @@ class TestEachProductionLoopAcknowledges:
         monkeypatch.setattr(cc, "build_capacity_runtime", lambda _f: _Runtime())
 
         task = asyncio.create_task(cc.capacity_events_poller_loop(object()))
-        lifecycle._HANDLES[lifecycle.CAPACITY_EVENTS_POLLER] = task
+        lifecycle.controller()._handles[lifecycle.CAPACITY_EVENTS_POLLER] = task
         try:
             await asyncio.sleep(0.1)
-            server._LOOPS_PAUSED = True
+            lifecycle.controller().request_pause(True)
             await lifecycle.await_quiescence(0.05)
             states = lifecycle.loop_states()
         finally:

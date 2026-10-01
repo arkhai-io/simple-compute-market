@@ -365,3 +365,112 @@ async def test_concurrent_publication_steps_run_one_after_the_other(tmp_path) ->
             await asyncio.gather(first, second)
 
     assert log == ["start first", "end first", "start second", "end second"]
+
+
+class _StubServicingWorker:
+    """Stands in for settlement servicing: the loop body gates and waits like
+    the kit worker; a step is one counted sweep."""
+
+    def __init__(self) -> None:
+        self.sweeps = 0
+
+    async def run(self, *, paused=None, wait=None) -> None:
+        while True:
+            if paused is not None and paused():
+                await asyncio.sleep(0.005)
+                continue
+            await (wait(3600) if wait is not None else asyncio.sleep(3600))
+
+    async def run_once(self) -> int:
+        self.sweeps += 1
+        return 0
+
+
+def _runtime_with_servicing(path: str) -> tuple[BareMetalStorefrontRuntime, _StubServicingWorker]:
+    worker = _StubServicingWorker()
+    return dataclasses.replace(_runtime(path), settlement_worker=worker), worker
+
+
+async def test_the_pause_holds_every_loop_and_each_step_runs_while_held(tmp_path) -> None:
+    runtime, worker = _runtime_with_servicing(str(tmp_path / "storefront.db"))
+    app = _app(runtime)
+
+    async with app.router.lifespan_context(app):
+        async with _admin_client(app) as admin:
+            paused = await admin.admin_pause_lifecycle_loops()
+            assert paused["paused"] is True
+            assert paused["loops"] == {
+                "negotiation_watchdog": "paused",
+                "settlement_servicing": "paused",
+            }
+
+            servicing = await admin.admin_run_lifecycle_cycle("settlement-servicing")
+            watchdog = await admin.admin_run_lifecycle_cycle("negotiation-watchdog")
+            assert servicing == {"loop": "settlement_servicing", "processed": 0}
+            assert watchdog == {"loop": "negotiation_watchdog", "abandoned": 0}
+            assert worker.sweeps == 1, "a step must run exactly one cycle"
+            assert set(runtime.loops.states().values()) == {"paused"}, (
+                "a step must not resume the loops"
+            )
+
+            resumed = await admin.admin_resume_lifecycle_loops()
+            assert resumed == {
+                "paused": False,
+                "loops": {
+                    "negotiation_watchdog": "running",
+                    "settlement_servicing": "running",
+                },
+            }
+
+
+async def test_the_lifecycle_pause_refuses_an_unsigned_request(tmp_path) -> None:
+    runtime, _worker = _runtime_with_servicing(str(tmp_path / "storefront.db"))
+    app = _app(runtime)
+
+    # Rejection path: an unsigned request is refused before any loop is held.
+    with TestClient(app) as client:
+        response = client.post("/api/v1/admin/lifecycle/pause")
+
+    assert response.status_code == 401
+    assert not runtime.loops.is_pause_requested()
+
+
+async def test_publication_offers_no_preview(tmp_path) -> None:
+    log: list[str] = []
+    app = _app(_stepped_runtime(str(tmp_path / "storefront.db"), log))
+
+    async with app.router.lifespan_context(app):
+        async with _admin_client(app) as admin:
+            with pytest.raises(StorefrontClientError) as refused:
+                await admin.admin_dry_run_lifecycle_cycle("publication")
+
+    assert refused.value.status_code == 404
+    assert log == []
+
+
+async def test_startup_registers_exactly_the_loops_it_starts(tmp_path) -> None:
+    runtime, _worker = _runtime_with_servicing(str(tmp_path / "storefront.db"))
+    app = _app(runtime)
+
+    async with app.router.lifespan_context(app):
+        assert runtime.loops.registered_loop_names() == [
+            "negotiation_watchdog",
+            "settlement_servicing",
+        ]
+        assert runtime.loops.step_routes() == {
+            "negotiation-watchdog": "negotiation_watchdog",
+            "publication": "publication",
+            "settlement-servicing": "settlement_servicing",
+        }
+
+
+async def test_a_storefront_without_settlement_servicing_steps_no_such_loop(tmp_path) -> None:
+    runtime = _runtime(str(tmp_path / "storefront.db"))
+    app = _app(runtime)
+
+    async with app.router.lifespan_context(app):
+        assert runtime.loops.registered_loop_names() == ["negotiation_watchdog"]
+        async with _admin_client(app) as admin:
+            with pytest.raises(StorefrontClientError) as refused:
+                await admin.admin_run_lifecycle_cycle("settlement-servicing")
+    assert refused.value.status_code == 404

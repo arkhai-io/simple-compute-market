@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Protocol
@@ -173,24 +173,27 @@ async def run_negotiation_watchdog(
     emit_stage_event: Callable[..., None] | None = None,
     logger: LoggerLike | None = None,
     paused: Callable[[], bool] | None = None,
+    wait: Callable[[float], Awaitable[None]] | None = None,
 ) -> None:
-    """Continuously run the shared sweep until the task is cancelled."""
+    """Continuously run the shared sweep until the task is cancelled.
+
+    Each cycle reads the gate, sweeps if the sweep is due, then waits one
+    interval through `wait` -- a storefront's loop controller, which returns
+    early on a pause request -- or a plain sleep. The gate is read on entry and
+    immediately before every sweep, so a pause requested during the wait is
+    observed before the next sweep.
+    """
 
     active_logger = logger or logging.getLogger(__name__)
-    # The initial delay is applied inside the loop, after the gate, so it holds
-    # the first sweep and not the acknowledgement. Its purpose is to avoid
-    # measuring freshly created threads against a clock that has not caught up,
-    # which constrains when a sweep may run -- nothing about it requires the
-    # loop to be unobservable. Delaying before the first gate call made the
-    # watchdog invisible for the whole window, and the first pause of an
-    # end-to-end run lands inside it.
-    # A deadline, not a sleep. Sleeping the delay inside the loop still stops
-    # the loop cycling for its duration, so a pause requested in that window is
-    # not observed until it elapses -- the loop reaches its gate once and then
-    # disappears for 30 seconds. Comparing a deadline holds the sweep while the
-    # cycle, and therefore the gate, keeps its cadence.
-    sweep_not_before = (
-        asyncio.get_running_loop().time() + float(policy.initial_delay_seconds or 0.0)
+    # A deadline, not a sleep, so the gate keeps its cadence while the first
+    # sweep is held back. A loop that slept before its first gate call would be
+    # invisible to a pause for that whole window, and the first pause of an
+    # end-to-end run lands inside it. The first sweep comes no earlier than one
+    # interval after start, and no earlier than the initial delay, which avoids
+    # measuring freshly created threads against a clock that has not caught up.
+    sweep_not_before = asyncio.get_running_loop().time() + max(
+        float(policy.interval_seconds),
+        float(policy.initial_delay_seconds or 0.0),
     )
     if policy.log_loop_start:
         active_logger.info(
@@ -203,23 +206,31 @@ async def run_negotiation_watchdog(
             if paused is not None and paused():
                 await asyncio.sleep(_PAUSED_POLL_SECONDS)
                 continue
-            await asyncio.sleep(policy.interval_seconds)
-            if asyncio.get_running_loop().time() < sweep_not_before:
-                continue
-            abandoned = await sweep_stale_negotiations(
-                repository,
-                policy,
-                emit_stage_event=emit_stage_event,
-                logger=active_logger,
-            )
-            if abandoned:
-                active_logger.info(
-                    "negotiation_watchdog_loop: marked %d stale thread(s) as %s",
-                    abandoned,
-                    policy.terminal_state,
+            if asyncio.get_running_loop().time() >= sweep_not_before:
+                abandoned = await sweep_stale_negotiations(
+                    repository,
+                    policy,
+                    emit_stage_event=emit_stage_event,
+                    logger=active_logger,
                 )
+                if abandoned:
+                    active_logger.info(
+                        "negotiation_watchdog_loop: marked %d stale thread(s) as %s",
+                        abandoned,
+                        policy.terminal_state,
+                    )
         except asyncio.CancelledError:
             active_logger.info("negotiation_watchdog_loop: cancelled, shutting down")
             break
         except Exception as exc:
             active_logger.exception("negotiation_watchdog_loop error: %s", exc)
+        # Outside the work's handler so a failing sweep still waits its
+        # interval rather than retrying in a tight loop.
+        try:
+            if wait is not None:
+                await wait(float(policy.interval_seconds))
+            else:
+                await asyncio.sleep(policy.interval_seconds)
+        except asyncio.CancelledError:
+            active_logger.info("negotiation_watchdog_loop: cancelled, shutting down")
+            break

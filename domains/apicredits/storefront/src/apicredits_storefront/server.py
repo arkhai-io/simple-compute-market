@@ -32,6 +32,7 @@ from apicredits_storefront.services.fulfillment_service import (
 )
 from apicredits_storefront.services.listing_service import ListingService
 from apicredits_storefront.services.system_service import SystemService
+from apicredits_storefront.lifecycle_steps import register_api_credit_lifecycle_steps
 from apicredits_storefront.startup import _startup_tasks
 from apicredits_storefront.settlement_composition import (
     ApiCreditsSettlementComposition,
@@ -56,6 +57,7 @@ from core_storefront.services.negotiation_service import NegotiationService
 from core_storefront.stage_log import set_stage_event_db_path, stage_event
 from market_core import MarketDomainContract
 from market_storefront_kit import (
+    StorefrontLoopController,
     AlkahestChain,
     AlkahestClientPolicy,
     StorefrontComposition,
@@ -250,6 +252,9 @@ async def _start_api_credit_services(
     _container.resolved_negotiation_runtime = services.negotiation_runtime
     _container.resolved_negotiation_service = services.negotiation_service
     _container.resolved_system_service = services.system_service
+    loops = StorefrontLoopController(logger=logger)
+    register_api_credit_lifecycle_steps(loops)
+    _container.resolved_loop_controller = loops
     logger.info("[STARTUP] Singletons initialized")
     await _startup_tasks(domain=services.domain)
     logger.info("[STARTUP] Background tasks started")
@@ -266,6 +271,9 @@ async def _stop_api_credit_services(
 from apicredits_storefront.controllers.hosted_settlement_controller import (  # noqa: E402
     evidence_router,
     router as hosted_settlement_router,
+)
+from apicredits_storefront.controllers.lifecycle_controller import (  # noqa: E402
+    router as lifecycle_router,
 )
 from apicredits_storefront.controllers.listings_controller import (  # noqa: E402
     router as listings_router,
@@ -350,6 +358,7 @@ def build_api_credits_storefront_app(
                     negotiations_router,
                     settle_router,
                     admin_settle_router,
+                    lifecycle_router,
                 ),
                 middleware=(authenticate_response,),
             ),

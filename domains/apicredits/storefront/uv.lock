@@ -159,6 +159,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "arkhai-core-storefront-client" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
 ]
@@ -191,6 +192,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "arkhai-core-storefront-client", specifier = ">=0.22.0" },
     { name = "pytest", specifier = ">=8.3.4,<9.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.23.8,<1.0.0" },
 ]
@@ -234,6 +236,18 @@ dependencies = [
 ]
 wheels = [
     { path = "arkhai_core_storefront-0.6.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-core-storefront-client"
+version = "0.22.0"
+source = { registry = "../../../.dist" }
+dependencies = [
+    { name = "arkhai-kit-identity" },
+    { name = "httpx" },
+]
+wheels = [
+    { path = "arkhai_core_storefront_client-0.22.0-py3-none-any.whl" },
 ]
 
 [[package]]

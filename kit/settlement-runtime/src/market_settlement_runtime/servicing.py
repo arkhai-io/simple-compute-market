@@ -99,26 +99,43 @@ class SettlementServicingWorker:
             processed += 1
         return processed
 
-    async def run(self, *, paused: Callable[[], bool] | None = None) -> None:
+    async def run(
+        self,
+        *,
+        paused: Callable[[], bool] | None = None,
+        wait: Callable[[float], Awaitable[None]] | None = None,
+    ) -> None:
         """Sweep due obligations on an interval until cancelled.
 
-        `paused` holds the loop at the top of a cycle without stopping it:
-        nothing is torn down, no sweep is cut part-way, and `run_once` stays
-        callable so an operator or a scenario can advance one cycle while the
-        timer is held. The previous claims engine carried the same predicate,
-        and dropping it left callers with no way to stop racing this loop.
+        Each cycle reads `paused`, sweeps if a sweep is due, then waits one
+        interval through `wait` -- a storefront's loop controller, which returns
+        early on a pause request -- or a plain sleep. `paused` holds the loop at
+        the top of a cycle without stopping it: nothing is torn down, no sweep is
+        cut part-way, and `run_once` stays callable so an operator or a scenario
+        can advance one cycle while the timer is held. It is read on entry, so a
+        pause is observable from the moment the loop starts, and immediately
+        before every sweep, so a pause requested during the wait is observed
+        before the next sweep. The first sweep comes one interval after start.
         """
+        loop = asyncio.get_running_loop()
+        sweep_not_before = loop.time() + self._interval_seconds
         while True:
             try:
                 if paused is not None and paused():
                     await asyncio.sleep(_PAUSED_POLL_SECONDS)
                     continue
-                await asyncio.sleep(self._interval_seconds)
-                await self.run_once()
+                if loop.time() >= sweep_not_before:
+                    await self.run_once()
             except asyncio.CancelledError:
                 raise
             except Exception:
                 logger.exception("settlement servicing sweep failed")
+            # Outside the sweep's handler so a failing sweep still waits its
+            # interval rather than retrying in a tight loop.
+            if wait is not None:
+                await wait(self._interval_seconds)
+            else:
+                await asyncio.sleep(self._interval_seconds)
 
     async def wake(self, obligation_ref: str) -> None:
         await self._repository.wake_settlement_obligation(obligation_ref)

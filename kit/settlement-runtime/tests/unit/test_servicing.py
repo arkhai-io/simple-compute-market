@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import asyncio
+from unittest.mock import MagicMock
+
 from market_identity import Identity, IdentityScheme
 
 from market_settlement_runtime import (
@@ -286,3 +289,55 @@ async def test_return_cleanup_retries_durably_after_restart(tmp_path) -> None:
     assert stored is not None
     assert stored["fulfillment_ref"] == "durable-fulfillment-evidence"
     assert stored["collection_state"] == "pending"
+
+class _CountingWorker(SettlementServicingWorker):
+    """Counts sweeps; the loop's ordering is what these tests examine."""
+
+    def __init__(self, *, interval_seconds: float) -> None:
+        super().__init__(
+            MagicMock(), MagicMock(), worker_id="counting", interval_seconds=interval_seconds
+        )
+        self.sweeps = 0
+
+    async def run_once(self, limit: int = 50) -> int:
+        self.sweeps += 1
+        return 0
+
+
+async def test_the_first_sweep_waits_one_interval():
+    worker = _CountingWorker(interval_seconds=3600)
+    task = asyncio.create_task(worker.run())
+    await asyncio.sleep(0.02)
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    assert worker.sweeps == 0
+
+
+async def test_a_pause_requested_during_the_wait_holds_the_next_sweep():
+    worker = _CountingWorker(interval_seconds=0.02)
+    held = {"value": False}
+    woke = asyncio.Event()
+
+    async def _wait(seconds: float) -> None:
+        # Returns early once a pause is requested, as a loop controller's does.
+        try:
+            await asyncio.wait_for(woke.wait(), timeout=seconds)
+        except asyncio.TimeoutError:
+            pass
+
+    task = asyncio.create_task(worker.run(paused=lambda: held["value"], wait=_wait))
+    try:
+        await asyncio.sleep(0.1)
+        assert worker.sweeps >= 1
+        held["value"] = True
+        woke.set()
+        before = worker.sweeps
+        await asyncio.sleep(0.1)
+        assert worker.sweeps == before, "a held servicing loop swept"
+        held["value"] = False
+        woke.clear()
+        await asyncio.sleep(0.1)
+        assert worker.sweeps > before
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)

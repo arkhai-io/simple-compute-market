@@ -21,7 +21,7 @@ from dataclasses import asdict
 
 import pytest
 
-from market_storefront import lifecycle, server
+from market_storefront import lifecycle
 from market_storefront.startup import _start_publication_loop
 
 from tests._settings_overrides import settings_overrides
@@ -466,10 +466,10 @@ async def test_an_unbacked_listing_publishes_and_negotiates_to_acceptance(tmp_pa
 def lifecycle_registry():
     """A clean loop registry and pause flag, as a fresh process has."""
     lifecycle.reset_for_tests()
-    server._LOOPS_PAUSED = False
+    lifecycle.controller().request_pause(False)
     yield
     lifecycle.reset_for_tests()
-    server._LOOPS_PAUSED = False
+    lifecycle.controller().request_pause(False)
 
 
 async def test_the_lifecycle_pause_holds_the_loop_while_its_controls_step_it(

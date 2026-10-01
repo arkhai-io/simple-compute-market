@@ -14,6 +14,15 @@ from .composition import (
     build_storefront_lifespan,
     get_storefront_container,
 )
+from .lifecycle import (
+    HELD_POLL_SECONDS,
+    LoopNotFound,
+    LoopStep,
+    PreviewNotOffered,
+    QUIESCENCE_TIMEOUT_SECONDS,
+    StorefrontLoopController,
+)
+from .lifecycle_routes import LifecycleRouteError, StorefrontLifecycleRouteService
 from .negotiation_watchdog import (
     NegotiationRepository,
     NegotiationWatchdogPolicy,
@@ -26,6 +35,14 @@ from .negotiation_watchdog import (
 __all__ = [
     "AlkahestChain",
     "AlkahestClientPolicy",
+    "HELD_POLL_SECONDS",
+    "LifecycleRouteError",
+    "LoopNotFound",
+    "LoopStep",
+    "PreviewNotOffered",
+    "QUIESCENCE_TIMEOUT_SECONDS",
+    "StorefrontLifecycleRouteService",
+    "StorefrontLoopController",
     "NegotiationRepository",
     "NegotiationWatchdogPolicy",
     "StorefrontComposition",
