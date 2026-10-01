@@ -40,7 +40,7 @@ The payments service never parses the agreement, so the two can evolve independe
 - `authorities`: `reverse` lists the seller and Arkhai's dispute authority, which the service requires; `start` and `stop` are empty.
 - `nonce`: fixed, since `negotiation_id` already makes each agreement unique.
 
-The transaction id is `sha256(JCS(mandate))`, so both sides know it before approval. The buyer's kit checks the mandate against the agreement and its own policy (payee, amount, hold, `deal`) and approves it, attaching the agreement. Both sides poll `GET /transactions/{id}`; the seller provisions once the receipt matches. A push hook can come when polling hurts.
+The transaction id is `sha256(JCS(mandate))`, so both sides know it before approval. The buyer's kit checks the mandate against the agreement and its own policy (payee, amount, hold, `deal`) and approves it, attaching the agreement. Both sides poll `GET /transactions/{id}`; the seller provisions once the receipt matches. A push hook from the payments service is expected to replace polling (see Resolved Questions).
 
 ### Depositing the agreement
 
@@ -60,9 +60,9 @@ Built on `fiat.stripe.v1` and `kit/hosted-settlement`: `consume-expanded-stripe-
 - **Negotiation slot.** `kit/negotiation-runtime` builds in one protocol (counter/accept/exit, an amount, `AgreementTerms`). Revisit when a second negotiation protocol arrives, e.g. auctions.
 - **Per-stage kit declarations** (which predecessor outputs a stage accepts, for filtering). Revisit with the negotiation slot.
 
-## Open Questions
+## Resolved Questions
 
-- The overview sketches neutral `SettlementObligation` parties as `payer`/`payee`, but the current core carrier has `payer`/`claimant` and their principals. Which mechanism-neutral recipient field, if any, remains when Alkahest claimant semantics move into `params`? The Arkhai mandate's `to` value comes from the payment option, and the agreement already carries buyer and seller principals.
-- The proposal assigns escrow servicing to Alkahest, while the current `kit/settlement-runtime` owns a shared operation journal and worker. Does that shared runtime remain as an implementation dependency for Alkahest, or is it retired as Alkahest takes ownership of the lifecycle?
-- Whether the buyer's kit polls through the storefront or the payments service only, and whether a hook replaces polling.
-- The SDK's default window. The payments service enforces no minimum; chargeback exposure is covered by its cash reserve.
+- No mechanism-neutral recipient field remains in `SettlementObligation`. The Agreement carries buyer and seller principals, and the Arkhai mandate's `to` comes from the payment option; Alkahest's claimant moves into its `params`. Core keeps only what at least two parties read.
+- `kit/settlement-runtime` moves into `kit/alkahest`. Arkhai payments keeps no client-side servicing state, so Alkahest is the runtime's only user.
+- Both kits poll the payments service by transaction ID; the storefront relays nothing. A push hook from the payments service is tracked as an idea in arkhai-payments (`transaction-webhooks`) and is expected to replace polling.
+- The SDK's default window is `P7D`. The payments service enforces no minimum; chargeback exposure is covered by its cash reserve.

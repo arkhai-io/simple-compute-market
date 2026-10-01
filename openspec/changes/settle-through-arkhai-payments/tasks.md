@@ -2,11 +2,11 @@
 
 ## 1. Move escrow semantics into `alkahest.v1`
 
-Dependency: Section 2 consumes the settlement-option and accepted-carrier shapes established here. Section 3 depends on Sections 1 and 2. The recipient field and shared settlement-runtime disposition are unresolved in `design.md#open-questions`; resolve them before changing the affected core/runtime contracts.
+Dependency: Section 2 consumes the settlement-option and accepted-carrier shapes established here. Section 3 depends on Sections 1 and 2. The recipient field and shared settlement-runtime disposition are settled in `design.md#resolved-questions`.
 
-- [ ] 1.1 Remove `claimant`, `claimant_principal`, `expiration_unix`, and `conditions` as universal fields from `core/src/market_core/schemas.py`. Keep the accepted mechanism and opaque `params`; carry Alkahest escrow data in its mechanism-owned option and obligation parameters. Do not choose the unresolved neutral recipient field in code before its design question is answered.
+- [ ] 1.1 Remove `claimant`, `claimant_principal`, `expiration_unix`, and `conditions` as universal fields from `core/src/market_core/schemas.py`. Keep the accepted mechanism and opaque `params`; carry Alkahest escrow data in its mechanism-owned option and obligation parameters. No neutral recipient field replaces them.
 - [ ] 1.2 Move Alkahest listing escrow forms, arbiter demands, oracle address, claimant, expiration, and condition decoding into `kit/alkahest/src/market_alkahest/{schemas.py,proposals.py,plans.py,settlement_config.py,claims.py,claim_hooks.py,escrow_verification.py}`. Update existing regression coverage in `kit/alkahest/tests/unit/{test_settlement_config.py,test_proposal_normalization.py,test_plans.py,test_claims.py,test_conditional_escrow_client.py}`.
-- [ ] 1.3 Resolve and implement the `kit/settlement-runtime` boundary recorded in `design.md#open-questions`. Update the affected `src/market_settlement_runtime/{models.py,ports.py,servicing.py,runtime.py,configuration.py}` and existing `tests/unit/{test_accepted_obligation.py,test_servicing.py,test_runtime.py,test_configuration.py}` so no shared mechanism contract imposes Alkahest collect/reclaim semantics on charge-first settlement.
+- [ ] 1.3 Move `kit/settlement-runtime` into `kit/alkahest`. Update the affected `src/market_settlement_runtime/{models.py,ports.py,servicing.py,runtime.py,configuration.py}` and existing `tests/unit/{test_accepted_obligation.py,test_servicing.py,test_runtime.py,test_configuration.py}` so no shared mechanism contract imposes Alkahest collect/reclaim semantics on charge-first settlement.
 - [ ] 1.4 Preserve recovery of already accepted Alkahest work while moving its immutable option and obligation parameters. Update the owning persisted carrier/migration and recovery tests where those records are read; fail closed on records that cannot be unambiguously reconstructed.
 
 ## 2. Emit one explicit Agreement from negotiation
