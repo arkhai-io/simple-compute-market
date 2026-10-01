@@ -514,6 +514,7 @@ e2e-dev-identities-env: ## Print VAR=value lines for `docker compose --env-file`
 	@echo 'VMS_REGISTRY_IDENTITY_CREDENTIAL_FILE=$(E2E_IDENTITY_DIR)/registry-a.eip191'
 	@echo 'VMS_REGISTRY_B_IDENTITY_CREDENTIAL_FILE=$(E2E_IDENTITY_DIR)/registry-b.eip191'
 	@echo 'VMS_PROVISIONING_IDENTITY_ENV_FILE=$(E2E_IDENTITY_DIR)/provisioning.identity.env'
+	@echo 'VMS_ALICE_PROVISIONING_IDENTITY_ENV_FILE=$(E2E_IDENTITY_DIR)/provisioning-alice.identity.env'
 	@echo 'VMS_BOB_IDENTITY_ENV_FILE=$(E2E_IDENTITY_DIR)/bob.identity.env'
 	@echo 'VMS_ALICE_IDENTITY_ENV_FILE=$(E2E_IDENTITY_DIR)/alice.identity.env'
 	@echo 'VMS_BOB_EVM_WALLET_ENV_FILE=$(CURDIR)/domains/vms/storefront/.env.bob.docker'

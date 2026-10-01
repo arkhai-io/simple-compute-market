@@ -27,6 +27,8 @@ services:
       - ${VMS_REGISTRY_B_IDENTITY_CREDENTIAL_FILE:?set private registry Ed25519 signer credential file}:/run/secrets/arkhai/registry-identity/credential:ro
   alice-storefront:
     profiles: [evm-multi-seller]
+  alice-provisioning:
+    profiles: [evm-multi-seller]
   provisioning:
     env_file:
       - ${VMS_PROVISIONING_IDENTITY_ENV_FILE:?set provisioning Ed25519 signer credential environment file}

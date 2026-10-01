@@ -50,6 +50,15 @@ provisioning:
   service_scheme:     "eip191"
   service_credential: "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 
+alice_provisioning:
+  api_url: "http://alice-provisioning:8081"
+  # Public deterministic development identities; never use on a public network.
+  # The admin is Anvil 5; the service has its own Ed25519 signing credential.
+  admin_scheme: "eip191"
+  admin_credential: "0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba"
+  authority_scheme: "ed25519"
+  authority_identifier: "3NPn0gInwKKqVkrFl5_C07yYcjLOfVszbq51kw6EnPw"
+
 api_credits:
   registry_url:   "http://api-credits-registry:8080"
   service_url:    "http://credits-service:8082"

@@ -1,7 +1,7 @@
 # VM compute (vms.compute) market — domain stack.
 #
 # The seller side of the VM compute market: two registry/indexer instances,
-# Bob's and Alice's storefronts, the Redis job queue, and provisioning. The
+# Bob's and Alice's storefronts and their provisioning authorities. The
 # domain stack has no unconditional chain dependency. An explicit Alkahest
 # storefront profile may add Anvil through the root development overlay;
 # a hosted-only profile composes without it.
@@ -143,7 +143,7 @@ services:
     depends_on:
       registry:
         condition: service_healthy
-      provisioning:
+      alice-provisioning:
         condition: service_healthy
     ports:
       - "8002:8002"
@@ -160,10 +160,8 @@ services:
     volumes:
       - ${VMS_ALICE_STOREFRONT_CONFIG:-./storefront/storefront.alice.toml}:/etc/arkhai/storefront.toml:ro
       - ./storefront/src/market_storefront/data/alkahest_anvil_addresses.json:/app/alkahest_anvil_addresses.json:ro
-      # Reuses Bob's seed CSV — the multi-registry test seeds inventory
-      # at runtime via admin_import_resources anyway, so the on-disk CSV
-      # content is irrelevant. Bind-mounted to satisfy the config's
-      # resources_csv_path requirement.
+      # Startup still requires a CSV path. Scenario inventory is declared
+      # through Alice's provisioning authority and read from its projections.
       - ./storefront/src/market_storefront/data/kvm1-machine.csv:/app/resources.csv:ro
     deploy:
       resources:
@@ -176,7 +174,8 @@ services:
       retries: 6
       start_period: 10s
 
-  # 3. Redis (job queue for provisioning service)
+  # 3. Retained Redis service. Provisioning uses process-local job queues
+  # and does not consume this service.
   redis:
     image: redis:7-alpine
     ports:
@@ -191,7 +190,7 @@ services:
   # Configuration is bundled in the compute provisioning service wheel,
   # plus dynaconf profile loading via ACTIVE_PROFILES). Compose-time
   # overrides go in `environment:` below.
-  provisioning:
+  provisioning: &provisioning
     image: arkhai:compute-provisioning
     platform: linux/amd64
     command: ["sh", "-c", "compute-provisioning-migrate && exec compute-provisioning-api"]
@@ -203,7 +202,7 @@ services:
     ports:
       - "8081:8081"
     environment:
-      - DATABASE_URL=sqlite:////app/data/provisioning.db
+      - PROVISIONING_DATABASE_URL=sqlite:////app/data/provisioning.db
       - REDIS_URL=redis://redis:6379
       # Mounts /test/* router used by integration tests' provisioning_test_client
       # (TestStage07 mock-rules). Should never be set in staging/prod.
@@ -227,3 +226,17 @@ services:
       resources:
         limits:
           memory: 384m
+
+  # Each authority keeps its database and in-process job queue in its own
+  # container. Neither storefront shares physical authority.
+  alice-provisioning:
+    <<: *provisioning
+    depends_on:
+      registry:
+        condition: service_healthy
+    ports:
+      - "8083:8081"
+    environment:
+      - PROVISIONING_DATABASE_URL=sqlite:////app/data/provisioning.db
+      - ACTIVE_PROFILES=mock
+      - PROVISIONING_STOREFRONT_URL=http://alice-storefront:8002

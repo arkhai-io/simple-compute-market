@@ -194,8 +194,12 @@ market listing list --resource 'gpu_model=H200' --explain
 market listing show <listing_id>
 ```
 
-`list` queries every compatible URL in `[registry].urls` in parallel and
-deduplicates by listing ID. `--explain` reports canonical registry predicates,
+`list` queries the configured URLs in `[registry].urls` and
+deduplicates by registry authority and listing ID. Endpoints of the same
+authority share listing identity; independent authorities retain separate records.
+Ordinary discovery can retain results when another endpoint is unavailable.
+A resource query or `--explain` requires successful query preparation for every
+selected registry. `--explain` reports canonical registry predicates,
 local settlement constraints, survivor counts, and sanitized rejection
 categories, then stops before negotiation or settlement.
 
