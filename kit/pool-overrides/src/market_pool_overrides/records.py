@@ -45,14 +45,19 @@ class PoolOverrideRecord(PoolOverrideAddress):
 
     ``listing_shapes`` and ``settlements`` each replace the lower tier's list as a
     whole, so an empty list would be a second, less visible way to stop selling
-    the pool; a seller stops selling by closing its listings. ``terms`` is the
-    market's own commercial vocabulary, opaque here.
+    the pool; a seller stops selling by closing its listings. ``asking_rates``
+    also replaces the lower tier's list as a whole, but an empty list is
+    accepted and publishes no rate: withholding a price stops nothing. Its
+    entries are judged by the market's contribution, which alone knows the
+    shape vocabulary they are keyed by. ``terms`` is the market's own
+    commercial vocabulary, opaque here.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     listing_shapes: list[dict[str, Any]] | None = None
     settlements: list[dict[str, Any]] | None = None
+    asking_rates: list[dict[str, Any]] | None = None
     terms: dict[str, Any] | None = None
 
     @field_validator("listing_shapes", "settlements")
@@ -64,8 +69,15 @@ class PoolOverrideRecord(PoolOverrideAddress):
 
     @model_validator(mode="after")
     def _states_something(self) -> "PoolOverrideRecord":
-        if self.listing_shapes is None and self.settlements is None and not self.terms:
-            raise ValueError("an override must state listing shapes, settlements, or terms")
+        if (
+            self.listing_shapes is None
+            and self.settlements is None
+            and self.asking_rates is None
+            and not self.terms
+        ):
+            raise ValueError(
+                "an override must state listing shapes, settlements, asking rates, or terms"
+            )
         return self
 
     @property

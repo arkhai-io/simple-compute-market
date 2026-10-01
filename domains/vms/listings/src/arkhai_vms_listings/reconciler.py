@@ -14,6 +14,7 @@ from arkhai_vms import (
     listing_shape_key,
 )
 
+from arkhai_vms_listings.asking_rates import resolve_vm_asking_rates
 from arkhai_vms_listings.listing_comparison import REFUSE, compare_listing
 from arkhai_vms_listings.listing_shapes import (
     SHAPE_SOURCE_DEFAULT,
@@ -427,14 +428,17 @@ def vm_override_view(
     *,
     listing_shapes: Any = None,
     settlements: Any = None,
+    asking_rates: Any = None,
     terms: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """One VM override as derivation reads it: shapes, clauses, and each VM term
-    at the top level, ``None`` where the override states nothing."""
+    """One VM override as derivation reads it: shapes, clauses, asking rates,
+    and each VM term at the top level, ``None`` where the override states
+    nothing."""
     terms = terms if isinstance(terms, Mapping) else {}
     return {
         "listing_shapes": listing_shapes,
         "settlements": settlements,
+        "asking_rates": asking_rates,
         **{name: terms.get(name) for name in VM_OVERRIDE_TERMS},
     }
 
@@ -464,6 +468,7 @@ def _site_pool_overrides(
             **vm_override_view(
                 listing_shapes=stored.listing_shapes,
                 settlements=stored.settlements,
+                asking_rates=stored.asking_rates,
                 terms=stored.terms,
             ),
             "problems": stored.problems,
@@ -641,6 +646,8 @@ class _SiteDerivationReport:
     members_without_gpu_count: dict[str, str] = field(default_factory=dict)
     members_without_resource_type: dict[str, str] = field(default_factory=dict)
     unreadable_shapes: dict[str, list[str]] = field(default_factory=dict)
+    unreadable_asking_rates: dict[str, list[str]] = field(default_factory=dict)
+    unpublished_asking_rates: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     infeasible_shapes: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     undeclared_attributes: dict[str, dict[str, Any]] = field(default_factory=dict)
     legacy_overrides_in_effect: dict[str, list[str]] = field(default_factory=dict)
@@ -660,6 +667,8 @@ class _SiteDerivationReport:
                 sorted(self.members_without_resource_type.items())
             ),
             "unreadable_shapes": dict(sorted(self.unreadable_shapes.items())),
+            "unreadable_asking_rates": dict(sorted(self.unreadable_asking_rates.items())),
+            "unpublished_asking_rates": dict(sorted(self.unpublished_asking_rates.items())),
             "infeasible_shapes": dict(sorted(self.infeasible_shapes.items())),
             "undeclared_attributes": dict(sorted(self.undeclared_attributes.items())),
             "legacy_overrides_in_effect": {
@@ -731,6 +740,22 @@ def _record_site_report(site_id: str, report: _SiteDerivationReport) -> None:
             site_id,
             pool_id,
             "; ".join(problems),
+        )
+    for pool_id, problems in current["unreadable_asking_rates"].items():
+        logger.warning(
+            "[PUBLICATION] site %s pool %s states asking rates the VM market "
+            "cannot read (%s); its listings are held",
+            site_id,
+            pool_id,
+            "; ".join(problems),
+        )
+    for pool_id, shapes in current["unpublished_asking_rates"].items():
+        logger.warning(
+            "[PUBLICATION] site %s pool %s prices %d shape(s) it does not "
+            "publish; those rates reach no buyer",
+            site_id,
+            pool_id,
+            len(shapes),
         )
     for pool_id, shapes in current["infeasible_shapes"].items():
         logger.warning(
@@ -929,6 +954,25 @@ def _projected_pool_rows(
         holds.add(("pool", site_id, pool_id))
         return []
 
+    # Asking rates hold the pool on the same terms as shapes: a rate the seller
+    # believes they published is not silently dropped to a lower tier.
+    rates = resolve_vm_asking_rates(
+        policy_tags,
+        override_rates=override.get("asking_rates") if override else None,
+    )
+    if rates.unreadable:
+        report.unreadable_asking_rates[pool_id] = [
+            f"{rates.source}: {problem}" for problem in rates.problems
+        ]
+        holds.add(("pool", site_id, pool_id))
+        return []
+    unpublished_rates = rates.unpublished(shape.digest for shape in resolution.shapes)
+    if unpublished_rates:
+        report.unpublished_asking_rates[pool_id] = [
+            {"shape_digest": digest, "shape": shape}
+            for digest, shape in sorted(unpublished_rates.items())
+        ]
+
     legacy_fields: set[str] = set()
 
     def _tier(field_name: str) -> Any:
@@ -1070,6 +1114,9 @@ def _projected_pool_rows(
         "listing_shapes": resolution.shapes,
         "shape_source": resolution.source,
         "pricing_by_model": pricing_by_model,
+        "asking_rates_by_digest": {
+            digest: rate.published() for digest, rate in rates.rates.items()
+        },
     }
 
     if mode == "specific_resource":
@@ -1560,6 +1607,11 @@ def available_compute_slices(
             if pricing is not None:
                 candidate["accepted_escrows"] = _parsed_escrows(pricing.accepted_escrows)
                 candidate["settlements"] = _parsed_settlements(pricing.settlements)
+            # Absent rather than null when nothing prices the shape, so a
+            # listing whose rate is withdrawn refreshes to one without the field.
+            asking_rate = (row.get("asking_rates_by_digest") or {}).get(shape.digest)
+            if asking_rate is not None:
+                candidate["asking_rate"] = dict(asking_rate)
             out.append(candidate)
     return out
 

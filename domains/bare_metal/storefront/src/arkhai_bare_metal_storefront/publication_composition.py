@@ -3,8 +3,8 @@
 The publication command and the administrator's publication step both compose
 their cycle here, so the two cannot run different cycles. Each trusted site's
 own capacity client and the one configured registry come from the storefront
-runtime and the process environment; terms of sale come only from durable
-configuration.
+runtime and the process environment; terms of sale come from durable
+configuration, replaced for one site's pool by the storefront's stored override.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from typing import Any
 from core_storefront.publication_runner import PublicationPayload
 from market_settlement_runtime import SettlementPublicationClause
 
+from .pool_overrides import compile_publication_clauses
 from .publication import BareMetalPublicationCycle
 from .publication_service import BareMetalRegistryConfiguration
 from .runtime import BareMetalStorefrontRuntime
@@ -73,14 +74,23 @@ def publication_payload_builder(
     max_duration = int(environ["BARE_METAL_STOREFRONT_MAX_DURATION_SECONDS"])
 
     async def build(candidate: dict[str, Any]) -> PublicationPayload:
+        # A pool's storefront override replaces the configured clauses and
+        # bound for that pool's listings only.
+        override_clauses = candidate.get("override_clauses")
         return await composition.publication_payload(
             candidate=candidate,
-            clauses=clauses,
+            clauses=(
+                compile_publication_clauses(override_clauses)
+                if override_clauses is not None
+                else clauses
+            ),
             option_expires_at=option_expiry,
             funding_deadlines=funding_deadlines,
             fulfillment_deadline=fulfillment_deadline,
             demands=demands,
-            max_duration_seconds=max_duration,
+            max_duration_seconds=candidate.get(
+                "override_max_duration_seconds", max_duration
+            ),
         )
 
     return build

@@ -82,6 +82,21 @@ deliberate decision rather than an accident: the schema is frozen, not dropped.
   `test_multi_registry.py`'s second storefront needs provisioning to trust its
   principal first (see Dependencies).
 
+### Retire diagnostics and cleanup that depend on local inventory
+
+- Remove the local-row normalization half of `release_reservations` when the
+  local listing path retires; retain the authoritative site-ledger release
+  operation. Correct its operator description for the resulting behavior.
+- Remove `resource_count` from system status and both `HealthResponse` models
+  when CSV inventory retires. The existing "Operator-visible acceptance state"
+  requirement, its resource-count scenario and Evidence entry, the smoke and
+  full-deal assertions, the seller quickstart, and the validation runbook must
+  be reconciled with that boundary.
+- These two removals were transferred from
+  `remove-dead-storefront-physical-surfaces` during its design review. The
+  replacement operator diagnostic remains a design question in `design.md`;
+  this scope transfer does not select a new status field or response shape.
+
 ## Capabilities
 
 ### New Capabilities
@@ -105,7 +120,7 @@ None.
   migration command for them (`design.md` records the alternatives).
 - Do not retire the storefront's zero-caller physical surfaces
   (`compute_allocations`, the resource admin routes, the always-`None` host
-  plumbing, `resource_count`) — `remove-dead-storefront-physical-surfaces`.
+  plumbing) — `remove-dead-storefront-physical-surfaces`.
 - Do not fix a Resource Pool's provider at creation —
   `fix-resource-pool-provider-at-creation`.
 - Do not migrate the bare-metal storefront, which has no local tables.
@@ -120,7 +135,8 @@ None.
   `utils/{sqlite_client,migrations}.py`, `settings.toml`, `groups/config.py`);
   `domains/vms/storefront/storefront.alice.toml`;
   `domains/vms/storefront/scripts/import_resources_csv.py`; the import surfaces
-  of `core/storefront` and `core/storefront-client`; seven test files.
+  of `core/storefront` and `core/storefront-client`, including both health
+  models; seven test files; `docs/development/VALIDATION_RUNBOOK.md`.
 - Deployment: Helm, compose, and the seller quickstart lose the CSV contract.
 - Not affected: `kit/resource-pools`, `kit/pool-overrides` (the store stays;
   the tier beneath it goes), the region/SLA/pricing hint mechanism, bare metal.
@@ -153,6 +169,9 @@ None.
   operator deployment documentation.
 - Why legacy values are not carried over, and why the schema is frozen rather
   than dropped — this change's `design.md`.
+- The operator-visible acceptance contract after local inventory and
+  `resource_count` retire — `openspec/specs/storefront-publication/spec.md`
+  and the quickstart/runbook; the replacement is unresolved design work.
 
 ## Dependencies and Related Changes
 

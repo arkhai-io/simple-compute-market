@@ -22,6 +22,7 @@ loop for the storefront's own async persistence and the kit publication runtime.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
@@ -35,6 +36,7 @@ from arkhai_bare_metal import (
     CANDIDATE,
     HELD,
     IDENTITY_CHANGED,
+    POOL_ADMITTED,
     UNAVAILABLE,
     UNCHANGED,
     BareMetalListing,
@@ -68,6 +70,11 @@ from .publication_service import (
     RegistryClientFactory,
     bare_metal_publication_candidate,
     build_publication_runtime,
+)
+from .pool_overrides import (
+    BareMetalPoolOverride,
+    read_bare_metal_pool_overrides,
+    record_accepted_generation,
 )
 from .site_reading import SitePoolReading, read_site_pools
 from .sqlite_client import SQLiteClient
@@ -171,6 +178,7 @@ class BareMetalPublicationCycle:
         self._held_pools: set[tuple[str, str]] = set()
         self._candidates: list[dict[str, Any]] = []
         self._pending: dict[int, dict[str, Any]] = {}
+        self._overrides: dict[tuple[str, str], BareMetalPoolOverride] = {}
 
     def _await(self, awaitable: Awaitable[T]) -> T:
         return self._driver.call(awaitable)
@@ -178,6 +186,10 @@ class BareMetalPublicationCycle:
     # -- run -------------------------------------------------------------
 
     async def run(self) -> dict[str, Any]:
+        # Read once, before any site, so every site in a run sees one view.
+        self._overrides = await asyncio.to_thread(
+            read_bare_metal_pool_overrides, self._db.db_path
+        )
         for site_id in sorted(self._site_clients):
             await self._classify_site(site_id)
         selection = build_bare_metal_publication_selection(
@@ -228,17 +240,48 @@ class BareMetalPublicationCycle:
                 "hold", site_id=site_id, reason="site_projection_refused", error=str(exc)
             )
             return
-        reading = read_site_pools(response["resource_pools"])
+        pools = response["resource_pools"]
+        await asyncio.to_thread(
+            record_accepted_generation,
+            self._db.db_path,
+            site_id=site_id,
+            revision=generation.revision,
+            digest=generation.digest,
+            pool_ids=[str(pool.get("pool_id")) for pool in pools if pool.get("pool_id")],
+        )
+        site_overrides = {
+            pool_id: override
+            for (override_site, pool_id), override in self._overrides.items()
+            if override_site == site_id
+        }
+        reading = read_site_pools(
+            pools,
+            override_asking_rates={
+                pool_id: override.asking_rates
+                for pool_id, override in site_overrides.items()
+                if not override.problems and override.asking_rates is not None
+            },
+            override_problems={
+                pool_id: override.problems
+                for pool_id, override in site_overrides.items()
+                if override.problems
+            },
+        )
         self._report_pools(site_id, reading)
         classification = classify_bare_metal_resources(
             generation,
             pool_admission=reading.admission,
             pool_regions=reading.regions,
+            pool_asking_rates=reading.published_asking_rates(),
         )
         self._classifications[site_id] = classification
         for item in classification.of(HELD):
             if item.pool_id in reading.regionless:
                 reason = "pool_region_missing"
+            elif item.pool_id in reading.unreadable_overrides:
+                reason = "pool_override_unreadable"
+            elif item.pool_id in reading.unreadable_asking_rates:
+                reason = "asking_rates_unreadable"
             elif item.problems:
                 reason = "declaration_unresolvable"
             else:
@@ -260,7 +303,11 @@ class BareMetalPublicationCycle:
                     physical_resource_id=item.physical_resource_id,
                     reason="publication_capabilities_ignored",
                 )
+        self._report_unpublished_rates(site_id, reading, classification)
         for candidate in classification.candidates:
+            override = site_overrides.get(candidate["pool_id"])
+            if override is not None:
+                _apply_override(candidate, override)
             candidate["derivation_key"] = self._key(
                 site_id,
                 candidate["pool_id"],
@@ -298,6 +345,24 @@ class BareMetalPublicationCycle:
                 pool_id,
                 site_id,
             )
+        for pool_id, problems in sorted(reading.unreadable_overrides.items()):
+            self._held_pools.add((site_id, pool_id))
+            logger.warning(
+                "bare-metal pool %s at %s has a stored override that cannot be "
+                "read (%s); its listings are held",
+                pool_id,
+                site_id,
+                "; ".join(problems),
+            )
+        for pool_id, problems in sorted(reading.unreadable_asking_rates.items()):
+            self._held_pools.add((site_id, pool_id))
+            logger.warning(
+                "bare-metal pool %s at %s states asking rates that cannot be read "
+                "(%s); its listings are held",
+                pool_id,
+                site_id,
+                "; ".join(problems),
+            )
         for pool_id in reading.listing_shapes_stated:
             self.report.record(
                 "report",
@@ -305,6 +370,27 @@ class BareMetalPublicationCycle:
                 pool_id=pool_id,
                 reason="listing_shapes_not_applicable",
             )
+
+    def _report_unpublished_rates(
+        self, site_id: str, reading: SitePoolReading, classification: Any
+    ) -> None:
+        """Report each priced shape no machine in its pool publishes: such a
+        price reaches no buyer, which the seller should be able to see."""
+        published: dict[str, set[str]] = {}
+        for candidate in classification.candidates:
+            published.setdefault(candidate["pool_id"], set()).add(candidate["shape_digest"])
+        for pool_id, resolution in sorted(reading.asking_rates.items()):
+            if reading.admission.get(pool_id) != POOL_ADMITTED:
+                continue
+            unpublished = resolution.unpublished(published.get(pool_id, ()))
+            if unpublished:
+                self.report.record(
+                    "report",
+                    site_id=site_id,
+                    pool_id=pool_id,
+                    reason="asking_rate_shape_unpublished",
+                    shapes=[unpublished[digest] for digest in sorted(unpublished)],
+                )
 
     def _key(
         self, site_id: str, pool_id: str, physical_resource_id: str, shape_digest: str
@@ -630,6 +716,25 @@ class BareMetalPublicationCycle:
             status=result.get("status"),
         )
         return result
+
+
+def _apply_override(candidate: dict[str, Any], override: BareMetalPoolOverride) -> None:
+    """Carry a pool's override to its candidate as plain values.
+
+    The candidate is handed to mechanism option builders, so it holds clause
+    data and bounds rather than the override itself. A clause list replaces the
+    configured clauses as a whole; each bound replaces the configured bound.
+    """
+    if override.clauses is not None:
+        candidate["override_clauses"] = [
+            clause.model_dump(mode="json") for clause in override.clauses
+        ]
+    if override.max_duration_seconds is not None:
+        candidate["override_max_duration_seconds"] = override.max_duration_seconds
+    if override.min_duration_seconds is not None:
+        candidate["listing_resource"]["min_duration_seconds"] = (
+            override.min_duration_seconds
+        )
 
 
 def _listing(

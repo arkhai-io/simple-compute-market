@@ -6,7 +6,14 @@ from importlib.metadata import PackageNotFoundError, version
 
 import typer
 
+from .pool_override_cli import pool_override_app
+
 app = typer.Typer(no_args_is_help=True)
+app.add_typer(
+    pool_override_app,
+    name="pool-override",
+    help="Read and replace the storefront's own per-pool terms over its admin API.",
+)
 
 
 def _version_callback(value: bool) -> None:

@@ -272,3 +272,105 @@ def test_sync_client_binds_compiled_params_to_etag_and_surfaces_412() -> None:
     assert caught.value.status_code == 412
     assert request.call_args.kwargs["headers"] == {"If-Match": '"rotated-from-this"'}
     assert request.call_args.kwargs["params"]["ram_gb_min"] == "64"
+
+
+def _rate_spec() -> FilterSpecResponse:
+    co = ["asking_rate_asset", "asking_rate_period"]
+    return FilterSpecResponse.from_dict(
+        {
+            "version": 1,
+            "etag": "rates-1",
+            "listing_shape": {"type": "object"},
+            "filters": [
+                {
+                    "name": "asking_rate_max",
+                    "query_name": "asking_rate",
+                    "path": "$.listing_resource.asking_rate.amount",
+                    "op": "range",
+                    "value_type": "decimal_text",
+                    "alias_kind": "upper_bound",
+                    "on_missing": "fail",
+                    "requires": co,
+                },
+                {
+                    "name": "asking_rate_min",
+                    "path": "$.listing_resource.asking_rate.amount",
+                    "op": "range",
+                    "value_type": "decimal_text",
+                    "alias_kind": "lower_bound",
+                    "on_missing": "fail",
+                    "requires": co,
+                },
+                {
+                    "name": "asking_rate_asset",
+                    "path": "$.listing_resource.asking_rate.asset",
+                    "op": "in",
+                    "value_type": "string",
+                    "on_missing": "fail",
+                },
+                {
+                    "name": "asking_rate_period",
+                    "path": "$.listing_resource.asking_rate.period",
+                    "op": "in",
+                    "value_type": "string",
+                    "on_missing": "fail",
+                },
+            ],
+        }
+    )
+
+
+def test_decimal_text_compiles_exactly_to_its_filter_parameter() -> None:
+    compiled = compile_resource_query(
+        "asking_rate<=16.000000000000000001 asking_rate_asset=usd "
+        "asking_rate_period=hour",
+        filter_spec=_rate_spec(),
+        registry_url="https://registry.example",
+    )
+    assert compiled.as_params() == {
+        "asking_rate_max": "16.000000000000000001",
+        "asking_rate_asset": "usd",
+        "asking_rate_period": "hour",
+    }
+
+
+def test_requires_resolve_to_query_names_from_the_spec() -> None:
+    descriptors = {d.name: d for d in resource_query_descriptors(_rate_spec())}
+    assert descriptors["asking_rate"].requires == ("asking_rate_asset", "asking_rate_period")
+    assert descriptors["asking_rate_min"].requires == (
+        "asking_rate_asset",
+        "asking_rate_period",
+    )
+    assert descriptors["asking_rate_asset"].requires == ()
+
+
+def test_bound_without_its_co_requirements_is_refused_before_any_request() -> None:
+    with pytest.raises(QueryValidationError) as caught:
+        compile_resource_query(
+            "asking_rate<=16 asking_rate_asset=usd",
+            filter_spec=_rate_spec(),
+            registry_url="https://registry.example",
+        )
+    assert caught.value.code == "missing_co_requirement"
+
+
+def test_requires_naming_an_undeclared_filter_is_an_unusable_vocabulary() -> None:
+    spec = FilterSpecResponse.from_dict(
+        {
+            "version": 1,
+            "etag": "bad-1",
+            "listing_shape": {"type": "object"},
+            "filters": [
+                {
+                    "name": "asking_rate_max",
+                    "path": "$.listing_resource.asking_rate.amount",
+                    "op": "range",
+                    "value_type": "decimal_text",
+                    "alias_kind": "upper_bound",
+                    "requires": ["asking_rate_asset"],
+                }
+            ],
+        }
+    )
+    with pytest.raises(FilterVocabularyError, match="undeclared"):
+        resource_query_descriptors(spec)

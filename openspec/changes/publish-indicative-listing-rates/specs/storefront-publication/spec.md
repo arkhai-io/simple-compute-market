@@ -197,6 +197,10 @@ A bare-metal storefront's command line MUST offer the same replace, read, list, 
 operations through its administrator API, with the offering mode never defaulted, and MUST
 NOT read or write its database to do so.
 
+A stored bare-metal override that cannot be read MUST hold its pool's listings, neither
+publishing, closing, nor refreshing them, and MUST be reported; configuration MUST NOT speak
+for a pool whose override exists but cannot be read.
+
 A bare-metal storefront MUST record durably, for each site, the last resource-pool projection
 generation a publication run accepted, whichever process ran it, and its override status MUST
 be judged against that generation. A site with no recorded generation is `unknown`.
@@ -219,6 +223,13 @@ be judged against that generation. A site with no recorded generation is `unknow
   the `bare_metal` mode
 - **THEN** the command sends it through the administrator API, which checks it against
   the site's live projection, and prints the stored override
+
+#### Scenario: A stored bare-metal override cannot be read
+
+- **WHEN** a publication run finds a stored override for a pool that cannot be decoded
+  or read in the bare-metal vocabulary
+- **THEN** the pool's listings are held rather than published under configured terms,
+  and the run reports why
 
 #### Scenario: Publication runs from the command
 
@@ -245,7 +256,9 @@ unambiguous encoding. Replacement MUST replace the whole record. Deletion MUST b
 Before accepting a replacement, the storefront MUST refuse:
 
 - a site it has not configured;
-- a structurally invalid record, including a shape outside the domain's vocabulary.
+- a structurally invalid record, including a shape outside the domain's vocabulary;
+- asking rates its domain cannot read, judged exactly as publication reads them, so an
+  accepted write never later holds the pool.
 
 It MUST then fetch that site's resource-pool projection live through the site's
 authenticated client, not from its cache:
@@ -287,6 +300,13 @@ an accepted write at its next publication run.
 
 - **WHEN** an administrator writes an override whose shape names a family or field the
   domain does not define
+- **THEN** the write is refused without contacting the site
+
+#### Scenario: An override states a rate its domain cannot read
+
+- **WHEN** an administrator writes an override whose asking rate names a shape outside
+  the domain's vocabulary, a period this version does not accept, or a shape another
+  entry already prices
 - **THEN** the write is refused without contacting the site
 
 #### Scenario: A bare-metal override is accepted between runs

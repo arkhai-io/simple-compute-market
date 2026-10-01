@@ -19,7 +19,13 @@ from collections.abc import Mapping
 from typing import Any
 
 from arkhai_compute import COMPUTE_CAPABILITY_SCHEMA
-from market_capability_shape import CapabilityShapeError, FieldKind, unflatten_shape
+from market_capability_shape import (
+    CapabilityShapeError,
+    FieldKind,
+    shape_digest,
+    shape_problems,
+    unflatten_shape,
+)
 
 #: The whole-machine dimension a bare-metal claim reserves.
 UNITS_DIMENSION = "units"
@@ -82,4 +88,18 @@ def derive_bare_metal_shape(
     return shape
 
 
-__all__ = ["UNITS_DIMENSION", "BareMetalShapeError", "derive_bare_metal_shape"]
+def bare_metal_shape_problems(shape: Any) -> tuple[str, ...]:
+    """Every problem with ``shape`` in the compute family's vocabulary, which a
+    bare-metal shape is expressed in; empty when valid."""
+    return tuple(str(problem) for problem in shape_problems(shape, COMPUTE_CAPABILITY_SCHEMA))
+
+
+def bare_metal_shape_digest(shape: Any) -> str:
+    """The digest a bare-metal listing's derivation identity uses for ``shape``."""
+    return shape_digest(shape)
+
+
+
+__all__ = [
+    "bare_metal_shape_digest",
+    "bare_metal_shape_problems","UNITS_DIMENSION", "BareMetalShapeError", "derive_bare_metal_shape"]

@@ -8,6 +8,7 @@ from typing import Any, Callable, Mapping, Optional
 import yaml
 from sqlalchemy.orm import Session, sessionmaker
 
+from .asking_rates import ASKING_RATES_POLICY_TAG, validate_asking_rates
 from .hints import (
     CAPACITY_BACKING_POLICY_TAG,
     MAX_RESERVATION_HOLD_SECONDS_POLICY_TAG,
@@ -133,6 +134,7 @@ class ResourcePoolService:
             + validate_hold_preference(policy_tags)
             + validate_sla_preference(policy_tags)
             + validate_listing_shapes(policy_tags)
+            + validate_asking_rates(policy_tags)
         )
         if problems:
             raise PoolValidationError("; ".join(problems))
@@ -521,6 +523,15 @@ class ResourcePoolService:
                             path=f"{base}.policy_tags.{LISTING_SHAPES_POLICY_TAG}",
                             code="invalid_listing_shapes",
                             message=shape_problem,
+                        )
+                    )
+                    entry_valid = False
+                for rate_problem in validate_asking_rates(tags):
+                    problems.append(
+                        PoolValidationProblem(
+                            path=f"{base}.policy_tags.{ASKING_RATES_POLICY_TAG}",
+                            code="invalid_asking_rates",
+                            message=rate_problem,
                         )
                     )
                     entry_valid = False

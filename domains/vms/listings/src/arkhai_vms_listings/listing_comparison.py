@@ -44,8 +44,15 @@ IDENTITY_FIELDS: tuple[str, ...] = (
     "region",
 )
 
-# Terms of sale carried inside the published listing shape.
-TERM_RESOURCE_FIELDS: tuple[str, ...] = ("sla", "interruptible", "settlement_model")
+# Terms of sale carried inside the published listing shape. The asking rate is
+# one: a price change refreshes the listing in place, and it is excluded from
+# every shape digest so it can never change a listing's identity.
+TERM_RESOURCE_FIELDS: tuple[str, ...] = (
+    "sla",
+    "interruptible",
+    "settlement_model",
+    "asking_rate",
+)
 
 # Terms of sale carried beside the listing shape.
 TERM_LISTING_FIELDS: tuple[str, ...] = (

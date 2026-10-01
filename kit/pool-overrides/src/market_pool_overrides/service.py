@@ -77,7 +77,10 @@ class PoolOverrideService:
     store; the configured sites and a factory for each one's signed client; the
     contribution per offering mode; the market-neutral settlement-clause
     compiler; the source listings derive from; and the two effects a write has
-    on publication.
+    on publication. Either effect may be ``None``: a storefront that caches no
+    projection has nothing to refresh, and one whose publication is
+    operator-invoked has no loop to wake, so a write there takes effect at the
+    next publication run.
     """
 
     def __init__(
@@ -89,8 +92,8 @@ class PoolOverrideService:
         contributions: Mapping[str, PoolOverrideContribution],
         compile_clauses: Callable[[list[dict[str, Any]]], Any],
         projection_source: ProjectionSource,
-        refresh_site: Callable[[str], Awaitable[None]],
-        wake_publication: Callable[[], None],
+        refresh_site: Callable[[str], Awaitable[None]] | None,
+        wake_publication: Callable[[], None] | None,
     ) -> None:
         self._store = store
         self._site_ids = site_ids
@@ -191,14 +194,16 @@ class PoolOverrideService:
         # brings the cache up to the generation the write was checked against,
         # and the wake makes the effect prompt. The write already stands, so a
         # refresh failure is logged rather than raised.
-        try:
-            await self._refresh_site(site_id)
-        except Exception:
-            logger.exception(
-                "[POOL-OVERRIDES] refreshing site %s's projection after a write failed",
-                site_id,
-            )
-        self._wake_publication()
+        if self._refresh_site is not None:
+            try:
+                await self._refresh_site(site_id)
+            except Exception:
+                logger.exception(
+                    "[POOL-OVERRIDES] refreshing site %s's projection after a write failed",
+                    site_id,
+                )
+        if self._wake_publication is not None:
+            self._wake_publication()
 
     async def get(self, address: PoolOverrideAddress) -> dict[str, Any] | None:
         return await self._store.get(address)
@@ -215,7 +220,8 @@ class PoolOverrideService:
         cache to; it only wakes publication so the next tier applies promptly.
         """
         deleted = await self._store.delete(address)
-        self._wake_publication()
+        if self._wake_publication is not None:
+            self._wake_publication()
         return deleted
 
     async def statuses(self) -> list[dict[str, Any]]:

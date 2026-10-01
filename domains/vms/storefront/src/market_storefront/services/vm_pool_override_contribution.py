@@ -2,8 +2,8 @@
 
 The pool-override kit stores and checks overrides for any market; for the VM
 offering mode this supplies the two judgements only the VM market can make.
-Terms are validated by ``VmPoolOverrideTerms`` and shapes by the VM capability
-vocabulary. Feasibility is judged by the derivation VM publication runs, on
+Terms are validated by ``VmPoolOverrideTerms``, and shapes and asking rates by
+the VM capability vocabulary. Feasibility is judged by the derivation VM publication runs, on
 declared capacity, with the new record in place of the stored one, so a write's
 report and the next publication cycle cannot disagree.
 """
@@ -17,6 +17,7 @@ from arkhai_vms import canonical_vm_shape, vm_shape_digest, vm_shape_problems
 from arkhai_vms_listings import (
     ShapeFeasibility as ShapeFeasibilityJudge,
     declared_shape_feasibility,
+    resolve_vm_asking_rates,
     vm_override_view,
 )
 from market_pool_overrides import PoolOverrideRecord, ShapeFeasibility
@@ -59,6 +60,11 @@ class VmPoolOverrideContribution:
             problems.extend(
                 f"listing_shapes[{index}] {problem}" for problem in vm_shape_problems(shape)
             )
+        if record.asking_rates is not None:
+            # The resolution publication runs, so a write accepted here is one
+            # publication can read rather than one that later holds the pool.
+            rates = resolve_vm_asking_rates({}, override_rates=record.asking_rates)
+            problems.extend(f"asking_rates{problem}" for problem in rates.problems)
         return problems
 
     def judge_shapes(
@@ -79,6 +85,7 @@ class VmPoolOverrideContribution:
             override=vm_override_view(
                 listing_shapes=record.listing_shapes,
                 settlements=record.settlements,
+                asking_rates=record.asking_rates,
                 terms=record.terms,
             ),
             shape_feasible=self._shape_feasible,

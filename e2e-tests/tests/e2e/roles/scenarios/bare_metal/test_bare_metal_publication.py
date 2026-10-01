@@ -6,8 +6,12 @@ capacity, the storefront's administrator steps publication, and a buyer
 discovers what it published. A buyer finds the listing by
 the hardware its declaration states, through the registry's own filter
 vocabulary. The scenario then withdraws the pool's advertisement and restores
-it, following the one listing through a close and a reopen at the registry, and
-finally declares a pool that states no region and observes it held.
+it, following the one listing through a close and a reopen at the registry. It
+then prices the machine: the pool declares an asking rate, a storefront override
+replaces it and its lease bound, and deleting the override restores the pool's.
+Each change refreshes the same listing in place, and a buyer finds it by rate
+through the registry's filter vocabulary. Finally it declares a pool that states
+no region and observes it held.
 
 Publication has no timer; each step is one explicit pass, so every transition
 here is invoked by the scenario. Registry convergence after a missed close,
@@ -24,6 +28,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import pytest
+from arkhai_bare_metal import derive_bare_metal_shape
+from market_pool_overrides import SyncPoolOverrideClient, pool_override_statuses
 from registry_client.query import compile_resource_query
 from vm_provisioning_operator import PoolCreate, PoolUpdate
 
@@ -39,6 +45,9 @@ REGION = "us-west"
 # contains, which the listing publishes where the compute filters read it.
 WHOLE_HOST_CAPACITY = {"units": 1, "gpu_count": 8, "ram_gb": 2048}
 GPU_MODEL = "H200"
+# The shape a whole-host declaration reads as, which an asking rate is keyed by.
+MACHINE_SHAPE = derive_bare_metal_shape(WHOLE_HOST_CAPACITY, {"gpu_model": GPU_MODEL})
+RATE_QUERY = "asking_rate_asset=usd asking_rate_period=hour"
 
 
 @dataclass
@@ -50,6 +59,9 @@ class PublicationState:
     dark_resource: str = ""
     listing_id: str = ""
     withdrawn: bool = False
+    reinstated: bool = False
+    priced: bool = False
+    overridden: bool = False
     regionless_pool: str = ""
 
 
@@ -58,7 +70,9 @@ def state() -> PublicationState:
     return PublicationState()
 
 
-def _declarations(*, advertised: bool, region: str | None = REGION) -> dict[str, Any]:
+def _declarations(
+    *, advertised: bool, region: str | None = REGION, asking_rate: str | None = None
+) -> dict[str, Any]:
     declarations: dict[str, Any] = {
         "deliverable_modes": [BARE_METAL],
         "advertisable_modes": [BARE_METAL] if advertised else [],
@@ -66,7 +80,31 @@ def _declarations(*, advertised: bool, region: str | None = REGION) -> dict[str,
     }
     if region is not None:
         declarations["region"] = region
+    if asking_rate is not None:
+        declarations["asking_rates"] = {BARE_METAL: [_rate(asking_rate)]}
     return declarations
+
+
+def _rate(amount: str) -> dict[str, Any]:
+    return {"shape": MACHINE_SHAPE, "amount": amount, "asset": "usd", "period": "hour"}
+
+
+def _found(registry, query: str) -> set[str]:
+    """Listings a buyer finds, compiled against the registry's own specification."""
+    compiled = compile_resource_query(
+        query, filter_spec=registry.get_filter_spec(), registry_url=lane_setting("registry_url")
+    )
+    response = registry.list_listings(
+        offering_mode=BARE_METAL, etag=compiled.etag, **compiled.as_params()
+    )
+    return {listing.id for listing in response.listings}
+
+
+def _refreshed_fields(report: dict[str, Any], listing_id: str) -> list[str]:
+    (refresh,) = [
+        item for item in _with_listing(report, listing_id) if item["action"] == "refresh"
+    ]
+    return sorted(refresh["fields"])
 
 
 def _whole_host(resource_id: str) -> dict[str, Any]:
@@ -203,19 +241,12 @@ class TestStage03b_DiscoverByHardware:
         """Compiled against the registry's own filter specification, as the
         bare-metal buyer's ``list --resource`` compiles it."""
         require_state(state, "listing_id")
-        spec = bare_metal_registry.get_filter_spec()
-
-        def found(query: str) -> set[str]:
-            compiled = compile_resource_query(
-                query, filter_spec=spec, registry_url=lane_setting("registry_url")
-            )
-            response = bare_metal_registry.list_listings(
-                offering_mode=BARE_METAL, etag=compiled.etag, **compiled.as_params()
-            )
-            return {listing.id for listing in response.listings}
-
-        assert state.listing_id in found(f"gpu_model={GPU_MODEL} gpu_count>=8 region={REGION}")
-        assert state.listing_id not in found(f"gpu_model={GPU_MODEL} gpu_count>=9")
+        assert state.listing_id in _found(
+            bare_metal_registry, f"gpu_model={GPU_MODEL} gpu_count>=8 region={REGION}"
+        )
+        assert state.listing_id not in _found(
+            bare_metal_registry, f"gpu_model={GPU_MODEL} gpu_count>=9"
+        )
 
 
 class TestStage04_Withdraw:
@@ -271,6 +302,83 @@ class TestStage05_Reinstate:
         ], "the reopened resource must not publish a second listing"
         assert bare_metal_registry.get_listing(state.listing_id).status == "open"
         assert bare_metal_storefront_public.get_listing(state.listing_id).status == "open"
+        state.reinstated = True
+
+
+class TestStage05b_PriceThePool:
+    def test_05b_a_declared_rate_refreshes_the_listing_and_is_found_by_rate(
+        self,
+        bare_metal_site_operator,
+        bare_metal_storefront_admin,
+        bare_metal_registry,
+        state: PublicationState,
+    ):
+        require_state(state, "reinstated")
+        bare_metal_site_operator.patch_pool(
+            state.advertised_pool,
+            PoolUpdate(policy_tags=_declarations(advertised=True, asking_rate="12.50")),
+        )
+
+        report = _step(bare_metal_storefront_admin)
+
+        assert _refreshed_fields(report, state.listing_id) == ["asking_rate"], report
+        listing = bare_metal_registry.get_listing(state.listing_id)
+        assert listing.listing_resource["asking_rate"] == {
+            "amount": "12.50", "asset": "usd", "period": "hour",
+        }
+        assert state.listing_id in _found(bare_metal_registry, f"asking_rate<=12.50 {RATE_QUERY}")
+        assert state.listing_id not in _found(
+            bare_metal_registry, f"asking_rate<=12.49 {RATE_QUERY}"
+        )
+        assert state.listing_id not in _found(
+            bare_metal_registry, f"asking_rate_min>12.50 {RATE_QUERY}"
+        )
+        state.priced = True
+
+
+class TestStage05c_OverrideThePrice:
+    def test_05c_a_storefront_override_replaces_the_rate_and_bound(
+        self, bare_metal_storefront_admin, bare_metal_registry, state: PublicationState
+    ):
+        require_state(state, "priced")
+        SyncPoolOverrideClient(bare_metal_storefront_admin).put_pool_override(
+            {
+                "site_id": lane_setting("site_id"),
+                "pool_id": state.advertised_pool,
+                "offering_mode": BARE_METAL,
+                "asking_rates": [_rate("9.00")],
+                "terms": {"max_duration_seconds": 7200},
+            }
+        )
+
+        report = _step(bare_metal_storefront_admin)
+
+        assert "asking_rate" in _refreshed_fields(report, state.listing_id), report
+        listing = bare_metal_registry.get_listing(state.listing_id)
+        assert listing.listing_resource["asking_rate"]["amount"] == "9.00"
+        assert listing.max_duration_seconds == 7200
+        statuses = pool_override_statuses(bare_metal_storefront_admin.get_system_status())
+        assert (state.advertised_pool, "applied") in {
+            (item["pool_id"], item["state"]) for item in statuses or []
+        }, statuses
+        state.overridden = True
+
+
+class TestStage05d_DeleteTheOverride:
+    def test_05d_deleting_the_override_restores_the_pools_rate(
+        self, bare_metal_storefront_admin, bare_metal_registry, state: PublicationState
+    ):
+        require_state(state, "overridden")
+        SyncPoolOverrideClient(bare_metal_storefront_admin).delete_pool_override(
+            lane_setting("site_id"), state.advertised_pool, BARE_METAL
+        )
+
+        report = _step(bare_metal_storefront_admin)
+
+        assert "asking_rate" in _refreshed_fields(report, state.listing_id), report
+        listing = bare_metal_registry.get_listing(state.listing_id)
+        assert listing.listing_resource["asking_rate"]["amount"] == "12.50"
+        assert listing.status == "open"
 
 
 class TestStage06_RegionlessPool:

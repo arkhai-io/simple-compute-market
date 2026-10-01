@@ -146,6 +146,53 @@ async def test_commercial_terms_reach_the_published_listing(world):
     assert row["accepted_escrows"][0]["rates"][0]["value"] == "7"
 
 
+async def test_an_override_rate_reaches_the_published_listing(world):
+    """The asking rate and the settlement rate are independent carriers: each
+    publishes as stated, and neither is derived from or reconciled with the
+    other."""
+    world.pools.append(_shaped())
+    await _cycle(world)
+
+    written = await _overrides(world).put_pool_override(
+        _record(
+            asking_rates=[{"shape": HINT_SHAPE, "amount": "2.10", "asset": "usd",
+                           "period": "hour"}],
+            settlements=[settlement_clause(rate="7")],
+        )
+    )
+    await _cycle(world)
+
+    assert written.override.asking_rates[0]["amount"] == "2.10"
+    ((_, row),) = (await _open_rows(world)).items()
+    assert row["listing_resource"]["asking_rate"] == {
+        "amount": "2.10", "asset": "usd", "period": "hour",
+    }
+    assert row["accepted_escrows"][0]["rates"][0]["value"] == "7"
+    for option in row.get("settlement_options") or []:
+        assert "2.10" not in json.dumps(option)
+
+
+async def test_an_empty_override_rate_list_withholds_the_pools_declared_rate(world):
+    world.pools.append(
+        pool(
+            "gpu", backing="unbacked", capacity=_BIG, listing_shapes={"vm": [HINT_SHAPE]},
+            asking_rates={"vm": [{"shape": HINT_SHAPE, "amount": "2.10", "asset": "usd",
+                                  "period": "hour"}]},
+        )
+    )
+    await _cycle(world)
+    ((listing_id, before),) = (await _open_listings(world)).items()
+    assert before["asking_rate"]["amount"] == "2.10"
+
+    await _overrides(world).put_pool_override(_record(asking_rates=[]))
+    await _cycle(world)
+
+    # Refreshed in place: the same listing, now without a rate.
+    ((after_id, after),) = (await _open_listings(world)).items()
+    assert after_id == listing_id
+    assert "asking_rate" not in after
+
+
 async def test_an_infeasible_shape_is_accepted_and_publishes_nothing(world):
     world.pools.append(_shaped())
     await _cycle(world)
@@ -268,6 +315,23 @@ async def test_a_site_that_cannot_answer_is_refused_as_retryable(world, switch, 
         pytest.param(
             _record(settlements=[{"mechanism": "nope", "asset": "x", "rate": "1", "per": "hour"}]),
             id="clauses that do not compile",
+        ),
+        pytest.param(
+            _record(asking_rates=[{"shape": {"gpu": {"count": 1}}, "amount": "2",
+                                   "asset": "usd", "period": "hour"}]),
+            id="a rate keyed by a shape outside the vocabulary",
+        ),
+        pytest.param(
+            _record(asking_rates=[{"shape": HINT_SHAPE, "amount": "2", "asset": "usd",
+                                   "period": "month"}]),
+            id="a rate in a period this version does not accept",
+        ),
+        pytest.param(
+            _record(asking_rates=[{"shape": HINT_SHAPE, "amount": "2", "asset": "usd",
+                                   "period": "hour"},
+                                  {"shape": HINT_SHAPE, "amount": "3", "asset": "usd",
+                                   "period": "hour"}]),
+            id="two rates for one shape",
         ),
         pytest.param(_record(offering_mode="kube_pod", terms={"sla": 1.0}),
                      id="a mode no market serves"),

@@ -435,6 +435,26 @@ def _refuse_retired_listing_kind(conn: sqlite3.Connection) -> None:
         )
 
 
+#: Each site's latest projection generation a publication run accepted. Override
+#: status reads it: publication may run in another process, or before a restart,
+#: so no in-memory record could answer for it.
+ACCEPTED_GENERATIONS_TABLE = "bare_metal_accepted_site_generations"
+
+
+def _add_accepted_site_generations(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS {ACCEPTED_GENERATIONS_TABLE} (
+          site_id TEXT PRIMARY KEY,
+          revision INTEGER NOT NULL,
+          digest TEXT NOT NULL,
+          pool_ids TEXT NOT NULL,
+          accepted_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        )
+        """
+    )
+
+
 BARE_METAL_STOREFRONT_MIGRATIONS = (
     # First, so a database written under the retired listing kind is refused
     # before any other pending migration touches a renamed column. On a fresh
@@ -478,5 +498,9 @@ BARE_METAL_STOREFRONT_MIGRATIONS = (
     Migration(
         id="bare-metal-storefront-0010-drop-derived-publications",
         apply=_drop_derived_publication_tracking,
+    ),
+    Migration(
+        id="bare-metal-storefront-0011-accepted-site-generations",
+        apply=_add_accepted_site_generations,
     ),
 )

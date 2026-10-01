@@ -15,6 +15,7 @@ import pytest
 from pydantic import ValidationError
 
 from core_registry.api.filter_spec import (
+    _spec_body,
     compute_etag,
     load_filter_spec,
 )
@@ -320,16 +321,78 @@ def test_etag_unchanged_for_specs_without_schema_identity(tmp_path: Path) -> Non
         """,
     )
     spec = load_filter_spec(path)
+    # `requires` defaults to `[]` on every `FilterDecl`, including ones
+    # written before the field existed. A raw `model_dump` therefore now
+    # carries a `requires` key this test's "legacy payload" must not —
+    # dropping it here mirrors what `compute_etag` itself does (see
+    # `_dump_filter`) so this test keeps proving the pre-`requires` etag
+    # contract rather than silently re-deriving whatever the dump produces.
+    dumped = spec.filters[0].model_dump(exclude_none=False)
+    assert dumped.pop("requires") == []
     legacy_payload = json.dumps(
         {
             "version": 1,
             "listing_shape": {"type": "object"},
-            "filters": [spec.filters[0].model_dump(exclude_none=False)],
+            "filters": [dumped],
         },
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")
     assert compute_etag(spec) == hashlib.sha256(legacy_payload).hexdigest()
+    # Literal pin, independent of both sides' construction, so a future
+    # change to `_dump_filter` and this test's own expected-payload logic
+    # drifting together in the same wrong direction still gets caught.
+    assert (
+        compute_etag(spec)
+        == "8cae70cfe8eb09f027a3fd1152c99af1ddc4772428d38b58f64b4a6426a68f1d"
+    )
+
+
+def test_requires_absent_from_etag_and_served_body_when_undeclared(
+    tmp_path: Path,
+) -> None:
+    """A filter declaring no `requires` serializes with no `requires` key.
+
+    An undeclared co-requirement leaves a specification's serialization and
+    etag unchanged. `requires` defaults to `[]` on every `FilterDecl`, so
+    without this exclusion every deployment's spec would gain a
+    `requires: []` key, and so a new etag, from upgrading the engine alone,
+    with no semantic change.
+    """
+    path = _write(
+        tmp_path,
+        """
+        version: 1
+        listing_shape:
+          type: object
+        filters:
+          - {name: region, path: $.listing_resource.region, op: in, value_type: string, on_missing: fail}
+        """,
+    )
+    spec = load_filter_spec(path)
+    served = _spec_body(spec)
+    assert "requires" not in served["filters"][0]
+
+
+def test_requires_present_in_etag_and_served_body_when_declared(
+    tmp_path: Path,
+) -> None:
+    path = _write(
+        tmp_path,
+        """
+        version: 1
+        listing_shape:
+          type: object
+        filters:
+          - {name: asking_rate_asset, path: $.listing_resource.asking_rate.asset, op: in, value_type: string, on_missing: fail}
+          - {name: asking_rate_max, path: $.listing_resource.asking_rate.amount, op: range, value_type: decimal_text, alias_kind: upper_bound, on_missing: fail, requires: [asking_rate_asset]}
+        """,
+    )
+    spec = load_filter_spec(path)
+    served = _spec_body(spec)
+    by_name = {f["name"]: f for f in served["filters"]}
+    assert by_name["asking_rate_max"]["requires"] == ["asking_rate_asset"]
+    assert "requires" not in by_name["asking_rate_asset"]
 
 
 def test_etag_changes_when_schema_identity_added(tmp_path: Path) -> None:
@@ -515,3 +578,83 @@ def test_endpoint_serves_schema_identity(
     _assert_signed_filter_response(response, request, registry_principals)
     body = response.json()
     assert body["schema"] == {"id": "tokens.api", "version": 2}
+
+
+def test_decimal_text_value_type_accepted(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        """
+        version: 1
+        listing_shape:
+          type: object
+        filters:
+          - {name: asking_rate_max, path: $.listing_resource.asking_rate.amount, op: range, value_type: decimal_text, alias_kind: upper_bound, on_missing: fail}
+        """,
+    )
+    spec = load_filter_spec(path)
+    assert spec.filters[0].value_type == "decimal_text"
+
+
+def test_requires_rejects_undeclared_target(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        """
+        version: 1
+        listing_shape:
+          type: object
+        filters:
+          - {name: asking_rate_max, path: $.listing_resource.asking_rate.amount, op: range, value_type: decimal_text, on_missing: fail, requires: [asking_rate_asset]}
+        """,
+    )
+    with pytest.raises(ValueError, match="undeclared filter"):
+        load_filter_spec(path)
+
+
+def test_requires_rejects_self_reference(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        """
+        version: 1
+        listing_shape:
+          type: object
+        filters:
+          - {name: asking_rate_max, path: $.listing_resource.asking_rate.amount, op: range, value_type: decimal_text, on_missing: fail, requires: [asking_rate_max]}
+        """,
+    )
+    with pytest.raises(ValueError, match="requires on itself"):
+        load_filter_spec(path)
+
+
+def test_requires_rejects_cycle(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        """
+        version: 1
+        listing_shape:
+          type: object
+        filters:
+          - {name: a, path: $.listing_resource.a, op: in, value_type: string, on_missing: fail, requires: [b]}
+          - {name: b, path: $.listing_resource.b, op: in, value_type: string, on_missing: fail, requires: [a]}
+        """,
+    )
+    with pytest.raises(ValueError, match="cycle in filter requires"):
+        load_filter_spec(path)
+
+
+def test_requires_allows_one_directional_supply(tmp_path: Path) -> None:
+    """A co-requirement target may itself be declared with no `requires` —
+    the dependency is one-directional, not a mutual pairing."""
+    path = _write(
+        tmp_path,
+        """
+        version: 1
+        listing_shape:
+          type: object
+        filters:
+          - {name: asking_rate_asset, path: $.listing_resource.asking_rate.asset, op: in, value_type: string, on_missing: fail}
+          - {name: asking_rate_max, path: $.listing_resource.asking_rate.amount, op: range, value_type: decimal_text, on_missing: fail, requires: [asking_rate_asset]}
+        """,
+    )
+    spec = load_filter_spec(path)
+    assert spec.filters[1].requires == ["asking_rate_asset"]
+    assert spec.filters[0].requires == []

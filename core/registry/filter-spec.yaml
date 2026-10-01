@@ -151,6 +151,19 @@ listing_shape:
         internet_download_mbps: {type: integer, minimum: 0}
         internet_upload_mbps: {type: integer, minimum: 0}
         open_ports_count: {type: integer, minimum: 0}
+        # A seller's asking price for this listing's whole shape. A listing
+        # attribute, not a settlement option rate: nothing is constructed
+        # from it, and it need not agree with any mechanism rate. The three
+        # parts travel together because a number means nothing without the
+        # asset it is quoted in and the period it is quoted per.
+        asking_rate:
+          type: object
+          additionalProperties: false
+          required: [amount, asset, period]
+          properties:
+            amount: {type: string, pattern: '^(0|[1-9][0-9]*)(\.[0-9]+)?$'}
+            asset: {type: string, minLength: 1}
+            period: {type: string, enum: [hour]}
     accepted_escrows:
       type: array
       minItems: 0
@@ -233,6 +246,19 @@ filters:
   - {name: internet_download_mbps_min, query_name: internet_download_mbps, query_aliases: [internet_download_mbps_min], path: $.listing_resource.internet_download_mbps, op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
   - {name: internet_upload_mbps_min,   query_name: internet_upload_mbps,   query_aliases: [internet_upload_mbps_min],   path: $.listing_resource.internet_upload_mbps,   op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
   - {name: open_ports_count_min,       query_name: open_ports_count,       query_aliases: [open_ports_count_min],       path: $.listing_resource.open_ports_count,       op: range, value_type: integer, alias_kind: lower_bound, on_missing: fail}
+
+  # Asking-rate filters. The amount is decimal text compared exactly, and a
+  # bound is meaningless without the asset and period it is quoted in, so
+  # both bounds require them; listings in another asset or period are
+  # excluded rather than converted. The bare query name is the upper bound
+  # because a buyer searches price from above, where every capacity field
+  # above is searched from below: a bare name follows the direction a buyer
+  # searches that field in, not a fixed bound position. A listing publishing
+  # no rate has not shown it is within a buyer's bound (`on_missing: fail`).
+  - {name: asking_rate_max,    query_name: asking_rate, path: $.listing_resource.asking_rate.amount, op: range, value_type: decimal_text, alias_kind: upper_bound, on_missing: fail, requires: [asking_rate_asset, asking_rate_period]}
+  - {name: asking_rate_min,                             path: $.listing_resource.asking_rate.amount, op: range, value_type: decimal_text, alias_kind: lower_bound, on_missing: fail, requires: [asking_rate_asset, asking_rate_period]}
+  - {name: asking_rate_asset,                           path: $.listing_resource.asking_rate.asset,  op: in,    value_type: string,       on_missing: fail}
+  - {name: asking_rate_period,                          path: $.listing_resource.asking_rate.period, op: in,    value_type: string,       on_missing: fail}
 
   # Payment-token filter: array projection over accepted_escrows[*].literal_fields.token.
   # `on_missing: pass` is underreport-friendly — a seller advertising no

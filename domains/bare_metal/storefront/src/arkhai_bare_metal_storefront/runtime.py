@@ -23,6 +23,7 @@ from market_settlement_runtime import (
     SettlementServicingWorker,
     SettlementSQLiteRepository,
 )
+from market_pool_overrides import PoolOverrideService, SQLitePoolOverrideStore
 from market_storefront_kit import (
     AlkahestChain,
     AlkahestClientPolicy,
@@ -45,6 +46,11 @@ from .delivery import (
     build_introduction_delivery,
     load_storefront_delivery_sinks,
     storefront_delivery_section,
+)
+from .pool_overrides import (
+    BareMetalPoolOverrideContribution,
+    accepted_site_projection,
+    compile_publication_clauses,
 )
 from .sqlite_client import SQLiteClient
 from .site_clients import (
@@ -205,6 +211,32 @@ class BareMetalStorefrontRuntime:
             fulfillment_client=self.fulfillment_client,
         )
 
+    def pool_override_service(self) -> PoolOverrideService | None:
+        """The storefront's pool-override service, or ``None`` without sites.
+
+        Neither after-write effect applies: this storefront caches no site
+        projection and publishes only when a run is invoked, so a write takes
+        effect at the next run. Status is judged against the generations
+        publication runs durably recorded.
+        """
+        if self.capacity_client is None:
+            return None
+        db_path = self.db.db_path
+        return PoolOverrideService(
+            store=SQLitePoolOverrideStore(db_path),
+            site_ids=lambda: [binding.site_id for binding in self.site_bindings],
+            site_client=self.capacity_client.site,
+            contributions={
+                BareMetalPoolOverrideContribution.offering_mode: (
+                    BareMetalPoolOverrideContribution()
+                )
+            },
+            compile_clauses=compile_publication_clauses,
+            projection_source=lambda: accepted_site_projection(db_path),
+            refresh_site=None,
+            wake_publication=None,
+        )
+
     async def health(self) -> dict[str, object]:
         """Report composed authorities without implying fulfillment readiness.
 
@@ -333,6 +365,21 @@ def _build_chain_clients_from_environment() -> tuple[
     return clients, {chain.name: chain.address_config_path for chain in chains}
 
 
+def storefront_signer_from_environment(environ: Mapping[str, str]) -> Signer:
+    """The storefront's own marketplace signer, from its public identity and
+    credential inputs. The server and the operator commands both sign with it,
+    so a command can act only as an identity the server would also be.
+
+    Raises ``KeyError`` or ``ValueError`` when an input is missing or does not
+    match.
+    """
+    identity_config = IdentityConfig(
+        scheme=IdentityScheme(environ.get("BARE_METAL_STOREFRONT_IDENTITY_SCHEME", "")),
+        identifier=environ.get("BARE_METAL_STOREFRONT_IDENTITY_IDENTIFIER", ""),
+    )
+    return resolve_storefront_signer(identity_config, environ["ARKHAI_IDENTITY_CREDENTIAL"])
+
+
 def build_runtime_from_environment(
     *,
     domain: MarketDomainContract | None = None,
@@ -342,15 +389,7 @@ def build_runtime_from_environment(
         domain or get_market_domain_contract(),
     )
     try:
-        identity_config = IdentityConfig(
-            scheme=IdentityScheme(
-                os.environ.get("BARE_METAL_STOREFRONT_IDENTITY_SCHEME", ""),
-            ),
-            identifier=os.environ.get(
-                "BARE_METAL_STOREFRONT_IDENTITY_IDENTIFIER",
-                "",
-            ),
-        )
+        signer = storefront_signer_from_environment(os.environ)
         raw_admin_identities = json.loads(
             os.environ["BARE_METAL_STOREFRONT_ADMIN_IDENTITIES"],
         )
@@ -360,10 +399,6 @@ def build_runtime_from_environment(
             identities=tuple(
                 Identity.model_validate(value) for value in raw_admin_identities
             ),
-        )
-        signer = resolve_storefront_signer(
-            identity_config,
-            os.environ["ARKHAI_IDENTITY_CREDENTIAL"],
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise RuntimeError(

@@ -1,5 +1,18 @@
 """Provider-neutral resource-pool administration."""
 
+from .asking_rates import (
+    ACCEPTED_ASKING_RATE_PERIODS,
+    ASKING_RATE_SOURCE_HINT,
+    ASKING_RATE_SOURCE_NONE,
+    ASKING_RATE_SOURCE_OVERRIDE,
+    ASKING_RATES_POLICY_TAG,
+    AskingRate,
+    AskingRateResolution,
+    asking_rate_entry_problems,
+    raw_asking_rates,
+    resolve_asking_rates,
+    validate_asking_rates,
+)
 from .db import DEFAULT_POOL_ID, ResourcePool
 from .hints import (
     ADVERTISABLE_MODES_POLICY_TAG,
@@ -101,4 +114,15 @@ __all__ = [
     "ResourcePoolService",
     "validate_deliverable_modes",
     "validate_listing_shapes",
+    "ACCEPTED_ASKING_RATE_PERIODS",
+    "ASKING_RATE_SOURCE_HINT",
+    "ASKING_RATE_SOURCE_NONE",
+    "ASKING_RATE_SOURCE_OVERRIDE",
+    "ASKING_RATES_POLICY_TAG",
+    "AskingRate",
+    "AskingRateResolution",
+    "asking_rate_entry_problems",
+    "raw_asking_rates",
+    "resolve_asking_rates",
+    "validate_asking_rates",
 ]

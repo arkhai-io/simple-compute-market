@@ -23,6 +23,7 @@ import sqlite3
 from typing import Any
 
 import pytest
+from arkhai_bare_metal import derive_bare_metal_shape
 from arkhai_bare_metal.fixtures.publication_view import (
     DEFAULT_CAPACITY,
     DEFAULT_GPU_MODEL,
@@ -31,6 +32,7 @@ from arkhai_bare_metal.fixtures.publication_view import (
 from core_storefront.publication_runner import PublicationPayload
 from market_capacity_publication import BoundListing, CapacityBinding
 from market_identity import create_signer
+from market_pool_overrides import PoolOverrideRecord, SQLitePoolOverrideStore
 from market_site_client.fixtures.resource_pools import (
     build_projected_resource,
     build_resource_pool_projection,
@@ -38,6 +40,7 @@ from market_site_client.fixtures.resource_pools import (
 )
 
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
+from arkhai_bare_metal_storefront.pool_overrides import accepted_site_projection
 from arkhai_bare_metal_storefront.publication import BareMetalPublicationCycle
 from arkhai_bare_metal_storefront.publication_service import build_publication_runtime
 from arkhai_bare_metal_storefront.server import build_bare_metal_storefront_registry
@@ -768,3 +771,142 @@ async def test_bare_metal_listing_shapes_and_publication_capabilities_are_report
     assert reasons == {"listing_shapes_not_applicable", "publication_capabilities_ignored"}
     body = storefront.registries.sent[0][3]["listing_resource"]
     assert body["gpu_model"] == "H200"
+
+
+# -- asking rates ---------------------------------------------------------------
+
+MACHINE_SHAPE = derive_bare_metal_shape(DEFAULT_CAPACITY, {"gpu_model": DEFAULT_GPU_MODEL})
+
+
+def _priced(*rates: dict[str, Any], resource: str = "r1") -> dict[str, Any]:
+    return pool(
+        "pool-1", member(resource, "pool-1"),
+        policy_tags={"asking_rates": {"bare_metal": list(rates)}},
+    )
+
+
+def _rate(amount: str, *, shape=None, period: str = "hour") -> dict[str, Any]:
+    return {"shape": shape or MACHINE_SHAPE, "amount": amount, "asset": "usd", "period": period}
+
+
+async def test_a_priced_machine_publishes_its_asking_rate(db):
+    storefront = Storefront(db, {"site-a": Site(_priced(_rate("12.50")))})
+
+    await storefront.run()
+
+    body = storefront.registries.sent[0][3]["listing_resource"]
+    assert body["asking_rate"] == {"amount": "12.50", "asset": "usd", "period": "hour"}
+
+
+async def test_an_unpriced_machine_publishes_no_rate_field(db):
+    storefront = Storefront(db, {"site-a": Site(pool("pool-1", member("r1", "pool-1")))})
+
+    await storefront.run()
+
+    assert "asking_rate" not in storefront.registries.sent[0][3]["listing_resource"]
+
+
+async def test_a_rate_change_or_removal_refreshes_in_place(db):
+    site = Site(_priced(_rate("12.50")))
+    storefront = Storefront(db, {"site-a": site})
+    await storefront.run()
+    listing_id = storefront.listing("site-a", "pool-1", "r1")[0]
+
+    site.serve(_priced(_rate("11.00")))
+    changed = await storefront.run()
+    changed_body = storefront.registries.sent[0][3]["listing_resource"]
+    site.serve(pool("pool-1", member("r1", "pool-1")))
+    removed = await storefront.run()
+    removed_body = storefront.registries.sent[0][3]["listing_resource"]
+
+    assert storefront.listing("site-a", "pool-1", "r1") == (listing_id, "open", None)
+    assert [item["fields"] for item in actions(changed, "refresh")] == [["asking_rate"]]
+    assert [item["fields"] for item in actions(removed, "refresh")] == [["asking_rate"]]
+    assert changed_body["asking_rate"]["amount"] == "11.00"
+    assert "asking_rate" not in removed_body
+
+
+async def test_an_unreadable_rate_holds_the_pool_and_keeps_its_listing(db):
+    site = Site(_priced(_rate("12.50")))
+    storefront = Storefront(db, {"site-a": site})
+    await storefront.run()
+    listing_id = storefront.listing("site-a", "pool-1", "r1")[0]
+
+    site.serve(_priced(_rate("12.50", period="month")))
+    report = await storefront.run()
+
+    assert storefront.listing("site-a", "pool-1", "r1")[:2] == (listing_id, "open")
+    assert {item["reason"] for item in actions(report, "hold")} == {"asking_rates_unreadable"}
+    assert storefront.registries.operations() == []
+
+
+async def test_a_rate_for_a_shape_no_machine_has_is_reported(db):
+    other = {"gpu": {"count": 1, "model": DEFAULT_GPU_MODEL}}
+    storefront = Storefront(
+        db, {"site-a": Site(_priced(_rate("12.50"), _rate("2.00", shape=other)))}
+    )
+
+    report = await storefront.run()
+
+    (reported,) = [
+        item for item in actions(report, "report")
+        if item["reason"] == "asking_rate_shape_unpublished"
+    ]
+    assert reported["shapes"] == [other]
+
+
+# -- storefront pool overrides -------------------------------------------------
+
+
+async def _override(db: SQLiteClient, **stated: Any) -> None:
+    await SQLitePoolOverrideStore(db.db_path).replace(
+        PoolOverrideRecord(site_id="site-a", pool_id="pool-1", offering_mode="bare_metal",
+                           **stated)
+    )
+
+
+async def test_a_run_records_each_site_generation_it_accepts(db):
+    storefront = Storefront(db, {"site-a": Site(pool("pool-1", member("r1", "pool-1")))})
+
+    await storefront.run()
+
+    assert accepted_site_projection(db.db_path) == {"site-a": [{"pool_id": "pool-1"}]}
+
+
+async def test_an_override_rate_and_bound_reach_the_published_listing(db):
+    site = Site(_priced(_rate("12.50")))
+    storefront = Storefront(db, {"site-a": site})
+    await storefront.run()
+    listing_id = storefront.listing("site-a", "pool-1", "r1")[0]
+
+    await _override(db, asking_rates=[_rate("9.00")], terms={"min_duration_seconds": 3600})
+    report = await storefront.run()
+
+    assert storefront.listing("site-a", "pool-1", "r1") == (listing_id, "open", None)
+    body = storefront.registries.sent[0][3]["listing_resource"]
+    assert body["asking_rate"]["amount"] == "9.00"
+    assert body["min_duration_seconds"] == 3600
+    assert sorted(actions(report, "refresh")[0]["fields"]) == [
+        "asking_rate", "min_duration_seconds",
+    ]
+
+
+async def test_an_unreadable_stored_override_holds_its_pool(db):
+    storefront = Storefront(db, {"site-a": Site(pool("pool-1", member("r1", "pool-1")))})
+    await storefront.run()
+    listing_id = storefront.listing("site-a", "pool-1", "r1")[0]
+    conn = sqlite3.connect(db.db_path)
+    try:
+        with conn:
+            conn.execute(
+                "INSERT INTO pool_overrides (site_id, pool_id, offering_mode, terms) "
+                "VALUES ('site-a', 'pool-1', 'bare_metal', '{not json')"
+            )
+    finally:
+        conn.close()
+
+    report = await storefront.run()
+
+    assert storefront.listing("site-a", "pool-1", "r1")[:2] == (listing_id, "open")
+    assert {item["reason"] for item in actions(report, "hold")} == {"pool_override_unreadable"}
+    assert storefront.registries.operations() == []

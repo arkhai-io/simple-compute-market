@@ -15,7 +15,7 @@ from core_registry.api.filter_eval import (
     build_criteria,
     evaluate_all,
 )
-from core_registry.api.filter_spec import get_loaded_spec
+from core_registry.api.filter_spec import FilterDecl, FilterSpec, get_loaded_spec
 
 
 @pytest.fixture
@@ -466,3 +466,134 @@ class TestCapacityBackingFilter:
         assert _match(spec, _listing(capacity_backing="backed")) is True
         assert _match(spec, _listing(capacity_backing="unbacked")) is True
         assert _match(spec, _listing()) is True
+
+
+# ---------------------------------------------------------------------------
+# decimal_text and requires — constructed specs, independent of the deployed
+# compute filter-spec.yaml (which does not yet declare asking_rate filters).
+# ---------------------------------------------------------------------------
+
+def _rate_spec(*extra_filters: FilterDecl) -> FilterSpec:
+    return FilterSpec(
+        version=1,
+        listing_shape={"type": "object"},
+        filters=[
+            FilterDecl(
+                name="asking_rate_max",
+                path="$.listing_resource.asking_rate.amount",
+                query_name="asking_rate",
+                op="range",
+                value_type="decimal_text",
+                alias_kind="upper_bound",
+                on_missing="fail",
+                requires=["asking_rate_asset", "asking_rate_period"],
+            ),
+            FilterDecl(
+                name="asking_rate_min",
+                path="$.listing_resource.asking_rate.amount",
+                op="range",
+                value_type="decimal_text",
+                alias_kind="lower_bound",
+                on_missing="fail",
+                requires=["asking_rate_asset", "asking_rate_period"],
+            ),
+            FilterDecl(
+                name="asking_rate_asset",
+                path="$.listing_resource.asking_rate.asset",
+                op="in",
+                value_type="string",
+                on_missing="fail",
+            ),
+            FilterDecl(
+                name="asking_rate_period",
+                path="$.listing_resource.asking_rate.period",
+                op="in",
+                value_type="string",
+                on_missing="fail",
+            ),
+            *extra_filters,
+        ],
+    )
+
+
+def _rate_listing(amount: str, asset: str = "usd", period: str = "hour") -> dict:
+    return {
+        "listing_resource": {
+            "asking_rate": {"amount": amount, "asset": asset, "period": period},
+        }
+    }
+
+
+def test_decimal_text_range_bound_inclusive_at_equality() -> None:
+    spec = _rate_spec()
+    criteria = build_criteria(
+        spec,
+        {"asking_rate_max": "16.00", "asking_rate_asset": "usd", "asking_rate_period": "hour"},
+    )
+    assert evaluate_all(_rate_listing("16.00"), criteria)
+    assert evaluate_all(_rate_listing("15.99"), criteria)
+    assert not evaluate_all(_rate_listing("16.01"), criteria)
+
+
+def test_decimal_text_holds_precision_a_double_would_lose() -> None:
+    spec = _rate_spec()
+    criteria = build_criteria(
+        spec,
+        {"asking_rate_min": "0.1", "asking_rate_asset": "usd", "asking_rate_period": "hour"},
+    )
+    # 0.1 has no exact double; three decimal-text 0.1s must still sum/compare
+    # exactly rather than drift, which a float coercion would risk.
+    assert evaluate_all(_rate_listing("0.1"), criteria)
+    assert evaluate_all(_rate_listing("0.100000000000000000001"), criteria)
+
+
+def test_decimal_text_resolved_value_of_wrong_shape_excluded() -> None:
+    spec = _rate_spec()
+    criteria = build_criteria(
+        spec,
+        {"asking_rate_max": "16.00", "asking_rate_asset": "usd", "asking_rate_period": "hour"},
+    )
+    listing = {"listing_resource": {"asking_rate": {"amount": 16, "asset": "usd", "period": "hour"}}}
+    # amount is a JSON number, not decimal text — on_missing: fail applies,
+    # since the field doesn't resolve to a decimal-text value at all.
+    assert not evaluate_all(listing, criteria)
+
+
+def test_requires_satisfied_when_asset_and_period_supplied() -> None:
+    spec = _rate_spec()
+    criteria = build_criteria(
+        spec,
+        {"asking_rate_max": "16.00", "asking_rate_asset": "usd", "asking_rate_period": "hour"},
+    )
+    assert len(criteria) == 3
+
+
+def test_requires_refuses_bound_without_asset() -> None:
+    spec = _rate_spec()
+    with pytest.raises(FilterParamError, match="requires"):
+        build_criteria(spec, {"asking_rate_max": "16.00", "asking_rate_period": "hour"})
+
+
+def test_requires_refuses_bound_without_period() -> None:
+    spec = _rate_spec()
+    with pytest.raises(FilterParamError, match="requires"):
+        build_criteria(spec, {"asking_rate_max": "16.00", "asking_rate_asset": "usd"})
+
+
+def test_requires_target_alone_is_a_meaningful_query() -> None:
+    """Supplying only the co-requirement target, with no bound, is fine —
+    the dependency is one-directional."""
+    spec = _rate_spec()
+    criteria = build_criteria(spec, {"asking_rate_asset": "usd"})
+    assert len(criteria) == 1
+
+
+def test_cross_period_query_excludes_rather_than_converts() -> None:
+    spec = _rate_spec()
+    criteria = build_criteria(
+        spec,
+        {"asking_rate_max": "16.00", "asking_rate_asset": "usd", "asking_rate_period": "hour"},
+    )
+    # Listing quoted in a period the query didn't name — excluded by the
+    # (unsatisfied) asking_rate_period `in` criterion, not converted.
+    assert not evaluate_all(_rate_listing("10.00", period="month"), criteria)

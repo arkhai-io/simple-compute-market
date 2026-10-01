@@ -47,6 +47,7 @@ from arkhai_vms_listings.reconciler import (
     open_listing_resource_keys,
     stale_open_listing_ids,
 )
+from arkhai_vms_listings.asking_rates import resolve_vm_asking_rates
 from arkhai_vms_listings.listing_shapes import (
     SHAPE_SOURCE_OVERRIDE,
     ResolvedShape,
@@ -85,6 +86,7 @@ __all__ = [
     "ShapeFeasibility",
     "ShapeResolution",
     "resolve_shape",
+    "resolve_vm_asking_rates",
     "resolve_vm_listing_shapes",
     "adapt_db_resource_to_domain_resource",
     "adapt_domain_resource_to_db_resource",

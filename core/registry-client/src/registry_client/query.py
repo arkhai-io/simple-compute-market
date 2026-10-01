@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from typing import Any, Iterable
 
@@ -50,6 +50,9 @@ class _ResourceField:
     parameter: str
     filter_op: str
     alias_kind: str | None
+    #: Co-requirements as the registry declares them: filter ``name``s, which
+    #: are wire parameters, not the query names a buyer writes.
+    requires: tuple[str, ...] = ()
 
 
 def resource_query_descriptors(
@@ -121,6 +124,13 @@ def _resource_fields(filters: Iterable[dict[str, Any]]) -> tuple[_ResourceField,
             raise FilterVocabularyError(
                 f"registry filter declaration {index} has invalid alias_kind"
             )
+        requires_raw = raw.get("requires") or []
+        if not isinstance(requires_raw, list) or not all(
+            isinstance(target, str) and target for target in requires_raw
+        ):
+            raise FilterVocabularyError(
+                f"registry filter declaration {index} has invalid requires"
+            )
         on_missing_raw = raw.get("on_missing", "fail")
         try:
             on_missing = MissingValueRule(on_missing_raw)
@@ -141,8 +151,11 @@ def _resource_fields(filters: Iterable[dict[str, Any]]) -> tuple[_ResourceField,
                 parameter=parameter,
                 filter_op=filter_op,
                 alias_kind=alias_kind,
+                requires=tuple(requires_raw),
             )
         )
+
+    fields = _resolve_requires(fields)
 
     # Shared validation performs the cross-declaration collision check.
     try:
@@ -152,6 +165,34 @@ def _resource_fields(filters: Iterable[dict[str, Any]]) -> tuple[_ResourceField,
             "registry filter query names are ambiguous"
         ) from exc
     return tuple(fields)
+
+
+def _resolve_requires(fields: list[_ResourceField]) -> list[_ResourceField]:
+    """Attach each field's co-requirements as buyer-facing query names.
+
+    The registry declares ``requires`` by filter ``name``; a buyer writes
+    query names. Only the full declaration set can map one to the other, so
+    this runs after every declaration is read. A target the registry did not
+    declare is an unusable vocabulary, not a buyer error.
+    """
+    query_name_by_parameter = {
+        field.parameter: field.descriptor.name for field in fields
+    }
+    resolved: list[_ResourceField] = []
+    for field in fields:
+        if not field.requires:
+            resolved.append(field)
+            continue
+        try:
+            targets = tuple(query_name_by_parameter[target] for target in field.requires)
+        except KeyError as exc:
+            raise FilterVocabularyError(
+                f"registry filter {field.parameter!r} requires an undeclared filter"
+            ) from exc
+        resolved.append(
+            replace(field, descriptor=replace(field.descriptor, requires=targets))
+        )
+    return resolved
 
 
 def _required_string(raw: dict[str, Any], key: str, index: int) -> str:
@@ -169,6 +210,7 @@ def _value_type(value: Any, index: int) -> QueryValueType:
         "address": QueryValueType.STRING,
         "integer": QueryValueType.INTEGER,
         "number": QueryValueType.DECIMAL,
+        "decimal_text": QueryValueType.DECIMAL,
         "boolean": QueryValueType.BOOLEAN,
     }
     try:

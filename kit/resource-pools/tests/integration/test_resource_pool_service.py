@@ -1046,6 +1046,79 @@ pools:
         assert refused and refused[0].path.endswith(".policy_tags.listing_shapes")
 
 
+class TestAskingRatesValidationOnEveryWriteSurface:
+    """A malformed `asking_rates` is refused identically on create, replace,
+    patch, and bulk import, nothing is stored, and a valid one is kept
+    verbatim."""
+
+    MALFORMED = {"asking_rates": {"vm": [{"shape": {"gpu": {"count": 1}}, "amount": "1e3",
+                                          "asset": "usd", "period": "hour"}]}}
+    VALID = {"asking_rates": {"vm": [{"shape": {"gpu": {"count": 1, "model": "H100"}},
+                                      "amount": "2.10", "asset": "usd", "period": "hour"}]}}
+
+    def _create(self, svc, tags):
+        return svc.create_pool(
+            PoolCreate(
+                id="priced",
+                label="Priced",
+                provider="ansible",
+                policy_tags=_declared(tags),
+                provider_config=_ANSIBLE_CONFIG,
+            )
+        )
+
+    def test_create_refuses_and_stores_nothing(self, svc):
+        with pytest.raises(PoolValidationError) as refused:
+            self._create(svc, self.MALFORMED)
+        assert "asking_rates" in str(refused.value)
+        assert svc.list_pools() == []
+
+    def test_create_keeps_a_valid_declaration_verbatim(self, svc):
+        assert self._create(svc, self.VALID).policy_tags == _declared(self.VALID)
+
+    def test_replace_refuses_and_keeps_stored_metadata(self, svc):
+        self._create(svc, self.VALID)
+        with pytest.raises(PoolValidationError):
+            svc.replace_pool(
+                "priced",
+                PoolReplace(
+                    label="Priced",
+                    provider="ansible",
+                    enabled=True,
+                    policy_tags=_declared({"asking_rates": {"vm": "2.10"}}),
+                    provider_config=_ANSIBLE_CONFIG,
+                ),
+            )
+        assert svc.get_pool("priced").policy_tags == _declared(self.VALID)
+
+    def test_patch_refuses_and_keeps_stored_metadata(self, svc):
+        self._create(svc, self.VALID)
+        with pytest.raises(PoolValidationError):
+            svc.update_pool("priced", PoolUpdate(policy_tags=_declared(self.MALFORMED)))
+        assert svc.get_pool("priced").policy_tags == _declared(self.VALID)
+
+    def test_bulk_import_refuses_with_path_and_code(self, svc):
+        response = svc.validate_pools("""
+pools:
+  - id: default
+    label: Default Pool
+    provider: ansible
+    policy_tags:
+      advertisable_modes: []
+      capacity_backing: backed
+      asking_rates:
+        vm:
+          - {shape: {gpu: {count: 1, model: H100}}, amount: "-1", asset: usd, period: hour}
+    provider_config:
+      playbook_path: playbooks/vm-operations.yaml
+      inventory_group: kvm_hosts
+""")
+        assert response.valid is False
+        assert response.diff is None
+        refused = [p for p in response.problems if p.code == "invalid_asking_rates"]
+        assert refused and refused[0].path.endswith(".policy_tags.asking_rates")
+
+
 class _StubPoolConfigHandler:
     def __init__(self, provider: str) -> None:
         self.provider = provider

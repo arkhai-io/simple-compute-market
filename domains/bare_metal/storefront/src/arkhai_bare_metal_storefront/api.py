@@ -31,6 +31,17 @@ from market_contact_exchange import (
 from market_contact_exchange import MECHANISM as CONTACT_MECHANISM
 from market_identity import EMPTY_BODY, Identity
 from pydantic_core import to_jsonable_python
+from market_pool_overrides import (
+    POOL_OVERRIDES_PATH,
+    PoolOverrideContractError,
+    PoolOverrideDeleteResponse,
+    PoolOverrideListResponse,
+    PoolOverrideResponse,
+    PoolOverrideRouteError,
+    PoolOverrideRouteService,
+    PoolOverrideWriteResponse,
+    pool_override_contract,
+)
 from market_storefront_kit import get_storefront_container
 from market_settlement_runtime import (
     HostedSettlementRouteError,
@@ -859,7 +870,78 @@ async def system_status(request: Request) -> BareMetalHealthResponse:
         operation="admin_system_status",
         resource="system/status",
     )
-    return BareMetalHealthResponse.model_validate(await runtime.health())
+    status = await runtime.health()
+    overrides = runtime.pool_override_service()
+    if overrides is not None:
+        status["pool_overrides"] = await overrides.statuses()
+    return BareMetalHealthResponse.model_validate(status)
+
+
+# -- storefront pool overrides ----------------------------------------------
+# Site and pool identifiers are operator-chosen strings with no character
+# restriction, so they travel in the body or query, never the path. Each route
+# authenticates against the kit's contract, the one its client signs.
+
+
+async def _pool_override_request(request: Request) -> tuple[Any, PoolOverrideRouteService]:
+    runtime = _runtime(request)
+    body = await _request_body(request) if request.method == "PUT" else EMPTY_BODY
+    try:
+        contract = pool_override_contract(
+            request.method, request.query_params.multi_items(), body
+        )
+    except PoolOverrideContractError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await _admin(
+        request=request,
+        runtime=runtime,
+        operation=contract.operation,
+        resource=contract.resource,
+        body=contract.body,
+    )
+    return contract.body, PoolOverrideRouteService(runtime.pool_override_service())
+
+
+@router.put(POOL_OVERRIDES_PATH, response_model=PoolOverrideWriteResponse)
+async def put_pool_override(request: Request) -> PoolOverrideWriteResponse:
+    body, routes = await _pool_override_request(request)
+    try:
+        return await routes.replace(body)
+    except PoolOverrideRouteError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.get(
+    POOL_OVERRIDES_PATH,
+    response_model=PoolOverrideResponse | PoolOverrideListResponse,
+)
+async def get_pool_overrides(
+    request: Request,
+) -> PoolOverrideResponse | PoolOverrideListResponse:
+    _, routes = await _pool_override_request(request)
+    query = request.query_params
+    try:
+        return await routes.read(
+            site_id=query.get("site_id"),
+            pool_id=query.get("pool_id"),
+            offering_mode=query.get("offering_mode"),
+        )
+    except PoolOverrideRouteError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.delete(POOL_OVERRIDES_PATH, response_model=PoolOverrideDeleteResponse)
+async def delete_pool_override(request: Request) -> PoolOverrideDeleteResponse:
+    _, routes = await _pool_override_request(request)
+    query = request.query_params
+    try:
+        return await routes.delete(
+            site_id=query.get("site_id"),
+            pool_id=query.get("pool_id"),
+            offering_mode=query.get("offering_mode"),
+        )
+    except PoolOverrideRouteError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
 @router.post("/api/v1/admin/pause", response_model=AdminPauseResponse)

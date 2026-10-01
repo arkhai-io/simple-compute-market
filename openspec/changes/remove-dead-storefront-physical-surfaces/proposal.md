@@ -1,9 +1,9 @@
 ## Why
 
-The VM storefront carries six physical surfaces with no caller:
+The VM storefront carries physical surfaces with no production caller:
 
 - `compute_allocations`, an execution ledger `kit/site`'s `CapacityReservation`
-  supersedes. No production code inserts into it; its only writer is a
+  supersedes. No production code inserts into it; its runtime writer is a
   release-`UPDATE` inside `apply_resource_transition`, and its readers
   (`held_gpu_counts`, `held_gpu_counts_by_resource`) are exported from
   `domains/vms/listings` with no caller.
@@ -15,17 +15,18 @@ The VM storefront carries six physical surfaces with no caller:
   `storefront_client`'s `get_resource`/`patch_resource`. The provisioning
   service's only reverse call into the storefront is the `capacity_released`
   event; nothing patches a resource.
-- The legacy local-row normalization loop in `release_reservations`, beside the
-  authoritative `_release_site_ledger_holds`.
 - `SQLiteClient.delete_resource` and `ensure_default_resources` (no reference
   anywhere, tests included), `host_capacity_remaining` (referenced only by its
   own tests), and the storefront's `list_hosts`.
-- `resource_count` on the health surface, counting a table that is being
-  retired.
 
-None depends on the projection cutover `pools-9-retire-local-physical-authority`
-owns, and that cutover's start trigger is a repository-owner decision, so they
-land here on their own.
+The local-row half of `release_reservations` and the `resource_count` health
+field remain useful while local inventory and CSV import remain supported.
+Their retirement belongs to `pools-9-retire-local-physical-authority`, alongside
+the local listing path and its operator and test consumers.
+
+The surfaces retained in this change's scope do not depend on the projection
+cutover `pools-9-retire-local-physical-authority` owns. That cutover's start
+trigger is a repository-owner decision, so these removals land independently.
 
 ## What Changes
 
@@ -37,14 +38,12 @@ land here on their own.
 - Remove the always-`None` `reserved_vm_host` threading in the storefront's
   fulfillment service. `vm_host` inside the provisioning adapter is the real
   execution target and is untouched.
-- Remove the orphaned resource admin routes, their request/response models, and
-  both client variants' `get_resource`/`patch_resource`.
-- Remove the legacy local-row half of `release_reservations` and rewrite its
-  docstring.
-- Delete the four zero-caller `SQLiteClient` methods and the tests that exist
-  only to exercise `host_capacity_remaining`.
-- Remove `resource_count` from `SystemService.get_health` and from both
-  `core_storefront`'s and `storefront_client`'s `HealthResponse`.
+- Remove the orphaned resource admin routes, their request/response models,
+  authentication contracts, and both client variants' `get_resource`/`patch_resource`.
+  Retire their route-specific tests and preserve generic administrator signing
+  coverage through a supported operation.
+- Delete the four `SQLiteClient` methods with no production caller and the tests that exist
+  only to exercise `host_capacity_remaining` and `list_hosts`.
 
 ## Capabilities
 
@@ -58,8 +57,10 @@ None by requirement text. The contract these removals serve — the storefront
 holds no physical-resource, host, or physical-allocation authority — is
 `pools-9-retire-local-physical-authority`'s "Storefront holds no
 physical-resource authority", which describes the terminal state both changes
-reach together. This change removes code nothing calls and adds no behavior, so
-it carries no delta (`skip_specs`).
+reach together. No permanent requirement prescribes the removed routes or
+helpers. The existing operator-visible acceptance requirement and its
+`resource_count` scenario remain in force, so this change carries no delta
+(`skip_specs`).
 
 ## Non-Goals
 
@@ -68,31 +69,36 @@ it carries no delta (`skip_specs`).
 - Do not `DROP` `compute_allocations`; freeze only, matching the campaign's
   additive-only schema posture.
 - Do not touch `vm_host` in the provisioning adapter.
+- Do not remove `resource_count` or the local-row half of `release_reservations`;
+  both retire with local inventory in `pools-9-retire-local-physical-authority`.
 
 ## Impact
 
 - **BREAKING (wire):** `GET`/`PATCH /api/v1/admin/portfolio/resources/{resource_id}`
-  are removed and `HealthResponse.resource_count` disappears from
-  `/api/v1/system/status`. Both clients lose the corresponding methods. No
-  consumer in this repository is affected; pre-1.0 APIs may break in this way.
-- Code: `domains/vms/listings/reconciler.py` and `__init__.py`;
+  are removed. Both clients lose the corresponding methods. No executable e2e
+  scenario uses them; API and client tests do. Future physical-lifecycle
+  scenarios use the authoritative site and provisioning controls. Pre-1.0
+  APIs may break in this way.
+- Code: `domains/vms/listings/src/arkhai_vms_listings/reconciler.py` and `__init__.py`;
   `domains/vms/storefront/src/market_storefront/` (`controllers/admin_controller.py`,
-  `services/{system_service,vm_fulfillment_service}.py`,
-  `utils/{sqlite_client,migrations}.py`); `core/storefront`'s
-  `system_models.py`; `core/storefront-client`'s `client.py` and `models.py`;
+  `middleware/admin_identity.py`, `models/capacity_admin_models.py`,
+  `services/vm_fulfillment_service.py`,
+  `utils/{sqlite_client,migrations}.py`); `core/storefront-client`'s `client.py`;
   the storefront unit tests `test_compute_allocations.py`,
-  `test_cli_publish_helpers.py` (its test-only `INSERT`), and `test_hosts.py`.
+  `test_hosts.py`, and `test_identity_dispatch.py`; its integration
+  `test_admin_api.py`; and `core/storefront-client/tests/test_admin_auth.py`.
+  The two VM full-deal scenario docstrings incorrectly describe a PATCH
+  callback and need correction. The previously named CLI publish test file
+  is absent from the current tree.
 - Not affected: provisioning, `kit/site`, bare metal.
 
 ## Permanent documentation impact
 
 - [ ] `docs/development/ARCHITECTURE.md`
 - [ ] Existing subsystem specification — the terminal requirement is
-      `pools-9-retire-local-physical-authority`'s; one Evidence entry in
-      `openspec/specs/storefront-publication/spec.md` cites resource-count
-      diagnosis and is corrected here.
+      `pools-9-retire-local-physical-authority`'s.
 - [ ] New subsystem specification
-- [x] No permanent documentation change beyond that Evidence entry.
+- [x] No permanent documentation change.
 
 ### Knowledge to promote
 

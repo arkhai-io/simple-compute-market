@@ -3,18 +3,25 @@
 Sections 2 and 3 keep the numbering they have in
 `pools-9-retire-local-physical-authority`, which points here.
 
+Design review narrowed the scope: former tasks 3.3 and 3.4 belong to
+`pools-9-retire-local-physical-authority`. The existing checklist is reconciled
+below with that decision; this is not a new implementation plan. The accepted
+freeze and test-ownership constraints are in `design.md`.
+
 ## 1. Re-confirm
 
 - [ ] 1.1 Re-run the confirming searches `design.md`'s Context records:
       `compute_allocations`' lack of any production `INSERT`, the four
-      zero-caller methods, the two admin routes' lack of any production caller,
+      methods with no production caller, the two admin routes' lack of any
+      production or executable e2e caller,
       and that `reserved.get("vm_host")` is always `None` at the
       opaque-reservation boundary. Record drift in `design.md`.
 
 ## 2. Retire `compute_allocations`
 
 - [ ] 2.1 Remove `held_gpu_counts`, `held_gpu_counts_by_resource`, and
-      `allocation_table_exists` from `domains/vms/listings/reconciler.py` and
+      `allocation_table_exists` from
+      `domains/vms/listings/src/arkhai_vms_listings/reconciler.py` and
       their exports from that package's `__init__.py`.
 - [ ] 2.2 Remove the release-`UPDATE` against `compute_allocations` from
       `SQLiteClient.apply_resource_transition`, including the
@@ -22,30 +29,40 @@ Sections 2 and 3 keep the numbering they have in
       that feeds it.
 - [ ] 2.3 Freeze the table: stop creating it in `_ensure_domain_tables`, stop
       creating its trigger and four indexes, and stop adding its columns in
-      `migrations.py`. No `DROP`.
-- [ ] 2.4 Remove the test-only `INSERT` in `test_cli_publish_helpers.py` and
-      any assertion that depends on it; delete `test_compute_allocations.py`
-      or reduce it to the freeze's own assertions.
+      `migrations.py`, including allocation backfill writes. Existing schema
+      and rows remain intact; historical migration IDs remain stable. No `DROP`.
+- [ ] 2.4 Revise the allocation schema assertions for the freeze while
+      preserving the local derivation, member availability, cross-site identity,
+      and negotiation hold-persistence coverage in `test_compute_allocations.py`.
+      The previously named CLI publish test file is absent. Validation must
+      cover fresh initialization, an existing allocation table, and rerun.
 - [ ] 2.5 Run the storefront unit and integration suites.
 
 ## 3. Remove dead physical surfaces
 
-All zero-caller. Independent of each other.
+The surfaces retained in this change's scope have no production caller.
+Tasks 3.3 and 3.4 are transferred scope, not deletions authorized by this change.
 
 - [ ] 3.1 Delete `SQLiteClient.delete_resource`, `ensure_default_resources`,
       `host_capacity_remaining`, and `list_hosts`, plus the
-      `host_capacity_remaining` tests in `tests/unit/test_hosts.py`.
+      `host_capacity_remaining` and `list_hosts` tests in `tests/unit/test_hosts.py`.
 - [ ] 3.2 Remove `GET`/`PATCH /api/v1/admin/portfolio/resources/{resource_id}`,
       their request/response models, and `storefront_client`'s `get_resource`
-      and `patch_resource` on both client variants.
-- [ ] 3.3 Remove the legacy local-row normalization loop from
-      `release_reservations`, keeping `_release_site_ledger_holds` unchanged,
-      and rewrite the docstring, which currently describes the storefront as
-      clearing bookkeeping "via the provisioning service's LeaseWatchdog."
-- [ ] 3.4 Remove `resource_count` from `SystemService.get_health` and from
-      both `core_storefront`'s and `storefront_client`'s `HealthResponse`.
-      Update `storefront-publication`'s Evidence entry, which cites
-      resource-count diagnosis.
+      and `patch_resource` on both client variants. This includes the route
+      contracts in `middleware/admin_identity.py` and their route-specific
+      assertions in `test_admin_api.py` and `test_identity_dispatch.py`.
+      Preserve generic signing/parity coverage in
+      `core/storefront-client/tests/test_admin_auth.py` through a supported
+      operation. Correct the obsolete PATCH callback descriptions in both VM
+      full-deal scenarios and the release endpoint's docstring.
+- [ ] ~~3.3 Remove the legacy local-row normalization loop from
+      `release_reservations`.~~ Transferred to
+      `pools-9-retire-local-physical-authority`: local inventory cleanup retires
+      with the local listing path.
+- [ ] ~~3.4 Remove `resource_count` and its resource-count diagnosis
+      documentation.~~ Transferred to `pools-9-retire-local-physical-authority`:
+      the permanent scenario, e2e assertions, and operator guidance remain
+      current until the local-inventory cutover.
 - [ ] 3.5 Remove the always-`None` `reserved_vm_host` and its threading
       through `register_lease`, `schedule_shutdown`, `provision_vm`,
       `_do_provision`, and `_register_vm_lease_with_settings`. Leave
@@ -67,7 +84,8 @@ Per `openspec/README.md#plan-closeout-requirements`.
       these surfaces alive past their callers.
 - [ ] 4.2 **Import placement.**
 - [ ] 4.3 **Documentation compliance.** Confirm no permanent document
-      describes the removed routes or the health field.
+      describes the removed routes. Resource-count diagnosis remains current
+      and belongs to the later cutover.
 - [ ] 4.4 **Narrative compression.**
 - [ ] 4.5 **Roadmap currency.** Fold the retired surfaces into Goal 1's
       current-state text in `docs/development/ROADMAP.md` and remove this
@@ -79,8 +97,9 @@ Per `openspec/README.md#plan-closeout-requirements`.
       `make check-doc-citations CHANGE=remove-dead-storefront-physical-surfaces`
       and resolve every match.
 - [ ] 4.9 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and
-      record the evidence; the VM teardown stages exercise
-      `release_reservations`. If the pipeline cannot run for a reason unrelated
+      record the evidence; the VM full-deal provisioning and teardown stages
+      exercise the retained reservation/fulfillment behavior beside the removed
+      host threading. If the pipeline cannot run for a reason unrelated
       to this change, record that as an explicit blocker naming the cause and
       the change that owns it, and treat the validations it gates as unrun.
 - [ ] 4.10 **Packaging.** Run `make check-packaging` and resolve every failure it
@@ -94,3 +113,6 @@ Per `openspec/README.md#plan-closeout-requirements`.
 |---|---|
 | The storefront holds no physical-allocation ledger and no physical resource administration surface | Reached in part here; the requirement is `pools-9-retire-local-physical-authority`'s "Storefront holds no physical-resource authority" |
 | Why each surface was dead | This change's `design.md`; no permanent home once the surfaces are gone |
+| Authoritative scenario controls replace future local physical-state mutations | Existing authority boundary in `docs/development/ARCHITECTURE.md#authority-boundaries`; no new permanent behavior |
+| Resource-count diagnosis and local cleanup retire with the local listing path | Temporary sequencing decision; owned by `pools-9-retire-local-physical-authority/design.md` |
+| Existing allocation rows are preserved; unrelated live tests survive the freeze | Migration and validation constraints in this change's `design.md`; no new subsystem requirement |

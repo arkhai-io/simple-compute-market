@@ -23,351 +23,309 @@ service's canonical typed client over `ASGITransport`.
 No decision gate remains open. The tasks below confirm the code facts
 each decision rests on still hold, and stop rather than proceed if one has moved.
 
-- [ ] 1.1 Confirm `market_alkahest.schemas.PER_UNIT_SECONDS` still holds exactly
-      `{"hour": 3600}`. The hourly-only rule is a local asking-rate contract
-      validated against that table for parity, not a rule inherited from it.
-- [ ] 1.2 Confirm `SettlementPublicationClause` still expresses a published rate as
-      an opaque `asset` string and positive decimal `rate` text without an exponent,
-      with rate and unit required together.
-- [ ] 1.3 Confirm the settlement clause grammar still restricts `asset` to equality
-      operators.
-- [ ] 1.4 Confirm `contact-exchange.v1` options remain rateless; if that mechanism
-      gains a rate, revisit the carrier decision before implementing.
-- [ ] 1.5 Confirm the site-scoped pool-override store still applies to a pool at any
-      configured site and replaces shapes and settlement clauses as whole lists, and
-      that `listing_comparison` still refreshes term fields in place. The override
-      precedence and the in-place lifecycle rest on both. Files:
-      `kit/pool-overrides/src/market_pool_overrides/records.py`,
-      `domains/vms/listings/src/arkhai_vms_listings/listing_comparison.py`.
-- [ ] 1.6 Confirm the registry still validates its full `listing_shape` only in the
-      dry run (`core/registry/src/core_registry/api/validate_routes.py`,
-      `core/registry/src/core_registry/api/validate_model.py`). If
-      publish-boundary enforcement has been added, the refusal of a partial rate
-      may also move there; re-read `design.md` before relying on it.
+- [x] 1.1 Confirmed: `market_alkahest.schemas.PER_UNIT_SECONDS` holds exactly
+      `{"hour": 3600}`.
+- [x] 1.2 Confirmed: `SettlementPublicationClause` (`kit/settlement-runtime/src/market_settlement_runtime/publication.py`)
+      expresses `asset: str` (trimmed, non-empty) and `rate: str | None` validated
+      against `_DECIMAL_RATE = re.compile(r"(?:0|[1-9][0-9]*)(?:\.[0-9]+)?")` —
+      positive decimal text without an exponent. Reused for the asking-rate
+      amount contract in 3.2.
+- [x] 1.3 Confirmed: every settlement-carrier asset filter in
+      `core/registry/filter-spec.yaml` (`token`, `token_exclude`, `mechanism`) is
+      declared `op: in` / `op: not_in` — equality-family ops only, nothing
+      range-like.
+- [x] 1.4 Confirmed: `kit/contact-exchange/src/market_contact_exchange/settlement_config.py`'s
+      `contact_option_builder` raises `ValueError("contact exchange declines
+      scalar rates")` when its clause carries a rate, and always publishes
+      `rates: []`.
+- [x] 1.5 Confirmed: `kit/pool-overrides/src/market_pool_overrides/records.py`'s
+      `PoolOverrideRecord` carries `listing_shapes` as a whole-list replacement,
+      and `domains/vms/listings/src/arkhai_vms_listings/listing_comparison.py`'s
+      `TERM_RESOURCE_FIELDS`/`compare_listing`/`refreshed_listing_resource`
+      refresh named term fields in place.
+- [x] 1.6 Confirmed: `core/registry/src/core_registry/api/validate_routes.py`'s
+      `/api/v1/listings/validate-publish` is the only route that validates the
+      full `listing_shape`; its own comment states "A shape opinion that only
+      the dry run holds is advisory," i.e. the publish boundary does not
+      re-enforce it. No publish-boundary enforcement has been added since
+      `design.md` was written.
 
 ## 2. Generic registry prerequisite
 
-The engine cannot evaluate this change's field as it stands. Section 4 is blocked on
-this section. Nothing in this section may name a rate, an asset, a period, or any
-compute field.
+Nothing in this section names a rate, an asset, a period, or any compute field.
 
-- [ ] 2.1 Add `"decimal_text"` to the `ValueType` literal in
-      `core/registry/src/core_registry/api/filter_spec.py` (currently
-      `Literal["string", "integer", "number", "boolean", "address"]`, line 51).
-- [ ] 2.1a In `core/registry/src/core_registry/api/filter_eval.py`, add a
-      `decimal_text` branch to `_coerce_scalar` (parses to `decimal.Decimal`,
-      rejecting non-decimal text) and widen `_Range.min`/`_Range.max` to
-      `float | int | Decimal | None`. Leave the existing `number` branch (parses
-      with `float(raw)`) untouched.
-- [ ] 2.1b In `_Range.contains` and the `range` branch of `evaluate`
-      (`filter_eval.py`, ~line 400), accept `Decimal` alongside `int`/`float` in
-      the `isinstance` check that selects which resolved values participate in a
-      range comparison.
-- [ ] 2.1c Add the buyer-side mapping entry `"decimal_text": QueryValueType.DECIMAL`
-      next to the existing `"number": QueryValueType.DECIMAL` entry in
-      `core/registry-client/src/registry_client/query.py`'s `_value_type` (~line
-      171). No rendering change: `_scalar` (~line 286) already renders `Decimal`
-      exactly.
-- [ ] 2.1d Confirm `load_filter_spec` (`filter_spec.py`, ~line 149) still raises on
-      an unrecognized `value_type` by virtue of `ValueType` being a closed
-      `Literal` and `FilterDecl` forbidding extras — no new code needed, but add a
-      unit test pinning this for `decimal_text` specifically (see 7.1).
-- [ ] 2.2 Add `requires: list[str] = Field(default_factory=list)` to `FilterDecl`
-      in `filter_spec.py`.
-- [ ] 2.2a In `load_filter_spec`'s validation loop (`filter_spec.py`, ~line
-      161–183), after the existing per-declaration checks, validate each
-      declaration's `requires`: every named target must be a declared filter
-      `name`, must not name itself, and the `requires` graph over all
-      declarations must not contain a cycle (a simple DFS over the
-      name→requires adjacency built from `spec.filters`).
-- [ ] 2.2b In `core/registry/src/core_registry/api/filter_eval.py`, add the
-      co-requirement check to `build_criteria` (~line 327): after
-      `_extract_strict_overrides` splits real filter params from `strict.*`
-      overrides, for each supplied filter name present in `real_params`, check
-      that every name in its `FilterDecl.requires` is also present in
-      `real_params`; raise `FilterParamError` naming the missing co-requirement
-      if not. Follows `_extract_strict_overrides`'s existing shape of a
-      cross-cutting check resolved before the per-criterion loop.
-- [ ] 2.2c In `core/src/market_core/query_dsl.py`, add `requires: tuple[str, ...]
-      = ()` to `FieldDescriptor` (~line 95), naming other descriptor `name`s. Add
-      a validation in `compile_query`/`validate_query` (~lines 431–487) checking,
-      over the validated comparisons' field names, that every field's `requires`
-      entries are also present among the comparisons; raise the same
-      `QueryValidationError` family used for other compile-time refusals.
-- [ ] 2.2d In `core/registry-client/src/registry_client/query.py`'s
-      `_resource_fields` (~line 94), resolve each filter declaration's `requires`
-      (filter `name`s) to the corresponding `FieldDescriptor.name`s (the mapped
-      `query_name`s) in a second pass after the full `by name` table is built,
-      and populate each `FieldDescriptor.requires` accordingly. Encode no
-      specific field's dependency in code — this reads only the specification's
-      declared `requires`.
-- [ ] 2.2e Confirm an undeclared `requires` (the default `[]`) round-trips through
-      `compute_etag` and `_spec_body` (`filter_spec.py`) with no new key added to
-      the serialized body beyond what `model_dump(exclude_none=False)` already
-      produces for the new field — `requires: []` is itself a new key, so this
-      task is to recognize that every filter's etag contribution changes the
-      moment the field exists on the model, and to pin the new etag with a
-      literal-digest test (see 7.2) rather than assume the existing
-      `test_etag_unchanged_for_specs_without_schema_identity`
-      (`core/registry/tests/unit/test_filter_spec.py`, ~line 302) covers it — it
-      builds its expected payload from the model's own dump and will not catch a
-      newly defaulted field changing that dump's shape. Re-confirm against
-      `design.md`'s "An undeclared co-requirement leaves the specification's etag
-      unchanged" before deciding whether a dump-shape change here is acceptable;
-      if it is not, exclude `requires` from serialization when empty
-      (`model_dump(exclude_defaults=True)` for that one field, or a custom
-      serializer) so the normative claim holds exactly.
+- [x] 2.1 `decimal_text` joins `ValueType` in
+      `core/registry/src/core_registry/api/filter_spec.py`.
+- [x] 2.1a `core/registry/src/core_registry/api/filter_eval.py`: `_coerce_scalar`
+      parses `decimal_text` bounds to `Decimal`; `_Range` bounds admit `Decimal`;
+      `number` is unchanged.
+- [x] 2.1b `Criterion` carries the declaration's `value_type`; for `decimal_text`,
+      `evaluate` coerces each resolved listing value from decimal text and drops
+      one of the wrong shape (a JSON number included), so `on_missing` decides it.
+      Range evaluation admits `Decimal`.
+- [x] 2.1c `core/registry-client/src/registry_client/query.py` maps `decimal_text`
+      to `QueryValueType.DECIMAL`; rendering already exact.
+- [x] 2.1d A registry still refuses a spec naming a value type it does not
+      implement (closed `Literal`, `extra="forbid"`); no code needed.
+- [x] 2.2 `FilterDecl.requires: list[str]`, default empty.
+- [x] 2.2a `load_filter_spec` refuses a `requires` target that is undeclared or
+      the declaration itself, and any cycle (`_check_requires_acyclic`).
+- [x] 2.2b `build_criteria` refuses a supplied filter whose co-requirements are
+      not all supplied, before building any criterion, as `strict.<n>` is
+      resolved before the criterion loop. One-directional.
+- [x] 2.2c `core/src/market_core/query_dsl.py`: `FieldDescriptor.requires` (query
+      names); a descriptor requiring itself is refused at construction, an
+      undeclared target in `_descriptor_maps`, and `validate_query` refuses a
+      missing co-requirement as `missing_co_requirement` positioned at the
+      comparison that needs it. `field_reference_json` and
+      `render_field_reference` name co-requirements only when declared, so
+      existing help output is unchanged.
+- [x] 2.2d The registry client reads `requires` per declaration and resolves the
+      filter names to query names once every declaration is read
+      (`_resolve_requires`); an undeclared target is a `FilterVocabularyError`.
+- [x] 2.2e **Decided in implementation:** an empty `requires` is omitted from both
+      the etag input and the served body (`_dump_filter`), so the normative claim
+      holds exactly: no specification declaring no co-requirement changes
+      serialization or etag. The existing precedent test built its expected
+      payload from the model's own dump and would have silently absorbed the new
+      key; it now drops that key explicitly and also pins the literal digest.
+      No version bump or relock: same-version internal wheels are reinstalled by
+      `reinit` and no package requirement changed
+      (`docs/development/BUILD_AND_PACKAGING.md`).
 
 ## 3. Declaration, resolution, and publication
 
-- [ ] 3.1 Add `ASKING_RATES_POLICY_TAG = "asking_rates"` to
-      `kit/resource-pools/src/market_resource_pools/hints.py` beside
-      `LISTING_SHAPES_POLICY_TAG` (~line 83). Add `raw_asking_rates(policy_tags,
-      offering_mode)` mirroring `raw_listing_shapes` (~line 345) and
-      `validate_asking_rates(policy_tags)` mirroring `validate_listing_shapes`
-      (~line 458): a mapping of offering mode to a list of `{shape, amount,
-      asset, period}` entries, each `shape` structurally checked with the
-      existing `shape_structure_problems` helper `validate_listing_shapes`
-      already uses, `amount`/`asset`/`period` checked for presence and type only
-      (decimal-text-shaped string, non-empty string, non-empty string) — the
-      value contract from 3.2 validates content. Export both from
-      `kit/resource-pools/src/market_resource_pools/__init__.py` beside
-      `validate_listing_shapes`.
-- [ ] 3.1a Call `validate_asking_rates` from both existing pool-write call sites
-      of `validate_listing_shapes` in
-      `kit/resource-pools/src/market_resource_pools/service.py`:
-      `_require_valid_policy_tag_hints` (~line 135, the shared helper every
-      individual-pool write path uses) and the bulk YAML import loop (~line
-      518).
-- [ ] 3.2 Add the asking-rate value contract shared by VM and bare metal — a
-      pydantic model (new file,
-      `kit/resource-pools/src/market_resource_pools/asking_rate.py`, or beside
-      `hints.py` if a separate module is unwarranted once written) validating
-      decimal-text amount (positive, no exponent, matching the grammar
-      `SettlementPublicationClause`'s `rate` field already uses in
-      `kit/settlement-runtime`), opaque trimmed non-empty asset, and a period
-      checked against `PER_UNIT_SECONDS` parity (`hour` only this version,
-      confirmed in 1.1).
-- [ ] 3.3 Add asking rates to the site-scoped pool-override store beside listing
-      shapes: `asking_rates: list[dict[str, Any]] | None = None` on
-      `PoolOverrideRecord` in
-      `kit/pool-overrides/src/market_pool_overrides/records.py` (~line 54,
-      beside `listing_shapes`), replacing the pool's list as a whole and
-      accepting an empty list (distinct from `None`) as withholding every rate —
-      `listing_shapes`' `_non_empty` validator (~line 60) must not be reused
-      verbatim here, since it rejects empty lists and this field must not.
-- [ ] 3.4 Resolve each listing's rate by canonical shape digest through the
-      override, then the pool declaration, then none, in
-      `domains/vms/listings/src/arkhai_vms_listings/pricing_resolution.py`
-      (new function beside the existing resolution logic there) and wire it into
-      candidate construction in
-      `domains/vms/listings/src/arkhai_vms_listings/reconciler.py` where
-      `shape_fields` are merged per shape digest into each candidate row (~lines
-      1080–1118). Supply no rate from storefront configuration. Report entries
-      naming an unpublished shape through the same reporting channel
-      `infeasible_shapes`/`undeclared_attributes` already use (~lines 1120–1140).
-- [ ] 3.5 Hold a pool whose declaration or override is unreadable — unknown shape
-      vocabulary, a duplicate shape, or an invalid amount, asset, or period — and
-      report it through the reconciler's existing hold-and-report path (the same
-      one `_VALID_HINT_FIELD`'s sibling checks use in
-      `domains/vms/listings/src/arkhai_vms_listings/reconciler.py`). Do not fall
-      through; `design.md` records why this diverges from `_VALID_HINT_FIELD`
-      and the divergence must not be "fixed" later.
-- [ ] 3.6 Publish `listing_resource.asking_rate` for VM listings in the candidate
-      construction path identified in 3.4, excluded from every shape digest and
-      derivation identity (confirm it is not read by whatever function computes
-      `shape.digest` — `domains/vms/domain/src/arkhai_vms/shape_generation.py` —
-      nor by the derivation-identity builder referenced in `design.md`).
-- [ ] 3.7 Add `"asking_rate"` to `TERM_RESOURCE_FIELDS` in
-      `domains/vms/listings/src/arkhai_vms_listings/listing_comparison.py`
-      (~line 48), so a change or removal refreshes the listing in place through
-      `compare_listing`/`refreshed_listing_resource` (~lines 81, 118) unchanged.
-- [ ] 3.8 Publish and refresh the asking rate for bare-metal listings through the
-      same resolution (3.4's function, reused rather than re-implemented) once
-      bare-metal publication reads pool declarations and publishes a capability
-      shape per listing — both true as of `bare-metal-listing-shapes` (archived).
-      Files: `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/publication.py`
-      and `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/publication_composition.py`,
-      where clause and duration precedence are currently resolved (see 3b.3) and
-      where the shape-keyed rate lookup joins it.
-- [ ] 3.9 Do not populate the asking rate from a mechanism rate, and do not write
-      it into a settlement carrier. Confirm by reading
-      `domains/vms/storefront/src/market_storefront/settlement_composition.py`
-      and `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/settlement_composition.py`
-      for any path that reads a listing's published fields when constructing a
-      settlement option or escrow term, and confirm neither reads
-      `asking_rate`.
+Three planning premises moved during implementation; each is recorded at the
+task it changed.
+
+- [x] 3.1 `kit/resource-pools/src/market_resource_pools/asking_rates.py` (new):
+      `ASKING_RATES_POLICY_TAG`, `validate_asking_rates` (structure only:
+      mapping of mode to list; each entry exactly `shape`, `amount`, `asset`,
+      `period`; shape well-formed; amount positive decimal text in the
+      settlement clause's grammar; asset and period trimmed non-empty tokens),
+      and `raw_asking_rates`. An empty mode list is valid and prices nothing.
+      Exported from the package.
+- [x] 3.1a Both pool-write surfaces in `service.py` call it: the shared
+      `_require_valid_policy_tag_hints` and the bulk-import loop
+      (`invalid_asking_rates` at `.policy_tags.asking_rates`).
+- [x] 3.2 **Amended.** The value contract is `AskingRate` in the same module.
+      The accepted periods are a local constant, `ACCEPTED_ASKING_RATE_PERIODS`,
+      held equal to `PER_UNIT_SECONDS` by a parity test in the VM storefront
+      suite (`tests/unit/test_asking_rate_period_parity.py`), which installs
+      both packages. Importing `market_core` into `kit/resource-pools` would
+      have changed its requirements and forced relocks across every consumer;
+      the design already makes the rule local with parity checked, not
+      inherited.
+- [x] 3.3 **Amended.** `kit/pool-overrides`: `asking_rates` on
+      `PoolOverrideRecord` (an empty list accepted, unlike shapes and clauses;
+      an override stating only rates states something), in `_JSON_COLUMNS`, on
+      `StoredPoolOverride`, and added by a second, additive, idempotent
+      migration (`20261001_001_pool_override_asking_rates`) that VM's chain
+      composes unchanged. The record does not check entry structure: that would
+      add a `resource-pools` dependency to a kit whose dependency set
+      `ARCHITECTURE.md` fixes. Each market's contribution judges rates instead,
+      through the shared resolver, which also catches vocabulary, period, and
+      duplicate problems at the write.
+- [x] 3.4 **Amended.** Resolution is `resolve_asking_rates` in
+      `kit/resource-pools`, not VM's `pricing_resolution.py`: bare metal reuses
+      it and cannot import VM. It is generic over each domain's shape digest and
+      vocabulary: override, else pool declaration, else none; an unreadable tier
+      never falls through; `unpublished()` names priced shapes no listing has.
+      VM binds it in `arkhai_vms_listings/asking_rates.py`
+      (`resolve_vm_asking_rates`, keyed by `vm_shape_digest`, listing
+      identity's digest); `reconciler.py` resolves it right after shapes and
+      carries `asking_rates_by_digest` on each row, from which
+      `available_compute_slices` gives each candidate its own shape's rate.
+      `_site_pool_overrides` and `vm_override_view` carry the override's rates.
+      Unpublished priced shapes go to the derivation report
+      (`unpublished_asking_rates`) and are logged. No configuration default.
+- [x] 3.5 An unreadable declaration or override holds the pool and is reported
+      (`unreadable_asking_rates`), as unreadable shapes are.
+- [x] 3.6 `arkhai_vms/storefront_adapter.py` publishes
+      `listing_resource.asking_rate` from the candidate; it reaches no shape
+      digest or derivation key. **Found in implementation:** VM's
+      `ComputeResource` (`arkhai_vms_listings/models.py`) ignores undeclared
+      fields, so the stored and published listing silently lost the rate; only
+      the app-level tests could see it. It now declares `asking_rate`
+      (`PublishedAskingRate`) and omits it from serialization when unset, so an
+      unpriced listing publishes no field (the compute schema types it as an
+      object) and a withdrawn rate refreshes to a listing without one.
+- [x] 3.7 `asking_rate` joins `TERM_RESOURCE_FIELDS` in
+      `arkhai_vms_listings/listing_comparison.py`; a change or removal refreshes
+      in place.
+- [x] 3.8 Bare metal, through the same resolver:
+      - `arkhai_bare_metal/shapes.py` owns `bare_metal_shape_digest` and
+        `bare_metal_shape_problems` (compute-family vocabulary), so the
+        storefront adds no direct dependency on `arkhai_compute` or the
+        capability-shape kit;
+      - `arkhai_bare_metal_storefront/site_reading.py` resolves each pool's
+        rates (`resolve_bare_metal_asking_rates`), takes an optional
+        per-pool override rate list for 3b, and marks an admitted pool whose
+        rates cannot be read as held in the admission map classification
+        already obeys;
+      - `classify_bare_metal_resources` attaches each candidate's own shape's
+        rate; `BareMetalListing` declares `asking_rate`
+        (`BareMetalAskingRate`), persisted with `exclude_none`;
+      - `asking_rate` joins bare metal's `TERM_RESOURCE_FIELDS`;
+      - `publication.py` holds with reason `asking_rates_unreadable` and
+        reports `asking_rate_shape_unpublished`.
+- [x] 3.9 Confirmed by reading: neither VM's nor bare metal's
+      `settlement_composition.py` reads a published listing field, and nothing
+      in VM settlement or negotiation, or the bare-metal domain, references the
+      rate. 7.11 asserts it at the app level.
 
 ## 3b. Bare metal joins the site-scoped override store
 
 Baseline from `bare-metal-listing-shapes`' design review, which moved this work
 here; see "Bare metal joins the site-scoped override store" in `design.md`.
 
-- [ ] 3b.1 `kit/pool-overrides`:
-      - add the framework-free `PoolOverrideRouteService` (`replace`, `read`,
-        `delete`) as a new module,
-        `kit/pool-overrides/src/market_pool_overrides/route_service.py`,
-        following `kit/contact-exchange`'s `IntroductionRouteService` shape;
-      - make `refresh_site` and `wake_publication` accept `None` in
-        `kit/pool-overrides/src/market_pool_overrides/service.py`
-        (`PoolOverrideService`);
-      - bump the kit's version (`kit/pool-overrides/pyproject.toml`);
-      - add unit tests over a service double in
-        `kit/pool-overrides/tests/unit/test_route_service.py`, and integration
-        tests against the real store in
-        `kit/pool-overrides/tests/integration/test_route_service.py`, including
-        a storefront with no cache and no loop (exercising the now-optional
-        `refresh_site`/`wake_publication`).
-- [ ] 3b.2 VM storefront: reduce the three override handlers in
-      `domains/vms/storefront/src/market_storefront/controllers/admin_controller.py`
-      (`put_pool_override`, `get_pool_overrides`, the delete handler — ~lines
-      618–675) to bindings over `PoolOverrideRouteService`. VM's existing
-      override integration
-      (`domains/vms/storefront/tests/integration/test_pool_overrides_api.py`),
-      identity-dispatch, client-parity
-      (`domains/vms/storefront/tests/unit/test_pool_override_client_parity.py`),
-      and CLI tests
-      (`domains/vms/storefront/tests/unit/cli/test_pool_overrides.py`) must pass
-      unchanged.
-- [ ] 3b.3 Bare-metal storefront:
-      - a new `BareMetalPoolOverrideTerms` model (new file,
-        `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/pool_override_terms.py`,
-        mirroring
-        `domains/vms/storefront/src/market_storefront/models/pool_override_models.py`),
-        carrying `min_duration_seconds` and `max_duration_seconds` and no
-        shapes;
-      - a new `BareMetalPoolOverrideContribution` implementing
-        `market_pool_overrides.contribution.PoolOverrideContribution` for
-        `bare_metal` (new file,
-        `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/pool_override_contribution.py`,
-        mirroring
-        `domains/vms/storefront/src/market_storefront/services/vm_pool_override_contribution.py`),
-        whose `vocabulary_problems` refuses a record stating `listing_shapes`
-        and whose `judge_shapes` returns nothing;
-      - a new migration for the kit's override tables plus a bare-metal
-        storefront table recording, per site, the site, revision, digest,
-        projected pool IDs, and acceptance time of every publication run that
-        accepted that site's generation — in
-        `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/migrations.py`;
-      - every publication run records its accepted generation — in
-        `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/publication.py`
-        and/or `publication_service.py`;
-      - override status reads that table (`unknown` for a site with no row) —
-        exposed through
-        `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/api.py`'s
-        system-status route;
-      - three admin routes (`PUT`/`GET`/`DELETE` `/pool-overrides`) bound in
-        `api.py` through the existing `_admin` dependency (~line 131), delegating
-        to the kit's `PoolOverrideRouteService` from 3b.1;
-      - clause and duration precedence in
-        `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/publication_composition.py`,
-        holding a pool whose override is unreadable (replacing
-        `BARE_METAL_STOREFRONT_PUBLICATION_CLAUSES` configuration precedence
-        where an override states clauses);
-      - wiring in
-        `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/runtime.py`
-        (`build_runtime_from_environment`, `BareMetalStorefrontRuntime`) to
-        construct and hold the `PoolOverrideService` the way
-        `domains/vms/storefront/src/market_storefront/server.py` and
-        `container.py` do for VM.
-- [ ] 3b.4 Bare-metal `pool-override` command (`set --file`, `get`, `list`,
-      `delete`, `--mode` never defaulted) over the kit's `SyncPoolOverrideClient`
-      in `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/cli.py`,
-      written for bare metal rather than copied from VM's
-      `domains/vms/storefront/src/market_storefront/cli.py` — no
-      infeasible-shape warning, since an override here states no shapes.
-- [ ] 3b.5 Integration through the typed clients, in a new
-      `domains/bare_metal/storefront/tests/test_pool_overrides_api.py` (mirroring
-      VM's `test_pool_overrides_api.py`) and
-      `domains/bare_metal/storefront/tests/test_publication_cli.py` (extended):
-      - replace, read, list, and delete;
-      - refusals of shapes, unknown terms, an unconfigured site, an unreachable
-        site, and an unknown pool;
-      - status `unknown` before any run, `applied` after a run from the command,
-        `orphaned`, and `site_unconfigured`;
-      - an override's clauses and durations reaching a refreshed listing.
-      A VM storefront test
-      (`domains/vms/storefront/tests/integration/test_admin_api.py` or
-      `test_pool_overrides_api.py`) shows the combined shell still refuses a
-      `bare_metal` write.
-- [ ] 3b.6 End-to-end: the bare-metal publication scenario in
-      `e2e-tests/tests/e2e/` writes an override through the kit client, steps
-      publication, and observes the refreshed term at the registry.
+- [x] 3b.1 `kit/pool-overrides`:
+      - `route_service.py` (new): `PoolOverrideRouteService` with `replace`
+        (accepts a validated record or a raw mapping, refusing an invalid body
+        with 422), `read` (a whole address reads one, 404 when absent; otherwise
+        a list), and `delete` (refuses a partial address with 400); a malformed
+        address component is 400; no service composed is 503. Every refusal is a
+        `PoolOverrideRouteError` carrying its status, as
+        `kit/contact-exchange`'s route service does;
+      - `PoolOverrideService` accepts `None` for `refresh_site` and
+        `wake_publication`;
+      - unit tests over a service double:
+        `kit/pool-overrides/tests/unit/test_route_service.py`;
+      - the delete path also guards its wake, which the optional effect needs;
+      - **Decided in implementation: no version bump.** The kit's additions are
+        backward compatible and its requirements are unchanged, so a same-version
+        wheel is what `docs/development/BUILD_AND_PACKAGING.md` reinstalls and
+        `make check-locks` accepts. A bump would also force relocking VM's
+        storefront, whose resolution this environment cannot reproduce (its RL
+        extra's index host is unreachable here), to no behavioural end. The
+        bare-metal storefront pins `arkhai-kit-pool-overrides==0.2.0` as VM does.
+      - the no-cache, no-loop composition is exercised end to end by bare
+        metal's own integration tests (3b.5), which is the storefront that
+        needs it.
+- [x] 3b.2 `domains/vms/storefront/src/market_storefront/controllers/admin_controller.py`:
+      the three handlers bind the route service and translate its error to an
+      `HTTPException`. VM keeps FastAPI's typed record body, so its 422 shape is
+      unchanged. VM's override integration, client-parity, CLI, and admin tests
+      pass unchanged (100).
+- [x] 3b.3 Bare-metal storefront:
+      - `pool_overrides.py` (new): `BareMetalPoolOverrideTerms`
+        (`min_duration_seconds`, `max_duration_seconds`, ordered);
+        `BareMetalPoolOverrideContribution` refusing shapes and judging terms
+        and rates through the same function publication reads a stored
+        override with, `judge_shapes` empty; `read_bare_metal_pool_overrides`
+        (an undecodable or unreadable stored override carries its problems);
+        `record_accepted_generation` and `accepted_site_projection`;
+      - `migrations.py`: `bare-metal-storefront-0011-accepted-site-generations`;
+        `sqlite_client.py` composes the kit's migrations before it;
+      - `publication.py`: each run reads overrides once, records every site
+        generation it accepts, passes override rates and problems to
+        `read_site_pools`, holds with `pool_override_unreadable`, and carries a
+        pool's override to its candidates as plain values;
+      - `publication_composition.py`: a candidate's override clauses replace the
+        configured clauses, and its bound the configured bound;
+      - `runtime.py`: `pool_override_service()` composes the kit service with no
+        after-write effects and the accepted-generation projection as status
+        source; `None` without sites;
+      - `api.py`: `PUT`/`GET`/`DELETE` on the kit's path, authenticated through
+        `_admin` with the kit's `pool_override_contract`, delegating to the route
+        service; administrator system status reports `pool_overrides`
+        (`models.py`);
+      - `pyproject.toml` requires the kit; `uv.lock` relocked (adds only the
+        kit; no environment path recorded).
+- [x] 3b.4 `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/pool_override_cli.py`
+      (new), registered in `cli.py` as `pool-override`: `set --file`, `get`,
+      `list`, and `delete` over the kit's `SyncPoolOverrideClient`, `--mode`
+      never defaulted, `--pool` requiring `--site`, a refusal exiting 1 with its
+      message. It connects to `--storefront-url`, else
+      `BARE_METAL_STOREFRONT_PUBLIC_URL`, else `http://localhost:8000`. It signs
+      with `runtime.storefront_signer_from_environment`, extracted from
+      `build_runtime_from_environment` so the server and the command resolve one
+      identity from the same inputs. Heavy imports stay inside the command, as
+      its sibling commands keep theirs. No infeasible-shape warning: an override
+      here states no shapes. Tests: `tests/test_pool_override_cli.py`.
+- [x] 3b.5 `domains/bare_metal/storefront/tests/test_pool_overrides_api.py`
+      through the kit's typed client against the running app: replace, read,
+      list, delete; refusal (422) of shapes, an unknown term, bounds out of
+      order, an unreadable rate, and an unconfigured site, each storing
+      nothing; 404 for a pool the live site lacks; status `unknown`, `applied`,
+      `orphaned`, and `site_unconfigured`; a signed non-administrator refused.
+      `tests/test_publication_cycle.py`: a run records its accepted generation;
+      an override's rate and minimum duration refresh the listing in place; an
+      undecodable stored override holds its pool. Not covered: an unreachable
+      site (the kit's own suite covers its 503), and an override's clauses
+      reaching a listing, which needs the settlement composition the cycle
+      harness replaces; that belongs with 3b.6.
+- [x] 3b.6 Written; runs in CI.
+      `e2e-tests/tests/e2e/roles/scenarios/bare_metal/test_bare_metal_publication.py`
+      gains stages 05b–05d on the reinstated listing: a pool-declared rate
+      refreshes it in place and a rate query compiled from the registry's own
+      specification finds it, at and only at its bound, by both bound names; a
+      storefront override through the kit's typed client replaces the rate and
+      the maximum duration and reports `applied`; deleting it restores the
+      pool's rate. The machine's rate key is the domain's own
+      `derive_bare_metal_shape`. The module collects in the e2e environment (11
+      stages). An override's clauses reaching a listing are not asserted: the
+      lane's configured clauses are not visible to the scenario, so a clause
+      override it wrote could not be told apart from configuration.
 
 ## 4. Filters and the compute schema
 
-Blocked on Section 2.
-
-- [ ] 4.0 Confirm the decided query names against `design.md` ("A bound filter's
-      bare query name follows the field's preferred direction, not bound
-      position"): `asking_rate` for the upper bound, `asking_rate_min` for the
-      lower. Stop and revisit rather than proceed if the reasoning no longer
-      holds against the current filter-spec conventions
-      (`core/registry/filter-spec.yaml`'s existing `*_min` declarations, ~lines
-      224–234).
-- [ ] 4.1 Declare `asking_rate_max`, `asking_rate_min`, `asking_rate_asset`, and
-      `asking_rate_period` in `core/registry/filter-spec.yaml`, beside the
-      existing lower-bound block (~line 220–234), with the paths, ops, types,
-      and alias kinds `design.md`'s table fixes, naming `asking_rate_max`'s
-      `query_name` as `asking_rate` and `asking_rate_min`'s as
-      `asking_rate_min` per 4.0.
-- [ ] 4.1a Make all four `on_missing: fail`.
-- [ ] 4.1b Declare `requires: [asking_rate_asset, asking_rate_period]` on both
-      bound filters.
-- [ ] 4.1c Match only listings quoting the named period and asset; convert
-      across neither (no code change beyond 2.2b's co-requirement check and the
-      `in`-op equality filters declared in 4.1 — `asking_rate_asset` and
-      `asking_rate_period` as `op: in, value_type: string`).
-- [ ] 4.2 Declare the `asking_rate` object in the compute `listing_shape` inside
-      `core/registry/filter-spec.yaml` (the `listing_resource.properties` block,
-      ~lines 54–119), all three fields (`amount`, `asset`, `period`) required
-      when the object is present, so the dry run
-      (`core/registry/src/core_registry/api/validate_model.py`) and the served
-      self-description (`filter_spec.py`'s `/filter-spec` route) describe it.
-- [ ] 4.3 Record the etag consequence in `design.md`'s Migration Plan (already
-      stated) and confirm by running the filter-spec test suite
-      (`core/registry/tests/unit/test_filter_spec.py`,
-      `core/registry/tests/integration/test_filter_spec.py`) after the YAML
-      change: the compute specification's etag changes and buyers re-fetch,
-      without a version bump; no other deployed specification's etag changes
-      (none other declares `decimal_text` or `requires`).
+- [x] 4.0 Confirmed against `core/registry/filter-spec.yaml`'s lower-bound block:
+      every existing bare-named bound is a capacity field searched from below.
+      `asking_rate` names the upper bound; the lower bound keeps
+      `asking_rate_min`.
+- [x] 4.1 `core/registry/filter-spec.yaml` declares `asking_rate_max` (query name
+      `asking_rate`), `asking_rate_min`, `asking_rate_asset`, and
+      `asking_rate_period`, after the lower-bound block, with a comment stating
+      the direction-of-search naming rule.
+- [x] 4.1a All four `on_missing: fail`.
+- [x] 4.1b Both bounds `requires: [asking_rate_asset, asking_rate_period]`.
+- [x] 4.1c Asset and period are `op: in` string filters, so a listing in another
+      asset or period is excluded, never converted.
+- [x] 4.2 `listing_resource.asking_rate` declared in the compute `listing_shape`:
+      `additionalProperties: false`, all three parts required, `amount` matching
+      the settlement publication clause's decimal-text grammar, `period` limited
+      to `hour`.
+- [x] 4.3 The compute specification's etag changes (it now declares `requires`);
+      nothing in the tree snapshots it. No other specification declares
+      `decimal_text` or `requires`, and the literal-digest test pins that an
+      undeclaring spec's etag is unchanged.
 
 ## 5. Specification
 
-- [ ] 5.1 State the two engine capabilities (the `decimal_text` value type and
-      declarative `requires` co-requirements) in
-      `openspec/specs/registry-discovery/spec.md`, near the existing "Resource
-      query compilation preserves filter-spec authority" requirement (~line
-      110), including that an undeclared co-requirement leaves a
-      specification's serialization and etag unchanged (or, if 2.2e concludes
-      otherwise, the corrected statement of that rule).
-- [ ] 5.1a State the general naming convention from `design.md` ("A bound
-      filter's bare query name follows the field's preferred direction, not
-      bound position") in `openspec/specs/registry-discovery/spec.md`, as
-      guidance for filter authors rather than an engine-enforced requirement —
-      see `design.md`'s note that this binds only a human choosing a
-      `query_name`.
-- [ ] 5.2 State the compute schema's asking-rate field and its four filters in
-      `openspec/specs/registry-discovery/spec.md` near "The published listing
-      shape is named for the seller's listing" (~line 182) or "Compute listings
-      publish their capacity backing" (~line 211), and that the registry
-      validates the field only in the dry run.
-- [ ] 5.3 State in `openspec/specs/storefront-publication/spec.md` the per-shape
-      declaration and precedence (override, then pool declaration, then none,
-      no configuration default), the fail-closed rule, the listing-attribute and
-      independent-carrier rules, and the in-place refresh.
-- [ ] 5.4 State the `asking_rates` policy tag and its structural validation in
-      `openspec/specs/resource-pool-management/spec.md`.
-- [ ] 5.5 Record in `openspec/specs/storefront-publication/architecture.md` why
-      the rate is keyed by shape beside the shape, why the storefront has final
-      authority with no configuration default, and why a site-declared range is
+Normative statements are carried in this change's deltas and reach the permanent
+specs when the change is archived. Companion `architecture.md` and
+`DEPLOYMENT_AND_CONFIG.md` are not synchronized by OpenSpec, so 5.5 and 5.6 are
+written at promotion (8.9), after code review.
+
+- [x] 5.1 `specs/registry-discovery/spec.md`: exact decimal comparison, declared
+      co-requirements (registry refusal authoritative; specification defects
+      refused; an undeclaring specification's serialization and etag unchanged).
+- [x] 5.1a Same delta: "A bound filter's bare query name is the bound a buyer
+      searches by", stated as a rule for filter authors, not engine behaviour.
+- [x] 5.2 Same delta: the compute schema's `asking_rate` object, validated only
+      in the dry run, and its filters, now naming `asking_rate` as the upper
+      bound and `asking_rate_min` as the lower.
+- [x] 5.3 `specs/storefront-publication/spec.md`: per-shape declaration and
+      precedence, no configuration default, the fail-closed hold, the listing
+      attribute independent of any mechanism rate, the in-place refresh, and
+      bare metal's override vocabulary, durable status source, command, and
+      unreadable-override hold. The modified write requirement now refuses rates
+      the domain cannot read, judged as publication reads them.
+- [x] 5.4 `specs/resource-pool-management/spec.md`: the `asking_rates` tag and its
+      structural check. **Found in reconciliation:** the delta requires `period`
+      to be a canonical lowercase unit token; the implementation checked only a
+      trimmed string. It now applies the settlement clause's unit grammar
+      (`kit/resource-pools/.../asking_rates.py`, `_UNIT`), with a test.
+- [ ] 5.5 At promotion: `openspec/specs/storefront-publication/architecture.md`,
+      why the rate is keyed by shape beside the shape, why the storefront has
+      final authority with no configuration default, and why a site range is
       deferred.
-- [ ] 5.6 Record in `openspec/specs/storefront-publication/architecture.md`
-      (new "Storefront pool overrides" subsection content, or extending the
-      existing one the design cites) and
-      `docs/development/DEPLOYMENT_AND_CONFIG.md` ("Storefront listing shapes
-      and pool overrides") bare metal's override vocabulary, its status source,
-      and the override route service both storefronts bind.
+- [ ] 5.6 At promotion: the same companion's "Storefront pool overrides" section
+      and `docs/development/DEPLOYMENT_AND_CONFIG.md` ("Storefront listing
+      shapes and pool overrides"): bare metal's vocabulary, its status source,
+      the shared route service, and the bare-metal command's identity and URL
+      inputs.
 
 ## 6. Cross-change reconciliation
 
@@ -390,13 +348,13 @@ Blocked on Section 2.
 
 ## 7. Validation
 
-- [ ] 7.1 **Unit.** `core/registry/tests/unit/test_filter_eval.py` and
+- [x] 7.1 **Unit.** `core/registry/tests/unit/test_filter_eval.py` and
       `core/registry/tests/unit/test_filter_spec.py`: exact-decimal comparator
       behaviour — bounds at, above, and below a value; inclusive against
       exclusive at equality; a value with more significant digits than a double
       holds; a resolved listing value of the wrong shape; a spec declaring
       `decimal_text` loads, one declaring an unrecognized type is refused.
-- [ ] 7.2 **Unit.** `core/registry/tests/unit/test_filter_spec.py`: co-requirement
+- [x] 7.2 **Unit.** `core/registry/tests/unit/test_filter_spec.py`: co-requirement
       declaration validation — unknown target, self-reference, cycle,
       one-directional supply (naming an asset/period without a bound still
       validates), serialization change when `requires` is declared versus not,
@@ -405,77 +363,83 @@ Blocked on Section 2.
       refusing a bound supplied without its co-requirement.
       `core/tests/unit/test_query_dsl.py`: the buyer-side `requires` check on
       `FieldDescriptor`.
-- [ ] 7.3 **Unit.**
-      `kit/resource-pools/tests/unit/test_hints.py`: `validate_asking_rates` and
-      `raw_asking_rates` — missing field, boundary amounts, an unsupported
-      period, a duplicate shape. New test module (e.g.
-      `domains/vms/storefront/tests/unit/test_pricing_resolution.py`, extended):
-      shape matching by digest, override replacement and the empty override
-      list, and — with a synthetic second period — a cross-period query
-      excluding rather than converting.
-- [ ] 7.4 **Integration.** `core/registry/tests/integration/test_filter_spec.py`
-      or a new `test_asking_rate_filter.py`: exact decimal round-trip through
-      the canonical `RegistryClient` against the real registry app, matching or
-      excluding on the true value.
-- [ ] 7.5 **Integration.** Same file as 7.4: a valid three-part rate query
-      through the canonical `RegistryClient`; and a narrow raw-ASGI
-      rejection-path request supplying an amount bound without its asset,
-      proving the registry itself refuses.
-- [ ] 7.6 **Integration.** `kit/resource-pools/tests/` (new or extended
-      integration test): pool write surfaces refuse a structurally malformed
-      `asking_rates` identically on create, replace, patch, and bulk import, and
-      project a valid one verbatim.
-- [ ] 7.7 **Integration.**
-      `domains/vms/storefront/tests/integration/test_reconciler_projection.py`
-      (extended): seller authoring through the real pool administration client
-      and projection — a rate declared for each of two shapes reaches each
-      shape's publication candidate and then the registry.
-- [ ] 7.8 **Integration.**
+- [x] 7.3 **Unit.** `kit/resource-pools/tests/unit/test_asking_rates.py`:
+      structure (absent, empty mode list, refused amounts including zero, sign,
+      exponent, leading zero, and a JSON number; boundary amounts; a missing or
+      unknown part; an untrimmed asset; an unknown period structurally valid)
+      and resolution (no tier; per-shape pricing by digest; another mode's
+      declaration; override replacing the pool's list as a whole; an empty
+      override; unknown vocabulary, an unaccepted period, and a duplicate shape
+      holding; an unreadable override not falling through; unpublished shapes
+      reported). The period parity guard is
+      `domains/vms/storefront/tests/unit/test_asking_rate_period_parity.py`.
+- [x] 7.6 **Integration.** `kit/resource-pools/tests/integration/test_resource_pool_service.py`
+      (`TestAskingRatesValidationOnEveryWriteSurface`): create, replace, patch,
+      and bulk import refuse identically and store nothing; a valid
+      declaration is kept verbatim.
+- [x] 7.7 **Integration.** `domains/vms/storefront/tests/integration/test_reconciler_projection.py`:
+      derivation on real SQLite prices each of two shapes and publishes no
+      field for an unpriced one;
       `domains/vms/storefront/tests/integration/test_pool_overrides_api.py`
-      (extended): override authority — an override for a pool at a non-first
-      site replaces the declared rate; an empty override list withholds every
-      rate; a storefront with pricing defaults and no declaration publishes no
-      rate.
-- [ ] 7.9 **Integration.** Same file as 7.7: rate lifecycle — change amount,
-      asset, and period and confirm each listing refreshes in place under its
-      identity; remove the entry and confirm the listing stays discoverable but
-      absent from rate-bounded queries.
-- [ ] 7.10 **Integration.** Same file as 7.7: an unreadable declaration or
-      override holds its pool rather than publishing a fallback or a rateless
-      listing.
-- [ ] 7.11 **Integration.**
-      `domains/vms/storefront/tests/integration/` (new or extended settlement
-      composition test) and the bare-metal equivalent in
-      `domains/bare_metal/storefront/tests/test_settlement.py`: no settlement
-      option, escrow term, or accepted obligation carries a value derived from
-      the published rate, and a published rate is not populated from a
-      mechanism rate. Exercise through the real storefront composition.
-- [ ] 7.12 **Integration.** Same files as 7.11, or the registry integration
-      suite: a listing advertising a rateless option (`contact-exchange.v1`)
-      publishes an asking rate and is returned by a rate-bounded query while its
-      option remains rateless.
+      carries a rate through write, publication cycle, and the stored listing
+      over the typed client.
+- [x] 7.8 **Integration.** Same two files: an override at a non-first site
+      replaces that site's rates as a whole while the other site keeps the pool
+      declaration's; an empty override withholds a declared rate and the same
+      listing refreshes without it; a storefront with pricing defaults and no
+      declaration publishes no rate; the write refuses a rate keyed by a shape
+      outside the vocabulary, an unaccepted period, and two rates for one shape.
+- [x] 7.9 **Integration.** `test_reconciler_projection.py`: amount, asset, and
+      removal each keep the listing's key and classify as `terms_differ` on
+      `asking_rate` alone, refreshing to the fresh value.
+      `domains/bare_metal/storefront/tests/test_publication_cycle.py`: a bare-metal
+      change and removal refresh the same listing in place.
+- [x] 7.10 **Integration.** Both domains: an unreadable declaration or override
+      holds the pool (VM `unreadable_asking_rates`; bare metal
+      `asking_rates_unreadable`, its listing kept open and nothing sent), and
+      a priced shape no listing has is reported.
+- [x] 7.11 **Integration.** `test_pool_overrides_api.py`: an override's rate and
+      its settlement clause's rate each publish as stated, and no settlement
+      option carries the asking amount.
+- [x] 7.12 **Integration.** `core/registry/tests/integration/test_asking_rate_filter.py`:
+      a listing whose only settlement option is a rateless introduction, built
+      with contact exchange's own option-identity derivation, is found by a
+      rate-bounded query and keeps its option's empty rate list. The registry
+      depends on no mechanism, so the mechanism's name and asset are stated
+      literally.
 - [ ] 7.13 **System.** `e2e-tests/tests/e2e/`: a buyer query bounded by rate
       returns backed and unbacked listings together, bare metal and VM, and
       excludes listings publishing no rate. Blocked on
       `unbacked-bare-metal-listings` and
       `compose-contact-exchange-across-compute`; until both land, record this as
       an explicit blocker and treat it as unrun rather than passed.
-- [ ] 7.14 **System.** `e2e-tests/tests/e2e/`: multi-seller provenance — one
-      storefront publishing for two seller sites, each site's declared rates
-      reaching only its own listings, and an override for one site leaving the
-      other's rates unchanged.
+- [ ] 7.14 **System.** Multi-seller provenance. Integration already proves an
+      override at a non-first site replaces that site's rates and leaves the
+      other site on its own declaration
+      (`domains/vms/storefront/tests/integration/test_reconciler_projection.py`).
+      The system scenario waits on a lane with two seller sites; the only
+      two-storefront scenario is owned by `repair-multi-storefront-scenario`,
+      which is active. Unrun until then.
 
 ## 8. Closeout
 
-- [ ] 8.1 **Comment hygiene.** Run `make check-comment-hygiene` and resolve
-      every match. The local rationale to keep is why nothing is constructed
-      from the rate, why the asking rate is not derived from a mechanism rate,
-      why the rate is excluded from shape identity, and why a malformed
-      declaration fails closed against the resolver's fall-through convention.
-- [ ] 8.2 **Import placement.** Review imports this change added or touched and
-      migrate function-level ones to module level where no genuine circular
-      import or documented lazy-load reason exists. Verify against the real
-      test suite.
+- [x] 8.1 **Comment hygiene.** `make check-comment-hygiene` passes. Its one
+      finding during implementation was a test docstring of this change citing
+      `design.md`, restated as the invariant. Still owed at closeout: a direct
+      read of the touched production files for fuzzier provenance.
+- [x] 8.2 **Import placement.** Every function-level import this change added
+      was checked. Kept local, with their reasons verified: VM's
+      `resolve_vm_asking_rates` imports the resource-pool kit locally because
+      `arkhai-vms-listings` installs it only as an optional extra (confirmed in
+      its `pyproject.toml`); the bare-metal `pool-override` command imports its
+      client stack inside each command, as its sibling commands do, so help and
+      unrelated commands load none of it. Moved to module level: the tests'
+      mid-module and function-local imports in
+      `core/registry/tests/unit/test_filter_eval.py`,
+      `core/registry/tests/integration/test_asking_rate_filter.py`,
+      `domains/vms/storefront/tests/integration/test_reconciler_projection.py`, and
+      `domains/bare_metal/storefront/tests/test_publication_cycle.py`; all three
+      suites pass after the move.
 - [ ] 8.3 **Documentation compliance.** Re-check accepted decisions against
       `openspec/README.md`'s placement table. Confirm the engine capabilities
       landed in `registry-discovery`, the publication rules in
@@ -493,20 +457,30 @@ Blocked on Section 2.
       change alone.
 - [ ] 8.6 **Campaign index currency.** Update this change's row and Goal 7's
       dependency graph in `openspec/changes/README.md`.
-- [ ] 8.7 **Documentation citations.** Run
-      `make check-doc-citations CHANGE=publish-indicative-listing-rates` and
-      resolve every match.
-- [ ] 8.8 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and
-      record the evidence: the run, its result, and the scenarios that exercise
-      this change's behaviour. If the pipeline cannot run for a reason unrelated
-      to this change, record that as an explicit blocker naming the cause and
-      the change that owns it, and treat the validations it gates as unrun
-      rather than passed.
+- [x] 8.7 **Documentation citations.**
+      `make check-doc-citations CHANGE=publish-indicative-listing-rates` passes;
+      rerun after promotion.
+- [ ] 8.8 **End-to-end pipeline.** Not runnable in the implementation
+      environment, which starts no stack. Owed: the run, its result, and the
+      scenarios exercising this change (bare-metal publication stages 05b–05d).
+      Note for that run: `e2e-tests/tests/unit/test_hosted_public_boundary.py::
+      test_buyer_deployment_mounts_separate_profile_state_and_credential` fails
+      before this change too; it reads compose files this change does not
+      touch.
 - [ ] 8.9 **Promotion.** Complete the design-promotion record below.
-- [ ] 8.10 **Packaging.** Run `make check-packaging` and resolve every failure
-      it reports: environment and image installs derive their internal
-      packages from their locks, every lock is current, and every Python
-      version selection reads the root declaration.
+- [ ] 8.10 **Packaging.** `make check-packaging`: layout, uv setup, and Python
+      version checks pass. `make check-locks` found that the bare-metal
+      storefront's new requirement must be recorded in every lock containing
+      that wheel. `domains/bare_metal/storefront/uv.lock` and `e2e-tests/uv.lock`
+      are relocked through `scripts/uv_project.py lock`, recording no
+      environment path. **Blocker, outside this change:**
+      `domains/vms/storefront/uv.lock` cannot be relocked in the implementation
+      environment, because resolving its `rl` extra fetches torch metadata from
+      `download-r2.pytorch.org`, which that environment's network refuses. The
+      lock already records the kit as VM's own dependency and lacks only the
+      bare-metal storefront's new edge to it. Clear it with
+      `make lock PROJECTS=domains/vms/storefront`, then rerun
+      `make check-packaging`. The lock is not edited by hand.
 
 ## Design promotion record
 
@@ -526,3 +500,9 @@ Blocked on Section 2.
 | Why the rate is keyed by shape, why the storefront has final authority, why a site range is deferred | `openspec/specs/storefront-publication/architecture.md` |
 | Bare metal's override vocabulary, status source, and shared route service | `openspec/specs/storefront-publication/architecture.md` and `docs/development/DEPLOYMENT_AND_CONFIG.md` |
 | Goal 7 current state and gap ownership | `docs/development/ROADMAP.md` |
+| One asking-rate resolver in `kit/resource-pools`, generic over each domain's shape digest and vocabulary, because bare metal cannot import VM | `openspec/specs/storefront-publication/architecture.md` |
+| A market's override contribution judges override rates, so the override kit gains no resource-pool dependency | `openspec/specs/storefront-publication/architecture.md` ("Storefront pool overrides") |
+| Accepted periods are a local contract held equal to `PER_UNIT_SECONDS` by a parity test, not imported | `openspec/specs/storefront-publication/architecture.md` |
+| An unpriced listing publishes no `asking_rate` field rather than null, so a withdrawn rate refreshes in place | `openspec/specs/storefront-publication/spec.md` (delta: "A shape is priced nowhere") |
+| The bare-metal command signs as the storefront's own identity from the server's inputs | `docs/development/DEPLOYMENT_AND_CONFIG.md` ("Storefront listing shapes and pool overrides") |
+| `kit/pool-overrides` keeps its version: backward-compatible additions, unchanged requirements | Temporary: change history only |

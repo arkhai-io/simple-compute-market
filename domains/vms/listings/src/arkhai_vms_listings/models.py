@@ -3,9 +3,11 @@ import re
 from typing import Any, Literal, Union
 from pydantic import (
     BaseModel,
+    ConfigDict,
     Field,
     field_serializer,
     field_validator,
+    model_serializer,
     model_validator,
 )
 
@@ -317,6 +319,23 @@ class TokenResource(Resource):
         return _serialize_uint256_str(v)
 
 
+class PublishedAskingRate(BaseModel):
+    """A seller's asking price for one listing's whole shape.
+
+    A listing attribute from which nothing is constructed: no settlement option,
+    escrow term, or obligation is derived from it. The parts travel together
+    because an amount means nothing without the asset and period it is quoted
+    in. The storefront validates the declaration it came from before
+    publication; this only carries the published value.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    amount: str
+    asset: str
+    period: str
+
+
 class ComputeResource(ComputeDomainResource):
     """Describes a compute slice — a sliceable allocation from a host that
     may be put on the market. The seller decides the slice configuration
@@ -434,6 +453,24 @@ class ComputeResource(ComputeDomainResource):
         default=None,
         description="True for commercial datacenter hosting (vs home/colo)",
     )
+
+    asking_rate: PublishedAskingRate | None = Field(
+        default=None,
+        description=(
+            "The seller's asking price for this listing's shape; omitted, not "
+            "null, when nothing prices it."
+        ),
+    )
+
+    @model_serializer(mode="wrap")
+    def _omit_unpriced_rate(self, handler: Any) -> Any:
+        # Omitted rather than null so a rateless listing publishes no field
+        # (the compute schema types it as an object) and a withdrawn rate
+        # refreshes in place to a listing without one.
+        data = handler(self)
+        if isinstance(data, dict) and data.get("asking_rate") is None:
+            data.pop("asking_rate", None)
+        return data
 
 
 class ComputeResourcePortfolio(BaseModel):

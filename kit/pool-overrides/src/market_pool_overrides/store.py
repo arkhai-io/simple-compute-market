@@ -24,9 +24,10 @@ from market_pool_overrides.records import PoolOverrideAddress, PoolOverrideRecor
 
 POOL_OVERRIDES_TABLE = "pool_overrides"
 POOL_OVERRIDES_MIGRATION_ID = "20260925_001_pool_overrides"
+POOL_OVERRIDE_ASKING_RATES_MIGRATION_ID = "20261001_001_pool_override_asking_rates"
 
 _ADDRESS = ("site_id", "pool_id", "offering_mode")
-_JSON_COLUMNS = ("listing_shapes", "settlements", "terms")
+_JSON_COLUMNS = ("listing_shapes", "settlements", "asking_rates", "terms")
 _COLUMNS = (*_ADDRESS, *_JSON_COLUMNS, "created_at", "updated_at")
 
 
@@ -56,16 +57,28 @@ def _create_pool_overrides(conn: sqlite3.Connection) -> None:
     )
 
 
+def _add_asking_rates(conn: sqlite3.Connection) -> None:
+    columns = {row[1] for row in conn.execute(f"PRAGMA table_info({POOL_OVERRIDES_TABLE})")}
+    if "asking_rates" not in columns:
+        conn.execute(f"ALTER TABLE {POOL_OVERRIDES_TABLE} ADD COLUMN asking_rates TEXT")
+
+
 def pool_override_migrations() -> tuple[PoolOverrideMigration, ...]:
-    """The store's migrations, for a storefront to compose into its own chain."""
-    return (PoolOverrideMigration(POOL_OVERRIDES_MIGRATION_ID, _create_pool_overrides),)
+    """The store's migrations, in order, for a storefront to compose into its
+    own chain. Each is additive: an existing override gains a column it states
+    nothing in."""
+    return (
+        PoolOverrideMigration(POOL_OVERRIDES_MIGRATION_ID, _create_pool_overrides),
+        PoolOverrideMigration(POOL_OVERRIDE_ASKING_RATES_MIGRATION_ID, _add_asking_rates),
+    )
 
 
 @dataclass(frozen=True)
 class StoredPoolOverride:
     """One stored override as a market's derivation reads it.
 
-    ``listing_shapes``, ``settlements``, and ``terms`` are decoded, or ``None``
+    ``listing_shapes``, ``settlements``, ``asking_rates``, and ``terms`` are
+    decoded, or ``None``
     where the override states nothing. A field whose stored value cannot be
     decoded is kept as its raw text and named in ``problems``: an unreadable
     override is not an absent one, so a reader holds what it governs rather than
@@ -77,6 +90,7 @@ class StoredPoolOverride:
     offering_mode: str
     listing_shapes: Any = None
     settlements: Any = None
+    asking_rates: Any = None
     terms: Any = None
     problems: tuple[str, ...] = field(default=())
 
@@ -226,6 +240,7 @@ class SQLitePoolOverrideStore:
 
 
 __all__ = [
+    "POOL_OVERRIDE_ASKING_RATES_MIGRATION_ID",
     "POOL_OVERRIDES_MIGRATION_ID",
     "POOL_OVERRIDES_TABLE",
     "PoolOverrideMigration",

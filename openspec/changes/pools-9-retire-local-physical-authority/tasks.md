@@ -3,10 +3,12 @@
 ## Status: planned
 
 Section numbering is kept from the original plan. Section 0 is
-`fix-resource-pool-provider-at-creation`'s; Sections 2 and 3 are
-`remove-dead-storefront-physical-surfaces`'; Section 1's endpoint tasks are
+`fix-resource-pool-provider-at-creation`'s; Section 2 and most of Section 3 are
+`remove-dead-storefront-physical-surfaces`'; former tasks 3.3 and 3.4 now belong
+here with the local-inventory cutover. Section 1's endpoint tasks are
 struck because `kit/pool-overrides` is the write path. Resolved planning
-questions, kept as record:
+questions, kept as record. The diagnostic question added by the scope transfer
+remains open in `design.md`:
 
 1. `resources`' commercial columns are dead in the default code path: read only
    by `_project_legacy_resource_row`, reached only when `compute_capacity_pools`
@@ -52,7 +54,17 @@ tasks 2.1–2.5 under the same numbers.
 
 ## 3. Remove dead physical surfaces
 
-Owned by the same change, tasks 3.1–3.7 under the same numbers.
+Tasks 3.1, 3.2, and 3.5–3.7 belong to the same change under the same numbers.
+Former tasks 3.3 (local-row reservation cleanup) and 3.4 (`resource_count`)
+are transferred here and retire with Section 4's local listing path and
+Section 5's CSV contract. The existing checklist has not yet been expanded
+into an implementation plan for that transferred scope.
+
+Design gate before the cutover's field removal: decide the replacement
+operator diagnostic, record its rationale, and reconcile the
+"Operator-visible acceptance state" delta and its consumers. Tasks 4.5 and
+5.6 must not be read as choosing an answer to that open question. The
+site-ledger half of `release_reservations` remains supported.
 
 ## 4. Retire the local-table listing path
 
@@ -89,7 +101,9 @@ provisioning can trust two principals leaves it with no listing source.
 - [ ] 4.5 Delete `resource_capacity_validator.py` and `SQLiteClient.upsert_resource`
       with `_sync_compute_pool_for_resource`, `upsert_host`, `get_host`,
       `get_resource`, `list_resources`, `apply_resource_transition`, and
-      `apply_resource_set_transition` once their callers are gone.
+      `apply_resource_set_transition` once their callers are gone. The
+      transferred local cleanup and resource-count readers are among those
+      callers and retire at the same cutover.
 - [ ] 4.6 Document, for operators, that rollback past this section is a code
       rollback rather than a configuration change.
 - [ ] 4.7 Run the full storefront suite and the VM e2e scenarios.
@@ -126,6 +140,8 @@ provisioning can trust two principals leaves it with no listing source.
 - [ ] 5.6 Migrate the seven CSV-dependent test files to
       projection/provisioning-service seeding: the six VM scenario files
       named in `proposal.md` plus `e2e-tests/tests/smoke/test_storefront_smoke.py`.
+      The resource-count assertions and their import diagnostics must be
+      reconciled against the operator diagnostic chosen at Section 3's gate.
       `test_multi_registry.py`'s second-storefront stages (02b, 06b, 06c) wait
       on `repair-multi-storefront-scenario`; once provisioning trusts that
       principal, its inventory is seeded through provisioning and
@@ -153,8 +169,9 @@ Per `openspec/README.md#plan-closeout-requirements`.
       touched docstrings directly as well: several — `_local_pool_pricing`,
       `_place_capacity_hold`, `_project_host`'s callers — describe an
       arrangement that no longer exists, and stale docstrings are what kept
-      these surfaces alive past their callers. (`patch_resource` and
-      `release_reservations` are `remove-dead-storefront-physical-surfaces`'.)
+      these surfaces alive past their callers. `release_reservations`' local
+      cleanup and its operator description are part of this cutover;
+      `patch_resource` belongs to `remove-dead-storefront-physical-surfaces`.
 - [ ] 7.2 **Import placement.** Review imports this change adds or touches;
       relocate function-level imports where no genuine circular import or
       documented lazy-load reason applies, verified against the real suite.
@@ -217,3 +234,4 @@ Per `openspec/README.md#plan-closeout-requirements`.
 | Why no carry-over: the status report already enumerates the population, and two of the eight legacy fields cannot be copied | This change's `design.md`, "Decision: retire the legacy override tier without carrying values over" |
 | Freeze-then-redirect, and that rollback past the cutover is a code rollback | `openspec/specs/storefront-publication/spec.md`, as a scenario on the modified projection requirement |
 | Why the legacy tier retires with the import (its only writer) rather than surviving as a lower override tier | This change's `design.md` |
+| Local resource-count diagnosis and local reservation normalization retire with their inventory source | Temporary sequencing decision in this change's `design.md`; the replacement operator-visible contract remains a design gate before promotion to `openspec/specs/storefront-publication/spec.md` |
