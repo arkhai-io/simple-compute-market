@@ -347,6 +347,40 @@ Settled while planning, from the code each touches.
   pool override whose clauses are a single introduction option, so the existing
   publication and deal scenarios' listings and assertions are untouched.
 
+### Implementation decisions
+
+Settled while implementing, where the code differed from what planning assumed.
+
+- **The sweep gates on entry.** Planning described the runner as "wait, then gate".
+  `market-composition` requires a loop to read its gate when it starts, because a
+  loop that sleeps first is invisible to a pause for its whole first interval. The
+  runner therefore follows the watchdog's shape: gate on entry, sweep once due — the
+  first sweep one interval after start, like the storefront's other loops — and wait
+  through the controller. An operator wanting a sweep sooner steps it.
+- **Operator deletion reports the tombstone's time.** `delete_one` answers whether
+  this call redacted and when the payloads were deleted, by this call or an earlier
+  one, and None when the deal never revealed an introduction. Converging rather than
+  failing is the spec's requirement; reporting which case occurred is what lets an
+  operator answer a request without a second query. The service takes the record
+  loader to do it.
+- **A redaction racing a start answers the deleted outcome.** The start reads the
+  record before persisting; if the sweep redacts between that read and the persist,
+  persistence refuses with a typed error and the start completes the obligation and
+  answers 410, rather than a 409 conflict.
+- **The canonical client reads the disclosure as a typed field.** `HealthResponse`
+  gains `disclosures`, so a buyer and the end-to-end scenario read the window without
+  digging in `extra`. The administrator status is built from the same readiness and
+  carries it too; that is a superset, not a second disclosure surface.
+- **The scenario reveals through the production buyer transport.** The e2e image
+  installs no bare-metal buyer plugin. Negotiating through the canonical
+  `StorefrontClient` and revealing through `IntroductionTransport` keeps the
+  no-raw-calls rule and the cross-service contract without adding an e2e
+  dependency; the `market bare-metal` commands' handling of the deleted outcome is
+  proven by the buyer's own tests.
+- **The deleted outcome's code is a wire constant on both sides.** `core_buyer`
+  cannot import the mechanism kit, so it names `introduction_payloads_deleted` itself,
+  as it names every other route it calls.
+
 ## Risks / Trade-offs
 
 - **[A party is told one window and the policy changes]** → Accepted, and why the

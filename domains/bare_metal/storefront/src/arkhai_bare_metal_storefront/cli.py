@@ -77,6 +77,8 @@ def redeliver_introduction_cmd(
     import asyncio
     import json
 
+    from market_contact_exchange import IntroductionPayloadsDeletedError
+
     from .delivery import (
         load_storefront_delivery_sinks,
         redeliver_introduction,
@@ -88,9 +90,24 @@ def redeliver_introduction_cmd(
     if not sinks:
         raise typer.BadParameter("no delivery sinks are configured")
     runtime = build_runtime_from_environment()
-    outcomes = asyncio.run(
-        redeliver_introduction(runtime.db, obligation_ref, sinks.sinks)
-    )
+    try:
+        outcomes = asyncio.run(
+            redeliver_introduction(runtime.db, obligation_ref, sinks.sinks)
+        )
+    except IntroductionPayloadsDeletedError as exc:
+        # Nothing was sent: the payloads are gone, and no sink was contacted.
+        typer.echo(
+            json.dumps(
+                {
+                    "obligation_ref": obligation_ref,
+                    "delivered": False,
+                    "payloads_deleted_at": exc.payloads_deleted_at,
+                },
+                sort_keys=True,
+            ),
+            err=True,
+        )
+        raise typer.Exit(code=1) from exc
     typer.echo(
         json.dumps(
             [

@@ -8,6 +8,7 @@ import threading
 import time
 
 import pytest
+from market_contact_exchange import IntroductionPayloadsDeletedError
 from market_delivery import (
     ConfiguredSink,
     DeliveryConfigurationError,
@@ -182,6 +183,22 @@ async def test_redelivery_sends_the_same_introduction_again(tmp_path) -> None:
 
     with pytest.raises(ValueError, match="not been revealed"):
         await redeliver_introduction(runtime.db, "f" * 64, (_recording_sink([]),))
+
+
+async def test_redelivery_of_a_deleted_introduction_contacts_no_sink(tmp_path) -> None:
+    runtime = _runtime(str(tmp_path / "storefront.db"))
+    option = await _insert_contact_listing(runtime)
+    with serving(_app(runtime)) as base_url:
+        _, obligation_ref, _ = await _accept_and_start(base_url, option)
+    deleted = await runtime.introduction_retention().delete_one(obligation_ref)
+
+    received: list = []
+    with pytest.raises(IntroductionPayloadsDeletedError) as refused:
+        await redeliver_introduction(
+            runtime.db, obligation_ref, (_recording_sink(received),)
+        )
+    assert refused.value.payloads_deleted_at == deleted["payloads_deleted_at"]
+    assert received == []
 
 
 def test_delivery_configuration_is_read_from_this_storefronts_environment(

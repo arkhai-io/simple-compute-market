@@ -299,3 +299,76 @@ def test_a_field_the_registry_does_not_declare_is_refused_before_any_read() -> N
         bare_metal_listing_params(
             _SpecClient(), "region=us-west", registry_url="https://registry"
         )
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["introduce", "--run-id", "run-1", "--contact", "email=b@example.com"],
+        ["introduction", "--run-id", "run-1", "--deliver"],
+    ],
+)
+def test_a_deleted_introduction_is_reported_as_an_outcome(
+    monkeypatch, arguments: list[str]
+) -> None:
+    """Both reveal commands print the deleted outcome and deliver nothing."""
+
+    from types import SimpleNamespace
+
+    from core_buyer.introductions import IntroductionPayloadsDeleted
+
+    from arkhai_bare_metal_buyer import cli
+
+    ref = "a" * 64
+    deleted = IntroductionPayloadsDeleted(
+        obligation_ref=ref, payloads_deleted_at="2026-10-01T12:00:00Z"
+    )
+
+    class Transport:
+        def start(self, **kwargs):
+            raise deleted
+
+        def read(self, **kwargs):
+            raise deleted
+
+    events: list[tuple[str, dict]] = []
+    delivered: list[object] = []
+    identity = SimpleNamespace(signer=object(), profile_id="profile-1")
+    monkeypatch.setattr(
+        cli,
+        "_recovered_introduction",
+        lambda run_id, config: (
+            SimpleNamespace(negotiation_id="neg-1", seller_principals=None),
+            identity,
+            Transport(),
+            ref,
+        ),
+    )
+    monkeypatch.setattr(
+        cli,
+        "open_run_log",
+        lambda *args, **kwargs: SimpleNamespace(
+            event=lambda name, **fields: events.append((name, fields))
+        ),
+    )
+    monkeypatch.setattr(cli, "load_buyer_delivery_sinks", lambda config: object())
+    monkeypatch.setattr(
+        cli, "_deliver_locally", lambda *args, **kwargs: delivered.append(args)
+    )
+
+    result = CliRunner().invoke(cli.bare_metal_app, arguments)
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output) == {
+        "obligation_ref": ref,
+        "revealed": False,
+        "code": "introduction_payloads_deleted",
+        "payloads_deleted_at": "2026-10-01T12:00:00Z",
+    }
+    assert events == [
+        (
+            "introduction_payloads_deleted",
+            {"obligation_ref": ref, "payloads_deleted_at": "2026-10-01T12:00:00Z"},
+        )
+    ]
+    assert delivered == []

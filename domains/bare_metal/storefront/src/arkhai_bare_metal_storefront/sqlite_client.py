@@ -37,8 +37,10 @@ from core_storefront import (
 from market_contact_exchange import (
     CONTACT_EXCHANGE_MIGRATIONS,
     IntroductionRecord,
+    delete_introduction_payloads,
     insert_introduction,
     load_introduction,
+    select_expired_introductions,
 )
 from market_settlement_runtime import settlement_migrations
 from market_identity import Identity
@@ -124,6 +126,42 @@ class SQLiteClient(CoreSQLiteClient):
                 conn.close()
 
         return await asyncio.to_thread(_load)
+
+    async def delete_contact_introduction_payloads(
+        self,
+        obligation_ref: str,
+        deleted_at: datetime,
+    ) -> bool:
+        """Redact one introduction's contact payloads; ``False`` if nothing to redact."""
+
+        def _delete() -> bool:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                redacted = delete_introduction_payloads(
+                    conn, obligation_ref, deleted_at=deleted_at
+                )
+                conn.commit()
+                return redacted
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_delete)
+
+    async def select_expired_contact_introductions(
+        self,
+        cutoff: datetime,
+        limit: int,
+    ) -> list[str]:
+        """Obligation refs of unredacted introductions revealed at or before ``cutoff``."""
+
+        def _select() -> list[str]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                return select_expired_introductions(conn, cutoff=cutoff, limit=limit)
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_select)
 
     async def is_global_paused(self) -> bool:
         """Return the durable storefront-wide negotiation pause state."""

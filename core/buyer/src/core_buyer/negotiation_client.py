@@ -528,6 +528,21 @@ _SIGNATURE_HEADER = "X-Market-Signature"
 _MAX_RESPONSE_SKEW = 300
 
 
+class AuthenticatedHTTPError(RuntimeError):
+    """A storefront answered with an authenticated, verified non-success status.
+
+    Carries the status and the parsed body, which the response signature
+    covers, so a caller can tell one refusal from another by its contract
+    rather than by message text. Still a ``RuntimeError``, so callers that
+    treat any refusal as a failure are unaffected.
+    """
+
+    def __init__(self, message: str, *, status_code: int, body: Any) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.body = body
+
+
 def _header(headers: Mapping[str, str] | Any, name: str) -> str | None:
     value = headers.get(name) if headers is not None else None
     if value is not None:
@@ -703,8 +718,10 @@ def _authenticated_json(
             f"{method} {url} response authentication failed: {verification.code.value}"
         )
     if not 200 <= response_status < 300:
-        raise RuntimeError(
-            f"{method} {url} -> authenticated HTTP {response_status}: {text[:500]}"
+        raise AuthenticatedHTTPError(
+            f"{method} {url} -> authenticated HTTP {response_status}: {text[:500]}",
+            status_code=response_status,
+            body=payload,
         )
     if not isinstance(payload, dict):
         raise RuntimeError(f"{method} {url} returned non-object JSON")

@@ -24,11 +24,9 @@ from fastapi import APIRouter, Body, HTTPException, Query, Request
 
 from market_contact_exchange import (
     AuthorizedIntroductionRequest,
-    ContactSettlementConfig,
     IntroductionRouteError,
     IntroductionStart,
 )
-from market_contact_exchange import MECHANISM as CONTACT_MECHANISM
 from market_identity import EMPTY_BODY, Identity
 from market_pool_overrides import (
     POOL_OVERRIDES_PATH,
@@ -303,14 +301,11 @@ async def _authorize_introduction_request(
 
 def _introduction_service(request: Request) -> Any:
     runtime = _runtime(request)
-    composition = runtime.settlement_composition
-    if (
-        composition is None
-        or CONTACT_MECHANISM not in composition.enabled_mechanisms
-    ):
+    section = runtime.contact_settlement_config()
+    retention = runtime.introduction_retention()
+    if section is None or retention is None:
         raise HTTPException(status_code=404, detail="contact exchange is disabled")
-    section = composition.config.mechanism_config("contact")
-    if not isinstance(section, ContactSettlementConfig) or not section.contact_payload:
+    if not section.contact_payload:
         raise HTTPException(
             status_code=503,
             detail="contact-exchange reveal is unavailable",
@@ -322,6 +317,7 @@ def _introduction_service(request: Request) -> Any:
         seller_contact=section.contact_payload,
         authorize_request=_authorize_introduction_request,
         deliver=runtime.introduction_delivery,
+        disclosure=retention.disclosure,
     )
 
 
@@ -345,6 +341,29 @@ async def read_introduction(
         return await _introduction_service(request).read(request, obligation_ref)
     except IntroductionRouteError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.delete("/api/v1/admin/introductions/{obligation_ref}/payloads")
+async def delete_introduction_payloads(
+    obligation_ref: str,
+    request: Request,
+) -> Mapping[str, Any]:
+    """Delete one introduction's contact payloads now, whatever the window says.
+
+    The same deletion operation the retention sweep runs. The deal and its
+    obligation record remain; repeating the request converges.
+    """
+    runtime = _runtime(request)
+    await _admin(
+        request=request,
+        runtime=runtime,
+        operation="admin_delete_introduction_payloads",
+        resource=obligation_ref,
+    )
+    retention = runtime.introduction_retention()
+    if retention is None:
+        raise HTTPException(status_code=404, detail="contact exchange is disabled")
+    return await retention.delete_one(obligation_ref)
 
 
 @router.post("/api/v1/settlements")

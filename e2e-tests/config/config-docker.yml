@@ -115,4 +115,9 @@ bare_metal_lane:
   site_admin_credential: "0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba"
   buyer_scheme:     "eip191"
   buyer_credential: "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
+  # The storefront's contact-exchange settings, as `make e2e-bare-metal-dev-env`
+  # binds them: a development contact on a reserved domain and the short
+  # retention window the introduction scenario watches expire.
+  seller_contact_email: "seller@bare-metal-e2e.invalid"
+  introduction_retention_seconds: "5"
 

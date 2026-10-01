@@ -188,3 +188,44 @@ def test_buyer_role_resolves_a_minimal_enabled_section() -> None:
     )
     clients = registry.runtime_clients(config, role="buyer")
     assert isinstance(clients["contact-exchange.v1"], ContactExchangeClient)
+
+
+def test_retention_defaults_to_thirty_days_with_an_hourly_sweep() -> None:
+    config = _registry().resolve(_seller_raw(), role="seller")
+    section = config.mechanism_config("contact")
+    assert section.retention_seconds == 2_592_000
+    assert section.retention_sweep_interval_seconds == 3600
+
+
+@pytest.mark.parametrize("window", [5, "indefinite"])
+def test_retention_accepts_a_positive_window_or_indefinite(window: Any) -> None:
+    config = _registry().resolve(
+        _seller_raw(retention_seconds=window), role="seller"
+    )
+    assert config.mechanism_config("contact").retention_seconds == window
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"retention_seconds": 0},
+        {"retention_seconds": -1},
+        {"retention_seconds": "forever"},
+        {"retention_seconds": True},
+        {"retention_sweep_interval_seconds": 0},
+    ],
+)
+def test_retention_refuses_a_zero_negative_or_unknown_window(
+    overrides: dict[str, Any],
+) -> None:
+    with pytest.raises((SettlementConfigurationError, ValueError)):
+        _registry().resolve(_seller_raw(**overrides), role="seller")
+
+
+def test_retention_is_seller_configuration() -> None:
+    raw = {
+        "priority": ["contact-exchange.v1"],
+        "contact": {"enabled": True, "retention_seconds": 60},
+    }
+    with pytest.raises(SettlementConfigurationError, match="does not apply to role"):
+        _registry().resolve(raw, role="buyer")
