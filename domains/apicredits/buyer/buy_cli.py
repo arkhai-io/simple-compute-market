@@ -232,7 +232,7 @@ def register(credits_app: typer.Typer) -> None:
         if not alkahest_enabled:
             raise typer.BadParameter("no buyer settlement mechanism is enabled")
         if from_run:
-            if not is_negotiation_complete(from_run):
+            if not is_negotiation_complete(from_run, signer=signer):
                 typer.secho(
                     "Run-log has no agreed negotiation. Resume the round loop with `market credits negotiate --from <run-id>` first, then settle.",
                     err=True,
