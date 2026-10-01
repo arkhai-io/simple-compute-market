@@ -12,22 +12,43 @@ Each stage consumes its predecessor's output and owns the translation into its o
 
 Rejected: a mechanism-neutral signal vocabulary (start/stop/reverse or collect/reclaim) in core. Nothing but the mechanism reads it, and each domain needs explicit compatibility with each mechanism anyway.
 
+### The agreement is the negotiation stage's output
+
+On acceptance the seller emits one agreement object holding only the accepted terms, since terms are the only output negotiation exposes; there is no universal meaning to a transcript. Both sides keep the exact bytes from the accept response and neither rebuilds it, so serialization differences cannot produce two hashes. A sketch for the current runtime:
+
+```text
+Agreement = {
+  negotiation_id, listing_id, listing_hash,
+  buyer, seller: Identity,
+  settlement: {option_id, mechanism, params},   # the settle stage's section, carried unread
+  amount, asset, duration_seconds, start_utc,   # start is explicit; "now" is resolved at acceptance
+  provision_terms: <domain wire>,
+  accepted_at,
+}
+```
+
 ### The settle stage defines the deal hash
 
 `arkhai.payments.v1` commits to `sha256(JCS(agreement))` (RFC 8785; the Python side uses `rfc8785`). `derive_settlement_option_id`'s `json.dumps(sort_keys=True)` is not JCS and is not reused for it.
 
-### Mandate derivation for fixed-interval deals
+### The seller derives the mandate; the buyer confirms
 
-Both sides derive the mandate from the agreement deterministically, so the seller's verification is a comparison:
-- `from`: the buyer's Arkhai account; `to`: the payee account in the selected option's params.
-- one `once` part: the agreed amount in the option's asset (payments notation, e.g. `USD/2`), held for the term plus the dispute window declared in the option params.
+The payments service never parses the agreement, so the two can evolve independently. The seller's kit derives the mandate and returns it with the agreement in the accept response:
+- `from`: the buyer's Arkhai account; `to`: the payee account in the option params.
+- one `once` part: the agreed amount in the option's asset (payments notation, e.g. `USD/2`), held for `start_utc − accepted_at + duration_seconds + window`. The window is declared in the option params, so buyers see it before negotiating, and it absorbs a late provisioning start.
 - `fee`: the service's published fee policy.
 - `authorities`: `reverse` lists the seller and Arkhai's dispute authority, which the service requires; `start` and `stop` are empty.
-- `nonce`: from the agreement, so one agreement cannot be approved twice by accident.
+- `nonce`: fixed, since `negotiation_id` already makes each agreement unique.
+
+The transaction id is `sha256(JCS(mandate))`, so both sides know it before approval. The buyer's kit checks the mandate against the agreement and its own policy (payee, amount, hold, `deal`) and approves it, attaching the agreement. Both sides poll `GET /transactions/{id}`; the seller provisions once the receipt matches. A push hook can come when polling hurts.
+
+### Depositing the agreement
+
+Approval may carry the agreement as an attachment, which the service checks against `deal` and keeps for disputes. If the seller's kit is set to deposit and the snapshot shows no agreement, it attaches it itself. The listing option declares the setting, so buyers can see it and filter on it: it gives the deal Arkhai's dispute fast path, which sellers without a reputation can advertise. Any party could deposit on its own, so a buyer's protection is this transparency, not a veto.
 
 ### Stateless kit
 
-Every call goes to the payments service: approve (buyer), fetch or verify the receipt (seller), `reverse` (seller refund). Hold release and fee collection happen in the service. Provisioning is gated on a verified receipt.
+Every call goes to the payments service: approve and attach (buyer), poll and attach (seller), `reverse` (seller refund). Headless callers authenticate with WorkOS user-scoped API keys for their owner's Arkhai account. Hold release and fee collection happen in the service.
 
 ## Superseded changes
 
@@ -41,6 +62,5 @@ Built on `fiat.stripe.v1` and `kit/hosted-settlement`: `consume-expanded-stripe-
 
 ## Open Questions
 
-- The shape of the agreement object, and whether it includes the full transcript or only the accepted terms.
-- Where the buyer presents the receipt to the storefront (the existing `mechanism_ref` path or a new route).
-- How the dispute window is chosen: seller-declared in option params, or a registry policy.
+- Whether the buyer's kit polls through the storefront or the payments service only, and whether a hook replaces polling.
+- The SDK's default window. The payments service enforces no minimum; chargeback exposure is covered by its cash reserve.
