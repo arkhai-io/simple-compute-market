@@ -33,12 +33,6 @@ PROJECTS: dict[str, Project] = {
         ("kit/identity/tests",),
         ("dist-identity",),
     ),
-    "kit/hosted-settlement": Project(
-        "kit/hosted-settlement",
-        "arkhai-kit-hosted-settlement",
-        ("kit/hosted-settlement/tests",),
-        ("dist-hosted-client", "dist-kits"),
-    ),
     "kit/settlement-runtime": Project(
         "kit/settlement-runtime",
         "arkhai-kit-settlement-runtime",
@@ -219,7 +213,6 @@ IMPACT_EXPANSION: dict[str, tuple[str, ...]] = {
         "core/storefront",
         "core/storefront-client",
         "kit/settlement-runtime",
-        "kit/hosted-settlement",
         "kit/config",
         "kit/policy",
         "kit/site-client",
@@ -259,14 +252,8 @@ IMPACT_EXPANSION: dict[str, tuple[str, ...]] = {
         "provisioning/compute/service",
         "e2e-tests",
     ),
-    "kit/hosted-settlement": (
-        "core/buyer",
-        "domains/vms/buyer",
-        "domains/vms/storefront",
-    ),
     "kit/settlement-runtime": (
         "kit/alkahest",
-        "kit/hosted-settlement",
         "core/buyer",
         "core/storefront",
         "domains/vms/buyer",
@@ -293,7 +280,6 @@ SETTLEMENT_DEPLOYMENT_PROJECTS = frozenset(
     {
         "kit/config",
         "kit/settlement-runtime",
-        "kit/hosted-settlement",
         "kit/alkahest",
         "core/buyer",
         "domains/vms/buyer",
@@ -304,13 +290,9 @@ SETTLEMENT_DEPLOYMENT_PATHS = (
     "helm/",
     "manifests/",
     "compose.vms",
-    "compose.hosted-settlement.yml",
-    "config.stripe-fiat-ed25519.toml",
     "domains/vms/compose.yml",
     "domains/vms/storefront/Dockerfile",
     "scripts/package-review-wheelhouse.sh",
-    "scripts/prepare-hosted-compose.py",
-    "scripts/verify-hosted-release.py",
 )
 
 

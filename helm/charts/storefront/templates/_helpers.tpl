@@ -196,7 +196,6 @@ principals = [{{ range $i, $principal := $principals }}{{ if $i }}, {{ end }}{ s
 {{- $neg := $seller.negotiation | default dict -}}
 {{- $settlement := $cfg.settlement | default dict -}}
 {{- $pricing := $cfg.pricing | default dict -}}
-{{- $stripe := $settlement.stripe | default dict -}}
 {{- $alkahest := $settlement.alkahest | default dict -}}
 {{- $registryAuthority := $cfg.registryAuthority | default dict -}}
 {{- $domains := required "storefront config.storefrontDomains requires at least one explicit registration" $cfg.storefrontDomains -}}
@@ -246,19 +245,6 @@ principals = [{{ range $i, $principal := $principals }}{{ if $i }}, {{ end }}{ s
   {{- end -}}
   {{- if not $provisioningPeerTrusted -}}
     {{- fail "service-peer trust must include the active provisioning principal for the configured site" -}}
-  {{- end -}}
-{{- end -}}
-{{- $expectedAuthority := $stripe.authority | default dict -}}
-{{- if $stripe.enabled -}}
-  {{- $conditionProfile := required "enabled Stripe settlement requires condition_profile" $stripe.condition_profile -}}
-  {{- if not (hasKey ($stripe.condition_profiles | default dict) $conditionProfile) -}}
-    {{- fail "enabled Stripe settlement condition_profile must name a configured condition profile" -}}
-  {{- end -}}
-  {{- $condition := index $stripe.condition_profiles $conditionProfile -}}
-  {{- $evaluator := $condition.evaluator | default dict -}}
-  {{- $resolverID := required "enabled Stripe condition profile evaluator requires resolver_id" $evaluator.resolver_id -}}
-  {{- if not (hasKey ($stripe.resolvers | default dict) $resolverID) -}}
-    {{- fail "enabled Stripe condition profile resolver_id must name a configured resolver" -}}
   {{- end -}}
 {{- end -}}
 # Rendered by the storefront helm chart (ConfigMap layer — non-sensitive).
@@ -361,55 +347,6 @@ settlements = {{ include "storefront.tomlLiteral" $pricing.settlements }}
 [Settlement]
 schema_version = {{ $settlement.schema_version | default 1 }}
 priority = [{{ range $i, $mechanism := ($settlement.priority | default list) }}{{ if $i }}, {{ end }}{{ $mechanism | quote }}{{ end }}]
-
-{{- if $stripe }}
-[Settlement.stripe]
-enabled = {{ $stripe.enabled | default false }}
-{{- if $stripe.base_url }}
-base_url = {{ $stripe.base_url | quote }}
-{{- end }}
-{{- if $stripe.authority_id }}
-authority_id = {{ $stripe.authority_id | quote }}
-{{- end }}
-{{- if $stripe.environment }}
-environment = {{ $stripe.environment | quote }}
-{{- end }}
-{{- if $stripe.expected_manifest_digest }}
-expected_manifest_digest = {{ $stripe.expected_manifest_digest | quote }}
-{{- end }}
-expected_api_version = {{ $stripe.expected_api_version | default "0.2.1" | quote }}
-expected_schema_version = {{ $stripe.expected_schema_version | default 5 }}
-required_capabilities = [{{ range $i, $cap := ($stripe.required_capabilities | default list) }}{{ if $i }}, {{ end }}{{ $cap | quote }}{{ end }}]
-{{- if $stripe.account_ref }}
-account_ref = {{ $stripe.account_ref | quote }}
-{{- end }}
-currency = {{ $stripe.currency | default "usd" | quote }}
-country = {{ $stripe.country | default "US" | quote }}
-{{- if $stripe.condition_profile }}
-condition_profile = {{ $stripe.condition_profile | quote }}
-{{- end }}
-request_timeout_seconds = {{ $stripe.request_timeout_seconds | default 10.0 }}
-preflight_timeout_seconds = {{ $stripe.preflight_timeout_seconds | default 5.0 }}
-allow_insecure_loopback = {{ $stripe.allow_insecure_loopback | default false }}
-{{- if $expectedAuthority.principals }}
-
-[Settlement.stripe.authority]
-{{ include "storefront.principalsToml" (dict "label" "Stripe settlement authority" "principals" $expectedAuthority.principals) }}
-{{- end }}
-{{- range $profileID, $profile := ($stripe.condition_profiles | default dict) }}
-
-[Settlement.stripe.condition_profiles.{{ $profileID | quote }}]
-{{ range $field := keys $profile | sortAlpha }}
-{{ $field }} = {{ include "storefront.tomlLiteral" (index $profile $field) }}
-{{ end }}
-{{- end }}
-{{- range $resolverID, $resolver := ($stripe.resolvers | default dict) }}
-
-[Settlement.stripe.resolvers.{{ $resolverID | quote }}]
-chain_name = {{ $resolver.chain_name | quote }}
-evidence_mode = {{ $resolver.evidence_mode | quote }}
-{{- end }}
-{{- end }}
 
 {{- if $alkahest }}
 [Settlement.alkahest]
