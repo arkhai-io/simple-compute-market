@@ -1,281 +1,167 @@
 # Tasks — contact payload retention
 
-Implemented; awaiting code review, then the end-to-end pipeline and promotion.
-Sections 2–5 and 7.1–7.5 are complete; 7.6 is partly run; Section 6 and 8.10 follow
-review, as `AGENTS.md` places promotion.
+Implemented, reviewed, and promoted. The end-to-end pipeline passed on the
+pre-review fileset (8.9); a confirming run on the final fileset is the one
+outstanding item.
 
 Validation levels below are named deliberately. Per `docs/development/TESTING.md`,
 integration means the real app, a real database, a wired DI container, and the
-service's canonical typed client over `ASGITransport`; a kit library's integration
-tests exercise its public API against a real embedded database.
+service's canonical typed client; a kit library's integration tests exercise its
+public API against a real embedded database.
 
 ## 1. Design
 
-- [x] 1.1 **Decision gate.** Record the design decisions in `design.md`. Decided:
-      kit-first placement; retention on bare metal with VM inheriting it through
-      `compose-contact-exchange-across-compute`; redaction leaving a tombstone, the
-      active part of the table append-only under triggers; each surface's outcome
-      after deletion; the window as `retention_seconds` in `ContactSettlementConfig`;
-      one disclosure object; eligibility from reveal time; one deletion operation
-      behind both invocation paths; bare-metal lifecycle controls supplied by
-      `kit-owned-storefront-loop-lifecycle`; the first introduction scenario on the
-      bare-metal lane.
-- [x] 1.2 **Decision gate.** Decide whether redaction reaches the copies of revealed
-      contacts in `core_storefront`'s authenticated replay store. Decided: out of
-      scope. Bounding recorded outcomes needs one answer for every authenticated
-      response; recorded as unowned work, and the disclosure's scope names only the
-      introduction record.
-- [x] 1.3 Plan the implementation, naming the files each decision touches, the focused
-      and integration suites, and the permanent documentation destinations. Planning
-      decisions are recorded in `design.md`.
+- [x] 1.1 **Decision gate.** Design decisions recorded in `design.md`: kit-first
+      placement; retention on bare metal, VM inheriting it through
+      `compose-contact-exchange-across-compute`; redaction leaving a tombstone under
+      triggers; each surface's outcome after deletion; `retention_seconds` in
+      `ContactSettlementConfig`; one disclosure object; eligibility from reveal time;
+      one deletion operation behind both invocation paths; the first introduction
+      scenario on the bare-metal lane.
+- [x] 1.2 **Decision gate.** The authenticated replay store's copies of revealed
+      contacts are out of scope and the disclosure is scoped to the introduction
+      record. The replay store's redesign is owned by
+      `redesign-authenticated-replay-state`.
+- [x] 1.3 Implementation planned; planning and implementation decisions are in
+      `design.md`.
 
 ## 2. Persistence and redaction (kit)
 
-All in `kit/contact-exchange/src/market_contact_exchange/migrations.py` unless named.
+In `kit/contact-exchange/src/market_contact_exchange/`.
 
-- [x] 2.1 Add migration `20261001_007_contact_introduction_tombstones` to
-      `CONTACT_EXCHANGE_MIGRATIONS`: the nullable `payloads_deleted_at` column, the
-      update trigger permitting only the redaction, the delete trigger refusing an
-      unredacted row, and an index on `created_at`. Bare metal composes the tuple
-      already, so it takes the migration unchanged.
-- [x] 2.2 Replace `delete_introduction` with `delete_introduction_payloads(conn,
-      obligation_ref, *, deleted_at)`: one `UPDATE` redacting an unredacted row;
-      `True` when it redacts, `False` otherwise. Export it in place of the old name from
-      `__init__.py`.
-- [x] 2.3 `introduction_routes.py`: `IntroductionRecord` gains
-      `payloads_deleted_at: str | None`. `load_introduction` returns it; a redacted
-      record carries empty contacts.
-- [x] 2.4 Add `select_expired_introductions(conn, *, cutoff, limit)` returning the
-      obligation references of unredacted rows with `created_at <= cutoff`, and
-      `format_introduction_timestamp(datetime)` producing the column's text form.
-- [x] 2.5 `insert_introduction` refuses to re-persist over a redacted row, distinctly
-      from its existing different-payload refusal.
+- [x] 2.1 Migration `20261001_007_contact_introduction_tombstones`: the
+      `payloads_deleted_at` column, a trigger permitting only one-way redaction, a
+      trigger refusing removal of an unredacted row, and a partial index on
+      `created_at`.
+- [x] 2.2 `delete_introduction_payloads` redacts in one `UPDATE`, returning whether it
+      did; it replaces `delete_introduction`.
+- [x] 2.3 `IntroductionRecord.payloads_deleted_at`; a redacted record loads with empty
+      contacts.
+- [x] 2.4 `select_expired_introductions`, oldest first and bounded, and
+      `format_introduction_timestamp`.
+- [x] 2.5 `insert_introduction` refuses to persist over a tombstone with
+      `IntroductionPayloadsDeletedError`, distinct from the different-payload conflict.
 
 ## 3. Configuration, disclosure, and the route service (kit)
 
-- [x] 3.1 `settlement_config.py`: `ContactSettlementConfig` gains `retention_seconds`
-      (`int | Literal["indefinite"]`, default `2592000`, positive) and
-      `retention_sweep_interval_seconds` (positive, default `3600`), both seller role.
-      Confirm the role template and schema-fragment output the settlement configuration
-      metadata generates, and update any golden test asserting it.
-      *Done:* `kit/config`'s surface renders a union field by annotation name with a
-      JSON-safe default, and no committed golden output names the contact section, so
-      nothing regenerates.
-- [x] 3.2 Add `retention.py` with `IntroductionRetentionPolicy` (window and interval,
-      built from the configuration section) and `retention_disclosure(policy)` returning
-      `{"window_seconds", "basis": "current_policy", "scope": "introduction_record"}`.
-- [x] 3.3 `introduction_routes.py`:
-      - `introduction_projection` refuses a redacted record and, given a disclosure,
-        includes it as `retention`;
-      - `IntroductionRouteService` takes an optional disclosure provider;
-      - `read` answers `IntroductionRouteError(410, {"code":
-        "introduction_payloads_deleted", "payloads_deleted_at": ...})` for a redacted
-        record;
-      - `start` loads the record first; for a redacted one it drives `complete`, then
-        answers the same 410 without persisting or delivering. The existing
-        first-reveal check reuses that load.
-- [x] 3.4 `test_package_boundary.py`: add any standard-library root the new modules
-      import (`asyncio`, `datetime`) as explicit permitted lines; leave the deny list
-      unchanged.
+- [x] 3.1 `retention_seconds` (default 30 days, positive or `indefinite`) and
+      `retention_sweep_interval_seconds` (default one hour), seller role. No generated
+      output names the contact section, so nothing regenerated.
+- [x] 3.2 `IntroductionRetentionPolicy` and `retention_disclosure` in `retention.py`.
+- [x] 3.3 The projection refuses a redacted record and carries the disclosure; read
+      answers 410 `introduction_payloads_deleted`; a start that finds the payloads
+      deleted, on its read or its persist, drives completion and answers the same 410.
+- [x] 3.4 Package boundary permits `asyncio`, `datetime`, and `logging`.
 
 ## 4. Sweep, loop runner, and admin service (kit)
 
-In `kit/contact-exchange/src/market_contact_exchange/retention.py`.
-
-- [x] 4.1 `IntroductionRetentionService`, built from injected persistence callables
-      (select-expired, delete-payloads), the policy, and a clock:
-      - `delete_one(obligation_ref)` → reference, whether redacted, deletion time
-        (*amended:* the service also takes `load`, so the time reported is the
-        tombstone's whichever call made it, and None when nothing was revealed);
-      - `sweep_once()` → `{"loop": "introduction_retention", "deleted": n}`, selecting
-        and redacting through `delete_one`'s operation; nothing when `indefinite`;
-      - `preview()` → `{"loop": "introduction_retention", "dry_run": true,
-        "eligible": [...], "eligible_count": n}`, writing nothing.
-- [x] 4.2 `run_introduction_retention_sweep(service, *, interval_seconds, paused,
-      wait)`: wait, then gate with a short held poll, then `sweep_once`, logging and
-      continuing on failure.
-      *Amended:* "wait, then gate" contradicts `market-composition`'s requirement that
-      a loop reads its gate on entry. The runner follows the requirement and the
-      watchdog's pattern: gate on entry, sweep when due (first one interval after
-      start), wait through the controller. It takes the interval from the service's
-      policy rather than a parameter.
-- [x] 4.3 Export the policy, disclosure, service, runner, and route and loop names from
-      `__init__.py`.
+- [x] 4.1 `IntroductionRetentionService`: `delete_one` (whether redacted, and the
+      tombstone's time), `sweep_once`, and `preview`, all through one deletion
+      operation.
+- [x] 4.2 `run_introduction_retention_sweep` gates on entry, sweeps once due, and waits
+      through the controller.
+- [x] 4.3 Exports, including the kit-owned `IntroductionAdminClient` and
+      `SyncIntroductionAdminClient` with the route path and operation name.
 
 ## 5. Bare-metal composition
 
 In `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/` unless named.
 
-- [x] 5.1 `sqlite_client.py`: `delete_contact_introduction_payloads` and
-      `select_expired_contact_introductions` as `asyncio.to_thread` wrappers over the
-      kit functions.
-- [x] 5.2 `api.py`: build the retention service and policy beside the introduction
-      service from the `ContactSettlementConfig` section; pass the disclosure provider
-      into the introduction service; add `DELETE
-      /api/v1/admin/introductions/{obligation_ref}/payloads` authenticated by `_admin`
-      as `admin_delete_introduction_payloads`.
-- [x] 5.3 `models.py` and the `/health` and `/api/v1/system/health` handler in `api.py`:
-      `BareMetalHealthResponse` gains `disclosures.introduction_retention`, present only
-      when contact exchange is enabled. Do not add it to `/api/v1/system/status`.
-      *Amended:* the administrator status is built from the same readiness and so
-      carries `disclosures` too; it is not the disclosure surface, since a buyer cannot
-      read it. The canonical client's `HealthResponse` gains a typed `disclosures`
-      field so readers do not dig it out of `extra`.
-- [x] 5.4 `server.py`: when contact exchange is enabled, start the sweep loop through the
-      runtime's loop controller under route `introduction-retention`, with
-      `sweep_once` as its step and `preview` as its preview, at the configured interval.
-      *Amended:* bare metal registers steps in `lifecycle_steps.py` when the runtime is
-      built, so the step and preview are registered there and `server.py` starts only
-      the timer. `runtime.introduction_retention()` builds the service from running
-      configuration for every caller.
-- [x] 5.5 `delivery.py` and `introduction_routes.py`: `load_revealed_introduction`
-      refuses a redacted record, so `redeliver_introduction` and the
-      `redeliver-introduction` command deliver nothing for it.
-- [x] 5.6 `core/storefront-client/src/storefront_client/client.py`: add
-      `admin_delete_introduction_payloads(obligation_ref)` to the async and sync clients.
-      *Amended:* neither client had an authenticated DELETE helper; both gain
-      `_authenticated_delete`.
-- [x] 5.7 Buyer:
-      - `core/buyer/src/core_buyer/negotiation_client.py`: `_authenticated_json` raises
-        an `AuthenticatedHTTPError(RuntimeError)` carrying the verified status and body
-        for a non-success answer;
-      - `core/buyer/src/core_buyer/introductions.py`: `IntroductionTransport` maps 410
-        `introduction_payloads_deleted` to `IntroductionPayloadsDeleted`;
-      - `domains/bare_metal/buyer/src/arkhai_bare_metal_buyer/cli.py`: the
-        start-introduction and `introduction` commands print the outcome with
-        `revealed: false` and the deletion time, delivering nothing.
-        *Amended:* the start command is named `introduce`. Both commands also record
-        an `introduction_payloads_deleted` run-log event.
-      - *Added:* the storefront's `redeliver-introduction` command reports a deleted
-        introduction as a refusal rather than a traceback.
-- [x] 5.8 End-to-end lane: in the root `Makefile`'s bare-metal lane environment, enable
-      `contact` in `BARE_METAL_STOREFRONT_SETTLEMENT_JSON` with a seller contact
-      payload, one profile, `retention_seconds: 5`, and a long sweep interval. Values
-      are development fixtures, commented as such and never to be used on a public
-      network.
+- [x] 5.1 `sqlite_client.py` wrappers for redaction and expired selection.
+- [x] 5.2 `runtime.introduction_retention()` builds the service from running
+      configuration; the reveal carries its disclosure; the operator route binds the
+      kit's path and operation.
+- [x] 5.3 Readiness carries `disclosures.introduction_retention` while contact exchange
+      is enabled; the core client's `HealthResponse` reads it as a typed field.
+- [x] 5.4 The sweep's step and preview register in `lifecycle_steps.py`; `server.py`
+      starts its timer.
+- [x] 5.5 Re-delivery refuses a deleted introduction, and the
+      `redeliver-introduction` command reports the refusal.
+- [x] 5.6 The operator deletion client is kit-owned (4.3); the core storefront client
+      is unchanged apart from `HealthResponse.disclosures`.
+- [x] 5.7 Buyer: `AuthenticatedHTTPError` carries a verified status and body;
+      `IntroductionTransport` raises `IntroductionPayloadsDeleted`; the bare-metal
+      `introduce` and `introduction` commands print the deleted outcome, log it, and
+      deliver nothing.
+- [x] 5.8 The bare-metal lane enables contact exchange with development-fixture
+      values, a 5-second window, and a day-long sweep interval.
 
 ## 6. Specification
 
-- [ ] 6.1 Promote this change's `contact-exchange-settlement` delta into
+- [x] 6.1 `contact-exchange-settlement` delta promoted into
       `openspec/specs/contact-exchange-settlement/spec.md`.
-- [ ] 6.2 Promote this change's `introduction-delivery` delta into
+- [x] 6.2 `introduction-delivery` delta promoted into
       `openspec/specs/introduction-delivery/spec.md`.
 
 ## 7. Validation
 
-- [x] 7.1 **Unit (kit).** `kit/contact-exchange/tests/unit/`: `test_migrations.py`
-      replaces the row-delete case with redaction, repeat redaction, and the
-      re-persist refusal; `test_settlement_config.py` covers both new fields, `indefinite`,
-      and the refusal of zero; new `test_retention.py` covers the disclosure object,
-      eligibility at the boundary, `indefinite` deleting nothing, preview writing
-      nothing, a partially failed sweep converging, and the runner's wait-gate-work
-      order; `test_introduction_routes.py` covers the projection's refusal and
-      disclosure, and read and start after deletion — start drives completion first and
-      neither persists nor delivers.
-- [x] 7.2 **Integration (kit library).** New
-      `kit/contact-exchange/tests/integration/test_retention_persistence.py` against a
-      real SQLite file: both triggers refuse; a read on an independent connection
-      interleaved with redaction sees the whole record or the tombstone; a shortened
-      window applies to rows created before it; the sweep converges after a failure
-      part-way. Add the `integration` directory to the kit's `make test`.
-- [x] 7.3 **Unit (core).** `core/buyer` tests: the typed error carries status and body
-      and remains a `RuntimeError`; the transport maps the deleted outcome.
-      `core/storefront-client` tests: the new method in both forms, and the sync/async
-      parity test.
-- [x] 7.4 **Integration (bare metal).** `domains/bare_metal/storefront/tests/test_http_introductions.py`
-      through `StorefrontClient` and the buyer transport: the readiness disclosure equals
-      the reveal's and is absent when contact exchange is disabled; admin deletion
-      leaves the obligation resolvable and correlatable by `obligation_ref`; read and a
-      fresh-request start answer the deleted outcome and the seller receives no second
-      delivery; re-delivery refuses; with the loops held, the retention preview reports
-      an eligible introduction and the step redacts exactly it.
-      `tests/test_introduction_delivery.py` covers re-delivery's refusal; the buyer
-      CLI's outcome is covered in `domains/bare_metal/buyer/tests`.
-- [x] 7.5 **System.** *Written and collected; not run here — the pipeline needs Docker
-      and the lane, see 8.9.* *Amended:* the e2e image installs no bare-metal buyer
-      plugin, so the scenario negotiates through the canonical `StorefrontClient` and
-      reveals through the production buyer's `IntroductionTransport` rather than the
-      `market bare-metal` CLI, which keeps the no-raw-calls rule without a new e2e
-      dependency; the CLI's deleted outcome is covered by the buyer's own tests. Each
-      introduction gets its own whole-host listing, since a whole host is one
-      exclusive unit. Re-delivery runs inside the storefront container and is out of
-      the pod's reach; its refusal is covered by the storefront's tests. Marker
-      `e2e_bare_metal_introduction`, added to the lane's module selection. A new module, `test_bare_metal_introduction.py`, in
-      `e2e-tests/tests/e2e/roles/scenarios/bare_metal/`, on the bare-metal lane, pausing the storefront's loops through an opt-in
-      module-scoped fixture and resuming in a finaliser: declare a pool and whole host,
-      set a pool override whose clauses are one introduction option, step publication,
-      discover the listing, negotiate and start two introductions through the buyer
-      CLI helpers, read the disclosure on readiness and in the reveal, delete one through
-      the admin route and observe the deleted outcome, poll the retention preview until
-      it reports the other, step the sweep, and observe the deleted outcome.
-- [ ] 7.6 Run `make test` in `kit/contact-exchange`, `core/buyer`,
-      `core/storefront-client`, `domains/bare_metal/storefront`, and
-      `domains/bare_metal/buyer` after `make dist`, and in every other project whose
-      lock includes a changed package.
-      *Run so far, against freshly built wheels:* `kit/contact-exchange` 77 (unit and
-      integration), `core/storefront-client` 47, `core/buyer` unit 131,
-      `domains/bare_metal/storefront` full suite, `domains/bare_metal/buyer` 16, the
-      VM storefront's whole-surface client parity test (run from the client's
-      environment), and the e2e project's collection of the new module. *Unrun:* the
-      VM storefront's full suite — its environment needs a package index this
-      sandbox's network policy blocks. *Pre-existing, unrelated:* e2e unit
+- [x] 7.1 **Unit (kit).** Configuration fields and refusals; the disclosure;
+      eligibility at the boundary; `indefinite`; preview writing nothing; the step
+      deleting a superset of a preview under an advancing clock and a batch limit; a
+      partially failed sweep converging; the runner's gate order; the route service's
+      outcomes after deletion, including a redaction racing a start; the admin client's
+      request and sync/async parity.
+- [x] 7.2 **Integration (kit library).** Against real SQLite: redaction, repeat
+      redaction, re-persist refusal, and expired selection (`test_migrations.py`); both
+      triggers; an independent-connection read interleaved with redaction; a
+      shortened window; convergence after a part-way failure
+      (`test_retention_persistence.py`).
+- [x] 7.3 **Unit (core).** The typed error carries status and body and stays a
+      `RuntimeError`; the transport maps the deleted outcome and no other refusal.
+- [x] 7.4 **Integration (bare metal).** Through the canonical client, the kit admin
+      client, and the production buyer transport: readiness disclosure equal to the
+      reveal's, `indefinite`, absent without contact exchange; operator deletion keeping
+      the obligation, converging, and stopping read, start, and a second delivery; the
+      held sweep's preview and step; re-delivery's refusal. Buyer CLI outcome in
+      `domains/bare_metal/buyer/tests`.
+- [x] 7.5 **System.** `e2e_bare_metal_introduction` on the bare-metal lane: disclosure
+      before commitment, an introduction offered by pool override, two reveals through
+      the production buyer transport, operator deletion, and the held sweep stepped
+      once the preview reports the expired introduction. Each introduction has its own
+      whole-host listing. Re-delivery runs inside the storefront container and is
+      proven by the storefront's tests.
+- [x] 7.6 Package suites, against freshly built wheels. Final fileset: kit 84,
+      `core/storefront-client` 44, `core/buyer` unit 131, bare-metal storefront 226,
+      bare-metal buyer 16, the VM storefront's whole-surface client parity test, and
+      e2e collection. `make test` across the repository passed on the pre-review
+      fileset. *Pre-existing, unrelated:* e2e unit
       `test_buyer_deployment_mounts_separate_profile_state_and_credential` fails
       identically without this change.
+- [x] 7.7 **Overlap ordering.** A first start whose completion is held while a
+      redaction commits still answers and delivers its reveal once; later reads and
+      starts answer the deleted outcome.
 
 ## 8. Closeout
 
-- [x] 8.1 **Comment hygiene.** Run `make check-comment-hygiene` and resolve every
-      match. The local rationale to keep is why deletion redacts rather than removes
-      the row, why the triggers permit only redaction, and why the window is read from
-      running configuration rather than recorded per row.
-      *Done:* passes.
-- [x] 8.2 **Import placement.** Review imports this change added or touched and
-      migrate function-level ones to module level where no genuine circular import or
-      documented lazy-load reason exists. Verify against the real test suite.
-      *Done:* the only function-level import added is the deleted-error import in
-      the storefront's `redeliver-introduction` command, kept local because that CLI
-      imports per command so `--help` loads no runtime; every other added import is
-      module level.
-- [ ] 8.3 **Documentation compliance.** Re-check accepted decisions against
-      `openspec/README.md`'s placement table. That the window is aggregate and read
-      from running configuration, and that every composing storefront runs retention,
-      are behaviour an implementation must satisfy, so confirm both landed as normative
-      requirements rather than as design prose.
-- [ ] 8.4 **Narrative compression.** Shorten completed-task notes to final behaviour
-      and the accepted risks with their reasoning: that a disclosed window is current
-      policy rather than a commitment, that per-storefront discoverability is not
-      filterable comparison, and that tombstone removal is anticipated and unowned.
-- [ ] 8.5 **Roadmap currency.** Goal 6's open-gap row in
-      `docs/development/ROADMAP.md` for the unimplemented retention window leaves the
-      table and its result joins Goal 6's current-state prose. Goal 7 names no row for
-      this change and needs no edit. Record the update in the design-promotion
-      record.
-- [ ] 8.6 **Campaign index currency.** Update this change's row and the Goal 6 and
-      Goal 7 dependency graphs in `openspec/changes/README.md`, keep the unowned
-      replay-store entry this change recorded, and record it in the design-promotion
-      record.
-- [x] 8.7 **Documentation citations.** Run
-      `make check-doc-citations CHANGE=contact-payload-retention` and resolve every
-      match. An unresolvable citation is a blocking defect under `AGENTS.md`'s
-      cross-reference rule, and the target also rejects a citation whose target is a
-      tombstone.
-      *Done:* passes for this change.
-- [x] 8.8 **Packaging.** Run `make check-packaging` and resolve every failure it
-      reports: environment and image installs derive their internal packages from
-      their locks, every lock is current, and every Python version selection reads the
-      root declaration.
-      *Done:* passes: locks current, installs derived from locks, one Python
-      declaration, one package per distribution. Kit versions are unchanged, so no
-      lock moved.
-- [ ] 8.9 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and record
-      the evidence: the run, its result, and the bare-metal introduction scenario that
-      exercises this change. If the pipeline cannot run for a reason unrelated to this
-      change, record that as an explicit blocker naming the cause and the change that
-      owns it, and treat the validations it gates as unrun rather than passed.
-- [ ] 8.10 **Promotion.** Complete the design-promotion record below, including
-      `docs/development/ARCHITECTURE.md`'s settlement-configuration paragraph, which
-      names the deletion operation, `docs/development/DEPLOYMENT_AND_CONFIG.md` for the
-      retention setting, and `docs/development/TESTING.md`'s loop table.
+- [x] 8.1 **Comment hygiene.** `make check-comment-hygiene` passes.
+- [x] 8.2 **Import placement.** The one function-level import added, in the
+      storefront's `redeliver-introduction` command, follows that CLI's per-command
+      imports so `--help` loads no runtime.
+- [x] 8.3 **Documentation compliance.** The aggregate, configuration-read window and
+      the requirement that every composing storefront run retention are normative in
+      `contact-exchange-settlement`; rationale is in `design.md`.
+- [x] 8.4 **Narrative compression.** Task notes reduced to final behaviour and
+      evidence; alternatives, review rationale, and the accepted risks are in
+      `design.md`.
+- [x] 8.5 **Roadmap currency.** Goal 6's retention gap left the table for the
+      current-state prose; its replay-store row is owned by
+      `redesign-authenticated-replay-state`. Goal 7 needed no edit.
+- [x] 8.6 **Campaign index currency.** This change's row, its unowned replay entry
+      retired in favour of `redesign-authenticated-replay-state`'s row, and
+      `compose-contact-exchange-across-compute` blocked only on 8.9.
+- [x] 8.7 **Documentation citations.** Passes for this change; repository-wide
+      failures are unchanged from the baseline.
+- [x] 8.8 **Packaging.** `make check-packaging` passes.
+- [ ] 8.9 **End-to-end pipeline.** [Actions run 36921556410](https://github.com/arkhai-io/simple-compute-market/actions/runs/36921556410)
+      passed both lanes on the pre-review fileset: VM 129 passed; bare metal 16
+      passed, the 11 publication stages and all 5 `e2e_bare_metal_introduction`
+      stages. Storefront logs show the reveals, the operator deletion, `410` on a
+      read and on a fresh start, the preview polled across the 5-second window, the
+      sweep step, and `410` on the swept introduction. *Outstanding:* one run on the
+      final fileset. Since that run the scenario sends its deletion through the
+      kit's admin client, an identical wire request, and the preview's guarantee is
+      restated; no wire contract changed.
+- [x] 8.10 **Promotion.** Recorded below.
 
 ## Design promotion record
 
@@ -291,4 +177,10 @@ In `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/` unless name
 | Every storefront composing the mechanism runs the sweep and serves both disclosures | `openspec/specs/contact-exchange-settlement/spec.md` |
 | The retention sweep is a held and stepped storefront loop | `docs/development/TESTING.md` |
 | The retention boundary and the deletion operation's name | `docs/development/ARCHITECTURE.md#settlement-configuration` |
-| The authenticated replay store is out of scope; bounding it is unowned work | `openspec/changes/README.md` (unowned work), `docs/development/ROADMAP.md` Goal 6 |
+| A reveal is ordered by its persist; deletion does not recall a reveal already made | `openspec/specs/contact-exchange-settlement/spec.md`, `openspec/specs/introduction-delivery/spec.md`, `docs/development/ARCHITECTURE.md#settlement-configuration` |
+| A preview is a snapshot; the next step deletes every previewed introduction still present, plus any expired since | `openspec/specs/contact-exchange-settlement/spec.md`, `docs/development/TESTING.md` |
+| Retention settings, the operator route, and the disclosure's scope | `docs/development/DEPLOYMENT_AND_CONFIG.md#contact-exchange-retention` |
+| The operator deletion client is a kit-owned extension over core's generic transport | Temporary: follows the existing pool-overrides rule in `docs/development/ARCHITECTURE.md`; no new permanent text |
+| Goal 6 current state | `docs/development/ROADMAP.md` |
+| Campaign index rows | `openspec/changes/README.md` |
+| The authenticated replay store is out of scope; redesigning it is owned elsewhere | `openspec/changes/README.md` (`redesign-authenticated-replay-state`), `docs/development/ROADMAP.md` Goal 6 |

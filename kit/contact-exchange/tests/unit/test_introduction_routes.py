@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 from typing import Any
 
@@ -381,3 +382,49 @@ async def test_a_redaction_racing_a_start_answers_the_deleted_outcome() -> None:
     assert caught.value.status_code == 410
     assert harness.completions == [_OBLIGATION_REF]
     assert delivered == []
+
+
+async def test_a_deletion_committing_during_a_first_reveal_does_not_recall_it() -> None:
+    """A reveal is ordered by its persist; deletion bounds only what follows.
+
+    The start persists, then waits on completion while a deletion commits. The
+    start finishes answering and delivering the reveal it made before the
+    deletion; every later read and start answers the deleted outcome.
+    """
+    harness = Harness()
+    delivered: list[str] = []
+    completing = asyncio.Event()
+    release = asyncio.Event()
+    original_complete = harness.complete
+
+    async def held_complete(agreement: IntroductionAgreement) -> None:
+        completing.set()
+        await release.wait()
+        await original_complete(agreement)
+
+    harness.complete = held_complete  # type: ignore[method-assign]
+    service = harness.service(
+        deliver=lambda projection, agreement: delivered.append(
+            projection["obligation_ref"]
+        )
+    )
+
+    start = asyncio.create_task(service.start({"principal": BUYER}, _start()))
+    await asyncio.wait_for(completing.wait(), timeout=5)
+    harness.redact()
+    release.set()
+    revealed = await start
+
+    assert revealed["revealed"] is True
+    assert revealed["counterparty_contact"] == _SELLER_CONTACT
+    assert delivered == [_OBLIGATION_REF]
+
+    harness.complete = original_complete  # type: ignore[method-assign]
+    for attempt in (
+        service.read({"principal": BUYER}, _OBLIGATION_REF),
+        service.start({"principal": BUYER}, _start()),
+    ):
+        with pytest.raises(IntroductionRouteError) as caught:
+            await attempt
+        assert caught.value.status_code == 410
+    assert delivered == [_OBLIGATION_REF]

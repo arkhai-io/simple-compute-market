@@ -25,6 +25,7 @@ from typing import Any
 
 import pytest
 from core_buyer.introductions import IntroductionPayloadsDeleted, IntroductionTransport
+from market_contact_exchange import SyncIntroductionAdminClient
 from market_identity import Identity, TrustedIdentitySet, create_signer
 from market_pool_overrides import SyncPoolOverrideClient
 from market_settlement_runtime import derive_obligation_ref
@@ -288,14 +289,16 @@ class TestStage03_OperatorDeletion:
         require_state(state, "revealed")
         first = state.obligation_refs[0]
 
-        deleted = bare_metal_storefront_admin.admin_delete_introduction_payloads(first)
+        deleted = SyncIntroductionAdminClient(
+            bare_metal_storefront_admin
+        ).delete_introduction_payloads(first)
 
-        assert deleted["obligation_ref"] == first
-        assert deleted["redacted"] is True
-        assert deleted["payloads_deleted_at"]
+        assert deleted.obligation_ref == first
+        assert deleted.redacted is True
+        assert deleted.payloads_deleted_at
         with pytest.raises(IntroductionPayloadsDeleted) as on_read:
             introductions.read(obligation_ref=first)
-        assert on_read.value.payloads_deleted_at == deleted["payloads_deleted_at"]
+        assert on_read.value.payloads_deleted_at == deleted.payloads_deleted_at
         # A fresh start, not an exact replay, reveals nothing either.
         with pytest.raises(IntroductionPayloadsDeleted):
             introductions.start(

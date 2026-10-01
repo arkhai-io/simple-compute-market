@@ -109,8 +109,8 @@ class IntroductionRetentionService:
 
     The single deletion and every sweep redact through the same injected
     operation, so neither path can delete differently from the other. The
-    sweep step is the operation the timer runs, and the preview selects
-    exactly what that step would delete, writing nothing.
+    sweep step is the operation the timer runs, and the preview selects what
+    that step would delete if it ran now, writing nothing.
     """
 
     def __init__(
@@ -181,7 +181,13 @@ class IntroductionRetentionService:
         return {"loop": INTRODUCTION_RETENTION_LOOP, "deleted": deleted}
 
     async def preview(self) -> Mapping[str, Any]:
-        """Report what the next sweep cycle would delete, deleting nothing."""
+        """Report what a sweep cycle would delete now, deleting nothing.
+
+        A snapshot: eligibility only grows with time, so the next cycle deletes
+        everything reported here that is still unredacted, and may also delete
+        introductions that expired in between. Selection is oldest first, so
+        that holds under the batch limit too.
+        """
 
         eligible = await self._eligible(self._clock())
         return {

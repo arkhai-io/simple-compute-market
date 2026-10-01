@@ -23,6 +23,8 @@ from core_storefront.models.system_models import AdminPauseResponse
 from fastapi import APIRouter, Body, HTTPException, Query, Request
 
 from market_contact_exchange import (
+    DELETE_INTRODUCTION_PAYLOADS_OPERATION,
+    INTRODUCTION_PAYLOADS_ROUTE,
     AuthorizedIntroductionRequest,
     IntroductionRouteError,
     IntroductionStart,
@@ -343,7 +345,7 @@ async def read_introduction(
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
-@router.delete("/api/v1/admin/introductions/{obligation_ref}/payloads")
+@router.delete(INTRODUCTION_PAYLOADS_ROUTE)
 async def delete_introduction_payloads(
     obligation_ref: str,
     request: Request,
@@ -357,7 +359,7 @@ async def delete_introduction_payloads(
     await _admin(
         request=request,
         runtime=runtime,
-        operation="admin_delete_introduction_payloads",
+        operation=DELETE_INTRODUCTION_PAYLOADS_OPERATION,
         resource=obligation_ref,
     )
     retention = runtime.introduction_retention()

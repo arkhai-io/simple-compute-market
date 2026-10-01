@@ -260,3 +260,37 @@ async def test_a_gated_runner_requires_an_interruptible_wait() -> None:
         await run_introduction_retention_sweep(
             _service(Store({})), paused=lambda: False
         )
+
+
+async def test_a_step_after_time_passes_deletes_a_superset_of_the_preview() -> None:
+    """The preview is a snapshot; the step deletes it plus anything since expired."""
+
+    boundary = _NOW - timedelta(seconds=_WINDOW)
+    store = Store(
+        {
+            "oldest": boundary - timedelta(seconds=30),
+            "old": boundary - timedelta(seconds=20),
+            # Not eligible at preview; crosses the window before the step.
+            "crossing": boundary + timedelta(seconds=5),
+        }
+    )
+    clock = [_NOW]
+    service = IntroductionRetentionService(
+        policy=IntroductionRetentionPolicy(window_seconds=_WINDOW, sweep_interval_seconds=60),
+        select_expired=store.select_expired,
+        delete_payloads=store.delete_payloads,
+        load=store.load,
+        clock=lambda: clock[0],
+        batch_limit=2,
+    )
+
+    preview = await service.preview()
+    assert preview["eligible"] == ["oldest", "old"]
+
+    clock[0] = _NOW + timedelta(seconds=10)
+    # Bounded to a batch of two with three eligible: the previewed pair is
+    # selected first, because the newly eligible one is younger than both.
+    assert await service.sweep_once() == {"loop": "introduction_retention", "deleted": 2}
+    assert sorted(store.deleted) == ["old", "oldest"]
+    assert await service.sweep_once() == {"loop": "introduction_retention", "deleted": 1}
+    assert sorted(store.deleted) == ["crossing", "old", "oldest"]

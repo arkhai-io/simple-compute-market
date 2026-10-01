@@ -1,5 +1,12 @@
 """Introduction-only settlement mechanism: contact exchange."""
 
+from .admin_client import (
+    DELETE_INTRODUCTION_PAYLOADS_OPERATION,
+    INTRODUCTION_PAYLOADS_ROUTE,
+    IntroductionAdminClient,
+    IntroductionPayloadsDeletion,
+    SyncIntroductionAdminClient,
+)
 from .client import ContactExchangeClient
 from .introduction_routes import (
     INTRODUCTION_PAYLOADS_DELETED,
@@ -68,11 +75,13 @@ __all__ = [
     "CONTACT_EXCHANGE_TOMBSTONES_MIGRATION_ID",
     "DEFAULT_RETENTION_SECONDS",
     "DEFAULT_RETENTION_SWEEP_INTERVAL_SECONDS",
+    "DELETE_INTRODUCTION_PAYLOADS_OPERATION",
     "DISCLOSURE_BASIS",
     "DISCLOSURE_SCOPE",
     "INDEFINITE_RETENTION",
     "INTRODUCTION_ASSET",
     "INTRODUCTION_PAYLOADS_DELETED",
+    "INTRODUCTION_PAYLOADS_ROUTE",
     "INTRODUCTION_RETENTION_LOOP",
     "INTRODUCTION_RETENTION_ROUTE",
     "MECHANISM",
@@ -84,9 +93,11 @@ __all__ = [
     "ContactSettlementConfig",
     "DeleteIntroductionPayloads",
     "DeliverIntroduction",
+    "IntroductionAdminClient",
     "IntroductionAgreement",
     "IntroductionDisclosure",
     "IntroductionPayloadsDeletedError",
+    "IntroductionPayloadsDeletion",
     "IntroductionRecord",
     "IntroductionRetentionPolicy",
     "IntroductionRetentionService",
@@ -96,6 +107,7 @@ __all__ = [
     "IntroductionStart",
     "LoadIntroduction",
     "SelectExpiredIntroductions",
+    "SyncIntroductionAdminClient",
     "contact_accepted_obligation_builder",
     "contact_buyer_compatibility",
     "contact_channel_projection",

@@ -583,29 +583,6 @@ class StorefrontClient(_StorefrontClientBase):
             raise StorefrontClientError(f"PATCH {url} returned non-object JSON")
         return payload
 
-    async def _authenticated_delete(
-        self,
-        path: str,
-        *,
-        role: str,
-        operation: str,
-        resource: str,
-        request_id: str | None = None,
-    ) -> dict[str, Any]:
-        signed = self._signed_request(
-            role=role,
-            method="DELETE",
-            operation=operation,
-            resource=resource,
-            request_id=request_id,
-        )
-        resp = await self._client.delete(
-            path,
-            headers=signed.headers,
-            timeout=self._timeout,
-        )
-        return self._authenticated_payload("DELETE", self._url(path), resp, signed)
-
     async def authenticated_request(
         self,
         method: str,
@@ -1041,9 +1018,7 @@ class StorefrontClient(_StorefrontClientBase):
         derived listings: the dry run names the pending events so a caller can
         check the cause before advancing. Also supported by `publication`, whose
         dry run reports every publish, refresh, close, reopen, and hold the
-        next cycle would perform, with its reason, and by
-        `introduction-retention`, whose dry run names the introductions whose
-        contact payloads the next sweep would delete.
+        next cycle would perform, with its reason.
         """
         return await self._authenticated_post(
             f"/api/v1/admin/lifecycle/{loop}/dry-run",
@@ -1051,28 +1026,6 @@ class StorefrontClient(_StorefrontClientBase):
             role="admin",
             operation="admin_dry_run_lifecycle_cycle",
             resource=loop,
-            request_id=request_id,
-        )
-
-    async def admin_delete_introduction_payloads(
-        self,
-        obligation_ref: str,
-        *,
-        request_id: str | None = None,
-    ) -> dict[str, Any]:
-        """DELETE /api/v1/admin/introductions/{obligation_ref}/payloads.
-
-        Delete one revealed introduction's contact payloads now, whatever the
-        retention window says, leaving the deal and its obligation record
-        intact. Answers ``obligation_ref``, ``redacted`` -- whether this call
-        deleted them -- and ``payloads_deleted_at``, which is None when the
-        deal never revealed an introduction. Repeating it converges.
-        """
-        return await self._authenticated_delete(
-            f"/api/v1/admin/introductions/{obligation_ref}/payloads",
-            role="admin",
-            operation="admin_delete_introduction_payloads",
-            resource=obligation_ref,
             request_id=request_id,
         )
 
@@ -1992,29 +1945,6 @@ class SyncStorefrontClient(_StorefrontClientBase):
             raise StorefrontClientError(f"POST {url} returned non-object JSON")
         return payload
 
-    def _authenticated_delete(
-        self,
-        path: str,
-        *,
-        role: str,
-        operation: str,
-        resource: str,
-        request_id: str | None = None,
-    ) -> dict[str, Any]:
-        signed = self._signed_request(
-            role=role,
-            method="DELETE",
-            operation=operation,
-            resource=resource,
-            request_id=request_id,
-        )
-        resp = self._client.delete(
-            path,
-            headers=signed.headers,
-            timeout=self._timeout,
-        )
-        return self._authenticated_payload("DELETE", self._url(path), resp, signed)
-
     def _authenticated_get(
         self,
         path: str,
@@ -2517,9 +2447,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
         derived listings: the dry run names the pending events so a caller can
         check the cause before advancing. Also supported by `publication`, whose
         dry run reports every publish, refresh, close, reopen, and hold the
-        next cycle would perform, with its reason, and by
-        `introduction-retention`, whose dry run names the introductions whose
-        contact payloads the next sweep would delete.
+        next cycle would perform, with its reason.
         """
         return self._authenticated_post(
             f"/api/v1/admin/lifecycle/{loop}/dry-run",
@@ -2527,28 +2455,6 @@ class SyncStorefrontClient(_StorefrontClientBase):
             role="admin",
             operation="admin_dry_run_lifecycle_cycle",
             resource=loop,
-            request_id=request_id,
-        )
-
-    def admin_delete_introduction_payloads(
-        self,
-        obligation_ref: str,
-        *,
-        request_id: str | None = None,
-    ) -> dict[str, Any]:
-        """DELETE /api/v1/admin/introductions/{obligation_ref}/payloads.
-
-        Delete one revealed introduction's contact payloads now, whatever the
-        retention window says, leaving the deal and its obligation record
-        intact. Answers ``obligation_ref``, ``redacted`` -- whether this call
-        deleted them -- and ``payloads_deleted_at``, which is None when the
-        deal never revealed an introduction. Repeating it converges.
-        """
-        return self._authenticated_delete(
-            f"/api/v1/admin/introductions/{obligation_ref}/payloads",
-            role="admin",
-            operation="admin_delete_introduction_payloads",
-            resource=obligation_ref,
             request_id=request_id,
         )
 

@@ -671,6 +671,32 @@ independent release and chart. Marketplace packages consume the exact hosted
 client wheel and identity interface bound by that signed release manifest;
 editable sibling sources and compatible-major substitution are rejected.
 
+### Contact-exchange retention
+
+A storefront composing `contact-exchange.v1` configures it in the peer
+`[Settlement.contact]` table. Besides the seller's `contact_payload` and its
+`profiles`, two seller-only settings bound how long revealed contacts are kept:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `retention_seconds` | `2592000` (30 days) | How long both contact payloads of a revealed introduction are kept, counted from the reveal. A positive integer, or `"indefinite"` for no deletion. Zero and negative values are refused, so a typo cannot delete introductions moments after reveal. |
+| `retention_sweep_interval_seconds` | `3600` | How often the retention sweep runs. Positive. |
+
+The window is current policy, not a term of any deal: a storefront restarted with
+a shorter window deletes, on its next sweep, introductions revealed under the
+longer one. The sweep is the `introduction_retention` loop, held by the lifecycle
+pause and stepped and previewed under the route name `introduction-retention`. An
+operator deletes one introduction's payloads early with
+`DELETE /api/v1/admin/introductions/{obligation_ref}/payloads`, through
+`kit/contact-exchange`'s typed operator client. Deletion leaves the deal and its
+obligation record in place, and re-delivery of a deleted introduction is refused
+without contacting any sink.
+
+The window is disclosed publicly as `disclosures.introduction_retention` on the
+storefront's `/health` readiness projection and again in every reveal. Its `scope`
+is the introduction record: copies already delivered to either side's sinks, and
+responses the authenticated replay store recorded for exact retry, are outside it.
+
 ### Bare-metal hosted role configuration
 
 `arkhai-bare-metal-buyer` is an installed core buyer-domain wheel. Its TOML contains a registry URL, registry authority/trust pins, and bounded public defaults only; the XDG buyer profile service resolves the fresh or run-recorded signer. The `bare-metal` commands use authenticated discovery and the shared schema-opaque hosted storefront transport. Raw payer/instrument/provider values and action material are not domain configuration or durable CLI output.

@@ -11,7 +11,10 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 from market_contact_exchange import MECHANISM as CONTACT_MECHANISM
-from market_contact_exchange import format_introduction_timestamp
+from market_contact_exchange import (
+    IntroductionAdminClient,
+    format_introduction_timestamp,
+)
 from market_core.schemas import derive_settlement_option_id
 from market_identity import (
     EMPTY_BODY,
@@ -427,7 +430,9 @@ async def test_no_retention_is_disclosed_without_contact_exchange(tmp_path) -> N
             readiness = await anonymous.get_health()
         async with _admin(base_url) as admin:
             with pytest.raises(StorefrontClientError) as refused:
-                await admin.admin_delete_introduction_payloads("ab" * 32)
+                await IntroductionAdminClient(admin).delete_introduction_payloads(
+                    "ab" * 32
+                )
     assert readiness.disclosures == {}
     assert refused.value.status_code == 404
     assert "introduction-retention" not in runtime.loops.step_routes()
@@ -446,8 +451,9 @@ async def test_operator_deletion_keeps_the_deal_and_stops_every_reveal(tmp_path)
         negotiation_id, obligation_ref, _ = await _accept_and_start(base_url, option)
         assert deliveries == [obligation_ref]
         async with _admin(base_url) as admin:
-            deleted = await admin.admin_delete_introduction_payloads(obligation_ref)
-            again = await admin.admin_delete_introduction_payloads(obligation_ref)
+            introductions_admin = IntroductionAdminClient(admin)
+            deleted = await introductions_admin.delete_introduction_payloads(obligation_ref)
+            again = await introductions_admin.delete_introduction_payloads(obligation_ref)
         with pytest.raises(IntroductionPayloadsDeleted) as on_read:
             _introductions(base_url).read(obligation_ref=obligation_ref)
         # A fresh request identity, so not an exact replay of the first start.
@@ -458,10 +464,10 @@ async def test_operator_deletion_keeps_the_deal_and_stops_every_reveal(tmp_path)
                 contact_payload=dict(_BUYER_CONTACT),
             )
 
-    assert deleted["obligation_ref"] == obligation_ref
-    assert deleted["redacted"] is True
-    assert again == {**deleted, "redacted": False}
-    assert on_read.value.payloads_deleted_at == deleted["payloads_deleted_at"]
+    assert deleted.obligation_ref == obligation_ref
+    assert deleted.redacted is True
+    assert again == deleted.model_copy(update={"redacted": False})
+    assert on_read.value.payloads_deleted_at == deleted.payloads_deleted_at
     assert on_start.value.outcome()["revealed"] is False
     # Nothing was persisted again and the seller was not told a second time.
     stored = await runtime.db.load_contact_introduction(obligation_ref=obligation_ref)
@@ -475,7 +481,7 @@ async def test_operator_deletion_keeps_the_deal_and_stops_every_reveal(tmp_path)
     assert status.status == "complete"
 
 
-async def test_held_retention_sweep_previews_then_deletes_exactly_that(
+async def test_held_retention_sweep_deletes_what_it_previewed(
     tmp_path,
 ) -> None:
     db_path = str(tmp_path / "storefront.db")
