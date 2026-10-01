@@ -57,6 +57,30 @@ transaction identity. For a local development service, use the explicit
 `development_account` authentication option; it sends `X-Account-ID` and is
 not available outside the service's development authenticator.
 
+## Settlement configuration integration
+
+`create_arkhai_payments_registration()` provides a typed mechanism registration for
+publication input, public option construction, and buyer-side option filtering.
+It intentionally has no conditional-escrow client, accepted-obligation builder, or
+settlement verifier: payment approval and receipt servicing remain in the domain
+stage that owns the accepted Agreement.
+
+`ArkhaiPaymentsConfig` keeps the service origin, pinned Ed25519 receipt identity,
+fee policy, dispute authority, API-key environment-variable name, and local
+development-auth switch in trusted role configuration. The API key value is read
+only when a client is created. `payments_client_for_owner(config, owner_account)`
+validates the owner account and uses it for loopback development authentication;
+normal service calls use the configured environment variable:
+
+```python
+from market_arkhai_payments import create_arkhai_payments_registration
+from market_arkhai_payments import payments_client_for_owner
+
+registration = create_arkhai_payments_registration()
+with payments_client_for_owner(config, owner_account) as client:
+    snapshot = client.get_transaction(transaction_id)
+```
+
 ## Seller servicing
 
 ```python
@@ -96,9 +120,9 @@ make test
 make build
 ```
 
-`make test` checks static typing and the upstream mandate, receipt, attachment,
-and approval vectors. The vector runner is also available as
-`python scripts/check_vectors.py`.
+`make test` checks static typing, unit tests for settlement configuration and
+registration, and the upstream mandate, receipt, attachment, and approval vectors.
+The vector runner is also available as `python scripts/check_vectors.py`.
 
 ## Local first use
 

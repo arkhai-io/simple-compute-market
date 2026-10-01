@@ -50,6 +50,11 @@ Approval may carry the agreement as an attachment, which the service checks agai
 
 Every call goes to the payments service: approve and attach (buyer), poll and attach (seller), `reverse` (seller refund). Headless callers authenticate with WorkOS user-scoped API keys for their owner's Arkhai account. Hold release and fee collection happen in the service.
 
+The kit also exports a typed `MechanismRegistration` for publication inputs and
+public option filtering. Its client factory, accepted-obligation builder, and
+settlement verifier remain unset; compositions use the registration without routing
+payments transactions through the conditional-escrow lifecycle engine.
+
 ## Superseded changes
 
 Built on `fiat.stripe.v1` and `kit/hosted-settlement`: `consume-expanded-stripe-funding`, `add-api-credits-hosted-settlement`, `add-bare-metal-hosted-settlement`, `bind-one-hosted-release-coordinate`, `carry-the-payer-return-address`, `project-an-authoritative-funding-loss`, and the hosted sections of `disburse-a-settlement-disposition`. The old service never ran with production money, so nothing deployed needs migration. Archive or withdraw them when this change is accepted.
