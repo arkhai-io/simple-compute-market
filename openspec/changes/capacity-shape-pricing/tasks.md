@@ -299,7 +299,7 @@ are `negotiation-driven-capacity-resize` task 2.4's. The number is kept.
       `make -C domains/bare_metal/storefront test` and `make -C domains/apicredits test`,
       because the generic listing table gains a column and the API-credit reference
       changes. `make -C core typecheck`. Disclose any suite not run.
-      *Done 2026-10-01, with unrun suites disclosed:* passed — `kit/capability-pricing` (22), `kit/settlement-runtime` (109), `kit/alkahest` (182), `kit/hosted-settlement` (189), `kit/negotiation-runtime` (8), `kit/resource-pools` (280), `provisioning/compute/service` (670, 281), `domains/vms/domain` (42), `core/storefront` (182), `domains/vms/storefront` unit (1149) and integration (270), `domains/bare_metal/storefront` (215), and the API-credit Python suites (87 and the rest). Not run here, for environment reasons: the VM storefront's two `test_alkahest.py` cases (no local chain runtime binary) and the API-credit Rust middleware suite (no `cargo`). The VM storefront's environment was built from its existing lock plus the new kit's wheel, because relocking it needs `torch` metadata this environment cannot fetch; see 7.8. `make -C core typecheck` reports one error, in `core/src/market_core/query_dsl.py`, a file this change does not touch.
+      *Done 2026-10-01, with unrun suites disclosed:* passed — `kit/capability-pricing` (22), `kit/settlement-runtime` (109), `kit/alkahest` (182), `kit/hosted-settlement` (189), `kit/negotiation-runtime` (8), `kit/resource-pools` (280), `provisioning/compute/service` (670, 281), `domains/vms/domain` (42), `core/storefront` (182), `domains/vms/storefront` unit (1149) and integration (270), `domains/bare_metal/storefront` (215), and the API-credit Python suites (87 and the rest). Not run here, for environment reasons: the VM storefront's two `test_alkahest.py` cases (no local chain runtime binary) and the API-credit Rust middleware suite (no `cargo`). After the implementation-review fixes: VM storefront 1084 unit and 338 integration, API-credit domain 42, storefront 90, service 65, and buyer 17, core storefront 182, provisioning integration 283, and `kit/policy` 42 (run from the VM storefront's environment, since this environment cannot build `kit/policy`'s own). The maintainer's full `make test` stopped first at the API-credit middleware's `cargo` toolchain check and, after reinstalling Rust, gets further and fails at a later step that is being investigated separately, and this change touches no build tooling beyond the new kit's targets. The VM storefront's environment was built from its existing lock plus the new kit's wheel, because relocking it needs `torch` metadata this environment cannot fetch; see 7.8. `make -C core typecheck` reports one error, in `core/src/market_core/query_dsl.py`, a file this change does not touch.
 - [x] 6.2 Confirm no consumer reconstructs a total from individual family rates: a
       search for rate-times-quantity arithmetic outside the aggregator finds none.
       *Done 2026-10-01.* Done: no rate-times-quantity arithmetic outside `market_capability_pricing`.
@@ -367,17 +367,20 @@ review.
       implementer's local tree, whose relocked files were not in the fileset; this
       environment cannot relock the VM storefront, buyer, or `kit/policy`, because their
       `rl` extra resolves `torch` from an index that refuses it.)
-- [ ] 7.9 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and record
+- [x] 7.9 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and record
       the run, its result, and the scenarios exercising this change: 3.6's
       shape-priced scenario and the existing VM full-deal scenarios, which prove
       flat-priced listings settle unchanged. If the pipeline cannot run for a reason
       unrelated to this change, record that as an explicit blocker naming the cause and
       its owning change, and treat the validations it gates as unrun.
-      *Run 2026-10-01 by the maintainer, before the implementation-review fixes:* VM e2e 128 passed, 2 skipped; bare-metal 11
-      passed. Stage 07 (`test_07a`, `test_07b`) passed, and the full-deal scenarios settle
+      *Done 2026-10-01 by the maintainer, after the implementation-review fixes:* VM e2e
+      128 passed, 2 skipped; bare-metal 11 passed. Stage 07 passed: `test_07a` published
+      the listing shape-priced at `11000000000000000000` base units an hour and refreshed
+      it in place, and `test_07b` restored the flat rate. The full-deal scenarios settle
       flat-priced listings unchanged. The two skips are `test_multi_registry.py`'s
-      negotiate-with-alice stages, statically skipped and unrelated. The run predates the
-      implementation-review fixes; the task closes when a run after them passes.
+      negotiate-with-alice stages, statically skipped and unrelated. An earlier run,
+      before the fixes, had the same result.
+
 - [ ] 7.10 **Promotion.** Complete the design-promotion record below, mapping every
       accepted decision to its exact permanent heading, and synchronize the three spec
       deltas into `openspec/specs/storefront-publication/spec.md`,
