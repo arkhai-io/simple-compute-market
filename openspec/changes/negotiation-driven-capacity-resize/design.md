@@ -156,7 +156,16 @@ not wait on the registry change's implementation.
 
 For a round carrying a shape, the VM `evaluate_round` composition runs, in
 order: admissibility (if composed), authoritative feasibility (if composed), the
-seller's commercial feasibility guard, then pricing. Each is a distinct refusal
+seller's commercial feasibility guard, then pricing.
+
+The commercial feasibility guard is this change's: a predicate taking a requested
+shape and the listing's categorical commitments — GPU model and region compared by
+equality — so a requested shape the seller does not sell is declined before it is
+quoted. Its quantitative counterpart is `capacity-shape-envelope`'s admissibility
+predicate, composed first; the guard does not re-check ranges. It moved here from
+`capacity-shape-pricing`, whose planning-time Section 5 held both halves, because
+this composition is where a requested shape first exists and where the order is
+decided. The "Seller feasibility precedes pricing" requirement moved with it. Each is a distinct refusal
 reason on the wire, because each leads to a different counter: change the ask,
 retry later, or accept the seller's counter. A domain that composes neither of
 the first two negotiates shapes on price alone and says so in its composition
@@ -235,5 +244,6 @@ drain.
 | A buyer-requested round-0 VM shape differing from the listing is rejected outright until a round can carry a shape | Temporary; lifted by Section 2. Never promoted |
 | Revised terms are a child of `proposal`; core reuses `ProvisionTerms` rather than adding vocabulary | `openspec/specs/negotiation-protocol/spec.md` — "A round may revise the capacity shape" |
 | The negotiated quantity is a multiplier in basis points; amounts stay exact | `openspec/specs/negotiation-protocol/spec.md` — "Rate-multiplier negotiation" |
+| A requested shape's feasibility, quantitative and categorical, is evaluated before pricing | `openspec/specs/negotiation-protocol/spec.md` — "Seller feasibility precedes pricing" |
 | The agreed shape is what the claim reserves | `openspec/specs/vm-storefront-fulfillment/spec.md` — "The agreed shape is reserved" |
 | No core-level extra-field guard; content validation lives in the domain codec | This change's `design.md` |

@@ -6,10 +6,15 @@ alone. Section 4 is `negotiation-driven-capacity-resize`'s; its number is kept.
 *Re-planned 2026-10-01* against the revised `design.md`. No task had been started,
 so Sections 1–3 are rewritten rather than amended; the planning-time entries they
 replace are summarized under "Superseded planning-time entries" at the end of this
-section list. Section 5 is outside this implementation round and opens with decision
-gate 5.0. Every amount in every task is a Python `int`, exact decimal text, or a
+section list. Every amount in every task is a Python `int`, exact decimal text, or a
 `Fraction`; none passes through `float` or through `Decimal` arithmetic under a
 precision context, and none is stored in a fixed-width column.
+
+*Design revised 2026-10-01 after review* (see `design.md`, "Review dispositions"):
+the recorded rate structure, unrated families, unreadable rates, the pricing kit, the
+pricing projection, the selected-option reference amount, and Section 5's move. The
+tasks below are re-planned against that revision in the next planning round; until
+then `design.md` governs where they disagree.
 
 ## 1. Exact amounts and the aggregator
 
@@ -215,28 +220,10 @@ Section 2b: the multiplier and the revised-terms field are one deployment bounda
 
 ## 5. Seller feasibility guard
 
-- [ ] 5.0 **Decision gate.** Before any other Section 5 task starts, decide whether
-      Section 5 and its `negotiation-protocol` "Seller feasibility precedes pricing"
-      delta move into their own change depending on `capacity-shape-envelope`, and
-      record the decision and its reasoning in `design.md`. Section 5 touches the
-      negotiation path rather than pricing and publication, its quantitative check
-      overlaps the envelope's admissibility, and it has no live caller until
-      `negotiation-driven-capacity-resize` §2.
-- [ ] 5.1 Extend `has_matching_inventory_guard` from `region`/`gpu_model` equality to a
-      quantitative check across every dimension the seller constrains.
-      *Amended 2026-09-23:* `unbacked-listing-publication` makes the guard recheck
-      every published source-derived field — categorical and quantitative — against
-      the listing's own source. What remains here is checking a *buyer-requested*
-      shape, once shapes are negotiable, rather than the listing's advertised one.
-      Implement the predicate here, taking a requested shape and the seller's
-      constraints, and wire it into the VM `evaluate_round` composition in
-      `negotiation_runtime.py` ahead of pricing. Until a round can carry a shape the
-      requested shape is the listing's own and the predicate is exercised by unit
-      tests only.
-- [ ] 5.2 Order the guard before pricing inside the VM `evaluate_round` composition,
-      so a shape the seller will not serve is never quoted.
-- [ ] 5.3 Focused tests: quantitative constraint exceeded declines without a quote;
-      categorical mismatch declines as today.
+Moved (design review, 2026-10-01): the quantitative check of a requested shape is
+`capacity-shape-envelope`'s admissibility predicate, and the categorical check, the
+ordering ahead of pricing, and the "Seller feasibility precedes pricing" requirement
+are `negotiation-driven-capacity-resize` task 2.4's. The number is kept.
 
 ## 6. Validation
 
@@ -280,18 +267,16 @@ review.
       `DEPLOYMENT_AND_CONFIG.md`, and the superseded compatibility reading only in
       `design.md`.
 - [ ] 7.4 **Narrative compression.** Compress completed-task notes to final behavior,
-      material validation evidence, unresolved or deferred work (Section 5, and the
-      findings `design.md` records as not changed), and promotion destinations.
+      material validation evidence, unresolved or deferred work (the findings
+      `design.md` records as not changed), and promotion destinations.
 - [ ] 7.5 **Roadmap currency.** In `docs/development/ROADMAP.md`'s Goal 2, rewrite
       the current-state statement that commercial resolution produces a single price
       per GPU model and that rates scale by duration only, and remove this change's
-      gap row if Section 5 has moved out (gate 5.0); otherwise narrow the row to
-      Section 5. The statement that negotiation has one degree of freedom stays until
+      gap row. The statement that negotiation has one degree of freedom stays until
       `negotiation-driven-capacity-resize` lands. Name the update in the promotion
       record.
 - [ ] 7.6 **Campaign index currency.** Update this change's row and Goal 2's
-      dependency graph in `openspec/changes/README.md` to its state at completion,
-      including any change gate 5.0 creates, and remove the unowned-work entries this
+      dependency graph in `openspec/changes/README.md` to its state at completion, and remove the unowned-work entries this
       change resolved. Name the update in the promotion record.
 - [ ] 7.7 **Documentation citations.** Run
       `make check-doc-citations CHANGE=capacity-shape-pricing` and resolve every match.
@@ -320,16 +305,19 @@ review.
 
 | Accepted decision | Permanent location |
 |---|---|
-| Per-family rates in one nesting across the three tiers; a listing is shape-priced or flat-priced by its GPU family; unpriceable, mixed, and conflicting inputs refuse the candidate | `openspec/specs/storefront-publication/spec.md` — "Shape-resolvable commercial rates" |
-| Price aggregation is replaceable, exact, selected by the domain's composition, and no consumer reconstructs a total | `openspec/specs/storefront-publication/spec.md` — "Price aggregation is replaceable" |
-| A shape-priced listing's rates are a storefront term of sale; the registry carries only composed option rates | `openspec/specs/storefront-publication/spec.md` — "A shape-priced listing's rates are a storefront term of sale" |
+| Per-family rates in one nesting across the three tiers; an explicit pricing projection; shape-priced when any family resolves rates; unrated families not charged; a free listing refused | `openspec/specs/storefront-publication/spec.md` — "Shape-resolvable commercial rates" |
+| An unreadable family rate holds its pool and is reported; a malformed configured default stops startup | `openspec/specs/storefront-publication/spec.md` — "An unreadable family rate holds its pool" |
+| Price aggregation is replaceable, exact, domain-selected, and no consumer reconstructs a total | `openspec/specs/storefront-publication/spec.md` — "Price aggregation is replaceable" |
+| The recorded structure holds every resolved family; option identity follows the composed rate | `openspec/specs/storefront-publication/spec.md` — "A shape-priced listing records the rates that could price a revised shape" |
 | A clause rate is stated or composed and converts to base units exactly or is refused | `openspec/specs/storefront-publication/spec.md` — "Publication pricing is explicit per settlement clause" |
-| The dead `min_price`/`token` resolution is retired; retired keys are tolerated and reported; the floor is the configured default alone | `openspec/specs/storefront-publication/spec.md` — "Domain-owned publication and hold hints" |
-| The seller's reference amount and floor are exact | `openspec/specs/negotiation-protocol/spec.md` — "Uint256-safe negotiation values" |
-| Seller feasibility is evaluated quantitatively and precedes pricing (Section 5) | `openspec/specs/negotiation-protocol/spec.md` — "Seller feasibility precedes pricing", subject to gate 5.0 |
-| How a listing is priced, and that the override tier is the site-scoped pool override | `docs/development/ARCHITECTURE.md`, "Discovery and negotiation" |
-| Why rates live inside families; why the flat rate is never reinterpreted; why `RateValue` was not widened; why the structure is storefront-served | `openspec/specs/storefront-publication/architecture.md` |
-| Operator-facing family-rate configuration and override terms | `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Storefront listing shapes and pool overrides" |
-| Goal 2's current state: per-family pricing exists; negotiation still has one degree of freedom | `docs/development/ROADMAP.md`, Goal 2 (task 7.5) |
-| This change's status and Goal 2's dependency graph | `openspec/changes/README.md`, Goal 2 (task 7.6) |
-| The superseded primary-dimension compatibility reading | This change's `design.md` only |
+| The dead `min_price`/`token` resolution is retired; retired keys are reported; the floor is the configured default alone | `openspec/specs/storefront-publication/spec.md` — "Domain-owned publication and hold hints" |
+| The seller's reference amount is the selected option's rate | `openspec/specs/negotiation-protocol/spec.md` — "The seller's reference amount is the selected option's rate" |
+| Reference amounts and the floor are exact | `openspec/specs/negotiation-protocol/spec.md` — "Uint256-safe negotiation values" |
+| Pool writes check pricing rate-list structure | `openspec/specs/resource-pool-management/spec.md` — "Pricing rate-list hint validation" |
+| `kit/capability-pricing` is a foundation kit over the shape vocabulary | `docs/development/ARCHITECTURE.md`, "Kit layers" |
+| How a listing is priced and what a seller negotiates from | `docs/development/ARCHITECTURE.md`, "Discovery and negotiation" |
+| Why rates live inside families; why the flat rate is never reinterpreted; why `RateValue` was not widened; why pricing is its own kit; why the structure is storefront-served | `openspec/specs/storefront-publication/architecture.md` |
+| Operator-facing family-rate configuration, override terms, and the refused fractional floor | `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Storefront listing shapes and pool overrides" and "Combined compute-family storefront" |
+| Goal 2's current state | `docs/development/ROADMAP.md`, Goal 2 |
+| This change's status and Goal 2's dependency graph | `openspec/changes/README.md`, Goal 2 |
+| The superseded primary-dimension compatibility reading; the review dispositions | This change's `design.md` only |

@@ -2,7 +2,7 @@
 
 ## Context
 
-Re-verified against the tree on 2026-10-01. The original planning-time context
+Re-verified against the tree on 2026-10-01, including `publish-indicative-listing-rates` as landed. The original planning-time context
 (2026-08-06) described a per-GPU-model `min_price` as the price a listing
 publishes; that stopped being true when publication pricing moved to typed
 settlement clauses, and the decisions below are written against the tree as it is.
@@ -38,9 +38,18 @@ settlement clauses, and the decisions below are written against the tree as it i
   escrow advertises no rate (a hidden reserve). Its unit is base units per hour.
   `default_token_address` is read only into the dead resolution and by the
   legacy pricing migration.
-- **The seller's reference amount** is
+- **The seller's reference amount ignores the buyer's selection.** It is
   `primary_rate_value(accepted_escrows[0])` scaled by the requested duration in
-  `_seller_reference_amount`.
+  `_seller_reference_amount`, else the `default_min_price` floor. A settlement
+  option bargains a scalar whenever it carries an `amount` rate, so a hosted
+  option is scalar; but a hosted-only listing has no accepted escrow and
+  negotiates against the floor, and a listing offering both mechanisms
+  negotiates a hosted selection against the Alkahest rate, in another asset's
+  units. `kit/negotiation-runtime` holds the buyer's pinned proposal where it
+  calls the domain's `reference_amount` hook but does not pass it; the VM and
+  API-credit storefronts are the hook's two implementers. The API-credit hook
+  also computes `int(Decimal(str(unit)) * quantity)` under the default decimal
+  context.
 - **`RateValue` and `PER_UNIT_SECONDS` exist twice**, in `market_core.schemas`
   and `market_alkahest.schemas`.
 - **`kit/capability-shape`** defines the family-grouped shape and its
@@ -49,6 +58,13 @@ settlement clauses, and the decisions below are written against the tree as it i
   (`arkhai_compute`), shared by the VM and bare-metal domains, with families
   `gpu` (`count`, required `model`), `cpu.count`, `memory.gib`, and
   `storage.gib`. Shapes are digested over their families.
+- **Asking rates are a separate, landed term.** `publish-indicative-listing-rates`
+  publishes a per-shape `asking_rate` on the listing resource, resolved from an
+  override's `asking_rates` or the pool's declaration, never decomposed per
+  dimension, and constructing nothing. An unreadable asking-rate declaration
+  holds the pool rather than falling through to a lower tier. Pool writes on the
+  provisioning service check its structure (`validate_asking_rates`) beside the
+  other hint validators.
 - **The registry keeps a fixed column set.** Its filter spec admits additional
   top-level listing properties, but the publish route stores only
   `listing_resource`, `accepted_escrows`, `settlement_options`, `demands`,
@@ -73,15 +89,17 @@ feeds:
 
 ## Goals / Non-Goals
 
-**Goals:** a seller can state a price for each capacity family and have any
-admissible shape priced from it; every listing priced today keeps exactly its
-current price and option identities; every amount on the pricing path is exact;
-the aggregator is replaceable without touching negotiation; the dead `min_price`
+**Goals:** a seller can state a price for each capacity family and have any shape
+priced from it; every listing priced today keeps its current price and option
+identities wherever its rates convert exactly; every amount on the pricing path is
+exact; the aggregator is replaceable without touching negotiation; the seller's
+reference amount is the rate of the option the buyer selected; the dead `min_price`
 and `token` resolution is removed.
 
 **Non-Goals:** protocol changes and the multiplier reinterpretation
-(`negotiation-driven-capacity-resize`); admissibility
-(`capacity-shape-envelope`); authoritative feasibility
+(`negotiation-driven-capacity-resize`); admissibility of a requested shape
+(`capacity-shape-envelope`) and the seller's check of one ahead of pricing
+(`negotiation-driven-capacity-resize`); authoritative feasibility
 (`negotiation-capacity-feasibility-probe`); hold billing
 (`billable-capacity-reservations`); any second aggregator implementation;
 advertising the rate structure through the registry; retiring the
@@ -97,10 +115,7 @@ shapes and every write can desynchronize them — a family present in one and ab
 the other is representable and meaningless.
 
 Accepted: a rate is stated under the family it prices, in the same family-grouped
-nesting the pricing hint already uses for `gpu`. A family whose schema carries an
-attribute is keyed by that attribute's value — in the compute schema only `gpu`,
-keyed by `model` — and other families are not keyed. One nesting serves all three
-tiers:
+nesting the pricing hint already uses for `gpu`. One nesting serves all three tiers:
 
 ```yaml
 # pool hint (policy_tags) and the site-scoped override's terms, identically
@@ -122,129 +137,194 @@ rates = [ { asset = "0x9fe4…", rate = "0.05", per = "hour" } ]   # per GiB-hou
 rates = [ { asset = "0x9fe4…", rate = "0.001", per = "hour" } ]  # per GiB-hour
 ```
 
-A family rate is asset-denominated and mechanism-neutral: it states what one unit
-of the family costs per hour in one asset, and prices every clause paying in that
-asset. A rate is positive decimal text in the asset's display units, the same form
-a clause rate takes; an explicit zero is refused, so no family is ever priced at
-zero by construction. Revisit trigger for the zero rule: a seller who needs to
-commit a dimension at no charge. `per` must be a time unit, and every family rate
-applied to one clause must name the same unit.
+A family rate is asset-denominated and mechanism-neutral: it states what one unit of
+the family costs per hour in one asset, and prices every clause paying in that asset.
+A rate is positive decimal text in the asset's display units, the same form a clause
+rate takes, and an explicit zero is refused: a family the seller does not charge for
+is one it states no rate for. `per` must be a time unit, and every family rate applied
+to one clause must name the same unit. The entry keys are `rate` and `per`, the
+settlement clause's, because a composed rate becomes a clause's `rate` and `per`;
+the landed asking rate's `amount` and `period` describe a different, non-composing
+quantity.
 
-A rate is never a `ShapeField`: shapes are digested over their families, and a
-rate must not change a listing's shape digest or identity.
+A rate is never a `ShapeField`: shapes are digested over their families, and a rate
+must not change a listing's shape digest or identity.
 
-### A listing is either flat-priced or shape-priced, decided by its GPU family
+### Which families are priced, and by what key, is an explicit domain projection
 
-Every compute shape names the `gpu` family, so the GPU family decides the mode:
+Rejected: inferring the pricing key from the schema — "a family whose schema carries
+an attribute is keyed by it". `CapabilitySchema` permits several attributes and
+several quantities per family, so the inference is ambiguous in general and only
+happens to fit the compute schema today.
 
-- **Shape-priced** — the listing's GPU model resolves a non-empty `rates` list.
+Accepted: the domain states a pricing projection over its schema — the families a
+rate may be stated for, each priced by its one quantity field, and for a family
+priced per attribute value, which attribute. For VM: `gpu` priced by `count` per
+`model`; `cpu` by `count`; `memory` and `storage` by `gib`. A test asserts the
+projection agrees with the schema: every priced family has exactly the named
+quantity field, and every pricing key is one of that family's attributes. The
+aggregator refuses a family the projection does not price.
+
+### A listing is either flat-priced or shape-priced, and is never free
+
+- **Shape-priced** — some family resolves a non-empty rate list for the listing.
   Its clauses state mechanism, asset, and mechanism input only. For each clause
-  whose mechanism negotiates a scalar amount, the storefront evaluates the
-  listing's own shape against the family rates in that clause's asset, through
-  the aggregator, and supplies the result as the clause's `rate` and `per` before
-  the mechanism compiles it. A clause whose mechanism declines the scalar
+  whose mechanism negotiates a scalar amount, the storefront evaluates the listing's
+  own shape against the family rates in that clause's asset, through the domain's
+  aggregator, and supplies the result as the clause's `rate` and `per` before the
+  mechanism compiles it. A clause whose mechanism declines the scalar
   (`contact-exchange.v1`, per `negotiation-protocol`'s "Scalar negotiation
   participation is a mechanism declaration") is passed through rateless in either
   mode: it carries no price to compose, and its mechanism refuses a rate.
-- **Flat-priced** — no GPU rates resolve. A clause's own `rate` is the listing's
-  rate whatever its shape, and a rateless Alkahest clause is a hidden reserve
-  priced by the `default_min_price` floor, both exactly as today.
+- **Flat-priced** — no family resolves rates. A clause's own `rate` is the listing's
+  rate whatever its shape, and a rateless Alkahest clause is a hidden reserve priced
+  by the `default_min_price` floor, both exactly as today.
 
-The published wire does not change in either mode: each settlement option still
-carries one `amount` rate for the whole listing. Only where its value comes from
-differs.
+No family is special. A family the listing's shape names with no rate in a clause's
+asset contributes nothing to that clause's price: stating a quantity commits it, and
+does not mean the seller charges for it. The derivation report lists each family a
+listing includes without a rate, per asset, so an operator can see what is bundled;
+nothing is held or refused for it.
 
-A candidate is refused, with a reason naming the family and asset, when:
+What is refused is a free listing. A candidate is refused, with a reason naming the
+asset, when a scalar-negotiating clause's composed price is zero — no family the
+shape names has a rate in that clause's asset, the likeliest cause being a mistyped
+asset. A listing that publishes no settlement option at a non-zero price is never
+posted to a registry and so is never negotiated. A candidate is also refused when a
+shape-priced clause states its own `rate`: two sources for one price.
 
-- a shape-priced listing's clause also states its own `rate` (two sources for one
-  price);
-- a family the listing's shape names has no rate in the asset of a shape-priced
-  clause whose mechanism negotiates a scalar (unpriceable, never free and never a
-  hidden reserve — which also catches a mistyped asset);
-- any non-GPU family resolves rates while the GPU family resolves none (a
-  partially stated shape-priced intent).
-
-Refusing the candidate, rather than dropping only the affected option, is
-deliberate: a silently missing settlement option is a price change nobody stated.
-It matches how the common clause contract already treats a malformed rate.
-
-A family the listing's shape does not name is not priced, even if a rate resolves
-for it: a dimension the shape omits is outside the listing's commitment (see
-`openspec/specs/storefront-publication/spec.md`, "Every VM listing is a listing
-shape"), so a buyer is not charged for it.
+A family the listing's shape does not name contributes nothing to *its* price either;
+see the next decision for why its rate is still recorded.
 
 Worked example, one 18-decimal token, the rates above:
 `{gpu: {count: 2, model: H100}, cpu: {count: 16}, memory: {gib: 128}}` prices at
-`2×80 + 16×0.5 + 128×0.05 = 174.4` per hour, which the Alkahest mechanism scales
-to `174400000000000000000` base units per hour. The GPU-only default listings of
-an 8-card H100 pool price at 80, 160, … 640.
+`2×80 + 16×0.5 + 128×0.05 = 174.4` per hour, which the Alkahest mechanism scales to
+`174400000000000000000` base units per hour. The GPU-only default listings of an
+8-card H100 pool price at 80, 160, … 640.
+
+### The recorded rate structure is everything that could price a revised shape
+
+The structure a shape-priced listing records serves two purposes that must not be
+conflated: its own price uses only the families its shape names, while a revised
+shape — `negotiation-driven-capacity-resize`'s quote for "the same GPUs, more
+memory" — needs the rates of families the advertised shape omits. A GPU-only
+default listing whose seller prices memory must therefore still record the memory
+rate.
+
+The recorded structure is every family's resolved rate list for the listing's GPU
+model. Rates for other GPU models are not recorded: the model is part of the
+listing's identity, so no revised shape of this listing can change it. A change to
+any recorded rate is a change to the listing's terms and refreshes it in place,
+including one for a family the listing's own shape omits, which leaves its price
+unchanged.
 
 ### Compatibility: the flat rate is never reinterpreted
 
-This replaces the planning-time decision, which read an existing single-rate
-listing as "a structure whose only priced dimension is the primary one" and
-claimed that reproduced today's prices exactly. It does not: today's clause rate
-is per listing, not per GPU, so reading it as a per-card rate multiplies the price
-of every listing whose GPU count exceeds one — every default listing above the
-first count.
+This replaces the planning-time decision, which read an existing single-rate listing
+as "a structure whose only priced dimension is the primary one" and claimed that
+reproduced today's prices exactly. It does not: today's clause rate is per listing,
+not per GPU, so reading it as a per-card rate multiplies the price of every listing
+whose GPU count exceeds one — every default listing above the first count.
 
 | | Planning-time decision (superseded) | Accepted |
 |---|---|---|
 | Meaning of an existing clause `rate` | A GPU-only per-dimension rate | A flat listing rate, never reinterpreted |
-| Existing listing prices after deploy | Change ×N for GPU count N > 1 | Identical |
-| Option identities and republication | Every multi-GPU option's `option_id` changes; every such listing refreshes | Unchanged; nothing republishes |
-| How per-family pricing starts | Implicitly, for everyone | Opt-in, by stating GPU `rates` |
-| A family with no rate | Unpriceable | Unpriceable, per family and asset |
+| Existing listing prices after deploy | Change ×N for GPU count N > 1 | Identical where rates convert exactly |
+| Option identities and republication | Every multi-GPU option's `option_id` changes; every such listing refreshes | Unchanged where rates convert exactly |
+| How per-family pricing starts | Implicitly, for everyone | Opt-in, by stating family rates |
 
-Under the accepted reading every configuration valid today publishes
-byte-identical settlement options.
+The promise is bounded by exactness. A configuration whose rates convert exactly
+publishes byte-identical settlement options. Two inputs that are accepted today only
+through precision loss are refused afterwards, deliberately: a clause rate with more
+than 28 significant digits that is not a whole number of base units, which today's
+context-limited arithmetic can round into an apparently exact amount; and a
+`default_min_price` given as a binary float, such as a TOML or Helm number with a
+fraction, which is refused when a hidden-reserve negotiation first needs the floor.
 
 **Neither mode is a published asking rate.** `publish-indicative-listing-rates`
-adds a listing-wide catalogue price on the published listing resource, from which
-nothing is constructed. The two are distinct quantities. The family rates this
-change introduces let a seller price a shape a buyer proposes; the asking rate
+publishes a listing-wide catalogue price on the listing resource, from which nothing
+is constructed and which is never decomposed per dimension. The two are distinct
+quantities. Family rates let a seller price a shape a buyer proposes; the asking rate
 prices the one shape a listing advertises and is what a buyer compares on before
 contacting anyone. A storefront **may** derive an asking rate by evaluating a
-seller's family rates at the listing's advertised shape, where the seller's
-declared policy says so. It is not required to, and neither quantity is read as
-the other.
+seller's family rates at the listing's advertised shape, where the seller's declared
+policy says so. It is not required to, and neither quantity is read as the other.
+
+### Settlement-option identity follows the composed rate
+
+The recorded rate structure is never hashed into any identity. A settlement
+option's identity is what it is today: a digest over its mechanism, asset, rates, and
+parameters. A shape-priced option's rate is the composed rate, so a family-rate
+change that changes a listing's composed rate changes that option's `option_id`,
+exactly as editing a flat clause rate does today. The listing's identity is
+unchanged: price is a term of sale.
 
 ### Family rates resolve through the existing tiers, one whole list per family
 
-Rates resolve through the precedence `pools-8` established — site-scoped
-storefront pool override, pool hint, configured default — independently per
-family, and per model within `gpu`. Within one family, a tier's `rates` list
-replaces lower tiers' lists as a whole, the way a tier's `settlements` list does:
-merging per asset across tiers would let one family's price for one asset come
-from an override and for another asset from a default, a combination no one wrote.
+Rates resolve through the precedence `pools-8` established — site-scoped storefront
+pool override, pool hint, configured default — independently per family, and per
+model within `gpu`. Within one family, a tier's `rates` list replaces lower tiers'
+lists as a whole, the way a tier's `settlements` list does: merging per asset across
+tiers would let one family's price for one asset come from an override and for
+another asset from a default, a combination no one wrote. An explicitly empty list is
+a statement, so it stops lower tiers from supplying that family.
 
-A malformed family-rate hint is treated as absent, as every other malformed hint
-field is, and is reported in system status. An override stating a rate for a
-family the schema does not know, or a malformed rate, is refused at write.
+### An unreadable rate holds the pool, and the reason is visible
 
-### Price aggregation is a replaceable interface in `kit/capability-shape`
+A rate that a tier states but the storefront cannot read is not treated as absent.
+Falling through would publish a lower tier's rate — a price nobody stated for this
+pool — where an asking rate's fall-through publishes only no rate; so this follows
+`publish-indicative-listing-rates`' rule for unreadable asking rates: the pool is
+held. Its listings keep their last-published terms and stay negotiable; nothing is
+published or refreshed from the misread rate until it is fixed.
 
-Real capacity is not linearly priced — the last GPU on a host is worth more than
-the first, and the reservable capacity per dimension being a function of current
-occupancy applies to price as much as to availability. Linear summation ships as
-the only implementation; what makes that safe is that evaluation is reached
-through an injectable aggregator, so a non-linear or coupled aggregator is a new
-implementation behind an unchanged interface.
+Three layers, by what each can know:
 
-The interface takes a shape, the family rates for one asset, and the schema, and
-returns either an exact price per time unit in the asset's display units or an
-unpriceable result naming every family that has no rate. It does not assume the
-price is a sum, and nothing downstream may assume it either: no caller may
-reconstruct a total by multiplying one family's rate by its quantity.
+1. **The provisioning service refuses a malformed hint at write.** Every pool-write
+   surface already checks hint structure (`validate_asking_rates`,
+   `validate_listing_shapes`). A structural check of `pricing` rate lists joins them:
+   each `rates` value is a list of entries naming an `asset`, positive decimal-text
+   `rate`, and unit-token `per`, with no asset twice. It knows no family name, so it
+   stays domain-neutral, as the asking-rate structure check is. A site administrator
+   learns of the problem when writing the hint.
+2. **The storefront holds what it still cannot read**: a hint written before the
+   check existed, a family its pricing projection does not price, a non-time unit, or
+   a stored override that bypassed the write-time check.
+3. **The reason is diagnosable.** Derivation records each held pool's unreadable
+   rates — tier, family, and problem — in its per-site derivation report, which the
+   storefront's system status serves, beside `unreadable_asking_rates`, and logs it
+   once per change. An administrator asking why a hint has no effect finds the pool
+   held and the exact entry that could not be read.
 
-The interface and the linear implementation live in `kit/capability-shape`
-(`market_capability_shape`), beside the schema-driven traversal they need. That
-module is a standard-library-only foundation kit, so buyers, storefronts, and the
-bare-metal domain can all evaluate a shape. A separate `kit/capability-pricing`
-distribution was considered and rejected: it would add a distribution, lock, and
-wheel for one module whose only dependency is the shape kit itself. The domain's
-composition selects the aggregator; operator configuration does not, so a
-deployment has exactly one.
+A malformed rate in the storefront's own configured defaults is the operator's own
+input: the storefront refuses to start with it.
+
+### Price aggregation is a replaceable interface in its own foundation kit
+
+Real capacity is not linearly priced — the last GPU on a host is worth more than the
+first, and the reservable capacity per dimension being a function of current
+occupancy applies to price as much as to availability. Linear summation ships as the
+only implementation; what makes that safe is that evaluation is reached through an
+injectable aggregator, so a non-linear or coupled aggregator is a new implementation
+behind an unchanged interface.
+
+The interface takes a shape, one asset's family rates, and the domain's pricing
+projection, and returns an exact price per time unit in the asset's display units. It
+does not assume the price is a sum, and nothing downstream may assume it either: no
+caller may reconstruct a total by multiplying one family's rate by its quantity.
+
+The interface and the linear implementation live in a new foundation kit,
+`kit/capability-pricing` (`market_capability_pricing`), which depends only on
+`kit/capability-shape`. `kit/capability-shape` is capacity vocabulary — structure,
+flattening, digest — and pricing is commercial evaluation over that vocabulary;
+keeping them apart keeps the shape kit's responsibility what its documentation says
+it is. Other homes were considered and rejected: `kit/settlement-runtime` knows no
+shapes, and depending on the shape kit would put capacity vocabulary beneath
+mechanisms that have none; `kit/resource-pools` is an authority-layer kit that buyers
+and hold billing should not depend on; `kit/policy` is schema-free negotiation
+middleware. The domain selects the aggregator — for VM, `arkhai_vms` binds it with
+its pricing projection — and operator configuration does not, so a deployment has
+exactly one.
 
 Evaluation is callable outside the negotiation path, so
 `billable-capacity-reservations` can price a hold's burn rate and
@@ -258,192 +338,204 @@ A family rate is per unit per hour. Two ways to express that were considered:
 2. Keep `RateValue` as-is and pair each family's rate with that family's own
    quantity from the shape at evaluation.
 
-Option 2 is accepted. `RateValue` is on the wire, in option identity, and in
-escrow obligation data, so widening it has the largest blast radius of anything
-here; and the quantity is already present in the shape being priced — carrying it
-in the rate too would let the two disagree. Under the flat-or-shape decision above
-the published `RateValue` does not change at all: it still carries the whole
-listing's rate. Recorded explicitly because option 1 looks simpler to anyone who
-has not traced `RateValue`'s reach into settlement.
+Option 2 is accepted. `RateValue` is on the wire, in option identity, and in escrow
+obligation data, so widening it has the largest blast radius of anything here; and the
+quantity is already present in the shape being priced — carrying it in the rate too
+would let the two disagree. The published `RateValue` does not change: it still
+carries the whole listing's rate.
 
 ### Every amount is exact, and nothing rounds silently
 
-The pricing path touches on-chain amounts, whose base units routinely exceed 64
-bits. These rules apply to every value this change computes or feeds:
+The pricing path touches on-chain amounts, whose base units routinely exceed 64 bits.
+These rules apply to every value this change computes or feeds:
 
 - **No binary floats, no context-limited arithmetic.** A decimal rate is parsed
-  exactly into an integer coefficient and a scale from its digits
-  (`Decimal.as_tuple()`), never through `float` and never through `Decimal`
-  arithmetic under a precision context. Products and sums are Python `int`. The
-  aggregator's result is rendered back as exponent-free decimal text.
+  exactly into an integer coefficient and a scale from its digits, never through
+  `float` and never through `Decimal` arithmetic under a precision context. Products
+  and sums are Python `int`. The aggregator's result is rendered back as
+  exponent-free decimal text.
 - **The aggregator's result is exact.** A sum of products of finite decimals is a
   finite decimal, so no rounding happens inside evaluation. Converting it to base
-  units is the consumer's step, with the consumer's stated rule: publication
-  refuses a total that is not a whole number of base units (the mechanism's
-  existing "more than N decimal places" refusal), and later consumers that quote
-  (`negotiation-driven-capacity-resize`, `billable-capacity-reservations`) round
-  up.
-- **One exact conversion helper.** `kit/settlement-runtime` gains one helper,
-  beside clause validation, that converts decimal rate text and an asset exponent
-  to integer base units exactly, refusing a non-whole result and a result above
-  `2**256 - 1`. The Alkahest and hosted mechanism scalers use it in place of
-  context-limited `Decimal` multiplication. This touches two mechanism kits, but
-  this change is what produces the long totals that expose the defect.
-- **The reference amount is integer arithmetic.** `_seller_reference_amount`
-  becomes `value * seconds // 3600` on Python `int`, matching `compute_rate_total`.
+  units is the consumer's step, with the consumer's stated rule: publication refuses
+  a total that is not a whole number of base units, and later consumers that quote
+  (`negotiation-driven-capacity-resize`, `billable-capacity-reservations`) round up.
+- **One exact conversion helper.** `kit/settlement-runtime` gains one helper, beside
+  clause validation, that converts decimal rate text and an asset exponent to integer
+  base units exactly, refusing a non-whole result and a result above `2**256 - 1`. The
+  Alkahest and hosted mechanism scalers use it in place of context-limited `Decimal`
+  multiplication.
+- **Reference amounts are integer arithmetic.** The VM `_seller_reference_amount`
+  becomes `floor(rate × seconds / 3600)` on exact values, matching
+  `compute_rate_total`; the API-credit reference amount becomes exact integer
+  multiplication of its unit rate by the quantity.
 - **The floor is parsed exactly.** `default_min_price` keeps its meaning — a
-  negotiation floor in base units per hour, used only for a hidden reserve — but is
-  parsed as exact positive decimal text instead of through `float`, and the
-  reference amount derived from it truncates to whole base units with integer
-  arithmetic, as a rate-derived one does.
+  negotiation floor in base units per hour, used only where the selected option has
+  no rate — but is parsed as exact positive decimal text instead of through `float`.
 - **No amount in a fixed-width column.** Amounts stay decimal text in JSON or in
   `TEXT` columns, never a SQLite `INTEGER`.
+
+### The seller's reference amount is the selected option's rate
+
+A seller negotiates from what the buyer actually selected. The reference amount is
+the amount rate of the option the buyer's proposal selects — the matched accepted
+escrow for an escrow proposal, the settlement option matched by `option_id` for a
+settlement selection — scaled by the requested duration. The `default_min_price`
+floor applies only when that option advertises no rate: a genuine hidden reserve.
+
+This fixes a defect that predates shape pricing: a hosted-only listing negotiated
+against the floor, and a listing offering two mechanisms negotiated a hosted
+selection against the Alkahest rate in another asset's units. Shape pricing makes it
+more consequential, because each asset's option now carries its own composed rate.
+
+`kit/negotiation-runtime`'s `reference_amount` hook gains the buyer's pinned
+proposal, which the runtime already holds where it calls the hook. Both implementers
+change: the VM storefront's kit hook and its round hook read the selected option, and
+the API-credit storefront takes the new argument, its reference amount reading the
+selected option likewise and becoming exact.
 
 ### The rate structure is a storefront-served term of sale, not a registry field
 
 The registry discards top-level listing fields outside its fixed column set (see
 Context), so a top-level `rate_structure` would be silently lost. Placing it in
-`listing_resource` would survive storage but put asset-denominated payment pricing
-in the capacity description and add a term every comparison must classify.
+`listing_resource` would survive storage but put asset-denominated payment pricing in
+the capacity description and add a term every comparison must classify.
 
 Accepted: the registry receives what it receives today — each settlement option
 carries its composed rate for the listing's own shape, which is what discovery
-compares. The resolved family rates for a shape-priced listing are recorded on the
-storefront's listing record as a term of sale — refreshed in place on change,
-never part of the listing's identity, its shape digest, or any option's identity —
-and returned by the storefront's listing read.
-
-The record is a nullable `rate_structure` text column on the generic storefront
-`listings` table, holding the domain's JSON: for a shape-priced VM listing, each
-family the listing's shape names mapped to its resolved `rates` list, with the GPU
-family already resolved to the listing's model; null for a flat-priced listing.
-`storefront-publication`'s "Commercial mapping identity" keeps pricing on the
-generic table and forbids a domain mapping carrying commercial fields, and the
-column's content is opaque to core as `listing_resource`'s is. The registry
-request is built field by field from the stored listing, so the column never
-reaches a registry.
+compares. The recorded rate structure is a nullable `rate_structure` text column on
+the generic storefront `listings` table, holding the domain's JSON: for a
+shape-priced VM listing, each family's resolved rate list for the listing's model;
+null for a flat-priced listing. `storefront-publication`'s "Commercial mapping
+identity" keeps pricing on the generic table and forbids a domain mapping carrying
+commercial fields, and the column's content is opaque to core as
+`listing_resource`'s is. It is added as an additive entry in the storefront's
+versioned migration chain, which `add-database-migration-commands` will run from an
+explicit command rather than at client construction; the entry needs no change when
+it does. The registry request is built field by field from the stored listing, so the
+column never reaches a registry. It is returned by the storefront's listing read.
 
 That read is unsigned. Whether a buyer may derive a quote from it, or needs the
 structure bound into a signed negotiation response, is
-`negotiation-driven-capacity-resize`'s decision, its first consumer. So is whether
-any buyer needs the structure at discovery time; that would require the registry to
-keep listing-level fields it currently discards, which is
-`store-registry-listings-as-published`'s concern, and that change's accepted
-carrier policy is the input to the decision.
+`negotiation-driven-capacity-resize`'s decision, its first consumer. So is whether any
+buyer needs the structure at discovery time; that would require the registry to keep
+listing-level fields it currently discards, which is
+`store-registry-listings-as-published`'s concern, and that change's accepted carrier
+policy is the input to the decision.
 
-### Scope edges found during planning
+### Scope edges
 
-- **The local-table derivation path is flat-priced only.** Family rates resolve on
-  the projection path, as site-scoped overrides do; the legacy local-table path,
-  which `pools-9-retire-local-physical-authority` retires, never resolves them, in
-  the same way overrides are inactive there.
-- **Helm values do not expose family-rate defaults.** The storefront chart's
-  `pricing` schema describes the hosted-fiat flat clause form. Helm deployments
-  price shapes through pool hints and site-scoped overrides; adding
-  `[pricing.defaults.<family>]` to the chart is a chart change no deployment needs
-  yet. The chart keeps accepting `default_token_address` as a retired key.
-- **The legacy pricing migration must not mistake family rates for legacy pricing.**
-  It reports any `[pricing.defaults.gpu.<model>]` table as per-model legacy pricing
-  needing manual clauses. It is narrowed to tables stating the retired `min_price`
-  or `token`, so a model table carrying only `rates` or `settlements` is not a
-  conflict.
+- **The local-table derivation path is flat-priced only.** Family rates resolve on the
+  projection path, as site-scoped overrides do; the legacy local-table path, which
+  `pools-9-retire-local-physical-authority` retires, never resolves them.
+- **Helm values do not expose family-rate defaults.** The storefront chart's `pricing`
+  schema describes the hosted-fiat flat clause form. Helm deployments price shapes
+  through pool hints and site-scoped overrides. The chart keeps accepting
+  `default_token_address` as a retired key.
+- **The legacy pricing migration must not mistake family rates for legacy pricing.** It
+  is narrowed to model tables stating the retired `min_price` or `token`.
 - **Found, not changed here.** The legacy migration reads `default_min_price` as a
-  display-unit rate for an Alkahest clause, while the negotiation floor reads the
-  same key as base units per hour; this change documents the floor's unit and
-  leaves the migration's reading, which only runs on pre-clause configurations.
-  The API-credit domain computes its reference amount as
-  `int(Decimal(str(unit)) * count)` under the default decimal context, the same
-  class of defect fixed here for VM; it is outside this change's domain and is
-  recorded as unowned work in the campaign index.
+  display-unit rate for an Alkahest clause, while the negotiation floor reads the same
+  key as base units per hour; the migration only runs on pre-clause configurations.
 
 ### The negotiated variable is unchanged here
 
-This change states and evaluates rates; it does not change what a round
-negotiates. Making the negotiated quantity a multiplier over the advertised
-minimum is one deployment boundary with the field that lets a round carry a shape,
-so both belong to `negotiation-driven-capacity-resize`. After this change every
-existing negotiation prices exactly as before: a shape-priced listing's options
-carry its composed rate, and the reference amount reads it as it reads any rate.
+This change states and evaluates rates; it does not change what a round negotiates.
+Making the negotiated quantity a multiplier over the advertised minimum is one
+deployment boundary with the field that lets a round carry a shape, so both belong to
+`negotiation-driven-capacity-resize`. A shape-priced listing's options carry its
+composed rate, and the reference amount reads it as it reads any rate.
 
 ### The dead `min_price` and `token` resolution is removed
 
-Per-model resolution of `min_price` and `token`, the candidate fields that carry
-them, and the `[pricing.defaults.gpu.<model>].min_price/token` and
-`default_token_address` defaults feed nothing, and leaving them makes the
-resolver's documented contract false. They are removed.
+Per-model resolution of `min_price` and `token`, the candidate fields that carry them,
+and the `[pricing.defaults.gpu.<model>].min_price/token` and `default_token_address`
+defaults feed nothing, and leaving them makes the resolver's documented contract
+false. They are removed.
 
-Compatibility for inputs that still state them:
+- **Stored site-scoped overrides.** `VmPoolOverrideTerms` validates an override only at
+  write. Derivation reads stored terms through `vm_override_view`, which takes the
+  keys it names and ignores the rest, so a stored override still carrying `min_price`
+  or `token` stays readable; derivation reports the retired keys per pool. A write
+  stating them is refused.
+- **Configuration.** A configuration still stating the retired keys is accepted; they
+  are not read, and startup reports them.
+- **Unchanged:** the legacy pricing migration's reading of legacy inputs; the legacy
+  local tables' columns (`pools-9-retire-local-physical-authority`); and
+  `default_min_price` as the hidden-reserve floor.
 
-- **Stored site-scoped overrides.** `VmPoolOverrideTerms` (which forbids unknown
-  fields) validates an override only at write. Derivation reads stored terms
-  through `vm_override_view`, which takes the keys it names and ignores the rest,
-  and holds a pool only when the kit cannot decode the stored JSON at all. A stored
-  override still carrying `min_price` or `token` therefore stays readable once the
-  keys leave the terms contract; derivation reports the retired keys per pool in
-  its derivation report, which system status surfaces. A write stating them is
-  refused. *Amended during planning:* the design originally said removal would
-  hold such pools; the read path shows it would not, so no tolerant decoder is
-  needed, only the report.
-- **Configuration.** A configuration still stating the retired keys is accepted;
-  they are not read, and startup reports them.
-- **Unchanged:** the legacy pricing migration's reading of legacy inputs, which is
-  its purpose; the legacy local tables' columns, whose retirement is
-  `pools-9-retire-local-physical-authority`'s; and `default_min_price` as the
-  hidden-reserve floor.
+### Seller feasibility of a requested shape is not this change's
 
-### The feasibility guard checks a requested shape, ordered before pricing
-
-`has_matching_inventory_guard` answers "is this listing still what it says". The
-predicate Section 5 adds answers "will the seller serve this shape", taking a
-requested shape and the seller's constraints, and runs inside the VM
-`evaluate_round` composition ahead of pricing so a shape the seller will not serve
-is never quoted.
-
-Section 5 is not part of the Sections 1–3 implementation. Its quantitative check
-overlaps `capacity-shape-envelope`'s admissibility, it touches the negotiation path
-rather than pricing and publication, and it has no live caller until
-`negotiation-driven-capacity-resize` §2. Whether it moves into its own change
-depending on `capacity-shape-envelope` is decided when Section 5 is taken up
-(task 5.0).
+The planning-time Section 5 — checking a buyer-requested shape before pricing it — has
+two halves with existing owners. Its quantitative half is
+`capacity-shape-envelope`'s admissibility predicate. Its categorical half, and the
+ordering of every check ahead of pricing, is `negotiation-driven-capacity-resize`'s
+`evaluate_round` composition, which already orders admissibility, authoritative
+feasibility, commercial feasibility, and pricing. The "Seller feasibility precedes
+pricing" requirement moved with it. Nothing in this change waits on a requested shape
+existing.
 
 ## Risks / Trade-offs
 
 - **[Linear pricing is wrong for real hardware]** → Accepted as a starting point.
   Mitigated by the aggregator seam and the prohibition on reconstructing totals
   outside it.
-- **[A rate resolves partially and prices a shape from an incomplete structure]**
-  → A named family with no rate in the clause's asset refuses the candidate.
-  Priced-at-zero is impossible: zero rates are refused and absence never means
-  zero.
-- **[Composed totals expose the mechanisms' context-limited scaling]** → The
-  shared exact conversion helper replaces it in both mechanism kits.
-- **[Two aggregator implementations disagree on the same shape]** → Only one
-  ships, and the domain's composition selects it.
-- **[Mode confusion for operators]** → Mixed-mode candidates are refused with a
-  reason, never silently resolved to one mode.
-- **[Retiring override keys holds pools]** → Tolerant decoding of the two retired
-  keys, reported in status.
+- **[An unrated family is given away by mistake]** → A family without a rate is
+  bundled by design; the derivation report lists every bundled family per asset, and
+  a listing that would be free in an asset is refused.
+- **[Composed totals expose the mechanisms' context-limited scaling]** → The shared
+  exact conversion helper replaces it in both mechanism kits.
+- **[Two aggregator implementations disagree on the same shape]** → Only one ships,
+  and the domain selects it.
+- **[Mode confusion for operators]** → A shape-priced clause that also states a rate is
+  refused with a reason, never silently resolved to one mode.
+- **[A malformed rate silently changes a price]** → Refused at write on the
+  provisioning service, and held and reported on the storefront.
+- **[The reference amount changes for live hosted listings]** → Intended: they
+  negotiate from their advertised rate instead of the floor. In-flight negotiations
+  pin their proposal, so a negotiation in progress at deployment continues from the
+  selected option's rate.
 
 ## Migration Plan
 
-1. Exact conversion helper, mechanism scalers, reference amount, and floor
-   parsing. No published value changes for any rate a mechanism accepts today.
-2. Aggregator interface and linear implementation in `kit/capability-shape`.
-3. Family-rate resolution through the three tiers, override terms, and the dead
-   `min_price`/`token` retirement with tolerant decoding.
-4. Shape-priced clause composition at publication, and the rate structure on the
+1. Exact conversion helper, mechanism scalers, reference amounts, and floor parsing.
+2. `kit/capability-pricing` with the aggregator interface and its linear
+   implementation; the VM pricing projection.
+3. The widened `reference_amount` hook and selected-option reference amounts.
+4. Family-rate resolution through the three tiers, the provisioning-side structure
+   check, the storefront hold and report, override terms, and the dead
+   `min_price`/`token` retirement.
+5. Shape-priced clause composition at publication, and the rate structure on the
    storefront's listing record.
 
-Every step is additive for existing configurations: none of them changes a
-published option for a configuration that states no family rates. Rollback at any
-point is a code revert. A storefront that had published shape-priced listings
-then reads their rateless clauses as it does today on its next cycle: an Alkahest
-clause becomes a hidden reserve priced by the floor, and a hosted clause, which
-requires a rate, is refused. An operator reverting restores clause rates first.
+Steps 1, 2, 4, and 5 change no published option for a configuration that states no
+family rates and whose rates convert exactly. Step 3 changes what hosted selections
+negotiate from, as intended. Rollback at any point is a code revert; a storefront that
+had published shape-priced listings then reads their rateless clauses as it does today:
+an Alkahest clause becomes a hidden reserve priced by the floor, and a hosted clause,
+which requires a rate, is refused. An operator reverting restores clause rates first.
 
 ## Open Questions
 
 None. Whether a buyer reads the rate structure at discovery time or from a signed
-round, whether the multiplier is bounded below at 1.0, and whether the quoted
-price travels on the wire are `negotiation-driven-capacity-resize`'s. Whether
-Section 5 becomes its own change is task 5.0's decision.
+round, whether the multiplier is bounded below at 1.0, and whether the quoted price
+travels on the wire are `negotiation-driven-capacity-resize`'s.
+
+## Review dispositions
+
+Design review of 2026-10-01, after the Sections 1–3 implementation:
+
+| Finding | Disposition |
+|---|---|
+| The recorded structure omitted families the advertised shape does not name | Accepted: every resolved family is recorded |
+| Option identity was said to exclude rates that change the composed rate | Accepted: corrected; the composed rate participates as any rate does |
+| The seller reference ignores scalar settlement options | Accepted and fixed here, by widening the kit hook |
+| The compatibility promise covered inputs accepted only through precision loss | Accepted: narrowed to exact inputs |
+| Keyed families were inferred from schema attributes | Accepted: explicit pricing projection |
+| Pricing in `kit/capability-shape` broadens a vocabulary kit | Accepted: new `kit/capability-pricing` |
+| Section 5 blurs the completion boundary | Accepted: split between the envelope and resize |
+| `add-database-migration-commands` should precede the migration | Not accepted: the entry is already in the versioned chain that change runs |
+| Stale "tolerant decoding" rationale | Accepted: removed |
+
+In the same discussion, a family without a rate was changed from "unpriceable" to
+"not charged", with a free listing refused instead; and unreadable rates were changed
+from "treated as absent" to "hold the pool", following the landed asking-rate rule.
