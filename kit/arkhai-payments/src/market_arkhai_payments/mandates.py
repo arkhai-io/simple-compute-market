@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from math import ceil, floor
 import re
 from typing import Any
 
@@ -126,10 +127,11 @@ def derive_mandate(agreement_json: dict[str, Any], policy: MandatePolicy) -> Man
         raise MandatePolicyError(str(exc)) from exc
     if start_utc < accepted_at:
         raise MandatePolicyError("start_utc precedes accepted_at")
-    hold_seconds = start_utc - accepted_at + policy.duration_seconds + window
+    # The wire uses seconds; rounding must not shorten the accepted hold interval.
+    hold_seconds = ceil(start_utc - accepted_at) + policy.duration_seconds + window
     if hold_seconds > MAX_SAFE_INTEGER:
         raise MandatePolicyError("hold duration exceeds the JSON wire integer range")
-    expires = accepted_at + window
+    expires = floor(accepted_at) + window
     if expires <= accepted_at or expires > MAX_SAFE_INTEGER:
         raise MandatePolicyError("mandate expiry must follow acceptance and fit the wire range")
 
@@ -198,11 +200,11 @@ def _amount_text(value: int | str) -> str:
     return text
 
 
-def _utc_seconds(value: int | str | datetime, name: str) -> int:
+def _utc_seconds(value: int | str | datetime, name: str) -> int | float:
     if isinstance(value, bool):
         raise ValueError(f"{name} must be a UTC timestamp")
     if isinstance(value, int):
-        timestamp = value
+        timestamp: int | float = value
     elif isinstance(value, str):
         try:
             parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
@@ -218,9 +220,7 @@ def _utc_seconds(value: int | str | datetime, name: str) -> int:
     return timestamp
 
 
-def _datetime_seconds(value: datetime, name: str) -> int:
+def _datetime_seconds(value: datetime, name: str) -> float:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError(f"{name} must include a timezone")
-    if value.microsecond:
-        raise ValueError(f"{name} must have whole-second precision")
-    return int(value.astimezone(timezone.utc).timestamp())
+    return value.astimezone(timezone.utc).timestamp()
