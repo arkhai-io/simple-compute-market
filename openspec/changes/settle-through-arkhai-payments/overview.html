@@ -91,9 +91,9 @@
 <div class="cols">
   <div class="card"><h3>Flow</h3>
     <ol class="seq">
-      <li>Buyer and seller each derive the same mandate from the agreement: one <code>once</code> part, held for term + dispute window, <code>deal = sha256(JCS(agreement))</code>.</li>
-      <li>Buyer agent approves it (WorkOS user API key) → service-signed receipt. Tx id = mandate hash, so retries converge.</li>
-      <li>Seller verifies receipt against its derived mandate → provisions.</li>
+      <li>Seller's kit derives the mandate from the agreement (one <code>once</code> part, held to term end + window, <code>deal = sha256(JCS(agreement))</code>) and returns both in the accept response. Tx id = mandate hash, known to both before payment.</li>
+      <li>Buyer agent checks it and approves (WorkOS user API key), optionally attaching the agreement for Arkhai's dispute fast path.</li>
+      <li>Both poll the id; seller provisions once the signed receipt matches.</li>
       <li>Failure while held → seller sends <code>reverse</code>, buyer is refunded. Otherwise the hold releases on its own.</li>
     </ol>
   </div>
