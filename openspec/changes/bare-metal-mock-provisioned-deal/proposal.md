@@ -2,48 +2,59 @@
 
 Every market domain intended for deployment must prove a complete deal —
 discovery, negotiation, settlement, delivery, and domain-defined teardown — against
-running services. VM proves it on every pull request, with the provisioning service
-running its mock profile. Bare metal proves it nowhere that runs: its only complete-deal
-scenario, `test_bare_metal_complete_deal`, needs a real whole host to SSH into and a
-hosted settlement authority, and the end-to-end pipeline runs in GitHub Actions, where
-neither exists. It skips on every run.
+running services. VM proves it on every pipeline run with a typed-client scenario that
+holds every loop, previews every transition with a dry run, and advances it explicitly,
+against the provisioning service's mock profile. Bare metal proves it nowhere that runs:
+its only complete-deal scenario needs a real whole host and a hosted settlement
+authority, and the end-to-end pipeline runs in GitHub Actions, where neither exists and
+neither ever will.
 
-`bare-metal-publication-reads-pool-declarations` gives bare metal its own end-to-end
-lane, with a single mock-profile site, a bare-metal storefront, a registry, and a dev
-chain, and proves publication there. It stops before a deal. This change proves the
-deal on that lane.
+`bare-metal-publication-reads-pool-declarations` gave bare metal its own lane, with a
+mock-profile site, a bare-metal storefront, a registry, and a dev chain, and proved
+publication there. This change brings the bare-metal deal on that lane to parity with
+VM's. What stands in the way:
 
-Three things stand in the way:
+- **The mock produces VM results**, and bare-metal execution has no seam of its own: its
+  jobs run through VM's job service and its one Ansible service.
+- **Bare metal negotiates through a domain-local, round-0-only copy** rather than the kit
+  negotiation runtime, so it has no multi-round negotiation or force-accept.
+- **The storefront lacks the deal controls** VM's scenario drives: stage events,
+  evaluate-negotiate, force-accept, settle verify and evaluate, settle wait, admin
+  reserve, and the capacity-released callback.
+- **Fulfillment never starts on the Alkahest path**; it waits for a buyer call no buyer
+  makes.
+- **Release has two owners and bypasses the fulfillment aggregate**: lease expiry submits
+  a raw reclaim job, and buyer teardown makes the storefront release site capacity itself.
+- **No scenario exists**, and stage definitions are VM's alone.
 
-- **The mock produces VM results.** Bare-metal grant and reclaim jobs already go
-  through the same job service, and so through the programmable mock Ansible service
-  the mock profile installs. But the mock's default result is a VM creation; bare-metal
-  fulfillment reads a tenant user, host, and SSH port instead, so a deal would fail at
-  delivery.
-- **The bare-metal storefront's loops cannot be held or stepped.** It runs a negotiation
-  watchdog and a settlement-servicing worker on timers with no pause, so a scenario
-  cannot drive their transitions deterministically, as `TESTING.md` requires of every
-  loop an end-to-end test advances.
-- **No scenario exists for it.** The release-qualified scenario asserts real SSH access
-  and its revocation, which no mock can satisfy.
+The pipeline itself also needs restructuring: every lane rebuilds every image, and the
+API-credit deal runs inside the VM lane.
 
 ## What Changes
 
-- Give the bare-metal provisioning adapter a mock of its own, mounted by the mock
-  profile: a successful grant returns the access coordinates bare-metal fulfillment
-  reads, a reclaim succeeds, and when→then rules can override either, as VM's mock
-  allows. Bare-metal execution, which runs inside the VM adapter today, gains the seam
-  that mock needs.
-- Drive the scenario through the bare-metal storefront's lifecycle controls — a pause
-  that holds its loops, a resume, and an explicit single step per loop that runs
-  exactly the cycle its timer runs, alongside the publication step — which
-  `kit-owned-storefront-loop-lifecycle` supplies.
-- Add a mock-provisioned complete-deal scenario to the bare-metal lane, driven through
-  typed clients only: discovery, negotiation, Alkahest settlement on the lane's dev
-  chain, fulfillment through the mock, the buyer-safe result and access view, teardown,
-  and the site's capacity returned.
-- Keep the release-qualified real-host scenario, unselected, until the replacement
-  scenario is written, migrating what is useful from it.
+- Extract the mock rule-and-gate mechanism into a new kit, `kit/compute-executor-mock`,
+  and rebuild VM's programmable mock on it. Route executor actions through an
+  action-keyed table in the job service, and give the bare-metal adapter its own mock
+  under the mock profile, with its own `/test/bare-metal` rule routes.
+- Compose bare metal onto `kit/negotiation-runtime` through its existing routes and
+  delete its domain-local negotiation (migrated from `bare-metal-and-credits-domain-stacks`
+  4a.1, 4a.2, and the runtime half of 4a.3).
+- Move the deal controls into kit as framework-free route services, bound by every
+  storefront that has or needs them, with wire paths and client methods unchanged
+  (implemented in place of the corresponding part of `kit-owned-storefront-shell`).
+- Start bare-metal fulfillment when settlement verifies the escrow, resume unstarted
+  fulfillment from settlement servicing, and retire `POST /api/v1/fulfillments/begin`.
+- Make the lease lifecycle the only owner of release for every offering mode: lease
+  release delegates to durable fulfillment teardown, buyer teardown goes through lease
+  termination, and the storefront's direct site release is removed.
+- Give bare-metal publication a dry run.
+- Share compute deal stages in `compute_deal_stages.py` with a per-domain driver, move
+  VM's scenario onto them, and add the bare-metal mock-provisioned deal.
+- Prove bare-metal storefront restart recovery at integration level, as VM's is.
+- Build pipeline images once and share them across lanes; give API credits its own lane
+  (migrated from `apicredits-end-to-end-lane`).
+- Keep the real-host scenario, deactivated; move the buyer CLI requirements to
+  `bare-metal-and-credits-domain-stacks`.
 
 ## Capabilities
 
@@ -53,64 +64,88 @@ None.
 
 ### Modified Capabilities
 
-- `test-compatibility`: a deployable domain's deal path runs on every end-to-end run
-  against mock provisioning, distinctly from any protected real-host evidence; a
-  bare-metal deal survives a storefront restart after settlement commit and after
-  teardown acceptance.
-- `buyer-orchestration`: the bare-metal demand is exact and buyer-bounded, public
-  result and evidence are decoded strictly, and teardown is authenticated and
-  idempotent — the buyer-side properties this scenario is the natural place to prove,
-  since it is the only bare-metal deal that runs on every pipeline run.
+- `test-compatibility`: a deployable domain's deal runs on every pipeline run against
+  mock provisioning; compute domains share deal stages; every lane runs on images
+  built once; bare-metal storefront restart recovery is proven at integration level.
+- `market-composition`: storefront deal controls are kit-owned route services; mock
+  executors share a compute-family kit.
+- `physical-provisioning`: lease release delegates to durable fulfillment teardown for
+  every offering mode; storefront teardown goes through lease termination; executor
+  actions route to the owning adapter's executor.
+- `storefront-publication`: bare-metal fulfillment starts at settlement verification,
+  and bare-metal teardown releases capacity through the site's lease lifecycle.
 
 ## Non-Goals
 
 - Real SSH access or its revocation; that remains the protected lane's.
 - Hosted (Stripe) settlement in the lane; the lane has no hosted authority.
-- Finding bare-metal supply by hardware filters, owned by `bare-metal-listing-shapes`.
+- Moving bare metal onto the shell's shared routes, or the rest of the shell extraction.
+- Moving bare-metal execution or its job storage out of the VM adapter.
+- Moving `BareMetalFulfillmentTransport` into the bare-metal domain package; the shell
+  decides where route clients live.
+- Holding and stepping API-credit loops in its lane, and API-credit production-application
+  integration tests; `apicredits-end-to-end-lane` keeps them.
 - Multiple sites, or a site trusting several storefronts (roadmap Goal 1).
-- Changing bare-metal negotiation, settlement, or fulfillment behaviour. Defects the
-  scenario surfaces in those are bare-metal findings, recorded against their owning
-  change rather than absorbed here. Composing bare metal onto the kit negotiation
-  runtime is `bare-metal-and-credits-domain-stacks`'; the scenario here must pass
-  before and after that composition.
 
 ## Impact
 
-- The bare-metal provisioning adapter (its own mock) and the VM adapter's job service,
-  which executes bare-metal actions today (the seam that mock needs).
-- `domains/bare_metal/storefront/`: none for lifecycle controls, which
-  `kit-owned-storefront-loop-lifecycle` composes there.
-- `e2e-tests/`: the deal scenario on the bare-metal lane, and whatever shared domain-deal
-  helpers it needs generalized.
-- `openspec/changes/bare-metal-and-credits-domain-stacks/`: its bare-metal deal path is
-  evidenced here.
+- New `kit/compute-executor-mock`; the VM adapter's mock, test controller, and job
+  service; the bare-metal provisioning adapter's runtime, mock, routes, and release.
+- `provisioning/compute`: provider-neutral release executor and job port, release
+  dispatcher composition, and the provisioning client's route contracts.
+- `kit/negotiation-runtime`, `kit/settlement-runtime`, `kit/capacity-publication`, and
+  `kit/storefront`: deal-control route services and the evaluate-settle hook.
+- `domains/vms/storefront` and `domains/apicredits/storefront`: rebinding to the kit
+  route services and removing their copies.
+- `domains/bare_metal/storefront`: negotiation on the kit runtime, deal controls,
+  settlement-started fulfillment, teardown through lease termination, the
+  capacity-released callback, the publication dry run, restart integration tests.
+- `domains/bare_metal/buyer`: `begin()` removed from the fulfillment transport.
+- `e2e-tests`: shared compute deal stages, VM's scenario moved onto them, the bare-metal
+  scenario and driver, shared helpers, the bare-metal buyer dependency, lane targets.
+- Root `Makefile`, compose files, and `.github/workflows/e2e.yml`.
+- `openspec/changes/bare-metal-and-credits-domain-stacks/`,
+  `openspec/changes/kit-owned-storefront-shell/`, and
+  `openspec/changes/apicredits-end-to-end-lane/`: migrated scope recorded.
 
 ## Permanent documentation impact
 
-- [ ] `docs/development/ARCHITECTURE.md`
-- [x] Existing subsystem specification — `openspec/specs/test-compatibility/spec.md`
-      and `openspec/specs/buyer-orchestration/spec.md`.
+- [x] `docs/development/ARCHITECTURE.md` — kit layers (`kit/compute-executor-mock`, the
+      deal-control route services), release ownership, and the bare-metal fulfillment
+      hook statement, which is stale today.
+- [x] `docs/development/TESTING.md` — three lanes on shared images, the loop table's
+      bare-metal publication dry run, shared compute deal stages, the mock profile's
+      per-adapter executors, and the stale "blocked—not mocked" bare-metal statement.
+- [x] Existing subsystem specification — `test-compatibility`, `market-composition`,
+      `physical-provisioning`, `storefront-publication`.
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 
 ### Knowledge to promote
 
-- A deployable domain's deal path runs on every end-to-end run against mock
-  provisioning, distinct from protected real-host evidence —
-  `openspec/specs/test-compatibility/spec.md`.
-- The bare-metal demand is exact and buyer-bounded; public result and evidence decode
-  strictly; teardown is authenticated and idempotent —
-  `openspec/specs/buyer-orchestration/spec.md`.
+- A deployable domain's deal runs on every pipeline run against mock provisioning;
+  compute domains share deal stages; lanes run on images built once —
+  `openspec/specs/test-compatibility/spec.md`, `docs/development/TESTING.md`.
+- Storefront deal controls are kit-owned route services; mock executors share
+  `kit/compute-executor-mock` — `openspec/specs/market-composition/spec.md`,
+  `docs/development/ARCHITECTURE.md`.
+- Lease release delegates to durable fulfillment teardown for every offering mode, and
+  storefront teardown goes through lease termination —
+  `openspec/specs/physical-provisioning/spec.md`, `docs/development/ARCHITECTURE.md`.
+- Bare-metal fulfillment starts at settlement verification —
+  `openspec/specs/storefront-publication/spec.md`, `docs/development/ARCHITECTURE.md`.
 
 ## Dependencies
 
-Depends on `bare-metal-publication-reads-pool-declarations`, which builds the bare-metal
-end-to-end lane, splits the pipeline into VM and bare-metal jobs, and adds the
-publication step. Depends on `kit-owned-storefront-loop-lifecycle` for the bare-metal
-lifecycle pause and steps its scenario uses. Supplies the bare-metal deal-path evidence
-`bare-metal-and-credits-domain-stacks` requires for Goal 4, short of real access, which
-stays with the protected lane.
+Depends on `bare-metal-publication-reads-pool-declarations` (archived), which built the
+bare-metal lane, and `kit-owned-storefront-loop-lifecycle` (archived), which built the
+bare-metal lifecycle pause and steps. No active dependency.
 
-Owns the buyer-side deal requirements the scenario proves (Section 3 of
-`tasks.md`): exact demand, strict result and evidence decoding, idempotent teardown,
-and restart recovery at the deal's durable boundaries.
+Takes over, and records as migrated in the source change:
+- `bare-metal-and-credits-domain-stacks` 4a.1, 4a.2, and the runtime half of 4a.3;
+- the deal-control route services from `kit-owned-storefront-shell`'s scope;
+- the separate API-credit lane from `apicredits-end-to-end-lane`.
+
+Hands to `bare-metal-and-credits-domain-stacks` its former tasks 3.1–3.4 and the
+`buyer-orchestration` delta. Supplies that change's pipeline deal evidence for Goal 4,
+short of real access, which stays with the protected lane.

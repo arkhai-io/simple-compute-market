@@ -66,11 +66,16 @@ lane needs.
 
 `design.md`'s Context names the files that reimplement what the kit owns.
 
-- [ ] 4a.1 Re-verify that `negotiation_service.py`, `negotiation.py`, the
+Composing bare metal onto the kit negotiation runtime moved to
+`bare-metal-mock-provisioned-deal` on 2026-10-01, because its pipeline deal needs
+multi-round negotiation and force-accept for parity with VM's. What remains here is
+moving the bare-metal routes onto the shell.
+
+- [x] 4a.1 **Migrated** to `bare-metal-mock-provisioned-deal`. Re-verify that `negotiation_service.py`, `negotiation.py`, the
       `/api/v1/negotiate/*` and listing routes in `api.py`, and their thread
       persistence in `sqlite_client.py` are still domain-local copies, and that no
       module in `domains/bare_metal` imports `market_negotiation_runtime`.
-- [ ] 4a.2 Implement bare metal's `NegotiationDomainHooks` for the kit runtime:
+- [x] 4a.2 **Migrated** to `bare-metal-mock-provisioned-deal`. Implement bare metal's `NegotiationDomainHooks` for the kit runtime:
       `validate_opening` decoding the closed `bare_metal.v1` demand (positive
       duration, one listed access method, one `ssh-ed25519` public key; refuse
       `access_ref`, private material, and any seller-owned routing or resource field),
@@ -80,26 +85,29 @@ lane needs.
       accepted obligation the settlement runtime already consumes, and `place_hold`
       as today's hold placement.
 - [ ] 4a.3 Route bare-metal negotiation through the shared shell's negotiate routes
-      with the contribution registered, and delete the parallel routes, service, hook
-      class, and thread persistence. No compatibility endpoint may select by URL,
-      payload kind, app instance, or module getter.
+      with the contribution registered, and delete the bare-metal negotiate routes in
+      `api.py`. No compatibility endpoint may select by URL, payload kind, app
+      instance, or module getter. Amended 2026-10-01: serving the existing routes over
+      the kit runtime and deleting the parallel service, hook class, and thread
+      persistence moved to `bare-metal-mock-provisioned-deal`; this task is the move
+      onto the shell's routes.
 - [ ] 4a.4 Serve bare-metal listings through the shared shell's listing routes from
       the common binding, and delete the domain-local listing routes.
 - [ ] 4a.5 Reduce what remains of `runtime.py` and `server.py` to contribution
       adapters over `StorefrontAppConfig`; record in `design.md` anything that cannot
       reduce and why.
-- [ ] 4a.6 Focused tests: the conformance matrix `multi-domain-storefront-composition`
-      7.5 added runs under the bare-metal contract; opening refusal for each forbidden
-      demand field; terms mismatch refusal; the bare-metal e2e lane's negotiation
-      stages pass unchanged through the shared routes.
+- [ ] 4a.6 Focused tests: the bare-metal e2e lane's negotiation stages pass unchanged
+      through the shared routes. Amended 2026-10-01: the conformance matrix under the
+      bare-metal contract, opening refusal for each forbidden demand field, and terms
+      mismatch refusal moved with 4a.2 to `bare-metal-mock-provisioned-deal`.
 
 ## 4b. Bare-metal buyer requirements (verification)
 
 Each task verifies one requirement against the delivered packages and has a delta
 in `specs/`; `design.md`'s "Requirement ownership" says why these are here.
 
-- [ ] 4b.1 **Opening carries only buyer-owned demand.** Verified by 4a.2's refusal
-      tests and one e2e stage proposing an `access_ref`; both parties derive identical
+- [ ] 4b.1 **Opening carries only buyer-owned demand.** Verified by the refusal
+      tests migrated with 4a.2 to `bare-metal-mock-provisioned-deal` and one e2e stage proposing an `access_ref`; both parties derive identical
       terms for a valid SSH demand. (`negotiation-protocol` delta.)
 - [ ] 4b.2 **Resume is transcript-exact.** A buyer run interrupted after the seller's
       round resumes against the recorded thread when the registry listing has changed,
@@ -119,6 +127,37 @@ in `specs/`; `design.md`'s "Requirement ownership" says why these are here.
       sibling buyer, provider SDK, e2e helper, or test package; a missing accepted
       client surface fails with a prerequisite-version error rather than a local
       transport. (`test-compatibility` delta.)
+
+Tasks 4b.6–4b.9 were migrated on 2026-10-01 from `bare-metal-mock-provisioned-deal`
+(its former 3.1–3.4), with their `buyer-orchestration` delta: they are properties of the
+`market bare-metal` command, which that change's typed-client scenario cannot observe.
+Its scenario proves the storefront half of 4b.9.
+
+- [ ] 4b.6 **Demand is exact and buyer-bounded.** `market bare-metal buy` with a
+      private key, an `access_ref`, or any site/pool/resource/host/executor/price/
+      deadline override fails before negotiation and records no run event; a valid
+      demand emits the canonical `bare_metal.v1` envelope with no seller-owned field.
+      The real-host scenario's forbidden-flag list is the starting point.
+      (`buyer-orchestration` delta.)
+- [ ] 4b.7 **A provisioning route offered to the buyer is refused.** A listing,
+      response, configuration value, or argument attempting to make a provisioning
+      URL, site credential, provider identifier, or direct executor operation
+      authoritative is rejected; the buyer uses only the recorded storefront authority.
+      (`buyer-orchestration` delta.)
+- [ ] 4b.8 **Result and evidence decode strictly.** Public result/evidence carrying a
+      password, bearer token, private key, connection endpoint, raw executor result,
+      provider field, or unrecognized property is rejected and never displayed,
+      persisted, or captured in a diagnostic; access data returned without a valid
+      response proof from the recorded storefront is rejected and not cached.
+      (`buyer-orchestration` delta.)
+- [ ] 4b.9 **Teardown is authenticated and idempotent.** Repeating `teardown --from`
+      after a lost response resumes or returns the same operation with no second
+      physical teardown; status distinguishes requested, running, complete,
+      failed/operator-action, and lease-already-expired; a run principal that does not
+      authorize the agreement's teardown is refused and not retried elsewhere. The
+      command's current options and subcommands differ from the real-host scenario's
+      invocations (`--from`, `teardown request`/`status`); reconcile the two first.
+      (`buyer-orchestration` delta.)
 
 ## 5. Validation
 

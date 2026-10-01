@@ -21,11 +21,11 @@ close before it is.
 
 ## What Changes
 
-- Give API credits its own end-to-end lane, run as its own pipeline job and not
-  inside the VM lane, following the VM and bare-metal lanes' shape: its own compose
-  stack, development identities, and lane environment.
-- Move the API-credit deal scenario into that lane and hold and step the API-credit
-  storefront's loops through the canonical client while it runs.
+- Hold and step the API-credit storefront's loops through the canonical client while
+  the API-credit deal scenario runs in its own lane. The lane itself — its own pipeline
+  job, compose stack, development identities, and lane environment, with the scenario
+  moved out of the VM lane — moved to `bare-metal-mock-provisioned-deal` on 2026-10-01,
+  which restructures every lane onto images built once.
 - Give the API-credit storefront production-application integration tests: the real
   application through its lifespan, a real database, and the canonical typed client,
   with the credits service and capacity authority supplied as the tests need.
@@ -36,8 +36,8 @@ close before it is.
 
 ### Modified Capabilities
 
-- `test-compatibility`: API credits' end-to-end scenarios run in their own lane, and
-  its storefront has production-application integration tests.
+- `test-compatibility`: the API-credit lane holds and steps its storefront's loops, and
+  the storefront has production-application integration tests.
 
 ### New Capabilities
 
@@ -46,22 +46,23 @@ None.
 ## Non-Goals
 
 - Do not change API-credit market behaviour, settlement, or the credits service.
-- Do not change the VM or bare-metal lanes beyond removing the API-credit stack from
-  the VM lane.
+- Do not change the VM or bare-metal lanes; separating the API-credit lane from the VM
+  lane is `bare-metal-mock-provisioned-deal`'s.
 - Do not add protected Stripe, signed producer release, or live resolver evidence;
   `add-api-credits-hosted-settlement` owns that.
 
 ## Impact
 
-- `e2e-tests`, the root `Makefile`'s lane targets, the compose files, and
-  `.github/workflows/e2e.yml`.
+- The API-credit deal scenario in `e2e-tests`.
 - `domains/apicredits/storefront/tests`, and whatever startup seams the integration
   tests need.
 - `docs/development/TESTING.md`.
 
 ## Dependencies and Related Changes
 
-- **No blocking dependency.**
+- **Follows `bare-metal-mock-provisioned-deal`**, which creates the API-credit lane
+  this change's loop holding runs in. Production-application integration tests do not
+  depend on it.
 - **Follows `kit-owned-storefront-loop-lifecycle`**, which gave the API-credit
   storefront lifecycle controls and recorded the missing production-application
   coverage.
@@ -78,6 +79,7 @@ None.
 
 ### Knowledge to promote
 
-- API credits runs in its own end-to-end lane — `openspec/specs/test-compatibility/spec.md`.
+- The API-credit lane holds and steps its storefront's loops —
+  `openspec/specs/test-compatibility/spec.md`.
 - The API-credit storefront's integration tests run the production application —
   `openspec/specs/test-compatibility/spec.md`, `docs/development/TESTING.md`.

@@ -109,6 +109,12 @@ projection. The storefront only fetches the projection and maps the outcome to a
 status. `validate_opening` calls the same function, so the move carries the fetch and
 the mapping, not the check.
 
+Amended 2026-10-01: the hooks implementation and the deletion of the parallel service,
+hook class, and thread persistence moved to `bare-metal-mock-provisioned-deal`, which
+serves bare metal's existing negotiate routes over the kit runtime so its pipeline deal
+reaches parity with VM's. What stays here is moving those routes, and the listing
+routes, onto the shell's shared routes (4a.3–4a.6).
+
 ### Teardown is domain-defined, and bare metal proves access revocation
 
 The shared lifecycle names a teardown boundary without imposing a VM payload.
@@ -161,9 +167,11 @@ Rollback is per step; nothing here changes persisted state or wire contracts.
 The bare-metal buyer and seller requirements this change verifies (Section 4b) and
 those `bare-metal-mock-provisioned-deal` verifies are split by where the behavior is
 proven: negotiation ownership and resume, the clean wheel, independent authorities,
-and the package boundary here, where bare metal composes the kit and the stack is
-stood up; exact demand, strict result and evidence decoding, idempotent teardown, and
-restart recovery in the mock-provisioned deal, which is the only bare-metal deal that
-runs on every pipeline run. Requirements already stated generically for every buyer
-domain — plugin composition, the shared conformance suite, profile-bound recovery,
-secret-free configuration — are not restated per domain.
+the package boundary, and the `market bare-metal` command's demand, route refusal,
+strict decoding, and teardown semantics here, where the installed buyer is exercised;
+the storefront half of idempotent teardown, and restart recovery, in
+`bare-metal-mock-provisioned-deal`, whose pipeline deal drives typed clients and whose
+storefront integration tests rebuild the application. The command's requirements
+moved here from that change on 2026-10-01. Requirements already stated generically for
+every buyer domain — plugin composition, the shared conformance suite, profile-bound
+recovery, secret-free configuration — are not restated per domain.

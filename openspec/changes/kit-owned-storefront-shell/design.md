@@ -57,6 +57,14 @@ Design phase; not planned.
   rather than owning them. This belongs here rather than earlier because the shell
   decides where those routes live; moving the clients first would move them twice.
   Planning retires the interim test dependency.
+- **Deal controls arrive as kit route services.** `bare-metal-mock-provisioned-deal`
+  moves the stage-event read, evaluate-negotiate, force-accept, settle verify,
+  evaluate-settle (with a per-domain fulfillment-preview hook), settle wait, admin
+  reserve, and the capacity-released callback into the kits that own their mechanisms,
+  as framework-free route services every storefront binds, with wire paths and client
+  methods unchanged. Decided there on 2026-10-01 rather than waiting for this change.
+  The shell mounts those services; it does not extract them again, and its drift
+  inventory skips them.
 - **Settlement divergences already resolved.** From `bare-metal-listing-shapes`:
   - a settlement request restates no negotiated term, in every domain;
   - Alkahest-path fulfillment starts when settlement is verified, which

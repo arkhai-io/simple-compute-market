@@ -59,7 +59,7 @@ domain hook set, so a domain supplies its own codecs and policy without importin
 VM or API-credit code. VM and API credits are the concrete migrations in this
 change. The bare-metal storefront carries a domain-local negotiation service and
 its own negotiate routes beside the kit; composing it onto these hooks is
-`bare-metal-and-credits-domain-stacks`' Section 4a, which is why this change's
+`bare-metal-mock-provisioned-deal`'s, which is why this change's
 acceptance boundary is the VM and API-credit compositions.
 
 ## Risks / Trade-offs
