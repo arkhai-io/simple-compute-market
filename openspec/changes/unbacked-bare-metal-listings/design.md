@@ -38,8 +38,8 @@ nothing stands behind is what backing-as-a-listing-property exists to avoid.
 
 Negotiation and settlement composition for an unbacked bare-metal listing sit on the
 kit negotiation runtime, which bare metal composes through
-`bare-metal-and-credits-domain-stacks` Section 4a; that section's own prerequisite,
-the negotiation runtime kit, is in place. This change adds the unbacked candidate to
+`bare-metal-mock-provisioned-deal` (moved there from `bare-metal-and-credits-domain-stacks`
+Section 4a on 2026-10-01); its prerequisite, the negotiation runtime kit, is in place. This change adds the unbacked candidate to
 publication and relies on that composition for the rest, unless planning finds a
 piece neither owns.
 

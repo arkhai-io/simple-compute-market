@@ -2,170 +2,310 @@
 
 ## Context
 
-Found while designing the end-to-end evidence for
-`bare-metal-publication-reads-pool-declarations`. That change proves publication on a
-new bare-metal lane and deliberately stops before a deal, which would exercise
-negotiation, settlement, fulfillment, and teardown paths it does not touch.
+The objective is parity: a bare-metal counterpart to VM's typed-client deal,
+`e2e-tests/tests/e2e/roles/scenarios/vms/test_full_deal.py`, run on every pipeline run
+against the provisioning service's mock profile. The pipeline runs only in GitHub
+Actions, which has no live host inventory and never will, so this scenario is where
+bare metal proves everything integration tests cannot: that the storefront, registry,
+chain, site, and executor compose into a working deal.
 
-What the codebase does today, verified 2026-09-25:
+What the codebase does today, verified 2026-10-01:
 
-- **The end-to-end pipeline runs only in GitHub Actions**, with no Kubernetes cluster
-  and no live host inventory, and never will have either.
-- **The provisioning service's mock profile** (`ACTIVE_PROFILES=mock`) replaces the VM
-  adapter's Ansible service with `ProgrammableMockAnsibleService` and mounts the `/test/*`
-  controller, whose when→then rules can shape, pause, or fail any job. VM's deal
-  scenarios run against it.
-- **Bare-metal jobs already reach that mock.** The bare-metal operations service submits
-  grant and reclaim jobs (`NODE_GRANT_ACCESS_ACTION`, `NODE_RECLAIM_ACCESS_ACTION`)
-  through the VM runtime's job service, so they execute through the same Ansible
-  service the mock replaces.
-- **The mock's default result is a VM creation** (`_FAKE_STDOUT`: a VM name, tenant
-  user, external SSH port). The bare-metal fulfillment provider reads a grant's tenant
-  user, host, and port under its own keys, so a default mock result is not a bare-metal
-  one. The provisioning service's integration tests already fake a bare-metal grant's
-  playbook output, so the shape is known.
-- **The bare-metal storefront starts two unpausable loops** at startup: the negotiation
-  watchdog and the settlement-servicing worker. `TESTING.md` requires every loop an
-  end-to-end scenario advances to offer a pause and an explicit step that works while
-  held, and names the traps of a loop with none.
-- **The canonical storefront client already speaks lifecycle controls**:
-  `admin_pause_lifecycle_loops`, `admin_resume_lifecycle_loops`,
-  `admin_run_lifecycle_cycle(loop)`, and `admin_dry_run_lifecycle_cycle(loop)`, which the
-  VM storefront implements. `bare-metal-publication-reads-pool-declarations` adds the
-  bare-metal `publication` step.
-- **The release-qualified scenario** (`test_bare_metal_complete_deal`) SSHes into the
-  leased host and asserts access is revoked after teardown. The permanent
-  `test-compatibility` requirement "Bare-metal hosted evidence is attributed by layer"
-  says whole-host release acceptance must observe real access and revocation on a
-  disposable host, and that mocks do not satisfy it.
+- **Bare-metal execution runs through VM's job service.** The bare-metal operations
+  service submits grant and reclaim jobs to the VM runtime's `AnsibleJobService`.
+  `_process_job` persists the job, checks the registered host, renders inventory, and
+  calls one injected Ansible service — real, or `ProgrammableMockAnsibleService` under
+  the mock profile. The bare-metal fulfillment provider reads status and credentials
+  back from the persisted job. The mock's default stdout is a VM creation
+  (`vm_creation_data`); a bare-metal grant is parsed from `node_grant_access_data`.
+- **The `/test/*` controller assumes one Ansible service.** It resolves
+  `resolved_ansible_service` and requires the VM programmable mock; the job service's
+  `notify_job_done` also reaches that one service.
+- **Bare metal negotiates through a domain-local copy.** `negotiation_service.py`,
+  `negotiation.py`, the negotiate routes in `api.py`, and thread persistence implement
+  round 0 only; continue refuses with "default bare-metal policy does not support
+  additional rounds". VM and API credits run on `kit/negotiation-runtime`, which is
+  where multi-round negotiation and force-accept come from.
+- **The bare-metal storefront lacks the deal controls VM's scenario drives**: stage-event
+  read, evaluate-negotiate, force-accept, settle verify and evaluate dry runs, settle
+  wait, admin reserve, and the capacity-released callback. VM implements each in its own
+  controllers; API credits has its own copies of the events read, settle wait, and
+  force-accept. `kit-owned-storefront-shell`, in design and unplanned, would extract the
+  route set wholesale.
+- **Fulfillment never starts on the Alkahest path.** The `fulfill_bare_metal` hook is
+  registered in the domain contract, but settlement only adopts the obligation; delivery
+  waits for `POST /api/v1/fulfillments/begin`, which no buyer code calls. Settle status
+  asserts no fulfillment is bound.
+- **Capacity release has two owners.** Lease expiry submits a raw reclaim job through
+  `BareMetalReleaseExecutor`, bypassing the fulfillment aggregate, so the aggregate stays
+  `active` after the lease ends. Buyer teardown calls provisioning's fulfillment teardown
+  directly, which the lease lifecycle never sees, so the storefront releases the site
+  reservation itself when it observes `torn_down`. VM's release executor and release job
+  port already delegate to the fulfillment aggregate and are provider-neutral in
+  substance.
+- **Bare-metal publication has a step but no dry run**, unlike VM's publication and
+  capacity-events loops.
+- **The lane starts empty.** Every lane takes its stack down with volumes before it comes
+  up and never restarts a service mid-run; VM's restart recovery is covered by storefront
+  integration tests.
+- **Every lane builds every image.** Each pipeline job runs `make build-dev`, building
+  the wheels and all runtime, dev-chain, and test images. The API-credit deal runs inside
+  the VM lane because the VM stack includes `domains/apicredits/compose.yml`.
+- **The real-host scenario is already unselected.** `e2e_bare_metal_deal` is in no lane's
+  marker expression.
 
 ## Decisions
 
-### The deal runs on the bare-metal lane, against the mock
+### The scenario is VM's deal, stage for stage
 
-The deal scenario runs on the lane `bare-metal-publication-reads-pool-declarations`
-builds: one site in the mock profile, trusting the bare-metal storefront, a bare-metal
-registry, and the dev chain. It proves what VM's mock-provisioned deals prove — that
-the services compose into a working deal — and reports nothing about a real host.
+Decided with the maintainer. Every stage of VM's typed-client deal has a bare-metal
+counterpart, including every dry run, so the scenario follows `TESTING.md`'s
+pause, dry-run, advance convention end to end: the storefront's loops are paused once at
+the start and every transition the scenario depends on is first previewed, then
+advanced explicitly. No stage is dropped because bare metal lacks the control it needs;
+the missing controls are built (below).
 
-### Mock provisioning gets bare-metal results, not a second mock
+| VM stage | Bare-metal counterpart |
+|---|---|
+| 00 pause loops, health, contract pins, mock mode, provisioning→storefront link | Same, through the bare-metal storefront's lifecycle pause and system status, plus the site projection loaded |
+| 00f seed resources, register host, declare capacity | Declare a backed bare-metal pool, register the host record, declare whole-host capacity |
+| 02b–04a listing created, validated, published, discovered | Publication dry run then step; typed hardware query at the registry |
+| 05a evaluate-negotiate, 05b negotiate, 06b force-accept | Same, through the kit negotiation runtime |
+| 07 on-chain escrow, verify dry run, mock gate armed | Same, with the bare-metal grant gate |
+| 08a evaluate-settle, 08c evaluate-job, 08b settle → dispatching | Same; bare metal's evaluate-settle previews scheduling and materialization |
+| 09a release gate, converge to active; 09a2 listing closes | Same; the publication dry run then step closes the listing as unavailable |
+| 09b ready and credentials | Buyer result carries no access coordinates; buyer access returns host, port, and user |
+| 09bb settlement-servicing dry run then step → claim | Same |
+| 09c lease registered | Same, through the bare-metal lease view |
+| 10a–11b expire lease, gated teardown, release, re-reserve | Same; release reaches the storefront through the capacity-released callback |
+| — | A second deal on the freed host: buyer-requested teardown sent twice returns the same operation, capacity is released once, and publication reopens the listing |
 
-Bare-metal jobs already reach the programmable mock, so this change adds bare-metal
-results to it rather than a parallel mock: a grant returns the access coordinates the
-bare-metal fulfillment provider reads, and a reclaim succeeds. The `/test/*` rules keep
-the power to override either, which is what lets a later scenario exercise a failed
-grant or a slow reclaim.
+### Compute deal stages are shared
 
-### Every loop the scenario advances can be held and stepped
+Decided with the maintainer. Stage definitions live once, in a new
+`compute_deal_stages.py` module beside the shared domain-deal helpers
+(`e2e-tests/tests/e2e/roles/helpers/`), as classes not named `Test*`
+so pytest does not collect them where they are defined. Each compute domain's scenario
+module declares its stages in order by subclassing them
+(`class TestStage05b_Negotiate(Stage05bNegotiate): pass`), which keeps pytest's order
+explicit and lets a domain override one stage or insert its own. What differs between
+domains is supplied by a `deal_driver` fixture implementing a `ComputeDealDriver`
+protocol: seeding supply, the listing's provision terms, the mock rules matched, the
+lease view, the evaluate-settle expectations, and the domain's result and access
+assertions. Negotiation needs no driver hook.
 
-The bare-metal storefront's negotiation watchdog and settlement-servicing worker gain
-the lifecycle pause and per-loop step the canonical client already calls, joining the
-publication step. A step runs exactly the cycle the timer runs, whether or not the
-loops are held, so a scenario advances production behaviour rather than a test path;
-the pause holds every loop at once, as VM's does.
+The module is compute-specific by name and scope. API credits, inference, and later
+domains have different deal flows and keep their own scenarios; nothing here is shaped
+for them.
 
-The controls are built by `kit-owned-storefront-loop-lifecycle`, which extracts VM's
-loop lifecycle into one kit controller and composes it into every storefront, bare
-metal included. A bare-metal-local copy would have been the shell extraction's to
-remove. This change consumes the controls and keeps the scenario that relies on them.
+VM's `test_full_deal.py` moves onto the shared stages without behaviour change and is
+green on its lane before the bare-metal driver is added.
 
-### The scenario uses typed clients only
+### Bare metal negotiates through the kit runtime
 
-Discovery goes through the registry client, and the seller side through
-`StorefrontClient` and whatever typed buyer client the bare-metal domain owns; the
-scenario does not run the `market` command. Its domain-specific assertions — the
-listing, the access result, the teardown carrier — go through the shared domain-deal
-helpers as codecs, not copied VM orchestration, per "Per-domain end-to-end deal path".
+Decided with the maintainer. Bare metal's round-0-only negotiation is an artifact of its
+domain-local copy, not a domain difference. This change composes bare metal onto
+`kit/negotiation-runtime` — migrated from `bare-metal-and-credits-domain-stacks` tasks
+4a.1, 4a.2, and the runtime half of 4a.3 — implementing `NegotiationDomainHooks` and
+serving the existing `api.py` negotiate routes over the runtime, as VM serves its own
+routes without the shell. The domain-local negotiation service, policy class, and thread
+persistence are deleted. Moving those routes onto the shell's shared routes (the rest of
+4a.3, and 4a.4–4a.5) stays with that change.
 
-### Teardown is proven up to the site, not the host
+The implementation satisfies `bare-metal-and-credits-domain-stacks`' delta
+"Bare-metal negotiation preserves demand and authority ownership", which that change's
+4b.1 and 4b.2 continue to verify and promote.
 
-With no host, teardown is observed as far as it is observable: the storefront reports
-the lease torn down, the site's capacity for that Physical Resource returns, and the
-next publication pass reopens its listing. That access was actually revoked stays the
-protected lane's evidence.
+### Deal controls are kit-owned route services
+
+Decided with the maintainer: the parts of `kit-owned-storefront-shell` this scenario needs
+are implemented here, in place, rather than blocking on the shell or splitting a new
+change. Each control becomes a framework-free route service, following the precedent
+`kit-owned-storefront-loop-lifecycle` and `kit/pool-overrides` set, living in the kit that
+owns the mechanism it exposes and bound by each storefront behind its own
+authentication:
+
+| Control | Mechanism owner | Bound by |
+|---|---|---|
+| Stage-event read (`/api/v1/system/events`) | storefront kit | VM, API credits, bare metal |
+| Evaluate-negotiate | negotiation runtime, through the domain's seller-policy hook | VM, bare metal |
+| Force-accept | negotiation runtime's acceptance chokepoint | VM, API credits, bare metal |
+| Settle verify (dry run) | settlement runtime, through the mechanism adapter | VM, bare metal |
+| Evaluate-settle (dry run) | settlement runtime, through a new per-domain fulfillment-preview hook | VM, bare metal |
+| Settle wait | settlement runtime | VM, API credits, bare metal |
+| Admin reserve | capacity/publication kit, through a listing's capacity binding | VM, bare metal |
+| Capacity-released callback | capacity/publication kit | VM, bare metal |
+
+Wire paths and canonical client methods are unchanged, so VM's scenario and every
+existing caller keep working. Per "An extracted concern leaves no domain-local
+implementation", every domain that carries a copy rebinds in this change and its copy
+is removed; a domain that lacked the control gains it by composition. API credits gains
+only what it already has a copy of: it has no evaluate-negotiate, settle dry runs, admin
+reserve, or capacity-released callback today, and nothing here requires them.
+
+The shell, when planned, mounts these route services rather than extracting them again.
+Exact module placement within each owning kit is fixed in planning.
+
+### Settlement starts fulfillment
+
+Decided in `bare-metal-listing-shapes`, implemented here. Once settlement verifies the
+escrow, bare metal's settle path invokes its `fulfill` hook once, and the
+settlement-servicing cycle resumes any verified obligation whose fulfillment has not
+started, so retries stay in the seller's durable loop. Settle status stops asserting
+that no fulfillment is bound. `POST /api/v1/fulfillments/begin` and
+`BareMetalFulfillmentTransport.begin()` are retired. The buyer makes one call, as in
+every domain, and the settlement request names the negotiation, the buyer, and the EVM
+address only.
+
+### The lease lifecycle owns release for every offering mode
+
+Decided with the maintainer. The storefront's direct site release is a workaround for
+buyer teardown bypassing the lease lifecycle, and it is removed.
+
+- VM's release executor and fulfillment release job port move to
+  `compute_provisioning.release` as provider-neutral components and are registered for
+  bare metal as well as VM, so lease expiry begins fulfillment teardown and completion is
+  read from the aggregate, never from a raw job. `BareMetalReleaseExecutor` is deleted.
+- Buyer teardown at the bare-metal storefront calls the site's storefront-role lease
+  terminate (`/api/v1/contract/leases/{id}/terminate`), the same release path expiry
+  takes. A repeated teardown returns the same `releasing` or `released` lease, which is
+  what makes it idempotent.
+- The lease cycle records release and delivers the capacity-released callback; the
+  bare-metal storefront binds the kit callback route and marks its lifecycle released
+  only on that callback.
+
+The site's lease view and backdating used by the expiry stages go through typed
+clients. Planning verifies whether `/api/v1/leases/*` already serves bare-metal
+reservations; if it does not, the bare-metal lease routes gain read, update, and
+terminate.
+
+### Executors are routed by action, and each adapter owns its mock
+
+Decided with the maintainer. The job service gains an executor table keyed by action.
+The bare-metal adapter contributes the executor for its access actions: the real
+Ansible service in production, a bare-metal mock under the mock profile. The job record,
+host check, inventory rendering, and result parsing stay where they are, so the mock's
+playbook output is parsed by the same `node_grant_access_data` and
+`node_reclaim_access_data` path as a real run. A default grant returns a tenant user and
+SSH port, with the tenant address taken from the registered host record as a real run's
+is; a default reclaim succeeds. Job-done notification goes to the executor that ran the
+job.
+
+The rule store, pause gates, matching, job-done events, evaluate-job dry run, and a
+framework-free `/test` route service are extracted into a new foundation kit,
+`kit/compute-executor-mock` (`market_compute_executor_mock`), on which both the VM
+programmable mock and the bare-metal mock are built. It is compute-family only: an
+API-credit or inference executor mock would be a separate package. VM keeps its rule
+routes at `/test/mock-rules`; the bare-metal adapter mounts its own under
+`/test/bare-metal/mock-rules`, with route contracts and test-client methods. The job
+routes (`/test/jobs/drain`, `/test/jobs/{id}/wait`) stay shared.
+
+### Bare-metal publication has a dry run
+
+The publication loop gains a dry-run step that reports what one pass would open, close,
+refresh, or hold without publishing, so publication transitions follow the same
+preview-then-advance convention as VM's.
+
+### Restart recovery is proven at integration level, as VM's is
+
+Decided with the maintainer. The lane begins from an empty database and never restarts a
+service mid-run, the same as VM's; nothing about bare metal requires otherwise. Former
+tasks 3.5 and 3.6 become bare-metal storefront integration tests that rebuild the
+application over the same database file and a fake site: after settlement commit and
+after teardown acceptance the buyer retrieves the same operation with no second
+obligation, mechanism selection, or teardown, and the trading pause survives the
+restart.
+
+### The scenario uses typed clients
+
+Discovery goes through the registry client; the seller side through `StorefrontClient`;
+the site through the provisioning clients; on-chain escrow through a shared helper. The
+bare-metal fulfillment routes go through `BareMetalFulfillmentTransport`, so e2e-tests
+takes `arkhai-bare-metal-buyer` as a dependency. That is the interim the shell records
+under "Where each route's typed client lives"; this change does not move the client.
+
+### Lanes run on images built once
+
+Decided with the maintainer. One pipeline job builds the wheels and every image once and
+publishes them as a short-lived workflow artifact; each lane job depends on it, loads the
+images, and runs its stack and scenarios without building. Each lane gains a run-only
+Make target, and the existing `test-e2e-<lane>` targets become build plus run so local
+use is unchanged. Toolchains needed only to build move to the build job.
+
+### API credits runs in its own lane
+
+Decided with the maintainer, and migrated from `apicredits-end-to-end-lane`: the third
+lane runs the API-credit stack (`compose.apicredits.yml`) and `e2e_credits_deal` as its
+own pipeline job, and the VM lane's stack no longer includes the API-credit services.
+`e2e_alkahest_escrow_codecs` needs only the chain and stays in the VM lane. Planning
+fixes the identity overlay split and checks `multi_registry` for a dependency on the
+API-credit registry. Holding and stepping the API-credit storefront's loops in that lane,
+and its production-application integration tests, stay with `apicredits-end-to-end-lane`.
+
+### The real-host scenario stays, deactivated
+
+Decided with the maintainer. `test_bare_metal_complete_deal` keeps its marker, which no
+lane selects; the mock-provisioned scenario gets its own, `e2e_bare_metal_mock_deal`, so
+selecting it never selects the real-host one. The permanent protected-lane requirement,
+"Bare-metal hosted evidence is attributed by layer", is unchanged.
+
+### Buyer CLI requirements belong with the buyer
+
+Decided with the maintainer. Exact demand, refusing provisioning routes, strict result
+and evidence decoding, and `teardown --from` semantics are properties of the `market`
+command; this scenario drives typed clients and cannot observe them. Former tasks
+3.1–3.4 and their `buyer-orchestration` delta move to `bare-metal-and-credits-domain-stacks`
+Section 4b. The storefront-side half of teardown — one operation for a repeated request,
+capacity released once — is proven here.
 
 ### The lane settles through Alkahest
 
 The lane has no hosted authority, and a backed whole-host listing that settles by
 introduction is the unbacked case `unbacked-bare-metal-listings` owns. Alkahest on the
-lane's dev chain is how a backed bare-metal listing settles without a hosted service,
-and the lane already needs the chain for publication's Alkahest options.
+lane's dev chain is how a backed bare-metal listing settles without a hosted service.
 
-### The bare-metal mock is the bare-metal adapter's own
+### Teardown is proven up to the site, not the host
 
-Decided with the maintainer. The programmable mock is the VM adapter's and doubles for VM
-fulfillment; it does not double for another domain. The bare-metal provisioning adapter
-gets a mock of its own, mounted by the same mock profile, returning the results its own
-fulfillment provider reads and accepting when→then rules as the VM mock does. Where the
-two mocks turn out to share mechanism — rule matching, pause gates, job waiting — that is
-a candidate for a kit, discussed when the bare-metal mock is written rather than
-extracted in advance.
+With no host, teardown is observed as far as it is observable: the fulfillment reaches
+`torn_down`, the site releases the reservation, the storefront receives the
+capacity-released callback, and the next publication pass reopens the listing. That
+access was actually revoked stays the protected lane's evidence.
 
-**Consequence found while recording this.** Bare-metal grant and reclaim do not execute in
-the bare-metal adapter today. The bare-metal operations service submits them through the
-VM runtime's job service, whose Ansible service recognizes the bare-metal actions
-(`_BARE_METAL_ACTIONS`) and parses their results (`node_grant_access_data`). The VM mock
-intercepts them only because it replaces that service. A bare-metal mock therefore needs
-bare-metal execution to have a seam of its own, which means at least giving the job
-service a way to hand bare-metal actions to a bare-metal-owned executor, real or mock,
-and possibly moving bare-metal execution out of the VM adapter. How far to go is settled
-when this change is planned (1.5).
+### Every loop the scenario advances can be held and stepped
 
-### The buyer side uses the client built for each backend, mirroring VM
+Implemented by `kit-owned-storefront-loop-lifecycle`. The lifecycle pause holds every
+loop the bare-metal storefront runs, each loop has its own step, and the scenario pauses
+once at the start and invokes every transition it depends on.
 
-Decided with the maintainer. Each call goes through the typed client built for the
-backend it calls, and the scenario mirrors VM's typed-client deal,
-`e2e-tests/tests/e2e/roles/scenarios/vms/test_full_deal.py`: fulfillment, access, and
-teardown are driven and observed the way that scenario drives and observes them,
-including reading fulfillment state through the site's own client and holding provider
-teardown at a mock gate. Where no typed client covers a bare-metal backend route yet, the
-plan adds the method to the client that owns that backend rather than building requests
-by hand.
+## Superseded decisions
 
-### The real-host scenario stays until its replacement is written
-
-Decided with the maintainer. `test_bare_metal_complete_deal` stays, unselected, until the
-mock-provisioned deal scenario exists, since it has code worth migrating — its
-domain-deal state, buyer run handling, and teardown polling. Whether it is then removed,
-and what that means for the permanent protected-lane requirement, is decided when the
-replacement lands.
-
-### Pause holds every loop; every transition is stepped
-
-Decided with the maintainer, following VM's convention, and implemented by
-`kit-owned-storefront-loop-lifecycle`. The lifecycle pause holds every
-loop the bare-metal storefront runs — the negotiation watchdog and the settlement-
-servicing worker — and each loop has its own step, alongside the publication step. The
-scenario pauses once at the start, as VM's session fixture does, and deliberately
-invokes every state transition it depends on; nothing advances on a timer while it runs.
+- **"Mock provisioning gets bare-metal results, not a second mock"** was superseded
+  before planning by "The bare-metal mock is the bare-metal adapter's own", now
+  "Executors are routed by action, and each adapter owns its mock", which also settles
+  the rule mechanism as a kit.
+- **"The real-host scenario stays until its replacement is written"** is settled by
+  "The real-host scenario stays, deactivated".
+- **Restart in the lane** (former tasks 3.5–3.6) is replaced by integration tests.
 
 ## Risks / Trade-offs
 
-- **The deal surfaces bare-metal defects outside this change** → likely, since bare metal
-  has never completed a deal in CI. They are recorded against their owning change.
-- **Buyer discovery by filter does not find bare-metal listings** until
-  `bare-metal-listing-shapes` lands, because the compute schema's filters read top-level
-  fields a bare-metal listing does not have. The scenario discovers by listing identity,
-  and says so.
-- **Mock results drift from real playbook output** → the bare-metal result shape comes
-  from the adapter that parses it, and the provisioning service's own tests keep the two
-  agreeing.
-
-## Context from `bare-metal-listing-shapes`
-
-**Decided there, implemented here: fulfillment starts when settlement is verified.**
-VM's storefront starts Alkahest-path fulfillment itself once settlement verifies the
-escrow. Standalone bare metal instead waits for the buyer's
-`POST /api/v1/fulfillments/begin`, and the bare-metal buyer has no Alkahest path to
-call it.
-
-VM's direction was chosen:
-- the buyer makes one call;
-- retries stay in the seller's durable loop;
-- both domains already start hosted fulfillment this way.
-
-This change's Alkahest whole-host deal therefore has bare metal's settle path start
-fulfillment through its `fulfill` hook. It retires `POST /api/v1/fulfillments/begin`
-and `BareMetalFulfillmentTransport.begin()`, which exists only as the interim typed
-client for that route. Its settlement request names the negotiation, the buyer, and
-the EVM address only, as in every domain.
+- **Scope.** The change now carries three kit extractions, a negotiation composition,
+  a release-ownership change, and pipeline restructuring. Accepted deliberately over
+  managing further changes. Mitigation: sections land in an order that keeps every lane
+  green — kit extractions with VM and API-credit rebinding first, then bare-metal
+  behaviour, then the shared stages with VM moved onto them, then the bare-metal
+  scenario, then the pipeline.
+- **VM regression through shared stages and rebinding** → VM moves onto the shared
+  stages before any bare-metal driver exists, and each rebinding keeps wire paths and
+  client methods.
+- **The deal surfaces further bare-metal defects** → likely. Those inside the deal path
+  this change already touches are fixed here; others are recorded against their owner.
+- **Mock results drift from real playbook output** → the mock's output is parsed by the
+  real result parser; drift is confined to the playbook's own output, which
+  `node-access.yaml` already under-reports (no tenant address; tracked as unowned in the
+  change index).
+- **Image artifact size** → one compressed artifact kept for a day; if transfer time
+  rivals build time, a registry-backed cache is the fallback.
+- **Admin reserve's VM path** (`/api/v1/admin/portfolio/reservations`) carries VM
+  vocabulary; it is kept for client compatibility. `remove-dead-storefront-physical-surfaces`
+  does not retire it (checked 2026-10-01).

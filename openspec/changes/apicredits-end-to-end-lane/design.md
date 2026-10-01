@@ -22,7 +22,10 @@
 ### The lane is its own job, not part of the VM lane
 
 Decided with the maintainer. Evidence for each domain stays attributable to that
-domain, and a failure in one lane does not mask the other.
+domain, and a failure in one lane does not mask the other. Building the lane moved to
+`bare-metal-mock-provisioned-deal` on 2026-10-01, which restructures every lane onto
+images built once; this change holds and steps the API-credit loops once that lane
+exists.
 
 ### The storefront's integration tests run the production application
 
@@ -32,9 +35,6 @@ canonical typed client, as `docs/development/TESTING.md` defines integration.
 
 ## Open questions
 
-- **What the lane's stack contains.** Which services the API-credit stack needs on
-  its own — the credits service, a capacity authority, a chain — and whether it
-  shares any service definition with the VM stack.
 - **What supplies the credits service and capacity authority to integration tests.**
   A real credits-service application in process, a test double at the HTTP boundary,
   or a configuration seam, for each.
