@@ -6,6 +6,7 @@ import pytest
 from market_identity import Ed25519Signer
 
 import core_buyer.introductions as introductions
+from core_buyer.negotiation_client import AuthenticatedHTTPError
 
 
 def _transport() -> introductions.IntroductionTransport:
@@ -74,3 +75,59 @@ def test_refusals_surface_cleanly(monkeypatch) -> None:
     monkeypatch.setattr(introductions, "_signed_json", refuse)
     with pytest.raises(RuntimeError, match="has not been started"):
         _transport().read(obligation_ref="a" * 64)
+
+
+def _answer(status: int, body: Any):
+    def refuse(url: str, request_body: Any, **kwargs: Any) -> Any:
+        raise AuthenticatedHTTPError(
+            f"-> authenticated HTTP {status}", status_code=status, body=body
+        )
+
+    return refuse
+
+
+_DELETED_BODY = {
+    "detail": {
+        "code": "introduction_payloads_deleted",
+        "payloads_deleted_at": "2026-10-01T12:00:00Z",
+    }
+}
+
+
+@pytest.mark.parametrize("operation", ["start", "read"])
+def test_the_deleted_outcome_is_its_own_error(monkeypatch, operation: str) -> None:
+    monkeypatch.setattr(introductions, "_signed_json", _answer(410, _DELETED_BODY))
+    transport = _transport()
+    with pytest.raises(introductions.IntroductionPayloadsDeleted) as raised:
+        if operation == "start":
+            transport.start(
+                negotiation_id="negotiation-1",
+                obligation_ref="a" * 64,
+                contact_payload={"email": "buyer@example.com"},
+            )
+        else:
+            transport.read(obligation_ref="a" * 64)
+    assert raised.value.outcome() == {
+        "obligation_ref": "a" * 64,
+        "revealed": False,
+        "code": "introduction_payloads_deleted",
+        "payloads_deleted_at": "2026-10-01T12:00:00Z",
+    }
+
+
+@pytest.mark.parametrize(
+    "status, body",
+    [
+        (410, {"detail": "gone for another reason"}),
+        (409, _DELETED_BODY),
+        (503, {"detail": "introduction completion is temporarily unavailable"}),
+    ],
+)
+def test_other_refusals_are_not_mistaken_for_deletion(
+    monkeypatch, status: int, body: Any
+) -> None:
+    monkeypatch.setattr(introductions, "_signed_json", _answer(status, body))
+    with pytest.raises(AuthenticatedHTTPError) as raised:
+        _transport().read(obligation_ref="a" * 64)
+    assert not isinstance(raised.value, introductions.IntroductionPayloadsDeleted)
+    assert raised.value.status_code == status

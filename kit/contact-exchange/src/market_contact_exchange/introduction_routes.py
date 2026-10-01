@@ -9,7 +9,7 @@ not be an introduction.
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
@@ -59,13 +59,46 @@ class AuthorizedIntroductionRequest:
 
 
 class IntroductionRecord(BaseModel):
-    """One durably persisted, idempotently re-readable introduction."""
+    """One durably persisted, idempotently re-readable introduction.
+
+    ``payloads_deleted_at`` is set when the contact payloads were redacted; the
+    record then holds empty contacts and remains only as the tombstone that
+    stops the introduction being revealed again.
+    """
 
     obligation_ref: str
     agreement_ref: str
     buyer_contact: dict[str, str]
     seller_contact: dict[str, str]
     introduction_package: dict[str, Any] = Field(default_factory=dict)
+    payloads_deleted_at: str | None = None
+
+
+#: The stable code of the outcome every introduction surface answers once the
+#: payloads have been deleted.
+INTRODUCTION_PAYLOADS_DELETED = "introduction_payloads_deleted"
+
+
+class IntroductionPayloadsDeletedError(ValueError):
+    """The introduction's contact payloads have been deleted.
+
+    A ``ValueError`` so persistence callers that already refuse conflicting
+    payloads refuse this too; the route service distinguishes it to answer the
+    deleted outcome rather than a conflict.
+    """
+
+    def __init__(self, payloads_deleted_at: str) -> None:
+        super().__init__("introduction contact payloads have been deleted")
+        self.payloads_deleted_at = payloads_deleted_at
+
+
+def introduction_payloads_deleted_detail(payloads_deleted_at: str) -> dict[str, str]:
+    """The deleted outcome's body: its stable code and when deletion happened."""
+
+    return {
+        "code": INTRODUCTION_PAYLOADS_DELETED,
+        "payloads_deleted_at": payloads_deleted_at,
+    }
 
 
 class PrepareIntroduction(Protocol):
@@ -102,6 +135,11 @@ class LoadIntroduction(Protocol):
 
 class CompleteIntroduction(Protocol):
     def __call__(self, agreement: IntroductionAgreement) -> Awaitable[None]: ...
+
+
+#: Returns the retention disclosure to embed in a reveal, read from the running
+#: configuration at each call so a reveal never states a stale window.
+IntroductionDisclosure = Callable[[], Mapping[str, Any]]
 
 
 class DeliverIntroduction(Protocol):
@@ -146,23 +184,31 @@ def introduction_projection(
     *,
     for_role: Literal["buyer", "seller"],
     mechanism_id: str = MECHANISM,
+    retention: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """The reveal as one side sees it: the counterparty's half, not its own.
 
     One definition, so a re-delivery outside the request path shows the
-    operator exactly what the reveal itself showed them.
+    operator exactly what the reveal itself showed them. A redacted record is
+    refused rather than rendered: its contacts are empty, and a projection of
+    it would present no contact as though it were a reveal.
     """
 
+    if record.payloads_deleted_at is not None:
+        raise IntroductionPayloadsDeletedError(record.payloads_deleted_at)
     counterparty_contact = (
         record.seller_contact if for_role == "buyer" else record.buyer_contact
     )
-    return {
+    projection: dict[str, Any] = {
         "obligation_ref": record.obligation_ref,
         "mechanism": mechanism_id,
         "revealed": True,
         "introduction": dict(record.introduction_package),
         "counterparty_contact": dict(counterparty_contact),
     }
+    if retention is not None:
+        projection["retention"] = dict(retention)
+    return projection
 
 
 class IntroductionRouteService:
@@ -180,6 +226,7 @@ class IntroductionRouteService:
         seller_contact: Mapping[str, str],
         mechanism_id: str = MECHANISM,
         deliver: DeliverIntroduction | None = None,
+        disclosure: IntroductionDisclosure | None = None,
     ) -> None:
         self._callbacks = callbacks
         self._seller_contact = validate_contact_payload(seller_contact)
@@ -187,6 +234,7 @@ class IntroductionRouteService:
             raise ValueError("introduction reveal requires a seller contact payload")
         self._mechanism_id = mechanism_id
         self._deliver = deliver
+        self._disclosure = disclosure
 
     async def _prepare(
         self,
@@ -224,7 +272,23 @@ class IntroductionRouteService:
             record,
             for_role="buyer" if viewer == buyer_principal else "seller",
             mechanism_id=self._mechanism_id,
+            retention=self._disclosure() if self._disclosure is not None else None,
         )
+
+    @staticmethod
+    def _deleted(payloads_deleted_at: str) -> IntroductionRouteError:
+        return IntroductionRouteError(
+            410, introduction_payloads_deleted_detail(payloads_deleted_at)
+        )
+
+    async def _complete(self, agreement: IntroductionAgreement) -> None:
+        try:
+            await self._callbacks.complete(agreement)
+        except Exception as exc:
+            raise IntroductionRouteError(
+                503,
+                "introduction completion is temporarily unavailable",
+            ) from exc
 
     async def start(
         self,
@@ -244,30 +308,32 @@ class IntroductionRouteService:
         replay = self._replay(auth)
         if replay is not None:
             return replay
-        # "First reveal" has to be observed before persisting, because persist
-        # is idempotent: a repeat start with a fresh request id is not a replay
-        # and returns the same record, and delivering again for it would tell
-        # the seller a second time about one introduction.
-        already_revealed = (
-            self._deliver is not None
-            and await self._callbacks.load(agreement.obligation_ref) is not None
-        )
+        # The record is read before persisting for two reasons. "First reveal"
+        # has to be observed before persisting, because persist is idempotent:
+        # a repeat start with a fresh request id is not a replay and returns
+        # the same record, and delivering again for it would tell the seller a
+        # second time about one introduction. And a redacted record must stop
+        # the start before anything is persisted or delivered.
+        existing = await self._callbacks.load(agreement.obligation_ref)
+        if existing is not None and existing.payloads_deleted_at is not None:
+            # Completion still runs: it is idempotent, and it is how a deal
+            # whose earlier completion failed converges after deletion.
+            await self._complete(agreement)
+            raise self._deleted(existing.payloads_deleted_at)
         try:
             record = await self._callbacks.persist(
                 agreement,
                 start.contact_payload,
                 self._seller_contact,
             )
+        except IntroductionPayloadsDeletedError as exc:
+            # Redacted between the read above and the persist.
+            await self._complete(agreement)
+            raise self._deleted(exc.payloads_deleted_at) from exc
         except ValueError as exc:
             raise IntroductionRouteError(409, str(exc)) from exc
-        try:
-            await self._callbacks.complete(agreement)
-        except Exception as exc:
-            raise IntroductionRouteError(
-                503,
-                "introduction completion is temporarily unavailable",
-            ) from exc
-        if not already_revealed:
+        await self._complete(agreement)
+        if existing is None:
             self._deliver_to_seller(record, agreement)
         return self._projection(
             record,
@@ -324,6 +390,8 @@ class IntroductionRouteService:
         record = await self._callbacks.load(agreement.obligation_ref)
         if record is None:
             raise IntroductionRouteError(409, "introduction has not been started")
+        if record.payloads_deleted_at is not None:
+            raise self._deleted(record.payloads_deleted_at)
         return self._projection(
             record,
             viewer=auth.principal,
@@ -332,13 +400,18 @@ class IntroductionRouteService:
 
 
 __all__ = [
+    "INTRODUCTION_PAYLOADS_DELETED",
     "AuthorizedIntroductionRequest",
     "DeliverIntroduction",
     "IntroductionAgreement",
+    "IntroductionDisclosure",
+    "IntroductionPayloadsDeletedError",
     "IntroductionRecord",
     "IntroductionRouteCallbacks",
     "IntroductionRouteError",
     "IntroductionRouteService",
     "IntroductionStart",
+    "LoadIntroduction",
+    "introduction_payloads_deleted_detail",
     "introduction_projection",
 ]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 from typing import Any
 
@@ -9,11 +10,13 @@ import pytest
 from market_contact_exchange import (
     AuthorizedIntroductionRequest,
     IntroductionAgreement,
+    IntroductionPayloadsDeletedError,
     IntroductionRecord,
     IntroductionRouteCallbacks,
     IntroductionRouteError,
     IntroductionRouteService,
     IntroductionStart,
+    introduction_projection,
 )
 from market_identity import Identity, IdentityScheme
 
@@ -76,6 +79,8 @@ class Harness:
         )
         existing = self.records.get(agreement.obligation_ref)
         if existing is not None:
+            if existing.payloads_deleted_at is not None:
+                raise IntroductionPayloadsDeletedError(existing.payloads_deleted_at)
             if existing != record:
                 raise ValueError(
                     "introduction already revealed with different contact payloads"
@@ -90,7 +95,17 @@ class Harness:
     async def complete(self, agreement: IntroductionAgreement) -> None:
         self.completions.append(agreement.obligation_ref)
 
-    def service(self, deliver=None) -> IntroductionRouteService:
+    def redact(self, deleted_at: str = "2026-10-01T12:00:00Z") -> None:
+        record = self.records[_OBLIGATION_REF]
+        self.records[_OBLIGATION_REF] = record.model_copy(
+            update={
+                "buyer_contact": {},
+                "seller_contact": {},
+                "payloads_deleted_at": deleted_at,
+            }
+        )
+
+    def service(self, deliver=None, disclosure=None) -> IntroductionRouteService:
         return IntroductionRouteService(
             callbacks=IntroductionRouteCallbacks(
                 prepare=self.prepare,
@@ -101,6 +116,7 @@ class Harness:
             ),
             seller_contact=dict(_SELLER_CONTACT),
             deliver=deliver,
+            disclosure=disclosure,
         )
 
 
@@ -256,3 +272,159 @@ async def test_no_delivery_configured_reads_no_record_and_changes_nothing() -> N
 
     assert projection["revealed"] is True
     assert harness.completions == [_OBLIGATION_REF]
+
+
+_DISCLOSURE = {
+    "window_seconds": 2592000,
+    "basis": "current_policy",
+    "scope": "introduction_record",
+}
+_DELETED = {
+    "code": "introduction_payloads_deleted",
+    "payloads_deleted_at": "2026-10-01T12:00:00Z",
+}
+
+
+def test_the_projection_refuses_a_redacted_record() -> None:
+    record = IntroductionRecord(
+        obligation_ref=_OBLIGATION_REF,
+        agreement_ref="neg-1",
+        buyer_contact={},
+        seller_contact={},
+        payloads_deleted_at="2026-10-01T12:00:00Z",
+    )
+    with pytest.raises(IntroductionPayloadsDeletedError):
+        introduction_projection(record, for_role="seller")
+
+
+async def test_the_reveal_carries_the_disclosure_when_one_is_provided() -> None:
+    harness = Harness()
+    calls: list[int] = []
+
+    def disclosure() -> dict[str, Any]:
+        calls.append(1)
+        return dict(_DISCLOSURE)
+
+    service = harness.service(disclosure=disclosure)
+    started = await service.start({"principal": BUYER}, _start())
+    read = await service.read({"principal": SELLER}, _OBLIGATION_REF)
+    assert started["retention"] == _DISCLOSURE
+    assert read["retention"] == _DISCLOSURE
+    # Read from the provider at each reveal, never captured once.
+    assert len(calls) == 2
+
+
+async def test_the_reveal_omits_the_disclosure_without_a_provider() -> None:
+    projection = await Harness().service().start({"principal": BUYER}, _start())
+    assert "retention" not in projection
+
+
+async def test_a_read_after_deletion_answers_the_deleted_outcome() -> None:
+    harness = Harness()
+    service = harness.service()
+    await service.start({"principal": BUYER}, _start())
+    harness.redact()
+    for party in (BUYER, SELLER):
+        with pytest.raises(IntroductionRouteError) as caught:
+            await service.read({"principal": party}, _OBLIGATION_REF)
+        assert caught.value.status_code == 410
+        assert caught.value.detail == _DELETED
+
+
+async def test_a_start_after_deletion_completes_but_persists_and_delivers_nothing() -> None:
+    harness = Harness()
+    delivered: list[Any] = []
+    service = harness.service(deliver=lambda projection, agreement: delivered.append(1))
+    await service.start({"principal": BUYER}, _start())
+    harness.redact()
+    harness.completions.clear()
+    with pytest.raises(IntroductionRouteError) as caught:
+        await service.start({"principal": BUYER}, _start())
+    assert caught.value.status_code == 410
+    assert caught.value.detail == _DELETED
+    assert harness.completions == [_OBLIGATION_REF]
+    assert harness.records[_OBLIGATION_REF].buyer_contact == {}
+    assert delivered == [1]
+
+
+async def test_a_start_after_deletion_reports_unavailable_completion() -> None:
+    harness = Harness()
+    service = harness.service()
+    await service.start({"principal": BUYER}, _start())
+    harness.redact()
+
+    async def failing(agreement: IntroductionAgreement) -> None:
+        raise RuntimeError("settlement store unavailable")
+
+    harness.complete = failing  # type: ignore[method-assign]
+    with pytest.raises(IntroductionRouteError) as caught:
+        await harness.service().start({"principal": BUYER}, _start())
+    assert caught.value.status_code == 503
+
+
+async def test_a_redaction_racing_a_start_answers_the_deleted_outcome() -> None:
+    harness = Harness()
+    await harness.service().start({"principal": BUYER}, _start())
+    delivered: list[Any] = []
+    original_load = harness.load
+
+    async def stale_load(obligation_ref: str) -> IntroductionRecord | None:
+        # The start reads the record, then the sweep redacts it before persist.
+        record = await original_load(obligation_ref)
+        harness.redact()
+        return record
+
+    harness.load = stale_load  # type: ignore[method-assign]
+    harness.completions.clear()
+    service = harness.service(deliver=lambda projection, agreement: delivered.append(1))
+    with pytest.raises(IntroductionRouteError) as caught:
+        await service.start({"principal": BUYER}, _start())
+    assert caught.value.status_code == 410
+    assert harness.completions == [_OBLIGATION_REF]
+    assert delivered == []
+
+
+async def test_a_deletion_committing_during_a_first_reveal_does_not_recall_it() -> None:
+    """A reveal is ordered by its persist; deletion bounds only what follows.
+
+    The start persists, then waits on completion while a deletion commits. The
+    start finishes answering and delivering the reveal it made before the
+    deletion; every later read and start answers the deleted outcome.
+    """
+    harness = Harness()
+    delivered: list[str] = []
+    completing = asyncio.Event()
+    release = asyncio.Event()
+    original_complete = harness.complete
+
+    async def held_complete(agreement: IntroductionAgreement) -> None:
+        completing.set()
+        await release.wait()
+        await original_complete(agreement)
+
+    harness.complete = held_complete  # type: ignore[method-assign]
+    service = harness.service(
+        deliver=lambda projection, agreement: delivered.append(
+            projection["obligation_ref"]
+        )
+    )
+
+    start = asyncio.create_task(service.start({"principal": BUYER}, _start()))
+    await asyncio.wait_for(completing.wait(), timeout=5)
+    harness.redact()
+    release.set()
+    revealed = await start
+
+    assert revealed["revealed"] is True
+    assert revealed["counterparty_contact"] == _SELLER_CONTACT
+    assert delivered == [_OBLIGATION_REF]
+
+    harness.complete = original_complete  # type: ignore[method-assign]
+    for attempt in (
+        service.read({"principal": BUYER}, _OBLIGATION_REF),
+        service.start({"principal": BUYER}, _start()),
+    ):
+        with pytest.raises(IntroductionRouteError) as caught:
+            await attempt
+        assert caught.value.status_code == 410
+    assert delivered == [_OBLIGATION_REF]

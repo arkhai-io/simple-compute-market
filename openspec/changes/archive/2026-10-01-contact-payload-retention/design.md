@@ -206,6 +206,15 @@ its preview reports what the next cycle would delete without deleting it. A
 partially failed sweep converges on retry because redacting an already-redacted row
 returns `False` rather than raising.
 
+The preview is a snapshot, not a reservation. Preview and step each read the clock, so
+an introduction can cross the window between them. The guarantee is therefore a
+superset: the step deletes every previewed introduction still unredacted, plus any that
+expired since. That holds under the batch limit too, because selection runs oldest
+first and anything newly eligible is younger than everything previewed. A step that
+consumed a cutoff returned by its preview would make the two exact, but needs the kit
+loop controller's step to take arguments for one loop's benefit, and an operator gains
+nothing from exactness that the superset does not already give.
+
 The sweep loop registers with the kit loop controller, so the lifecycle pause holds
 it and its step and preview are reachable while held.
 
@@ -279,31 +288,26 @@ introduction evidence on this scenario.
 
 ### The authenticated replay store is out of scope
 
-Every reveal response, carrying the counterparty's contact, is also recorded in
-`core_storefront`'s `auth_replay_reservations.response_body` so that an exact retry is
-answered identically, and is kept indefinitely. Redaction does not reach it: the table
-records no operation or resource, so its rows cannot be attributed to an introduction.
+`core_storefront`'s `auth_replay_reservations` records the status and body of every
+authenticated response the storefront answers, so that an exact retry can be answered
+identically, and never deletes a row. Introduction reveals and reads are both
+authenticated, so each one leaves a copy of a counterparty's contact there. Redaction
+does not reach those copies: the table records no operation or resource, so its rows
+cannot be attributed to an introduction.
 
-The rows cannot simply be pruned after a freshness horizon either. Replay identity
-deliberately excludes the timestamp and proof so that a caller can re-sign the same
-request after a restart, which is how buyer run recovery resumes, so a row remains
-consultable — and remains the evidence for refusing a changed reuse of its request id
-— for as long as a caller may recover.
+Bounding them for this mechanism alone would be the wrong fix. Every authority's
+replay store grows without bound, the storefront and registry both keep every response
+body indefinitely, and most routes — introduction start and read among them — are
+idempotent in their own domain, so re-running them answers an exact retry with the
+*current* state, which a stored body cannot. That is a redesign of the replay contract
+for every authority, owned by `redesign-authenticated-replay-state`, which records the
+evidence. Once introduction routes resolve exact retries by re-running and record no
+body there, the replay store stops holding contact data.
 
-Attributing replay rows, recording a contact-free body for introduction operations, or
-linking reveal responses to their introductions would each solve the subset of rows
-this mechanism produces. How long recorded outcomes are kept and what they may hold is
-a question about every authenticated response in every storefront, and the replay
-stores of other authorities are about to retain outcomes as well
-(`retain-authenticated-request-outcomes`). It deserves one cohesive answer rather than
-a mechanism-specific exception, so this change does not attempt it and records it as
-unowned work.
-
-The consequence is stated rather than hidden. The retention window governs the
-introduction record. The disclosure's `scope` says exactly that, so it makes no claim
-about the replay store; an exact retry of a request answered before deletion may still
-return the response recorded at the time, contact included, until the replay store is
-bounded.
+The consequence until then is stated rather than hidden. The retention window governs
+the introduction record. The disclosure's `scope` says exactly that, so it makes no
+claim about the replay store; an exact retry of a request answered before deletion may
+still return the response recorded at the time, contact included.
 
 ### Aliasing is adjacent and out of scope
 
@@ -347,15 +351,67 @@ Settled while planning, from the code each touches.
   pool override whose clauses are a single introduction option, so the existing
   publication and deal scenarios' listings and assertions are untouched.
 
+### Implementation decisions
+
+Settled while implementing, where the code differed from what planning assumed.
+
+- **The sweep gates on entry.** Planning described the runner as "wait, then gate".
+  `market-composition` requires a loop to read its gate when it starts, because a
+  loop that sleeps first is invisible to a pause for its whole first interval. The
+  runner therefore follows the watchdog's shape: gate on entry, sweep once due — the
+  first sweep one interval after start, like the storefront's other loops — and wait
+  through the controller. An operator wanting a sweep sooner steps it.
+- **Operator deletion reports the tombstone's time.** `delete_one` answers whether
+  this call redacted and when the payloads were deleted, by this call or an earlier
+  one, and None when the deal never revealed an introduction. Converging rather than
+  failing is the spec's requirement; reporting which case occurred is what lets an
+  operator answer a request without a second query. The service takes the record
+  loader to do it.
+- **A reveal and a deletion are ordered by the persist.** An introduction is revealed
+  when it is persisted. A start that finds the payloads deleted — when it reads the
+  record, or when persisting is refused because a redaction landed in between —
+  completes the obligation and answers the deleted outcome rather than a conflict. A
+  start that persisted before the deletion committed preceded it, and finishes
+  answering and delivering its reveal even if the deletion commits while it is
+  completing. The alternative, fencing every start against every deletion, was
+  rejected: a per-introduction lock in the process would hold deletion behind
+  completion and stop holding as soon as a storefront runs a second worker;
+  re-reading before answering only narrows the window; and no database fence makes
+  an HTTP response atomic with a commit. The ordering costs nothing a party would
+  notice, since a start finishing a moment sooner would have produced the same
+  disclosure, and deletion already does not recall copies held by sinks or the
+  replay store.
+- **The operator deletion client is kit-owned.** It was first added to the core
+  storefront client, which review rejected: `ARCHITECTURE.md` keeps core to what every
+  market shares, and pool overrides set the precedent of a kit-owned typed extension
+  over core's generic `authenticated_request`. `IntroductionAdminClient` and its sync
+  twin live in `kit/contact-exchange` with the route path and operation name the
+  storefront route binds, so the two cannot drift. Core keeps only the generic
+  `disclosures` field on `HealthResponse`.
+- **The canonical client reads the disclosure as a typed field.** `HealthResponse`
+  gains `disclosures`, so a buyer and the end-to-end scenario read the window without
+  digging in `extra`. The administrator status is built from the same readiness and
+  carries it too; that is a superset, not a second disclosure surface.
+- **The scenario reveals through the production buyer transport.** The e2e image
+  installs no bare-metal buyer plugin. Negotiating through the canonical
+  `StorefrontClient` and revealing through `IntroductionTransport` keeps the
+  no-raw-calls rule and the cross-service contract without adding an e2e
+  dependency; the `market bare-metal` commands' handling of the deleted outcome is
+  proven by the buyer's own tests.
+- **The deleted outcome's code is a wire constant on both sides.** `core_buyer`
+  cannot import the mechanism kit, so it names `introduction_payloads_deleted` itself,
+  as it names every other route it calls.
+
 ## Risks / Trade-offs
 
 - **[A party is told one window and the policy changes]** → Accepted, and why the
   disclosure states current policy. The operator owns the data; no wording binds them.
 - **[Disclosure is read as covering copies held elsewhere]** → Why `scope` is stated
   explicitly and names only the introduction record.
-- **[Recorded replay responses outlive the window]** → Accepted for this change and
-  recorded as unowned work: the replay store needs one bound for every authenticated
-  response, not an exception for this mechanism.
+- **[Recorded replay responses outlive the window]** → Accepted for this change. The
+  replay store's unbounded state is a problem for every authority, owned by
+  `redesign-authenticated-replay-state`; see "The authenticated replay store is out of
+  scope".
 - **[The window is discoverable per storefront, not filterable]** → Accepted for this
   version; publisher metadata is the eventual answer.
 - **[Tombstones accumulate]** → One small row per revealed introduction. Removal is

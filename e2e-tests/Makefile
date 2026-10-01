@@ -114,7 +114,7 @@ E2E_MODULE ?= e2e_deal or e2e_deal_buyer_cli or e2e_buy or multi_registry \
               or e2e_credits_deal or e2e_listing_shapes
 # The bare-metal lane's scenarios. `e2e_bare_metal_deal` is in neither lane: it
 # needs a real whole host to SSH into, which the pipeline never has.
-E2E_BARE_METAL_MODULE ?= e2e_bare_metal_publication
+E2E_BARE_METAL_MODULE ?= e2e_bare_metal_publication or e2e_bare_metal_introduction
 
 test-buyer-machine:
 	docker run --rm \

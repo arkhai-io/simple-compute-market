@@ -109,10 +109,10 @@ None.
 - Do not change the reveal surface's authentication, idempotency, or wire shape
   beyond adding the disclosure object and the deleted outcome.
 - Do not bound or redact the responses the storefront records for exact retry.
-  Every reveal response is recorded there with the counterparty's contact and kept
-  indefinitely; how long recorded outcomes are kept and what they may hold needs one
-  answer for every authenticated response, not an exception for this mechanism. It
-  is recorded as unowned work, and the disclosure does not claim to cover it.
+  Every authenticated introduction response, reveals and reads alike, is recorded
+  there with the counterparty's contact and kept indefinitely. The replay store's
+  unbounded state is a design problem for every authority, owned by
+  `redesign-authenticated-replay-state`; the disclosure does not claim to cover it.
 - Do not claim the disclosed window covers copies held outside the introduction
   record, and do not present it as a commitment.
 

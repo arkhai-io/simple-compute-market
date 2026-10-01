@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Literal
 
 from market_core.schemas import SettlementOption, derive_settlement_option_id
 from market_settlement_runtime import (
@@ -35,6 +35,12 @@ _MAX_TERMS_CHARS = 4000
 _MAX_PAYLOAD_ENTRIES = 16
 _MAX_PAYLOAD_KEY_CHARS = 64
 _MAX_PAYLOAD_VALUE_CHARS = 512
+
+#: The retention window's literal for "never delete". A sentinel rather than a
+#: null because TOML, which some storefronts are configured in, has no null.
+INDEFINITE_RETENTION = "indefinite"
+DEFAULT_RETENTION_SECONDS = 30 * 24 * 60 * 60
+DEFAULT_RETENTION_SWEEP_INTERVAL_SECONDS = 60 * 60
 _CLAUSE_OPERATORS = frozenset(
     {
         ComparisonOperator.EQUAL,
@@ -99,6 +105,13 @@ class ContactSettlementConfig(BaseModel):
     ``contact_payload`` is the seller's held contact data: bounded, opaque,
     and revealed only through the authenticated introduction surface after
     acceptance. It must never reach readiness details, options, or listings.
+
+    ``retention_seconds`` is how long revealed payloads are kept, counted from
+    the reveal: a policy over everything the storefront holds, read from this
+    configuration wherever it applies and never recorded per introduction, so
+    a shortened window applies to introductions revealed before it. Zero is
+    refused, so a typo cannot delete introductions moments after reveal; an
+    operator wanting no deletion says ``indefinite``.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
@@ -113,6 +126,26 @@ class ContactSettlementConfig(BaseModel):
         default_factory=dict,
         json_schema_extra={"roles": ["seller"]},
     )
+    retention_seconds: int | Literal["indefinite"] = Field(
+        default=DEFAULT_RETENTION_SECONDS,
+        json_schema_extra={"roles": ["seller"]},
+    )
+    retention_sweep_interval_seconds: int = Field(
+        default=DEFAULT_RETENTION_SWEEP_INTERVAL_SECONDS,
+        gt=0,
+        json_schema_extra={"roles": ["seller"]},
+    )
+
+    @field_validator("retention_seconds")
+    @classmethod
+    def require_positive_window(
+        cls, value: int | Literal["indefinite"]
+    ) -> int | Literal["indefinite"]:
+        if value != INDEFINITE_RETENTION and value <= 0:
+            raise ValueError(
+                "retention_seconds must be positive or 'indefinite'"
+            )
+        return value
 
     @field_validator("contact_payload")
     @classmethod

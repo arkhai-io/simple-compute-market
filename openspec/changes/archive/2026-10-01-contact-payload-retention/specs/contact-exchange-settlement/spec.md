@@ -58,10 +58,19 @@ introduction from its introduction record:
 
 - an authenticated read MUST answer with a stable deleted outcome that states when the
   payloads were deleted;
-- an introduction start MUST still drive the deal's obligation to its terminal state,
-  then answer the same deleted outcome, and MUST NOT persist contact data or deliver
-  the introduction;
+- an introduction start that finds the payloads deleted, whether when it reads the
+  introduction or when it persists one, MUST still drive the deal's obligation to its
+  terminal state, then answer the same deleted outcome, and MUST NOT persist contact
+  data or deliver the introduction;
 - the reveal projection MUST refuse to render a redacted introduction.
+
+An introduction is revealed when it is persisted, and a reveal and a deletion are
+ordered by that moment. A start that persisted, or found persisted, the complete
+introduction before a deletion committed is a reveal that preceded the deletion: it
+MAY complete, answer the reveal, and deliver it, even if the deletion commits while it
+is still in progress. Deletion bounds what the storefront holds from the moment it
+commits; it does not recall a reveal already made, just as it does not recall copies
+already delivered to either side's sinks.
 
 #### Scenario: Deletion is repeated
 
@@ -82,6 +91,14 @@ introduction from its introduction record:
   deal whose payloads have been deleted
 - **THEN** the storefront answers the deleted outcome
 - **AND** no contact payload is persisted and the seller receives no delivery
+
+#### Scenario: A deletion overlaps a start that has already revealed
+
+- **WHEN** an introduction start has persisted the complete introduction and is still
+  completing the deal's obligation when a deletion of its payloads commits
+- **THEN** the start completes and answers the reveal, and delivers it if it is the
+  first reveal
+- **AND** every later read or start answers the deleted outcome
 
 #### Scenario: A deleted introduction cannot be restored or removed
 
@@ -111,6 +128,13 @@ and through an operator-invoked deletion of one introduction, and both MUST invo
 shared deletion operation. The scheduled sweep MUST be a storefront lifecycle loop that
 the lifecycle pause holds and an operator can step, and an operator MUST be able to
 preview what its next cycle would delete without deleting anything.
+
+A preview reports the introductions eligible when it is taken. Eligibility only grows
+with time, so the next cycle MUST delete every previewed introduction whose payloads
+are still present, and MAY also delete introductions that became eligible after the
+preview. A cycle bounded to a batch MUST select the longest-revealed introductions
+first, so a previewed introduction is never displaced by one that became eligible
+later.
 
 Every storefront that composes the mechanism MUST run the sweep, MUST serve the
 operator-invoked deletion, and MUST serve both disclosures this capability requires.
@@ -142,7 +166,8 @@ operator-invoked deletion, and MUST serve both disclosures this capability requi
 - **WHEN** the lifecycle loops are held and an operator previews the retention sweep,
   then runs one cycle of it
 - **THEN** the preview reports the eligible introductions without deleting them
-- **AND** the cycle deletes exactly those introductions' payloads
+- **AND** the cycle deletes the payloads of every previewed introduction not deleted
+  in the meantime, together with any that became eligible after the preview
 
 #### Scenario: A storefront composes the mechanism
 

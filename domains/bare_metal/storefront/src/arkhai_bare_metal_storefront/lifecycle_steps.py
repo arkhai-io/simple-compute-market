@@ -13,6 +13,10 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from core_storefront.stage_log import stage_event
+from market_contact_exchange import (
+    INTRODUCTION_RETENTION_LOOP,
+    INTRODUCTION_RETENTION_ROUTE,
+)
 from market_storefront_kit import LifecycleRouteError, sweep_stale_negotiations
 from pydantic_core import to_jsonable_python
 
@@ -24,6 +28,7 @@ logger = logging.getLogger(__name__)
 NEGOTIATION_WATCHDOG = "negotiation_watchdog"
 SETTLEMENT_SERVICING = "settlement_servicing"
 PUBLICATION = "publication"
+INTRODUCTION_RETENTION = INTRODUCTION_RETENTION_LOOP
 
 
 def register_bare_metal_lifecycle_steps(runtime: BareMetalStorefrontRuntime) -> None:
@@ -75,8 +80,20 @@ def register_bare_metal_lifecycle_steps(runtime: BareMetalStorefrontRuntime) -> 
             SETTLEMENT_SERVICING, route="settlement-servicing", step=settlement_servicing_step
         )
 
+    retention = runtime.introduction_retention()
+    if retention is not None:
+        # Registered with its preview, so an operator holding the loops can
+        # see which introductions the next sweep would delete before running it.
+        loops.register_step(
+            INTRODUCTION_RETENTION,
+            route=INTRODUCTION_RETENTION_ROUTE,
+            step=retention.sweep_once,
+            preview=retention.preview,
+        )
+
 
 __all__ = [
+    "INTRODUCTION_RETENTION",
     "NEGOTIATION_WATCHDOG",
     "PUBLICATION",
     "SETTLEMENT_SERVICING",

@@ -17,6 +17,14 @@ from core_storefront.models.system_models import ProjectionFamilyStatus
 from market_identity import Identity, IdentityScheme, Signer, TrustedIdentitySet
 from market_alkahest import create_alkahest_registration
 from market_core import MarketDomainContract, validate_domain_contract
+from market_contact_exchange import (
+    MECHANISM as CONTACT_MECHANISM,
+)
+from market_contact_exchange import (
+    ContactSettlementConfig,
+    IntroductionRetentionPolicy,
+    IntroductionRetentionService,
+)
 from market_hosted_settlement import PortableRemoteFulfillmentRef, canonical_json
 from market_settlement_runtime import (
     SettlementRuntime,
@@ -220,6 +228,35 @@ class BareMetalStorefrontRuntime:
             fulfillment_client=self.fulfillment_client,
         )
 
+    def contact_settlement_config(self) -> ContactSettlementConfig | None:
+        """The contact-exchange section when the mechanism is enabled, else None."""
+        composition = self.settlement_composition
+        if composition is None or CONTACT_MECHANISM not in composition.enabled_mechanisms:
+            return None
+        section = composition.config.mechanism_config("contact")
+        return section if isinstance(section, ContactSettlementConfig) else None
+
+    def introduction_retention(self) -> IntroductionRetentionService | None:
+        """Introduction retention under the running configuration, or None.
+
+        Present whenever contact exchange is enabled, whether or not a seller
+        contact is configured to reveal: payloads already revealed are held
+        under the window either way. Built from configuration on each call, so
+        the sweep, its step and preview, the operator deletion, and both
+        disclosures all read the same policy.
+        """
+        section = self.contact_settlement_config()
+        if section is None:
+            return None
+        return IntroductionRetentionService(
+            policy=IntroductionRetentionPolicy.from_config(section),
+            select_expired=self.db.select_expired_contact_introductions,
+            delete_payloads=self.db.delete_contact_introduction_payloads,
+            load=lambda obligation_ref: self.db.load_contact_introduction(
+                obligation_ref=obligation_ref
+            ),
+        )
+
     def pool_override_service(self) -> PoolOverrideService | None:
         """The storefront's pool-override service, or ``None`` without sites.
 
@@ -297,7 +334,21 @@ class BareMetalStorefrontRuntime:
             "sites": [binding.diagnostic() for binding in self.site_bindings],
             "resource_count": resource_count,
             "site_projections": await self._site_projections(),
+            "disclosures": self._disclosures(),
         }
+
+    def _disclosures(self) -> dict[str, dict[str, object]]:
+        """Storefront policies a counterparty may read before committing data.
+
+        Public and unauthenticated, because the point is that a buyer can read
+        them before handing over anything. The introduction retention window is
+        here because the buyer's contact accompanies the introduction start, so
+        disclosing it only in the reveal would be too late to decline.
+        """
+        retention = self.introduction_retention()
+        if retention is None:
+            return {}
+        return {"introduction_retention": retention.disclosure()}
 
     async def _site_projections(self) -> dict[str, dict[str, dict[str, object]]]:
         """Each trusted site's resource-pool projection as fetched just now.

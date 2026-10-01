@@ -13,6 +13,8 @@ from market_contact_exchange import (
     AuthorizedIntroductionRequest,
     DeliverIntroduction,
     IntroductionAgreement,
+    IntroductionDisclosure,
+    IntroductionPayloadsDeletedError,
     IntroductionRecord,
     IntroductionRouteCallbacks,
     IntroductionRouteService,
@@ -72,6 +74,7 @@ def build_bare_metal_introduction_service(
         Awaitable[AuthorizedIntroductionRequest],
     ],
     deliver: DeliverIntroduction | None = None,
+    disclosure: IntroductionDisclosure | None = None,
 ) -> IntroductionRouteService:
     """Install bare-metal accepted-state interpretation into the reveal service."""
 
@@ -158,6 +161,7 @@ def build_bare_metal_introduction_service(
         ),
         seller_contact=seller_contact,
         deliver=deliver,
+        disclosure=disclosure,
     )
 
 
@@ -169,12 +173,15 @@ async def load_revealed_introduction(
 
     The path an operator's re-delivery takes: it reads the durable reveal
     rather than reconstructing one, so a re-send can never invent contact data
-    that was never exchanged.
+    that was never exchanged, and once the payloads are deleted there is
+    nothing it may send.
     """
 
     record = await db.load_contact_introduction(obligation_ref=obligation_ref)
     if record is None:
         raise ValueError("introduction has not been revealed")
+    if record.payloads_deleted_at is not None:
+        raise IntroductionPayloadsDeletedError(record.payloads_deleted_at)
     agreement, _ = await _accepted_introduction(
         db,
         record.agreement_ref,

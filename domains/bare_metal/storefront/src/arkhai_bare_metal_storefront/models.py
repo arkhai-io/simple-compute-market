@@ -116,6 +116,10 @@ class BareMetalHealthResponse(BaseModel):
     site_projections: dict[str, dict[str, ProjectionFamilyStatus]] | None = None
     # Each stored pool override's address and state; administrator status only.
     pool_overrides: list[dict[str, str]] | None = None
+    # Storefront policies disclosed to anyone before they commit data, keyed by
+    # policy. ``introduction_retention`` is present only while contact exchange
+    # is enabled.
+    disclosures: dict[str, dict[str, object]] = Field(default_factory=dict)
 
 
 class BareMetalFulfillRequest(BaseModel):

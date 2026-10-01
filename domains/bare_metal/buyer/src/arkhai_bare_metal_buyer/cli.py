@@ -32,6 +32,7 @@ from core_buyer import (
     report_delivery,
     resolve_buyer_action_policy,
 )
+from core_buyer.introductions import IntroductionPayloadsDeleted
 from core_buyer.negotiation_client import negotiate_with_seller
 from core_buyer.profile_service import BuyerProfileService
 from market_contact_exchange import MECHANISM as CONTACT_MECHANISM
@@ -811,6 +812,28 @@ def _seller_principal(deal: Any) -> Any:
     return identities[0] if identities else None
 
 
+def _report_deleted(deleted: IntroductionPayloadsDeleted, run_id: str, identity: Any) -> None:
+    """Report that the storefront deleted this introduction's contact payloads.
+
+    An outcome, not a failure: the deal stands, but the storefront holds
+    neither party's contact any more, so there is nothing to print as a reveal
+    and nothing to deliver. Copies this buyer already delivered to its own
+    sinks are untouched.
+    """
+
+    log = open_run_log(
+        run_id,
+        signer=identity.signer,
+        profile_id=identity.profile_id,
+    )
+    log.event(
+        "introduction_payloads_deleted",
+        obligation_ref=deleted.obligation_ref,
+        payloads_deleted_at=deleted.payloads_deleted_at,
+    )
+    _json(deleted.outcome())
+
+
 @bare_metal_app.command("introduce")
 def introduce(
     run_id: str = typer.Option(...),
@@ -829,11 +852,15 @@ def introduce(
     deal, identity, transport, obligation_ref = _recovered_introduction(
         run_id, config
     )
-    projection = transport.start(
-        negotiation_id=deal.negotiation_id,
-        obligation_ref=obligation_ref,
-        contact_payload=_parse_contact(contact),
-    )
+    try:
+        projection = transport.start(
+            negotiation_id=deal.negotiation_id,
+            obligation_ref=obligation_ref,
+            contact_payload=_parse_contact(contact),
+        )
+    except IntroductionPayloadsDeleted as deleted:
+        _report_deleted(deleted, run_id, identity)
+        return
     log = open_run_log(
         run_id,
         signer=identity.signer,
@@ -860,7 +887,11 @@ def read_introduction(
     deal, identity, transport, obligation_ref = _recovered_introduction(
         run_id, config
     )
-    projection = transport.read(obligation_ref=obligation_ref)
+    try:
+        projection = transport.read(obligation_ref=obligation_ref)
+    except IntroductionPayloadsDeleted as deleted:
+        _report_deleted(deleted, run_id, identity)
+        return
     _json(projection)
     if sinks is not None:
         log = open_run_log(
