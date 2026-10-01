@@ -682,20 +682,11 @@ A storefront composing `contact-exchange.v1` configures it in the peer
 | `retention_seconds` | `2592000` (30 days) | How long both contact payloads of a revealed introduction are kept, counted from the reveal. A positive integer, or `"indefinite"` for no deletion. Zero and negative values are refused, so a typo cannot delete introductions moments after reveal. |
 | `retention_sweep_interval_seconds` | `3600` | How often the retention sweep runs. Positive. |
 
-The window is current policy, not a term of any deal: a storefront restarted with
-a shorter window deletes, on its next sweep, introductions revealed under the
-longer one. The sweep is the `introduction_retention` loop, held by the lifecycle
-pause and stepped and previewed under the route name `introduction-retention`. An
-operator deletes one introduction's payloads early with
-`DELETE /api/v1/admin/introductions/{obligation_ref}/payloads`, through
-`kit/contact-exchange`'s typed operator client. Deletion leaves the deal and its
-obligation record in place, and re-delivery of a deleted introduction is refused
-without contacting any sink.
-
-The window is disclosed publicly as `disclosures.introduction_retention` on the
-storefront's `/health` readiness projection and again in every reveal. Its `scope`
-is the introduction record: copies already delivered to either side's sinks, and
-responses the authenticated replay store recorded for exact retry, are outside it.
+The window is current policy, not a term of any deal: a storefront restarted with a
+shorter window deletes, on its next sweep, every introduction already past the new
+window, including those revealed under the longer one. The window is published to
+buyers; deletion and disclosure behaviour are specified in
+[contact-exchange settlement](../../openspec/specs/contact-exchange-settlement/spec.md).
 
 ### Bare-metal hosted role configuration
 

@@ -139,7 +139,13 @@ In `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/` unless name
       imports so `--help` loads no runtime.
 - [x] 8.3 **Documentation compliance.** The aggregate, configuration-read window and
       the requirement that every composing storefront run retention are normative in
-      `contact-exchange-settlement`; rationale is in `design.md`.
+      `contact-exchange-settlement`; rationale is in `design.md`. Pre-closeout review
+      found the first promotion over-broad: `ARCHITECTURE.md` restated the
+      mechanism's lifecycle, `TESTING.md` the preview's guarantee, and
+      `DEPLOYMENT_AND_CONFIG.md` its API and disclosure behaviour. Each now holds
+      only what its placement-table row owns — the retention boundary and operation
+      name, the loop's test controls, and the settings with when a change takes
+      effect — and links to the spec for the rest.
 - [x] 8.4 **Narrative compression.** Task notes reduced to final behaviour and
       evidence; alternatives, review rationale, and the accepted risks are in
       `design.md`.
@@ -175,11 +181,11 @@ In `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/` unless name
 | The scheduled sweep and the operator-invoked path share one deletion operation | `openspec/specs/contact-exchange-settlement/spec.md` |
 | The window is disclosed before a buyer commits contact data and again at reveal, as current policy scoped to the introduction record | `openspec/specs/contact-exchange-settlement/spec.md` |
 | Every storefront composing the mechanism runs the sweep and serves both disclosures | `openspec/specs/contact-exchange-settlement/spec.md` |
-| The retention sweep is a held and stepped storefront loop | `docs/development/TESTING.md` |
-| The retention boundary and the deletion operation's name | `docs/development/ARCHITECTURE.md#settlement-configuration` |
-| A reveal is ordered by its persist; deletion does not recall a reveal already made | `openspec/specs/contact-exchange-settlement/spec.md`, `openspec/specs/introduction-delivery/spec.md`, `docs/development/ARCHITECTURE.md#settlement-configuration` |
-| A preview is a snapshot; the next step deletes every previewed introduction still present, plus any expired since | `openspec/specs/contact-exchange-settlement/spec.md`, `docs/development/TESTING.md` |
-| Retention settings, the operator route, and the disclosure's scope | `docs/development/DEPLOYMENT_AND_CONFIG.md#contact-exchange-retention` |
+| The retention sweep is a held and stepped storefront loop, with a dry run | `docs/development/TESTING.md` |
+| The retention boundary and the deletion operation's name, linking to the contact-exchange spec for its semantics | `docs/development/ARCHITECTURE.md#settlement-configuration` |
+| A reveal is ordered by its persist; deletion does not recall a reveal already made | `openspec/specs/contact-exchange-settlement/spec.md`, `openspec/specs/introduction-delivery/spec.md` |
+| A preview is a snapshot; the next step deletes every previewed introduction still present, plus any expired since | `openspec/specs/contact-exchange-settlement/spec.md` |
+| Retention settings, their defaults, and when a changed window takes effect | `docs/development/DEPLOYMENT_AND_CONFIG.md#contact-exchange-retention` |
 | The operator deletion client is a kit-owned extension over core's generic transport | Temporary: follows the existing pool-overrides rule in `docs/development/ARCHITECTURE.md`; no new permanent text |
 | Goal 6 current state | `docs/development/ROADMAP.md` |
 | Campaign index rows | `openspec/changes/README.md` |
