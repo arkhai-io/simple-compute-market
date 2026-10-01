@@ -34,6 +34,13 @@ deployment boundary.
       names in `NegotiationDomainHooks`, that continue/advance carry a typed
       `proposal`, that `hold_ttl_seconds` still defaults to 0, and that
       `build_vm_accepted_artifacts` still derives the order from the listing record.
+- [ ] 2.1a **Decision gate.** Decide where a buyer reads a listing's rate structure,
+      and with what authority, per `design.md`'s "Where a buyer reads the rate
+      structure is a decision gate", taking `store-registry-listings-as-published`'s
+      accepted carrier policy as an input, and record the decision and reasoning in
+      `design.md`. If the decision needs the registry to keep a listing-level field,
+      record the dependency on that change here and in the campaign index before
+      any task relying on it starts.
 - [ ] 2.2 Add the revised-shape field as a child of `proposal`, typed as the existing
       `ProvisionTerms` envelope, to the continue/advance request models. The
       envelope stays opaque to core; the VM codec decodes its payload as a

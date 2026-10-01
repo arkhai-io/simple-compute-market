@@ -20,10 +20,11 @@ Verified against the tree at planning time; re-verify before implementing.
   mechanism-neutral `SettlementObligation` (`maker`, `claimant`, `amount`, `asset`,
   `expiration_unix`, `conditions`, `mechanism`, `params`). Interval escrows are
   generated deterministically from an accepted total, duration, and schedule.
-- `capacity-shape-pricing` gives each listing a per-dimension minimum rate structure
-  in the family-grouped capability shape, resolved through the site-scoped pool
-  override, the pool hint, and the configured default, with evaluation callable
-  outside the negotiation path. `negotiation-driven-capacity-resize` makes the
+- `capacity-shape-pricing` lets a seller state per-family rates under the family
+  each prices, resolved through the site-scoped pool override, the pool hint, and
+  the configured default, with an exact aggregator callable outside the negotiation
+  path. A shape-priced listing's rates are a storefront term of sale; the registry
+  receives only each option's composed rate. `negotiation-driven-capacity-resize` makes the
   negotiated quantity a multiplier over that structure in basis points, with every
   derived amount an exact integer.
 - `kit/alkahest` has no standing-account abstraction; "account" means an EOA
@@ -102,6 +103,17 @@ Alternatives:
   beside the lease field.
 - *Negotiating the hold rate.* Not planned. A negotiation-time hold must be priced at
   placement, before terms exist; a posted price is the only kind that can be.
+
+### Where a buyer reads the hold rate is a decision gate
+
+A posted hold rate is only a price a buyer agreed to if the buyer could read it
+before the hold was placed. The carriers are the same three
+`negotiation-driven-capacity-resize` weighs for the lease rate structure: the
+storefront's listing read with the rates bound into a signed response,
+`listing_resource`, or a registry listing-level field that depends on
+`store-registry-listings-as-published`. Task 1.3b decides it, with that change's
+accepted carrier policy as an input and consistently with the lease structure's
+carrier, since the hold rate sits beside the lease rate and falls back to it.
 
 ### Charging reuses the obligation lifecycle but not the interval generation rule
 

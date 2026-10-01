@@ -26,11 +26,16 @@ Verified against the tree at planning time; re-verify before implementing.
 - `kit/site`'s `resize_reservation` supersedes a reservation with a new shape
   under the same negotiation. It has no caller.
 - `kit/capability-shape` and `VM_CAPABILITY_SCHEMA` define the family-grouped
-  capability shape and the VM vocabulary. `capacity-shape-pricing` advertises a
-  per-dimension minimum rate structure on each listing and evaluates it for a
-  shape; `capacity-shape-envelope` supplies an admissibility predicate and
-  `negotiation-capacity-feasibility-probe` a non-consuming authoritative probe,
-  where a domain composes them.
+  capability shape and the VM vocabulary. `capacity-shape-pricing` lets a seller
+  state per-family rates; a shape-priced listing records its resolved rates on the
+  storefront's listing record, served by the storefront's unsigned listing read,
+  and publishes to the registry only each option's composed rate for the listing's
+  own shape. Its aggregator evaluates the rates for any shape exactly. A
+  flat-priced listing — one whose GPU family states no rates — has a clause rate
+  for its own shape and no family rates, so it cannot price a revised shape and is
+  shape-fixed by construction. `capacity-shape-envelope` supplies an
+  admissibility predicate and `negotiation-capacity-feasibility-probe` a
+  non-consuming authoritative probe, where a domain composes them.
 - `NegotiateContinueRequest` and `AdvanceRequest` in `core_storefront` carry
   no `extra="forbid"`; an undeclared top-level field is dropped. A core-level
   guard against that was tried and reverted: the risk is not a stray key but an
@@ -126,6 +131,27 @@ which is authoritative for both. It is not carried per round. Revisit trigger:
 the advertised structure ceasing to be authoritative for both parties (a seller
 repricing mid-negotiation), at which point the quote would have to travel.
 
+### Where a buyer reads the rate structure is a decision gate
+
+The quote for a revised shape is derived from the listing's rate structure, so a
+buyer must be able to read that structure with the authority the quote needs. Three
+carriers are possible:
+
+- the storefront's listing read, which exists today but is unsigned, with the
+  structure — or its digest — bound into a signed negotiation response so both
+  parties derive the quote from the same committed rates;
+- `listing_resource`, following `asking_rate`'s precedent, which the registry
+  already stores and can filter;
+- a listing-level field at the registry, which the registry currently discards.
+
+The third depends on `store-registry-listings-as-published`, and that change's
+accepted carrier policy bears on the second as well: its review decides whether
+listing-level terms keep accumulating in `listing_resource`. This is therefore an
+explicit decision gate (task 2.1a), taken with that change's accepted design as an
+input. Whether any buyer needs the structure at discovery time, rather than once a
+negotiation opens, is part of the same decision. A storefront-served structure does
+not wait on the registry change's implementation.
+
 ### Evaluation order inside the seller's round
 
 For a round carrying a shape, the VM `evaluate_round` composition runs, in
@@ -198,8 +224,8 @@ drain.
 
 - **Should a seller be able to declare a listing shape-fixed** (no revised shape
   accepted), independently of the envelope? A pool with exactly one feasible
-  shape is fixed by construction; a seller policy that refuses every revised
-  shape achieves the rest. Leaning towards no declaration until a seller asks
+  shape is fixed by construction, and so is a flat-priced listing; a seller policy
+  that refuses every revised shape achieves the rest. Leaning towards no declaration until a seller asks
   for one.
 
 ## Design promotion record

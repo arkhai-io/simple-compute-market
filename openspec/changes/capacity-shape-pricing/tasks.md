@@ -3,6 +3,12 @@
 Sections sized to land in roughly a day each. Every section is additive and deployable
 alone. Section 4 is `negotiation-driven-capacity-resize`'s; its number is kept.
 
+*Amended 2026-10-01:* `design.md` was revised against the tree. Sections 1–3 are
+re-planned against it in the planning round, preserving these entries; until then,
+where a task below disagrees with `design.md` — notably 3.2's primary-dimension
+reading, which the revision supersedes — `design.md` governs. Section 5 is outside
+the Sections 1–3 implementation and opens with decision gate 5.0.
+
 ## 1. Rate structure and evaluation
 
 - [ ] 1.1 Re-verify `design.md`'s Context findings before editing, particularly
@@ -57,6 +63,13 @@ Section 2b: the multiplier and the revised-terms field are one deployment bounda
 
 ## 5. Seller feasibility guard
 
+- [ ] 5.0 **Decision gate.** Before any other Section 5 task starts, decide whether
+      Section 5 and its `negotiation-protocol` "Seller feasibility precedes pricing"
+      delta move into their own change depending on `capacity-shape-envelope`, and
+      record the decision and its reasoning in `design.md`. Section 5 touches the
+      negotiation path rather than pricing and publication, its quantitative check
+      overlaps the envelope's admissibility, and it has no live caller until
+      `negotiation-driven-capacity-resize` §2.
 - [ ] 5.1 Extend `has_matching_inventory_guard` from `region`/`gpu_model` equality to a
       quantitative check across every dimension the seller constrains.
       *Amended 2026-09-23:* `unbacked-listing-publication` makes the guard recheck
@@ -136,9 +149,14 @@ Per `openspec/README.md#plan-closeout-requirements`.
 
 | Accepted decision | Permanent location |
 |---|---|
-| Commercial resolution yields a rate structure evaluable for any admissible shape, per-dimension, unpriceable rather than free when a rate is missing | `openspec/specs/storefront-publication/spec.md` — "Shape-resolvable commercial rates" |
-| Price aggregation is replaceable and no consumer may reconstruct a total | `openspec/specs/storefront-publication/spec.md` — "Price aggregation is replaceable" |
-| Seller feasibility is evaluated quantitatively and precedes pricing | `openspec/specs/negotiation-protocol/spec.md` — "Seller feasibility precedes pricing" |
-| Commercial resolution is per-dimension and the override tier is the site-scoped pool override | `docs/development/ARCHITECTURE.md`, "Discovery and negotiation" |
-| The rate lives inside the family it prices; why a parallel rate map was rejected | This change's `design.md` |
-| Why `RateValue` was not widened with a quantity axis | This change's `design.md` |
+| Per-family rates in one nesting across the three tiers; a listing is shape-priced or flat-priced by its GPU family; unpriceable, mixed, and conflicting inputs refuse the candidate | `openspec/specs/storefront-publication/spec.md` — "Shape-resolvable commercial rates" |
+| Price aggregation is replaceable, exact, selected by the domain's composition, and no consumer reconstructs a total | `openspec/specs/storefront-publication/spec.md` — "Price aggregation is replaceable" |
+| A shape-priced listing's rates are a storefront term of sale; the registry carries only composed option rates | `openspec/specs/storefront-publication/spec.md` — "A shape-priced listing's rates are a storefront term of sale" |
+| A clause rate is stated or composed and converts to base units exactly or is refused | `openspec/specs/storefront-publication/spec.md` — "Publication pricing is explicit per settlement clause" |
+| The dead `min_price`/`token` resolution is retired; retired keys are tolerated and reported; the floor is the configured default alone | `openspec/specs/storefront-publication/spec.md` — "Domain-owned publication and hold hints" |
+| The seller's reference amount and floor are exact | `openspec/specs/negotiation-protocol/spec.md` — "Uint256-safe negotiation values" |
+| Seller feasibility is evaluated quantitatively and precedes pricing (Section 5) | `openspec/specs/negotiation-protocol/spec.md` — "Seller feasibility precedes pricing", subject to gate 5.0 |
+| How a listing is priced, and that the override tier is the site-scoped pool override | `docs/development/ARCHITECTURE.md`, "Discovery and negotiation" |
+| Why rates live inside families; why the flat rate is never reinterpreted; why `RateValue` was not widened; why the structure is storefront-served | `openspec/specs/storefront-publication/architecture.md` |
+| Operator-facing family-rate configuration and override terms | `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Storefront listing shapes and pool overrides" |
+| The superseded primary-dimension compatibility reading | This change's `design.md` only |

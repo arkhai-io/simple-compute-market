@@ -21,6 +21,13 @@ boundary described in `design.md`.
       arithmetic with upward rounding; refuse a burn rate the asset's amount type
       cannot represent. Do not reconstruct a total from individual dimension rates.
       The negotiated lease multiplier is not an input.
+- [ ] 1.3b **Decision gate.** Decide where a buyer reads the posted hold rate before
+      a hold is placed, per `design.md`'s "Where a buyer reads the hold rate is a
+      decision gate", taking `store-registry-listings-as-published`'s accepted
+      carrier policy and `negotiation-driven-capacity-resize`'s rate-structure
+      carrier as inputs, and record the decision and reasoning in `design.md`. If
+      it needs the registry to keep a listing-level field, record the dependency here
+      and in the campaign index before any task relying on it starts.
 - [ ] 1.4 Focused tests: burn rate derived for a multi-dimension shape; a stated hold
       rate wins over the lease rate at its tier; an unstated hold rate falls back to
       the lease rate at that tier; a lease-rate change moves an unstated hold rate
