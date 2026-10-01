@@ -2,26 +2,35 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import time
 from typing import Any
 
 from arkhai_vms import normalize_vm_provision_terms
 from core_storefront.models.settle_models import (
+    EvaluateSettleRequest,
+    EvaluateSettleResponse,
     SettleResponse,
     SettleStatusResponse,
+    SettleWaitResponse,
+    VerifyEscrowRequest,
+    VerifyEscrowResponse,
 )
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from fastapi_utils.cbv import cbv
 from market_identity import Identity
 
 import market_storefront.container as _container
 from market_storefront.middleware import buyer_auth
+from market_storefront.middleware.admin_auth import require_admin_key
 from market_storefront.models.settle_models import (
     VmPaymentsSettleRequest,
     VmSettleRequest,
 )
+from market_storefront.services.admin_settle_service import AdminSettleService
 from market_storefront.settlement_composition import serialize_settlement_job
 from market_storefront.utils.escrow_verification import EscrowVerificationError
 
@@ -249,3 +258,85 @@ class SettleController:
 # ---------------------------------------------------------------------------
 
 admin_settle_router = APIRouter(prefix="/api/v1/admin/settle", tags=["admin-settle"])
+
+
+@cbv(admin_settle_router)
+class AdminSettleController:
+    def __init__(
+        self,
+        db: Any = Depends(lambda: _container.resolved_sqlite_client),  # noqa: B008
+        _key: Any = Depends(require_admin_key),  # noqa: B008
+    ) -> None:
+        self._db = db
+        self._svc = AdminSettleService(
+            sqlite_client=db, alkahest_clients=_container.resolved_alkahest_clients
+        )
+
+    @admin_settle_router.post(
+        "/{escrow_uid}/verify",
+        response_model=VerifyEscrowResponse,
+        summary="Verify an on-chain escrow matches expected terms (dry-run, no DB writes)",
+    )
+    async def verify_escrow(
+        self, escrow_uid: str, body: VerifyEscrowRequest
+    ) -> VerifyEscrowResponse:
+        """Read the escrow from chain and confirm caller-supplied terms without writes."""
+        try:
+            result = await self._svc.verify_escrow_dry_run(
+                escrow_uid=escrow_uid, listing_id=body.listing_id,
+                seller_wallet=body.seller_wallet, agreed_price=body.agreed_price,
+                agreed_duration_seconds=body.agreed_duration_seconds, chain_name=body.chain_name,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except Exception as exc:
+            logger.error("[ADMIN SETTLE] verify_escrow failed: %s", exc, exc_info=True)
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return VerifyEscrowResponse(**result)
+
+    @admin_settle_router.post(
+        "/{escrow_uid}/evaluate",
+        response_model=EvaluateSettleResponse,
+        summary="Evaluate provisioning job spec for a settlement (dry-run, no writes)",
+    )
+    async def evaluate_settle(
+        self, escrow_uid: str, body: EvaluateSettleRequest
+    ) -> EvaluateSettleResponse:
+        """Resolve inventory and build a job spec without chain reads or database writes."""
+        try:
+            result = await self._svc.evaluate_settle_dry_run(
+                escrow_uid=escrow_uid, listing_id=body.listing_id,
+                ssh_public_key=body.ssh_public_key, duration_seconds=body.duration_seconds,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except Exception as exc:
+            logger.error("[ADMIN SETTLE] evaluate_settle failed: %s", exc, exc_info=True)
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return EvaluateSettleResponse(**result)
+
+    @admin_settle_router.get(
+        "/{escrow_uid}/wait",
+        response_model=SettleWaitResponse,
+        summary="Long-poll until settlement reaches a terminal state (admin)",
+    )
+    async def wait_for_settlement(
+        self,
+        escrow_uid: str,
+        timeout: float = Query(default=60.0, gt=0, le=120),
+    ) -> SettleWaitResponse:
+        """Block until settlement is terminal or the bounded timeout elapses."""
+        start = time.monotonic()
+        deadline = start + timeout
+        while True:
+            job = await self._db.load_escrow(escrow_uid=escrow_uid) or {}
+            status = job.get("status", "unknown")
+            elapsed_ms = int((time.monotonic() - start) * 1000)
+            remaining = deadline - time.monotonic()
+            if status in {"ready", "failed"} or remaining <= 0:
+                return SettleWaitResponse(
+                    ready=status in {"ready", "failed"}, status=status,
+                    provisioning_job_id=job.get("provisioning_job_id"),
+                    fulfillment_id=job.get("fulfillment_id"), elapsed_ms=elapsed_ms,
+                )
+            await asyncio.sleep(min(1.0, remaining))
