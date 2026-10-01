@@ -1,38 +1,13 @@
 # Design — repair-multi-storefront-scenario
 
-## Why skip rather than delete or xfail
+## Original failure and containment
 
-Three options, and the choice matters because this scenario has already been
-invisible once.
-
-Deleting the stages would remove the only end-to-end statement of a property
-the roadmap treats as a goal. It would also lose the scenario's *working*
-coverage by association: only four of its stages need a second served
-storefront, and the rest — Alice publishing to registry-A, her absence from
-registry-B, fan-in returning two unique listings, resilience to a dead registry
-— are the scenario's actual subject and are unaffected.
-
-`xfail` would report an eventual pass as "unexpectedly passing", which reads as
-a problem rather than as the capability arriving. It also quietly tolerates the
-stage failing for a *different* reason than the one recorded, which is how a
-known limitation becomes cover for an unrelated defect.
-
-A skip with the reason at the call site says what is missing, names the roadmap
-goal and the owning change, and reports every run. It is the option that cannot
-be mistaken for either health or breakage.
-
-## Why the stages were not already skipped
-
-They were, in effect, and that is the more interesting failure. `ALICE.*` was
-absent from the e2e configuration, and `_require_setting` calls `pytest.skip`
-on an empty value — so every Alice stage skipped for want of a setting, with no
-statement anywhere that the scenario could not run. A reader of the Aug 15
-green run saw "99 passed, 12 skipped" and no reason to look further.
-
-An incidental skip and a declared one are indistinguishable in a summary line
-and opposite in meaning. This change replaces the remaining incidental skips
-with declared ones, and the configuration stays: reverting it would restore the
-silence.
+Alice originally skipped incidentally because her e2e settings were absent.
+Once configured, she called Bob's authority, which correctly rejected her
+principal. Explicit skips on `06b` and `06c` made the negotiation gap visible
+while retaining registry coverage. The earlier four-stage estimate was not
+an observed skip count. Those two explicit skips are removed by this repair;
+downstream prerequisite skips still identify missing scenario state.
 
 ## Accepted topology and unblocking
 
@@ -55,11 +30,47 @@ two projection-backed storefronts, not shared-site storefront substitution.
 The explicit blocked-stage skips are `06b` and `06c`; verify the actual runtime
 skip set rather than relying on the earlier four-stage estimate.
 
-During planning, identify the exact compose, identity, configuration, seeding,
-and test files needed for Alice's separate authority and isolated service state.
+The file-level plan is recorded in tasks.md. Alice uses a deterministic
+Ed25519 service identity and container-local database state. Job queues are
+process-local. The existing Redis setting in Bob's Compose service is unused
+by provisioning, so Alice does not need a separate Redis service. Both storefronts may call their local site alias `default`: the alias is
+scoped to its storefront and resolves to a different authority in each.
+
+The VM fiat overlay profiles Alice's authority with Alice herself,
+so hosted-only stacks do not start an unconfigured extra authority. The
+scenario uses the same typed provisioning and capacity administration clients
+for both storefronts, then explicitly refreshes each projection before listing
+creation. Local CSV scenario seeding is removed for both storefronts.
 
 ## Deliberately not addressed
 
 Multiple storefronts per site, shared-authority ownership and routing, new
 authentication protocols, general push delivery, and expanding this scenario
 to multiple sites per storefront are out of scope.
+
+## Permanent documentation text prepared for post-review promotion
+
+`docs/development/DEPLOYMENT_AND_CONFIG.md`, "Per-domain stack composition":
+The VM development stack runs Bob and Alice as separate storefronts, each with
+its own provisioning authority, service signer, callback destination, database,
+and process-local job queue. Both storefronts name their local site `default`; these
+aliases resolve to different authorities. The local identity overlay supplies
+the deterministic development credentials. The fiat overlay keeps Alice and
+her authority behind the same optional profile.
+
+`docs/development/TESTING.md`, end-to-end scenario guidance:
+The multi-registry scenario seeds each storefront's authority through typed
+administration clients and refreshes its projections before listing creation.
+It proves Bob's publication to both registries, Alice's publication to only the
+public registry, deduplicated discovery, resilience to an unavailable registry,
+and independent negotiations. It does not prove shared-site tenancy.
+
+`docs/development/ROADMAP.md`, Goal 1:
+Remove this change's shared-hardware substitution gap mapping: this repair
+establishes two projection-backed storefronts using separate authorities.
+Multiple storefronts per site remain explicitly out of scope. Retain the
+pools-9 local-authority retirement gap until its own implementation completes.
+
+No service API or authentication invariant changes, so the existing subsystem
+specifications remain authoritative without a new protocol delta. These
+changes are development composition and test coverage.

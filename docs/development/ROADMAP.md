@@ -48,7 +48,7 @@ Host records are used only where a connection is made. The resource-pool project
 | The relay path is implemented but unverified on a rented host: reload preservation of live sessions, the port window, teardown release, and relay deletion under live leases remain to be proved or decided | [`relay-vm-access-without-a-dashboard`](../../openspec/changes/relay-vm-access-without-a-dashboard/) |
 | Host inventory seeds the host registry only when it is empty and is never reconciled against its file, so editing a running deployment's inventory changes nothing | [`bring-host-inventory-under-definition-documents`](../../openspec/changes/bring-host-inventory-under-definition-documents/) |
 | One SSH key reaches every host in an environment, so a host prepared by another party cannot be registered with its own credential | [`contain-embedded-host-key-material`](../../openspec/changes/contain-embedded-host-key-material/) |
-| The provisioning service serves one storefront: its storefront principal and site binding are single values, so a second commercial front-end over the same hardware is not a configuration | [`repair-multi-storefront-scenario`](../../openspec/changes/repair-multi-storefront-scenario/) |
+| The two-storefront scenario repair uses separate provisioning authorities and has passing local end-to-end evidence; review and documentation promotion remain before closing the gap. Multiple storefronts per site are out of scope | [`repair-multi-storefront-scenario`](../../openspec/changes/repair-multi-storefront-scenario/) |
 
 A schema drop of the frozen columns is deliberately excluded from the retirement and belongs to a later follow-up, after a deployment cycle confirms the freeze never needed rolling back.
 

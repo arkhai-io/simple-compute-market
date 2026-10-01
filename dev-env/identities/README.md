@@ -32,9 +32,8 @@ is consumed as shell-format key/value pairs, it carries the statement inline.
 `docker compose up` resolves `include:` transitively, so the required variables
 come from five files, not from the root `docker-compose.yml` alone:
 `docker-compose.yml`, `compose.vms.yml`, `compose.dev.yml`,
-`domains/vms/compose.yml`, and `domains/apicredits/compose.yml`. Eighteen
-variables over twenty guard occurrences. `make e2e-dev-identities-env` supplies
-all of them.
+`domains/vms/compose.yml`, and `domains/apicredits/compose.yml`. `make e2e-dev-identities-env` supplies all required variables, including
+the identity overlay bindings.
 
 Not all are paths. `VMS_REGISTRY_ADMIN_API_KEY` and
 `VMS_REGISTRY_BOOTSTRAP_API_KEY` are bearer tokens for `registry-b`, which runs
@@ -171,3 +170,17 @@ required `default` pool with no deliverable or advertisable modes (scenarios
 declare their own pools against the provisioning mock profile), and placeholders
 for files the stack requires but the lane never uses — each explaining itself
 inline.
+
+## Alice's provisioning authority
+
+`provisioning-alice.identity.env` contains a public deterministic Ed25519 seed:
+SHA-256 of the UTF-8 string `arkhai-development-alice-provisioning-v1`, encoded
+as unpadded base64url. It must never be used on a public network. Its public
+identifier is `3NPn0gInwKKqVkrFl5_C07yYcjLOfVszbq51kw6EnPw`.
+
+`compose.local-identities.yml`, Alice's storefront profile, and the Docker test
+profile pin that identity. Alice's authority trusts Alice's seller principal
+(Anvil 4) and the provisioning administrator (Anvil 5); Bob's authority retains
+its own signer (Anvil 0). The two services have separate databases, process-local job queues,
+and callback destinations. Sharing an administrator does not share a service
+identity or authorize either storefront to call the other's authority.

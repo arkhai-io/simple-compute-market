@@ -16,6 +16,8 @@ The docker-compose stack runs:
                          [registry] urls = [registry, registry-b]
   * ``alice-storefront`` (Alice) on host port 8002 — Anvil acct #4,
                          [registry] urls = [registry]
+  * ``provisioning`` serves Bob; ``alice-provisioning`` serves Alice,
+    each with a distinct service identity and independent state.
 
 Provider topology
 -----------------
@@ -91,6 +93,10 @@ from typing import Any, Optional
 
 import httpx
 import pytest
+
+from market_site_client import SiteCapacityAdminClient
+from storefront_client import SyncStorefrontClient
+from vm_provisioning_operator import SyncProvisioningClient
 
 from market_identity import (
     Identity,
@@ -207,22 +213,6 @@ ALICE_OFFER = {
     "region": "New York, US",
 }
 
-_BOB_CSV = (
-    "resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,"
-    "max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,"
-    "attribute.vm_host\n"
-    'compute-mr-bob-001,compute.gpu,rtx5080,count,1,available,10,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,'
-    'RTX 5080,90.0,"California, US",kvm1\n'
-)
-_ALICE_CSV = (
-    "resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,"
-    "max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,"
-    "attribute.vm_host\n"
-    'compute-mr-alice-001,compute.gpu,rtx5080,count,1,available,10,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,'
-    'RTX 5080,90.0,"New York, US",ny1\n'
-)
-
-
 # ---------------------------------------------------------------------------
 # Local state
 # ---------------------------------------------------------------------------
@@ -296,7 +286,6 @@ def alice_admin_client():
     as Bob's is, and is pinned as ``Identity.administrators.operator`` in
     ``storefront.alice.toml``.
     """
-    from storefront_client import SyncStorefrontClient
 
     client = SyncStorefrontClient(
         _alice_url(),
@@ -316,7 +305,6 @@ def alice_admin_client():
 @pytest.fixture(scope="module")
 def alice_seller_client():
     """Seller-role client for Alice's storefront: publishing listings."""
-    from storefront_client import SyncStorefrontClient
 
     client = SyncStorefrontClient(
         _alice_url(),
@@ -438,31 +426,6 @@ def _list_listings_multi(
 # Phase 0 — readiness
 # ===========================================================================
 
-#: Stages that need the provisioning service to serve a second storefront.
-#:
-#: `ProvisioningIdentityContext.storefront_principal` is a single identity and
-#: the seller role bootstraps one principal, so Alice is not a trusted caller:
-#: her capacity poller reports `Invalid marketplace authentication` every cycle
-#: and never loads a projection. A negotiation against her listing is then
-#: refused `offer_unfulfillable` for want of inventory she cannot see.
-#:
-#: Skipped rather than deleted or marked xfail. The scenario's subject --
-#: registry isolation and fan-in across two storefronts -- is unaffected and
-#: those stages still run; only the four that need a second served storefront
-#: are held. `xfail` would report an eventual pass as "unexpectedly passing",
-#: which reads as a problem rather than as the capability arriving.
-#:
-#: One provisioning service serving several storefronts is what makes a
-#: storefront substitutable, which `docs/development/ROADMAP.md` Goal 1 names
-#: as the value of consolidating physical authority. That goal's table names
-#: the change which owns the repair.
-_MULTI_STOREFRONT_SKIP = (
-    "provisioning serves one storefront: its storefront principal is a single "
-    "identity, so Alice is not a trusted caller and never loads capacity. "
-    "See docs/development/ROADMAP.md Goal 1."
-)
-
-
 class TestStage00_PausesBothStorefronts:
     def test_00_pauses_both_storefronts_loops(
         self, storefront_admin_client, alice_admin_client
@@ -568,81 +531,67 @@ class TestStage00g_AliceStrategy:
 # Phase 2 — inventory seed
 # ===========================================================================
 
+@pytest.fixture(scope="module")
+def alice_provisioning_client():
+    config = settings.ALICE_PROVISIONING
+    with SyncProvisioningClient(
+        _require_setting(config.API_URL, "ALICE_PROVISIONING.API_URL"),
+        _signer(config.ADMIN_SCHEME, config.ADMIN_CREDENTIAL,
+                "ALICE_PROVISIONING.ADMIN_CREDENTIAL"),
+        _trust(config.AUTHORITY_IDENTIFIER, scheme=config.AUTHORITY_SCHEME),
+    ) as client:
+        yield client
+
+
+@pytest.fixture(scope="module")
+def alice_site_capacity_admin_client():
+    config = settings.ALICE_PROVISIONING
+    return SiteCapacityAdminClient(
+        _require_setting(config.API_URL, "ALICE_PROVISIONING.API_URL"),
+        _signer("eip191", settings.ALICE.PRIVATE_KEY, "ALICE.PRIVATE_KEY"),
+        _trust(config.AUTHORITY_IDENTIFIER, scheme=config.AUTHORITY_SCHEME),
+    )
+
+
 class TestStage02a_BobInventory:
-    def test_02a_bob_seeds_inventory(self, storefront_admin_client, mr_state):
-        _require(mr_state, "bob_healthy")
-        result = storefront_admin_client.admin_import_resources(
-            _BOB_CSV.encode("utf-8"), filename="mr-bob-resources.csv",
-        )
-        assert result.failed_count == 0, f"bob import failed: {result}"
-        assert result.imported_count >= 1
-        mr_state.bob_inventory_seeded = True
-
-
-class TestStage02a1_ExecutorHostRegistry:
-    def test_02a1_registers_executor_hosts_and_syncs_projection(
-        self, provisioning_client, storefront_admin_client,
-        site_capacity_admin_client, mr_state,
+    def test_02a_bob_seeds_inventory(
+        self, provisioning_client, site_capacity_admin_client,
+        storefront_admin_client, mr_state,
     ):
-        """One executor and one capacity declaration per storefront's resource.
-
-        Both storefronts reach the same site authority, and each negotiates over
-        its own resource, so each needs its own executor with its own declaration.
-        The declarations differ in `region` — the field both listings advertise and
-        the inventory guard compares by equality — so a claim from one storefront
-        cannot be satisfied by the other's capacity, which is what makes stage 06c's
-        independence assertion meaningful rather than incidental.
-
-        Two declarations on one executor would sell the same machine twice and the
-        site authority refuses that correlation, so the two hosts are required
-        rather than tidier.
-        """
-        _require(mr_state, "bob_inventory_seeded")
-
-        bob_host = provision_e2e_executor(
+        _require(mr_state, "bob_healthy")
+        host = provision_e2e_executor(
             provisioning_client,
             site_capacity_admin_client,
             host=E2E_MULTI_REGISTRY_HOST,
             pool_id=E2E_MULTI_REGISTRY_POOL_ID,
-            resource_id="compute-mr-bob-001",
+            resource_id=BOB_OFFER["resource_id"],
             sellable_units=1,
-            attributes={
-                "gpu_model": "RTX 5080",
-                "region": "California, US",
-                "sla": "90.0",
-            },
+            attributes={"gpu_model": "RTX 5080", "region": BOB_OFFER["region"],
+                        "sla": "90.0"},
         )
-        provision_e2e_executor(
-            provisioning_client,
-            site_capacity_admin_client,
-            host=f"{E2E_MULTI_REGISTRY_HOST}-ny",
-            pool_id=E2E_MULTI_REGISTRY_POOL_ID,
-            resource_id="compute-mr-alice-001",
-            sellable_units=1,
-            attributes={
-                "gpu_model": "RTX 5080",
-                "region": "New York, US",
-                "sla": "90.0",
-            },
-        )
-        assert (bob_host.gpu_count or 0) >= E2E_HOST_GPU_COUNT
-
-        sites = refresh_storefront_projections(storefront_admin_client)
-        log.info(
-            "[02a1] executor hosts %s registered (gpus=%s); projections confirmed for %s",
-            [E2E_MULTI_REGISTRY_HOST, f"{E2E_MULTI_REGISTRY_HOST}-ny"],
-            bob_host.gpu_count, sorted(sites),
-        )
+        assert (host.gpu_count or 0) >= E2E_HOST_GPU_COUNT
+        refresh_storefront_projections(storefront_admin_client)
+        mr_state.bob_inventory_seeded = True
 
 
 class TestStage02b_AliceInventory:
-    def test_02b_alice_seeds_inventory(self, alice_admin_client, mr_state):
+    def test_02b_alice_seeds_inventory(
+        self, alice_provisioning_client, alice_site_capacity_admin_client,
+        alice_admin_client, mr_state,
+    ):
         _require(mr_state, "alice_healthy")
-        result = alice_admin_client.admin_import_resources(
-            _ALICE_CSV.encode("utf-8"), filename="mr-alice-resources.csv",
+        host = provision_e2e_executor(
+            alice_provisioning_client,
+            alice_site_capacity_admin_client,
+            host=f"{E2E_MULTI_REGISTRY_HOST}-ny",
+            pool_id=E2E_MULTI_REGISTRY_POOL_ID,
+            resource_id=ALICE_OFFER["resource_id"],
+            sellable_units=1,
+            attributes={"gpu_model": "RTX 5080", "region": ALICE_OFFER["region"],
+                        "sla": "90.0"},
         )
-        assert result.failed_count == 0, f"alice import failed: {result}"
-        assert result.imported_count >= 1
+        assert (host.gpu_count or 0) >= E2E_HOST_GPU_COUNT
+        refresh_storefront_projections(alice_admin_client)
         mr_state.alice_inventory_seeded = True
 
 
@@ -688,7 +637,7 @@ class TestStage03d_AlicePublishes:
 
         resp = alice_seller_client.create_listing(
             listing_resource=ALICE_OFFER,
-            capacity_source=capacity_source_for(ALICE_OFFER),
+            capacity_source=capacity_source_for(ALICE_OFFER, site_id="default"),
             accepted_escrows=ACCEPTED_ESCROWS,
             max_duration_seconds=DURATION_HOURS * 3600,
             paused=True,
@@ -850,7 +799,6 @@ class TestStage06a_NegotiateWithBob:
     ):
         """Buyer hits bob-storefront:8001 to start a negotiation against Bob's listing."""
         _require(mr_state, "bob_listing_id", "fanin_ok")
-        from storefront_client import SyncStorefrontClient
         # negotiate_new derives `buyer_principal` from the signer and asserts
         # the buyer role, so this client signs; the storefront records the
         # thread against whichever principal opened it.
@@ -899,7 +847,6 @@ class TestStage06a_NegotiateWithBob:
 
 
 class TestStage06b_NegotiateWithAlice:
-    @pytest.mark.skip(reason=_MULTI_STOREFRONT_SKIP)
     def test_06b_buyer_starts_negotiation_with_alice(
         self, alice_admin_client, buyer_config, mr_state
     ):
@@ -912,8 +859,7 @@ class TestStage06b_NegotiateWithAlice:
         ``alice`` URL since it knows the topology.
         """
         _require(mr_state, "alice_listing_id", "fanin_ok")
-        from storefront_client import SyncStorefrontClient
-        # See the note in stage 06a: this client signs as the buyer.
+        # This client signs as the buyer.
         buyer_to_alice = SyncStorefrontClient(
             str(settings.ALICE.API_URL),
             _signer("eip191", settings.BUYER.MARKETPLACE_CREDENTIAL,
@@ -955,7 +901,6 @@ class TestStage06b_NegotiateWithAlice:
 
 
 class TestStage06c_NegotiationsIndependent:
-    @pytest.mark.skip(reason=_MULTI_STOREFRONT_SKIP)
     def test_06c_negotiations_are_distinct_objects_on_distinct_storefronts(
         self, storefront_admin_client, alice_admin_client, mr_state,
     ):
@@ -966,7 +911,10 @@ class TestStage06c_NegotiationsIndependent:
         bob_neg = mr_state.negotiation_ids.get("bob")
         alice_neg = mr_state.negotiation_ids.get("alice")
         if not bob_neg or not alice_neg:
-            pytest.skip("upstream negotiation stages didn't both complete")
+            pytest.skip(
+                "Missing MRState.negotiation_ids[bob] or [alice]: "
+                "upstream negotiation stages did not both complete"
+            )
 
         assert bob_neg != alice_neg, (
             "Bob and Alice returned the same negotiation_id — they share state?"
