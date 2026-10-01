@@ -90,12 +90,31 @@ rule (own changes); bare metal.
 
 The migration stops creating and writing the retired tables, columns,
 triggers, and indexes and redirects every read to the projection. The schema
-stays so a code rollback finds its data. A `DROP` is a later change, after a
+stays so a code rollback or an operator seeding provisioning finds its data.
+Fresh databases omit the retired schema; upgraded databases preserve existing
+tables, columns, triggers, indexes, and rows unchanged. Current storefront code
+does not read or write that data for any purpose, including startup and status.
+A `DROP` is a later change, after a
 deployment cycle shows the freeze never needed reverting. This matches the
 additive-only posture of every other schema change in the campaign.
 
 Rollback past this change is a code operation, not a configuration flip;
-operator documentation says so explicitly.
+operator documentation says so explicitly. Retention preserves historical
+data, not a current inventory snapshot: once provisioning changes physical
+state, an operator must reconcile the retained data against current site state
+before resuming an older storefront version or using it to seed provisioning.
+Restoring stale inventory alone does not establish safe availability.
+
+Retained rows can inform an operator's provisioning host inventory, pool
+definitions, and capacity declarations through the existing provisioning
+administration surfaces. This does not add an automatic transfer command or
+overwrite live site state. Commercial values still follow the independent
+override decision below; retaining mixed historical rows does not keep their
+commercial tier active.
+
+The terminal contract prohibits active storefront physical authority, rather
+than requiring all historical physical records to be absent. Its fresh-boot
+and upgrade scenarios distinguish these database populations explicitly.
 
 ### The legacy override tier retires with the import, without carry-over
 
@@ -142,8 +161,37 @@ giving it a second provisioning service in compose, were both rejected as
 working around a scenario the repository intends to repair; storefront
 substitutability is the property this consolidation exists to deliver.
 
-The dependency is on the cutover and that one test migration only. The
-freeze and the CSV code removal can land first.
+Keep `repair-multi-storefront-scenario` separate and complete it first. Its
+acceptance must prove both storefronts are trusted by the shared provisioning
+authority, Alice derives from provisioning-seeded projections without her
+local-path opt-out, and the affected two-storefront stages run and pass. A
+configuration edit or continued skips do not satisfy this prerequisite.
+
+### Retire the local inventory contract in one coordinated cutover
+
+Local derivation, CSV import, startup seeding, deployment and CLI wiring,
+legacy overrides, local diagnostics and cleanup, and the fresh-schema freeze
+form one supported contract until their replacement is ready. Retire them
+together after the separate multi-storefront repair is complete. Existing
+task section numbers organize the work; they do not define independently
+deployable intermediate states.
+
+The prior claim that CSV removal and the freeze can land first is superseded.
+While local derivation and its writers remain supported, fresh databases still
+need their schema. Removing its creation or its inventory-input contract in
+isolation would leave a supported configuration without a working inventory
+path. Updating source consumers, test seeding, and diagnostics belongs in the
+same cutover before it is offered for deployment.
+
+Alternatives:
+
+- *Fold multi-storefront support into this change.* Rejected: keep its trust
+  configuration design and acceptance boundary in the existing separate change.
+- *Ship the freeze or CSV removal before local derivation retires.* Rejected:
+  that intermediate state does not preserve the supported inventory contract.
+
+Read-only re-grounding, design, and planning can proceed beforehand. Independent
+zero-caller cleanup and pool-provider immutability remain separate changes.
 
 ### Commercial rows are storefront-owned; the site-scoped store is where they live
 
@@ -185,13 +233,66 @@ required by a current permanent scenario and read by running e2e checks,
 and removing the local cleanup loop while local derivation remains available
 would discard an existing recovery operation before its inventory retires.
 
-The replacement diagnostic has not been chosen. Projection load state proves
-whether a generation is known, but reports no inventory quantity; a loaded
-empty generation and loaded usable inventory both have state `loaded`.
-The cutover review must decide what operator evidence distinguishes a healthy
-empty site, unavailable inventory, and successfully seeded sellable supply.
-That decision must revise the current normative scenario and its consumers
-before field removal is implementation-ready.
+### Operator counts belong to each site's projection generation
+
+Replace the storefront-local top-level `resource_count` with
+`site_projections[site_id][family].resource_count`, alongside that family's
+existing state, revision, digest, last error, and confirmation timestamp.
+Counts remain separate for every site and projection family; a storefront-wide
+total cannot replace them.
+
+The current site projections already contain the necessary information:
+
+- `resource_pool`: count the projected members across pools. This counts
+  capacity declarations, including disabled declarations, not distinct hosts
+  or physical machines.
+- `capacity_bucket`: sum the groups' existing `resource_count` values. The
+  producer groups enabled declarations only, including exhausted ones;
+  `available` describes each member's remaining quantities, not a group total.
+  Neither the number of groups nor the sum of dimension quantities is a
+  resource count. Pool enablement and offering-mode authorization are not
+  additional filters for this count.
+
+Compute each summary from the same cached family view whose identity and state
+are reported. Do not fetch a new generation just for status or consult local
+inventory. A held empty generation reports zero; a family with no generation
+held reports `null`; a retained stale generation reports its count with state
+`stale`. The two families can differ because their inclusion rules differ and
+their generations are independently versioned.
+
+Physical-resource projections also support pools that do not use capacity
+buckets; their eventual listing consumers must not make capacity buckets a
+universal inventory requirement. Count the current resource-pool projection's
+members independently of the capacity-bucket family. The per-site, per-family
+structure also accommodates any further physical-resource projection under
+its own count semantics when exposed through status. Defining a new projection
+protocol or changing which projection creates a listing is outside this
+diagnostic decision.
+
+A positive count proves projected inventory exists, not that its pool is
+enabled, its shapes are feasible, its provider can execute, or its commercial
+terms produce a listing. Publication diagnostics and catalogue checks remain
+the evidence for sellable supply. A known-empty generation cannot establish
+whether an operator intended it to be empty or an inventory import failed;
+import failures are diagnosed at provisioning, which owns the import.
+
+Alternatives:
+
+- *A projection-derived top-level total.* Rejected: the counts per site must
+  remain visible, and summing known sites would hide unavailable ones.
+- *Adding counts to the site projection protocol.* Unnecessary for the current
+  families: grouped capacity already carries multiplicity, and the
+  resource-pool projection already enumerates every member.
+- *Publication candidate counts as the inventory diagnostic.* Rejected as the
+  replacement: a populated projection may yield no candidate for several
+  independent reasons. Candidate or listing counts can be separate diagnostics.
+
+This replaces the current operator acceptance requirement's local-row scenario
+and its consumers. The response change removes the top-level field and adds
+counts beneath the existing projection status; it does not change liveness
+health or global negotiation-pause behavior. Permanent homes are
+`openspec/specs/storefront-publication/spec.md` for the observable status
+contract and its `architecture.md` companion for the interpretation of counts.
 
 ## Risks / Trade-offs
 
@@ -202,29 +303,39 @@ before field removal is implementation-ready.
   Mitigated by migration guidance that names the provisioning-side
   declaration path and by the seeding stack's removal making the
   configuration keys unknown.
-- **The two-storefront scenario is repaired later than expected** → the
-  cutover waits; the freeze and code removal do not.
+- **Retained inventory is mistaken for current supply** → an unsafe rollback
+  or provisioning seed. Guidance requires checking current site state before
+  using the historical records; current storefront code never consults them.
+- **The two-storefront scenario is repaired later than expected** → all local
+  inventory retirement waits, including the freeze and CSV removal; design and
+  read-only investigation can continue.
 
 ## Migration Plan
 
-1. Re-verify the confirming searches (legacy-resources fallback
-   reachability, the CSV-dependent test set).
-2. Retire the local-table path, the flag, the legacy override tier, and the
-   `inactive` state; freeze the retired tables and columns.
-3. Retire CSV import, the startup seeding stack, the deployment contract,
-   and the CLI surface; migrate the seven test files; write operator
-   guidance.
-4. Freeze-then-redirect migration; run the storefront suites and one e2e run.
+1. Complete `repair-multi-storefront-scenario` separately, including its
+   projection cutover and passing two-storefront evidence.
+2. Re-verify the confirming searches against that resulting tree
+   (legacy-resources fallback reachability and the remaining CSV consumers).
+   Reconcile any files or scenario stages the prerequisite already migrated.
+3. Prepare projection counts, provisioning-seeded tests, and operator guidance
+   together with retirement of local derivation, the flag, legacy overrides,
+   CSV import, startup seeding, deployment and CLI wiring, and local cleanup.
+4. Apply the fresh-schema freeze in the same coordinated cutover, preserving
+   existing historical data. No partial retirement is an independently
+   deployable outcome.
+5. Validate fresh and populated databases, the affected suites, packaging,
+   and the end-to-end pipeline; complete the planned closeout.
 
-Rollback at any step is a code revert; no `DROP` has happened.
+Rollback requires earlier code and reconciliation of retained historical data
+with current site state before trading resumes; no `DROP` has happened.
 
 ## Open Questions
 
-- What operator evidence replaces resource-count diagnosis when local CSV
-  inventory retires? Existing projection load state plus catalogue checks may
-  suffice, or projection diagnostics may need additional public information.
-  Resolve this during cutover design review, then reconcile the delta spec,
-  smoke/deal checks, quickstart, and validation runbook before implementing
-  the transferred removal. No existing task chooses a replacement.
+The resource-count diagnostic decision is resolved above. Further use of
+physical-resource projections for listing creation does not gate these
+summaries of existing projections.
 
-The start trigger remains a decision outside this document.
+The repository work order is decided: complete the separate multi-storefront
+repair first, then the coordinated retirement. Each self-hosting operator
+still selects their deployment time after preparing site inventory and
+commercial overrides; there is no fleet-wide rollout signal to wait for.

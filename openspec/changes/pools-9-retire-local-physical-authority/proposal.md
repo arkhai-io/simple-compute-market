@@ -49,7 +49,12 @@ deliberate decision rather than an accident: the schema is frozen, not dropped.
 - Remove `resource_capacity_validator.py` with its only caller,
   `upsert_resource`.
 - Freeze, do not drop: the migration stops creating the retired tables,
-  columns, triggers, and indexes and stops writing them. A schema `DROP` is a
+  columns, triggers, and indexes on fresh databases. Upgraded databases retain
+  existing schema and rows unchanged as inert rollback data or an operator
+  source for seeding provisioning. Current storefront code neither reads nor
+  writes them. Retained data is historical and must be reconciled against live
+  site state before reuse; no automatic transfer or overwrite is added.
+  A schema `DROP` is a
   later change, after a deployment cycle confirms the freeze never needed
   rolling back.
 
@@ -79,23 +84,28 @@ deliberate decision rather than an accident: the schema is frozen, not dropped.
   `test_compute_dynamic_listings.py`, `test_full_deal.py`,
   `test_full_deal_buyer_cli.py`, `test_multi_registry.py`,
   `test_non_erc20_settlement.py`, and `e2e-tests/tests/smoke/test_storefront_smoke.py`.
-  `test_multi_registry.py`'s second storefront needs provisioning to trust its
-  principal first (see Dependencies).
+  Re-ground that set after the separate multi-storefront repair, which moves
+  Alice's stages to projection/provisioning seeding before this cutover.
 
 ### Retire diagnostics and cleanup that depend on local inventory
 
 - Remove the local-row normalization half of `release_reservations` when the
   local listing path retires; retain the authoritative site-ledger release
   operation. Correct its operator description for the resulting behavior.
-- Remove `resource_count` from system status and both `HealthResponse` models
-  when CSV inventory retires. The existing "Operator-visible acceptance state"
-  requirement, its resource-count scenario and Evidence entry, the smoke and
-  full-deal assertions, the seller quickstart, and the validation runbook must
-  be reconciled with that boundary.
+- **BREAKING (status):** replace top-level `resource_count` with
+  `site_projections[site_id][family].resource_count` when CSV inventory retires.
+  Count projected resource-pool members and sum the capacity groups' existing
+  counts, separately per site and family. Report zero for a held empty
+  generation, `null` when none is held, and the retained count with stale state
+  after refresh failure. No site projection protocol change is needed.
+  Reconcile both health models, the operator acceptance requirement and its
+  Evidence entry, smoke and full-deal assertions, the seller quickstart, and
+  the validation runbook. Publication diagnostics and catalogue checks prove
+  sellable supply separately from inventory presence.
 - These two removals were transferred from
   `remove-dead-storefront-physical-surfaces` during its design review. The
-  replacement operator diagnostic remains a design question in `design.md`;
-  this scope transfer does not select a new status field or response shape.
+  replacement operator diagnostic is now resolved in `design.md` as counts
+  attached to each site's independently versioned projection families.
 
 ## Capabilities
 
@@ -124,6 +134,10 @@ None.
 - Do not fix a Resource Pool's provider at creation —
   `fix-resource-pool-provider-at-creation`.
 - Do not migrate the bare-metal storefront, which has no local tables.
+- Do not change projection protocols or the listing-creation paths as part of
+  replacing the inventory diagnostic. Preserve independent physical-resource
+  counts for pools that do not use capacity buckets, and the per-site,
+  per-family structure for any further projection family.
 
 ## Impact
 
@@ -160,6 +174,11 @@ None.
 - The storefront holds no physical-resource, host, or physical-allocation
   authority, and derives every listing candidate from the site projection —
   `openspec/specs/storefront-publication/spec.md`.
+- Fresh databases omit retired physical schema; upgraded databases preserve
+  inert history for rollback or operator provisioning seeding, without current
+  storefront reads or writes — `openspec/specs/storefront-publication/spec.md`
+  and its architecture companion. Safe reuse requires checking live site state
+  — operator deployment documentation and `docs/seller-quickstart.md`.
 - The site-scoped override store is the only storefront override tier; no
   pool-keyed legacy record exists beneath it and no `inactive` override state
   exists — `openspec/specs/storefront-publication/spec.md`, "Storefront pool
@@ -169,9 +188,11 @@ None.
   operator deployment documentation.
 - Why legacy values are not carried over, and why the schema is frozen rather
   than dropped — this change's `design.md`.
-- The operator-visible acceptance contract after local inventory and
-  `resource_count` retire — `openspec/specs/storefront-publication/spec.md`
-  and the quickstart/runbook; the replacement is unresolved design work.
+- Per-site, per-family counts describe the cached projection generation;
+  inventory presence, freshness, and publication feasibility are separate
+  observations — `openspec/specs/storefront-publication/spec.md` and its
+  architecture companion, with operational interpretation in the
+  quickstart/runbook.
 
 ## Dependencies and Related Changes
 
@@ -179,7 +200,11 @@ None.
   scenario's second storefront derives from local tables because provisioning
   trusts one storefront principal and it can load no projection; the cutover
   and the migration of `test_multi_registry.py` wait on provisioning trusting
-  a second principal. The freeze and the CSV code removal do not.
+  a second principal. Complete that change separately first, including Alice's
+  projection cutover and passing scenario evidence. The local path, CSV
+  contract, startup seeding, schema freeze, and local diagnostic retirement
+  then land together as one coordinated cutover; none of those removals is an
+  independently deployable precursor.
 - Depends on `capacity-resource-administration` (archived): multi-dimensional
   capacity is declarable at the site, so the CSV path is not the only
   expression of it.
@@ -191,5 +216,6 @@ None.
   `fix-resource-pool-provider-at-creation`; either order. This change's
   freeze migration covers `compute_allocations` if the former has not landed
   first.
-- The start trigger for the cutover is a repository-owner decision. Sellers
-  self-host, so no fleet-wide rollout signal exists to gate it on.
+- The repository work order is repair first, retirement second. Sellers
+  self-host and choose deployment timing after preparing authoritative site
+  inventory and commercial overrides; no fleet-wide rollout signal gates it.

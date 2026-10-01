@@ -2,19 +2,52 @@
 
 ### Requirement: Storefront holds no physical-resource authority
 
-A storefront MUST NOT persist physical-resource inventory, host inventory, or
-physical-allocation state. Authoritative physical state belongs to the site
+A storefront MUST NOT actively maintain physical-resource inventory, host
+inventory, or physical-allocation state. Authoritative physical state belongs to the site
 authority and the provisioning service, and a storefront obtains it only through
 projections. A storefront MAY persist commercial state — pricing, accepted
 settlement terms, seller policy, and listing derivation records — including
 per-pool commercial values keyed by a projected pool identity.
 
-#### Scenario: Storefront persistence is inspected for physical state
+Fresh storefront databases MUST NOT create the retired local inventory or
+physical-allocation tables, columns, triggers, or indexes. An upgraded database
+MAY retain pre-existing schema and rows as inert historical data for code
+rollback or operator-directed provisioning seeding. The retirement MUST NOT
+drop that schema or delete or rewrite its retained rows. Current storefront
+code MUST NOT read or write the retired data, including during startup,
+publication, negotiation, diagnostics, or reservation cleanup.
 
-- **WHEN** a storefront's persisted schema is reviewed
-- **THEN** it contains no physical-resource inventory, host inventory, or
-  physical-allocation records, while commercial and listing-derivation records
-  remain
+Retained rows MUST NOT be treated as current physical truth. An operator MAY
+use them to prepare host inventory, pool definitions, and capacity declarations
+for provisioning's supported administration surfaces; that use MUST NOT restore
+a storefront inventory read path or overwrite live site state automatically.
+
+#### Scenario: A fresh storefront database is initialized
+
+- **WHEN** a storefront bootstraps a new database
+- **THEN** it creates no retired local physical-inventory or allocation schema,
+  while commercial and listing-derivation persistence remains
+
+#### Scenario: A populated legacy database is upgraded
+
+- **WHEN** retirement is applied to a database containing retired local schema
+  and rows, including resource-transition history
+- **THEN** that schema and those rows are retained unchanged and current
+  storefront code neither reads nor writes them
+
+#### Scenario: An operator uses retained inventory to seed provisioning
+
+- **WHEN** an operator prepares provisioning inventory from retained legacy rows
+- **THEN** authoritative declarations enter through provisioning's supported
+  administration surfaces, without automatic overwrite of live site state or
+  reactivating storefront-local inventory
+
+#### Scenario: Physical state changes after the cutover
+
+- **WHEN** provisioning's physical state changes while historical storefront
+  rows remain in the database
+- **THEN** the historical rows remain unchanged and cannot be used as evidence
+  of current availability for rollback or provisioning seeding
 
 #### Scenario: Provisioning reports a physical lifecycle transition
 
@@ -30,6 +63,16 @@ per-pool commercial values keyed by a projected pool identity.
 
 ## REMOVED Requirements
 
+### Requirement: Operator-visible acceptance state
+
+**Reason**: Its inventory scenario requires a storefront-local resource-row
+count, which retires with local inventory and CSV import.
+
+**Migration**: Replaced by "Operator-visible acceptance and projection state"
+below. Global negotiation-pause behavior is preserved. Operator checks use
+counts under each site's projection-family status instead of the removed
+top-level `resource_count`; provisioning owns inventory-import diagnostics.
+
 ### Requirement: Storefronts cache independent site projections
 
 **Reason**: Its third paragraph and the "Projection-backed derivation has reached parity" scenario define a retained local-table derivation path as an explicit, non-default rollback option. This change deletes that path outright, so the requirement cannot be amended in place without leaving a scenario describing behavior no implementation can exhibit.
@@ -37,6 +80,85 @@ per-pool commercial values keyed by a projected pool identity.
 **Migration**: Replaced by "Projection-backed listing candidate derivation" below, which carries forward the projection-consumption, independent-versioning, and stale-generation semantics unchanged and replaces the parity/rollback provision with a prohibition on retaining a local path. No storefront behavior other than the removed local path changes; a deployment that had already defaulted to projection-backed derivation is unaffected.
 
 ## ADDED Requirements
+
+### Requirement: Operator-visible acceptance and projection state
+
+The storefront MUST expose enough operator state to distinguish global
+negotiation pause from listing state, and a known-empty site projection from
+one whose generation is not held.
+
+System status MUST report `resource_count` separately under each site's
+projection-family status, alongside that family's load state, revision,
+digest, last error, and confirmation timestamp. The count MUST describe the
+same cached generation as that state and identity. Status MUST NOT obtain a
+separate generation just to compute a count, consult storefront-local physical
+inventory, or replace per-site counts with a storefront-wide total. The
+top-level storefront-local `resource_count` field MUST be removed.
+
+For `resource_pool`, the count MUST be the number of projected members across
+pools, including disabled declarations. For `capacity_bucket`, it MUST be the
+sum of the projected groups' `resource_count` values, counting enabled
+declarations including exhausted ones. These are declaration counts, not
+counts of distinct physical machines, groups, dimension quantities, feasible
+listing shapes, or published listings. Both counts MUST NOT be filtered
+further by pool enablement or offering-mode authorization.
+
+A held empty generation MUST report zero. A family with no generation held
+MUST report null, not zero. A retained stale generation MUST retain its count
+and be reported as stale. Each site and projection family MUST be reported
+independently; a loaded family MUST NOT supply a count for an unknown one.
+
+Inventory counts MUST NOT assert publication readiness or diagnose an import
+failure from emptiness alone. Publication diagnostics and catalogue state
+describe sellable listings; provisioning owns its inventory-import outcomes.
+Liveness health MUST remain independent of these operator inventory counts.
+
+#### Scenario: Storefront is globally paused
+
+- **WHEN** a buyer starts a negotiation while global pause is active
+- **THEN** the storefront rejects it with HTTP 503 and a global-pause reason
+  until an authenticated operator resumes the process
+
+#### Scenario: A site has a known-empty projection
+
+- **WHEN** a cached site projection family holds an empty generation
+- **THEN** system status reports zero resources for that site and family,
+  with the held generation's identity and state
+
+#### Scenario: A projection family has not loaded
+
+- **WHEN** a site projection family has no generation held, even if another
+  family or site has loaded
+- **THEN** its count is null and its own load state is reported, without
+  borrowing another family's count or treating the site as empty
+
+#### Scenario: Refresh fails after inventory has loaded
+
+- **WHEN** refreshing a family fails after a complete generation was held
+- **THEN** its count and identity describe that retained generation and its
+  state is stale
+
+#### Scenario: Grouped capacity carries resource multiplicity
+
+- **WHEN** a site's capacity projection contains two groups with resource
+  counts of three and two
+- **THEN** its capacity-family status reports five resources, regardless of
+  the groups' available dimension quantities
+
+#### Scenario: Inventory includes disabled and exhausted declarations
+
+- **WHEN** a site's resource-pool projection contains three declarations,
+  one disabled and two enabled, one of which is exhausted, and its capacity
+  projection contains those two enabled declarations
+- **THEN** status reports three resource-pool members and two capacity-family
+  resources, without asserting that either count proves sellable listings
+
+#### Scenario: Sites have different inventory counts
+
+- **WHEN** two sites hold resource-pool generations containing two and five
+  members respectively
+- **THEN** system status preserves the two site-scoped counts alongside their
+  respective generation identities rather than replacing them with seven
 
 ### Requirement: Projection-backed listing candidate derivation
 
