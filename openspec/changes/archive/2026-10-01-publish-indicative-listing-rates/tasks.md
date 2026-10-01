@@ -1,7 +1,6 @@
 # Tasks — publish indicative listing rates
 
-Implemented. Closeout remains: archival, which applies the spec deltas, and the
-index and roadmap links that follow it (8.6, 8.9). Test levels follow
+Implemented, closed out, and archived; the spec deltas are applied. Test levels follow
 `docs/development/TESTING.md`: integration means the real app, a real database,
 wired DI, and the canonical typed client; real-database tests below that level
 are supplemental.
@@ -184,6 +183,16 @@ Names no rate, asset, period, or compute field.
       the receiving proposal, and the exported sentinel.
 - [x] 7b.9 Interaction with `store-registry-listings-as-published` recorded
       (`design.md`).
+- [x] 7b.10 Pre-archival: two companion sentences restated as current
+      (negotiation-side pricing is a separate concern; the declaration could be
+      extended, not "admits" ranges); the roadmap's `capacity-shape-pricing`
+      relationship matches that change's per-family design; the proposal's
+      documentation-impact list records the `ARCHITECTURE.md` change; the index
+      is named in the promotion record. Other changes present in the reviewer's
+      snapshot (`store-registry-listings-as-published`, and the redesigns of
+      `capacity-shape-pricing`, `negotiation-driven-capacity-resize`, and
+      `billable-capacity-reservations`) arrived by the same `dev` merge as 7b.7
+      and are byte-identical in this change's tree to the base it started from.
 
 ## 8. Closeout
 
@@ -201,17 +210,24 @@ Names no rate, asset, period, or compute field.
 - [x] 8.5 **Roadmap currency.** Goal 7 describes published, filterable rates and
       its rate-comparison gap row is closed; the goal stays open on its
       unbacked-supply rows.
-- [ ] 8.6 **Campaign index currency.** Current, except at archival: the row
-      becomes archived with its link, and the roadmap's closed-gap link follows.
+- [x] 8.6 **Campaign index currency.** `openspec/changes/README.md`: this
+      change's row is archived with its archive link, its graph entry marked
+      archived, and the two receiving rows name the evidence they carry. The
+      roadmap's closed-gap link points at the archive.
 - [x] 8.7 **Documentation citations.**
-      `make check-doc-citations CHANGE=publish-indicative-listing-rates` passes.
+      `make check-doc-citations CHANGE=publish-indicative-listing-rates` passes,
+      and `openspec validate publish-indicative-listing-rates --strict` reports the
+      change valid, both rerun after every edit to this change's documents.
 - [x] 8.8 **End-to-end pipeline.** Run 36841346733, including every fix: VM 126
       passed with its 2 existing skips; bare metal all 11 publication stages,
       05b–05d covering a declared rate, a storefront override, and its removal;
       no tracebacks. `make test` passed in the reviewer's environment, covering
       the VM chain-dependent tests and `rl` extra this environment cannot run.
-- [ ] 8.9 **Promotion.** The record below lists every destination; the spec
-      deltas are applied at archival.
+- [x] 8.9 **Promotion.** Archival applied the deltas: 11 requirements added
+      and 1 modified across `registry-discovery`, `storefront-publication`, and
+      `resource-pool-management`, each landing in its spec's Requirements
+      section, with Evidence entries added. All three specs validate strictly.
+      Every destination is in the record below.
 - [x] 8.10 **Packaging.** `make check-packaging` passes on the relocked tree.
 
 ## Design promotion record
@@ -231,6 +247,7 @@ Names no rate, asset, period, or compute field.
 | The `asking_rates` policy tag and its structural validation | `openspec/specs/resource-pool-management/spec.md` |
 | Why the rate is keyed by shape, why the storefront has final authority, why a site range is deferred | `openspec/specs/storefront-publication/architecture.md` |
 | Bare metal's override vocabulary, status source, and shared route service | `openspec/specs/storefront-publication/architecture.md` and `docs/development/DEPLOYMENT_AND_CONFIG.md` |
+| This change's campaign-index state, the Goal 7 dependency graph, and the rows of the two changes that received its unbacked-supply evidence | `openspec/changes/README.md` |
 | Goal 7 current state and gap ownership | `docs/development/ROADMAP.md` (Goal 7 current state; rate-comparison gap row closed) |
 | The pool-override kit's framework-free route service, bound by each storefront | `docs/development/ARCHITECTURE.md` (pool-override kit) and `openspec/specs/storefront-publication/architecture.md` ("Storefront pool overrides") |
 | One asking-rate resolver in `kit/resource-pools`, generic over each domain's shape digest and vocabulary, because bare metal cannot import VM | `openspec/specs/storefront-publication/architecture.md` |

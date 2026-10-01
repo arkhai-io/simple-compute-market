@@ -182,9 +182,11 @@ None.
 
 ## Permanent documentation impact
 
-- [ ] `docs/development/ARCHITECTURE.md` — no change expected; the declaration
-      follows the existing hint-and-override pattern, and nothing crosses a new
-      authority boundary. Re-confirm at implementation time rather than assuming.
+- [x] `docs/development/ARCHITECTURE.md` — the declaration follows the existing
+      hint-and-override pattern and crosses no new authority boundary, but the
+      pool-override kit gained a framework-free route service that both compute
+      storefronts bind, which is repository-wide composition, so the kit's
+      description changed.
 - [x] Existing subsystem specification —
       `openspec/specs/registry-discovery/spec.md`,
       `openspec/specs/storefront-publication/spec.md`,
