@@ -109,7 +109,7 @@ def run_settle_from_log(
     console: Console | None = None,
     identity: ResolvedBuyerIdentity | None = None,
 ) -> dict:
-    "Alkahest settlement recovery uses the immutable accepted plan and operation identities."
+    """Resume the accepted settlement mechanism without reselecting its option."""
     console = console or Console()
     from .common import chain_by_name, resolve_recovery_buyer_identity
 

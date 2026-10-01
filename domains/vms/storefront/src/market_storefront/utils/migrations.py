@@ -21,8 +21,9 @@ from core_storefront.sqlite_migrations import (  # noqa: F401 — re-exported
     apply_schema_migrations,
 )
 
-logger = logging.getLogger(__name__)
 from market_storefront.payment_repository import add_vm_payment_records
+
+logger = logging.getLogger(__name__)
 
 
 def _normalize_to_dict(value: Any) -> dict[str, Any] | None:

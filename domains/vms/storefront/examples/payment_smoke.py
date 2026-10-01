@@ -1,9 +1,6 @@
 """Local VM payment-stage first use; payments HTTP and VM delivery are controlled.
 
-Run from the repository root after building the internal wheels:
-uv run --project domains/vms/storefront --find-links .dist --with arkhai-vms-buyer \
-    --refresh-package arkhai-kit-arkhai-payments --refresh-package arkhai-vms-buyer \
-    python domains/vms/storefront/examples/payment_smoke.py
+Run from the repository root using the wheel setup in the adjacent README.md.
 """
 
 from __future__ import annotations
