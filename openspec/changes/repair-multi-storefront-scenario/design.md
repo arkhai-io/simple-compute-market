@@ -34,22 +34,32 @@ and opposite in meaning. This change replaces the remaining incidental skips
 with declared ones, and the configuration stays: reverting it would restore the
 silence.
 
-## What unblocking requires
+## Accepted topology and unblocking
 
-`ProvisioningIdentityContext` holds `storefront_principal: Identity` and
-`SqlAlchemyProvisioningPrincipalAuthority` bootstraps the `seller` role from it.
-The authority already supports multiple principals per role — rotation carries
-an overlap window in which two are trusted — so the constraint is the single
-configured identity rather than the trust model.
+Alice and Bob are separate storefronts. Give each a separate provisioning
+service instance with its own authority identity, configured storefront
+counterparty, callback destination, and inventory. Alice must consume her
+authority's projections and stop using local-table listing derivation.
 
-That suggests the smaller shape: configure a set of storefront principals
-rather than one, and let each carry its own site binding, since
-`storefront_site_id` is likewise singular today. Whether a storefront principal
-should imply a site, or the two should be configured independently, is the open
-question and belongs to this change rather than to a skip marker.
+This preserves the topology in `service-identity-signing` and
+`replace-polling-with-authenticated-push`: each site uses its own credential,
+distinct from the storefront's, and each authority serves one storefront.
+Neither change needs a topology amendment for this repair.
+
+Rotation overlap accepts credential generations of the same counterparty;
+it must not be used to introduce an independent storefront. The earlier
+proposal to configure several sellers on one authority is rejected.
+
+Acceptance proves registry isolation, fan-in, and distinct negotiations across
+two projection-backed storefronts, not shared-site storefront substitution.
+The explicit blocked-stage skips are `06b` and `06c`; verify the actual runtime
+skip set rather than relying on the earlier four-stage estimate.
+
+During planning, identify the exact compose, identity, configuration, seeding,
+and test files needed for Alice's separate authority and isolated service state.
 
 ## Deliberately not addressed
 
-Several provisioning services serving one storefront. That is the inverse
-relation, has its own roadmap treatment, and shares none of this change's
-mechanism.
+Multiple storefronts per site, shared-authority ownership and routing, new
+authentication protocols, general push delivery, and expanding this scenario
+to multiple sites per storefront are out of scope.

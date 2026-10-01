@@ -199,8 +199,8 @@ None.
 - Depends on `repair-multi-storefront-scenario`. The two-storefront e2e
   scenario's second storefront derives from local tables because provisioning
   trusts one storefront principal and it can load no projection; the cutover
-  and the migration of `test_multi_registry.py` wait on provisioning trusting
-  a second principal. Complete that change separately first, including Alice's
+  and the migration of `test_multi_registry.py` wait on Alice receiving her
+  own provisioning authority. Multiple storefronts per site are out of scope. Complete that change separately first, including Alice's
   projection cutover and passing scenario evidence. The local path, CSV
   contract, startup seeding, schema freeze, and local diagnostic retirement
   then land together as one coordinated cutover; none of those removals is an
