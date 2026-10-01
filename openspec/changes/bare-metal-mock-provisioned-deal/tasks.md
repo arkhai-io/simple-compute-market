@@ -68,7 +68,14 @@ migrated from three sibling changes; `design.md` records each decision.
       kit; the deal-on-every-run requirement applies compute provisioning only where
       delivery crosses it; the kit settlement-servicing worker, composed for every
       mechanism, starts and retries bare-metal fulfillment. Sections 4–7 were replanned
-      accordingly, and every section now ends at its own gate.
+      accordingly, and every section now ends at its own gate. Replanning verified the
+      new premises against code: composition already refuses duplicate
+      `(offering_mode, action)` keys, so 4.1 extends it rather than adding a registry;
+      the job service's only bare-metal routing is its playbook-path special case; the
+      worker has no single-obligation step, so 5.3 adds `service_obligation`; VM and API
+      credits hold only at acceptance, so 5.6 proves the post-force-accept path rather
+      than idempotency; `preview_opening` can stop before `start`'s first write; and
+      evaluate-negotiate and force-accept have the callers 5.5, 5.7, and 5.9 name.
 
 ## 3. Buyer-side deal requirements
 
@@ -100,13 +107,15 @@ Former tasks 3.5–3.6 are storefront behaviour proven at integration level.
 Decision: "Executors are selected by offering mode and action, and each adapter owns its
 mock". Reviewable alone: provisioning only, no storefront or scenario change.
 
-- [ ] 4.1 Add the executor table to `provisioning/compute/src/compute_provisioning/`:
-      `executors.py` with an `ActionExecutorRegistry` keyed by `(offering_mode, action)`
-      that rejects duplicate keys, and the narrow resolver port a job service depends on.
-      Adapter bundles (`compute_provisioning.adapters`' bundle contract) declare their
-      action executors; `compose_adapter_bundles` registers them. Unit tests in
-      `provisioning/compute/tests/unit/test_executors.py` (selection, duplicate refusal,
-      unknown key).
+- [ ] 4.1 Extend composition with job executors:
+      `provisioning/compute/service/src/compute_provisioning_service/composition.py`'s
+      `ExecutorAdapterContribution` gains `job_executor`, `job_actions`, and
+      `playbook_path`; `compose_adapter_bundles` builds `ComposedComputeAdapters.job_executors`
+      keyed by `(offering_mode, action)` under the same duplicate refusal it applies to
+      contract actions. The `JobExecutorResolver` protocol the job service depends on goes
+      in `provisioning/compute/src/compute_provisioning/adapters.py`. Tests in
+      `provisioning/compute/service/tests/unit/test_composition.py` (selection,
+      duplicate refusal across bundles, unknown key).
 - [ ] 4.2 Add `compute_provisioning/executor_mock.py`: the rule model, store, and matching
       over an opaque job-parameter mapping, pause gates and job-done events, the
       evaluate-job dry run, and a framework-free route service raising an HTTP-shaped
@@ -116,8 +125,9 @@ mock". Reviewable alone: provisioning only, no storefront or scenario change.
       they test mechanism rather than VM output.
 - [ ] 4.3 Resolve executors in VM's job service:
       `domains/vms/provisioning/adapter/src/vm_provisioning_adapter/services/job_service.py`
-      takes the resolver port and selects each job's executor from its persisted
-      `offering_mode` and action; its `bare_metal` special case is removed;
+      takes the resolver port and selects each job's executor and playbook from its
+      persisted `offering_mode` and action; `_playbook_path_for_params`' `bare_metal`
+      special case and `_BARE_METAL_ACTIONS` are removed;
       `notify_job_done` goes to the executor that ran the job. Persistence, host
       validation, inventory rendering, and `parse_playbook_result` are unchanged. The VM
       bundle (`vm_provisioning_adapter/bundle.py`, `runtime.py`) registers the real
@@ -131,12 +141,15 @@ mock". Reviewable alone: provisioning only, no storefront or scenario change.
       `provisioning/compute/service/tests/integration/test_test_controller.py` passes
       unchanged.
 - [ ] 4.5 Add the bare-metal mock:
-      `domains/bare_metal/provisioning/adapter/src/bare_metal_provisioning_adapter/services/bare_metal_mock_executor.py`,
-      whose default grant emits `node_grant_access_data` (tenant user and SSH port;
-      tenant address from the registered host record, as a real run's) and whose default
-      reclaim emits `node_reclaim_access_data`; `bundle.py` and `runtime.py` register the
-      real Ansible service, or under the mock profile the mock, for
-      `(bare_metal, NODE_GRANT_ACCESS_ACTION)` and `(bare_metal, NODE_RECLAIM_ACCESS_ACTION)`;
+      `domains/bare_metal/provisioning/adapter/src/bare_metal_provisioning_adapter/services/bare_metal_mock_executor.py`
+      constructs its own instance of VM's Ansible-shaped programmable mock, with its own
+      rule store and bare-metal default output: a default grant emits
+      `node_grant_access_data` (tenant user and SSH port; tenant address from the
+      registered host record, as a real run's) and a default reclaim emits
+      `node_reclaim_access_data`. `bundle.py` and `runtime.py` register the real Ansible
+      service, or under the mock profile the mock, as the job executor for
+      `(bare_metal, NODE_GRANT_ACCESS_ACTION)` and `(bare_metal, NODE_RECLAIM_ACCESS_ACTION)`
+      with the bare-metal playbook path;
       new `controllers/test_controller.py` binds the route service at
       `/test/bare-metal/mock-rules`; `routers.py` exposes it. Tests in
       `domains/bare_metal/provisioning/adapter/tests/test_bare_metal_mock_executor.py`:
@@ -169,11 +182,13 @@ through the runtime", "Evaluate-negotiate previews the real opening". Reviewable
 kits, core, and the VM and API-credit storefronts; bare metal binds in Sections 6–7.
 
 - [ ] 5.1 `kit/negotiation-runtime/src/market_negotiation_runtime/runtime.py`: add
-      `accept_administratively` (load the recorded thread and binding, build the
-      `Acceptance` through the domain hooks at the administrator's amount, append the
-      administrator's accept message, commit through `_commit_acceptance`) and
-      `preview_opening` (the `start` pipeline up to and including round-zero evaluation,
-      with no persistence, hold, or event). Unit tests in
+      `accept_administratively` (the continuation's existing resolution with an
+      administrator actor, then the `Acceptance` built through the domain hooks at the
+      administrator's amount, the administrator's accept message, and
+      `_commit_acceptance`) and `preview_opening` (`start`'s resolution, decode,
+      `validate_opening`, pause and liveness checks, round-zero evaluation,
+      `agreement_terms`, and `build_artifacts`, factored into one function `start` also
+      calls, stopping before `create_negotiation_thread`). Unit tests in
       `kit/negotiation-runtime/tests/unit/test_administrative_acceptance.py` and
       `test_opening_preview.py`: hooks run on administrative acceptance; preview refuses
       every opening `start` refuses and writes nothing.
@@ -182,11 +197,16 @@ kits, core, and the VM and API-credit storefronts; bare metal binds in Sections 
       `system_controller.stream_events`), evaluate-negotiate over `preview_opening`, and
       force-accept over `accept_administratively`. Unit tests in
       `kit/storefront/tests/unit/test_deal_control_routes.py`.
-- [ ] 5.3 `kit/settlement-runtime/src/market_settlement_runtime/admin_routes.py`: settle
+- [ ] 5.3 `kit/settlement-runtime/src/market_settlement_runtime/servicing.py`:
+      `SettlementServicingWorker.service_obligation(obligation_ref)`, the per-record body
+      `run_once` applies (factored out, with the same retry scheduling and terminal
+      handling). `kit/settlement-runtime/src/market_settlement_runtime/admin_routes.py`: settle
       verify over the mechanism adapter's escrow read with no adoption, evaluate-settle
       over a new `FulfillmentPreviewHook` port in `ports.py`, and settle wait as a
       bounded long-poll over an injected settle-status reader and terminal predicate.
-      Unit tests in `kit/settlement-runtime/tests/unit/test_admin_routes.py`.
+      Unit tests in `kit/settlement-runtime/tests/unit/test_admin_routes.py` and
+      `test_servicing.py` (`service_obligation` matches one `run_once` pass for that
+      obligation; a concurrent pass sees it busy).
 - [ ] 5.4 `kit/capacity-publication/src/market_capacity_publication/admin_routes.py`:
       admin reserve through a listing's capacity binding, and the capacity-released
       callback dispatching to an injected domain release hook. Unit tests in
@@ -194,12 +214,16 @@ kits, core, and the VM and API-credit storefronts; bare metal binds in Sections 
 - [ ] 5.5 Wire models and client: `core/storefront/src/core_storefront/models/listing_models.py`'s
       `EvaluateNegotiateRequest` becomes the opening request and the response reports
       refusals before policy; `core/storefront-client/src/storefront_client/client.py`'s
-      async and sync `evaluate_negotiate` take it.
-- [ ] 5.6 Verify hold idempotency before rebinding: VM's `place_hold`
-      (`domains/vms/storefront/src/market_storefront/negotiation_runtime.py`) and API
-      credits' `_place_quota_hold` (`domains/apicredits/storefront/src/apicredits_storefront/negotiation_runtime.py`)
-      tolerate a second call for a negotiation that already holds; make them so where
-      they do not, with focused tests beside each.
+      async and sync `evaluate_negotiate` take it. Every caller moves to the opening body:
+      `domains/vms/storefront/tests/integration/test_listings_api.py`,
+      `test_publication_loop.py`, and e2e `scenarios/vms/test_full_deal_buyer_cli.py` and
+      `test_non_erc20_settlement.py` (`test_full_deal.py` in 5.10).
+- [ ] 5.6 Prove the hold path after force-accept. VM's `place_hold` and API credits'
+      `_place_quota_hold` run only at acceptance (verified 2026-10-01), so administrative
+      acceptance places the hold once. Focused tests in
+      `domains/vms/storefront/tests/integration/test_negotiations_api.py` and the
+      API-credit negotiation suite: after force-accept the hold and settlement plan exist,
+      and settlement consumes the hold exactly as after a negotiated acceptance.
 - [ ] 5.7 Rebind VM: `controllers/system_controller.py` (events),
       `listings_controller.py` (evaluate-negotiate over the preview; remove
       `ListingService.evaluate_negotiate` and its round-zero helper's admin use),
@@ -213,7 +237,9 @@ kits, core, and the VM and API-credit storefronts; bare metal binds in Sections 
       `negotiations_controller.py` (force-accept), `settle_controller.py` (wait).
       API-credit suites pass, with force-accept asserting the quota hold.
 - [ ] 5.9 Remove `NegotiationService.force_accept` from
-      `core/storefront/src/core_storefront/services/negotiation_service.py` and its tests.
+      `core/storefront/src/core_storefront/services/negotiation_service.py`, and its cases
+      from `domains/vms/storefront/tests/unit/services/test_negotiation_service.py`;
+      `test_negotiations_api.py` covers force-accept through the route service.
 - [ ] 5.10 VM's stage 05a in `e2e-tests/tests/e2e/roles/scenarios/vms/test_full_deal.py`
       sends the opening request it later sends to `negotiate_new`.
 - [ ] 5.11 **Gate.** Bump and relock the changed kits, core packages, and consumers; the
@@ -267,7 +293,7 @@ paths and provider-neutral release in provisioning.
       to the existing lifecycle callbacks and Alkahest to `fulfillment_service.py`;
       `lifecycle_steps.py` then registers the settlement-servicing step on the Alkahest
       path too. `settlement_service.py`'s `verify` wakes the worker for the adopted
-      obligation and steps it once through the worker, and `status` drops its
+      obligation and calls `service_obligation` once, and `status` drops its
       no-fulfillment assertion. Remove `POST /api/v1/fulfillments/begin` from `api.py`
       and `BareMetalFulfillRequest` from `models.py`; remove `begin()` from
       `domains/bare_metal/buyer/src/arkhai_bare_metal_buyer/fulfillment.py`.

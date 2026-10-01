@@ -171,10 +171,13 @@ the administrator as the accepting author, and commits through the same
 credits rebind to it; core `NegotiationService.force_accept` has no remaining caller and
 is removed.
 
-This changes VM's force-accept behaviour: a force-accepted VM thread now carries its
-hold and committed settlement plan. Where a domain's round-zero opening already placed a
-hold, `place_hold` must be idempotent for the same negotiation; planning verifies VM's
-and API credits' hooks and makes them so where they are not.
+It reuses the runtime's continuation resolution, which already admits an administrator
+actor; what it adds is acceptance at the administrator's amount rather than the seller's
+last one. This changes VM's force-accept behaviour: a force-accepted VM thread now
+carries its capacity hold and committed settlement plan. Planning found that VM and API
+credits place their hold only at acceptance, never at opening, so administrative
+acceptance places it once rather than twice; what needs proving is that settlement
+consumes a hold after force-accept exactly as after a negotiated acceptance.
 
 ### Evaluate-negotiate previews the real opening
 
@@ -195,7 +198,10 @@ dispatches by the obligation's mechanism: hosted obligations to the existing hos
 lifecycle callbacks, Alkahest obligations to the fulfillment service. When `verify`
 adopts an obligation it wakes the worker and steps that obligation once through the
 worker's own path, so the settle response normally reports fulfillment started; if that
-attempt fails, the worker's schedule retries it. The domain supplies what fulfillment
+attempt fails, the worker's schedule retries it. The worker has no public way to service
+one obligation today, so the kit gains `service_obligation`, the same per-record body
+`run_once` applies to each due row, with the same retry scheduling; the runtime's
+operation leases already make a concurrent loop pass see the obligation as busy. The domain supplies what fulfillment
 means; the kit worker alone decides when an unstarted ready obligation is retried, so no
 second retry path exists in the domain.
 
@@ -235,20 +241,29 @@ Decided with the maintainer; placement corrected after design review. Executor s
 authority belongs to compute provisioning, keyed the way "Validated executor
 registration" requires:
 
-- `compute_provisioning` gains an action-executor table keyed by
-  `(offering_mode, action)`, beside `ExecutorAdapterRegistry`, rejecting duplicate
-  registrations at startup. Each adapter bundle registers its executors there.
+- Compute-provisioning composition already validates `(offering_mode, action)` ownership
+  and refuses duplicates for the actions a bundle submits through the compute contract
+  (`compute_provisioning_service.composition`). Each `ExecutorAdapterContribution` gains
+  the job executor that runs its mode's actions, the actions it runs, and the playbook
+  it runs them with; composition builds the job-executor table from those under the
+  same duplicate refusal. The resolver protocol a job service depends on lives in
+  `compute_provisioning`, which both adapters already import.
 - VM's job service receives a narrow resolver port and owns no routing decision. It
-  resolves a job's executor from the job's persisted `offering_mode` and action. Job
-  storage stays in the VM adapter behind that port; moving it is out of scope, but no
-  new cross-domain authority is added there.
+  resolves a job's executor and playbook from the job's persisted `offering_mode` and
+  action, so its `bare_metal` playbook special case goes. Job storage stays in the VM
+  adapter behind that port; moving it is out of scope, but no new cross-domain authority
+  is added there.
 - The bare-metal bundle registers its access actions: the real Ansible service in
   production, the bare-metal mock under the mock profile. The job record, host check,
   inventory rendering, and result parsing are unchanged, so the mock's playbook output is
   parsed by the same `node_grant_access_data` and `node_reclaim_access_data` path as a
   real run. A default grant returns a tenant user and SSH port, with the tenant address
   taken from the registered host record as a real run's is; a default reclaim succeeds.
-  Job-done notification goes to the executor that ran the job.
+  Job-done notification goes to the executor that ran the job. The Ansible-shaped fake
+  (vars files, inventory, playbook start and wait, delegation to the real parser) stays
+  in the VM adapter, because generic compute modules may not know playbooks; the
+  bare-metal adapter constructs its own instance of it with bare-metal default output and
+  its own rule store, through the VM-adapter dependency job execution already has.
 
 The rule store, pause gates, matching, job-done events, evaluate-job dry run, and a
 framework-free `/test` route service move out of the VM mock into a compute-family module,
@@ -397,8 +412,8 @@ Earlier:
   bare-metal behaviour, then the shared stages with VM moved onto them, then the
   bare-metal scenario, then the pipeline.
 - **VM's force-accept starts placing holds and committing plans** → a behaviour change
-  in VM's deal path; its hold idempotency is checked before rebinding, and VM's lane is
-  the gate.
+  in VM's deal path; a focused test proves settlement consumes the hold after
+  force-accept as after a negotiated acceptance, and VM's lane is the gate.
 - **VM regression through shared stages and rebinding** → VM moves onto the shared
   stages before any bare-metal driver exists, and each rebinding keeps wire paths and
   client methods.
