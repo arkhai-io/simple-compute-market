@@ -588,6 +588,11 @@ class SettlementSelection(BaseModel):
     mechanism: str = Field(min_length=1)
     option_id: str = Field(pattern=r"^[0-9a-f]{64}$")
     expiration_unix: int | None = Field(default=None, gt=0)
+    # Buyer-side mechanism parameters, opaque to core. The seller's option
+    # params cannot name the buyer's own mechanism identity (for example the
+    # payer account an Arkhai payments mandate charges), so the buyer supplies
+    # it here and the Agreement carries it as settlement_params.
+    params: dict[str, Any] | None = None
 
 
 class Agreement(BaseModel):
@@ -601,6 +606,7 @@ class Agreement(BaseModel):
     buyer: dict[str, str]
     seller: dict[str, str]
     settlement: SettlementOption | None = None
+    settlement_params: dict[str, Any] | None = None
     amount: int = Field(ge=0)
     asset: str | None = None
     duration_seconds: int = Field(ge=0)

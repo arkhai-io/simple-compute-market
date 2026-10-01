@@ -34,7 +34,7 @@ Agreement = {
 ### The seller derives the mandate; the buyer confirms
 
 The payments service never parses the agreement, so the two can evolve independently. The seller's kit derives the mandate and returns it with the agreement in the accept response:
-- `from`: the buyer's Arkhai account; `to`: the payee account in the option params.
+- `from`: the buyer's Arkhai account, which the buyer supplies as `payer_account` in its `SettlementSelection.params` and the Agreement carries as `settlement_params`; `to`: the payee account in the option params. Core treats both params maps as opaque.
 - one `once` part: the agreed amount in the option's asset (payments notation, e.g. `USD/2`), held for `start_utc − accepted_at + duration_seconds + window`. The window is declared in the option params, so buyers see it before negotiating, and it absorbs a late provisioning start.
 - `fee`: the service's published fee policy.
 - `authorities`: `reverse` lists the seller and Arkhai's dispute authority, which the service requires; `start` and `stop` are empty.
