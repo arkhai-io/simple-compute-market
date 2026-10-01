@@ -125,16 +125,16 @@ change. Each control becomes a framework-free route service, following the prece
 owns the mechanism it exposes and bound by each storefront behind its own
 authentication:
 
-| Control | Mechanism owner | Bound by |
-|---|---|---|
-| Stage-event read (`/api/v1/system/events`) | storefront kit | VM, API credits, bare metal |
-| Evaluate-negotiate | negotiation runtime, through the domain's seller-policy hook | VM, bare metal |
-| Force-accept | negotiation runtime's acceptance chokepoint | VM, API credits, bare metal |
-| Settle verify (dry run) | settlement runtime, through the mechanism adapter | VM, bare metal |
-| Evaluate-settle (dry run) | settlement runtime, through a new per-domain fulfillment-preview hook | VM, bare metal |
-| Settle wait | settlement runtime | VM, API credits, bare metal |
-| Admin reserve | capacity/publication kit, through a listing's capacity binding | VM, bare metal |
-| Capacity-released callback | capacity/publication kit | VM, bare metal |
+| Control | Route service lives in | Over | Bound by |
+|---|---|---|---|
+| Stage-event read (`/api/v1/system/events`) | `kit/storefront` | core stage log | VM, API credits, bare metal |
+| Evaluate-negotiate | `kit/storefront` | the domain's round-zero seller-policy hook | VM, bare metal |
+| Force-accept | `kit/storefront` | core `NegotiationService.force_accept` | VM, API credits, bare metal |
+| Settle verify (dry run) | `kit/settlement-runtime` | the mechanism adapter's escrow read | VM, bare metal |
+| Evaluate-settle (dry run) | `kit/settlement-runtime` | a new per-domain fulfillment-preview hook | VM, bare metal |
+| Settle wait | `kit/settlement-runtime` | the domain's settle-status reader | VM, API credits, bare metal |
+| Admin reserve | `kit/capacity-publication` | a listing's capacity binding | VM, bare metal |
+| Capacity-released callback | `kit/capacity-publication` | a domain release hook | VM, bare metal |
 
 Wire paths and canonical client methods are unchanged, so VM's scenario and every
 existing caller keep working. Per "An extracted concern leaves no domain-local
@@ -144,7 +144,10 @@ only what it already has a copy of: it has no evaluate-negotiate, settle dry run
 reserve, or capacity-released callback today, and nothing here requires them.
 
 The shell, when planned, mounts these route services rather than extracting them again.
-Exact module placement within each owning kit is fixed in planning.
+Placement was fixed in planning: evaluate-negotiate and force-accept sit in
+`kit/storefront`, which composes the core shell with domain hooks, because force-accept
+is core's `NegotiationService.force_accept` rather than a runtime method;
+`kit/settlement-runtime` already holds framework-free routes (`hosted_routes.py`).
 
 ### Settlement starts fulfillment
 
@@ -175,9 +178,10 @@ buyer teardown bypassing the lease lifecycle, and it is removed.
   only on that callback.
 
 The site's lease view and backdating used by the expiry stages go through typed
-clients. Planning verifies whether `/api/v1/leases/*` already serves bare-metal
-reservations; if it does not, the bare-metal lease routes gain read, update, and
-terminate.
+clients. `/api/v1/leases/{id}` (read, update, terminate) is served over the
+kind-agnostic lease lifecycle and already reads and backdates a bare-metal
+reservation, so the bare-metal lease routes gain nothing; its VM-named fields are
+blank for bare metal.
 
 ### Executors are routed by action, and each adapter owns its mock
 
@@ -276,6 +280,29 @@ access was actually revoked stays the protected lane's evidence.
 Implemented by `kit-owned-storefront-loop-lifecycle`. The lifecycle pause holds every
 loop the bare-metal storefront runs, each loop has its own step, and the scenario pauses
 once at the start and invokes every transition it depends on.
+
+### The Alkahest path commits the lease window and registers the lease
+
+Found in planning. Bare metal's Alkahest fulfillment reserves and schedules but never
+commits the reservation or registers a lease: its hosted path commits with the lease
+window, and VM's storefront commits and registers. An uncommitted hold expires under the
+site's reservation watchdog and carries no lease end for expiry to find, so stages
+09c–11b could not run. Fulfillment start commits the reservation with the materialized
+lease window, as the hosted path does, and the storefront registers the lease through
+the site's contract lease route once fulfillment is active, as VM does. This is inside
+"add the functionality required for the 10b–11 stages".
+
+### Lane composition files
+
+Found in planning. `compose.local-identities.yml` binds both the VM and API-credit
+services, so the VM stack cannot drop the API-credit services while it is layered.
+`compose.apicredits.yml` redefines services it `include`s, which the overlay convention
+says compose refuses, and it omits the API-credit storefront's EVM key that the shared
+overlay carries. The overlay therefore splits per market, following
+`compose.bare-metal-local.yml`: `compose.vms-local.yml` and `compose.apicredits-local.yml`,
+with `compose.local-identities.yml` removed and `docker-compose.yml` layering both;
+`compose.apicredits.yml` becomes `include`-only. `test_multi_registry` reads only the VM
+stack's two registries and stays in the VM lane.
 
 ## Superseded decisions
 

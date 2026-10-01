@@ -3,11 +3,10 @@
 ### Requirement: Storefront deal controls are kit-owned route services
 
 The storefront's deal controls MUST be framework-free route services in the kit that
-owns the mechanism each exposes, bound by every storefront behind its own
-authentication: the stage-event read (storefront kit); evaluate-negotiate and
-force-accept (negotiation runtime); settle verify, evaluate-settle, and settle wait
-(settlement runtime); and admin reserve and the capacity-released callback (capacity and
-publication kit). Evaluate-negotiate MUST run the domain's own seller policy for round
+composes or owns the mechanism each exposes, bound by every storefront behind its own
+authentication: the stage-event read, evaluate-negotiate, and force-accept (storefront
+kit); settle verify, evaluate-settle, and settle wait (settlement runtime kit); and admin
+reserve and the capacity-released callback (capacity and publication kit). Evaluate-negotiate MUST run the domain's own seller policy for round
 zero; evaluate-settle MUST call a per-domain fulfillment-preview hook; both, and settle
 verify, MUST make no durable write. Wire paths and canonical client methods MUST be the
 same for every domain that binds a control. A storefront MUST NOT carry a domain-local
