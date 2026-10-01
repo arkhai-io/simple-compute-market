@@ -308,6 +308,53 @@ class TestListingShapesValidationThroughAdminApi:
         assert fetched.policy_tags == {**self._TAGS, "listing_shapes": self._SHAPES}
 
 
+class TestPricingRatesValidationThroughAdminApi:
+    """A malformed `pricing` rate list is refused by the server's shared
+    validator through the typed client, and a valid one round-trips."""
+
+    _TAGS = {"advertisable_modes": [], "capacity_backing": "backed"}
+    _PRICING = {
+        "gpu": {"H100": {"rates": [{"asset": "usd", "rate": "2", "per": "hour"}]}},
+        "memory": {"rates": [{"asset": "usd", "rate": "0.05", "per": "hour"}]},
+    }
+
+    async def test_create_pool_with_a_malformed_rate_returns_400(self, client_and_queue):
+        client, _ = client_and_queue
+        with pytest.raises(ProvisioningError) as exc_info:
+            await client.create_pool(
+                PoolCreate(
+                    id="priced",
+                    label="Priced",
+                    provider="ansible",
+                    policy_tags={
+                        **self._TAGS,
+                        "pricing": {"memory": {"rates": [
+                            {"asset": "usd", "rate": "0.05x", "per": "hour"},
+                        ]}},
+                    },
+                    provider_config=_ANSIBLE_CONFIG,
+                )
+            )
+        assert exc_info.value.status_code == 400
+        with pytest.raises(ProvisioningError) as get_exc_info:
+            await client.get_pool("priced")
+        assert get_exc_info.value.status_code == 404
+
+    async def test_create_pool_with_valid_rates_round_trips(self, client_and_queue):
+        client, _ = client_and_queue
+        await client.create_pool(
+            PoolCreate(
+                id="priced",
+                label="Priced",
+                provider="ansible",
+                policy_tags={**self._TAGS, "pricing": self._PRICING},
+                provider_config=_ANSIBLE_CONFIG,
+            )
+        )
+        fetched = await client.get_pool("priced")
+        assert fetched.policy_tags == {**self._TAGS, "pricing": self._PRICING}
+
+
 class TestVmSizeDefaultsThroughAdminApi:
     """Proves `default_vm_*` round-trips through the real typed client,
     the real HTTP API, the real `AnsiblePoolConfigHandler`, and the real

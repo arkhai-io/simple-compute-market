@@ -60,6 +60,8 @@ def extract_initial_price_from_order(
     openspec/specs/negotiation-protocol/spec.md, "The seller's reference amount is
     the selected option's rate".
     """
+    # Read through the Alkahest kit: concept modules may not import core, and
+    # this reader handles any option's ``rates`` the same way.
     from market_alkahest.schemas import primary_rate_value
 
     if isinstance(order, dict):

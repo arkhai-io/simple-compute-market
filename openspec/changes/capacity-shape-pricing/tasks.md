@@ -96,12 +96,21 @@ selected option's rate".
       *Done 2026-10-01.* `_selected_option` in `storefront_round.py` reads the selected option; a proposal selecting nothing the listing offers (an escrow proposal without an escrow address, an unmatched selection) falls back to the first accepted escrow, so the round's guards refuse it for its own reason rather than for want of a floor.
 - [x] 1.10 API-credit selected-option reference. `_reference_amount` in
       `domains/apicredits/storefront/src/apicredits_storefront/negotiation_runtime.py` takes
-      the pinned proposal and passes its settlement selection; the last step of
+      the pinned proposal and prices the artifact it selects — a matched accepted escrow,
+      which need not be the first, or a selected settlement option, falling to the floor
+      when that artifact has no rate — through a shared `selected_settlement_artifact` in
+      `kit/policy/src/market_policy/scalar_policies.py` that the VM reference uses too; the last step of
       `_seller_reference_amount` in
       `domains/apicredits/src/arkhai_apicredits/negotiation/storefront_round.py` and the
       floor parsing in `domains/apicredits/src/arkhai_apicredits/listings/pricing.py` become
       exact.
-      *Done 2026-10-01.* The kit hook reuses the round module's `_seller_reference_amount`.
+      *Done 2026-10-01; amended after implementation review.* The first pass passed only
+      the settlement selection, so an escrow proposal priced against the first accepted
+      escrow and a rateless selected option raised instead of using the floor. Both
+      domains now read the selected artifact through `selected_settlement_artifact`
+      (tests in `kit/policy/tests/unit/test_selection_scalar.py`); API-credit cases for a
+      non-first escrow, a selected option, a rateless option, and the hook reading the
+      whole pinned proposal are in `test_concept_modules.py`.
 - [x] 1.11 Reference tests. `domains/vms/storefront/tests/unit/test_extract_initial_price.py`:
       a hosted option selected on a two-mechanism listing references the hosted rate; a
       hosted-only listing never uses the floor; a rateless selected option uses the floor;
@@ -109,7 +118,11 @@ selected option's rate".
       hosted-selection negotiation in `domains/vms/storefront/tests/integration/test_listings_api.py`
       reports the hosted option's reference amount. `domains/apicredits/storefront/tests/unit/test_concept_modules.py`:
       the pinned selection reaches the reference, and a long amount is exact.
-      *Done 2026-10-01.* Done, with the hosted-integration case covered by the unit cases against the same function rather than a new `test_listings_api.py` scenario.
+      *Done 2026-10-01; amended after implementation review.* The first pass replaced the
+      integration case with unit cases, which `TESTING.md` does not allow for orchestration.
+      `test_a_hosted_selection_negotiates_from_the_hosted_rate` in `test_listings_api.py`
+      now drives `StorefrontClient.evaluate_negotiate` against a listing offering Alkahest
+      at 9000 and a hosted option at 1500, and asserts a reference of 1500.
 
 ## 2. Family-rate resolution, validation, and diagnosis
 
@@ -128,6 +141,7 @@ the reason is visible"; "The dead `min_price` and `token` resolution is removed"
       refused write through each surface in
       `kit/resource-pools/tests/integration/test_resource_pool_service.py`.
       *Done 2026-10-01.* Validator in `hints.py`, with unit tests in a new `kit/resource-pools/tests/unit/test_pricing_rates.py`. Suite passes (280); the provisioning service suite passes (670 and 281).
+      *Amended after implementation review:* the provisioning service's API boundary is proven through `ProvisioningClient` in `provisioning/compute/service/tests/integration/test_pools_api.py` (`TestPricingRatesValidationThroughAdminApi`: a malformed rate refused with nothing stored, a valid rate list round-tripped).
 - [x] 2.2 Rewrite `domains/vms/listings/src/arkhai_vms_listings/pricing_resolution.py`:
       `min_price` and `token` leave `GpuPricingFields`, `_FIELD_NAMES`, and
       `_VALID_HINT_FIELD`, and the module docstring is corrected. Family-rate resolution
@@ -244,6 +258,7 @@ sale, not a registry field".
       refresh on a rate change, with new option identities and the same listing; a
       would-be-free listing refused and never posted.
       *Done 2026-10-01.* Done. VM storefront: 1149 unit and 270 integration tests pass.
+      *Amended after implementation review:* `test_rate_structure_column.py` is in `core/storefront/tests/integration/`, since it uses real SQLite. The reconciler's database-backed cases moved from `domains/vms/storefront/tests/unit/test_reconciler.py` to `tests/integration/test_reconciler_derivation.py`, as the campaign index recorded they would when the file next changed; shared helpers and the schema fixture are in `tests/_reconciler_cases.py`, which `test_reconciler_projection.py` also imports.
 - [x] 3.6 End-to-end Stage 07 in
       `e2e-tests/tests/e2e/roles/scenarios/vms/test_listing_shapes.py`: an override stating
       family rates and rateless clauses refreshes the listing in place at the composed rate,
@@ -316,7 +331,7 @@ review.
       their reason.
       *Done 2026-10-01.* Done: added imports are module level, including the moved test imports.
 - [x] 7.3 **Documentation compliance.** Re-check this change's accepted decisions
-      against `openspec/README.md`'s placement rules: normative behavior in the two
+      against `openspec/README.md`'s placement rules: normative behavior in the three
       spec deltas, rationale in `storefront-publication/architecture.md`, the
       cross-system pricing account in `ARCHITECTURE.md`, operator configuration in
       `DEPLOYMENT_AND_CONFIG.md`, and the superseded compatibility reading only in
@@ -342,23 +357,32 @@ review.
       An unresolvable citation, or one whose target is a tombstone, is a blocking
       defect under `AGENTS.md`'s cross-reference rule.
       *Done 2026-10-01.* Done: passes.
-- [ ] 7.8 **Packaging.** Run `make lock` for the new distribution and its dependents,
+- [x] 7.8 **Packaging.** Run `make lock` for the new distribution and its dependents,
       then `make check-packaging`, and resolve every failure it reports:
       `arkhai-kit-capability-pricing` is a new distribution and `arkhai-vms` depends on
       it, so every lock downstream of `arkhai-vms` changes; `kit/settlement-runtime` gains
       an export.
-      *Partly done 2026-10-01:* `make lock` relocked every project this environment can resolve, and the new kit's lock was created. `domains/vms/storefront`, `domains/vms/buyer`, and `kit/policy` could not be relocked here: their `rl` extra resolves `torch`, whose index refuses this environment. `make check-packaging` therefore reports exactly two problems — the VM storefront and buyer locks not recording `arkhai-kit-capability-pricing` — which the maintainer's `make lock` resolves.
+      *Done 2026-10-01 by the maintainer:* `make lock` regenerated seven locks and
+      `make check-packaging` passes every check. (The first note here described the
+      implementer's local tree, whose relocked files were not in the fileset; this
+      environment cannot relock the VM storefront, buyer, or `kit/policy`, because their
+      `rl` extra resolves `torch` from an index that refuses it.)
 - [ ] 7.9 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and record
       the run, its result, and the scenarios exercising this change: 3.6's
       shape-priced scenario and the existing VM full-deal scenarios, which prove
       flat-priced listings settle unchanged. If the pipeline cannot run for a reason
       unrelated to this change, record that as an explicit blocker naming the cause and
       its owning change, and treat the validations it gates as unrun.
-      *Pending:* the maintainer runs `make run-e2e`; Stage 07 of `test_listing_shapes.py` exercises shape pricing and the full-deal scenarios exercise flat pricing.
+      *Run 2026-10-01 by the maintainer, before the implementation-review fixes:* VM e2e 128 passed, 2 skipped; bare-metal 11
+      passed. Stage 07 (`test_07a`, `test_07b`) passed, and the full-deal scenarios settle
+      flat-priced listings unchanged. The two skips are `test_multi_registry.py`'s
+      negotiate-with-alice stages, statically skipped and unrelated. The run predates the
+      implementation-review fixes; the task closes when a run after them passes.
 - [ ] 7.10 **Promotion.** Complete the design-promotion record below, mapping every
-      accepted decision to its exact permanent heading, and synchronize the two spec
-      deltas into `openspec/specs/storefront-publication/spec.md` and
-      `openspec/specs/negotiation-protocol/spec.md`. Write the rationale into
+      accepted decision to its exact permanent heading, and synchronize the three spec
+      deltas into `openspec/specs/storefront-publication/spec.md`,
+      `openspec/specs/negotiation-protocol/spec.md`, and
+      `openspec/specs/resource-pool-management/spec.md`. Write the rationale into
       `openspec/specs/storefront-publication/architecture.md`, the pricing account into
       `docs/development/ARCHITECTURE.md`'s "Discovery and negotiation", and the
       operator configuration into `docs/development/DEPLOYMENT_AND_CONFIG.md`'s

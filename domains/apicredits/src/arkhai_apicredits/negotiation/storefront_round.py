@@ -112,21 +112,21 @@ def _seller_reference_amount(
     quantity: int | None,
     *,
     default_min_price: Any = None,
-    settlement_selection: Mapping[str, Any] | None = None,
+    proposal: Mapping[str, Any] | None = None,
 ) -> int:
-    """quantity × exact selected per-credit rate, in base units."""
+    """quantity × the per-credit rate of the option ``proposal`` selects, exactly.
+
+    The unit is a base-unit rate or a rational floor, and a long amount must not
+    round through a fixed-precision decimal context.
+    """
     unit = extract_unit_price_from_order(
         dict(listing),
         default_min_price=default_min_price,
-        settlement_selection=(
-            dict(settlement_selection) if settlement_selection is not None else None
-        ),
+        proposal=dict(proposal) if isinstance(proposal, Mapping) else None,
     )
     count = int(quantity) if quantity is not None else 1
-    if settlement_selection is not None:
+    if isinstance(unit, int):
         return checked_credit_total(unit, count)
-    # Exact: the unit may be a base-unit rate or a rational floor, and a long
-    # amount must not round through a fixed-precision decimal context.
     return math.floor(Fraction(unit) * count)
 
 
@@ -158,19 +158,13 @@ async def _run_seller_round(
         if item.sender == "them":
             their_proposal = item.proposal
             break
-    settlement_selection = (
-        their_proposal.get("settlement_selection")
-        if isinstance(their_proposal, Mapping)
-        and isinstance(their_proposal.get("settlement_selection"), Mapping)
-        else None
-    )
     uses_scalar_amount = proposal_uses_scalar_amount(listing_dict, their_proposal)
     reference_amount = (
         _seller_reference_amount(
             listing_dict,
             requested_quantity,
             default_min_price=default_min_price,
-            settlement_selection=settlement_selection,
+            proposal=their_proposal if isinstance(their_proposal, Mapping) else None,
         )
         if uses_scalar_amount
         else 0

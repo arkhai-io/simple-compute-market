@@ -78,7 +78,6 @@ No change owns these yet. The first three are the archived design's open questio
 | A time bound on holding an unknown site's listings, so a site decommissioned without closing them stops advertising unbookable capacity | Decision 11; deferred at the maintainer's direction |
 | The admin projection refresh rebuilds every site's cache and discards last-known generations, so pressing it during an outage turns a stale site unknown |
 | How a shape generator is assigned to a pool; the generator seam exists, with the VM default as its one implementation |
-| `domains/vms/storefront/tests/unit/test_reconciler.py`'s database-backed cases belong at integration level and move there when the file is next changed | Slice C review, partly accepted |
 | Thirteen anchor-form spec citations (in `listing_cardinality_mode.py`, `legacy_backfill.py`, `kit/site`'s ledger, and seven `kit/fulfillment` modules) omit the `requirement-` prefix their headings' slugs carry, so none resolves |
 | `core_storefront`'s `SQLiteClient.listing_id_for_derivation_key` calls an undefined `self._connect()`, so it raises whenever reached |
 

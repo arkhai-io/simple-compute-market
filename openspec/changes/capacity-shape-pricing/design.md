@@ -387,6 +387,10 @@ against the floor, and a listing offering two mechanisms negotiated a hosted
 selection against the Alkahest rate in another asset's units. Shape pricing makes it
 more consequential, because each asset's option now carries its own composed rate.
 
+Which artifact a proposal selects is one shared operation,
+`selected_settlement_artifact` in `kit/policy`, beside the matchers it composes, so
+the two domains cannot answer the question differently.
+
 `kit/negotiation-runtime`'s `reference_amount` hook gains the buyer's pinned
 proposal, which the runtime already holds where it calls the hook. Both implementers
 change: the VM storefront's kit hook and its round hook read the selected option, and
@@ -539,3 +543,16 @@ Design review of 2026-10-01, after the Sections 1–3 implementation:
 In the same discussion, a family without a rate was changed from "unpriceable" to
 "not charged", with a free listing refused instead; and unreadable rates were changed
 from "treated as absent" to "hold the pool", following the landed asking-rate rule.
+
+Implementation review of 2026-10-01:
+
+| Finding | Disposition |
+|---|---|
+| API credits priced an escrow proposal against the first accepted escrow, and refused a rateless selected option instead of using the floor | Accepted and fixed: both domains read the selected artifact through `selected_settlement_artifact` |
+| The VM hosted-selection reference was proven only by unit tests | Accepted: integration case through `StorefrontClient.evaluate_negotiate` |
+| Pricing rate-list validation was not proven at the provisioning API | Accepted: typed-client integration cases |
+| Locks downstream of `arkhai-vms` looked stale | Resolved by the maintainer's `make lock`; the packaging note now records it |
+| Database-backed reconciler and rate-structure tests sat under `unit/` | Accepted: moved to integration, with shared helpers |
+| The VM reference reads rates through `market_alkahest.schemas` rather than core's mechanism-neutral copy | Not adopted: `test_architecture_imports.py` forbids domain concept modules from importing core packages, and the Alkahest kit's reader treats every option's `rates` alike. A neutral reader in a kit concept modules may use is possible later work |
+| Closeout prose named two spec deltas where there are three | Accepted: corrected |
+

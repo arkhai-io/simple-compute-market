@@ -321,16 +321,11 @@ def _reference_amount(
     """quantity × the rate of the option the buyer's pinned proposal selects."""
     if not uses_scalar_amount:
         return 0
-    selection = (
-        pinned_proposal.get("settlement_selection")
-        if isinstance(pinned_proposal, Mapping)
-        else None
-    )
     return _seller_reference_amount(
         listing,
         provision_quantity(terms.decoded),
         default_min_price=_default_min_price(),
-        settlement_selection=selection if isinstance(selection, Mapping) else None,
+        proposal=pinned_proposal,
     )
 
 

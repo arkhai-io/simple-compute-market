@@ -30,7 +30,7 @@ from market_pool_overrides import (
     pool_override_migrations,
 )
 
-from tests.unit.test_reconciler import (  # noqa: F401  (db_path is a fixture)
+from tests._reconciler_cases import (  # noqa: F401  (db_path is a fixture)
     _BIG,
     available_compute_slices,
     _SMALL_SHAPE,

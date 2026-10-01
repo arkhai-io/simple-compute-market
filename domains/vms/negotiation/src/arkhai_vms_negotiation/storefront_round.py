@@ -20,10 +20,7 @@ from arkhai_vms_negotiation.policies import (
     make_escrow_kind_dispatch_middleware,
     proposal_uses_scalar_amount,
 )
-from market_policy.scalar_policies import (
-    _accepted_escrow_for_proposal,
-    _settlement_option_for_selection,
-)
+from market_policy.scalar_policies import selected_settlement_artifact
 from market_policy.negotiation_middleware import (
     NegotiationContext,
     NegotiationMiddleware,
@@ -223,10 +220,7 @@ def _selected_option(listing: Any, proposal: Any) -> Any:
     listing_dict = (
         listing.model_dump(mode="json") if hasattr(listing, "model_dump") else dict(listing)
     )
-    if isinstance(proposal.get("settlement_selection"), Mapping):
-        selected = _settlement_option_for_selection(listing_dict, dict(proposal))
-    else:
-        selected = _accepted_escrow_for_proposal(listing_dict, dict(proposal))
+    selected = selected_settlement_artifact(listing_dict, proposal)
     return _NO_PROPOSAL if selected is None else selected
 
 

@@ -12,11 +12,13 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping
 from fractions import Fraction
 from typing import Any
 
 from arkhai_apicredits.listings.models import resource_is_api_credits
 from market_core.schemas import SettlementOption, SettlementSelection
+from market_policy.scalar_policies import selected_settlement_artifact
 
 _MAX_BASE_UNIT_AMOUNT = 2**256 - 1
 
@@ -97,42 +99,65 @@ def _primary_rate_value(entry: dict[str, Any]) -> int | None:
     return None
 
 
+def _selected_option_rate(option: Mapping[str, Any]) -> int | None:
+    """A selected settlement option's per-credit amount, or None if it has none."""
+    parsed = SettlementOption.model_validate(option)
+    amount_rates = [rate for rate in parsed.rates if rate.field == "amount"]
+    if not amount_rates:
+        return None
+    if len(amount_rates) != 1:
+        raise ValueError("selected API-credit option has more than one amount rate")
+    rate = amount_rates[0]
+    if rate.per not in {"credit", "token", "request"}:
+        raise ValueError("selected API-credit option rate is not per credit")
+    return checked_credit_total(rate.value, 1)
+
+
 def extract_unit_price_from_order(
     order: dict[str, Any],
     *,
     default_min_price: Any = None,
-    settlement_selection: SettlementSelection | dict[str, Any] | None = None,
+    proposal: Mapping[str, Any] | None = None,
 ) -> int | Fraction:
-    """The seller's per-token floor from an API-credits listing.
+    """The seller's per-credit floor for the option a buyer's proposal selects.
 
-    Mirrors the VM domain's ``extract_initial_price_from_order``: the
-    advertised primary rate wins; a hidden-reserve listing falls back to
-    ``[seller.pricing].default_min_price``; with neither there is no
-    floor to negotiate against and the negotiation is refused.
+    The seller negotiates from the selected settlement artifact's rate: the
+    settlement option a ``settlement_selection`` names, or the accepted escrow an
+    escrow proposal names, which need not be the listing's first. When that
+    artifact advertises no rate the listing is a hidden reserve for it and the
+    floor is ``[seller.pricing].default_min_price``. Without a proposal that
+    selects anything, the listing's first advertised rate stands in. With no
+    rate and no floor there is nothing to negotiate against and the negotiation
+    is refused. See openspec/specs/negotiation-protocol/spec.md, "The seller's
+    reference amount is the selected option's rate".
     """
-    if settlement_selection is not None:
-        return selected_unit_price(
-            order,
-            SettlementSelection.model_validate(settlement_selection),
-        )
-
-    accepted = _accepted_escrows(order)
-    advertised = _primary_rate_value(accepted[0]) if accepted else None
+    selected = selected_settlement_artifact(order, proposal)
+    selection = proposal.get("settlement_selection") if isinstance(proposal, Mapping) else None
+    if isinstance(selection, Mapping):
+        if selected is None:
+            raise ValueError("settlement selection does not exact-match one listing option")
+        advertised = _selected_option_rate(selected)
+    elif selected is not None:
+        advertised = _primary_rate_value(selected)
+    else:
+        accepted = _accepted_escrows(order)
+        advertised = _primary_rate_value(accepted[0]) if accepted else None
+        if advertised is None:
+            options = _settlement_options(order)
+            if options:
+                amount_rates = [r for r in options[0].rates if r.field == "amount"]
+                if len(amount_rates) == 1:
+                    advertised = checked_credit_total(amount_rates[0].value, 1)
     if advertised is not None:
         return advertised
-    options = _settlement_options(order)
-    if options:
-        amount_rates = [rate for rate in options[0].rates if rate.field == "amount"]
-        if len(amount_rates) == 1:
-            return checked_credit_total(amount_rates[0].value, 1)
 
     floor = _exact_floor(default_min_price, listing_id=order.get("listing_id"))
     if floor is not None and floor > 0:
         return floor
 
     raise ValueError(
-        f"Listing {order.get('listing_id')} has hidden reserve "
-        "(accepted_escrows[0].rates is empty) and "
+        f"Listing {order.get('listing_id')} has hidden reserve (the selected "
+        "settlement artifact advertises no rate) and "
         "[seller.pricing].default_min_price is not configured. The seller "
         "has no floor to negotiate against; refusing the negotiation."
     )
