@@ -227,7 +227,7 @@ no-op.
 
 ### Settlement configuration
 
-Marketplace roles configure peer settlement mechanisms through one typed `[Settlement]` root. Its duplicate-free `priority` list contains canonical mechanism IDs; registered `stripe`, `alkahest`, and `contact` subsections own their mechanism policy and public client inputs. Identity, wallet, and chains remain independent shared resources. Composition roots register installed mechanisms explicitly, inject only the signer or EVM resources each declares, and pass every resulting client into the single `market_settlement_runtime` lifecycle.
+Marketplace roles configure settlement mechanisms through one typed `[Settlement]` root. Its duplicate-free `priority` list contains canonical mechanism IDs; registered `alkahest` and `contact` subsections own their mechanism policy and public client inputs. Identity, wallet, and chains remain independent shared resources. Composition roots register installed mechanisms explicitly and inject only the resources each declares.
 
 A market may settle by introduction: the `contact-exchange.v1` mechanism completes a deal with no payment and no provisioning — buyer and seller are put durably into contact with the context established during negotiation, revealed only after acceptance through the authenticated introductions surface. Its options are rateless (the mechanism declines scalar negotiation), its one obligation is non-financial, and contact payloads are bounded, deliberately persisted PII that never appears in listings or discovery.
 
@@ -261,39 +261,12 @@ Preflight remains mechanism-owned but projects one sanitized readiness contract.
 
 Typed metadata generates role-appropriate templates, edit validation, environment and Helm schema fragments, clause descriptors, and reference output. Marketplace schemas admit public consumer trust and policy but reject hosted provider, administrator, webhook, database, and service-migration state. See the [CLI query language](../../openspec/specs/cli-query-language/spec.md), [settlement configuration contract](../../openspec/specs/settlement-configuration/spec.md), and its [architecture](../../openspec/specs/settlement-configuration/architecture.md).
 
-### API-credit hosted settlement
-
-API credits composes the same registered hosted mechanism and shared operation
-journal as VM settlement, without importing VM routes or hosted-client models.
-Its listing publishes mechanism-neutral `settlement_options` independently of
-legacy Alkahest `accepted_escrows`. The seller reloads accepted negotiation
-artifacts to derive one obligation that pins service, quantity, key target,
-canonical buyer and claimant, amount, expiry, profile, and evidence condition;
-buyer input cannot override those fields at settlement start.
-
-The common hosted route service injects API-credit callbacks around
-authorization/replay and the mechanism runtime. Authoritative `funded` is the
-only transition that enters issuance. The credits authority keys its immutable
-grant by a deterministic fulfillment identity derived from the obligation and
-binds a canonical request digest, so retry or acknowledgement loss cannot
-double-reserve quota, create a second key, or increase balance twice. Buyer-only
-credentials live in the private result repository.
-
-The storefront signs a canonical secret-free issuance evidence body and
-publishes it through the configured portable resolver. Condition success and
-collection follow only after that evidence is authoritative. Reclaim first
-queries the credits authority under the same fulfillment identity: committed
-issuance becomes durable fulfillment and excludes reclaim; an unknown grant
-leaves eligible financial reclaim to the hosted mechanism. This keeps grant,
-evidence, collection, and reclaim races attributable without treating an API
-credential as settlement evidence.
-
 ## Runtime service map
 
 ```text
 ┌──────────────────────────────────────────────────────────────┐
 │                   Settlement mechanisms                      │
-│              Hosted fiat / Alkahest adapters                 │
+│                       Alkahest                               │
 └───────────────────┬──────────────────────────┬───────────────┘
                     │                          │
           ┌─────────▼─────────┐       ┌────────▼──────────┐
@@ -619,27 +592,4 @@ The fulfillment kit owns provider-neutral acceptance orchestration. It loads an 
 ### Atomic workload-lifecycle cutovers
 
 A schema cutover that transfers ownership of active workloads between persistence models must treat the workload and its known provider-operation identity as authoritative. The compute provisioner's legacy VM lease conversion validates the complete candidate population and writes fulfillment aggregates atomically before retiring the legacy table. Any unsafe ambiguity rolls back the entire conversion; unused pre-release reservation rows must not override or obscure an active lease.
-
-## Hosted fiat settlement boundary
-
-`fiat.stripe.v1` remains one mechanism behind the kit-owned settlement runtime, now with three exact consumer profiles: `card.v1`, `us_bank_transfer.v1`, and `us_ach_debit.v1`. The marketplace owns deterministic per-profile options and accepted plans, VM fulfillment, work leases, and provider-neutral public settlement state. The separately released hosted service is the sole payer-profile and financial authority: it owns provider customers and instruments, mandates, Checkout and confirmation, push-transfer instructions, debits, transfers, returns/refunds/reversals, webhooks, recovery, EAS/RPC access, and condition authorization. Platform-custodied funds are not on-chain escrow; EAS and Alkahest-arbiter compatibility supplies only a release predicate.
-
-The VM storefront consumes the released `hosted_settlement_client` through the thin `market_hosted_settlement` adapter. The buyer has one narrow direct-authority lane for payer profile/setup/instrument management and exact post-acceptance purchase authorization. Those operations use the selected or run-recorded persistent marketplace signer and the authority/environment-scoped opaque payer binding. Escrow materialization, status, condition, collection, reclaim, and recovery remain storefront-mediated. Neither core nor VM packages copy hosted wire models or signing behavior.
-
-Every ready funding profile publishes as its own option. The accepted plan pins the profile, amount, currency, destination account, parties, condition, expiry policy, and deterministic marketplace operation identity. After accepted terms are durable, the buyer authorizes exactly that obligation and passes only the operation-scoped `funding_authorization_ref` to storefront start. Storefront persistence contains the exact profile, safe authorization and settlement refs, lifecycle reason/deadline/action kind and expiry, condition anchor, safe fulfillment reference, and opaque receipts. It never contains stable payer/instrument refs, provider identifiers, raw action URLs, bank/card/payment data, client secrets, or buyer automation policy.
-
-Only authoritative hosted `funded` state after the selected profile's success and availability gate permits VM fulfillment. Setup/payment/confirmation actions, bank instructions, Checkout completion, or pending ACH do not. An unknown acknowledgement or restart reuses the immutable accepted obligation, authorization, settlement, and operation identities. Reclaim asks the hosted authority for a provider-neutral outcome and never selects a provider refund/return/reversal operation. Historical card-only rows retain recovery-only decoding under their original identities; new publication and negotiation accept only `card.v1`.
-
-Buyer-local off-session automation is an opt-in policy bounded by exact authority/environment, profile, currency, per-purchase amount, aggregate window, and optional seller principals. It can sign only the current accepted authorization. A policy refusal or hosted `requires_action` continues the same obligation through the ordinary transient `--action open|print|fail` path; it does not switch profile, instrument, amount, destination, or operation.
-
-Hosted system evidence preserves the production ownership boundary. Credential-free marketplace tests cover profile configuration/identity, independent readiness, direct payer and authorization helpers, action redaction, delayed funding gates, runtime journals, legacy recovery, reclaim races, and packaging using released provider-neutral contracts. The protected marketplace scenario alone attributes supported Stripe test-mode behavior for each profile and off-session action fallback. Its report identifies marketplace source separately from the hosted signed manifest, client, service image, API/schema/migrations, provenance, repository/workflow/source, and protected run, and marks unavailable external prerequisites rather than substituting local evidence.
-
-Alkahest remains an independent mechanism lane. API-credit and bare-metal hosted adoption are separate composition changes; the VM consumer does not install hosted dependencies or lifecycle code into those domains.
-
-### Bare-metal hosted adoption
-
-Bare metal composes the same provider-neutral hosted mechanism without importing VM packages or the released client directly. The installed buyer plugin uses the core `HostedSettlementTransport`; the seller binds bare-owned callbacks into the shared `HostedSettlementRouteService`. On first start, the seller rebuilds the accepted physical binding only from the durable negotiation thread, trusted listing, exact option, settlement plan, and canonical parties, then persists it under the obligation identity.
-
-Authoritative funding is the gate into the existing selected-site capacity and fulfillment clients. A deterministic fulfillment identity survives retries and restart. Access-ready state produces a credential-free public result and content-addressed lease-ready evidence; the resolver returns the canonical evidence with a marketplace-signer proof. Collection follows evidence. Reclaim is blocked after evidence, committed collection, or unknown physical authority. Financial return/loss recovery and post-collection lease teardown remain separate convergent lifecycles.
-
 

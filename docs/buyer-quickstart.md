@@ -7,21 +7,12 @@ For the seller side see [`seller-quickstart.md`](./seller-quickstart.md).
 
 ## Supported settlement methods
 
-The buyer supports two independent settlement mechanisms:
+The buyer supports Alkahest escrow settlement.
 
 | Mechanism | Buyer payment choices | Buyer requirements |
 |---|---|---|
-| Hosted Stripe fiat (`fiat.stripe.v1`) | `card.v1`; US/USD push transfer through `us_bank_transfer.v1`; US/USD ACH Direct Debit through `us_ach_debit.v1` | A durable marketplace profile, an opaque payer binding for the selected hosted authority/environment, and any transient payment or setup action. No wallet, chain, RPC, gas, or token balance. |
 | Alkahest (`alkahest.v1`) | The exact chain/asset/escrow option advertised by the listing | An EVM wallet, RPC-backed chain configuration, gas, and the advertised asset. |
 
-Cards may be interactive or use an explicitly selected saved instrument and
-per-purchase authorization. Any off-session authentication requirement returns
-to the interactive action flow. Push bank transfer remains
-purchase-interactive; ACH may be interactive or use a ready saved bank
-instrument and mandate. A listing is selectable only when it advertises that
-exact profile and the configured authority reports it ready. See
-[`ROADMAP.md`](./development/ROADMAP.md#hosted-settlement-release-status) for
-current external release-qualification status.
 
 ## Prerequisites
 
@@ -36,9 +27,6 @@ current external release-qualification status.
   ```
 
   The pubkey gets injected into every VM you lease via cloud-init.
-- For hosted `fiat.stripe.v1`, the seller's listing and hosted authority provide
-  the payment action; no buyer wallet, chain, RPC, gas, or token balance is
-  required.
 - For `alkahest.v1`, configure an EVM wallet, an RPC-backed chain, and the
   deployed Alkahest address file. Fund the wallet with gas and the advertised
   token.
@@ -110,53 +98,9 @@ Set `[provisioning].ssh_public_key`, `[registry].urls`, and each signed registry
 authority pin in public config. Never put a seed or marketplace private key in
 TOML.
 
-Settlement mechanisms are explicit and disabled by default. A hosted-only
-buyer uses:
+Settlement mechanisms are explicit and disabled by default.
 
-```toml
-[Settlement]
-schema_version = 1
-priority = ["fiat.stripe.v1"]
-
-[Settlement.stripe]
-enabled = true
-# Set the hosted base URL, authority/environment, exact signed manifest,
-# client/API 0.2.1/schema 5 and capability pins, USD/US policy, and
-# [Settlement.stripe.authority].principals.
-
-[Settlement.alkahest]
-enabled = false
-```
-
-The selected durable marketplace profile must also have an active opaque payer
-binding for that exact hosted authority/environment. The binding contains no
-provider customer, instrument, mandate, or payment data. A saved instrument is
-selected only for the current direct authorization call and is never stored in
-TOML or the run log.
-
-Create and manage that opaque binding through the direct, signer-authenticated
-payer namespace:
-
-```bash
-market settlement stripe payer create --country US
-market settlement stripe payer show
-market settlement stripe payer setup start \
-  --funding-profile card.v1 --label primary-card --action open
-market settlement stripe payer setup status SETUP_REF --action open
-market settlement stripe payer instrument list
-market settlement stripe payer instrument default INSTRUMENT_REF
-```
-
-Saved setup accepts `card.v1` and `us_ach_debit.v1`; push
-`us_bank_transfer.v1` remains purchase-interactive. Use `instrument revoke` or
-`instrument delete` for the same opaque `INSTRUMENT_REF`. After a proven local
-profile rotation, `payer owner rotate` proves both retained signers; retire an
-old hosted owner with `payer owner retire --principal scheme:identifier`.
-`payer delete` deletes the hosted profile and retires the local binding. Add
-`--json` for the safe projection and `--action open|print|fail` for transient
-setup actions; neither output stores action values or payment data.
-
-An Alkahest buyer instead enables and prioritizes `alkahest.v1`, supplies
+An Alkahest buyer enables and prioritizes `alkahest.v1`, supplies
 `[Settlement.alkahest].address_config_path`, and fills the generated `[Wallet]`
 and `[Chains.<name>]` tables. Enabling a mechanism does not make an incompatible
 listing selectable; discovery still requires one advertised compatible option.
@@ -185,9 +129,6 @@ repeated occurrences are alternatives in command order.
 market listing list
 market listing list --resource 'gpu_model=H200 gpu_count>=1'
 market listing list \
-  --resource 'gpu_model in [H200,H100] region=us-east' \
-  --settlement 'mechanism=fiat.stripe.v1 asset=usd stripe.funding_profile=card.v1 stripe.interaction=interactive'
-market listing list \
   --resource 'gpu_model=H200' \
   --settlement 'mechanism=alkahest.v1 alkahest.chain=base_sepolia'
 market listing list --resource 'gpu_model=H200' --explain
@@ -204,11 +145,8 @@ categories, then stops before negotiation or settlement.
 ```bash
 market buy \
   --resource 'gpu_model=H200 gpu_count>=1' \
-  --settlement 'mechanism=fiat.stripe.v1 asset=usd stripe.funding_profile=card.v1 stripe.interaction=interactive' \
+  --settlement 'mechanism=alkahest.v1 alkahest.chain=base_sepolia' \
   --duration-hours 1 \
-  --initial-price 2 \
-  --max-price 2 \
-  --action print \
   --settlement-timeout 1800 \
   --yes
 ```
@@ -216,9 +154,6 @@ market buy \
 The CLI filters resources first, selects one compatible advertised settlement
 option, negotiates, persists the exact accepted option, starts that mechanism,
 and polls until the seller returns `status: ready` with VM credentials.
-`--action open|print|fail` controls any transient buyer action on both fresh and
-resumed runs. `open` uses the browser, `print` is automation-friendly, and
-`fail` stops actionably while preserving resumable accepted state.
 
 Useful inputs:
 
@@ -252,9 +187,9 @@ market buy --from <run_id>        # resume from wherever the run stopped
 `buy --from` reads `buyer_profile_id` and the canonical principal from run-log
 version 3, then resolves that exact retained signer. Changing the selected
 profile or rotating the primary affects only fresh work. A predecessor cannot
-be retired while a recoverable run or hosted payer binding still needs it.
+be retired while a recoverable run still needs it.
 `market settle --from <run_id>` is the narrower accepted-settlement resume path;
-it derives mechanism, chain/token metadata, and action handling from the run.
+it derives mechanism and chain/token metadata from the run.
 
 If `buy` crashed after an accepted settlement was created, **always resume**.
 Starting a new buy can create a second commercial commitment or lock more funds.
@@ -275,56 +210,6 @@ market settlement alkahest escrow reclaim --escrow-uid <escrow_uid>
 market settlement alkahest chain check
 ```
 
-## Hosted funding profiles
-
-When a listing advertises `fiat.stripe.v1`, constrain one exact option with a
-clause such as `mechanism=fiat.stripe.v1 asset=usd
-stripe.funding_profile=card.v1 stripe.interaction=interactive`. The other
-initial profiles are `us_bank_transfer.v1` and `us_ach_debit.v1`; they remain
-distinct choices even when price and condition match.
-
-Discovery uses the listing plus selected-profile readiness and performs no
-hosted mutation. After seller-accepted terms are durable, the CLI obtains one
-exact purchase authorization directly from the hosted authority using the
-selected or recorded marketplace signer, then starts, polls, and reclaims the
-obligation only through the seller storefront. The run log keeps the exact
-profile and opaque authorization/settlement references, never the payer or
-saved-instrument reference.
-
-Use `--action open` for interactive setup/payment/confirmation or bank
-instructions, `--action print` to hand the transient action to an external
-automation boundary, or `--action fail` when interaction is forbidden. Pending
-push transfer or ACH availability remains pending until authoritative funded
-state; displaying instructions or completing a redirect does not imply VM
-fulfillment. The run log keeps only safe public reason/deadline/action
-kind/expiry metadata and never an action URL, client secret, bank detail, or
-provider payload. Resume the accepted run to retrieve current state and action.
-
-## Buy API credits with hosted funding
-
-The API-credit buyer uses the same selected durable profile and hosted policy.
-It filters exact listing options before negotiation, then revalidates service,
-quantity, key mode/key ID, parties, currency, profile, and condition from the
-accepted seller state before authorization:
-
-```bash
-market credits buy \
-  --service-name vllm-chat \
-  --quantity 10 \
-  --new-key \
-  --funding-profile card.v1 \
-  --action open \
-  --yes
-```
-
-The returned API credential is buyer-only output, not hosted settlement
-evidence. Resume a recorded pending purchase with
-`market credits settle-status RUN_ID`; use
-`market credits settle-reclaim RUN_ID --reason expired` only when issuance did
-not commit. For an existing-key top-up, replace `--new-key` with
-`--existing-key KEY_ID`; another marketplace principal is rejected by the
-credits authority. Hosted-only API-credit commands do not require wallet,
-chain, RPC, or gas configuration.
 
 ## Common pitfalls
 
@@ -332,7 +217,7 @@ chain, RPC, or gas configuration.
   registry resource query can still produce zero compatible settlement
   options; `--explain` distinguishes the two outcomes.
 - **Every settlement predicate in one clause matches one option.** Fields from
-  separate Stripe and Alkahest options are never combined to satisfy a clause.
+  separate settlement options are never combined to satisfy a clause.
 - **Accepted settlement never follows current priority.** Resume the existing
   run; changing `[Settlement].priority` does not redirect it.
 - **Prices on the CLI are human asset units.** Publication normalizes each
