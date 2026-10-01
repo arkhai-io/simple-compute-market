@@ -657,6 +657,13 @@ def _negotiate_matches(
                 if outcome.accepted_provision_terms is not None
                 else None
             ),
+            agreement=(
+                outcome.agreement.model_dump(mode="json", exclude_none=True)
+                if outcome.agreement is not None
+                else None
+            ),
+            agreement_bytes=outcome.agreement_bytes,
+            settlement_data=outcome.settlement_data,
         )
         attempts.append(
             {

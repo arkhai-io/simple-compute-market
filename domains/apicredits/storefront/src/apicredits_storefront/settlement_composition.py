@@ -22,6 +22,13 @@ from market_settlement_runtime import (
     SettlementSQLiteRepository,
     compile_settlement_publication_clause,
 )
+from domains.apicredits.settlement import (
+    CONFIG_KEY,
+    MECHANISM_ID,
+    create_api_credits_payments_registration,
+    mandate_policy_from_agreement,
+)
+from market_arkhai_payments import derive_mandate, transaction_id
 
 from apicredits_storefront.services.issuance_evidence import (
     ApiCreditPrivateResultRepository,
@@ -43,8 +50,10 @@ def _mapping(value: Any) -> dict[str, Any]:
 
 
 def build_storefront_settlement_registry() -> SettlementConfigurationRegistry:
-    """Install the Alkahest mechanism registration."""
-    return SettlementConfigurationRegistry((create_alkahest_registration(),))
+    """Install the Alkahest and Arkhai payments registrations."""
+    return SettlementConfigurationRegistry(
+        (create_alkahest_registration(), create_api_credits_payments_registration())
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +71,26 @@ class ApiCreditsSettlementComposition:
     evidence_service: ApiCreditsIssuanceEvidenceService
     private_results: ApiCreditPrivateResultRepository
     failure_policy: Any
+    payments_client: Any | None = None
+
+    def payment_settlement_artifacts(
+        self, agreement: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        config = self.settlement_config.mechanism_config(CONFIG_KEY)
+        if config is None or not getattr(config, "enabled", False):
+            raise ValueError("Arkhai payments is not enabled for API credits")
+        policy = mandate_policy_from_agreement(
+            agreement,
+            fee_bps=config.fee_bps,
+            dispute_authority=config.dispute_authority,
+        )
+        mandate = derive_mandate(dict(agreement), policy)
+        return {
+            "mandate": mandate.model_dump(
+                mode="json", by_alias=True, exclude_none=True
+            ),
+            "transaction_id": transaction_id(mandate),
+        }
 
     async def readiness(self) -> tuple[MechanismReadiness, ...]:
         return await self.configuration_registry.ordered_readiness(
@@ -72,9 +101,7 @@ class ApiCreditsSettlementComposition:
 
     def accepted_obligation_dispatch(
         self,
-    ) -> dict[
-        str, Callable[[Mapping[str, Any], Mapping[str, Any]], Any] | None
-    ]:
+    ) -> dict[str, Callable[[Mapping[str, Any], Mapping[str, Any]], Any] | None]:
         """Curried registry dispatch for every enabled obligation-building mechanism."""
 
         dispatch: dict[
@@ -226,6 +253,7 @@ def build_api_credit_settlement_composition(
         "default_chain": next(iter(storefront_config.CHAINS), None),
     }
     mechanism_clients: dict[str, Any] = {}
+    payments_client: Any | None = None
     for registration in registry.ordered_registrations(
         settlement_config, role="seller"
     ):
@@ -243,8 +271,8 @@ def build_api_credit_settlement_composition(
                     default_chain=resources["default_chain"],
                 )
             )
-        else:
-            mechanism_clients[registration.mechanism_id] = registry.create_client(
+        elif registration.mechanism_id == MECHANISM_ID:
+            payments_client = registry.create_client(
                 registration.mechanism_id,
                 settlement_config,
                 role="seller",
@@ -276,6 +304,7 @@ def build_api_credit_settlement_composition(
         worker=worker,
         local_principal=marketplace_signer.identity,
         mechanism_clients=mechanism_clients,
+        payments_client=payments_client,
         settlement_config=settlement_config,
         configuration_registry=registry,
         mechanism_resources=resources,

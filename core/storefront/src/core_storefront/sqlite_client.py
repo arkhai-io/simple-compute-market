@@ -29,7 +29,7 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from market_core import DomainIdentity, MarketDomainContract
+from market_core import DomainIdentity
 from market_identity import Identity, ReplayIdentity, ReplayReservation
 
 from core_storefront.auth import ReplayClaim
@@ -349,6 +349,7 @@ class SQLiteClient:
                   agreed_duration_seconds INTEGER,
                   agreed_at TEXT,
                   agreement_bytes BLOB,
+                  settlement_data TEXT,
                   buyer_scheme TEXT,
                   buyer_identifier TEXT,
                   seller_scheme TEXT,
@@ -483,6 +484,12 @@ class SQLiteClient:
             try:
                 cur.execute(
                     "ALTER TABLE negotiation_threads ADD COLUMN agreement_bytes BLOB"
+                )
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cur.execute(
+                    "ALTER TABLE negotiation_threads ADD COLUMN settlement_data TEXT"
                 )
             except sqlite3.OperationalError:
                 pass
@@ -1390,14 +1397,11 @@ class SQLiteClient:
                     (binding.listing_id,),
                 ).fetchone()
                 if row is None:
-                    raise KeyError(
-                        f"unknown listing {binding.listing_id!r}"
-                    )
+                    raise KeyError(f"unknown listing {binding.listing_id!r}")
                 offer = self._normalize_resource(row[0])
                 if (
                     not isinstance(offer, dict)
-                    or offer.get("virtualization_type")
-                    != binding.binding.offering_mode
+                    or offer.get("virtualization_type") != binding.binding.offering_mode
                 ):
                     raise StorefrontDomainBindingError(
                         "persisted offer_resource mode disagrees with binding"
@@ -1738,7 +1742,7 @@ class SQLiteClient:
                     raise StorefrontDomainBindingError(
                         f"listing {listing_id!r} has no domain binding"
                     )
-                cursor = conn.execute(
+                conn.execute(
                     """
                     UPDATE negotiation_threads
                     SET domain_listing_id=?, site_id=?, offering_mode=?,
@@ -1786,6 +1790,7 @@ class SQLiteClient:
                 conn.close()
 
         return await asyncio.to_thread(_copy)
+
     @staticmethod
     def _artifact_codec_name(artifact_slot: str) -> str:
         if not isinstance(artifact_slot, str) or not artifact_slot.strip():
@@ -1798,7 +1803,9 @@ class SQLiteClient:
             "receipt",
             "result",
         }:
-            raise ValueError(f"unsupported storefront domain artifact slot {artifact_slot!r}")
+            raise ValueError(
+                f"unsupported storefront domain artifact slot {artifact_slot!r}"
+            )
         return codec_name
 
     @staticmethod
@@ -1987,9 +1994,7 @@ class SQLiteClient:
         context: Mapping[str, Any],
         registry: StorefrontDomainRegistry,
     ) -> StorefrontThreadBinding:
-        thread_binding = await self.load_thread_binding(
-            negotiation_id=negotiation_id
-        )
+        thread_binding = await self.load_thread_binding(negotiation_id=negotiation_id)
         registry.resolve(thread_binding.binding)
         expected = self.bind_fulfillment_context(
             {},
@@ -2208,6 +2213,7 @@ class SQLiteClient:
         agreed_start_utc: str | None = None,
         accepted_at: str | None = None,
         agreement_bytes: bytes | None = None,
+        settlement_data: dict[str, Any] | None = None,
     ) -> None:
         """Record the agreement artifact that comes out of a successful negotiation.
 
@@ -2222,6 +2228,17 @@ class SQLiteClient:
         the buyer's negotiation-init ask and is used by settlement-time
         arbiter codecs that bind the seller's delivery window.
         """
+
+        if settlement_data is not None:
+            settlement_data_json = json.dumps(
+                settlement_data,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+                allow_nan=False,
+            )
+        else:
+            settlement_data_json = None
 
         def _save() -> None:
             now = datetime.now().isoformat()
@@ -2238,6 +2255,7 @@ class SQLiteClient:
                         requested_start_utc = COALESCE(requested_start_utc, ?),
                         agreed_at = ?,
                         agreement_bytes = COALESCE(?, agreement_bytes),
+                        settlement_data = COALESCE(?, settlement_data),
                         updated_at = ?
                     WHERE negotiation_id = ?
                     """,
@@ -2247,6 +2265,7 @@ class SQLiteClient:
                         agreed_start_utc,
                         agreed_at_value,
                         agreement_bytes,
+                        settlement_data_json,
                         now,
                         negotiation_id,
                     ),
@@ -2353,7 +2372,7 @@ class SQLiteClient:
                            provision_terms,
                            settlement_plan,
                            agreed_price, agreed_duration_seconds, agreed_at,
-                           agreement_bytes, buyer_scheme, buyer_identifier,
+                           agreement_bytes, settlement_data, buyer_scheme, buyer_identifier,
                            seller_scheme, seller_identifier, matched_offer_id
                     FROM negotiation_threads WHERE negotiation_id = ?
                     """,
@@ -2381,6 +2400,7 @@ class SQLiteClient:
                     "agreed_duration_seconds",
                     "agreed_at",
                     "agreement_bytes",
+                    "settlement_data",
                     "buyer_scheme",
                     "buyer_identifier",
                     "seller_scheme",
@@ -2418,6 +2438,12 @@ class SQLiteClient:
                 if isinstance(raw_plan, str) and raw_plan:
                     try:
                         result["settlement_plan"] = json.loads(raw_plan)
+                    except (ValueError, TypeError):
+                        pass
+                raw_settlement_data = result.get("settlement_data")
+                if isinstance(raw_settlement_data, str) and raw_settlement_data:
+                    try:
+                        result["settlement_data"] = json.loads(raw_settlement_data)
                     except (ValueError, TypeError):
                         pass
                 result["agreed_price"] = _amount_from_db_text(
@@ -3347,12 +3373,9 @@ class SQLiteClient:
             raise TypeError(
                 "domain_artifact must be a PreparedStorefrontDomainArtifact"
             )
-        if (
-            prepared_artifact is not None
-            and (
-                thread_binding is None
-                or prepared_artifact.binding != thread_binding.binding
-            )
+        if prepared_artifact is not None and (
+            thread_binding is None
+            or prepared_artifact.binding != thread_binding.binding
         ):
             raise StorefrontDomainBindingError(
                 "opening artifact must use the exact thread domain binding"
@@ -3384,20 +3407,16 @@ class SQLiteClient:
             self._canonical_artifact_json(proposal) if proposal is not None else None
         )
         terms_json = (
-            self._canonical_artifact_json(terms_wire) if terms_wire is not None else None
+            self._canonical_artifact_json(terms_wire)
+            if terms_wire is not None
+            else None
         )
         seller_initial_amount = _amount_to_db_text(
             field(thread, "seller_initial_amount")
         )
-        seller_amount = _amount_to_db_text(
-            field(initial_message, "seller_amount")
-        )
-        buyer_amount = _amount_to_db_text(
-            field(initial_message, "buyer_amount")
-        )
-        proposed_amount = _amount_to_db_text(
-            field(initial_message, "proposed_amount")
-        )
+        seller_amount = _amount_to_db_text(field(initial_message, "seller_amount"))
+        buyer_amount = _amount_to_db_text(field(initial_message, "buyer_amount"))
+        proposed_amount = _amount_to_db_text(field(initial_message, "proposed_amount"))
         round_number = field(initial_message, "round_number")
         if round_number is None:
             round_number = 0

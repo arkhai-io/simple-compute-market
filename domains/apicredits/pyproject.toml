@@ -11,6 +11,8 @@ dependencies = [
     "arkhai-kit-identity==0.3.0",
     "httpx>=0.27",
     "pydantic>=2",
+    "arkhai-kit-settlement-runtime>=0.1.0",
+    "arkhai-kit-arkhai-payments",
 ]
 
 [build-system]
@@ -40,6 +42,7 @@ only-include = ["__init__.py"]
 "settlement/credits_client.py" = "domains/apicredits/settlement/credits_client.py"
 "settlement/fulfillment.py" = "domains/apicredits/settlement/fulfillment.py"
 "settlement/issuance_evidence.py" = "domains/apicredits/settlement/issuance_evidence.py"
+"settlement/payments.py" = "domains/apicredits/settlement/payments.py"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

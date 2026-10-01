@@ -88,7 +88,7 @@ class CreditIssuanceRequest(_CreditsContract):
     schema: Literal["arkhai.api-credits.issuance-request.v1"] = ISSUANCE_REQUEST_SCHEMA  # type: ignore[assignment]
     fulfillment_id: str = Field(min_length=1, max_length=320)
     obligation_ref: str = Field(min_length=1, max_length=255)
-    mechanism: Literal["alkahest.v1"]
+    mechanism: Literal["alkahest.v1", "arkhai.payments.v1"]
     owner: Identity
     service: str = Field(min_length=1, max_length=255)
     resource_id: str = Field(min_length=1, max_length=255)
@@ -106,7 +106,7 @@ class CreditIssuanceRequest(_CreditsContract):
         cls,
         *,
         obligation_ref: str,
-        mechanism: Literal["alkahest.v1"],
+        mechanism: Literal["alkahest.v1", "arkhai.payments.v1"],
         owner: Identity,
         service: str,
         resource_id: str,
@@ -169,7 +169,7 @@ class CreditIssuanceResult(_CreditsContract):
     fulfillment_id: str = Field(min_length=1, max_length=320)
     grant_id: str = Field(min_length=1, max_length=320)
     obligation_ref: str = Field(min_length=1, max_length=255)
-    mechanism: Literal["alkahest.v1"]
+    mechanism: Literal["alkahest.v1", "arkhai.payments.v1"]
     owner: Identity | None
     service: str = Field(min_length=1, max_length=255)
     resource_id: str = Field(min_length=1, max_length=255)

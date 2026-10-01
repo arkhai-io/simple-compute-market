@@ -1,23 +1,18 @@
 """`market credits buy` — pure-client sequential credit buy.
 
-Drives the deal end-to-end from the CLI process:
+Discovery and negotiation use the shared buyer orchestration. The accepted
+settlement then follows its selected mechanism: Alkahest creates an on-chain
+escrow; Arkhai payments approves a deterministic mandate and verifies its
+signed receipt. The seller issues credits only after its settlement gate and
+returns the credentials once through the signed status response.
 
-    discover (registry, api-credits schema) →
-    negotiate each match (sync HTTP rounds, quantity × per-token rate) →
-    pick agreed match →
-    create escrow on-chain (alkahest-py in-process) →
-    POST /settle/{uid} on seller →
-    poll /settle/{uid}/status until ready/failed →
-    deliver the issued credentials to the run-log.
-
-The orchestration stages are core (``core_buyer.orchestration``); this
-command wires the API-credits instantiation: the quantity unit count,
-the key disposition fixed at round 0, the durationless escrow terms,
-and the once-only credential delivery.
+This command wires the API-credit quantity and key disposition fixed at round
+zero, mechanism-specific settlement adapters, and credential delivery.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import time
 from typing import Any, Optional
@@ -48,17 +43,17 @@ from .buyer_client import load_buyer_chain
 from .cli_helpers import resolve_prices_from_matches
 from .common import resolve_config_value
 from .settle_cli import render_credentials, run_settle_from_log
+from .payments import payment_selection_for_listing, settle_api_credit_negotiation
 from .settlement_composition import resolve_buyer_settlement_policy
 
 
 def _confirm_settlement_interactive(
     *, terms, listing: dict, quantity: int, console: Console
 ) -> bool:
-    """Prompt the buyer to approve settlement at the negotiated total.
+    """Prompt before creating the negotiated Alkahest escrow.
 
-    Shown after negotiation agrees but BEFORE create_escrow runs — i.e.,
-    no on-chain transaction has been emitted and the seller's /settle
-    endpoint hasn't been touched yet. Declining here is a clean exit.
+    Declining before the on-chain call is a clean exit; payments has its
+    own prompt after validating the seller's exact mandate.
     """
     per_token = terms.agreed_amount / quantity if quantity else 0
     table = Table.grid(padding=(0, 2))
@@ -73,8 +68,36 @@ def _confirm_settlement_interactive(
     console.print(Panel(table, title="Confirm settlement", border_style="yellow"))
     try:
         return typer.confirm(
-            "Proceed to settlement (escrow + /settle + poll)?", default=True
+            "Proceed to settlement (create Alkahest escrow + poll)?", default=True
         )
+    except typer.Abort:
+        return False
+
+
+def _confirm_payment_interactive(
+    *, mandate: Any, transaction_id: str, listing: dict, quantity: int, console: Console
+) -> bool:
+    """Show the validated Arkhai mandate before approving its payment."""
+    table = Table.grid(padding=(0, 2))
+    table.add_column(style="bold")
+    table.add_column()
+    table.add_row(
+        "Seller",
+        str(listing.get("storefront_url") or listing.get("seller_url") or ""),
+    )
+    table.add_row("Listing", str(listing.get("listing_id") or ""))
+    table.add_row("Quantity", str(quantity))
+    table.add_row("Transaction", transaction_id)
+    console.print(Panel(table, title="Confirm Arkhai payment", border_style="yellow"))
+    console.print(
+        Panel(
+            json.dumps(mandate.model_dump(mode="json", by_alias=True), indent=2),
+            title="Validated mandate",
+            border_style="dim",
+        )
+    )
+    try:
+        return typer.confirm("Approve this payment mandate?", default=True)
     except typer.Abort:
         return False
 
@@ -125,7 +148,11 @@ def register(credits_app: typer.Typer) -> None:
         from_run: Optional[str] = typer.Option(
             None,
             "--from",
-            help="Resume a partial buy run-id end-to-end. Continues negotiation if it stopped mid-stream, then drives escrow.create + /settle + poll. The same run-log is appended to, so it captures the full lifecycle.",
+            help=(
+                "Resume a partial buy run-id end-to-end. Continues negotiation if needed, "
+                "then approves or creates the selected settlement and polls for issuance. "
+                "The same run-log captures the lifecycle."
+            ),
         ),
         registry_urls: Optional[str] = typer.Option(
             None,
@@ -198,8 +225,9 @@ def register(credits_app: typer.Typer) -> None:
         to the run-log.
 
         When ``--from <run_id>`` is supplied, picks up wherever the
-        prior run left off: finishes the negotiation if it stopped
-        mid-stream, then drives stages 3-5 (escrow → submit → poll).
+        When ``--from <run_id>`` is supplied, resumes the saved deal: it
+        finishes negotiation if needed, then follows the selected
+        mechanism and polls for issued credentials.
         """
         console = Console()
         policy_params_all: dict[str, Any] = {
@@ -229,7 +257,11 @@ def register(credits_app: typer.Typer) -> None:
         alkahest_enabled = bool(
             alkahest_config is not None and getattr(alkahest_config, "enabled", False)
         )
-        if not alkahest_enabled:
+        payments_config = buyer_settlement.config.mechanism_config("arkhai_payments")
+        payments_enabled = bool(
+            payments_config is not None and getattr(payments_config, "enabled", False)
+        )
+        if not alkahest_enabled and not payments_enabled:
             raise typer.BadParameter("no buyer settlement mechanism is enabled")
         if from_run:
             if not is_negotiation_complete(from_run, signer=signer):
@@ -276,6 +308,7 @@ def register(credits_app: typer.Typer) -> None:
         from .common import (
             APICREDITS_SCHEMA_ID,
             resolve_buyer_wallet,
+            buyer_chains,
             resolve_discovery_timeout,
             resolve_indexer_urls,
             resolve_indexer_urls_for_schema,
@@ -306,31 +339,33 @@ def register(credits_app: typer.Typer) -> None:
         selected_chain_name = None
         rpc = None
         addr_cfg = None
-        evm_addr, evm_key = resolve_buyer_wallet(
-            override_addr=evm_address, override_pk=evm_private_key
-        )
-        chain_cfg = select_chain_for_listing(
-            listing=None, override=chain_name, yes=assume_yes
-        )
-        selected_chain_name = chain_cfg.name
-        rpc = chain_cfg.rpc_url
-        addr_cfg = chain_cfg.alkahest_address_config_path
-        missing = [name for name, value in (("registry_urls", reg_urls),) if not value]
-        missing.extend(
-            (
-                name
-                for name, value in (
-                    ("buyer_evm_address", evm_addr),
-                    ("buyer_evm_private_key", evm_key),
-                )
-                if not value
+        alkahest_available = False
+        if alkahest_enabled:
+            evm_addr, evm_key = resolve_buyer_wallet(
+                override_addr=evm_address, override_pk=evm_private_key
             )
-        )
+            if evm_addr and evm_key and buyer_chains():
+                chain_cfg = select_chain_for_listing(
+                    listing=None, override=chain_name, yes=assume_yes
+                )
+                selected_chain_name = chain_cfg.name
+                rpc = chain_cfg.rpc_url
+                addr_cfg = chain_cfg.alkahest_address_config_path
+                alkahest_available = True
+        missing = [name for name, value in (("registry_urls", reg_urls),) if not value]
+        if alkahest_enabled and not payments_enabled and not alkahest_available:
+            if not evm_addr:
+                missing.append("buyer_evm_address")
+            if not evm_key:
+                missing.append("buyer_evm_private_key")
+            if not buyer_chains():
+                missing.append("chain configuration")
         if missing:
             typer.secho("Missing required config:", err=True, fg=typer.colors.RED)
             key_for = {
                 "buyer_evm_address": "wallet.address",
                 "buyer_evm_private_key": "wallet.private_key",
+                "chain configuration": "chains.<name>",
                 "registry_urls": "registry.urls",
             }
             for name in missing:
@@ -341,14 +376,14 @@ def register(credits_app: typer.Typer) -> None:
                 )
             raise typer.Exit(2)
         tc = token_contract
-        if explicit_prices and (not tc):
+        if explicit_prices and alkahest_available and not tc:
             typer.secho(
-                "--initial-price and --max-price require --token-contract so prices can be scaled to the right decimals. Without it, drop the explicit price flags and let prices anchor on each listing's advertised per-token rate.",
+                "--initial-price and --max-price require --token-contract when settling with Alkahest.",
                 err=True,
                 fg=typer.colors.RED,
             )
             raise typer.Exit(2)
-        if explicit_prices:
+        if explicit_prices and alkahest_available:
             if token_decimals is None:
                 from market_alkahest.token import TokenResolutionError, resolve_token
 
@@ -369,20 +404,26 @@ def register(credits_app: typer.Typer) -> None:
             accepted_proposal_recipient,
             encode_escrow_proposal,
             looks_like_propagation_lag,
-            make_alkahest_settlement_payload_fn,
-            make_buyer_payment_escrow_terms_fn,
-            make_create_escrow_fn,
         )
 
-        build_escrow_terms = make_buyer_payment_escrow_terms_fn(
-            chain_name=selected_chain_name, addr_config_path=addr_cfg or None
-        )
-        create_escrow = make_create_escrow_fn(
-            private_key=evm_key,
-            rpc_url=rpc,
-            chain_name=selected_chain_name,
-            addr_config_path=addr_cfg or None,
-        )
+        build_escrow_terms = None
+        create_escrow = None
+        if alkahest_available:
+            from .escrow_client import (
+                make_alkahest_settlement_payload_fn,
+                make_buyer_payment_escrow_terms_fn,
+                make_create_escrow_fn,
+            )
+
+            build_escrow_terms = make_buyer_payment_escrow_terms_fn(
+                chain_name=selected_chain_name, addr_config_path=addr_cfg or None
+            )
+            create_escrow = make_create_escrow_fn(
+                private_key=evm_key,
+                rpc_url=rpc,
+                chain_name=selected_chain_name,
+                addr_config_path=addr_cfg or None,
+            )
         try:
             matches = query_registry_for_matches_multi(
                 reg_urls,
@@ -436,6 +477,16 @@ def register(credits_app: typer.Typer) -> None:
         from .escrow_selection import select_escrow_entry
 
         def build_escrow_proposal_for_match(match: dict) -> EscrowProposal | Any | None:
+            payment_selection = payment_selection_for_listing(
+                buyer_settlement,
+                match,
+                expiration_unix=expiration_unix,
+                prefer_payment=not alkahest_available,
+            )
+            if payment_selection is not None:
+                return payment_selection
+            if not alkahest_available:
+                return None
             entry = select_escrow_entry(
                 match,
                 chain_name=selected_chain_name,
@@ -469,7 +520,6 @@ def register(credits_app: typer.Typer) -> None:
             max_matches=max_matches,
             max_rounds=max_rounds,
             chain_name=selected_chain_name,
-            settlement_mechanism="alkahest.v1",
         )
         header = Table.grid(padding=(0, 2))
         header.add_column(style="bold")
@@ -479,7 +529,8 @@ def register(credits_app: typer.Typer) -> None:
         header.add_row(
             "Marketplace principal", f"{principal.scheme.value}:{principal.identifier}"
         )
-        header.add_row("EVM chain wallet", evm_addr)
+        if evm_addr:
+            header.add_row("EVM chain wallet", evm_addr)
         header.add_row("Quantity", str(quantity))
         header.add_row(
             "Key", key_mode + (f" ({resolved_key_id})" if resolved_key_id else "")
@@ -558,23 +609,63 @@ def register(credits_app: typer.Typer) -> None:
             decode_escrow_proposal=EscrowProposal.model_validate,
             decode_escrow_terms=EscrowTerms.model_validate,
         )
-        settle_hook = make_settle_hook(
-            config=config,
-            unit_count=float(quantity),
-            duration_seconds=0,
-            build_escrow_terms=build_escrow_terms,
-            create_escrow=create_escrow,
-            settlement_recipient=accepted_proposal_recipient,
-            build_settlement_payload=make_alkahest_settlement_payload_fn(
-                buyer_evm_address=evm_addr
-            ),
-            settlement_submit_max_attempts=6,
-            settlement_submit_retryable=looks_like_propagation_lag,
-            confirm_settlement=confirm_settlement_cb,
-            settlement_poll_interval=poll_interval,
-            settlement_total_timeout=settlement_timeout,
-            sleep=time.sleep,
-        )
+        alkahest_settle_hook = None
+        if alkahest_available:
+            if build_escrow_terms is None or create_escrow is None:
+                raise RuntimeError("Alkahest settlement adapters were not initialized")
+            alkahest_settle_hook = make_settle_hook(
+                config=config,
+                unit_count=float(quantity),
+                duration_seconds=0,
+                build_escrow_terms=build_escrow_terms,
+                create_escrow=create_escrow,
+                settlement_recipient=accepted_proposal_recipient,
+                build_settlement_payload=make_alkahest_settlement_payload_fn(
+                    buyer_evm_address=evm_addr
+                ),
+                settlement_submit_max_attempts=6,
+                settlement_submit_retryable=looks_like_propagation_lag,
+                confirm_settlement=confirm_settlement_cb,
+                settlement_poll_interval=poll_interval,
+                settlement_total_timeout=settlement_timeout,
+                sleep=time.sleep,
+            )
+
+        def settle_hook(negotiation, on_event):
+            outcome = getattr(negotiation, "outcome", None)
+            selection = getattr(outcome, "settlement_selection", None)
+            if selection is not None and selection.mechanism == "arkhai.payments.v1":
+                payment_confirmation = None
+                if not assume_yes and os.isatty(0):
+
+                    def confirm_payment(mandate, transaction_id):
+                        return _confirm_payment_interactive(
+                            mandate=mandate,
+                            transaction_id=transaction_id,
+                            listing=negotiation.match or {},
+                            quantity=int(quantity),
+                            console=console,
+                        )
+
+                    payment_confirmation = confirm_payment
+                return settle_api_credit_negotiation(
+                    negotiation=negotiation,
+                    buyer=identity,
+                    buy_config=config,
+                    settlement_config=buyer_settlement.config,
+                    poll_interval=poll_interval,
+                    total_timeout=settlement_timeout,
+                    on_event=on_event,
+                    confirm_payment=payment_confirmation,
+                )
+            if alkahest_settle_hook is None:
+                from core_buyer.orchestrator import BuyResult
+
+                return BuyResult(
+                    status="exited", reason="no compatible settlement mechanism"
+                )
+            return alkahest_settle_hook(negotiation, on_event)
+
         try:
             result = run_buy(
                 config=config,
@@ -603,6 +694,7 @@ def register(credits_app: typer.Typer) -> None:
             negotiation_id=result.negotiation_id,
             agreed_amount=result.agreed_amount,
             escrow_uid=result.escrow_uid,
+            settlement_ref=result.settlement_ref,
             fulfillment_uid=result.fulfillment_uid,
             reason=result.reason,
         )
@@ -615,6 +707,7 @@ def register(credits_app: typer.Typer) -> None:
             ("Negotiation", result.negotiation_id),
             ("Agreed amount (total)", result.agreed_amount),
             ("Escrow UID", result.escrow_uid),
+            ("Settlement ref", result.settlement_ref),
             ("Fulfillment UID", result.fulfillment_uid),
             ("Reason", result.reason),
         ):

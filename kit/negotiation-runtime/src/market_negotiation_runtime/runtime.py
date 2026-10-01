@@ -24,8 +24,6 @@ ActorRole = Literal["buyer", "admin"]
 StageEventHook = Callable[..., None]
 
 
-
-
 class StorefrontPausedError(Exception):
     """Raised when a new negotiation is attempted while unavailable."""
 
@@ -162,22 +160,16 @@ ValidateContinuationHook = Callable[
 ]
 EvaluateRoundHook = Callable[[RoundRequest], Awaitable[RoundEvaluation]]
 DetermineStrategyHook = Callable[[Any, Mapping[str, Any]], str]
-ReferenceAmountHook = Callable[
-    [Any, Mapping[str, Any], NegotiationTerms, bool], int
-]
+ReferenceAmountHook = Callable[[Any, Mapping[str, Any], NegotiationTerms, bool], int]
 AmountFromProposalHook = Callable[[Mapping[str, Any] | None], int | None]
 ProposalFromAmountHook = Callable[
     [Mapping[str, Any] | None, int | None], Mapping[str, Any] | None
 ]
-AgreementHook = Callable[
-    [Any, Mapping[str, Any], NegotiationTerms], AgreementTerms
-]
+AgreementHook = Callable[[Any, Mapping[str, Any], NegotiationTerms], AgreementTerms]
 BuildArtifactsHook = Callable[[Acceptance, bool], Mapping[str, Any]]
 PersistOpeningHook = Callable[[Any, OpeningRecord], Awaitable[None]]
 PlaceHoldHook = Callable[[Any, Acceptance], Awaitable[None]]
-PersistArtifactsHook = Callable[
-    [Any, Acceptance, Mapping[str, Any]], Awaitable[None]
-]
+PersistArtifactsHook = Callable[[Any, Acceptance, Mapping[str, Any]], Awaitable[None]]
 DecisionWireHook = Callable[[NegotiationDecision], Mapping[str, Any]]
 ListingLiveHook = Callable[[Mapping[str, Any]], bool]
 ListingPausedHook = Callable[[Any, str], Awaitable[bool]]
@@ -460,9 +452,7 @@ class NegotiationRuntime:
         expected_buyer = Identity.model_validate(buyer_principal)
         actor = Identity.model_validate(actor_principal)
         if expected_buyer != stored_buyer:
-            raise NegotiationStateError(
-                "buyer principal does not own this negotiation"
-            )
+            raise NegotiationStateError("buyer principal does not own this negotiation")
         if seller_principal is not None:
             expected_seller = Identity.model_validate(seller_principal)
             if expected_seller != stored_seller:
@@ -600,19 +590,20 @@ class NegotiationRuntime:
             }
 
         if buyer_action != "counter":
-            raise NegotiationStateError(
-                f"Unsupported buyer action {buyer_action!r}"
-            )
+            raise NegotiationStateError(f"Unsupported buyer action {buyer_action!r}")
         proposal_wire = (
             dict(buyer_proposal) if buyer_proposal is not None else pinned_proposal
         )
         incoming_round = len(history)
-        round_history = (*history, NegotiationRound(
-            round_number=incoming_round,
-            sender="them",
-            action="counter",
-            proposal=proposal_wire,
-        ))
+        round_history = (
+            *history,
+            NegotiationRound(
+                round_number=incoming_round,
+                sender="them",
+                action="counter",
+                proposal=proposal_wire,
+            ),
+        )
         evaluation = await hooks.evaluate_round(
             RoundRequest(
                 repository=repository,
@@ -746,7 +737,9 @@ class NegotiationRuntime:
             try:
                 start = datetime.fromisoformat(requested.strip().replace("Z", "+00:00"))
             except ValueError as exc:
-                raise NegotiationStateError("accepted start_utc is not ISO-8601") from exc
+                raise NegotiationStateError(
+                    "accepted start_utc is not ISO-8601"
+                ) from exc
             if start.tzinfo is None:
                 start = start.replace(tzinfo=UTC)
             else:
@@ -787,6 +780,11 @@ class NegotiationRuntime:
             agreement_bytes=(
                 base64.b64decode(artifacts["agreement_bytes"], validate=True)
                 if isinstance(artifacts.get("agreement_bytes"), str)
+                else None
+            ),
+            settlement_data=(
+                dict(artifacts["settlement_data"])
+                if isinstance(artifacts.get("settlement_data"), dict)
                 else None
             ),
         )
@@ -943,9 +941,9 @@ class NegotiationRuntime:
         )
 
 
-def _stored_action(value: Any) -> Literal[
-    "initial", "counter", "accept", "exit", "reject"
-]:
+def _stored_action(
+    value: Any,
+) -> Literal["initial", "counter", "accept", "exit", "reject"]:
     actions: dict[str, Literal["initial", "counter", "accept", "exit", "reject"]] = {
         "make_offer": "initial",
         "counter_offer": "counter",

@@ -16,6 +16,7 @@ dependencies = [
   "arkhai-core>=0.2.0",
   "arkhai-apicredits-domain>=0.1.0",
   "arkhai-kit-alkahest",
+  "arkhai-kit-arkhai-payments",
   "arkhai-kit-config",
   "arkhai-kit-policy",
   "arkhai-kit-settlement-runtime",
@@ -61,6 +62,7 @@ only-include = ["__init__.py"]
 "listing_cli.py" = "domains/apicredits/buyer/listing_cli.py"
 "negotiate_cli.py" = "domains/apicredits/buyer/negotiate_cli.py"
 "settle_cli.py" = "domains/apicredits/buyer/settle_cli.py"
+"payments.py" = "domains/apicredits/buyer/payments.py"
 "settlement_composition.py" = "domains/apicredits/buyer/settlement_composition.py"
 
 [tool.pytest.ini_options]

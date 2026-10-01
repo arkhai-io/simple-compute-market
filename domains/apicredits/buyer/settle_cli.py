@@ -1,14 +1,10 @@
-"""`market credits settle` — composite stages 3-5 of a credit deal.
+"""`market credits settle` — resume a selected mechanism from a deal log.
 
-Resumes a buy from the post-negotiation point: creates the on-chain
-escrow if not already created, POSTs `/settle/{escrow_uid}` to the
-seller, polls until terminal, and delivers the issued credentials to
-the run-log. Driven by a buyer run-log produced by `market credits
-negotiate` (or a partially-completed `market credits buy`).
-
-Credit deals are durationless: escrow terms materialize with
-``duration_seconds=0`` and the settle request carries an empty
-``ssh_public_key`` (the VM domain's provisioning payload).
+For Alkahest, create the accepted on-chain escrow if needed before submitting
+the settlement request. For Arkhai payments, recover the exact accepted
+Agreement, approve its deterministic mandate, and submit the resulting
+transaction reference. Both paths poll the seller until credits are issued
+and deliver credentials through the same signed status channel.
 """
 
 from __future__ import annotations
@@ -107,16 +103,16 @@ def run_settle_from_log(
     settlement_timeout: float,
     console: Optional[Console] = None,
 ) -> dict:
-    """Drive stages 3-5 of a credit deal from a buyer run-log.
+    """Resume settlement from a buyer run-log.
 
-    Reusable by both ``market credits settle`` and ``market credits buy
-    --from``. Reads the run-log for ``run_id``, creates the on-chain
-    escrow if not already present, POSTs ``/settle/{escrow_uid}`` to
-    the seller, and polls until terminal. Logs each stage transition —
-    including the issued credentials — back into the same run-log.
+    Reusable by ``market credits settle`` and ``market credits buy --from``.
+    The accepted mechanism decides whether the buyer creates an Alkahest
+    escrow or approves an Arkhai payments mandate. Both paths submit to the
+    seller, poll until terminal, and append any issued credentials to the
+    same run-log.
 
-    Returns the final settle-status body. Raises ``typer.Exit`` on
-    fatal errors.
+    Returns the final settle-status body. Raises ``typer.Exit`` on fatal
+    errors.
     """
     console = console or Console()
     signer = identity.signer
@@ -137,6 +133,101 @@ def run_settle_from_log(
             run_id, signer=signer
         ),
     )
+    if (deal.settlement_selection or {}).get("mechanism") == "arkhai.payments.v1":
+        if not deal.agreement or not deal.agreement_bytes:
+            typer.secho(
+                "Run-log is missing the accepted Agreement required for payments.",
+                err=True,
+                fg=typer.colors.RED,
+            )
+            raise typer.Exit(2)
+        from core_buyer.orchestration import make_publisher_trust_resolver
+        from core_buyer.orchestrator import BuyConfig
+        from .payments import settle_api_credit_payment
+        from .settlement_composition import resolve_buyer_settlement_policy
+
+        log = open_run_log(run_id, signer=signer, profile_id=identity.profile_id)
+        log.event("settle_resumed")
+        registry_urls = resolve_indexer_urls()
+        registry_authorities = resolve_registry_authorities(registry_urls)
+        buy_config = BuyConfig.from_resolved_identity(
+            identity=identity,
+            registry_urls=registry_urls,
+            registry_authorities=registry_authorities,
+            discovery_timeout=resolve_discovery_timeout(),
+            registry_api_keys=resolve_registry_api_keys(),
+        )
+        listing = {
+            "listing_id": deal.listing_id,
+            "publisher_id": deal.publisher_id,
+            "publisher_principals": deal.publisher_principals.model_dump(mode="json"),
+            "storefront_url": deal.seller_url,
+            "source_registry_url": deal.source_registry_url,
+            "source_registry_authority": deal.source_registry_authority,
+        }
+        resolve_seller_principals = make_publisher_trust_resolver(
+            config=buy_config,
+            listing=listing,
+            on_update=lambda event, fields: log.event(event, **fields),
+        )
+        header = Table.grid(padding=(0, 2))
+        header.add_column(style="bold")
+        header.add_column()
+        header.add_row("Run ID", run_id)
+        header.add_row("Seller", deal.seller_url)
+        header.add_row("Negotiation", deal.negotiation_id)
+        header.add_row("Agreed amount (total)", str(deal.agreed_amount))
+        console.print(Panel(header, title="market credits settle", border_style="cyan"))
+        try:
+            transaction, final = settle_api_credit_payment(
+                seller_url=deal.seller_url,
+                listing=listing,
+                negotiation_id=deal.negotiation_id,
+                buyer=identity,
+                buy_config=buy_config,
+                settlement_config=resolve_buyer_settlement_policy(
+                    identity=identity
+                ).config,
+                agreement=deal.agreement,
+                agreement_bytes=deal.agreement_bytes,
+                settlement_selection=deal.settlement_selection,
+                settlement_data=deal.settlement_data,
+                poll_interval=poll_interval,
+                total_timeout=settlement_timeout,
+                on_event=lambda event, body: log.event(event, **body),
+            )
+        except Exception as exc:
+            log.event("settlement_failed", error=str(exc))
+            log.end("error", error=str(exc))
+            typer.secho(
+                f"Payment settlement failed: {exc}", err=True, fg=typer.colors.RED
+            )
+            raise typer.Exit(5) from exc
+        credentials = final.get("tenant_credentials")
+        if isinstance(credentials, dict) and credentials:
+            log.event("credentials_delivered", credentials=credentials)
+        log.end(
+            final.get("status") or "unknown",
+            settlement_ref=transaction,
+            fulfillment_uid=final.get("fulfillment_uid"),
+        )
+        result = Table.grid(padding=(0, 2))
+        result.add_column(style="bold")
+        result.add_column()
+        result.add_row("Status", str(final.get("status")))
+        result.add_row("Settlement ref", transaction)
+        if final.get("fulfillment_uid"):
+            result.add_row("Fulfillment UID", str(final["fulfillment_uid"]))
+        if final.get("reason"):
+            result.add_row("Reason", str(final["reason"]))
+        border = "green" if final.get("status") == "ready" else "red"
+        console.print(Panel(result, title="Settlement complete", border_style=border))
+        if isinstance(credentials, dict) and credentials:
+            render_credentials(console, credentials)
+        if final.get("status") != "ready":
+            raise typer.Exit(7)
+        return final
+
     chain_cfg_name = (
         chain_name
         or _accepted_proposal_chain(deal)

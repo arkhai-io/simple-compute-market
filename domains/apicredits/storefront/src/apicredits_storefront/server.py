@@ -175,6 +175,7 @@ def _build_api_credit_services(
         accepted_obligation_dispatch=(
             settlement_composition.accepted_obligation_dispatch()
         ),
+        settlement_artifacts_builder=settlement_composition.payment_settlement_artifacts,
     )
     settlement_runtime = settlement_composition.runtime
     settlement_worker = settlement_composition.worker
@@ -258,6 +259,10 @@ async def _start_api_credit_services(
 async def _stop_api_credit_services(
     services: ApiCreditsStorefrontServices,
 ) -> None:
+    composition = getattr(services, "settlement_composition", None)
+    payments_client = getattr(composition, "payments_client", None)
+    if payments_client is not None:
+        payments_client.close()
     _container.clear_lifespan_state(domain=services.domain)
     _container.resolved_negotiation_runtime = None
     logger.info("[SHUTDOWN] API-credits storefront shutting down")
@@ -275,7 +280,7 @@ from apicredits_storefront.controllers.negotiations_controller import (  # noqa:
 from apicredits_storefront.controllers.settle_controller import (  # noqa: E402
     admin_settle_router,
 )
-from apicredits_storefront.controllers.settle_controller import (
+from apicredits_storefront.controllers.settle_controller import (  # noqa: E402
     router as settle_router,
 )
 from apicredits_storefront.controllers.system_controller import (  # noqa: E402

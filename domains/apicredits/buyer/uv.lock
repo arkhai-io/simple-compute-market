@@ -199,6 +199,7 @@ dependencies = [
     { name = "arkhai-core" },
     { name = "arkhai-core-buyer" },
     { name = "arkhai-kit-alkahest" },
+    { name = "arkhai-kit-arkhai-payments" },
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-policy" },
     { name = "arkhai-kit-settlement-runtime" },
@@ -224,6 +225,7 @@ requires-dist = [
     { name = "arkhai-core", specifier = ">=0.2.0" },
     { name = "arkhai-core-buyer", specifier = ">=0.3.0" },
     { name = "arkhai-kit-alkahest" },
+    { name = "arkhai-kit-arkhai-payments" },
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-policy" },
     { name = "arkhai-kit-settlement-runtime" },
@@ -244,8 +246,10 @@ source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
     { name = "arkhai-kit-alkahest" },
+    { name = "arkhai-kit-arkhai-payments" },
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-policy" },
+    { name = "arkhai-kit-settlement-runtime" },
     { name = "httpx" },
     { name = "pydantic" },
 ]
@@ -308,6 +312,20 @@ dependencies = [
 ]
 wheels = [
     { path = "arkhai_kit_alkahest-0.2.1-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-kit-arkhai-payments"
+version = "0.1.0"
+source = { registry = "../../../.dist" }
+dependencies = [
+    { name = "arkhai-kit-identity" },
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "rfc8785" },
+]
+wheels = [
+    { path = "arkhai_kit_arkhai_payments-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]

@@ -138,6 +138,43 @@ async def test_fulfillment_issues_and_returns_credentials_once(monkeypatch):
     assert [e[1] for e in events] == ["credits_issued", "fulfilled"]
 
 
+async def test_payment_receipt_gate_issues_without_chain_fulfillment(monkeypatch):
+    issued = {}
+
+    async def fake_issue(self, request):
+        issued["request"] = request
+        return _issuance_result(request)
+
+    async def unexpected_chain_fulfillment(**kwargs):
+        raise AssertionError(
+            "payment-backed issuance must not submit an on-chain fulfillment"
+        )
+
+    monkeypatch.setattr(CreditsServiceClient, "submit_credit_issuance", fake_issue)
+    monkeypatch.setattr(
+        fulfillment_module, "_submit_token_fulfillment", unexpected_chain_fulfillment
+    )
+    events, stage_event = _events()
+    result = await fulfill_api_credits_obligation(
+        client=None,
+        escrow_uid="payment-tx-1",
+        mechanism="arkhai.payments.v1",
+        authoritative_gate="payments_receipt_verified",
+        offer_resource=_OFFER,
+        quantity=2,
+        buyer_principal=_BUYER_PRINCIPAL,
+        service_url="http://tokens:8082",
+        admin_key="k",
+        stage_event=stage_event,
+    )
+
+    assert result["status"] == "fulfilled"
+    assert result["fulfillment_uid"] == issued["request"].fulfillment_id
+    assert issued["request"].mechanism == "arkhai.payments.v1"
+    assert issued["request"].obligation_ref == "payment-tx-1"
+    assert [event for _, event, _ in events] == ["credits_issued", "fulfilled"]
+
+
 async def test_fulfillment_refusal_applies_failure_policy(monkeypatch):
     async def fake_issue(self, request):
         raise CreditsServiceError("quota_exhausted", "no units", status_code=409)
@@ -203,6 +240,94 @@ async def test_chain_failure_after_issuance_rolls_back(monkeypatch):
     assert [e[1] for e in events] == ["credits_issued", "failed_after_issuance"]
 
 
+async def test_fulfillment_service_keeps_capacity_hold_until_retry_completes(
+    monkeypatch,
+):
+    from apicredits_storefront.services import fulfillment_service
+
+    class FakeDb:
+        def __init__(self):
+            self.deleted: list[str] = []
+
+        async def load_capacity_hold(self, *, negotiation_id):
+            return {
+                "capacity_reservation_id": "alloc-payment",
+                "payload": {"resource_id": "svc-quota", "allocated_units": 3},
+            }
+
+        async def delete_capacity_hold(self, *, negotiation_id):
+            self.deleted.append(negotiation_id)
+
+    db = FakeDb()
+    calls = []
+
+    async def fake_fulfill(**kwargs):
+        calls.append(kwargs)
+        return {
+            "status": "pending" if len(calls) == 1 else "fulfilled",
+            "fulfillment_uid": "fulfill-1",
+        }
+
+    monkeypatch.setattr(fulfillment_service, "get_sqlite_client", lambda: db)
+    monkeypatch.setattr(
+        fulfillment_service, "fulfill_api_credits_obligation", fake_fulfill
+    )
+
+    kwargs = {
+        "client": None,
+        "escrow_uid": "neg-payment",
+        "order": {"offer_resource": dict(_OFFER)},
+        "quantity": 3,
+        "buyer_principal": _BUYER_PRINCIPAL,
+        "negotiation_id": "neg-payment",
+        "mechanism": "arkhai.payments.v1",
+        "authoritative_gate": "payments_receipt_verified",
+    }
+    pending = await fulfillment_service.fulfill_credit_obligation(**kwargs)
+    assert pending["status"] == "pending"
+    assert db.deleted == []
+
+    fulfilled = await fulfillment_service.fulfill_credit_obligation(**kwargs)
+    assert fulfilled["status"] == "fulfilled"
+    assert calls[0]["held_reservation"]["capacity_reservation_id"] == "alloc-payment"
+    assert calls[1]["held_reservation"]["capacity_reservation_id"] == "alloc-payment"
+    assert db.deleted == ["neg-payment"]
+
+
+async def test_payment_issuance_unavailable_stays_retryable(monkeypatch):
+    async def unavailable(self, _request):
+        raise RuntimeError("credits service timed out")
+
+    monkeypatch.setattr(
+        fulfillment_module.CreditsServiceClient,
+        "submit_credit_issuance",
+        unavailable,
+    )
+    events, stage_event = _events()
+    policy_calls = []
+
+    async def fail_policy(**kwargs):
+        policy_calls.append(kwargs)
+
+    result = await fulfillment_module.fulfill_api_credits_obligation(
+        client=None,
+        escrow_uid="neg-payment",
+        mechanism="arkhai.payments.v1",
+        authoritative_gate="payments_receipt_verified",
+        offer_resource=_OFFER,
+        quantity=3,
+        buyer_principal=_BUYER_PRINCIPAL,
+        service_url="http://tokens:8082",
+        admin_key="k",
+        stage_event=stage_event,
+        apply_failure_policy=fail_policy,
+    )
+
+    assert result["status"] == "pending"
+    assert not policy_calls
+    assert [event for _, event, _ in events] == ["issuance_retryable"]
+
+
 async def test_fulfillment_service_normalizes_order_through_domain_runtime(
     monkeypatch,
 ):
@@ -222,16 +347,20 @@ async def test_fulfillment_service_normalizes_order_through_domain_runtime(
 
     result = await fulfillment_service.fulfill_credit_obligation(
         client=None,
-        escrow_uid="0xescrow-runtime",
+        escrow_uid="neg-payment",
         order={"offer_resource": dict(_OFFER)},
         quantity=3,
         buyer_principal=_BUYER_PRINCIPAL,
+        mechanism="arkhai.payments.v1",
+        authoritative_gate="payments_receipt_verified",
     )
 
     assert result["status"] == "fulfilled"
     assert captured["offer_resource"]["kind"] == "api_credits.v1"
     assert captured["offer_resource"]["service_name"] == _OFFER["service_name"]
     assert captured["offer_resource"]["resource_id"] == _OFFER["resource_id"]
+    assert captured["mechanism"] == "arkhai.payments.v1"
+    assert captured["authoritative_gate"] == "payments_receipt_verified"
 
 
 async def test_fulfillment_service_rejects_invalid_domain_listing(monkeypatch):

@@ -16,6 +16,7 @@ reinit:
 		--upgrade-package arkhai-core-buyer        --reinstall-package arkhai-core-buyer \
 		--upgrade-package arkhai-core-registry-client --reinstall-package arkhai-core-registry-client \
 		--upgrade-package arkhai-kit-alkahest      --reinstall-package arkhai-kit-alkahest \
+		--upgrade-package arkhai-kit-arkhai-payments --reinstall-package arkhai-kit-arkhai-payments \
 		--upgrade-package arkhai-kit-config        --reinstall-package arkhai-kit-config \
 		--upgrade-package arkhai-kit-identity      --reinstall-package arkhai-kit-identity \
 		--upgrade-package arkhai-kit-policy        --reinstall-package arkhai-kit-policy \

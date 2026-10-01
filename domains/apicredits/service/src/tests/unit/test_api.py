@@ -34,6 +34,7 @@ def _issuance_payload(
     owner_identifier: str,
     quantity: int,
     key: dict[str, str],
+    mechanism: str = "alkahest.v1",
 ) -> dict[str, object]:
     owner = Identity(scheme="eip191", identifier=owner_identifier)
     disposition = KeyDisposition.model_validate(key)
@@ -41,7 +42,7 @@ def _issuance_payload(
     request_digest = issuance_request_digest(
         fulfillment_id=fulfillment_id,
         obligation_ref=obligation_ref,
-        mechanism="alkahest.v1",
+        mechanism=mechanism,
         owner=owner,
         service="test-api",
         resource_id="svc-quota",
@@ -51,7 +52,7 @@ def _issuance_payload(
     return {
         "fulfillment_id": fulfillment_id,
         "obligation_ref": obligation_ref,
-        "mechanism": "alkahest.v1",
+        "mechanism": mechanism,
         "owner": owner.model_dump(mode="json"),
         "service": "test-api",
         "resource_id": "svc-quota",
@@ -149,6 +150,21 @@ def test_full_deal_flow(client):
     )
     assert r.status_code == 200 and r.json()["balance"] == 1
 
+    # The same issuance boundary accepts a receipt-backed Arkhai payment.
+    r = client.post(
+        "/api/v1/issuance",
+        json=_issuance_payload(
+            "0xpaymentsdeal",
+            mechanism="arkhai.payments.v1",
+            quantity=2,
+            key={"mode": "existing", "key_id": key_id},
+            owner_identifier=BUYER_1,
+        ),
+        headers=AUTH,
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["mechanism"] == "arkhai.payments.v1"
+    assert r.json()["balance"] == 3 and r.json()["secret"] is None
     # A stranger cannot top up the principal-bound key.
     r = client.post(
         "/api/v1/issuance",

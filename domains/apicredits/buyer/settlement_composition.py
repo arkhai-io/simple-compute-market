@@ -20,11 +20,16 @@ from .common import (
     resolve_buyer_wallet,
     resolve_fresh_buyer_identity,
 )
+from domains.apicredits.settlement import (
+    create_api_credits_payments_registration,
+)
 
 
 def buyer_settlement_registry() -> SettlementConfigurationRegistry:
-    """Return the installed API-credit buyer settlement registration."""
-    return SettlementConfigurationRegistry((create_alkahest_registration(),))
+    """Return both installed API-credit settlement registrations."""
+    return SettlementConfigurationRegistry(
+        (create_alkahest_registration(), create_api_credits_payments_registration())
+    )
 
 
 def resolve_buyer_settlement_policy(

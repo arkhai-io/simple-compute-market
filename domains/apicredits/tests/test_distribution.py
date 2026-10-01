@@ -73,6 +73,10 @@ def wheels(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
         "policy": (REPO / "kit" / "policy", "arkhai_kit_policy-*.whl"),
         "alkahest": (REPO / "kit" / "alkahest", "arkhai_kit_alkahest-*.whl"),
         "identity": (REPO / "kit" / "identity", "arkhai_kit_identity-*.whl"),
+        "arkhai_payments": (
+            REPO / "kit" / "arkhai-payments",
+            "arkhai_kit_arkhai_payments-*.whl",
+        ),
         "capacity_publication": (
             REPO / "kit" / "capacity-publication",
             "arkhai_kit_capacity_publication-*.whl",
@@ -162,12 +166,15 @@ def test_role_wheels_require_shared_domain_and_versioned_core(
     storefront_metadata = _metadata(wheels["storefront"])
 
     assert "Requires-Dist: arkhai-core>=0.2.0" in domain_metadata
+    assert "Requires-Dist: arkhai-kit-arkhai-payments" in domain_metadata
     assert "Requires-Dist: arkhai-apicredits-domain>=0.1.0" in buyer_metadata
     assert "Requires-Dist: arkhai-core>=0.2.0" in buyer_metadata
     assert "Requires-Dist: arkhai-core-buyer>=0.3.0" in buyer_metadata
+    assert "Requires-Dist: arkhai-kit-arkhai-payments" in buyer_metadata
     assert "Requires-Dist: arkhai-apicredits-domain>=0.1.0" in storefront_metadata
     assert "Requires-Dist: arkhai-core>=0.2.0" in storefront_metadata
     assert "Requires-Dist: arkhai-core-storefront>=0.3.0" in storefront_metadata
+    assert "Requires-Dist: arkhai-kit-arkhai-payments" in storefront_metadata
 
 
 def test_storefront_wheels_require_settlement_runtime(

@@ -1,9 +1,8 @@
 """Sync negotiation through the real API-credits round hook.
 
 Capacity snapshots and key lookups are faked at the service seams the
-default hook resolves at call time; everything else — guards, terminal
-policy, thread persistence, token-terms persistence, and the safe default
-that grants no unfunded quota hold — runs against a temporary SQLite database.
+default hook resolves at call time; everything else runs against a temporary
+SQLite database.
 """
 
 from __future__ import annotations
@@ -14,6 +13,7 @@ import pytest
 from apicredits_storefront.domain_runtime import get_market_domain_contract
 from apicredits_storefront.negotiation_runtime import (
     _decode_terms,
+    _place_quota_hold,
     build_api_credit_negotiation_runtime,
 )
 from market_core.schemas import (
@@ -234,6 +234,52 @@ async def test_listed_price_accept_persists_terms_without_unfunded_hold(
 
     assert fake_capacity.reserved == []
     assert await db.load_capacity_hold(negotiation_id=neg_id) is None
+
+
+async def test_payment_selection_places_quota_hold(db, monkeypatch):
+    from types import SimpleNamespace
+
+    from apicredits_storefront import negotiation_runtime as runtime_module
+    from tests._settings_overrides import settings_overrides
+
+    class CapacityRuntime:
+        async def reserve(self, _binding, *, claim, deal_ref, ttl_seconds):
+            return {
+                "capacity_reservation_id": "alloc-payment",
+                "resource_id": "svc-quota",
+                "allocated_units": claim["units"],
+                "hold_expires_at": "2099-01-01 00:00",
+            }
+
+    monkeypatch.setattr(
+        runtime_module,
+        "build_capacity_runtime",
+        lambda _factory: CapacityRuntime(),
+    )
+    acceptance = SimpleNamespace(
+        negotiation_id="neg-payment",
+        listing_id="L-tok",
+        listing_record={
+            "offer_resource": {
+                "resource_id": "svc-quota",
+                "capacity_site_id": "tokens",
+                "offering_mode": "api_credits",
+            }
+        },
+        terms=SimpleNamespace(decoded=SimpleNamespace(payload={"quantity": 3})),
+        pinned_proposal=None,
+        policy_state={
+            "accepted_settlement_selection": {"mechanism": "arkhai.payments.v1"}
+        },
+        binding=None,
+    )
+
+    with settings_overrides(**{"capacity.hold_ttl_seconds": 300}):
+        await _place_quota_hold(db, acceptance, {})
+
+    hold = await db.load_capacity_hold(negotiation_id="neg-payment")
+    assert hold["capacity_reservation_id"] == "alloc-payment"
+    assert hold["payload"]["allocated_units"] == 3
 
 
 async def test_quota_guard_rejects_uncovered_quantity(db, fake_capacity, key_records):

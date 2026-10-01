@@ -51,6 +51,9 @@ class DealContext:
     accepted_escrow_terms: list[dict[str, Any]] | None = None
     accepted_provision_terms: dict[str, Any] | None = None
     settlement_selection: dict[str, Any] | None = None
+    agreement: dict[str, Any] | None = None
+    agreement_bytes: str | None = None
+    settlement_data: dict[str, Any] | None = None
     settlement_operation_identities: tuple[str, ...] = ()
     funding_authorizations: tuple[tuple[str, str], ...] = ()
 
@@ -237,6 +240,9 @@ def load_deal_context(
     accepted_escrow_terms: list[dict[str, Any]] | None = None
     accepted_provision_terms: dict[str, Any] | None = None
     settlement_selection: dict[str, Any] | None = None
+    accepted_agreement: dict[str, Any] | None = None
+    agreement_bytes: str | None = None
+    settlement_data: dict[str, Any] | None = None
     settlement_operation_identities: tuple[str, ...] = ()
     funding_authorizations: dict[str, str] = {}
     last_status: str | None = None
@@ -245,6 +251,7 @@ def load_deal_context(
         nonlocal accepted_escrow_proposal, settlement_plan, accepted_escrow_terms
         nonlocal accepted_provision_terms, settlement_selection
         nonlocal settlement_operation_identities
+        nonlocal accepted_agreement, agreement_bytes, settlement_data
 
         raw_plan = ev.get("settlement_plan")
         if raw_plan is not None:
@@ -272,6 +279,27 @@ def load_deal_context(
                     f"Run-log {run_id!r} has conflicting accepted settlement selections."
                 )
             settlement_selection = raw_selection
+        raw_agreement = ev.get("agreement")
+        if raw_agreement is not None:
+            if not isinstance(raw_agreement, dict):
+                raise typer.BadParameter(
+                    f"Run-log {run_id!r} has a malformed accepted Agreement."
+                )
+            accepted_agreement = raw_agreement
+        raw_agreement_bytes = ev.get("agreement_bytes")
+        if raw_agreement_bytes is not None:
+            if not isinstance(raw_agreement_bytes, str) or not raw_agreement_bytes:
+                raise typer.BadParameter(
+                    f"Run-log {run_id!r} has malformed accepted Agreement bytes."
+                )
+            agreement_bytes = raw_agreement_bytes
+        raw_settlement_data = ev.get("settlement_data")
+        if raw_settlement_data is not None:
+            if not isinstance(raw_settlement_data, dict):
+                raise typer.BadParameter(
+                    f"Run-log {run_id!r} has malformed settlement data."
+                )
+            settlement_data = raw_settlement_data
 
         raw_identities = ev.get("settlement_operation_identities")
         if raw_identities is not None:
@@ -423,7 +451,9 @@ def load_deal_context(
             if (
                 not isinstance(operation_ref, str)
                 or len(operation_ref) != 64
-                or any(character not in "0123456789abcdef" for character in operation_ref)
+                or any(
+                    character not in "0123456789abcdef" for character in operation_ref
+                )
                 or not isinstance(authorization_ref, str)
                 or not authorization_ref
                 or authorization_ref != authorization_ref.strip()
@@ -554,6 +584,9 @@ def load_deal_context(
         accepted_escrow_terms=accepted_escrow_terms,
         accepted_provision_terms=accepted_provision_terms,
         settlement_selection=settlement_selection,
+        agreement=accepted_agreement,
+        agreement_bytes=agreement_bytes,
+        settlement_data=settlement_data,
         settlement_operation_identities=settlement_operation_identities,
         funding_authorizations=tuple(sorted(funding_authorizations.items())),
     )
