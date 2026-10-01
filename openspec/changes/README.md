@@ -177,7 +177,7 @@ remaining failures.
 |---|---|---|
 | [`provide-e2e-development-identities`](archive/2026-09-12-provide-e2e-development-identities/) | **archived** 2026-09-12 | `docker compose up` had been unable to start since mid-August. Committed the development signer, wallet, admin-key, and buyer-config values; split the compose overrides out of the `include` files; and repaired five pre-existing defects the startup path had been masking. The stack now comes up healthy with no repository secrets, so a contributor or a fork can run it |
 | [`repair-e2e-fixture-drift`](archive/2026-09-13-repair-e2e-fixture-drift/) | **archived** 2026-09-13 | The e2e suite reached pytest reporting 12 passed and 88 fixture errors. The drift was wider than two signature mismatches: six construction sites and three payload shapes, four of them masked because pytest reports only the first fixture to raise. Rebuilt the fixtures as one client per role, corrected a misfiled route role in the storefront (system status is an administrator operation also readable by a service peer), and separated storefront administrators from their sellers in development configuration. The suite now reports **0 errors, 38 passed, 11 failed**, and every failure is classified |
-| [`repair-storefront-alkahest-configuration`](repair-storefront-alkahest-configuration/) | active; depends on nothing further | Alkahest is the VM storefronts' only enabled settlement mechanism and never becomes ready, so composition refuses every listing. Three configuration gaps: the storefront never receives its EVM credential because the wallet env files use a name only the buyer-side loader resolves, and both Alkahest address-config paths point into a source tree the image does not contain. Settles the stack so the on-chain escrow phases run for the first time since mid-August |
+| [`repair-storefront-alkahest-configuration`](repair-storefront-alkahest-configuration/) | implemented locally; stack verification and closeout remain | Alkahest is the VM storefronts' only enabled settlement mechanism and never becomes ready, so composition refuses every listing. Three configuration gaps: the storefront never receives its EVM credential because the wallet env files use a name only the buyer-side loader resolves, and both Alkahest address-config paths point into a source tree the image does not contain. Settles the stack so the on-chain escrow phases run for the first time since mid-August |
 | [`repair-multi-storefront-scenario`](repair-multi-storefront-scenario/) | active; opened by the change above; `pools-9-retire-local-physical-authority`'s cutover depends on it | The VM suite's two-storefront scenario has four stages that cannot pass: provisioning's storefront principal is a single identity, so Alice is never a trusted caller and never loads capacity. Not a regression -- the Aug 15 green run skipped every Alice stage, incidentally, for want of configuration. Those stages are now skipped with the reason declared; this change owns letting provisioning serve more than one storefront, and moving Alice off the local-table derivation she uses only because she is untrusted |
 | [`sign-multi-language-credits-middleware`](sign-multi-language-credits-middleware/) | planned; opened by `repair-storefront-alkahest-configuration` task `3ax.10` | The TypeScript and Rust API-credits middlewares authenticate to a credits service with signed authentication enabled, which they cannot today: both send only the legacy shared secret, and the service accepts signed requests or the secret and never both. Owes its validation layer first -- neither client has an e2e scenario, so signing code for them cannot currently be proven against a real service |
 | [`retain-authenticated-request-outcomes`](retain-authenticated-request-outcomes/) | planned; opened by `repair-storefront-alkahest-configuration` | `SiteAuthMiddleware` reserves `(principal, request_id)` and rejects changed reuse, but keeps no outcomes, so an exact retry cannot resolve to the recorded one. Conformance is currently delegated to handlers and declared per route by `exact_retry_safe`; this retains outcomes so the middleware can honour the requirement itself, with a durable provider for services that must survive an authority restart |
@@ -279,8 +279,8 @@ archived POOLS-1…6 foundations ──► POOLS-7 durable fulfillment cutover �
 
 | Change | Status | Acceptance boundary |
 |---|---|---|
-| [`pools-7-storefront-fulfillment-cutover`](pools-7-storefront-fulfillment-cutover/) | active; 72 prerequisite tasks completed | Central durable Settlement Record, scheduling, fulfillment, pull result, recovery, storefront cutover, and teardown path |
-| [`pools-8-capacity-projection-and-listing-hints`](pools-8-capacity-projection-and-listing-hints/) | active | Persists already-produced projections, maps them into commercial publication and claims, and adds advisory domain-owned hints |
+| [`pools-7-storefront-fulfillment-cutover`](pools-7-storefront-fulfillment-cutover/) | implementation substantially complete; change-specific end-to-end confirmation and closeout remain | Central durable Settlement Record, scheduling, fulfillment, pull result, recovery, storefront cutover, and teardown path |
+| [`pools-8-capacity-projection-and-listing-hints`](pools-8-capacity-projection-and-listing-hints/) | implementation complete; closeout remains | Persists already-produced projections, maps them into commercial publication and claims, and adds advisory domain-owned hints |
 | [`inject-site-pool-authority`](inject-site-pool-authority/) | design phase; no blocking dependency | Brings `kit/site` back inside `ARCHITECTURE.md`'s kit layers: the site ledger reads pool facts through a session-scoped port its composition root injects instead of importing `kit/resource-pools`, a capacity row's `pool_id` becomes non-null so no default pool is substituted, and a boundary test forbids the import. Should land before any new site read of pool state, including a backing check at admission |
 
 `add-host-capacity-filters` was archived as superseded by site admission and fulfillment scheduling.
@@ -324,14 +324,14 @@ add-database-migration-commands ──► separate-marketplace-registry ──�
 
 ## Lesser goal — Package and release readiness
 
-**What it adds up to.** The repository cannot publish a coherent set of installable distributions: internal dependencies resolve through relative paths, type checking is advertised but not enforced, and the publisher inventory does not match the packages that exist. This sequence makes every internal dependency wheel-resolvable, restores the checks, and reconciles the distribution graph. Not a roadmap goal — no behavior changes — but nothing outside this repository can consume the packages until it is done.
+**What it adds up to.** Internal dependencies now install from built wheels and packaging checks cover the repository's environments and images. Type checking is advertised but not enforced, and the publisher inventory does not match the packages that exist. The remaining changes restore the checks and reconcile the distribution graph. Not a roadmap goal — no behavior changes — but nothing outside this repository can consume the packages until it is done.
 
 Two changes joined this campaign on 2026-09-02. The first completed and was archived on 2026-09-04: the settlement client is published to the public index, every consuming lockfile resolves it from there, the release gate is off the build and test path, and `.dist` holds only what this repository builds. It left one residual, named below, that no change yet owns. Separately, twenty-eight distributions reach public PyPI on every merge to `main` with no gate — which is how `arkhai-kit-hosted-settlement` 0.1.4 came to be published declaring a dependency PyPI does not carry, uninstallable for everyone outside this repository and, because PyPI is write-once, not correctable in place.
 
 ```text
 publish-wheels-through-a-gate (its prerequisite archived 2026-09-04)
 converge-python-packaging (archived) ──► type-core-packages ──► configure-pypi-trusted-publishing
-(remove-relative-uv-sources: open work transferred to converge-python-packaging)
+(remove-relative-uv-sources: superseded and archived)
 ```
 
 `converge-python-packaging` absorbed the open sections of `remove-relative-uv-sources` (its path-source guard, remaining cutovers, and `reinit` inventory) when it was planned on 2026-09-27; that change's completed CI wheelhouse repair is unaffected, and it has no remaining open work.
@@ -339,7 +339,7 @@ converge-python-packaging (archived) ──► type-core-packages ──► conf
 | Order | Change | Status | Acceptance boundary |
 |---|---|---|---|
 | 1 | [`publish-wheels-through-a-gate`](publish-wheels-through-a-gate/) | active; the interim half needs no prerequisite | Automated publication to PyPI stops; merge to `main` publishes all twenty-eight distributions to the development registry; one inventory-derived list replaces the two enumerations; a human-invoked promotion copies bytes to PyPI and fails the whole set if any version there holds different content |
-| — | [`remove-relative-uv-sources`](remove-relative-uv-sources/) | open work transferred to `converge-python-packaging` 2026-09-27, and completed there; archivable | Remove remaining internal parent-path sources and enforce wheel-only resolution. Its CI wheelhouse repair is complete; the rest is now `converge-python-packaging` |
+| — | [`remove-relative-uv-sources`](archive/2026-09-28-remove-relative-uv-sources/) | **archived as superseded** 2026-09-28; remaining work transferred to `converge-python-packaging` | Its CI wheelhouse repair landed separately; the remaining package cutover and checks were completed by `converge-python-packaging` |
 | 2 | [`type-core-packages`](type-core-packages/) | active after affected public surfaces stabilize | Restore advertised checks, ratchet package by package, verify `py.typed` in installed wheels. Its deferred `kit/site` question should wait for the kit-composition goal's extraction scope |
 | 3 | [`configure-pypi-trusted-publishing`](configure-pypi-trusted-publishing/) | externally blocked | Reconcile the consumable distribution graph and verify trusted publishers plus PyPI-only downstream installation. Should follow the kit extraction, which changes wheel contents |
 | — | [`converge-python-packaging`](archive/2026-09-28-converge-python-packaging/) | **archived** 2026-09-28. Promoted to `deployment-state`, `planning-governance`, `docs/development/BUILD_AND_PACKAGING.md`, and `docs/development/RELEASING.md` | Two slices. Environments: `reinit`, image installs, and a new `make lock` derive internal-package flags from each project's lock through one script; the three outlier images install from their lock; Python 3.13 declared once; `make check-packaging` replaces `check-reinit` and `check-internal-locks` and joins every closeout. Layout: nine projects move to one package under `src/` (six nested-import projects plus the registry, API-credits service, and e2e harness), the eight published ones under new versions, and every project installs editable. Design reviewed and planned 2026-09-27 |
@@ -358,7 +358,7 @@ The two sequences are independent of each other and share this campaign because 
 
 | Change | Status | Acceptance boundary |
 |---|---|---|
-| [`refactor-e2e-fulfillment-lifecycle`](refactor-e2e-fulfillment-lifecycle/) | active; 22 of 25 tasks complete | Scenarios assert on fulfillment identity rather than provisioning job identity. Its three open tasks are all blocked on a live docker-compose run, unavailable since 2026-07-29 |
+| [`refactor-e2e-fulfillment-lifecycle`](refactor-e2e-fulfillment-lifecycle/) | implementation sections complete; live scenario verification and closeout remain | Scenarios assert on fulfillment identity rather than provisioning job identity. Its remaining validation must show the affected stages execute and pass against live services |
 | [`extract-e2e-project`](extract-e2e-project/) | deferred | Activate only for a named external consumer, compatibility profile, and release owner |
 
 ## Lesser goal — Agent-driven issue-discovery harness
@@ -379,30 +379,29 @@ restore-issue-discovery-thin-runner ──► add-harness-scenario-contract ─�
 | 4 | [`add-deterministic-regression-contract`](add-deterministic-regression-contract/) | active | What a generated regression must be: representation separated from its execution adapter, evidence that it fails without the fix it protects, an evidence class travelling with the artifact that refuses a concurrency or capacity claim, sanitization through the same allowlist as any other crossing, and placement at the level owning the behaviour it protects. Generates nothing |
 | 4 | [`add-future-domain-shape-validation`](add-future-domain-shape-validation/) | active | An adapter the runtime has never seen round-trips an opaque payload with no core edit. Prepared domains validate and dry-plan with zero effect on attempted execution. A testing seam, not a plugin platform |
 
-One dependency points outside this campaign; a second, [`fix-vm-fulfillment-capacity-boundary`](archive/2026-09-28-fix-vm-fulfillment-capacity-boundary/), is archived, so a scenario can now assert that the GPU reserved is the GPU received. Separately, nothing the harness exercises can complete a buyer journey until a composed domain wheel-and-policy path exists here — and that dependency has no owner on this branch. The change previously named for it has never existed on `dev`, so the citation is not a stale link but an unowned requirement; `add-harness-buyer-action-slice` still names it in its proposal, design, and task 1.4, and cannot bind to a real target until a change on this branch owns the work. The `reinit` coverage gap the harness surfaced is owned by [`remove-relative-uv-sources`](remove-relative-uv-sources/) task 2.5, not by this campaign.
+One dependency points outside this campaign; a second, [`fix-vm-fulfillment-capacity-boundary`](archive/2026-09-28-fix-vm-fulfillment-capacity-boundary/), is archived, so a scenario can now assert that the GPU reserved is the GPU received. Separately, nothing the harness exercises can complete a buyer journey until a composed domain wheel-and-policy path exists here — and that dependency has no owner on this branch. The change previously named for it has never existed on `dev`, so the citation is not a stale link but an unowned requirement; `add-harness-buyer-action-slice` still names it in its proposal, design, and task 1.4, and cannot bind to a real target until a change on this branch owns the work. The `reinit` coverage gap the harness surfaced was resolved by [`converge-python-packaging`](archive/2026-09-28-converge-python-packaging/), which superseded `remove-relative-uv-sources`.
 
 ## Lesser goal — Reach hosts and VMs that have no inbound route
 
 A rented node typically sits behind a firewall or NAT with nothing listening
-from outside. Two consequences run through the provisioning path and neither is
-currently satisfied: the provisioner cannot name a host whose SSH answers on a
-tunnel port, and the VM-creation path coordinates buyer tunnels through a relay
-management dashboard that a relay is not obliged to expose. Both are defects in
-how the existing mechanism is built rather than new market capability — the
-product already sells VMs on hosts it reaches by tunnel; it simply cannot do so
-against a relay deployed without a management surface.
+from outside. Provisioning can name a host whose SSH answers on a tunnel port,
+and the VM-creation path no longer depends on a relay management dashboard.
+The remaining work proves the relay path on live hardware and lets an operator
+register a host with its own SSH credential. The product already sells VMs on
+hosts it reaches by tunnel; these changes make that path usable across independently
+prepared hosts and relays without a management surface.
 
 ```text
 never-strand-the-host-on-passthrough ──► (prerequisite for exercising any below on real hardware)
-contain-embedded-host-key-material (independent)
-relay-vm-access-without-a-dashboard ──► add-buyer-vm-connectivity-terms
+contain-embedded-host-key-material ──► relay-vm-access-without-a-dashboard §8 live verification
+relay-vm-access-without-a-dashboard (implementation and promotion complete)
 ```
 
 | Change | Status | Acceptance boundary |
 |---|---|---|
 | [`never-strand-the-host-on-passthrough`](never-strand-the-host-on-passthrough/) | implemented; promoted; live verification outstanding | Host preparation cannot render a rented machine unreachable. Passthrough viability is audited read-only before anything is written, unsafe IOMMU groups are refused rather than bound, device binding is scoped to a PCI address and applied after boot, and the rollback target is a state that contends for no device |
-| [`contain-embedded-host-key-material`](contain-embedded-host-key-material/) | in design | A host may be reached with its own SSH key rather than the deployment's shared one. Decrypted key material exists only for the operation that needs it, on failing paths as well as succeeding ones. Takes no position on who generates a host's keypair |
-| [`relay-vm-access-without-a-dashboard`](relay-vm-access-without-a-dashboard/) | implemented and promoted (142 of 170 tasks); live-hardware verification (sections 6 and 8), decision gate 1A.7, and closeout outstanding | VM tunnel allocation and verification stop depending on a relay dashboard, DNS name, certificate, and second credential. A relay becomes an administered resource with its own controller, holding its own window and encrypted token, changeable against a running service rather than by redeployment, and no longer reverted when a pod restarts against an unchanged definition document. The host's management and buyer tunnel clients are split, and adding a VM stops restarting the tunnel client — and with it every buyer's live session |
+| [`contain-embedded-host-key-material`](contain-embedded-host-key-material/) | planned; no blocking dependency | A host may be reached with its own SSH key rather than the deployment's shared one. Decrypted key material exists only for the operation that needs it, on failing paths as well as succeeding ones. Takes no position on who generates a host's keypair |
+| [`relay-vm-access-without-a-dashboard`](relay-vm-access-without-a-dashboard/) | implemented and promoted; live-hardware verification (sections 6 and 8), decision gates 1A.7 and 2A.7, and closeout remain | VM tunnel allocation and verification stop depending on a relay dashboard, DNS name, certificate, and second credential. A relay becomes an administered resource with its own controller, holding its own window and encrypted token, changeable against a running service rather than by redeployment, and no longer reverted when a pod restarts against an unchanged definition document. The host's management and buyer tunnel clients are split, and adding a VM stops restarting the tunnel client — and with it every buyer's live session |
 
 `never-strand-the-host-on-passthrough` shares no code with the others and
 blocks none of them. It is sequenced first because they are verified by
@@ -423,8 +422,8 @@ the bootstrap path to every VM. A buyer-supplied first-boot configuration starti
 guest-side tunnel client would be the fresh change if a buyer ever needs to avoid the
 seller relay's port; it belongs here if opened.
 
-No roadmap goal currently covers this work. Whether one is warranted is a
-closeout decision for the second change rather than an omission here.
+The relay and host-key work also serves Goal 1: provisioning owns the physical
+facts and credentials that the storefront previously carried.
 
 ## Lesser goal — Hosted fiat settlement
 
