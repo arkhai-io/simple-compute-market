@@ -312,6 +312,31 @@ async def test_each_seller_sites_rate_reaches_only_its_own_listing(tmp_path):
     assert overridden == {"us-east": "2.10", "us-west": "2.95"}
 
 
+async def test_a_rate_the_market_cannot_read_holds_the_published_listing(world):
+    """Fail closed through the running app: when a pool's declaration turns
+    unreadable, its listing keeps what it published, neither refreshed without a
+    rate nor closed."""
+    rate = {"shape": HINT_SHAPE, "amount": "2.10", "asset": "usd", "period": "hour"}
+    world.pools.append(
+        pool("gpu", backing="unbacked", capacity=_BIG,
+             listing_shapes={"vm": [HINT_SHAPE]}, asking_rates={"vm": [rate]})
+    )
+    await _cycle(world)
+    ((listing_id, before),) = (await _open_listings(world)).items()
+
+    world.pools[:] = [
+        pool("gpu", backing="unbacked", capacity=_BIG,
+             listing_shapes={"vm": [HINT_SHAPE]},
+             asking_rates={"vm": [{**rate, "amount": "1.00", "period": "month"}]})
+    ]
+    await _cycle(world)
+
+    assert (await _open_listings(world)) == {listing_id: before}
+    assert before["asking_rate"]["amount"] == "2.10"
+    report = (await world.client.get_system_status()).publication_derivation[SITE]
+    assert "period" in report["unreadable_asking_rates"]["gpu"][0]
+
+
 # -- refused writes ------------------------------------------------------------
 
 

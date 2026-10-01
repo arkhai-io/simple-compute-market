@@ -769,6 +769,51 @@ arrives as plain data and the kit imports no storefront.
 **Revisit trigger:** a second consumer of pool-declared rates that is not a
 storefront, which would make the storefront precedence an imposition on it.
 
+### Where the evidence for unbacked and multi-seller supply lives
+
+The asking-rate path does not depend on backing. This change proves it through
+running services on backed supply and, at the registry, for a listing whose only
+option is a rateless introduction, which is what unbacked supply publishes. What
+it cannot supply is an unbacked listing, which two other changes first make
+publishable. The system scenario that returns backed and unbacked supply together
+in one rate-bounded query therefore belongs to them:
+`compose-contact-exchange-across-compute` (VM) and `unbacked-bare-metal-listings`
+(bare metal), each of which already owns a scenario querying both kinds of supply.
+Holding this change open for them would have left behaviour that is already true
+unpromoted behind a prerequisite with no work begun.
+
+Multi-seller provenance is proven at integration, not system. It is the
+storefront keying rates by site and pool inside one application, and the two
+service crossings a rate makes, site to storefront and storefront to registry, are
+proven by the single-site end-to-end scenario. A two-seller system lane would add
+no crossing.
+
+### The override kit keeps its version
+
+`kit/pool-overrides` gains a route service, optional after-write effects, and an
+`asking_rates` column, all backward compatible, and its own requirements do not
+change. A same-version wheel is what the build reinstalls and the lock check
+accepts. A version bump would have forced relocking every consumer for no change
+in behaviour.
+
+### The override store's `NULL` and `"null"` stay one state
+
+The asking-rate reader distinguishes a stated `null` from an absent declaration,
+and the bare-metal override reader refuses stored `terms` that are not a mapping.
+The override kit's store does not distinguish SQL `NULL` from stored JSON
+`"null"`: both read as unset. It writes `NULL` for every unset field, so `"null"`
+text can arise only from corruption, and separating them is a store-wide change
+governing every market's override fields, outside this change.
+
+### A later registry change may move the asking rate's validation
+
+`store-registry-listings-as-published`, in design, would stop the registry
+discarding listing content it acknowledges, and one of its candidate designs
+enforces the filter specification at the publish boundary. This change's
+`registry-discovery` requirement states that the registry validates the asking
+rate only in its dry run, which is true when this change lands. If that change
+enforces at publish, amending the statement is its delta's work.
+
 ## Risks / Trade-offs
 
 - **[Buyers read an asking rate as a quote]** → Partly mitigated by the normative

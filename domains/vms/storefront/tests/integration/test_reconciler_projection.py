@@ -1,12 +1,14 @@
-"""Which source derivation reads, and what it holds, on a real database.
+"""Which source derivation reads, what it holds, and what it prices.
 
-These are the reconciler's cases whose meaning this module's rules define: an
-empty projection is not the local tables, an unknown configured site is held
-rather than read as empty, and another market's stored overrides do not reach VM
-derivation. Each runs production derivation against real SQLite, so it is an
-integration test. The database fixture and seeding helpers are the reconciler
-unit module's; the rest of that module's database-backed cases move here when
-it is next changed.
+These cases call production derivation directly against a real SQLite
+database: an empty projection is not the local tables, an unknown configured
+site is held rather than read as empty, another market's stored overrides do not
+reach VM derivation, and asking rates resolve, hold, and refresh as the
+precedence rules say. No application runs, so under docs/development/TESTING.md
+they are focused evidence for derivation's own rules rather than integration
+evidence. The storefront's integration evidence for the same paths drives the
+real app through its typed clients, in test_pool_overrides_api.py. The database
+fixture and seeding helpers are the reconciler unit module's.
 """
 
 from __future__ import annotations
