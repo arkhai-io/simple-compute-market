@@ -512,18 +512,54 @@ The asking rate is a sibling of the flattened dimension fields inside
 }
 ```
 
-The filter declarations, matching the existing `alias_kind` sugar convention:
+The filter declarations, matching the existing `alias_kind` sugar convention and
+named per "A bound filter's bare query name follows the field's preferred
+direction, not bound position" below:
 
-| Filter name | Path | Op | Type |
-|---|---|---|---|
-| `asking_rate_max` | `$.listing_resource.asking_rate.amount` | `range` (`upper_bound`) | `decimal_text` |
-| `asking_rate_min` | `$.listing_resource.asking_rate.amount` | `range` (`lower_bound`) | `decimal_text` |
-| `asking_rate_asset` | `$.listing_resource.asking_rate.asset` | `in` | `string` |
-| `asking_rate_period` | `$.listing_resource.asking_rate.period` | `in` | `string` |
+| Filter name | Query name | Path | Op | Type |
+|---|---|---|---|---|
+| `asking_rate_max` | `asking_rate` | `$.listing_resource.asking_rate.amount` | `range` (`upper_bound`) | `decimal_text` |
+| `asking_rate_min` | `asking_rate_min` | `$.listing_resource.asking_rate.amount` | `range` (`lower_bound`) | `decimal_text` |
+| `asking_rate_asset` | `asking_rate_asset` | `$.listing_resource.asking_rate.asset` | `in` | `string` |
+| `asking_rate_period` | `asking_rate_period` | `$.listing_resource.asking_rate.period` | `in` | `string` |
 
 All four are `on_missing: fail`. Both bounds declare
-`requires: [asking_rate_asset, asking_rate_period]`. Their buyer-facing query names
-are an open question below.
+`requires: [asking_rate_asset, asking_rate_period]`.
+
+### A bound filter's bare query name follows the field's preferred direction, not bound position
+
+Every existing bound filter gives the bare field name to the lower bound
+(`gpu_count`, `ram_gb`, `vcpu_count`, and the rest), which reads as a rule about
+*position* — bare name means lower bound — because every field declared so far
+happens to share one shape: it publishes a capacity claim, and more of it is
+always at least as good for the buyer, so "at least X" is the only query a buyer
+would ever reasonably run. Nobody queries `gpu_count_max`.
+
+The asking rate is the first published dimension where that shape does not hold.
+It publishes a cost, not a capacity, and less of it is better for the buyer, so
+the query a buyer actually runs is "at most X" — the upper bound. Giving the bare
+name to the lower bound here would satisfy position-consistency while naming the
+filter almost nobody uses, and `asking_rate_max` would carry the query every
+price-conscious buyer writes.
+
+**The rule is restated as intent rather than position:** a bound filter's bare
+query name belongs to whichever bound a buyer querying that field by default
+would mean — the lower bound for a capacity-shaped dimension where more is
+preferable, the upper bound for a cost-shaped dimension where less is preferable.
+Position-consistency was never the actual property the existing filters
+exhibited; direction-of-preference consistency is, and it is what should govern
+the next dimension that isn't capacity-shaped either. A filter declaration states
+which bound it carries (`alias_kind`) independently of this rule, so nothing
+engine-side depends on the convention; it binds only a human choosing a
+`query_name`.
+
+This is a naming convention for filter authors, not a runtime behavior the engine
+enforces or could enforce — `alias_kind: lower_bound` or `upper_bound` is declared
+explicitly either way, so a spec that got the convention wrong would still
+evaluate correctly; it would just read backwards to the next person declaring a
+filter beside it. It belongs in `registry-discovery` beside the existing
+resource-query-compilation requirement, as guidance for every future filter
+declaration, not only the compute schema's.
 
 ### Exact filters, failing on missing
 
@@ -723,16 +759,20 @@ contribution. It does not run bare-metal publication, so it keeps refusing
   a rate until its publication reads declarations and publishes shapes. Accepted:
   a bare-metal-specific declaration form would be a second implementation of the
   same concept, against the rule that domains use the same kit mechanisms.
+- **[`asking_rate` naming the upper bound reads as position-inconsistent with every
+  other bare-named filter]** → Accepted and restated rather than avoided: the
+  existing filters were never demonstrating position-consistency, only
+  direction-of-preference consistency under the one shape they all happened to
+  share. Mitigated by stating the actual rule in `design.md` and promoting it to
+  `registry-discovery`, so the next non-capacity-shaped dimension inherits the
+  reasoning instead of re-deriving it or defaulting to position for lack of a
+  stated alternative.
 
 ## Open questions
 
-- **Buyer-facing query names for the two bounds.** The shared query language
-  allows each field once per query, and both bounds share one path, so they need
-  distinct `query_name`s. The existing convention gives the bare field name to a
-  lower bound (`gpu_count`). Undecided whether `asking_rate` names the upper bound
-  (buyers mostly bound price from above) with `asking_rate_min` for the lower, or
-  both keep suffixed names. No task prescribes an answer; the filter-declaration
-  task is a decision gate for it.
+None remaining. The buyer-facing query names for the two bounds were open pending
+discussion; resolved above ("A bound filter's bare query name follows the field's
+preferred direction, not bound position").
 
 ## Migration Plan
 

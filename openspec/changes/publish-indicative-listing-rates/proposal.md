@@ -197,6 +197,10 @@ None.
 - Declarative filter co-requirements, resolved from the active specification by both
   the registry and the buyer compiler, invisible to the etag when undeclared —
   `openspec/specs/registry-discovery/spec.md`.
+- A bound filter's bare query name follows the field's preferred search direction
+  (the lower bound for a capacity-shaped dimension, the upper bound for a
+  cost-shaped one), not bound position — a naming convention for filter authors,
+  not an engine-enforced rule — `openspec/specs/registry-discovery/spec.md`.
 - The compute schema's asking-rate field and its exact, fail-on-missing, co-required
   filters matching asset and period — `openspec/specs/registry-discovery/spec.md`.
 - The asking rate is a listing attribute, not a settlement option rate, and is
