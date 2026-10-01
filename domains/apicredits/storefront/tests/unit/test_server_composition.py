@@ -139,5 +139,6 @@ async def test_startup_registers_exactly_the_loops_it_starts_each_with_a_step(mo
         ]
         assert set(loops.step_routes().values()) == set(loops.registered_loop_names())
     finally:
+        handles = list(loops._handles.values())
         loops.clear_loops()
-        await asyncio.sleep(0)
+        await asyncio.gather(*handles, return_exceptions=True)

@@ -74,10 +74,11 @@ routes use the canonical `StorefrontClient` over `ASGITransport`.
 
 - [x] 3.1 `kit/storefront/src/market_storefront_kit/negotiation_watchdog.py`:
       `run_negotiation_watchdog` gains `wait: Callable[[float], Awaitable[None]] | None`
-      and runs wait, then gate with the existing 0.05-second held poll, then sweep. Keep
-      the initial-delay deadline. Without `wait` it sleeps, as today.
+      and runs gate on entry with the existing 0.05-second held poll, sweep when due,
+      then wait. Keep the initial-delay deadline. Without `wait` it sleeps.
 - [x] 3.2 `kit/settlement-runtime/src/market_settlement_runtime/servicing.py`:
-      `SettlementServicingWorker.run` gains `wait` and the same order.
+      `SettlementServicingWorker.run` gains `wait` and the same order. Each runner's
+      first sweep stays one interval after start, and a failing sweep still waits.
 - [x] 3.3 **Unit.** `kit/storefront/tests/unit/test_negotiation_watchdog.py` and
       `kit/settlement-runtime/tests/test_servicing.py`: a pause requested during the
       wait prevents the next cycle's work; an injected wait that returns early lets the
@@ -177,8 +178,8 @@ routes use the canonical `StorefrontClient` over `ASGITransport`.
       `middleware/admin_auth.py` a dependency authenticating an administrator under an
       explicit operation and resource — the canonical client's — rather than the route
       name and path. Include the router in `server.py`.
-- [x] 7.4 **Integration.** `domains/apicredits/storefront/tests/integration/test_lifecycle_routes.py`
-      through `StorefrontClient`: pause holds all three loops, each step runs while
+- [x] 7.4 **Component.** `domains/apicredits/storefront/tests/unit/test_lifecycle_routes.py`
+      through `StorefrontClient`, reclassified from integration in 10.5: pause holds all three loops, each step runs while
       held, resume, an unsigned request refused, an unknown loop not found. **Unit.**
       `tests/unit/test_server_composition.py`: registered loop names equal the loops
       startup creates. The canonical client is a new development dependency of the
@@ -202,6 +203,34 @@ routes use the canonical `StorefrontClient` over `ASGITransport`.
       Python suites pass. `e2e-tests` unit: one failure,
       `test_buyer_deployment_mounts_separate_profile_state_and_credential`, asserting on
       `docker-compose.yml`, which this change does not touch.
+
+## 10. Review follow-up
+
+- [x] 10.1 Every registered or declared loop waits through the controller. VM's
+      `fulfillment_resume_loop` and `site_projection_poller_loop` call `idle`; the
+      kit's `site_events_poller` and `poll_events` take a `wait`, which
+      `run_capacity_event_pollers` passes through and uses for its own cadence; VM's
+      and API credits' capacity loops pass the controller's `idle`. The table in
+      `design.md` lists every loop and its wait.
+- [x] 10.2 The watchdog, servicing worker, site poller, and capacity aggregate refuse
+      a gate without a wait.
+- [x] 10.3 **Regression guard.** VM's `tests/unit/test_loop_gate_wiring.py` drives
+      every VM loop body with an hour-long interval and requires `paused` within a
+      second; the kit runner, site-poller, and aggregate tests prove a pause during a
+      long wait holds the next cycle. Restoring the plain sleep in fulfillment resume
+      fails its two cases.
+- [x] 10.4 Every test file this change adds or touches is coordinated by events, with
+      no sleep: the kit controller, route-service, watchdog, servicing,
+      capacity-cycle, and aggregate tests; VM's gate-wiring tests; bare metal's system
+      tests, including the existing concurrent-publication case, which now waits on
+      an observed publication lock; and API credits' lifecycle and composition tests.
+      Bare metal and API credits drive the real servicing worker over a repository
+      with nothing due.
+- [x] 10.5 The API-credit lifecycle-route test moves to `tests/unit` as a component
+      test, its old path tombstoned. Production-application coverage and a lane of
+      its own belong to `apicredits-end-to-end-lane`.
+- [x] 10.6 Stale descriptions of the rejected wait-first order removed from the
+      design, tasks, the kit controller's comment, and the change index.
 
 ## 9. Closeout
 
@@ -242,7 +271,7 @@ routes use the canonical `StorefrontClient` over `ASGITransport`.
 | Accepted decision | Permanent location |
 |---|---|
 | One kit-owned loop controller per storefront process; every timer loop registers with it, paired with its step | `openspec/specs/market-composition/spec.md` |
-| A loop waits, then gates, then works | `openspec/specs/market-composition/spec.md` |
+| A loop gates on entry, works when due, then waits through the controller | `openspec/specs/market-composition/spec.md` |
 | A loop's reported state is established by the loop | `openspec/specs/market-composition/spec.md` |
 | The loop pause is process-local | `openspec/specs/market-composition/spec.md` |
 | `kit/storefront` owns the loop controller beside the shell seams | `docs/development/ARCHITECTURE.md#kit-layers`, `docs/development/ARCHITECTURE.md#operator-lifecycle-controls` |

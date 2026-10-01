@@ -135,6 +135,51 @@ to at least one interval. A sweep that raises still waits its interval, since th
 wait sits outside the work's error handler. Without an injected wait both fall back
 to a plain sleep.
 
+### Every timer loop waits through the controller
+
+A pause reaches a loop between cycles only if the loop's wait returns on the pause
+request, so every registered or declared loop waits through the controller's `idle`
+or a wait injected from it. The plan assumed VM's own loops already did; only
+publication did, and review found three that waited with a plain sleep —
+fulfillment resume, the site-projection poller, and the kit's per-site
+capacity-event poller — so a pause landing in a 30-second fulfillment interval
+outlasted the 5-second quiescence bound. All of them now wait through the
+controller:
+
+| Storefront | Loop | Wait |
+|---|---|---|
+| VM | negotiation watchdog, settlement servicing | injected `idle` |
+| VM | fulfillment resume, site-projection poller, publication | `idle` |
+| VM, API credits | capacity-event aggregate and each site poller | injected `idle`, through `run_capacity_event_pollers` |
+| Bare metal, API credits | negotiation watchdog, settlement servicing | injected `idle` |
+| Bare metal | publication | no timer |
+
+The kit runners — the watchdog, the servicing worker, the site poller, and the
+capacity aggregate — refuse a gate without a wait, because gated but
+uninterruptible is exactly the combination that defeats the bound. A kit-owned
+periodic runner that owns the whole gate-work-wait cycle would enforce this
+structurally; it cannot serve the runners in the settlement-runtime and
+capacity-publication kits, which sit below `kit/storefront`, so it is left to
+`kit-owned-storefront-shell`, which owns loop registration in the composition root.
+
+### Loop tests are coordinated by events
+
+`docs/development/TESTING.md` forbids coordinating background-loop tests through
+sleeps. Every test this change adds or touches drives its loops through a wait the
+test controls — returning only when ticked or paused — and synchronizes on events
+set by the work, the gate, or the controller's own acknowledgement. The regression
+guard for the bound runs each storefront's real loop bodies with an hour-long
+interval and requires `paused` within a second; with the plain sleep restored in
+fulfillment resume, its cases fail.
+
+### API-credit lifecycle routes are covered at component level
+
+The API-credit storefront has no production-application test at all: every test
+builds its own application or stubs the lifespan, and its startup needs the credits
+service and a capacity authority. Its lifecycle-route test is therefore a component
+test and lives in `tests/unit`. Production-application coverage, and a lane of its
+own rather than a seat in the VM lane, belong to `apicredits-end-to-end-lane`.
+
 ### A framework-free route service, bound by each storefront
 
 The controller is exposed through a route service with no web-framework dependency —
@@ -207,10 +252,13 @@ unaffected.
 - **[VM regresses through the migration]** → The binding preserves every imported
   name, and VM's loop and route suites run unchanged against it. The suites that move
   to kit are those asserting on registry internals.
-- **[Reordering the runners changes first-cycle timing]** → A loop now waits one
-  interval before its first gate rather than gating immediately. The watchdog already
-  deferred its first sweep by an initial delay; the servicing worker already slept
-  before its first cycle. Neither performed work earlier than it will now.
+- **[Reordering the runners changes first-cycle timing]** → It does not: each runner
+  still gates on entry, and its first sweep is still held back one interval by a
+  deadline, so neither works earlier or later than it did.
+- **[A loop is composed with a gate but no interruptible wait]** → Every runner that
+  takes a gate refuses to run without a wait, and each storefront's wiring tests
+  drive its real loop bodies with an hour-long interval and require them to be
+  reported `paused` within a second.
 - **[A storefront forgets to register a loop]** → A loop started outside the
   controller cannot be held. Each storefront's integration suite asserts the
   registered loop names against the loops its startup creates.

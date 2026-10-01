@@ -184,6 +184,10 @@ async def run_negotiation_watchdog(
     observed before the next sweep.
     """
 
+    if paused is not None and wait is None:
+        # Gated but uninterruptible is the combination that lets a pause
+        # outlast its own bounded wait.
+        raise TypeError("a gated watchdog requires an interruptible wait")
     active_logger = logger or logging.getLogger(__name__)
     # A deadline, not a sleep, so the gate keeps its cadence while the first
     # sweep is held back. A loop that slept before its first gate call would be

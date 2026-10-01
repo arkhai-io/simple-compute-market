@@ -7,6 +7,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 from market_identity import Eip191Signer, TrustedIdentitySet
+from market_settlement_runtime import SettlementServicingWorker
 
 from storefront_client import StorefrontClient
 from storefront_client.client import StorefrontClientError
@@ -346,20 +347,46 @@ async def test_a_loop_the_storefront_does_not_run_is_not_found(tmp_path) -> None
     assert log == []
 
 
+class _ObservedLock(asyncio.Lock):
+    """The runtime's publication lock, reporting each attempt to acquire it.
+
+    Lets a test wait until a second request is actually blocked on the lock,
+    rather than yielding and hoping it got there.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.attempts = 0
+        self._attempted = asyncio.Event()
+
+    async def acquire(self) -> bool:
+        self.attempts += 1
+        self._attempted.set()
+        return await super().acquire()
+
+    async def attempts_reach(self, count: int) -> None:
+        while self.attempts < count:
+            self._attempted.clear()
+            await asyncio.wait_for(self._attempted.wait(), timeout=1)
+
+
 async def test_concurrent_publication_steps_run_one_after_the_other(tmp_path) -> None:
     log: list[str] = []
     gate = asyncio.Event()
-    app = _app(_stepped_runtime(str(tmp_path / "storefront.db"), log, gate))
+    lock = _ObservedLock()
+    runtime = dataclasses.replace(
+        _stepped_runtime(str(tmp_path / "storefront.db"), log, gate),
+        publication_lock=lock,
+    )
+    app = _app(runtime)
 
     async with app.router.lifespan_context(app):
         async with _admin_client(app) as admin:
             first = asyncio.create_task(admin.admin_run_lifecycle_cycle("publication"))
+            await lock.attempts_reach(1)
             second = asyncio.create_task(admin.admin_run_lifecycle_cycle("publication"))
-            while not log:
-                await asyncio.sleep(0)
-            # Give the second request every chance to start a pass of its own.
-            for _ in range(50):
-                await asyncio.sleep(0)
+            # The second request is now waiting on the lock the first holds.
+            await lock.attempts_reach(2)
             assert log == ["start first"]
             gate.set()
             await asyncio.gather(first, second)
@@ -367,32 +394,32 @@ async def test_concurrent_publication_steps_run_one_after_the_other(tmp_path) ->
     assert log == ["start first", "end first", "start second", "end second"]
 
 
-class _StubServicingWorker:
-    """Stands in for settlement servicing: the loop body gates and waits like
-    the kit worker; a step is one counted sweep."""
+class _NothingDue:
+    """A settlement repository with no due obligations, counting each sweep."""
 
     def __init__(self) -> None:
         self.sweeps = 0
 
-    async def run(self, *, paused=None, wait=None) -> None:
-        while True:
-            if paused is not None and paused():
-                await asyncio.sleep(0.005)
-                continue
-            await (wait(3600) if wait is not None else asyncio.sleep(3600))
-
-    async def run_once(self) -> int:
+    async def list_due_settlement_obligations(self, **_kwargs):
         self.sweeps += 1
-        return 0
+        return []
 
 
-def _runtime_with_servicing(path: str) -> tuple[BareMetalStorefrontRuntime, _StubServicingWorker]:
-    worker = _StubServicingWorker()
-    return dataclasses.replace(_runtime(path), settlement_worker=worker), worker
+def _runtime_with_servicing(path: str) -> tuple[BareMetalStorefrontRuntime, _NothingDue]:
+    """A runtime whose settlement servicing is the real worker over a repository
+    with nothing due, on an interval no test waits out."""
+    repository = _NothingDue()
+    worker = SettlementServicingWorker(
+        runtime=object(),
+        repository=repository,
+        worker_id="test",
+        interval_seconds=3600,
+    )
+    return dataclasses.replace(_runtime(path), settlement_worker=worker), repository
 
 
 async def test_the_pause_holds_every_loop_and_each_step_runs_while_held(tmp_path) -> None:
-    runtime, worker = _runtime_with_servicing(str(tmp_path / "storefront.db"))
+    runtime, repository = _runtime_with_servicing(str(tmp_path / "storefront.db"))
     app = _app(runtime)
 
     async with app.router.lifespan_context(app):
@@ -408,7 +435,7 @@ async def test_the_pause_holds_every_loop_and_each_step_runs_while_held(tmp_path
             watchdog = await admin.admin_run_lifecycle_cycle("negotiation-watchdog")
             assert servicing == {"loop": "settlement_servicing", "processed": 0}
             assert watchdog == {"loop": "negotiation_watchdog", "abandoned": 0}
-            assert worker.sweeps == 1, "a step must run exactly one cycle"
+            assert repository.sweeps == 1, "a step must run exactly one cycle"
             assert set(runtime.loops.states().values()) == {"paused"}, (
                 "a step must not resume the loops"
             )
@@ -424,7 +451,7 @@ async def test_the_pause_holds_every_loop_and_each_step_runs_while_held(tmp_path
 
 
 async def test_the_lifecycle_pause_refuses_an_unsigned_request(tmp_path) -> None:
-    runtime, _worker = _runtime_with_servicing(str(tmp_path / "storefront.db"))
+    runtime, _repository = _runtime_with_servicing(str(tmp_path / "storefront.db"))
     app = _app(runtime)
 
     # Rejection path: an unsigned request is refused before any loop is held.
@@ -449,7 +476,7 @@ async def test_publication_offers_no_preview(tmp_path) -> None:
 
 
 async def test_startup_registers_exactly_the_loops_it_starts(tmp_path) -> None:
-    runtime, _worker = _runtime_with_servicing(str(tmp_path / "storefront.db"))
+    runtime, _repository = _runtime_with_servicing(str(tmp_path / "storefront.db"))
     app = _app(runtime)
 
     async with app.router.lifespan_context(app):

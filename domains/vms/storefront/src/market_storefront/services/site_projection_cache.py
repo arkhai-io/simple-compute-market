@@ -15,6 +15,7 @@ from core_storefront.site_projections import (
 from market_capacity_publication import remote_site_clients
 from market_storefront.services.capacity_client import build_capacity_client
 from market_storefront.services.publication_loop import wake_publication_loop
+from market_storefront.lifecycle import SITE_PROJECTION_POLLER, gate, idle
 
 logger = logging.getLogger(__name__)
 
@@ -222,7 +223,6 @@ def _resource_pool_identities() -> dict[str, Any]:
 
 
 async def site_projection_poller_loop(sqlite_client: Any) -> None:
-    from market_storefront.lifecycle import SITE_PROJECTION_POLLER, gate
     from market_storefront.utils import config
 
     interval = float(
@@ -251,7 +251,9 @@ async def site_projection_poller_loop(sqlite_client: Any) -> None:
                 wake_publication_loop()
         except Exception as exc:
             logger.warning("[PROJECTIONS] refresh failed: %s", exc)
-        await asyncio.sleep(interval)
+        # Through the controller, so a pause requested during the interval
+        # reaches the gate at once rather than after it.
+        await idle(interval)
 
 
 async def refresh_after_topology_error(

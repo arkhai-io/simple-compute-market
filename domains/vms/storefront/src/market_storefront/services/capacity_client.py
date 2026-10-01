@@ -577,6 +577,7 @@ async def capacity_events_poller_loop(sqlite_client: Any) -> None:
         capacity_site_loop_name,
         declare_and_gate,
         gate,
+        idle,
     )
 
     interval = float(
@@ -592,4 +593,5 @@ async def capacity_events_poller_loop(sqlite_client: Any) -> None:
         functools.partial(runtime.poll_events, interval_seconds=interval),
         gate=functools.partial(gate, CAPACITY_EVENTS_POLLER),
         site_gate=lambda site: declare_and_gate(capacity_site_loop_name(site)),
+        wait=idle,
     )

@@ -43,11 +43,12 @@ from core_storefront.app_startup import (
     start_storefront_background_task,
 )
 
-#: How long `pause` waits for loops to reach their gates. Bounded on purpose: a
-#: loop's gate is at the end of its interval, and an unbounded wait would let an
-#: operator request hang for as long as the slowest loop's interval. A loop that
-#: has not acknowledged inside the window is reported `pausing`, which is true,
-#: rather than `paused`, which would not be.
+#: How long `pause` waits for loops to reach their gates. A loop waiting between
+#: cycles reaches its gate at once, because its wait returns on a pause request;
+#: the bound covers a loop still finishing a cycle, so an operator request cannot
+#: hang for as long as the slowest cycle. A loop that has not acknowledged inside
+#: the window is reported `pausing`, which is true, rather than `paused`, which
+#: would not be.
 QUIESCENCE_TIMEOUT_SECONDS = 5.0
 
 #: How often a held loop re-reads its gate. A held loop cannot wait on the pause

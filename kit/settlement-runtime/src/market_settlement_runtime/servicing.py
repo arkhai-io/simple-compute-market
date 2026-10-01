@@ -117,6 +117,10 @@ class SettlementServicingWorker:
         before every sweep, so a pause requested during the wait is observed
         before the next sweep. The first sweep comes one interval after start.
         """
+        if paused is not None and wait is None:
+            # Gated but uninterruptible is the combination that lets a pause
+            # outlast its own bounded wait.
+            raise TypeError("a gated servicing loop requires an interruptible wait")
         loop = asyncio.get_running_loop()
         sweep_not_before = loop.time() + self._interval_seconds
         while True:

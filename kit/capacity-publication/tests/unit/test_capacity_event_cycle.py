@@ -10,6 +10,8 @@ because a second cursor would replay events or skip past them.
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from market_capacity_publication.capacity_remote import (
@@ -284,6 +286,7 @@ class TestOnePositionPerSite:
                 0.01,
                 full_reconcile=RecordingReconcile(),
                 paused=paused,
+                wait=_Control().wait,
             )
 
         assert gate_reads == 1
@@ -293,3 +296,72 @@ class TestOnePositionPerSite:
 
 class _StopPoller(BaseException):
     """Escape hatch: stop the poller's infinite loop from inside its gate."""
+
+
+class _Control:
+    """A gate and an interruptible wait, standing in for a storefront's loop
+    controller. The wait never expires on its own: it returns only when a pause
+    is requested, so a poller parked in it is observable and a poller that
+    sleeps instead never reaches it."""
+
+    def __init__(self) -> None:
+        self.paused = False
+        self.signal = asyncio.Event()
+        self.waiting = asyncio.Event()
+        self.acknowledged = asyncio.Event()
+
+    def gate(self) -> bool:
+        if self.paused:
+            self.acknowledged.set()
+        return self.paused
+
+    async def wait(self, seconds: float) -> None:
+        self.waiting.set()
+        await self.signal.wait()
+
+    def pause(self) -> None:
+        self.paused = True
+        self.signal.set()
+
+
+class TestAPauseReachesAPollerBetweenCycles:
+    async def test_a_pause_during_a_long_interval_holds_the_next_cycle(self):
+        """The poller waits through the injected wait, so a pause requested
+        while it waits out an hour-long interval reaches its gate at once and
+        no further feed read happens."""
+        client = FakeSiteClient([([_event(8)], 8)])
+        control = _Control()
+        poller = asyncio.create_task(
+            site_events_poller(
+                FakeAggregate(),
+                "default",
+                client,
+                3600,
+                full_reconcile=RecordingReconcile(),
+                paused=control.gate,
+                wait=control.wait,
+            )
+        )
+        try:
+            await asyncio.wait_for(control.waiting.wait(), timeout=1)
+            reads = len(client.reads)
+            assert reads >= 1
+
+            control.pause()
+            await asyncio.wait_for(control.acknowledged.wait(), timeout=1)
+
+            assert len(client.reads) == reads, "a held poller read its feed"
+        finally:
+            poller.cancel()
+            await asyncio.gather(poller, return_exceptions=True)
+
+    async def test_a_gated_poller_without_an_interruptible_wait_is_refused(self):
+        with pytest.raises(TypeError):
+            await site_events_poller(
+                FakeAggregate(),
+                "default",
+                FakeSiteClient([]),
+                3600,
+                full_reconcile=RecordingReconcile(),
+                paused=lambda: False,
+            )

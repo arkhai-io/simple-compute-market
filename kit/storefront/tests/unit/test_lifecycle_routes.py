@@ -18,27 +18,24 @@ from market_storefront_kit import (
 async def controller():
     loops = StorefrontLoopController()
     yield loops
+    handles = list(loops._handles.values())
     loops.clear_loops()
-    await asyncio.sleep(0)
-
-
-def _gating_loop(controller: StorefrontLoopController, name: str):
-    async def _loop() -> None:
-        while True:
-            if controller.gate(name):
-                await asyncio.sleep(0.001)
-                continue
-            await controller.idle(0.001)
-
-    return _loop
+    await asyncio.gather(*handles, return_exceptions=True)
 
 
 async def test_pause_and_resume_report_every_loop(controller):
-    controller.start_loop(
-        StorefrontBackgroundTask(name="alpha", task_factory=_gating_loop(controller, "alpha"))
-    )
+    gated = asyncio.Event()
+
+    async def _loop() -> None:
+        while True:
+            if controller.gate("alpha"):
+                await asyncio.Event().wait()
+            gated.set()
+            await controller.idle(3600)
+
+    controller.start_loop(StorefrontBackgroundTask(name="alpha", task_factory=_loop))
     service = StorefrontLifecycleRouteService(controller)
-    await asyncio.sleep(0.01)
+    await asyncio.wait_for(gated.wait(), timeout=1)
 
     assert await service.pause() == {"paused": True, "loops": {"alpha": "paused"}}
     assert await service.resume() == {"paused": False, "loops": {"alpha": "running"}}

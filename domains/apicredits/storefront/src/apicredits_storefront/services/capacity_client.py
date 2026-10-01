@@ -129,4 +129,5 @@ async def capacity_events_poller_loop(loops: StorefrontLoopController) -> None:
         functools.partial(runtime.poll_events, interval_seconds=interval),
         gate=loops.loop_gate(CAPACITY_EVENTS_POLLER),
         site_gate=lambda site: loops.declare(capacity_site_loop_name(site)),
+        wait=loops.idle,
     )
