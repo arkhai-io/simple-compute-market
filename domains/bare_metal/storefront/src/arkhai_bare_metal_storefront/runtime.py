@@ -390,6 +390,9 @@ def build_runtime_from_environment(
     )
     try:
         signer = storefront_signer_from_environment(os.environ)
+        # The signer resolves only when it owns the configured principal, so its
+        # identity is the storefront's public principal.
+        principal = signer.identity
         raw_admin_identities = json.loads(
             os.environ["BARE_METAL_STOREFRONT_ADMIN_IDENTITIES"],
         )
@@ -427,7 +430,7 @@ def build_runtime_from_environment(
                     settlement_config,
                     resources={
                         "marketplace_signer": signer,
-                        "claimant_principal": identity_config.principal,
+                        "claimant_principal": principal,
                     },
                 )
             )
@@ -458,7 +461,7 @@ def build_runtime_from_environment(
                 settlement_config,
                 resources={
                     "marketplace_signer": signer,
-                    "claimant_principal": identity_config.principal,
+                    "claimant_principal": principal,
                     "wallet": seller_evm_address or None,
                     "wallet_ready": bool(seller_evm_address),
                     "clients": chain_clients,
@@ -484,7 +487,7 @@ def build_runtime_from_environment(
             "bare-metal-storefront.db",
         ),
         domain=selected_domain,
-        local_listing_principal=identity_config.principal,
+        local_listing_principal=principal,
         expected_legacy_sellers=(storefront_url,),
     )
     try:
@@ -508,7 +511,7 @@ def build_runtime_from_environment(
         introduction_delivery=build_introduction_delivery(delivery_sinks.sinks),
         db=db,
         domain=selected_domain,
-        seller_principal=identity_config.principal,
+        seller_principal=principal,
         storefront_url=storefront_url,
         admin_principals=admin_principals,
         marketplace_signer=signer,
@@ -540,7 +543,7 @@ def build_runtime_from_environment(
         lifecycle = BareMetalHostedLifecycleCallbacks(
             db=db,
             runtime=runtime.settlement_runtime,
-            local_principal=identity_config.principal,
+            local_principal=principal,
             capacity_client=capacity_client,
             fulfillment_client=fulfillment_client,
             publish_evidence=publish_evidence,
@@ -568,7 +571,7 @@ def build_runtime_from_environment(
             SettlementServicingWorker(
                 runtime.settlement_runtime,
                 runtime.settlement_repository,
-                worker_id=f"bare-metal-storefront:{identity_config.principal.identifier}",
+                worker_id=f"bare-metal-storefront:{principal.identifier}",
                 interval_seconds=float(
                     os.environ.get(
                         "BARE_METAL_SETTLEMENT_SERVICING_INTERVAL_SECONDS",

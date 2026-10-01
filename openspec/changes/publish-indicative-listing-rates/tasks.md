@@ -240,7 +240,14 @@ here; see "Bare metal joins the site-scoped override store" in `design.md`.
       `BARE_METAL_STOREFRONT_PUBLIC_URL`, else `http://localhost:8000`. It signs
       with `runtime.storefront_signer_from_environment`, extracted from
       `build_runtime_from_environment` so the server and the command resolve one
-      identity from the same inputs. Heavy imports stay inside the command, as
+      identity from the same inputs. **Defect found by the end-to-end run:** the
+      extraction left six later reads of the removed local `identity_config` in
+      `build_runtime_from_environment`, so the server could not start. The unit
+      suites construct the runtime directly and never call that function. Fixed
+      by binding the principal from the resolved signer, which resolves only when
+      it owns the configured principal; `tests/test_runtime_environment.py` now
+      builds the runtime from its environment and refuses a credential that does
+      not own the identity. Heavy imports stay inside the command, as
       its sibling commands keep theirs. No infeasible-shape warning: an override
       here states no shapes. Tests: `tests/test_pool_override_cli.py`.
 - [x] 3b.5 `domains/bare_metal/storefront/tests/test_pool_overrides_api.py`
@@ -460,27 +467,22 @@ written at promotion (8.9), after code review.
 - [x] 8.7 **Documentation citations.**
       `make check-doc-citations CHANGE=publish-indicative-listing-rates` passes;
       rerun after promotion.
-- [ ] 8.8 **End-to-end pipeline.** Not runnable in the implementation
-      environment, which starts no stack. Owed: the run, its result, and the
-      scenarios exercising this change (bare-metal publication stages 05b–05d).
-      Note for that run: `e2e-tests/tests/unit/test_hosted_public_boundary.py::
+- [ ] 8.8 **End-to-end pipeline.** Run 36837675676: the VM lane passed, 126
+      passed and 2 existing skips, with the registry serving the compute
+      specification's new filters and no related errors in its container logs.
+      The bare-metal lane failed before any scenario ran: its storefront did not
+      start (`NameError` on `identity_config`; see 3b.4), so stages 05b–05d are
+      unproven. Owed: a rerun with the fix. Note for that run:
+      `e2e-tests/tests/unit/test_hosted_public_boundary.py::
       test_buyer_deployment_mounts_separate_profile_state_and_credential` fails
       before this change too; it reads compose files this change does not
       touch.
 - [ ] 8.9 **Promotion.** Complete the design-promotion record below.
-- [ ] 8.10 **Packaging.** `make check-packaging`: layout, uv setup, and Python
-      version checks pass. `make check-locks` found that the bare-metal
-      storefront's new requirement must be recorded in every lock containing
-      that wheel. `domains/bare_metal/storefront/uv.lock` and `e2e-tests/uv.lock`
-      are relocked through `scripts/uv_project.py lock`, recording no
-      environment path. **Blocker, outside this change:**
-      `domains/vms/storefront/uv.lock` cannot be relocked in the implementation
-      environment, because resolving its `rl` extra fetches torch metadata from
-      `download-r2.pytorch.org`, which that environment's network refuses. The
-      lock already records the kit as VM's own dependency and lacks only the
-      bare-metal storefront's new edge to it. Clear it with
-      `make lock PROJECTS=domains/vms/storefront`, then rerun
-      `make check-packaging`. The lock is not edited by hand.
+- [x] 8.10 **Packaging.** `make check-packaging` passes after `make lock` in the
+      reviewer's environment, which relocked two projects (including
+      `domains/vms/storefront/uv.lock`, which the implementation environment's
+      network could not resolve). Those locks are the reviewer's; nothing here
+      supersedes them.
 
 ## Design promotion record
 
