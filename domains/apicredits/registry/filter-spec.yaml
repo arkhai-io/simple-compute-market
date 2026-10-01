@@ -81,7 +81,6 @@ listing_shape:
             type: object
             additionalProperties: true
             properties:
-              funding_profile: {type: string}
               interaction: {type: string}
               country: {type: string}
               authority_id: {type: string}
@@ -99,9 +98,7 @@ filters:
   - {name: token,         path: "$.accepted_escrows[*].literal_fields.token", op: in,     value_type: string, on_missing: pass}
   - {name: token_exclude, path: "$.accepted_escrows[*].literal_fields.token", op: not_in, value_type: string, on_missing: pass}
 
-  # Mechanism-neutral hosted projections remain independent of legacy escrow
-  # entries, so hosted-only listings are discoverable without a wallet query.
+  # Mechanism-neutral option projections are independent of escrow entries.
   - {name: settlement_mechanism, path: "$.settlement_options[*].mechanism", op: in, value_type: string, on_missing: pass}
   - {name: settlement_asset, path: "$.settlement_options[*].asset", op: in, value_type: string, on_missing: pass}
-  - {name: funding_profile, path: "$.settlement_options[*].params.funding_profile", op: in, value_type: string, on_missing: pass}
   - {name: funding_interaction, path: "$.settlement_options[*].params.interaction", op: in, value_type: string, on_missing: pass}

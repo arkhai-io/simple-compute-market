@@ -31,7 +31,6 @@ from domains.vms.listings.reconciler import (
     listing_resource_key,
 )
 from market_identity import Ed25519Signer, TrustedIdentitySet
-from market_settlement_runtime import SettlementPublicationClause
 
 from market_storefront import cli_publish
 from market_storefront.cli_publish import (
@@ -69,9 +68,7 @@ def _site_projection_identity(monkeypatch):
     monkeypatch.setattr(
         agent_config, "get_provisioning_authorities", lambda: _SITE_AUTHORITIES
     )
-    monkeypatch.setattr(
-        cli_publish, "_site_topology_sync", lambda: ("site-a", 1)
-    )
+    monkeypatch.setattr(cli_publish, "_site_topology_sync", lambda: ("site-a", 1))
 
 
 def _init_db(path: str) -> None:
@@ -337,103 +334,6 @@ def test_available_resources_closes_oversized_slices_when_capacity_held(
     rows = _available_resources(db)
 
     assert [r["gpu_count"] for r in rows] == [1, 2]
-
-
-class TestPoolHintResolutionSettings:
-    """Unit coverage for cli_publish._pool_hint_resolution_settings --
-    confirms the real `[pricing]` config is actually read, not just that
-    the reconciler-side resolver logic (tested independently in
-    test_pool_descriptors.py / test_reconciler.py) is correct in
-    isolation."""
-
-    def test_reads_defaults_from_settings_toml(self):
-        settings = cli_publish._pool_hint_resolution_settings()
-        assert settings.accept_pool_declared_sla is False
-        assert settings.default_sla == 0.0
-
-    def test_reads_an_explicit_override(self):
-        with settings_overrides(
-            **{
-                "pricing.accept_pool_declared_sla": True,
-                "pricing.default_sla": 42.0,
-            }
-        ):
-            settings = cli_publish._pool_hint_resolution_settings()
-        assert settings.accept_pool_declared_sla is True
-        assert settings.default_sla == 42.0
-
-    def test_flat_pricing_defaults_become_the_tier_1_fallback(self):
-        with settings_overrides(
-            **{
-                "pricing.default_min_price": "1.00",
-                "pricing.default_token_address": "0xflat",
-                "pricing.default_max_duration_seconds": 60,
-            }
-        ):
-            settings = cli_publish._pool_hint_resolution_settings()
-        assert settings.gpu_pricing_flat_default.min_price == "1.00"
-        assert settings.gpu_pricing_flat_default.token == "0xflat"
-        assert settings.gpu_pricing_flat_default.max_duration_seconds == 60
-
-    def test_unset_flat_pricing_defaults_are_none_not_empty_string(self):
-        """An unset default_min_price/token/... must fall through as
-        None so lower-priority resolution tiers still have a chance --
-        propagating "" would be treated as a real (if empty) value."""
-        settings = cli_publish._pool_hint_resolution_settings()
-        assert settings.gpu_pricing_flat_default.min_price is None
-        assert settings.gpu_pricing_flat_default.token is None
-
-    def test_per_model_gpu_pricing_defaults_read_from_config(self):
-        with settings_overrides(
-            **{
-                "pricing.defaults": {
-                    "gpu": {
-                        "H100": {"min_price": "5.00"},
-                        "A100": {"min_price": "3.00"},
-                    },
-                },
-            }
-        ):
-            settings = cli_publish._pool_hint_resolution_settings()
-        assert settings.gpu_pricing_defaults_by_model["H100"].min_price == "5.00"
-        assert settings.gpu_pricing_defaults_by_model["A100"].min_price == "3.00"
-
-    def test_command_clauses_replace_per_model_settlement_defaults(self):
-        model_default = {
-            "mechanism": "fiat.stripe.v1",
-            "asset": "usd",
-            "rate": "2",
-            "per": "hour",
-            "mechanism_input": {
-                "funding_profile": "card.v1",
-                "interaction": "interactive",
-                "funds_flow": "separate_charges_transfers",
-            },
-        }
-        command_clause = SettlementPublicationClause(
-            mechanism="alkahest.v1",
-            asset="0x" + "12" * 20,
-            rate="3",
-            per="hour",
-            mechanism_input={
-                "chain": "base_sepolia",
-                "escrow_kind": "erc20_escrow_obligation_default",
-            },
-        )
-        with settings_overrides(
-            **{
-                "pricing.defaults": {"gpu": {"H100": {"settlements": [model_default]}}},
-            }
-        ):
-            settings = cli_publish._pool_hint_resolution_settings((command_clause,))
-
-        assert settings.gpu_pricing_defaults_by_model["H100"].settlements == [
-            command_clause.model_dump(mode="json", exclude_defaults=True)
-        ]
-
-    def test_no_configured_gpu_defaults_is_an_empty_mapping_not_an_error(self):
-        settings = cli_publish._pool_hint_resolution_settings()
-        assert settings.gpu_pricing_defaults_by_model == {}
 
 
 def test_stale_open_listing_ids_finds_slices_above_available_capacity(

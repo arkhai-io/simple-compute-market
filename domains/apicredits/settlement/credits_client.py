@@ -87,7 +87,7 @@ class CreditIssuanceRequest(_CreditsContract):
     schema: Literal["arkhai.api-credits.issuance-request.v1"] = ISSUANCE_REQUEST_SCHEMA
     fulfillment_id: str = Field(min_length=1, max_length=320)
     obligation_ref: str = Field(min_length=1, max_length=255)
-    mechanism: Literal["alkahest.v1", "fiat.stripe.v1"]
+    mechanism: Literal["alkahest.v1"]
     owner: Identity
     service: str = Field(min_length=1, max_length=255)
     resource_id: str = Field(min_length=1, max_length=255)
@@ -105,7 +105,7 @@ class CreditIssuanceRequest(_CreditsContract):
         cls,
         *,
         obligation_ref: str,
-        mechanism: Literal["alkahest.v1", "fiat.stripe.v1"],
+        mechanism: Literal["alkahest.v1"],
         owner: Identity,
         service: str,
         resource_id: str,
@@ -168,7 +168,7 @@ class CreditIssuanceResult(_CreditsContract):
     fulfillment_id: str = Field(min_length=1, max_length=320)
     grant_id: str = Field(min_length=1, max_length=320)
     obligation_ref: str = Field(min_length=1, max_length=255)
-    mechanism: Literal["alkahest.v1", "fiat.stripe.v1"]
+    mechanism: Literal["alkahest.v1"]
     owner: Identity | None
     service: str = Field(min_length=1, max_length=255)
     resource_id: str = Field(min_length=1, max_length=255)
@@ -192,8 +192,6 @@ class CreditIssuanceResult(_CreditsContract):
     def validate_result(self) -> Self:
         if self.grant_id != self.fulfillment_id:
             raise ValueError("grant_id must equal fulfillment_id")
-        if self.mechanism == "fiat.stripe.v1" and self.owner is None:
-            raise ValueError("hosted issuance result requires a canonical owner")
         if self.key_mode == "existing" and self.secret is not None:
             raise ValueError("existing-key top-up must not return a secret")
         if self.secret is not None and not self.secret.startswith(f"{self.key_id}."):

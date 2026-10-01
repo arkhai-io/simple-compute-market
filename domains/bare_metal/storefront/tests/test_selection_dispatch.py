@@ -6,18 +6,6 @@ from collections.abc import Mapping
 from typing import Any
 
 import pytest
-from core_storefront.models.negotiation_models import NegotiateNewRequest
-from market_core.schemas import derive_settlement_option_id
-from market_identity import Eip191Signer
-from market_settlement_runtime import (
-    AcceptedObligationArtifacts,
-    MechanismRegistration,
-    MechanismReadiness,
-    SettlementConfig,
-    SettlementConfigurationRegistry,
-)
-from pydantic import BaseModel, ConfigDict
-
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
 from arkhai_bare_metal_storefront.negotiation_service import (
     BareMetalNegotiationService,
@@ -27,7 +15,17 @@ from arkhai_bare_metal_storefront.settlement_composition import (
     BareMetalStorefrontSettlementComposition,
 )
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
-from market_hosted_settlement import StripeSettlementConfig
+from core_storefront.models.negotiation_models import NegotiateNewRequest
+from market_core.schemas import derive_settlement_option_id
+from market_identity import Eip191Signer
+from market_settlement_runtime import (
+    AcceptedObligationArtifacts,
+    MechanismReadiness,
+    MechanismRegistration,
+    SettlementConfig,
+    SettlementConfigurationRegistry,
+)
+from pydantic import BaseModel, ConfigDict
 
 BUYER_SIGNER = Eip191Signer(bytes.fromhex("22" * 32))
 SELLER_SIGNER = Eip191Signer(bytes.fromhex("11" * 32))
@@ -241,9 +239,7 @@ async def test_selection_must_exact_match_one_listing_option(tmp_path) -> None:
 
 def test_composition_dispatch_exposes_only_priority_builders() -> None:
     composition = BareMetalStorefrontSettlementComposition(
-        registry=SettlementConfigurationRegistry(
-            (_intro_registration(),)
-        ),
+        registry=SettlementConfigurationRegistry((_intro_registration(),)),
         config=SettlementConfig(
             priority=(INTRO_MECHANISM,),
             mechanisms={"demo_intro": DemoIntroConfig(enabled=True)},
@@ -251,17 +247,3 @@ def test_composition_dispatch_exposes_only_priority_builders() -> None:
     )
     dispatch = composition.accepted_obligation_dispatch()
     assert set(dispatch) == {INTRO_MECHANISM}
-
-
-def test_composition_dispatch_includes_the_hosted_builder() -> None:
-    composition = BareMetalStorefrontSettlementComposition.from_raw_config(
-        {
-            "priority": ["fiat.stripe.v1"],
-            "stripe": StripeSettlementConfig(enabled=True).model_dump(
-                mode="json", exclude_none=True, exclude_defaults=True
-            )
-            | {"enabled": True},
-        }
-    )
-    dispatch = composition.accepted_obligation_dispatch()
-    assert set(dispatch) == {"fiat.stripe.v1"}

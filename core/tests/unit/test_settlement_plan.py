@@ -61,7 +61,7 @@ def test_plan_round_trip_preserves_scheme_tagged_parties() -> None:
                 amount=2000,
                 asset="usd",
                 expiration_unix=4_102_444_800,
-                mechanism="fiat.stripe.v1",
+                mechanism="example.payment.v1",
             )
         ],
     )
@@ -140,12 +140,12 @@ def test_envelope_shape_passes_through_untouched():
         "payer": "buyer",
         "claimant": "seller",
         "expiration_unix": 4_102_444_800,
-        "mechanism": "fiat.stripe.v1",
-        "params": {"provider": "stripe", "currency": "USD"},
+        "mechanism": "example.payment.v1",
+        "params": {"provider": "example", "currency": "USD"},
     }
     ob = SettlementObligation.model_validate(envelope)
-    assert ob.mechanism == "fiat.stripe.v1"
-    assert ob.params == {"provider": "stripe", "currency": "USD"}
+    assert ob.mechanism == "example.payment.v1"
+    assert ob.params == {"provider": "example", "currency": "USD"}
 
 
 def test_plan_coerces_bare_legacy_terms_list():

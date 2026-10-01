@@ -103,7 +103,7 @@ class ExpectedApiCreditsIssuanceEvidenceV1(_EvidenceContract):
 
 
 class PortableApiCreditsFulfillmentRefV1(_EvidenceContract):
-    """Safe common-runtime reference to digest-only hosted publication."""
+    """Safe common-runtime reference to digest-only issuance publication."""
 
     schema: Literal[
         "arkhai.api-credits.portable-fulfillment-ref.v1"
@@ -153,7 +153,7 @@ def canonical_signed_issuance_evidence(
 def issuance_evidence_digest(
     evidence: SignedApiCreditsIssuanceEvidenceV1,
 ) -> str:
-    """Return the digest published to the hosted conditional authority."""
+    """Return the digest of the signed issuance evidence."""
 
     encoded = canonical_signed_issuance_evidence(evidence).encode("utf-8")
     return "sha256:" + hashlib.sha256(encoded).hexdigest()

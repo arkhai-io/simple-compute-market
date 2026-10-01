@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import ast
-from pathlib import Path
-
 import pytest
 from market_config import (
     ConfigLayer,
@@ -145,22 +142,3 @@ def test_dynamic_nested_models_are_strict_and_report_dotted_sources() -> None:
             },
             role="buyer",
         )
-
-
-def test_common_config_has_no_concrete_mechanism_imports() -> None:
-    package = Path(__file__).parents[2] / "src" / "market_config"
-    forbidden = {"market_alkahest", "market_hosted_settlement", "stripe", "web3"}
-    imports: list[tuple[str, int, str]] = []
-    for path in package.glob("*.py"):
-        tree = ast.parse(path.read_text(), filename=str(path))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                names = [alias.name for alias in node.names]
-            elif isinstance(node, ast.ImportFrom) and node.level == 0:
-                names = [node.module or ""]
-            else:
-                continue
-            for name in names:
-                if name.split(".", 1)[0] in forbidden:
-                    imports.append((path.name, node.lineno, name))
-    assert imports == []

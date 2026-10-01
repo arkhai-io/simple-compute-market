@@ -50,12 +50,9 @@ def _validate_settlement_candidate(
     # config path/help commands must not initialize operator configuration, and
     # this validator must evaluate the supplied in-memory candidate instead.
     from market_alkahest import create_alkahest_registration
-    from market_hosted_settlement import create_stripe_registration
     from market_settlement_runtime import SettlementConfigurationRegistry
 
-    registry = SettlementConfigurationRegistry(
-        [create_alkahest_registration(), create_stripe_registration()]
-    )
+    registry = SettlementConfigurationRegistry([create_alkahest_registration()])
     registry.resolve(document.get("Settlement", {}), role=role)
 
     from market_storefront.utils.config import settlement_publication_defaults
@@ -69,15 +66,12 @@ def _seller_publication_clause_compiler(
     document: Mapping[str, Any],
 ) -> Callable[[Mapping[str, Any]], SettlementPublicationClause]:
     from market_alkahest import create_alkahest_registration
-    from market_hosted_settlement import create_stripe_registration
     from market_settlement_runtime import (
         SettlementConfigurationRegistry,
         compile_settlement_publication_clause,
     )
 
-    registry = SettlementConfigurationRegistry(
-        [create_alkahest_registration(), create_stripe_registration()]
-    )
+    registry = SettlementConfigurationRegistry([create_alkahest_registration()])
     settlement = document.get("Settlement", document.get("settlement", {}))
     if not isinstance(settlement, Mapping):
         raise SettlementMigrationError("Settlement must be a table")
@@ -254,7 +248,9 @@ def config_migrate(
         legacy_domain,
         legacy_contract_version,
     )
-    if scope != "storefront-domains" and any(value is not None for value in legacy_values):
+    if scope != "storefront-domains" and any(
+        value is not None for value in legacy_values
+    ):
         raise typer.BadParameter(
             "--legacy-* assertions apply only to --scope storefront-domains"
         )
@@ -291,9 +287,7 @@ def config_migrate(
                 )
             else:
                 config_path = storefront_config_file()
-                config_document = tomllib.loads(
-                    config_path.read_text(encoding="utf-8")
-                )
+                config_document = tomllib.loads(config_path.read_text(encoding="utf-8"))
                 result = migrate_publication_csv(
                     inventory,
                     storefront_config=config_document,
@@ -409,7 +403,6 @@ _INIT_USER_TEMPLATE = """\
 # ---------------------------------------------------------------------------
 
 # EVM-mechanism settings only. Omit [wallet] and every [chains.<name>] table
-# when this storefront advertises only fiat.stripe.v1.
 [wallet]
 # address = "0x0000000000000000000000000000000000000000"
 # private_key = "0x..."
@@ -485,9 +478,6 @@ _INIT_USER_TEMPLATE = """\
 
 [pricing]
 # settlements = [                             # complete structured publication
-#   { mechanism = "fiat.stripe.v1", asset = "usd", rate = "2", per = "hour", mechanism_input = { funding_profile = "card.v1", interaction = "interactive", funds_flow = "separate_charges_transfers" } },
-#   { mechanism = "fiat.stripe.v1", asset = "usd", rate = "2", per = "hour", mechanism_input = { funding_profile = "us_bank_transfer.v1", interaction = "interactive", funds_flow = "separate_charges_transfers" } },
-#   { mechanism = "fiat.stripe.v1", asset = "usd", rate = "2", per = "hour", mechanism_input = { funding_profile = "us_ach_debit.v1", interaction = "interactive", funds_flow = "separate_charges_transfers" } },
 # ]
 # Per-resource or command clauses replace this list; fields are never merged.
 # default_min_price = "1"                      # negotiation floor when a resource row has no min_price;

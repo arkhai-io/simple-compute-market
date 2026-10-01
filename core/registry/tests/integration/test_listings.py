@@ -94,7 +94,7 @@ class TestPublishOrder:
     async def test_hosted_settlement_options_round_trip(self, registry_client):
         option = {
             "option_id": "a" * 64,
-            "mechanism": "fiat.stripe.v1",
+            "mechanism": "example.payment.v1",
             "asset": "usd",
             "rates": [{"field": "amount", "per": "hour", "value": "125"}],
             "params": {"account_ref": "acct-seller"},

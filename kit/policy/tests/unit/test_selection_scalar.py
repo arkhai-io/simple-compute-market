@@ -22,7 +22,7 @@ from market_policy.scalar_policies import (
 
 _SCALAR_OPTION = {
     "option_id": "aa" * 32,
-    "mechanism": "fiat.stripe.v1",
+    "mechanism": "example.payment.v1",
     "asset": "usd",
     "rates": [{"field": "amount", "per": "hour", "value": "100"}],
     "params": {},

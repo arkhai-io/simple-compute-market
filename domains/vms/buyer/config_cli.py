@@ -30,12 +30,9 @@ def _validate_settlement_candidate(
     document: Mapping[str, Any], role: SettlementRole
 ) -> None:
     from market_alkahest import create_alkahest_registration
-    from market_hosted_settlement import create_stripe_registration
     from market_settlement_runtime import SettlementConfigurationRegistry
 
-    registry = SettlementConfigurationRegistry(
-        [create_alkahest_registration(), create_stripe_registration()]
-    )
+    registry = SettlementConfigurationRegistry([create_alkahest_registration()])
     registry.resolve(document.get("Settlement", {}), role=role)
 
 
@@ -51,9 +48,7 @@ _REMOVED_IDENTITY_ROOTS = {
 
 def _reject_removed_identity_document(document: Mapping[str, Any]) -> None:
     present = sorted(
-        str(key)
-        for key in document
-        if str(key).casefold() in _REMOVED_IDENTITY_ROOTS
+        str(key) for key in document if str(key).casefold() in _REMOVED_IDENTITY_ROOTS
     )
     if present:
         raise typer.BadParameter(
@@ -269,56 +264,6 @@ _INIT_USER_TEMPLATE = """\
 schema_version = 1
 priority = []
 
-[Settlement.stripe]
-enabled = false
-# base_url = "https://settlement.example"
-# authority_id = "hosted-authority"
-# environment = "production"
-# expected_manifest_digest = "sha256:<released-manifest-digest>"
-# expected_api_version = "0.2.1"
-# expected_schema_version = 5
-# required_capabilities = [
-#   "scheme-tagged-identities.v1",
-#   "account-owner-admission.v1",
-#   "account-owner-rotation.v1",
-#   "account-owner-retirement.v1",
-#   "signer-injected-client.v1",
-#   "provider-neutral-seller-onboarding.v1",
-#   "conditional-escrow.v2",
-#   "stripe-connect-separate-charges-transfers.v2",
-#   "portable-attestation.v1",
-#   "eas-arbiter.v1",
-#   "payer-profile.v1",
-#   "funding-authorization.v1",
-#   "funding-profile.card.v1",
-#   "funding-profile.us_bank_transfer.v1",
-#   "funding-profile.us_ach_debit.v1",
-#   "normalized-funding-reversal.v1",
-#   "operator-recovery-redaction.v1",
-# ]
-# request_timeout_seconds = 10.0
-# preflight_timeout_seconds = 5.0
-# allow_insecure_loopback = false
-# authorization_journal_path = "/var/lib/arkhai/buyer/funding-authorizations.jsonl"
-# [Settlement.stripe.off_session_policy]
-# enabled = false
-# mode = "saved_instrument"
-# authority_id = "hosted-authority"
-# environment = "production"
-# funding_profile = "card.v1" # card.v1 or us_ach_debit.v1
-# currency = "usd"
-# max_purchase_minor_units = 10000
-# max_aggregate_minor_units = 50000
-# window_kind = "rolling" # rolling or fixed
-# window_seconds = 86400
-# fixed_window_anchor_unix = 0 # required only for fixed windows
-# seller_principals = [
-#   { scheme = "ed25519", identifier = "<seller-public-key>" },
-# ]
-# [Settlement.stripe.authority]
-# principals = [
-#   { scheme = "ed25519", identifier = "<authority-public-key>" },
-# ]
 
 [Settlement.alkahest]
 enabled = false

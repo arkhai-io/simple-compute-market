@@ -1,10 +1,9 @@
 """Schema-opaque HTTP routes owned by the bare-metal composition."""
 
 from __future__ import annotations
-import base64
 
-from collections.abc import Mapping
 import json
+from collections.abc import Mapping
 from typing import Annotated, Any
 
 from core_storefront.auth import AuthError, authenticate_request
@@ -18,38 +17,33 @@ from core_storefront.models.negotiation_models import (
     NegotiationListResponse,
 )
 from core_storefront.models.system_models import AdminPauseResponse
-from fastapi import APIRouter, Body, HTTPException, Query, Request
-
+from fastapi import APIRouter, HTTPException, Query, Request
+from market_contact_exchange import MECHANISM as CONTACT_MECHANISM
 from market_contact_exchange import (
     AuthorizedIntroductionRequest,
     ContactSettlementConfig,
     IntroductionRouteError,
     IntroductionStart,
 )
-from market_contact_exchange import MECHANISM as CONTACT_MECHANISM
 from market_identity import EMPTY_BODY, Identity
 from market_storefront_kit import get_storefront_container
-from market_settlement_runtime import (
-    HostedSettlementRouteError,
-    HostedSettlementStart,
-)
+
+from .fulfillment_service import BareMetalFulfillmentError
+from .introduction_routes import build_bare_metal_introduction_service
 from .models import (
     BareMetalAccessDeliveryResponse,
-    BareMetalFulfillRequest,
     BareMetalFulfillmentResponse,
     BareMetalFulfillmentResultResponse,
+    BareMetalFulfillRequest,
     BareMetalHealthResponse,
     BareMetalSettleRequest,
     BareMetalSettleResponse,
     BareMetalSettleStatusResponse,
 )
-from .fulfillment_service import BareMetalFulfillmentError
 from .negotiation_service import NegotiationRequestError
+from .response_auth import bind_response_auth, bind_response_contract
 from .runtime import BareMetalStorefrontRuntime
 from .settlement_service import SettlementRequestError
-from .hosted_routes import build_bare_metal_hosted_route_service
-from .introduction_routes import build_bare_metal_introduction_service
-from .response_auth import bind_response_auth, bind_response_contract
 
 router = APIRouter()
 
@@ -140,54 +134,6 @@ async def _admin(
     )
 
 
-async def _authorize_hosted_request(
-    request: Request,
-    operation: str,
-    resource: str,
-    expected_principal: Identity,
-    body: Mapping[str, Any] | None,
-) -> Any:
-    runtime = _runtime(request)
-    bind_response_contract(request, operation=operation, resource=resource)
-    try:
-        authenticated = await authenticate_request(
-            headers=request.headers,
-            method=request.method,
-            operation=operation,
-            resource=resource,
-            body=body if body is not None else EMPTY_BODY,
-            expected_role="buyer",
-            replay_store=runtime.db,
-            expected_principal=expected_principal,
-        )
-    except AuthError as exc:
-        raise HostedSettlementRouteError(exc.status_code, exc.detail) from exc
-    bind_response_auth(
-        request,
-        authenticated,
-        operation=operation,
-        resource=resource,
-    )
-    return authenticated
-
-
-def _hosted_service(request: Request) -> Any:
-    runtime = _runtime(request)
-    if runtime.settlement_composition is None:
-        raise HTTPException(status_code=404, detail="hosted settlement is disabled")
-    if runtime.hosted_domain_callbacks is None:
-        raise HTTPException(
-            status_code=503,
-            detail="bare-metal hosted lifecycle is unavailable",
-        )
-    return build_bare_metal_hosted_route_service(
-        repository=runtime.settlement_repository,
-        runtime=runtime.settlement_runtime,
-        domain_callbacks=runtime.hosted_domain_callbacks,
-        authorize_request=_authorize_hosted_request,
-    )
-
-
 async def _authorize_introduction_request(
     request: Request,
     operation: str,
@@ -229,10 +175,7 @@ async def _authorize_introduction_request(
 def _introduction_service(request: Request) -> Any:
     runtime = _runtime(request)
     composition = runtime.settlement_composition
-    if (
-        composition is None
-        or CONTACT_MECHANISM not in composition.enabled_mechanisms
-    ):
+    if composition is None or CONTACT_MECHANISM not in composition.enabled_mechanisms:
         raise HTTPException(status_code=404, detail="contact exchange is disabled")
     section = composition.config.mechanism_config("contact")
     if not isinstance(section, ContactSettlementConfig) or not section.contact_payload:
@@ -269,48 +212,6 @@ async def read_introduction(
     try:
         return await _introduction_service(request).read(request, obligation_ref)
     except IntroductionRouteError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
-
-
-@router.post("/api/v1/settlements")
-async def start_hosted_settlement(
-    body: HostedSettlementStart,
-    request: Request,
-) -> Mapping[str, Any]:
-    try:
-        return await _hosted_service(request).start(request, body)
-    except HostedSettlementRouteError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
-
-
-@router.get("/api/v1/settlements/{settlement_ref}")
-async def hosted_settlement_status(
-    settlement_ref: str,
-    request: Request,
-) -> Mapping[str, Any]:
-    try:
-        return await _hosted_service(request).status(request, settlement_ref)
-    except HostedSettlementRouteError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
-
-
-@router.post("/api/v1/settlements/{settlement_ref}/reclaim")
-async def reclaim_hosted_settlement(
-    settlement_ref: str,
-    request: Request,
-    mechanism_options: dict[str, Any] | None = Body(default=None),
-) -> Mapping[str, Any]:
-    """Reclaim one eligible expired hosted settlement.
-
-    The body is the mechanism's own vocabulary for this one reclaim -- a
-    push-funded profile needs somewhere to address the payer's return -- so it
-    is relayed opaquely rather than parsed into a model here.
-    """
-    try:
-        return await _hosted_service(request).reclaim(
-            request, settlement_ref, mechanism_options
-        )
-    except HostedSettlementRouteError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
@@ -730,37 +631,6 @@ async def teardown_fulfillment(
             status_code=exc.status_code,
             detail=exc.detail,
         ) from exc
-
-
-@router.get("/api/v1/evidence/bare-metal/{evidence_digest}")
-async def hosted_lease_evidence(
-    evidence_digest: str,
-    request: Request,
-) -> dict[str, Any]:
-    """Resolve one content-addressed lease-ready document with seller proof."""
-
-    if len(evidence_digest) != 64 or any(
-        char not in "0123456789abcdef" for char in evidence_digest
-    ):
-        raise HTTPException(status_code=404, detail="evidence not found")
-    runtime = _runtime(request)
-    evidence = await runtime.db.load_bare_metal_hosted_evidence(
-        evidence_digest="sha256:" + evidence_digest
-    )
-    if evidence is None:
-        raise HTTPException(status_code=404, detail="evidence not found")
-    material = evidence.canonical_json().encode("utf-8")
-    proof = (
-        base64.urlsafe_b64encode(runtime.marketplace_signer.sign(material))
-        .rstrip(b"=")
-        .decode("ascii")
-    )
-    return {
-        "protocol": "arkhai.bare-metal-evidence-signature.v1",
-        "seller_principal": runtime.seller_principal.model_dump(mode="json"),
-        "evidence": evidence.model_dump(mode="json"),
-        "proof": proof,
-    }
 
 
 @router.get("/health", response_model=BareMetalHealthResponse)

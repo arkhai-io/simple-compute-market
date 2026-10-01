@@ -292,31 +292,7 @@ def _buyer_response_contract(request: Request, body: Any) -> tuple[str, str] | N
         and path.endswith("/heartbeat")
     ):
         return "deal_heartbeat", path.split("/")[-2]
-    if path == "/api/v1/settlements" and method == "POST":
-        resource = (
-            str(body.get("obligation_ref") or "") if isinstance(body, dict) else ""
-        )
-        return "settlement_start", resource
-    if path.startswith("/api/v1/settlements/"):
-        suffix = path[len("/api/v1/settlements/") :]
-        if method == "GET" and "/" not in suffix:
-            return "settlement_status", suffix
-        if method == "POST" and suffix.endswith("/reclaim"):
-            return "settlement_reclaim", suffix[: -len("/reclaim")]
     return None
-
-
-
-def _safe_replay_body(operation: str, body: Any) -> Any:
-    """Exclude transient hosted buyer actions from the durable replay journal."""
-
-    if operation not in {"settlement_start", "settlement_status"}:
-        return body
-    if not isinstance(body, dict) or "action" not in body:
-        return body
-    safe = dict(body)
-    safe["action"] = None
-    return safe
 
 
 def _caller_request_id(request: Request) -> str | None:
@@ -428,7 +404,7 @@ async def _signed_buyer_response(
             authenticated.reservation,
             attempt_token=authenticated.attempt_token,
             status=response.status_code,
-            body=_safe_replay_body(operation, body),
+            body=body,
         )
     headers = dict(response.headers)
     headers.update(

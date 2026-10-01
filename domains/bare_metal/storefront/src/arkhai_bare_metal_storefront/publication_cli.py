@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import uuid
@@ -14,7 +15,6 @@ from arkhai_bare_metal import (
     BareMetalListing,
     BareMetalResourceProjection,
     TrustedBareMetalProjection,
-    bare_metal_digest,
 )
 from core_storefront.publication_command import (
     StorefrontPublicationCommandCallbacks,
@@ -129,7 +129,7 @@ def _projections(
         TrustedBareMetalProjection(
             site_id=site_id,
             revision=0,
-            digest=bare_metal_digest(
+            digest=_publication_digest(
                 [item.model_dump(mode="json") for item in resources]
             ),
             complete=True,
@@ -170,26 +170,20 @@ def run_publication_once() -> dict[str, Any]:
     """Publish one exact round from freshly authenticated site projections."""
 
     runtime = build_runtime_from_environment()
-    if runtime.settlement_composition is None:
+    composition = runtime.settlement_composition
+    if composition is None:
         raise RuntimeError(
             "shared settlement configuration is required for publication"
         )
     clauses_raw = _json_env("BARE_METAL_STOREFRONT_PUBLICATION_CLAUSES")
-    deadlines_raw = _json_env("BARE_METAL_STOREFRONT_FUNDING_DEADLINES")
-    if not isinstance(clauses_raw, list) or not isinstance(deadlines_raw, dict):
-        raise RuntimeError("publication clauses/deadlines have invalid JSON shapes")
+    if not isinstance(clauses_raw, list):
+        raise RuntimeError("publication clauses must be a JSON list")
     clauses = tuple(
         SettlementPublicationClause.model_validate(item) for item in clauses_raw
     )
-    funding_deadlines = {
-        str(profile): datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-        for profile, value in deadlines_raw.items()
-    }
     demands = _json_env("BARE_METAL_STOREFRONT_DEMANDS")
     if not isinstance(demands, list):
         raise RuntimeError("BARE_METAL_STOREFRONT_DEMANDS must be a JSON list")
-    offer_expiry = _instant("BARE_METAL_STOREFRONT_OFFER_EXPIRES_AT")
-    fulfillment_deadline = _instant("BARE_METAL_STOREFRONT_FULFILLMENT_DEADLINE")
     max_duration = int(os.environ["BARE_METAL_STOREFRONT_MAX_DURATION_SECONDS"])
 
     client = _registry(runtime)
@@ -228,12 +222,9 @@ def run_publication_once() -> dict[str, Any]:
     ) -> Any:
         publication_candidates[id(offer)] = candidate
         return asyncio.run(
-            runtime.settlement_composition.publication_payload(
+            composition.publication_payload(
                 candidate=candidate,
                 clauses=clauses,
-                offer_expires_at=offer_expiry,
-                funding_deadlines=funding_deadlines,
-                fulfillment_deadline=fulfillment_deadline,
                 demands=demands,
                 max_duration_seconds=max_duration,
             )
@@ -311,3 +302,9 @@ def run_publication_once() -> dict[str, Any]:
 
 
 __all__ = ["run_publication_once"]
+
+
+def _publication_digest(value: Any) -> str:
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()

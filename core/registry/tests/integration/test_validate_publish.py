@@ -106,7 +106,7 @@ async def test_hosted_settlement_option_passes_without_alkahest_choice() -> None
         settlement_options=[
             {
                 "option_id": "a" * 64,
-                "mechanism": "fiat.stripe.v1",
+                "mechanism": "example.payment.v1",
                 "asset": "usd",
                 "rates": [{"field": "amount", "per": "hour", "value": "125"}],
                 "params": {"account_ref": "acct-seller"},

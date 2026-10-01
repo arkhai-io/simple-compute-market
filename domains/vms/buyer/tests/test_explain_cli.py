@@ -8,9 +8,10 @@ from core_buyer import (
     RegistryDiscovery,
     RegistryQueryPlan,
 )
+from typer.testing import CliRunner
+
 from domains.vms.buyer import listing_cli
 from domains.vms.buyer.cli import app
-from typer.testing import CliRunner
 
 runner = CliRunner()
 
@@ -102,44 +103,3 @@ def test_listing_explain_emits_stable_json_and_stops_before_normal_selection(
     ]
     assert payload["settlement"]["rejection_categories"] == {"no_settlement_options": 1}
     assert payload["mutation_boundary"]["stopped_before"][-1] == "run_persistence"
-
-
-def test_listing_rejects_clause_with_generated_fields_before_registry(
-    monkeypatch,
-) -> None:
-    from domains.vms.buyer.settlement_composition import (
-        resolve_buyer_settlement_policy,
-    )
-
-    policy = resolve_buyer_settlement_policy(
-        {
-            "Settlement": {
-                "schema_version": 1,
-                "priority": ["fiat.stripe.v1"],
-                "stripe": {"enabled": True},
-            }
-        }
-    )
-    monkeypatch.setattr(
-        listing_cli,
-        "resolve_buyer_settlement_policy",
-        lambda **_kwargs: policy,
-    )
-    monkeypatch.setattr(
-        listing_cli,
-        "_registry_context",
-        lambda **_kwargs: (_ for _ in ()).throw(
-            AssertionError("invalid clause reached registry discovery")
-        ),
-    )
-
-    result = runner.invoke(
-        app,
-        ["listing", "list", "--settlement", "mechanism=ghost"],
-    )
-
-    assert result.exit_code == 2
-    assert "Accepted settlement fields:" in result.output
-    assert "asset" in result.output
-    assert "alkahest.chain" in result.output
-    assert "stripe.funding_profile" in result.output

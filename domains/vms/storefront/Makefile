@@ -12,19 +12,13 @@ DIST_DIR ?= ../../../.dist
 # Podman may reuse cross-stage layers after an internal wheel changes. Make the
 # wheel set an explicit cache key for both image stages.
 DIST_FINGERPRINT := $(shell find $(DIST_DIR) -maxdepth 1 -type f -name '*.whl' -exec cksum {} + 2>/dev/null | LC_ALL=C sort | cksum | awk '{print $$1}')
-HOSTED_REPO_ROOT := ../../..
-HOSTED_RELEASE_DIR ?= $(DIST_DIR)
-include $(HOSTED_REPO_ROOT)/make/hosted-release.mk
 
-.PHONY: build build-images build-no-cache deploy deploy-storefront init reinit test test-unit test-integration verify-hosted-release
+.PHONY: build build-images build-no-cache deploy deploy-storefront init reinit test test-unit test-integration
 
-verify-hosted-release:
-	$(VERIFY_HOSTED_RELEASE)
-
-init: verify-hosted-release ## Resolve deps from verified wheels and create .venv.
+init:  ## Resolve deps from repository wheels and create .venv.
 	uv sync --find-links $(DIST_DIR)
 
-reinit: verify-hosted-release ## Force-reinstall verified internal wheels.
+reinit:  ## Force-reinstall internal wheels.
 	uv sync --find-links $(DIST_DIR) \
 	--upgrade-package arkhai-core                    --reinstall-package arkhai-core \
 	--upgrade-package arkhai-core-storefront         --reinstall-package arkhai-core-storefront \
@@ -39,8 +33,6 @@ reinit: verify-hosted-release ## Force-reinstall verified internal wheels.
 	--upgrade-package arkhai-kit-settlement-runtime  --reinstall-package arkhai-kit-settlement-runtime \
 	--upgrade-package arkhai-kit-storefront         --reinstall-package arkhai-kit-storefront \
 	--upgrade-package arkhai-kit-negotiation-runtime --reinstall-package arkhai-kit-negotiation-runtime \
-	--upgrade-package arkhai-hosted-settlement-client --reinstall-package arkhai-hosted-settlement-client \
-	--upgrade-package arkhai-kit-hosted-settlement     --reinstall-package arkhai-kit-hosted-settlement \
 	--upgrade-package arkhai-kit-site                --reinstall-package arkhai-kit-site \
 	--upgrade-package arkhai-kit-resource-pools       --reinstall-package arkhai-kit-resource-pools \
 	--upgrade-package arkhai-kit-fulfillment         --reinstall-package arkhai-kit-fulfillment \

@@ -110,7 +110,7 @@ class IssuanceRequest(BaseModel):
     schema: Literal["arkhai.api-credits.issuance-request.v1"] = ISSUANCE_REQUEST_SCHEMA
     fulfillment_id: str = Field(min_length=1, max_length=320)
     obligation_ref: str = Field(min_length=1, max_length=255)
-    mechanism: Literal["alkahest.v1", "fiat.stripe.v1"]
+    mechanism: Literal["alkahest.v1"]
     owner: Identity
     service: str = Field(min_length=1, max_length=255)
     resource_id: str = Field(min_length=1, max_length=255)
@@ -149,7 +149,7 @@ class IssuanceResponse(BaseModel):
     fulfillment_id: str
     grant_id: str
     obligation_ref: str
-    mechanism: Literal["alkahest.v1", "fiat.stripe.v1"]
+    mechanism: Literal["alkahest.v1"]
     owner: Optional[Identity]
     service: str
     resource_id: str
