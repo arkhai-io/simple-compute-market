@@ -191,6 +191,9 @@ class NegotiationOutcome:
     rather than the buyer's local proposal protects against any
     drift between sides.
 
+    ``settlement_data`` carries seller-owned data for the selected settlement
+    stage without interpretation by core.
+
     ``agreed_amount`` is the absolute total payment in base units of
     the escrow's payment token (i.e. ``accepted_escrow_proposal.fields
     ["amount"]``). Per-unit rates only exist as listing broadcasts;
@@ -213,6 +216,7 @@ class NegotiationOutcome:
     accepted_escrow_terms: Optional[list[Any]] = None
     agreement: Agreement | None = None
     agreement_bytes: str | None = None
+    settlement_data: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"status": self.status, "rounds": self.rounds}
@@ -240,7 +244,21 @@ class NegotiationOutcome:
             d["agreement"] = self.agreement.model_dump(mode="json", exclude_none=True)
         if self.agreement_bytes is not None:
             d["agreement_bytes"] = self.agreement_bytes
+        if self.settlement_data is not None:
+            d["settlement_data"] = dict(self.settlement_data)
         return d
+
+
+def _parse_settlement_data(
+    reply: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Return the seller-owned settlement payload without interpreting it."""
+    raw = reply.get("settlement_data")
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ValueError("settlement_data must be an object")
+    return dict(raw)
 
 
 def parse_accepted_terms_from_reply(
@@ -849,6 +867,7 @@ def negotiate_with_seller(
     accepted_terms: Optional[list[Any]] = None
     accepted_agreement: Agreement | None = None
     accepted_agreement_bytes: str | None = None
+    accepted_settlement_data: dict[str, Any] | None = None
 
     def _parse_reply(
         reply_payload: dict[str, Any],
@@ -1059,6 +1078,11 @@ def negotiate_with_seller(
             accepted_plan,
             accepted_terms,
         ) = _parse_reply(reply)
+        accepted_settlement_data = (
+            _parse_settlement_data(reply)
+            if seller_action in {"counter", "accept"}
+            else None
+        )
         if seller_action in {"counter", "accept"} and accepted_prov is None:
             raise RuntimeError(
                 "seller negotiation reply omitted accepted_provision_terms"
@@ -1115,6 +1139,7 @@ def negotiate_with_seller(
                 accepted_escrow_terms=accepted_terms,
                 agreement=accepted_agreement,
                 agreement_bytes=accepted_agreement_bytes,
+                settlement_data=accepted_settlement_data,
             )
         # On non-agreed paths we still carry forward what the seller
         # validated — used if the negotiation ends up agreed in later
@@ -1260,6 +1285,13 @@ def negotiate_with_seller(
                 unit_count=unit_count,
                 rounds=round_idx,
             )
+        reply_settlement_data = (
+            _parse_settlement_data(reply)
+            if reply.get("action") in {"counter", "accept"}
+            else None
+        )
+        if reply_settlement_data is not None:
+            accepted_settlement_data = reply_settlement_data
 
         # After we sent our move, the seller has replied with either
         # a matching terminal (accept/exit) or a further counter.
@@ -1322,6 +1354,11 @@ def negotiate_with_seller(
                     accepted_escrow_terms=reply_terms or accepted_terms,
                     agreement=accepted_agreement,
                     agreement_bytes=accepted_agreement_bytes,
+                    settlement_data=(
+                        reply_settlement_data
+                        if reply_settlement_data is not None
+                        else accepted_settlement_data
+                    ),
                 )
             # Non-accept reply to our accept is anomalous but treat as terminal.
             if on_round:
@@ -1426,6 +1463,11 @@ def negotiate_with_seller(
                 accepted_escrow_terms=reply_terms or accepted_terms,
                 agreement=accepted_agreement,
                 agreement_bytes=accepted_agreement_bytes,
+                settlement_data=(
+                    reply_settlement_data
+                    if reply_settlement_data is not None
+                    else accepted_settlement_data
+                ),
             )
         if seller_action in ("exit", "reject"):
             if on_round:

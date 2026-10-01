@@ -8,8 +8,15 @@ the party principals, and a domain-namespaced ``service_terms`` package
 
 from __future__ import annotations
 
+import base64
+from types import SimpleNamespace
+
 import pytest
-from core_buyer.negotiation_client import _validate_settlement_acceptance
+from core_buyer.negotiation_client import (
+    _parse_settlement_data,
+    _validate_settlement_acceptance,
+    negotiate_with_seller,
+)
 from market_core.schemas import (
     Agreement,
     SettlementObligation,
@@ -18,7 +25,71 @@ from market_core.schemas import (
     SettlementSelection,
     derive_settlement_option_id,
 )
-from market_identity import Identity, TrustedIdentitySet
+from market_identity import Ed25519Signer, Identity, TrustedIdentitySet
+
+
+def test_seller_settlement_data_survives_buyer_acceptance(monkeypatch) -> None:
+    buyer = Ed25519Signer(bytes([17]) * 32)
+    seller = Ed25519Signer(bytes([34]) * 32)
+    provision_terms = {"kind": "example.v1", "version": 1, "payload": {}}
+    agreement = Agreement(
+        negotiation_id="neg-1",
+        listing_id="listing-1",
+        listing_hash="0" * 64,
+        buyer=buyer.identity.model_dump(mode="json"),
+        seller=seller.identity.model_dump(mode="json"),
+        amount=4200,
+        duration_seconds=3600,
+        start_utc="2025-01-01T00:00:00Z",
+        accepted_at="2025-01-01T00:00:00Z",
+    )
+    agreement_bytes = agreement.model_dump_json(exclude_none=True).encode()
+    settlement_data = {"mandate": {"opaque": "to-core"}}
+    reply = {
+        "negotiation_id": "neg-1",
+        "action": "accept",
+        "proposal": {"fields": {"amount": 4200}},
+        "buyer_principal": buyer.identity.model_dump(mode="json"),
+        "seller_principal": seller.identity.model_dump(mode="json"),
+        "accepted_provision_terms": provision_terms,
+        "agreement": agreement.model_dump(mode="json", exclude_none=True),
+        "agreement_bytes": base64.b64encode(agreement_bytes).decode("ascii"),
+        "settlement_data": settlement_data,
+    }
+
+    monkeypatch.setattr(
+        "core_buyer.negotiation_client.run_negotiation_chain",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            action="counter", proposal={"fields": {"amount": 4200}}
+        ),
+    )
+    monkeypatch.setattr(
+        "core_buyer.negotiation_client._authenticated_json",
+        lambda *_args, **_kwargs: reply,
+    )
+    outcome = negotiate_with_seller(
+        seller_url="http://seller",
+        principal=buyer.identity,
+        signer=buyer,
+        listing_id="listing-1",
+        resolve_seller_principals=lambda: TrustedIdentitySet(
+            identities=(seller.identity,)
+        ),
+        initial_price=4200,
+        max_price=4200,
+        unit_count=1,
+        provision_terms=provision_terms,
+        escrow_proposal={},
+        encode_escrow_proposal=lambda _proposal: {"fields": {"amount": 4200}},
+        chain=[],
+    )
+
+    assert outcome.settlement_data == settlement_data
+    assert outcome.to_dict()["settlement_data"] == settlement_data
+    assert _parse_settlement_data({}) is None
+    with pytest.raises(ValueError, match="must be an object"):
+        _parse_settlement_data({"settlement_data": ["not", "an object"]})
+
 
 _BUYER = Identity(scheme="eip191", identifier="0x" + "11" * 20)
 _SELLER = Identity(scheme="eip191", identifier="0x" + "22" * 20)
@@ -46,6 +117,7 @@ def _advertised_option() -> SettlementOption:
         params={key: dict(value) for key, value in _PARAMS.items()},
     )
 
+
 def _agreement(
     option: SettlementOption,
     *,
@@ -65,7 +137,6 @@ def _agreement(
         start_utc="2025-01-01T00:00:00Z",
         accepted_at="2025-01-01T00:00:00Z",
     )
-
 
 
 def _seller_plan(service_terms: dict) -> SettlementPlan:

@@ -51,6 +51,9 @@ class NegotiateNewResponse(BaseModel):
     (mechanism-neutral obligations); ``accepted_escrow_terms`` is its
     LEGACY flat-alkahest mirror, kept for buyers that predate the plan
     carrier and removed with the client-wheel wire bump.
+
+    ``settlement_data`` carries an opaque seller-owned payload for the
+    selected settlement stage.
     """
 
     negotiation_id: str
@@ -66,6 +69,7 @@ class NegotiateNewResponse(BaseModel):
     accepted_escrow_terms: list[dict[str, Any]] | None = None
     agreement: Agreement | None = None
     agreement_bytes: str | None = None
+    settlement_data: dict[str, Any] | None = None
 
 
 class NegotiateContinueRequest(BaseModel):
@@ -90,6 +94,7 @@ class NegotiateContinueResponse(BaseModel):
     accepted_escrow_terms: list[dict[str, Any]] | None = None
     agreement: Agreement | None = None
     agreement_bytes: str | None = None
+    settlement_data: dict[str, Any] | None = None
 
 
 class NegotiationSummary(BaseModel):

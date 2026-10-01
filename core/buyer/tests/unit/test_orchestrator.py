@@ -4,6 +4,7 @@ import uuid
 from unittest.mock import patch
 
 import pytest
+from market_core.schemas import SettlementSelection
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from registry_client import FilterSpecResponse
 
@@ -17,7 +18,8 @@ from core_buyer import (
     query_registry_for_matches_multi,
     run_buy,
 )
-from core_buyer.orchestration import make_publisher_trust_resolver
+from core_buyer.negotiation_client import NegotiationOutcome
+from core_buyer.orchestration import make_publisher_trust_resolver, make_settle_hook
 
 
 def _trusted(*signers: Ed25519Signer) -> TrustedIdentitySet:
@@ -149,6 +151,62 @@ def test_run_buy_composes_injected_negotiate_and_settle_hooks() -> None:
     ) in events
     assert ("domain_negotiate", {"count": 1}) in events
     assert ("domain_settle", {"listing_id": "L1"}) in events
+
+
+def test_settle_hook_delegates_agreement_only_selection_to_domain_stage() -> None:
+    selection = SettlementSelection(
+        mechanism="example.payment.v1",
+        option_id="a" * 64,
+    )
+    outcome = NegotiationOutcome(
+        status="agreed",
+        negotiation_id="N1",
+        settlement_selection=selection,
+        settlement_data={"mandate": {"opaque": "to-core"}},
+    )
+    negotiation = NegotiationResult(
+        match={"seller": "http://seller"},
+        outcome=outcome,
+    )
+    expected = BuyResult(status="ready", negotiation_id="N1")
+    delegated: list[NegotiationResult] = []
+    events: list[tuple[str, dict]] = []
+
+    def agreement_settlement(actual, emit):
+        delegated.append(actual)
+        emit("agreement_settlement", {"negotiation_id": actual.outcome.negotiation_id})
+        return expected
+
+    hook = make_settle_hook(
+        config=_config(),
+        unit_count=1.0,
+        build_escrow_terms=lambda *_args: pytest.fail("escrow path was used"),
+        create_escrow=lambda *_args: pytest.fail("escrow path was used"),
+        settlement_recipient=lambda *_args: pytest.fail("escrow path was used"),
+        build_settlement_payload=lambda *_args: pytest.fail("escrow path was used"),
+        confirm_settlement=None,
+        settlement_submit_max_attempts=1,
+        settlement_submit_retryable=lambda _exc: False,
+        settlement_poll_interval=0.0,
+        settlement_total_timeout=0.0,
+        sleep=lambda _seconds: None,
+        agreement_settlement=agreement_settlement,
+    )
+
+    result = hook(negotiation, lambda name, body: events.append((name, body)))
+
+    assert result is expected
+    assert delegated == [negotiation]
+    assert delegated[0].outcome.settlement_data == {"mandate": {"opaque": "to-core"}}
+    assert events == [("agreement_settlement", {"negotiation_id": "N1"})]
+
+    legacy = NegotiationResult(
+        match={"seller": "http://seller"},
+        outcome=NegotiationOutcome(status="agreed", negotiation_id="legacy"),
+    )
+    legacy_result = hook(legacy, lambda _name, _body: None)
+    assert legacy_result.reason == "missing_accepted_escrow_proposal"
+    assert delegated == [negotiation]
 
 
 def test_query_registry_for_matches_multi_dedupes_first_seen_listing() -> None:
