@@ -37,6 +37,7 @@ from rich.table import Table
 
 from domains.vms.settlement import escrow_proposal_from_accepted_entry
 
+from .arkhai_payments import make_payment_settle_hook, payer_selection
 from .buy_orchestrator import (
     BuyConfig,
     BuyConstraints,
@@ -228,6 +229,8 @@ def _run_resume_from(
             if outcome.accepted_escrow_proposal is not None
             else None,
             **accepted_settlement,
+            agreement_bytes=outcome.agreement_bytes,
+            settlement_data=outcome.settlement_data,
             accepted_escrow_terms=[
                 term.model_dump() for term in outcome.accepted_escrow_terms
             ]
@@ -521,6 +524,7 @@ def register(app: typer.Typer) -> None:
         )
         matches = []
         for match, selected in selected_matches:
+            selected = payer_selection(selected)
             normalized = dict(match)
             normalized["_selected_settlement"] = selected
             normalized["settlement_options"] = [selected.option.model_dump(mode="json")]
@@ -557,6 +561,7 @@ def register(app: typer.Typer) -> None:
             selected = candidate["_selected_settlement"]
             entry = alkahest_entry_from_selection(selected)
             if entry is None:
+                evm_matches.append(candidate)
                 continue
             advertised_chain = entry.get("chain_name")
             if not isinstance(advertised_chain, str) or not advertised_chain:
@@ -570,62 +575,56 @@ def register(app: typer.Typer) -> None:
                 advertised_tokens.append(entry_token)
         matches = evm_matches
         available_chains = tuple(dict.fromkeys(advertised_chains))
-        if not available_chains:
-            typer.secho(
-                "No selected Alkahest option has usable accepted escrow state.",
-                err=True,
-                fg=typer.colors.YELLOW,
-            )
-            raise typer.Exit(0)
-        if len(available_chains) != 1:
-            typer.secho(
-                "Selected Alkahest options span multiple chains; constrain selection with --settlement 'mechanism=alkahest alkahest.chain=<name>'.",
-                err=True,
-                fg=typer.colors.RED,
-            )
-            raise typer.Exit(2)
-        selected_chain_name = available_chains[0]
-        chain_cfg = chain_by_name(selected_chain_name)
-        rpc = chain_cfg.rpc_url
-        alkahest_section = settlement_policy.config.mechanism_config("alkahest")
-        raw_addr_cfg = getattr(alkahest_section, "address_config_path", None)
-        addr_cfg = raw_addr_cfg if isinstance(raw_addr_cfg, str) else None
-        addr, pk = resolve_buyer_wallet()
-        if not addr or not pk:
-            typer.secho(
-                "Selected Alkahest settlement requires [Wallet] credentials.",
-                err=True,
-                fg=typer.colors.RED,
-            )
-            raise typer.Exit(2)
-        if explicit_prices:
-            unique_tokens = tuple(
-                dict.fromkeys((token.lower() for token in advertised_tokens))
-            )
-            if len(unique_tokens) != 1:
-                raise typer.BadParameter(
-                    "explicit Alkahest prices require one selected asset; constrain it with --settlement asset=<token>"
+        if advertised_chains:
+            if len(available_chains) != 1:
+                typer.secho(
+                    "Selected Alkahest options span multiple chains; constrain selection with --settlement 'mechanism=alkahest alkahest.chain=<name>'.",
+                    err=True,
+                    fg=typer.colors.RED,
                 )
-            try:
-                token_decimals = resolve_token(
-                    unique_tokens[0], rpc_url=rpc, chain_id=chain_cfg.chain_id
-                ).decimals
-            except (TokenResolutionError, RuntimeError) as exc:
-                raise typer.BadParameter(
-                    "could not resolve the selected Alkahest asset decimals"
-                ) from exc
-            scale = 10 ** int(token_decimals)
-            initial_price = initial_price * scale
-            max_price = max_price * scale
-        build_escrow_terms = make_buyer_payment_escrow_terms_fn(
-            chain_name=selected_chain_name, addr_config_path=addr_cfg or None
-        )
-        create_escrow = make_create_escrow_fn(
-            private_key=pk,
-            rpc_url=rpc,
-            chain_name=selected_chain_name,
-            addr_config_path=addr_cfg or None,
-        )
+                raise typer.Exit(2)
+            selected_chain_name = available_chains[0]
+            chain_cfg = chain_by_name(selected_chain_name)
+            rpc = chain_cfg.rpc_url
+            alkahest_section = settlement_policy.config.mechanism_config("alkahest")
+            raw_addr_cfg = getattr(alkahest_section, "address_config_path", None)
+            addr_cfg = raw_addr_cfg if isinstance(raw_addr_cfg, str) else None
+            addr, pk = resolve_buyer_wallet()
+            if not addr or not pk:
+                typer.secho(
+                    "Selected Alkahest settlement requires [Wallet] credentials.",
+                    err=True,
+                    fg=typer.colors.RED,
+                )
+                raise typer.Exit(2)
+            if explicit_prices:
+                unique_tokens = tuple(
+                    dict.fromkeys((token.lower() for token in advertised_tokens))
+                )
+                if len(unique_tokens) != 1:
+                    raise typer.BadParameter(
+                        "explicit Alkahest prices require one selected asset; constrain it with --settlement asset=<token>"
+                    )
+                try:
+                    token_decimals = resolve_token(
+                        unique_tokens[0], rpc_url=rpc, chain_id=chain_cfg.chain_id
+                    ).decimals
+                except (TokenResolutionError, RuntimeError) as exc:
+                    raise typer.BadParameter(
+                        "could not resolve the selected Alkahest asset decimals"
+                    ) from exc
+                scale = 10 ** int(token_decimals)
+                initial_price = initial_price * scale
+                max_price = max_price * scale
+            build_escrow_terms = make_buyer_payment_escrow_terms_fn(
+                chain_name=selected_chain_name, addr_config_path=addr_cfg or None
+            )
+            create_escrow = make_create_escrow_fn(
+                private_key=pk,
+                rpc_url=rpc,
+                chain_name=selected_chain_name,
+                addr_config_path=addr_cfg or None,
+            )
         if not explicit_prices:
             from core_buyer.cli import interactive_disposition
 
@@ -671,7 +670,7 @@ def register(app: typer.Typer) -> None:
 
             entry = alkahest_entry_from_selection(selected)
             if entry is None:
-                return None
+                return selected.selection
             return escrow_proposal_from_accepted_entry(
                 listing=match,
                 entry=entry,
@@ -774,8 +773,10 @@ def register(app: typer.Typer) -> None:
             derive_prices=None,
             chain=negotiation_chain,
         )
-        assert build_escrow_terms is not None
-        assert create_escrow is not None
+        def unavailable_escrow(*_args, **_kwargs):
+            raise ValueError("selected settlement has no Alkahest configuration")
+        build_escrow_terms = build_escrow_terms or unavailable_escrow
+        create_escrow = create_escrow or unavailable_escrow
         settle_hook = make_legacy_settle_hook(
             config=config,
             provision=provision,
@@ -786,6 +787,10 @@ def register(app: typer.Typer) -> None:
             settlement_poll_interval=poll_interval,
             settlement_total_timeout=settlement_timeout,
             sleep=time.sleep,
+            agreement_settlement=make_payment_settle_hook(
+                config=config, policy=settlement_policy, timeout=settlement_timeout,
+                interval=poll_interval, confirm_settlement=confirm_settlement_cb,
+            ),
         )
         try:
             result = run_buy(

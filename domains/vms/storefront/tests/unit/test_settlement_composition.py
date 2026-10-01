@@ -23,9 +23,9 @@ from market_storefront.domain_runtime import (
     build_vm_storefront_registry,
 )
 from market_storefront.settlement_composition import (
-    build_storefront_settlement_registry,
     VmProjectionContext,
     _terminal_requires_lease_truncation,
+    build_storefront_settlement_registry,
     build_vm_settlement_composition,
     fulfill_vm_settlement,
     persist_vm_settlement_outcome,
@@ -490,4 +490,5 @@ def test_storefront_installs_alkahest_registration():
 
     assert [registration.mechanism_id for registration in registry.registrations] == [
         "alkahest.v1",
+        "arkhai.payments.v1",
     ]

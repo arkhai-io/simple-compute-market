@@ -22,6 +22,10 @@ from core_storefront.domain_lifecycle import (
 )
 from core_storefront.stage_log import stage_event
 from market_alkahest import create_alkahest_registration
+from market_arkhai_payments import (
+    ArkhaiPaymentsConfig,
+    create_arkhai_payments_registration,
+)
 from market_core import MarketDomainContract
 from market_core.schemas import (
     EscrowProposal,
@@ -42,6 +46,8 @@ from market_settlement_runtime import (
     derive_obligation_ref,
 )
 
+from market_storefront.arkhai_payments import VmArkhaiPaymentsStage
+from market_storefront.payment_settlement import VmPaymentsCoordinator
 from market_storefront.services.capacity_client import (
     build_capacity_runtime,
     capacity_binding_for_listing,
@@ -76,6 +82,8 @@ class VmSettlementComposition:
     settlement_config: SettlementConfig
     configuration_registry: SettlementConfigurationRegistry
     mechanism_resources: Mapping[str, Any]
+    arkhai_payments_stage: VmArkhaiPaymentsStage | None = None
+    payments_coordinator: VmPaymentsCoordinator | None = None
 
     async def readiness(self) -> tuple[MechanismReadiness, ...]:
         return await self.configuration_registry.ordered_readiness(
@@ -216,7 +224,9 @@ class VmSettlementComposition:
 
 
 def build_storefront_settlement_registry() -> SettlementConfigurationRegistry:
-    return SettlementConfigurationRegistry((create_alkahest_registration(),))
+    return SettlementConfigurationRegistry((
+        create_alkahest_registration(), create_arkhai_payments_registration(),
+    ))
 
 
 def build_storefront_publication_clause_compiler() -> Callable[
@@ -726,6 +736,8 @@ def build_vm_settlement_composition(
         role="seller",
     ):
         section = settlement_config.mechanism_config(registration.config_key)
+        if registration.client_factory is None:
+            continue
         if section is None:
             continue
         try:
@@ -826,6 +838,12 @@ def build_vm_settlement_composition(
         persist_outcome=persist_vm_settlement_outcome,
         wake_servicing=wake_servicing,
     )
+    payments_config = settlement_config.mechanism_config("arkhai_payments")
+    payments_stage = (
+        VmArkhaiPaymentsStage(ArkhaiPaymentsConfig.model_validate(payments_config))
+        if payments_config is not None and getattr(payments_config, "enabled", False)
+        else None
+    )
     composition = VmSettlementComposition(
         domain=domain,
         repository=repository,
@@ -838,5 +856,8 @@ def build_vm_settlement_composition(
         settlement_config=settlement_config,
         configuration_registry=registry,
         mechanism_resources=mechanism_resources,
+        arkhai_payments_stage=payments_stage,
+        payments_coordinator=VmPaymentsCoordinator(domain=domain, db=sqlite_client, stage=payments_stage)
+        if payments_stage is not None else None,
     )
     return composition

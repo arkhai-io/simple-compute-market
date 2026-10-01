@@ -64,7 +64,7 @@ def build_vm_fulfillment_plan(
             token_resource=token_resource,
             duration_seconds=duration_seconds,
         )
-    else:
+    elif settlement_mechanism != "arkhai.payments.v1":
         raise ValueError(f"Unsupported settlement mechanism: {settlement_mechanism}")
 
     return VmFulfillmentPlan(

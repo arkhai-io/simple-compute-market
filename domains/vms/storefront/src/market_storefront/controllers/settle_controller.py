@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -17,7 +18,10 @@ from market_identity import Identity
 
 import market_storefront.container as _container
 from market_storefront.middleware import buyer_auth
-from market_storefront.models.settle_models import VmSettleRequest
+from market_storefront.models.settle_models import (
+    VmPaymentsSettleRequest,
+    VmSettleRequest,
+)
 from market_storefront.settlement_composition import serialize_settlement_job
 from market_storefront.utils.escrow_verification import EscrowVerificationError
 
@@ -44,7 +48,7 @@ class SettleController:
     async def settle_escrow(
         self,
         escrow_uid: str,
-        body: VmSettleRequest,
+        body: VmSettleRequest | VmPaymentsSettleRequest,
         request: Request,
     ) -> Any:
         thread = await self._db.load_negotiation_thread_row(
@@ -60,6 +64,30 @@ class SettleController:
             request,
             negotiation_thread=thread,
         )
+        agreement_raw = thread.get("agreement_bytes")
+        agreement = json.loads(agreement_raw) if isinstance(agreement_raw, bytes) else {}
+        selected = agreement.get("settlement") or {}
+        if selected.get("mechanism") == "arkhai.payments.v1":
+            if not isinstance(body, VmPaymentsSettleRequest) or escrow_uid != body.negotiation_id:
+                raise HTTPException(status_code=400, detail="Arkhai settlement uses negotiation ID only")
+            composition = _container.resolved_settlement_composition
+            coordinator = getattr(composition, "payments_coordinator", None)
+            if coordinator is None:
+                raise HTTPException(status_code=503, detail="Arkhai settlement is unavailable")
+            if auth.exact_retry and auth.recorded_outcome is None:
+                raise HTTPException(status_code=409, detail="request retry is pending")
+            try:
+                result = await coordinator.start(body.negotiation_id, thread)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            except Exception as exc:
+                raise HTTPException(status_code=503, detail="payments service is unavailable") from exc
+            payload = serialize_settlement_job(result) if "created_at" in result else dict(result)
+            payload["buyer_principal"] = Identity.model_validate(thread["buyer_principal"]).model_dump(mode="json")
+            payload["seller_principal"] = composition.local_principal.model_dump(mode="json")
+            return JSONResponse(content=payload, status_code=200 if result.get("status") in ("ready", "failed") else 202)
+        if not isinstance(body, VmSettleRequest):
+            raise HTTPException(status_code=400, detail="Alkahest settlement requires EVM inputs")
         if auth.exact_retry:
             if auth.recorded_outcome is None:
                 raise HTTPException(status_code=409, detail="request retry is pending")

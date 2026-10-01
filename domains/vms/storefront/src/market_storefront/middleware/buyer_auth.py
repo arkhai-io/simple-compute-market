@@ -88,9 +88,9 @@ async def settle_escrow_auth(
     *,
     negotiation_thread: Any = None,
 ) -> AuthenticatedPrincipal:
-    from market_storefront.models.settle_models import VmSettleRequest
+    from core_storefront.models.settle_models import SettleRequest
 
-    if not isinstance(body, VmSettleRequest):
+    if not isinstance(body, SettleRequest):
         raise HTTPException(status_code=400, detail="Invalid request body type")
     thread = negotiation_thread
     if thread is None:

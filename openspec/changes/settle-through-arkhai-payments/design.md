@@ -44,6 +44,10 @@ The transaction id is `sha256(JCS(mandate))`, so both sides know it before appro
 
 For bare-metal, the buyer calls seller settlement with only the negotiation ID. The seller derives the deterministic transaction ID from the accepted mandate and polls the payments service. Acceptance stores the mandate with a digest of the exact Agreement bytes; receipt verification atomically records the transaction ID and signed receipt as `settlement_verified`. This is a domain-owned evidence record, not an escrow row or `SettlementPlan`. Fulfillment resolves the same record by negotiation ID and still uses the accepted selected-site binding before any provisioning effect.
 
+VM uses the same negotiation-scoped mandate and signed-receipt evidence. Its existing local `escrows` table stores only physical provisioning progress under the negotiation ID for payments, with no chain/address, plan, or obligation. The foreground task and recovery sweeper share the existing convergence lease and durable physical fulfillment ID; recovery rechecks the stored receipt against the exact accepted Agreement before any physical effect. The VM buyer's Arkhai account is `[vms].payer_account`, not its marketplace signer or a payments-service configuration field.
+
+Agreement timestamps may contain fractional seconds. Mandate derivation preserves the Agreement bytes/hash, rounds the acceptance-to-start interval up for the whole-second hold, and rounds approval expiry down. Domain adapters do not rewrite accepted timestamps.
+
 ### Depositing the agreement
 
 Approval may carry the agreement as an attachment, which the service checks against `deal` and keeps for disputes. If the seller's kit is set to deposit and the snapshot shows no agreement, it attaches it itself. The listing option declares the setting, so buyers can see it and filter on it: it gives the deal Arkhai's dispute fast path, which sellers without a reputation can advertise. Any party could deposit on its own, so a buyer's protection is this transparency, not a veto.
@@ -80,3 +84,6 @@ Built on `fiat.stripe.v1` and `kit/hosted-settlement`: `consume-expanded-stripe-
 |---|---|
 | Bare-metal stores the seller-derived mandate and matching signed receipt in a negotiation-scoped evidence record; the transaction ID is not an escrow obligation. | `openspec/specs/settlement-servicing/spec.md`, `openspec/specs/physical-provisioning/spec.md` |
 | Bare-metal invokes selected-site fulfillment only after that receipt record is verified. | `openspec/specs/physical-provisioning/spec.md`, `docs/development/ARCHITECTURE.md#fulfillment` |
+| VM payment evidence gates selected-site fulfillment and restart recovery; local provisioning progress has no escrow obligation. | Pending §4 promotion: `openspec/specs/settlement-servicing/spec.md`, `openspec/specs/physical-provisioning/spec.md` |
+| VM payer account is separate from marketplace identity and trusted service policy. | Pending §4 promotion: `openspec/specs/settlement-configuration/spec.md` |
+| Fractional Agreement timestamps round hold intervals up and approval expiry down without changing the deal hash. | Pending §4 promotion: `openspec/specs/settlement-servicing/spec.md` |

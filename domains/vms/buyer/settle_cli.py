@@ -11,6 +11,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from .arkhai_payments import accepted_payment_from_run, payment_buyer, settle_payment
 from .buy_orchestrator import (
     DEFAULT_SETTLEMENT_POLL_INTERVAL,
     DEFAULT_SETTLEMENT_TIMEOUT,
@@ -28,6 +29,7 @@ from .deal_helpers import (
 )
 from .escrow_client import looks_like_propagation_lag
 from .run_log import read_run
+from .settlement_composition import resolve_buyer_settlement_policy
 
 
 def _chain_name_from_run_log(run_id: str, *, signer) -> str | None:
@@ -121,6 +123,20 @@ def run_settle_from_log(
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
     resolve_seller_principals = make_deal_publisher_trust_resolver(run_id, deal, signer)
+    if accepted_mechanism == "arkhai.payments.v1":
+        raw, data = accepted_payment_from_run(run_id, signer=signer, negotiation_id=deal.negotiation_id)
+        final = settle_payment(
+            buyer=payment_buyer(resolve_buyer_settlement_policy()), agreement_bytes=raw,
+            settlement_data=data, seller_url=deal.seller_url, principal=deal.buyer_principal,
+            signer=signer, resolve_seller_principals=resolve_seller_principals,
+            negotiation_id=deal.negotiation_id, timeout=settlement_timeout, interval=poll_interval,
+            on_event=lambda stage, body: log.event(stage, **body),
+        )
+        log.end(final.get("status") or "unknown", escrow_uid=deal.negotiation_id)
+        console.print(Panel(str(final), title="Settlement complete"))
+        if final.get("status") != "ready":
+            raise typer.Exit(7)
+        return final
     if accepted_mechanism != "alkahest.v1":
         raise typer.BadParameter(
             f"accepted settlement mechanism {accepted_mechanism!r} is not installed; recovery will not fall back to another mechanism"

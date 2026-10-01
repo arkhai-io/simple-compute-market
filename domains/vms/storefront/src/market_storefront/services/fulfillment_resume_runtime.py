@@ -10,6 +10,7 @@ writes are logged for operator reconciliation.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import uuid
@@ -18,6 +19,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from compute_provisioning import FulfillmentRequestBody, FulfillmentScheduleRequest
+from market_arkhai_payments import Mandate, SignedReceipt, transaction_id
 from market_fulfillment import (
     FULFILLMENT_RESULT_KIND,
     FULFILLMENT_RESULT_SCHEMA_VERSION,
@@ -25,6 +27,7 @@ from market_fulfillment import (
     VersionedEnvelope,
 )
 
+import market_storefront.container as _container
 from market_storefront.services.capacity_client import (
     build_capacity_client,
     build_fulfillment_client,
@@ -278,6 +281,7 @@ async def converge_post_physical_delivery(
 ) -> bool:
     """Converge the durable storefront effects after physical success."""
     escrow_uid = str(escrow["escrow_uid"])
+    payments = context.get("settlement_mechanism") == "arkhai.payments.v1"
     reservation_id = str(escrow.get("capacity_reservation_id") or "")
     resource_id = str(escrow.get("settlement_resource_id") or "")
     listing_id = context.get("listing_id")
@@ -318,18 +322,20 @@ async def converge_post_physical_delivery(
         and bind_fulfillment_fn is None
     ):
         return True
-    fulfillment_uid = await _ensure_onchain_fulfillment(
-        escrow=escrow,
-        sqlite_client=sqlite_client,
-        submit_fulfillment=submit_fulfillment,
-        alkahest_client=alkahest_client,
-        connection_json=connection_json,
-    )
-    await _bind_recovered_settlement_fulfillment(
-        bind_fulfillment_fn=bind_fulfillment_fn,
-        escrow=escrow,
-        fulfillment_uid=fulfillment_uid,
-    )
+    if payments:
+        fulfillment_uid = escrow.get("fulfillment_id")
+        if not fulfillment_uid:
+            raise RuntimeError("physical fulfillment identity is unavailable")
+    else:
+        fulfillment_uid = await _ensure_onchain_fulfillment(
+            escrow=escrow, sqlite_client=sqlite_client,
+            submit_fulfillment=submit_fulfillment, alkahest_client=alkahest_client,
+            connection_json=connection_json,
+        )
+        await _bind_recovered_settlement_fulfillment(
+            bind_fulfillment_fn=bind_fulfillment_fn, escrow=escrow,
+            fulfillment_uid=fulfillment_uid,
+        )
     await _update_fulfilled_listing(
         sqlite_client=sqlite_client,
         escrow_uid=escrow_uid,
@@ -553,15 +559,41 @@ async def converge_escrow_once(
     """Advance one escrow by at most one externally observable phase."""
     if escrow.get("status") in _TERMINAL_ESCROW_STATUSES:
         return False
-    if not escrow.get("chain_name"):
-        # On-chain fulfillment requires the accepted chain binding.
-        return False
     context = _validated_context(escrow.get("fulfillment_context"))
     if context is None:
         logger.error(
             "[FULFILLMENT_RESUME] Escrow %s has no supported recovery context",
             escrow.get("escrow_uid"),
         )
+        return False
+    payments = context.get("settlement_mechanism") == "arkhai.payments.v1"
+    if payments:
+        record = await sqlite_client.load_vm_payment_record(
+            negotiation_id=str(escrow.get("negotiation_id") or "")
+        )
+        if record is None or not record.get("receipt"):
+            raise RuntimeError("payment receipt is not verified")
+        thread = await sqlite_client.load_negotiation_thread_row(
+            negotiation_id=str(escrow["negotiation_id"])
+        )
+        raw = thread.get("agreement_bytes") if thread else None
+        composition = _container.resolved_settlement_composition
+        stage = composition.arkhai_payments_stage if composition else None
+        if not isinstance(raw, bytes) or stage is None:
+            raise RuntimeError("accepted payment Agreement or verifier is unavailable")
+        agreement = json.loads(raw)
+        mandate = Mandate.model_validate(record["mandate"])
+        if (
+            record["agreement_sha256"] != hashlib.sha256(raw).hexdigest()
+            or record["transaction_id"] != transaction_id(mandate)
+            or record["mandate"] != stage.mandate_for_agreement(agreement)
+            or not stage.receipt_matches(
+                SignedReceipt.model_validate(record["receipt"]),
+                agreement=agreement, mandate=mandate,
+            )
+        ):
+            raise RuntimeError("payment evidence does not match accepted Agreement")
+    elif not escrow.get("chain_name"):
         return False
     raw_context = json.loads(escrow["fulfillment_context"])
     negotiation_id = escrow.get("negotiation_id")

@@ -10,6 +10,7 @@ import typer
 from core_buyer.buyer_config import ResolvedBuyerIdentity
 from core_buyer.settlement import BuyerSettlementPolicy, SelectedSettlementOption
 from market_alkahest import create_alkahest_registration
+from market_arkhai_payments import create_arkhai_payments_registration
 from market_config.config_loader import load_user_config
 from market_settlement_runtime import (
     MechanismReadiness,
@@ -79,6 +80,7 @@ def buyer_settlement_registry() -> SettlementConfigurationRegistry:
                 create_alkahest_registration(),
                 command_group=_alkahest_command_group(),
             ),
+            create_arkhai_payments_registration(),
         )
     )
 

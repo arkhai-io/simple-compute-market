@@ -34,6 +34,8 @@ from domains.vms.listings.resource_csv_importer import (
 from market_identity import Identity
 from market_settlement_runtime import settlement_migrations
 
+from market_storefront.payment_repository import VmPaymentRepository
+
 from .config import BASE_URL_OVERRIDE, resolve_marketplace_signer, settings
 from .migrations import (  # noqa: F401 — re-exported (tests import via here)
     VM_LEGACY_MIGRATION_INPUTS,
@@ -44,7 +46,7 @@ from .migrations import (  # noqa: F401 — re-exported (tests import via here)
 logger = logging.getLogger(__name__)
 
 
-class SQLiteClient(CoreSQLiteClient):
+class SQLiteClient(VmPaymentRepository, CoreSQLiteClient):
     """Core market-state client + the VM domain's inventory tables."""
 
     def __init__(
