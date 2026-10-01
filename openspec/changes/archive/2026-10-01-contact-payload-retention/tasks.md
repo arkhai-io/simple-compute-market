@@ -1,8 +1,7 @@
 # Tasks — contact payload retention
 
-Implemented, reviewed, and promoted. The end-to-end pipeline passed on the
-pre-review fileset (8.9); a confirming run on the final fileset is the one
-outstanding item.
+Complete, promoted, and archived 2026-10-01. Both end-to-end lanes passed on the
+final fileset in Actions run 36928047725.
 
 Validation levels below are named deliberately. Per `docs/development/TESTING.md`,
 integration means the real app, a real database, a wired DI container, and the
@@ -158,15 +157,14 @@ In `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/` unless name
 - [x] 8.7 **Documentation citations.** Passes for this change; repository-wide
       failures are unchanged from the baseline.
 - [x] 8.8 **Packaging.** `make check-packaging` passes.
-- [ ] 8.9 **End-to-end pipeline.** [Actions run 36921556410](https://github.com/arkhai-io/simple-compute-market/actions/runs/36921556410)
-      passed both lanes on the pre-review fileset: VM 129 passed; bare metal 16
-      passed, the 11 publication stages and all 5 `e2e_bare_metal_introduction`
-      stages. Storefront logs show the reveals, the operator deletion, `410` on a
-      read and on a fresh start, the preview polled across the 5-second window, the
-      sweep step, and `410` on the swept introduction. *Outstanding:* one run on the
-      final fileset. Since that run the scenario sends its deletion through the
-      kit's admin client, an identical wire request, and the preview's guarantee is
-      restated; no wire contract changed.
+- [x] 8.9 **End-to-end pipeline.** Final fileset: [Actions run 36928047725](https://github.com/arkhai-io/simple-compute-market/actions/runs/36928047725)
+      on `feat/contact-payload-retention` passed both lanes with no failures or skips —
+      VM 129 passed; bare metal 16 passed, the 11 publication stages and all 5
+      `e2e_bare_metal_introduction` stages. Storefront logs show the operator
+      deletion, `410` on a read and on a fresh start, the preview polled across the
+      5-second window, the sweep step, and `410` on the swept introduction. The
+      pre-review fileset had passed identically in
+      [run 36921556410](https://github.com/arkhai-io/simple-compute-market/actions/runs/36921556410).
 - [x] 8.10 **Promotion.** Recorded below.
 
 ## Design promotion record

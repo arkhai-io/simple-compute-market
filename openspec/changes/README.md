@@ -114,7 +114,7 @@ bare-metal-mock-provisioned-deal ───────────────�
 Next wave:
 kit-owned-storefront-loop-lifecycle (archived) ──► kit-owned-storefront-shell ──┬──► kit-owned-listing-and-fulfillment-lifecycles
      │                                                               └──► kit-owned-storefront-auth-and-persistence
-     ├──► contact-payload-retention (Goal 6)
+     ├──► contact-payload-retention (Goal 6, archived)
      └──► bare-metal-mock-provisioned-deal (Goal 7 section)
 
 kit-owned-settlement-runtime archived 2026-08-10
@@ -155,16 +155,16 @@ The mechanism work is delivered (`finish-settlement-mechanism-neutrality` and
 requirements are live in `openspec/specs/`).
 [`ROADMAP.md`](../../docs/development/ROADMAP.md)'s Goal 6 carries the current state.
 
-Two changes now own what that goal recorded as its remaining gap.
+Two changes took on what that goal recorded as its remaining gap. `contact-payload-retention` is complete and archived; `compose-contact-exchange-across-compute` owns the rest.
 
 ```text
-kit-owned-storefront-loop-lifecycle (Goal 4, archived) ──► contact-payload-retention ──► compose-contact-exchange-across-compute
+kit-owned-storefront-loop-lifecycle (Goal 4, archived) ──► contact-payload-retention (archived) ──► compose-contact-exchange-across-compute
 ```
 
 | Change | Status | Acceptance boundary |
 |---|---|---|
-| [`contact-payload-retention`](contact-payload-retention/) | implemented, reviewed, and promoted to `contact-exchange-settlement`, `introduction-delivery`, `ARCHITECTURE.md`, `DEPLOYMENT_AND_CONFIG.md`, and `TESTING.md`; end-to-end evidence (its 8.9) outstanding | Makes the bounded-PII retention requirement executable, kit-first and composed into bare metal, the only domain composing the mechanism. Deletion redacts in place and leaves a tombstone, because the existing primitive removed the row and let a buyer reveal a deleted introduction again; triggers keep the table's active part append-only. A `retention_seconds` window in the mechanism's seller configuration, 30 days by default or `indefinite`, applied as an aggregate policy; one deletion operation behind a held-and-stepped sweep and an operator path; a machine-readable disclosure on the public readiness projection and at reveal; and the first introduction scenario on the bare-metal lane. Requires every composing storefront to run retention, so VM inherits it through the change below. Recorded responses in the authenticated replay store are out of scope, owned by `redesign-authenticated-replay-state` |
-| [`compose-contact-exchange-across-compute`](compose-contact-exchange-across-compute/) | blocked on `contact-payload-retention`'s end-to-end evidence, its last outstanding task; design-complete; also wires that change's kit retention into VM (its 3a). Owns the system evidence for unbacked listings (its 6.4 and 6.5, transferred from the archived `unbacked-listing-publication`); its 6.4 also bounds the buyer query by asking rate, transferred from `publish-indicative-listing-rates` 7.13 | Promotes the domain-neutral introduction composition glue out of bare metal so accepted-state interpretation has one implementation, composes the mechanism in the VM storefront — the one remaining compute-family domain — extends delivery to it, and resolves the seller's contact payload per listing origin rather than per storefront. Goal 7's multi-seller introduction value depends on that last part |
+| [`contact-payload-retention`](archive/2026-10-01-contact-payload-retention/) | **archived** 2026-10-01. Promoted to `contact-exchange-settlement`, `introduction-delivery`, `ARCHITECTURE.md`, `DEPLOYMENT_AND_CONFIG.md`, and `TESTING.md`; both end-to-end lanes passed in [Actions run 36928047725](https://github.com/arkhai-io/simple-compute-market/actions/runs/36928047725), the bare-metal introduction scenario covering disclosure, reveal, operator deletion, and the held sweep | Makes the bounded-PII retention requirement executable, kit-first and composed into bare metal, the only domain composing the mechanism. Deletion redacts in place and leaves a tombstone, because the existing primitive removed the row and let a buyer reveal a deleted introduction again; triggers keep the table's active part append-only. A `retention_seconds` window in the mechanism's seller configuration, 30 days by default or `indefinite`, applied as an aggregate policy; one deletion operation behind a held-and-stepped sweep and an operator path; a machine-readable disclosure on the public readiness projection and at reveal; and the first introduction scenario on the bare-metal lane. Requires every composing storefront to run retention, so VM inherits it through the change below. Recorded responses in the authenticated replay store are out of scope, owned by `redesign-authenticated-replay-state` |
+| [`compose-contact-exchange-across-compute`](compose-contact-exchange-across-compute/) | unblocked: `contact-payload-retention` is archived; design-complete; also wires that change's kit retention into VM (its 3a). Owns the system evidence for unbacked listings (its 6.4 and 6.5, transferred from the archived `unbacked-listing-publication`); its 6.4 also bounds the buyer query by asking rate, transferred from `publish-indicative-listing-rates` 7.13 | Promotes the domain-neutral introduction composition glue out of bare metal so accepted-state interpretation has one implementation, composes the mechanism in the VM storefront — the one remaining compute-family domain — extends delivery to it, and resolves the seller's contact payload per listing origin rather than per storefront. Goal 7's multi-seller introduction value depends on that last part |
 
 ## Unblocking work — the local end-to-end stack
 
@@ -216,7 +216,7 @@ pool-declared-advertisement-and-backing (archived) ─────────�
 bare-metal-publication-reads-pool-declarations (archived) ──► bare-metal-listing-shapes (archived) ──► unbacked-bare-metal-listings
 bare-metal-publication-reads-pool-declarations (archived) ──► bare-metal-mock-provisioned-deal
 kit-owned-storefront-loop-lifecycle (Goal 4, archived) ───────► bare-metal-mock-provisioned-deal (lifecycle controls)
-kit-owned-storefront-loop-lifecycle (Goal 4, archived) ──► contact-payload-retention ──► compose-contact-exchange-across-compute (Sections 1–3, 3b) ──► unbacked-bare-metal-listings
+kit-owned-storefront-loop-lifecycle (Goal 4, archived) ──► contact-payload-retention (archived) ──► compose-contact-exchange-across-compute (Sections 1–3, 3b) ──► unbacked-bare-metal-listings
 bare-metal-and-credits-domain-stacks §4a (Goal 4; bare metal on the kit negotiation runtime) ──┘
 
 publish-indicative-listing-rates (archived)

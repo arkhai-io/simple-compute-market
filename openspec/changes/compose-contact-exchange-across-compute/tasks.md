@@ -1,7 +1,8 @@
 # Tasks — compose contact exchange across the compute family
 
-Depends on `contact-payload-retention` having landed. Do not begin Section 2
-before it has.
+Depended on `contact-payload-retention`, which is complete and archived
+(`openspec/changes/archive/2026-10-01-contact-payload-retention/`); Section 2 may
+begin.
 
 ## 1. Survey and placement
 
