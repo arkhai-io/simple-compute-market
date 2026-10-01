@@ -62,5 +62,7 @@ Built on `fiat.stripe.v1` and `kit/hosted-settlement`: `consume-expanded-stripe-
 
 ## Open Questions
 
+- The overview sketches neutral `SettlementObligation` parties as `payer`/`payee`, but the current core carrier has `payer`/`claimant` and their principals. Which mechanism-neutral recipient field, if any, remains when Alkahest claimant semantics move into `params`? The Arkhai mandate's `to` value comes from the payment option, and the agreement already carries buyer and seller principals.
+- The proposal assigns escrow servicing to Alkahest, while the current `kit/settlement-runtime` owns a shared operation journal and worker. Does that shared runtime remain as an implementation dependency for Alkahest, or is it retired as Alkahest takes ownership of the lifecycle?
 - Whether the buyer's kit polls through the storefront or the payments service only, and whether a hook replaces polling.
 - The SDK's default window. The payments service enforces no minimum; chargeback exposure is covered by its cash reserve.
