@@ -9,13 +9,15 @@ through negotiation start, and they only become non-trivial with two
 *different* providers whose per-provider registry sets differ.
 
 The docker-compose stack runs:
-  * ``registry``    on host port 8080 — public, no auth
+  * ``registry``    on host port 8080 — public, signed reads without a bearer gate
   * ``registry-b``  on host port 8082 — read + write gated, seeded with
                     the stack's single write-scoped bootstrap key
   * ``bob-storefront``   (Bob)   on host port 8001 — Anvil acct #2,
                          [registry] urls = [registry, registry-b]
   * ``alice-storefront`` (Alice) on host port 8002 — Anvil acct #4,
                          [registry] urls = [registry]
+  * ``provisioning`` serves Bob; ``alice-provisioning`` serves Alice,
+    each with a distinct service identity and independent state.
 
 Provider topology
 -----------------
@@ -23,17 +25,17 @@ Bob fans publishes out to both registries (matches the "operator
 mirrors to a private registry alongside the public one" scenario).
 Alice only publishes to the public registry (matches the "provider
 trusts only one registry" scenario). After both have a listing, the
-buyer's union view over [A, B] contains exactly two listings — Bob's
-is in *both* registries but should appear in the union once, Alice's
-is in *one* and should also appear once.
+buyer's view retains three authority-scoped records for this scenario:
+Bob at A, Bob at B, and Alice at A. An identical listing ID across independent
+registry authorities does not establish equivalent ownership or trust.
 
 What this exercises that test_full_deal doesn't
 -----------------------------------------------
 1. A storefront can publish to a subset of available registries (Alice).
 2. The buyer's discovery is the *union* across configured registries.
-3. The buyer-side dedupe is by listing_id, so cross-registry mirrors
-   don't produce duplicate negotiation kickoffs.
-4. Two concurrent negotiations against different providers don't
+3. Production buyer discovery preserves independent registry authorities
+   when the same listing ID appears in both.
+4. Independent negotiations against different providers don't
    collide on shared infrastructure (negotiation rounds, event stream).
 
 Stage map
@@ -68,8 +70,7 @@ Phase 4 — registry footprints differ as configured
   04d  Alice's listing **absent** from registry-B (404)
 
 Phase 5 — buyer-side discovery
-  05a  Fan-in over [A, B] returns exactly 2 unique listings:
-       Bob's once (deduped across mirrors) and Alice's once
+  05a  Fan-in over [A, B] retains Bob at A and B, plus Alice at A
   05b  Fan-in over [A, DEAD] still returns both (A has both)
 
 Phase 6 — simultaneous negotiations
@@ -80,25 +81,24 @@ Phase 6 — simultaneous negotiations
 
 from __future__ import annotations
 
-import json
 import logging
 import os
-import urllib.error
-import urllib.parse
-import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-import httpx
 import pytest
+
+from core_buyer.orchestrator import query_registry_for_matches_multi
+from core_buyer.registry_config import RegistryAuthority
+from registry_client import RegistryClientError, SyncRegistryClient
+from market_site_client import SiteCapacityAdminClient
+from storefront_client import SyncStorefrontClient
+from vm_provisioning_operator import SyncProvisioningClient
 
 from market_identity import (
     Identity,
-    RequestEnvelope,
     TrustedIdentitySet,
-    canonical_body_hash,
     create_signer,
-    sign_request,
 )
 from e2e_harness.settings import settings
 from tests.e2e.roles.scenarios.vms.host_registry import (
@@ -108,7 +108,7 @@ from tests.e2e.roles.scenarios.vms.host_registry import (
     provision_e2e_executor,
     refresh_storefront_projections,
 )
-from tests.e2e.roles.scenarios.vms.conftest import _require_setting, _signer, _trust, capacity_source_for, pause_storefront, signed_listing_read_headers
+from tests.e2e.roles.scenarios.vms.conftest import _require_setting, _signer, _trust, capacity_source_for, pause_storefront
 
 log = logging.getLogger(__name__)
 
@@ -207,22 +207,6 @@ ALICE_OFFER = {
     "region": "New York, US",
 }
 
-_BOB_CSV = (
-    "resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,"
-    "max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,"
-    "attribute.vm_host\n"
-    'compute-mr-bob-001,compute.gpu,rtx5080,count,1,available,10,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,'
-    'RTX 5080,90.0,"California, US",kvm1\n'
-)
-_ALICE_CSV = (
-    "resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,"
-    "max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,"
-    "attribute.vm_host\n"
-    'compute-mr-alice-001,compute.gpu,rtx5080,count,1,available,10,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,'
-    'RTX 5080,90.0,"New York, US",ny1\n'
-)
-
-
 # ---------------------------------------------------------------------------
 # Local state
 # ---------------------------------------------------------------------------
@@ -296,7 +280,6 @@ def alice_admin_client():
     as Bob's is, and is pinned as ``Identity.administrators.operator`` in
     ``storefront.alice.toml``.
     """
-    from storefront_client import SyncStorefrontClient
 
     client = SyncStorefrontClient(
         _alice_url(),
@@ -316,7 +299,6 @@ def alice_admin_client():
 @pytest.fixture(scope="module")
 def alice_seller_client():
     """Seller-role client for Alice's storefront: publishing listings."""
-    from storefront_client import SyncStorefrontClient
 
     client = SyncStorefrontClient(
         _alice_url(),
@@ -350,42 +332,32 @@ def alice_agent_id(alice_admin_client) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Inline buyer-side fan-in helper — same shape as in v1 of this file.
+# Registry trust configuration and typed client composition.
 # ---------------------------------------------------------------------------
 
-def _list_listings(
-    url: str,
-    *,
-    api_key: Optional[str] = None,
-    timeout: float = 5.0,
-) -> list[dict[str, Any]]:
-    """Enumerate open listings from one registry, signed as the buyer.
+def _buyer_signer():
+    return _signer(
+        "eip191", settings.BUYER.MARKETPLACE_CREDENTIAL,
+        "BUYER.MARKETPLACE_CREDENTIAL",
+    )
 
-    Through the canonical client rather than a hand-built request: discovery is
-    authenticated and the proof binds the query as well as the body, so
-    restating that canonicalization here would be a second implementation to
-    keep in step with the registry's.
-    """
-    from registry_client import SyncRegistryClient
 
+def _registry_client(url: str) -> SyncRegistryClient:
     pins = _registry_pins(url)
-    with SyncRegistryClient(
-        url,
-        signer=_signer(
-            "eip191", settings.BUYER.MARKETPLACE_CREDENTIAL,
-            "BUYER.MARKETPLACE_CREDENTIAL",
-        ),
-        caller_role="buyer",
+    return SyncRegistryClient(
+        url, signer=_buyer_signer(), caller_role="buyer",
         expected_registries=_trust(pins["identifier"]),
         registry_authority=pins["authority_id"],
-        timeout=timeout,
-        api_key=api_key,
-    ) as client:
-        response = client.list_listings(status="open", limit=200)
-    # `ListingListResponse.listings` holds `ListingSummary` records, which are
-    # dataclasses with `to_dict`, not pydantic models. The dict form is what
-    # the callers below index by `listing_id`.
-    return [summary.to_dict() for summary in response.listings]
+        api_key=_REGISTRY_B_TOKEN if url == _REGISTRY_B else None,
+        timeout=5.0,
+    )
+
+
+def _registry_authority(url: str) -> RegistryAuthority:
+    pins = _registry_pins(url)
+    return RegistryAuthority(
+        authority=pins["authority_id"], principals=_trust(pins["identifier"]),
+    )
 
 
 def _registry_pins(url: str) -> dict[str, str]:
@@ -410,58 +382,9 @@ def _registry_pins(url: str) -> dict[str, str]:
     )
 
 
-def _list_listings_multi(
-    urls: list[str],
-    *,
-    auth: Optional[dict[str, str]] = None,
-    timeout: float = 5.0,
-) -> tuple[list[dict[str, Any]], list[str]]:
-    auth = auth or {}
-    merged: dict[str, dict[str, Any]] = {}
-    errors: list[str] = []
-    for url in urls:
-        try:
-            items = _list_listings(url, api_key=auth.get(url), timeout=timeout)
-        except Exception as exc:
-            log.warning("[multi-registry] %s list failed: %s", url, exc)
-            errors.append(url)
-            continue
-        for item in items:
-            lid = item.get("listing_id") or item.get("id")
-            if lid is None:
-                continue
-            merged.setdefault(str(lid), item)
-    return list(merged.values()), errors
-
-
 # ===========================================================================
 # Phase 0 — readiness
 # ===========================================================================
-
-#: Stages that need the provisioning service to serve a second storefront.
-#:
-#: `ProvisioningIdentityContext.storefront_principal` is a single identity and
-#: the seller role bootstraps one principal, so Alice is not a trusted caller:
-#: her capacity poller reports `Invalid marketplace authentication` every cycle
-#: and never loads a projection. A negotiation against her listing is then
-#: refused `offer_unfulfillable` for want of inventory she cannot see.
-#:
-#: Skipped rather than deleted or marked xfail. The scenario's subject --
-#: registry isolation and fan-in across two storefronts -- is unaffected and
-#: those stages still run; only the four that need a second served storefront
-#: are held. `xfail` would report an eventual pass as "unexpectedly passing",
-#: which reads as a problem rather than as the capability arriving.
-#:
-#: One provisioning service serving several storefronts is what makes a
-#: storefront substitutable, which `docs/development/ROADMAP.md` Goal 1 names
-#: as the value of consolidating physical authority. That goal's table names
-#: the change which owns the repair.
-_MULTI_STOREFRONT_SKIP = (
-    "provisioning serves one storefront: its storefront principal is a single "
-    "identity, so Alice is not a trusted caller and never loads capacity. "
-    "See docs/development/ROADMAP.md Goal 1."
-)
-
 
 class TestStage00_PausesBothStorefronts:
     def test_00_pauses_both_storefronts_loops(
@@ -536,13 +459,8 @@ class TestStage00e_RegistryBDirectFromHost:
         """Sanity-check host-port mapping for registry-b — Phase 4
         assertions hit :8082 directly from this test process."""
         _require(mr_state, "bob_sees_both")
-        resp = httpx.get(
-            f"{_REGISTRY_B}/health", timeout=5.0,
-            headers={"Authorization": f"Bearer {_REGISTRY_B_TOKEN}"},
-        )
-        assert resp.status_code == 200, (
-            f"registry-b /health returned {resp.status_code}: {resp.text[:200]}"
-        )
+        with _registry_client(_REGISTRY_B) as client:
+            assert client.get_health().status == "ok"
         mr_state.registry_b_reachable = True
 
 
@@ -568,81 +486,67 @@ class TestStage00g_AliceStrategy:
 # Phase 2 — inventory seed
 # ===========================================================================
 
+@pytest.fixture(scope="module")
+def alice_provisioning_client():
+    config = settings.ALICE_PROVISIONING
+    with SyncProvisioningClient(
+        _require_setting(config.API_URL, "ALICE_PROVISIONING.API_URL"),
+        _signer(config.ADMIN_SCHEME, config.ADMIN_CREDENTIAL,
+                "ALICE_PROVISIONING.ADMIN_CREDENTIAL"),
+        _trust(config.AUTHORITY_IDENTIFIER, scheme=config.AUTHORITY_SCHEME),
+    ) as client:
+        yield client
+
+
+@pytest.fixture(scope="module")
+def alice_site_capacity_admin_client():
+    config = settings.ALICE_PROVISIONING
+    return SiteCapacityAdminClient(
+        _require_setting(config.API_URL, "ALICE_PROVISIONING.API_URL"),
+        _signer("eip191", settings.ALICE.PRIVATE_KEY, "ALICE.PRIVATE_KEY"),
+        _trust(config.AUTHORITY_IDENTIFIER, scheme=config.AUTHORITY_SCHEME),
+    )
+
+
 class TestStage02a_BobInventory:
-    def test_02a_bob_seeds_inventory(self, storefront_admin_client, mr_state):
-        _require(mr_state, "bob_healthy")
-        result = storefront_admin_client.admin_import_resources(
-            _BOB_CSV.encode("utf-8"), filename="mr-bob-resources.csv",
-        )
-        assert result.failed_count == 0, f"bob import failed: {result}"
-        assert result.imported_count >= 1
-        mr_state.bob_inventory_seeded = True
-
-
-class TestStage02a1_ExecutorHostRegistry:
-    def test_02a1_registers_executor_hosts_and_syncs_projection(
-        self, provisioning_client, storefront_admin_client,
-        site_capacity_admin_client, mr_state,
+    def test_02a_bob_seeds_inventory(
+        self, provisioning_client, site_capacity_admin_client,
+        storefront_admin_client, mr_state,
     ):
-        """One executor and one capacity declaration per storefront's resource.
-
-        Both storefronts reach the same site authority, and each negotiates over
-        its own resource, so each needs its own executor with its own declaration.
-        The declarations differ in `region` — the field both listings advertise and
-        the inventory guard compares by equality — so a claim from one storefront
-        cannot be satisfied by the other's capacity, which is what makes stage 06c's
-        independence assertion meaningful rather than incidental.
-
-        Two declarations on one executor would sell the same machine twice and the
-        site authority refuses that correlation, so the two hosts are required
-        rather than tidier.
-        """
-        _require(mr_state, "bob_inventory_seeded")
-
-        bob_host = provision_e2e_executor(
+        _require(mr_state, "bob_healthy")
+        host = provision_e2e_executor(
             provisioning_client,
             site_capacity_admin_client,
             host=E2E_MULTI_REGISTRY_HOST,
             pool_id=E2E_MULTI_REGISTRY_POOL_ID,
-            resource_id="compute-mr-bob-001",
+            resource_id=BOB_OFFER["resource_id"],
             sellable_units=1,
-            attributes={
-                "gpu_model": "RTX 5080",
-                "region": "California, US",
-                "sla": "90.0",
-            },
+            attributes={"gpu_model": "RTX 5080", "region": BOB_OFFER["region"],
+                        "sla": "90.0"},
         )
-        provision_e2e_executor(
-            provisioning_client,
-            site_capacity_admin_client,
-            host=f"{E2E_MULTI_REGISTRY_HOST}-ny",
-            pool_id=E2E_MULTI_REGISTRY_POOL_ID,
-            resource_id="compute-mr-alice-001",
-            sellable_units=1,
-            attributes={
-                "gpu_model": "RTX 5080",
-                "region": "New York, US",
-                "sla": "90.0",
-            },
-        )
-        assert (bob_host.gpu_count or 0) >= E2E_HOST_GPU_COUNT
-
-        sites = refresh_storefront_projections(storefront_admin_client)
-        log.info(
-            "[02a1] executor hosts %s registered (gpus=%s); projections confirmed for %s",
-            [E2E_MULTI_REGISTRY_HOST, f"{E2E_MULTI_REGISTRY_HOST}-ny"],
-            bob_host.gpu_count, sorted(sites),
-        )
+        assert (host.gpu_count or 0) >= E2E_HOST_GPU_COUNT
+        refresh_storefront_projections(storefront_admin_client)
+        mr_state.bob_inventory_seeded = True
 
 
 class TestStage02b_AliceInventory:
-    def test_02b_alice_seeds_inventory(self, alice_admin_client, mr_state):
+    def test_02b_alice_seeds_inventory(
+        self, alice_provisioning_client, alice_site_capacity_admin_client,
+        alice_admin_client, mr_state,
+    ):
         _require(mr_state, "alice_healthy")
-        result = alice_admin_client.admin_import_resources(
-            _ALICE_CSV.encode("utf-8"), filename="mr-alice-resources.csv",
+        host = provision_e2e_executor(
+            alice_provisioning_client,
+            alice_site_capacity_admin_client,
+            host=f"{E2E_MULTI_REGISTRY_HOST}-ny",
+            pool_id=E2E_MULTI_REGISTRY_POOL_ID,
+            resource_id=ALICE_OFFER["resource_id"],
+            sellable_units=1,
+            attributes={"gpu_model": "RTX 5080", "region": ALICE_OFFER["region"],
+                        "sla": "90.0"},
         )
-        assert result.failed_count == 0, f"alice import failed: {result}"
-        assert result.imported_count >= 1
+        assert (host.gpu_count or 0) >= E2E_HOST_GPU_COUNT
+        refresh_storefront_projections(alice_admin_client)
         mr_state.alice_inventory_seeded = True
 
 
@@ -688,7 +592,7 @@ class TestStage03d_AlicePublishes:
 
         resp = alice_seller_client.create_listing(
             listing_resource=ALICE_OFFER,
-            capacity_source=capacity_source_for(ALICE_OFFER),
+            capacity_source=capacity_source_for(ALICE_OFFER, site_id="default"),
             accepted_escrows=ACCEPTED_ESCROWS,
             max_duration_seconds=DURATION_HOURS * 3600,
             paused=True,
@@ -714,129 +618,84 @@ class TestStage03d_AlicePublishes:
 class TestStage04a_BobInRegistryA:
     def test_04a_bob_in_a(self, mr_state):
         _require(mr_state, "bob_listing_id")
-        resp = httpx.get(
-            f"{_REGISTRY_A}/listings/{mr_state.bob_listing_id}", timeout=5.0,
-            headers=signed_listing_read_headers(mr_state.bob_listing_id),
-        )
-        assert resp.status_code == 200, (
-            f"registry-A {resp.status_code} for bob's listing: {resp.text[:200]}"
-        )
+        with _registry_client(_REGISTRY_A) as client:
+            assert client.get_listing(mr_state.bob_listing_id).id == mr_state.bob_listing_id
         mr_state.bob_in_a = True
 
 
 class TestStage04b_BobInRegistryB:
     def test_04b_bob_in_b_with_bearer(self, mr_state):
         _require(mr_state, "bob_listing_id")
-        resp = httpx.get(
-            f"{_REGISTRY_B}/listings/{mr_state.bob_listing_id}",
-            timeout=5.0,
-            # Both gates apply: the bearer token grants read access to this
-            # private registry, and the marketplace signature identifies the
-            # caller. Neither substitutes for the other.
-            headers={
-                "Authorization": f"Bearer {_REGISTRY_B_TOKEN}",
-                **signed_listing_read_headers(mr_state.bob_listing_id),
-            },
-        )
-        assert resp.status_code == 200, (
-            f"registry-B {resp.status_code} for bob's listing: {resp.text[:200]}.\n"
-            "If 404: fanout-publish only hit registry-A. Check Bob's "
-            "[registry].urls in config.bob.toml."
-        )
+        with _registry_client(_REGISTRY_B) as client:
+            assert client.get_listing(mr_state.bob_listing_id).id == mr_state.bob_listing_id
         mr_state.bob_in_b = True
 
 
 class TestStage04c_AliceInRegistryA:
     def test_04c_alice_in_a(self, mr_state):
         _require(mr_state, "alice_listing_id")
-        resp = httpx.get(
-            f"{_REGISTRY_A}/listings/{mr_state.alice_listing_id}", timeout=5.0,
-            headers=signed_listing_read_headers(mr_state.alice_listing_id),
-        )
-        assert resp.status_code == 200, (
-            f"registry-A {resp.status_code} for alice's listing: {resp.text[:200]}"
-        )
+        with _registry_client(_REGISTRY_A) as client:
+            assert client.get_listing(mr_state.alice_listing_id).id == mr_state.alice_listing_id
         mr_state.alice_in_a = True
 
 
 class TestStage04d_AliceAbsentFromRegistryB:
     def test_04d_alice_not_in_b(self, mr_state):
-        """The whole point of Alice's single-registry config: her
-        listing must NOT appear in registry-B. If it does, either
-        registry-B did some cross-registry sync (it shouldn't) or
-        Alice's config was misread and she fanned out to both."""
         _require(mr_state, "alice_listing_id")
-        resp = httpx.get(
-            f"{_REGISTRY_B}/listings/{mr_state.alice_listing_id}",
-            timeout=5.0,
-            # Both gates apply: the bearer token grants read access to this
-            # private registry, and the marketplace signature identifies the
-            # caller. Neither substitutes for the other.
-            headers={
-                "Authorization": f"Bearer {_REGISTRY_B_TOKEN}",
-                **signed_listing_read_headers(mr_state.alice_listing_id),
-            },
-        )
-        assert resp.status_code == 404, (
-            f"Alice's listing {mr_state.alice_listing_id} unexpectedly present "
-            f"in registry-B: status={resp.status_code} body={resp.text[:200]}.\n"
-            "Either config.alice.toml grew an extra URL in [registry].urls, or "
-            "the registries are syncing across each other."
-        )
+        with _registry_client(_REGISTRY_B) as client:
+            with pytest.raises(RegistryClientError) as caught:
+                client.get_listing(mr_state.alice_listing_id)
+        assert caught.value.status_code == 404
         mr_state.alice_absent_from_b = True
-        log.info("[04d] alice's listing correctly absent from registry-B")
 
 
 # ===========================================================================
-# Phase 5 — buyer-side fan-in discovery
+# Phase 5 — production buyer discovery
 # ===========================================================================
 
-class TestStage05a_FanInUniqueListings:
-    def test_05a_fanin_returns_two_unique_listings(self, mr_state):
-        """The union over [A, B] should contain exactly two listings:
-        Bob's (deduped across A and B) and Alice's (only in A). Without
-        per-listing-id dedupe this returns 3 (Bob in A + Bob in B + Alice in A)."""
+class TestStage05a_AuthorityScopedListings:
+    def test_05a_fanin_preserves_independent_registry_authorities(self, mr_state):
         _require(
             mr_state, "bob_in_a", "bob_in_b", "alice_in_a", "alice_absent_from_b",
         )
-        merged, errors = _list_listings_multi(
-            [_REGISTRY_A, _REGISTRY_B],
-            auth={_REGISTRY_B: _REGISTRY_B_TOKEN},
+        authorities = {url: _registry_authority(url) for url in (_REGISTRY_A, _REGISTRY_B)}
+        assert authorities[_REGISTRY_A].authority != authorities[_REGISTRY_B].authority
+        listings = query_registry_for_matches_multi(
+            [_REGISTRY_A, _REGISTRY_B], signer=_buyer_signer(),
+            registry_authorities=authorities,
+            api_keys={_REGISTRY_B: _REGISTRY_B_TOKEN}, limit=200,
         )
-        assert errors == [], f"per-URL errors: {errors}"
-        all_ids = {str(r.get("listing_id") or r.get("id")) for r in merged}
-        assert mr_state.bob_listing_id in all_ids, (
-            f"Bob's listing {mr_state.bob_listing_id} missing from union {all_ids}"
-        )
-        assert mr_state.alice_listing_id in all_ids, (
-            f"Alice's listing {mr_state.alice_listing_id} missing from union {all_ids}"
-        )
-        # Dedupe assertion: each listing appears exactly once.
-        ids_list = [str(r.get("listing_id") or r.get("id")) for r in merged]
-        assert ids_list.count(mr_state.bob_listing_id) == 1, (
-            f"Bob's listing appears {ids_list.count(mr_state.bob_listing_id)} "
-            "times in the union — fan-in dedupe regression?"
-        )
-        assert ids_list.count(mr_state.alice_listing_id) == 1
+        # Other scenarios may have published listings; count this scenario's
+        # records exactly, including their authenticated source provenance.
+        records = [
+            (item["source_registry_authority"], item["source_registry_url"], item["listing_id"])
+            for item in listings
+            if item["listing_id"] in {mr_state.bob_listing_id, mr_state.alice_listing_id}
+        ]
+        expected = [
+            (authorities[_REGISTRY_A].authority, _REGISTRY_A, mr_state.bob_listing_id),
+            (authorities[_REGISTRY_A].authority, _REGISTRY_A, mr_state.alice_listing_id),
+            (authorities[_REGISTRY_B].authority, _REGISTRY_B, mr_state.bob_listing_id),
+        ]
+        assert sorted(records) == sorted(expected)
         mr_state.fanin_ok = True
-        log.info(
-            "[05a] union over [A, B] = bob + alice, each once "
-            "(merged size %d)", len(merged),
-        )
 
 
 class TestStage05b_FanInResilientToDeadRegistry:
-    def test_05b_one_dead_registry_doesnt_break_discovery(self, mr_state):
-        """Union over [A, DEAD] still finds both listings (both live in
-        A; the DEAD URL just errors and gets skipped)."""
+    def test_05b_one_dead_registry_doesnt_break_discovery(self, mr_state, capsys):
         _require(mr_state, "bob_in_a", "alice_in_a")
-        merged, errors = _list_listings_multi(
-            [_REGISTRY_A, _REGISTRY_DEAD], timeout=2.0,
+        authority = _registry_authority(_REGISTRY_A)
+        # An unreachable endpoint of A has valid trust configuration; the
+        # failure must occur during network access, not pin resolution.
+        listings = query_registry_for_matches_multi(
+            [_REGISTRY_A, _REGISTRY_DEAD], timeout=2.0, signer=_buyer_signer(),
+            registry_authorities={_REGISTRY_A: authority, _REGISTRY_DEAD: authority},
+            limit=200,
         )
-        assert _REGISTRY_DEAD in errors, f"expected dead URL in errors, got {errors}"
-        ids = {str(r.get("listing_id") or r.get("id")) for r in merged}
-        assert mr_state.bob_listing_id in ids, f"bob's missing: ids={ids}"
-        assert mr_state.alice_listing_id in ids, f"alice's missing: ids={ids}"
+        assert f"[registry] {_REGISTRY_DEAD}:" in capsys.readouterr().err
+        ids = {item["listing_id"] for item in listings}
+        assert {mr_state.bob_listing_id, mr_state.alice_listing_id} <= ids
+        assert all(item["source_registry_url"] == _REGISTRY_A for item in listings)
         mr_state.fanin_resilient_ok = True
 
 
@@ -850,7 +709,6 @@ class TestStage06a_NegotiateWithBob:
     ):
         """Buyer hits bob-storefront:8001 to start a negotiation against Bob's listing."""
         _require(mr_state, "bob_listing_id", "fanin_ok")
-        from storefront_client import SyncStorefrontClient
         # negotiate_new derives `buyer_principal` from the signer and asserts
         # the buyer role, so this client signs; the storefront records the
         # thread against whichever principal opened it.
@@ -899,7 +757,6 @@ class TestStage06a_NegotiateWithBob:
 
 
 class TestStage06b_NegotiateWithAlice:
-    @pytest.mark.skip(reason=_MULTI_STOREFRONT_SKIP)
     def test_06b_buyer_starts_negotiation_with_alice(
         self, alice_admin_client, buyer_config, mr_state
     ):
@@ -912,8 +769,7 @@ class TestStage06b_NegotiateWithAlice:
         ``alice`` URL since it knows the topology.
         """
         _require(mr_state, "alice_listing_id", "fanin_ok")
-        from storefront_client import SyncStorefrontClient
-        # See the note in stage 06a: this client signs as the buyer.
+        # This client signs as the buyer.
         buyer_to_alice = SyncStorefrontClient(
             str(settings.ALICE.API_URL),
             _signer("eip191", settings.BUYER.MARKETPLACE_CREDENTIAL,
@@ -955,7 +811,6 @@ class TestStage06b_NegotiateWithAlice:
 
 
 class TestStage06c_NegotiationsIndependent:
-    @pytest.mark.skip(reason=_MULTI_STOREFRONT_SKIP)
     def test_06c_negotiations_are_distinct_objects_on_distinct_storefronts(
         self, storefront_admin_client, alice_admin_client, mr_state,
     ):
@@ -966,7 +821,10 @@ class TestStage06c_NegotiationsIndependent:
         bob_neg = mr_state.negotiation_ids.get("bob")
         alice_neg = mr_state.negotiation_ids.get("alice")
         if not bob_neg or not alice_neg:
-            pytest.skip("upstream negotiation stages didn't both complete")
+            pytest.skip(
+                "Missing MRState.negotiation_ids[bob] or [alice]: "
+                "upstream negotiation stages did not both complete"
+            )
 
         assert bob_neg != alice_neg, (
             "Bob and Alice returned the same negotiation_id — they share state?"

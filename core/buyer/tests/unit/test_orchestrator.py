@@ -151,13 +151,14 @@ def test_run_buy_composes_injected_negotiate_and_settle_hooks() -> None:
     assert ("domain_settle", {"listing_id": "L1"}) in events
 
 
-def test_query_registry_for_matches_multi_dedupes_first_seen_listing() -> None:
+@pytest.mark.parametrize("second_authority", ["registry-ha", "registry-independent"])
+def test_query_registry_for_matches_multi_dedupes_within_authority(second_authority) -> None:
     buyer = Ed25519Signer(b"\x07" * 32)
     first = Ed25519Signer(b"\x08" * 32)
     second = Ed25519Signer(b"\x09" * 32)
     authorities = {
         "http://r1": _authority("registry-ha", first),
-        "http://r2": _authority("registry-ha", second),
+        "http://r2": _authority(second_authority, second),
     }
 
     def query(url, *_args, **kwargs):
@@ -180,7 +181,7 @@ def test_query_registry_for_matches_multi_dedupes_first_seen_listing() -> None:
             registry_authorities=authorities,
         )
 
-    assert result == [
+    expected = [
         {
             "listing_id": "L1",
             "seller": "http://r1",
@@ -191,9 +192,18 @@ def test_query_registry_for_matches_multi_dedupes_first_seen_listing() -> None:
             "listing_id": "L2",
             "seller": "http://r2",
             "source_registry_url": "http://r2",
-            "source_registry_authority": "registry-ha",
+            "source_registry_authority": second_authority,
         },
     ]
+
+    if second_authority != "registry-ha":
+        expected.insert(1, {
+            "listing_id": "L1",
+            "seller": "http://r2",
+            "source_registry_url": "http://r2",
+            "source_registry_authority": second_authority,
+        })
+    assert result == expected
 
 
 def test_registry_query_compiles_resource_and_uses_exact_authority_pin() -> None:

@@ -111,7 +111,7 @@ def listing_list(
         "-r",
         help="Comma-separated listing registry base URLs "
         "(config.toml: registry.urls). The result is the union "
-        "across all registries, deduped by listing_id.",
+        "across all registries, deduped by registry authority and listing_id.",
     ),
     discovery_timeout: float | None = typer.Option(
         None,

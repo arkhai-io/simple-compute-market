@@ -159,7 +159,8 @@ def register(credits_app: typer.Typer) -> None:
             "--registry-urls",
             help="Comma-separated registry base URLs (default: "
             "registry.urls from config.toml). Discovery is the "
-            "union across all listed registries, deduped by listing_id.",
+            "union across all listed registries, deduped by registry authority "
+            "and listing_id.",
         ),
         discovery_timeout: Optional[float] = typer.Option(
             None,

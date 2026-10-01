@@ -62,6 +62,14 @@ provisioning:
   service_scheme:     "eip191"
   service_credential: ""
 
+# Separate authority for the second storefront; supplied by the environment.
+alice_provisioning:
+  api_url: ""
+  admin_scheme: "eip191"
+  admin_credential: ""
+  authority_scheme: "ed25519"
+  authority_identifier: ""
+
 # Second storefront (multi-registry scenario)
 alice:
   api_url:

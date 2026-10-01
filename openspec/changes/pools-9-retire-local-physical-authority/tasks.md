@@ -21,7 +21,8 @@ is resolved in `design.md` as per-site, per-family projection counts:
 4. Complete `repair-multi-storefront-scenario` separately before local-inventory
    retirement. Technical gates: `capacity-resource-administration` (met) and
    the multi-storefront repair, including its projection cutover and passing
-   scenario evidence (not yet met).
+   scenario evidence (met; archived). Task 1.6 still re-grounds this plan
+   against the resulting tree before retirement begins.
 
 Section numbers preserve planning history rather than define independently
 deployable slices. After the separate multi-storefront repair is complete,

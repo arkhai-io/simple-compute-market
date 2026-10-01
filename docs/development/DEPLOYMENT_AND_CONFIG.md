@@ -165,6 +165,14 @@ authorities:
 - `compose.bare-metal.yml` composes the dedicated bare-metal storefront with a
   compute-family registry and the selected-site provisioning authority.
 
+The VM development stack runs Bob and Alice as separate storefronts with
+separate provisioning authorities. Each authority has its own service signer,
+storefront trust pin, callback destination, database, and process-local job
+queue. Both storefronts use the local site alias `default`, resolved against
+their respective authorities. The local identity overlay supplies deterministic
+development credentials, while the VM fiat overlay selects Alice and her
+authority together.
+
 The bare-metal wrapper extends each service from `domains/bare_metal/compose.yml`
 to merge role bindings with the domain topology, and declares the named volumes
 those services use. Service extension preserves the domain file's relative mount
