@@ -276,6 +276,42 @@ async def test_an_override_at_a_non_home_site_is_checked_stored_and_published_th
         assert memory == [16, 32]  # site-b's override, site-a's hint
 
 
+async def test_each_seller_sites_rate_reaches_only_its_own_listing(tmp_path):
+    """One storefront publishing for two seller sites: each site's declared rate
+    reaches only its own listing, and an override at one site leaves the other's
+    rate as its site declares it. The pools share a name, so only the site keeps
+    them apart; each states its own region so a listing shows where it came from."""
+
+    def _rate(amount):
+        return {"vm": [{"shape": HINT_SHAPE, "amount": amount, "asset": "usd",
+                        "period": "hour"}]}
+
+    def _rates_by_region(listings):
+        return {
+            resource["region"]: resource.get("asking_rate", {}).get("amount")
+            for resource in listings.values()
+        }
+
+    async with publication_app(
+        tmp_path, mechanism_fulfillment=_UNBACKED_PUBLISHABLE, second_site=True
+    ) as world:
+        world.pools.append(pool("gpu", backing="unbacked", capacity=_BIG, region="us-east",
+                                listing_shapes={"vm": [HINT_SHAPE]}, asking_rates=_rate("2.10")))
+        world.pools_b.append(pool("gpu", backing="unbacked", capacity=_BIG, region="us-west",
+                                  listing_shapes={"vm": [HINT_SHAPE]}, asking_rates=_rate("3.40")))
+        await _cycle(world)
+        declared = _rates_by_region(await _open_listings(world))
+
+        await _overrides(world).put_pool_override(
+            _record(site_id=SITE_B, asking_rates=_rate("2.95")["vm"])
+        )
+        await _cycle(world)
+        overridden = _rates_by_region(await _open_listings(world))
+
+    assert declared == {"us-east": "2.10", "us-west": "3.40"}
+    assert overridden == {"us-east": "2.10", "us-west": "2.95"}
+
+
 # -- refused writes ------------------------------------------------------------
 
 

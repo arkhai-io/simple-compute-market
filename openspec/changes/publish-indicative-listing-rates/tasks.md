@@ -9,10 +9,9 @@ site-scoped override store) may proceed now: its only prerequisite,
 `bare-metal-listing-shapes`, is archived. Section 4 (filters and the compute
 schema) is blocked on Section 2. Bare metal's share of Section 3 (publishing and
 refreshing the rate once a listing carries a shape) is unblocked on the same
-ground as 3b. Tasks 7.13 and 7.14's unbacked-supply half additionally wait on
-`unbacked-bare-metal-listings` for bare metal and
-`compose-contact-exchange-across-compute` for VM; both are named at the tasks that
-wait on them rather than gating the whole section.
+ground as 3b. The system evidence that unbacked supply carries a comparable rate
+(7.13) is transferred to the changes that make unbacked supply publishable; see
+7.13.
 
 Validation levels below are named deliberately. Per `docs/development/TESTING.md`,
 integration means the real app, a real database, a wired DI container, and the
@@ -348,10 +347,9 @@ written at promotion (8.9), after code review.
       state: both `bare-metal-publication-reads-pool-declarations` and
       `bare-metal-listing-shapes` are now archived, so this change is unblocked
       on bare-metal shapes specifically (Section 4) and on Section 3b's
-      override-store join; only the unbacked-supply system evidence (7.13,
-      7.14) remains blocked, on `unbacked-bare-metal-listings` and
-      `compose-contact-exchange-across-compute`. Re-confirmed current as of this
-      planning pass.
+      override-store join. The unbacked-supply system evidence was later
+      transferred out (7.13), and multi-seller provenance proven at integration
+      (7.14), so no task remains blocked on another change.
 
 ## 7. Validation
 
@@ -430,19 +428,28 @@ change that touches the module.
       rate-bounded query and keeps its option's empty rate list. The registry
       depends on no mechanism, so the mechanism's name and asset are stated
       literally.
-- [ ] 7.13 **System.** `e2e-tests/tests/e2e/`: a buyer query bounded by rate
-      returns backed and unbacked listings together, bare metal and VM, and
-      excludes listings publishing no rate. Blocked on
-      `unbacked-bare-metal-listings` and
-      `compose-contact-exchange-across-compute`; until both land, record this as
-      an explicit blocker and treat it as unrun rather than passed.
-- [ ] 7.14 **System.** Multi-seller provenance. Integration already proves an
-      override at a non-first site replaces that site's rates and leaves the
-      other site on its own declaration
-      (`domains/vms/storefront/tests/integration/test_reconciler_projection.py`).
-      The system scenario waits on a lane with two seller sites; the only
-      two-storefront scenario is owned by `repair-multi-storefront-scenario`,
-      which is active. Unrun until then.
+- [x] 7.13 **Transferred.** A buyer query bounded by rate returning backed and
+      unbacked listings together. The asking-rate path is independent of backing,
+      and this change proves it through running services on backed supply (8.8)
+      and, at the registry, for a listing whose only option is a rateless
+      introduction (7.12). What is missing is the unbacked listing itself, which
+      two other changes create, so each owns its half where its own system
+      scenario already queries backed and unbacked supply together:
+      `compose-contact-exchange-across-compute` 6.4 (VM) bounds that query by
+      asking rate, and `unbacked-bare-metal-listings` carries the bare-metal half
+      in its proposal and closeout. Holding this change open for them would have
+      left already-true behaviour unpromoted behind a Goal 6 prerequisite
+      (`contact-payload-retention`) with no tasks begun.
+- [x] 7.14 **Integration** (re-levelled from System). Multi-seller provenance:
+      `domains/vms/storefront/tests/integration/test_pool_overrides_api.py`
+      (`test_each_seller_sites_rate_reaches_only_its_own_listing`) runs one
+      storefront app for two seller sites whose pools share a name. Each site's
+      declared rate reaches only its own listing, and an override at one site
+      changes only that site's. System level adds nothing here: provenance is the
+      storefront keying rates by site and pool, and both service crossings the
+      rate makes, site to storefront and storefront to registry, are proven by
+      the bare-metal end-to-end run (8.8). The dependency on
+      `repair-multi-storefront-scenario` is dropped.
 
 ## 7b. Review findings
 
@@ -527,7 +534,7 @@ From the implementation review. Each was reproduced before it was changed.
 - [x] 8.7 **Documentation citations.**
       `make check-doc-citations CHANGE=publish-indicative-listing-rates` passes;
       rerun after promotion.
-- [ ] 8.8 **End-to-end pipeline.**
+- [x] 8.8 **End-to-end pipeline.**
       - Run 36837675676: VM lane 126 passed with its 2 existing skips; the
         bare-metal lane failed before any scenario, its storefront unable to
         start (the 3b.4 defect).
@@ -539,9 +546,13 @@ From the implementation review. Each was reproduced before it was changed.
         rate and maximum duration and reports `applied`), and 05d (deleting it
         restores the pool's rate). No tracebacks in either lane's container
         logs.
-      - Owed: a run including the 7b review fixes, which change the registry
-        evaluator, the asking-rate reader, and bare-metal override handling.
-      - Unrun by design: 7.13 and 7.14 (blocked; see those tasks).
+      - Run 36841346733, including the 7b review fixes: both lanes passed. VM:
+        126 passed and 2 existing skips. Bare metal: all 11 publication stages
+        passed, 05b–05d included. No tracebacks in either lane's container logs.
+      - `make test` passed in the reviewer's environment on the same tree,
+        covering the suites the implementation environment could not run (the
+        VM storefront's chain-dependent Alkahest tests and its `rl` extra).
+      - 7.13 transferred and 7.14 proven at integration; neither is owed here.
       - Note: `e2e-tests/tests/unit/test_hosted_public_boundary.py::
         test_buyer_deployment_mounts_separate_profile_state_and_credential`
         fails before this change too; it reads compose files this change does

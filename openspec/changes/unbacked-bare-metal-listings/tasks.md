@@ -18,4 +18,6 @@ phase; not yet planned.
 - [ ] 2.1 The closeout task defined in
       `openspec/README.md#plan-closeout-requirements`, written out in full when this
       change is planned, including the system evidence that unbacked bare-metal
-      discovery reaches a usable introduction.
+      discovery reaches a usable introduction, and that a buyer query bounded by
+      asking rate returns backed and unbacked bare-metal listings together
+      (transferred from `publish-indicative-listing-rates` 7.13).

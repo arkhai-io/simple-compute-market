@@ -35,6 +35,11 @@ What is missing is bare metal using that machinery.
 - Settle introductions through the domain-neutral composition
   `compose-contact-exchange-across-compute` promotes, revealing the contact of the
   listing's origin seller.
+- Own the bare-metal system evidence that unbacked supply is comparable on price: a
+  buyer query bounded by asking rate returns backed and unbacked bare-metal listings
+  together and excludes one publishing no rate. Transferred from
+  `publish-indicative-listing-rates` (its 7.13), which proved the asking-rate path on
+  backed supply; it rides on the same running scenario as the evidence below.
 - Own the bare-metal system evidence for Goal 7: unbacked bare-metal discovery reaching
   a usable introduction in a running stack.
 
@@ -84,4 +89,6 @@ None.
   and settlement of an unbacked bare-metal listing through the kit negotiation
   runtime; that section's only prerequisite, the negotiation runtime kit, is in
   place, so nothing else in that change gates this one.
-- **Unblocks** the bare-metal system evidence of `publish-indicative-listing-rates`.
+- **Carries** the bare-metal half of `publish-indicative-listing-rates`' unbacked
+  supply system evidence, transferred here because this change creates the listing it
+  needs.

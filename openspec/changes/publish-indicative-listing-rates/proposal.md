@@ -163,9 +163,12 @@ None.
   to the site-scoped override store was scoped there first and moved here: it is
   independent of the shape work, and the storefront tier's authority over asking
   rates is its first bare-metal consumer.
-- **System evidence for unbacked supply blocked on `unbacked-bare-metal-listings`**
-  (bare metal) and **`compose-contact-exchange-across-compute`** (VM). Until those
-  land, no unbacked compute listing can be published in a running stack.
+- **Transfers the system evidence for unbacked supply** to
+  `unbacked-bare-metal-listings` (bare metal) and
+  `compose-contact-exchange-across-compute` (VM, its 6.4): until those land, no
+  unbacked compute listing can be published in a running stack, and the
+  asking-rate path they would exercise is independent of backing and already proven
+  here on backed supply.
 - Builds on the archived `unbacked-listing-publication` and
   `publish-multidimensional-listing-shape`: the backing field, source-publication
   reconciliation, the listing-identity rule, listing shapes, and the site-scoped

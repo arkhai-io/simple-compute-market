@@ -661,10 +661,12 @@ follows.
   - it must publish unbacked listings at all — `unbacked-bare-metal-listings` — for
     the supply Goal 7 exists to serve to carry a rate.
 
-Implementation of this change therefore waits on the first two. Its system
-evidence for unbacked supply waits on `unbacked-bare-metal-listings` for bare
-metal and `compose-contact-exchange-across-compute` for VM. The registry primitives
-have no domain dependency and may land first.
+Implementation of this change therefore waits on the first two. The system
+evidence that unbacked supply carries a comparable rate belongs to the changes that
+make unbacked supply publishable, `unbacked-bare-metal-listings` for bare metal and
+`compose-contact-exchange-across-compute` for VM, because the rate path is
+independent of backing and what is missing is the unbacked listing itself. The
+registry primitives have no domain dependency and may land first.
 
 ### Bare metal joins the site-scoped override store
 
