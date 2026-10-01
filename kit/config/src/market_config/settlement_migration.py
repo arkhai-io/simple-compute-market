@@ -471,11 +471,7 @@ def reject_legacy_settlement_path(path: str, *, command: str) -> None:
 def environment_renames(
     environ: Mapping[str, str], *, role: SettlementRole
 ) -> tuple[EnvironmentRename, ...]:
-    """Project legacy marketplace environment names without reading their values.
-
-    Hosted-service-owned ``HOSTED_SETTLEMENT_*`` variables are intentionally not
-    marketplace aliases and are therefore never returned.
-    """
+    """Project supported marketplace environment aliases without reading values."""
 
     renames: list[EnvironmentRename] = []
     if role == "seller":

@@ -100,7 +100,7 @@ async def test_valid_listing_passes() -> None:
 
 
 @pytest.mark.asyncio
-async def test_hosted_settlement_option_passes_without_alkahest_choice() -> None:
+async def test_mechanism_option_passes_without_alkahest_choice() -> None:
     payload = _valid_payload(
         accepted_escrows=[],
         settlement_options=[

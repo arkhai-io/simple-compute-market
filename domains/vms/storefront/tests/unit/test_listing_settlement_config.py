@@ -110,7 +110,7 @@ async def test_clause_only_create_persists_canonical_clause_before_publication(
         },
     )
     option = {
-        "option_id": "stripe-option",
+        "option_id": "example-option",
         "mechanism": "example.payment.v1",
         "asset": "usd",
         "rates": [{"field": "amount", "per": "hour", "value": "200"}],
