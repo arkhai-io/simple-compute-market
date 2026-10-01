@@ -15,8 +15,21 @@ from typing import Any
 
 from core_storefront.app_composition import StorefrontAppConfig
 from core_storefront.domain_registry import (
-    StorefrontDomainRegistry,
     StorefrontDomainRegistration,
+    StorefrontDomainRegistry,
+)
+from core_storefront.services.negotiation_service import NegotiationService
+from core_storefront.stage_log import set_stage_event_db_path, stage_event
+from market_core import MarketDomainContract
+from market_settlement_runtime import SettlementJobCoordinator
+from market_storefront_kit import (
+    AlkahestChain,
+    AlkahestClientPolicy,
+    StorefrontComposition,
+    StorefrontRouteHooks,
+    StorefrontServiceHooks,
+    build_alkahest_clients,
+    build_composed_storefront_app,
 )
 
 import apicredits_storefront.container as _container
@@ -27,45 +40,32 @@ from apicredits_storefront.domain_runtime import (
     prepare_api_credit_settlement,
     reserve_api_credit_settlement,
 )
+from apicredits_storefront.middleware.response_auth import authenticate_response
+from apicredits_storefront.negotiation_runtime import (
+    build_api_credit_negotiation_runtime,
+)
 from apicredits_storefront.services.fulfillment_service import (
     build_api_credit_failure_policy,
 )
 from apicredits_storefront.services.listing_service import ListingService
 from apicredits_storefront.services.system_service import SystemService
-from apicredits_storefront.startup import _startup_tasks
 from apicredits_storefront.settlement_composition import (
     ApiCreditsSettlementComposition,
     build_api_credit_settlement_composition,
     build_storefront_settlement_registry,
 )
+from apicredits_storefront.startup import _startup_tasks
 from apicredits_storefront.utils.config import (
     AGENT_ID,
     BASE_URL_OVERRIDE,
     CHAINS,
     resolve_admin_identities,
-    settlement_config_mapping,
     resolve_identity_signer,
     resolve_registry_authorities,
     settings,
+    settlement_config_mapping,
 )
 from apicredits_storefront.utils.sqlite_client import get_sqlite_client
-from apicredits_storefront.negotiation_runtime import (
-    build_api_credit_negotiation_runtime,
-)
-from core_storefront.services.negotiation_service import NegotiationService
-from core_storefront.stage_log import set_stage_event_db_path, stage_event
-from market_core import MarketDomainContract
-from market_storefront_kit import (
-    AlkahestChain,
-    AlkahestClientPolicy,
-    StorefrontComposition,
-    StorefrontRouteHooks,
-    StorefrontServiceHooks,
-    build_alkahest_clients,
-    build_composed_storefront_app,
-)
-from market_settlement_runtime import SettlementJobCoordinator
-from apicredits_storefront.middleware.response_auth import authenticate_response
 
 logger = logging.getLogger(__name__)
 
@@ -263,10 +263,6 @@ async def _stop_api_credit_services(
     logger.info("[SHUTDOWN] API-credits storefront shutting down")
 
 
-from apicredits_storefront.controllers.hosted_settlement_controller import (  # noqa: E402
-    evidence_router,
-    router as hosted_settlement_router,
-)
 from apicredits_storefront.controllers.listings_controller import (  # noqa: E402
     router as listings_router,
 )
@@ -278,6 +274,8 @@ from apicredits_storefront.controllers.negotiations_controller import (  # noqa:
 )
 from apicredits_storefront.controllers.settle_controller import (  # noqa: E402
     admin_settle_router,
+)
+from apicredits_storefront.controllers.settle_controller import (
     router as settle_router,
 )
 from apicredits_storefront.controllers.system_controller import (  # noqa: E402
@@ -344,8 +342,6 @@ def build_api_credits_storefront_app(
                 routers=(
                     system_router,
                     listings_router,
-                    hosted_settlement_router,
-                    evidence_router,
                     negotiate_router,
                     negotiations_router,
                     settle_router,

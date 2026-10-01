@@ -9,6 +9,30 @@ from dataclasses import replace
 from decimal import Decimal
 from typing import Any
 
+from market_alkahest.proposals import accepted_escrow_artifacts_from_proposal
+from market_core import MarketDomainContract
+from market_core.schemas import (
+    SettlementObligation,
+    SettlementOption,
+    SettlementPlan,
+    SettlementSelection,
+)
+from market_identity import Identity
+from market_negotiation_runtime import (
+    Acceptance,
+    AgreementTerms,
+    NegotiationDomainHooks,
+    NegotiationRuntime,
+    NegotiationStateError,
+    NegotiationTerms,
+    OfferUnfulfillableError,
+    OpeningRecord,
+    ResolvedNegotiation,
+    RoundEvaluation,
+    RoundRequest,
+)
+from market_policy.scalar_policies import _amount_from_proposal
+
 from apicredits_storefront.services.capacity_client import (
     build_capacity_client,
     build_capacity_runtime,
@@ -27,30 +51,6 @@ from domains.apicredits.negotiation.terms import (
     provision_key_mode,
     provision_quantity,
 )
-from market_alkahest.proposals import accepted_escrow_artifacts_from_proposal
-from market_core import MarketDomainContract
-from market_core.schemas import (
-    SettlementObligation,
-    SettlementOption,
-    SettlementPlan,
-    SettlementSelection,
-)
-from market_hosted_settlement import default_hosted_selection_dispatch
-from market_identity import Identity
-from market_negotiation_runtime import (
-    Acceptance,
-    AgreementTerms,
-    NegotiationDomainHooks,
-    NegotiationRuntime,
-    NegotiationStateError,
-    NegotiationTerms,
-    OpeningRecord,
-    ResolvedNegotiation,
-    RoundEvaluation,
-    OfferUnfulfillableError,
-    RoundRequest,
-)
-from market_policy.scalar_policies import _amount_from_proposal
 
 logger = logging.getLogger(__name__)
 
@@ -151,7 +151,7 @@ def _proposal_from_amount(
     return base
 
 
-def _hosted_policy_state(
+def _selected_policy_state(
     listing: Mapping[str, Any],
     proposal: Mapping[str, Any] | None,
     admitted_mechanisms: Collection[str],
@@ -166,11 +166,11 @@ def _hosted_policy_state(
         "option_id",
         "expiration_unix",
     }:
-        raise NegotiationStateError("hosted settlement selection is not exact")
+        raise NegotiationStateError("selected settlement selection is not exact")
     try:
         selection = SettlementSelection.model_validate(raw_selection)
     except (TypeError, ValueError) as exc:
-        raise NegotiationStateError("hosted settlement selection is invalid") from exc
+        raise NegotiationStateError("selected settlement selection is invalid") from exc
     if selection.mechanism not in admitted_mechanisms:
         raise NegotiationStateError(
             "exact settlement selection uses an unsupported mechanism"
@@ -203,7 +203,7 @@ def _hosted_policy_state(
                 ) from exc
     if len(matches) != 1:
         raise NegotiationStateError(
-            "hosted settlement selection no longer exact-matches the trusted listing"
+            "selected settlement selection no longer exact-matches the trusted listing"
         )
     return {
         "accepted_settlement_selection": selection.model_dump(mode="json"),
@@ -211,7 +211,7 @@ def _hosted_policy_state(
     }
 
 
-def _preserve_hosted_round_selection(
+def _preserve_selected_round_selection(
     listing: Mapping[str, Any],
     history: Sequence[Any],
     admitted_mechanisms: Collection[str],
@@ -221,7 +221,7 @@ def _preserve_hosted_round_selection(
         if history and isinstance(history[0].proposal, Mapping)
         else None
     )
-    state = _hosted_policy_state(listing, opening_proposal, admitted_mechanisms)
+    state = _selected_policy_state(listing, opening_proposal, admitted_mechanisms)
     pinned = state["accepted_settlement_selection"] if state is not None else None
     buyer_rounds = [
         (index, item)
@@ -259,7 +259,7 @@ def _acceptance_policy_state(
     acceptance: Acceptance,
     admitted_mechanisms: Collection[str],
 ) -> Mapping[str, Any]:
-    pinned = _hosted_policy_state(
+    pinned = _selected_policy_state(
         acceptance.listing_record,
         acceptance.pinned_proposal,
         admitted_mechanisms,
@@ -276,7 +276,7 @@ def _acceptance_policy_state(
         selected = candidate.get("accepted_settlement_selection")
         if selected is not None and selected != pinned["accepted_settlement_selection"]:
             raise NegotiationStateError(
-                "hosted settlement policy state changed after opening"
+                "selected settlement policy state changed after opening"
             )
     return pinned
 
@@ -372,7 +372,7 @@ def _accepted_selection_artifacts(
         raise OfferUnfulfillableError("api_credit_quantity_unavailable")
     listing_id = listing.get("listing_id")
     if not isinstance(listing_id, str) or not listing_id:
-        raise OfferUnfulfillableError("hosted_listing_identity_unavailable")
+        raise OfferUnfulfillableError("selected_listing_identity_unavailable")
     try:
         built = build_obligation(
             advertised.model_dump(mode="json"),
@@ -386,10 +386,10 @@ def _accepted_selection_artifacts(
             },
         )
     except (TypeError, ValueError) as exc:
-        raise OfferUnfulfillableError("hosted_settlement_option_not_exact") from exc
+        raise OfferUnfulfillableError("selected_settlement_option_not_exact") from exc
     if built.amount is not None:
         if agreed_amount != built.amount:
-            raise OfferUnfulfillableError("hosted_amount_not_quantity_scaled")
+            raise OfferUnfulfillableError("selected_amount_not_quantity_scaled")
     elif agreed_amount:
         raise OfferUnfulfillableError("selection_amount_not_negotiable")
     service_terms = {
@@ -410,7 +410,7 @@ def _accepted_selection_artifacts(
             obligations=[SettlementObligation.model_validate(built.obligation)],
         )
     except (TypeError, ValueError) as exc:
-        raise OfferUnfulfillableError("hosted_settlement_option_not_exact") from exc
+        raise OfferUnfulfillableError("selected_settlement_option_not_exact") from exc
     return {
         "settlement_selection": accepted.model_dump(mode="json"),
         "settlement_plan": plan.model_dump(mode="json"),
@@ -593,9 +593,7 @@ def build_api_credit_negotiation_runtime(
     """Compose the shared lifecycle with API-credit codecs and effects."""
 
     dispatch = (
-        accepted_obligation_dispatch
-        if accepted_obligation_dispatch is not None
-        else default_hosted_selection_dispatch()
+        accepted_obligation_dispatch if accepted_obligation_dispatch is not None else {}
     )
 
     async def resolve_opening(
@@ -628,7 +626,7 @@ def build_api_credit_negotiation_runtime(
             raise NegotiationStateError(
                 f"Seller's order {listing_id} is gone from local DB"
             )
-        binding = _hosted_policy_state(
+        binding = _selected_policy_state(
             record,
             (
                 thread.get("buyer_escrow_proposal")
@@ -646,7 +644,7 @@ def build_api_credit_negotiation_runtime(
         )
 
     async def evaluate(request: RoundRequest) -> RoundEvaluation:
-        history, hosted_state = _preserve_hosted_round_selection(
+        history, selected_state = _preserve_selected_round_selection(
             request.listing_record,
             request.history,
             dispatch,
@@ -670,8 +668,8 @@ def build_api_credit_negotiation_runtime(
             ),
         )
         state = dict(result.intermediate or {})
-        if hosted_state is not None:
-            state.update(hosted_state)
+        if selected_state is not None:
+            state.update(selected_state)
         pinned = state.get("accepted_escrow_proposal")
         return RoundEvaluation(
             our_amount=int(result.our_amount),

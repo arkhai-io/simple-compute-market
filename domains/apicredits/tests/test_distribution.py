@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 import shutil
 import subprocess
 import sys
@@ -8,7 +7,6 @@ import zipfile
 from pathlib import Path
 
 import pytest
-
 
 REPO = Path(__file__).resolve().parents[3]
 APICREDITS = REPO / "domains" / "apicredits"
@@ -90,10 +88,6 @@ def wheels(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
             REPO / "kit" / "settlement-runtime",
             "arkhai_kit_settlement_runtime-*.whl",
         ),
-        "hosted_settlement": (
-            REPO / "kit" / "hosted-settlement",
-            "arkhai_kit_hosted_settlement-*.whl",
-        ),
         "resource_pools": (
             REPO / "kit" / "resource-pools",
             "arkhai_kit_resource_pools-*.whl",
@@ -115,22 +109,6 @@ def wheels(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
         matches = sorted(output.glob(pattern))
         assert len(matches) == 1
         built[name] = matches[0]
-    # The version follows the pin rather than being spelled again here, where
-    # nothing would keep it in step with the package that actually declares it.
-    pinned = re.search(
-        r'arkhai-hosted-settlement-client==([0-9]+\.[0-9]+\.[0-9]+)',
-        (REPO / "kit" / "hosted-settlement" / "pyproject.toml").read_text(
-            encoding="utf-8"
-        ),
-    )
-    assert pinned is not None
-    hosted_clients = sorted(
-        (REPO / ".dist").glob(
-            f"arkhai_hosted_settlement_client-{pinned.group(1)}-py3-none-any.whl"
-        )
-    )
-    assert len(hosted_clients) == 1
-    shutil.copy2(hosted_clients[0], output / hosted_clients[0].name)
     return built
 
 

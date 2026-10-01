@@ -23,15 +23,14 @@ from domains.vms.negotiation import storefront_round as vm_storefront_round
 from domains.vms.negotiation.policies import _amount_from_proposal
 from domains.vms.negotiation.storefront_round import SellerRoundHook, SellerRoundResult
 from domains.vms.settlement.proposals import accepted_escrow_artifacts_from_proposal
+from market_capacity_publication import CapacityBinding, CapacityRuntime
 from market_core import MarketDomainContract
 from market_core.schemas import (
-    EscrowProposal,
     SettlementObligation,
     SettlementOption,
     SettlementPlan,
     SettlementSelection,
 )
-from market_hosted_settlement import default_hosted_selection_dispatch
 from market_identity import Identity
 from market_negotiation_runtime import (
     Acceptance,
@@ -47,7 +46,7 @@ from market_negotiation_runtime import (
     RoundRequest,
 )
 from market_policy.negotiation_middleware import NegotiationDecision, NegotiationRound
-from market_capacity_publication import CapacityBinding, CapacityRuntime
+
 from market_storefront.services.capacity_client import capacity_binding_for_listing
 from market_storefront.utils.config import CHAINS, get_evm_wallet_address, settings
 
@@ -119,9 +118,7 @@ def _default_seller_round_hook(
 
 
 def _chain_config_paths() -> dict[str, str | None]:
-    return {
-        name: chain.alkahest_address_config_path for name, chain in CHAINS.items()
-    }
+    return {name: chain.alkahest_address_config_path for name, chain in CHAINS.items()}
 
 
 def _decode_vm_terms(domain: MarketDomainContract, raw_terms: Any) -> NegotiationTerms:
@@ -157,8 +154,7 @@ def _validate_vm_opening(
     mismatched = {
         key: {"requested": requested[key], "listing": listing_compute.get(key)}
         for key in _DIMENSION_COMPUTE_KEYS
-        if requested.get(key) is not None
-        and requested[key] != listing_compute.get(key)
+        if requested.get(key) is not None and requested[key] != listing_compute.get(key)
     }
     if mismatched:
         raise OfferUnfulfillableError(
@@ -272,9 +268,7 @@ def build_vm_accepted_artifacts(
                 buyer_wire if obligation.get("payer") == "buyer" else seller_wire
             )
             obligation["claimant_principal"] = (
-                buyer_wire
-                if obligation.get("claimant") == "buyer"
-                else seller_wire
+                buyer_wire if obligation.get("claimant") == "buyer" else seller_wire
             )
     return artifacts
 
@@ -331,22 +325,20 @@ def _accepted_vm_service_terms(
         else provision_terms
     )
     if not isinstance(provision, Mapping):
-        raise OfferUnfulfillableError("hosted_vm_provision_terms_unavailable")
+        raise OfferUnfulfillableError("selected_vm_provision_terms_unavailable")
     listing_id = listing.get("listing_id")
     if not isinstance(listing_id, str) or not listing_id:
-        raise OfferUnfulfillableError("hosted_listing_identity_unavailable")
+        raise OfferUnfulfillableError("selected_listing_identity_unavailable")
     order = dict(listing)
     offer_resource = order.get("offer_resource")
     if isinstance(offer_resource, str):
         try:
             offer_resource = json.loads(offer_resource)
         except json.JSONDecodeError as exc:
-            raise OfferUnfulfillableError(
-                "hosted_offer_resource_unavailable"
-            ) from exc
+            raise OfferUnfulfillableError() from exc
         order["offer_resource"] = offer_resource
     if not isinstance(offer_resource, dict):
-        raise OfferUnfulfillableError("hosted_offer_resource_unavailable")
+        raise OfferUnfulfillableError("selected_offer_resource_unavailable")
     return {
         "vm.v1": {
             "listing_id": listing_id,
@@ -380,7 +372,7 @@ def _accepted_selection_artifacts(
     try:
         advertised_option = SettlementOption.model_validate(option)
     except (TypeError, ValueError) as exc:
-        raise OfferUnfulfillableError("hosted_settlement_option_not_exact") from exc
+        raise OfferUnfulfillableError("selected_settlement_option_not_exact") from exc
     if (
         accepted.option_id != advertised_option.option_id
         or accepted.mechanism != advertised_option.mechanism
@@ -391,7 +383,7 @@ def _accepted_selection_artifacts(
         raise OfferUnfulfillableError("settlement_mechanism_unsupported")
     listing_id = listing.get("listing_id")
     if not isinstance(listing_id, str) or not listing_id:
-        raise OfferUnfulfillableError("hosted_listing_identity_unavailable")
+        raise OfferUnfulfillableError("selected_listing_identity_unavailable")
     try:
         built = build_obligation(
             advertised_option.model_dump(mode="json"),
@@ -405,10 +397,10 @@ def _accepted_selection_artifacts(
             },
         )
     except (TypeError, ValueError) as exc:
-        raise OfferUnfulfillableError("hosted_settlement_option_not_exact") from exc
+        raise OfferUnfulfillableError("selected_settlement_option_not_exact") from exc
     if built.amount is not None:
         if agreed_amount != built.amount:
-            raise OfferUnfulfillableError("hosted_amount_not_duration_scaled")
+            raise OfferUnfulfillableError("selected_amount_not_duration_scaled")
     elif agreed_amount:
         raise OfferUnfulfillableError("selection_amount_not_negotiable")
     try:
@@ -425,7 +417,7 @@ def _accepted_selection_artifacts(
             obligations=[SettlementObligation.model_validate(built.obligation)],
         )
     except (TypeError, ValueError) as exc:
-        raise OfferUnfulfillableError("hosted_settlement_option_not_exact") from exc
+        raise OfferUnfulfillableError("selected_settlement_option_not_exact") from exc
     return {
         "settlement_selection": accepted.model_dump(),
         "settlement_plan": plan.model_dump(),
@@ -451,9 +443,7 @@ def _accepted_settlement_artifacts(
     if isinstance(proposal, Mapping) and isinstance(
         proposal.get("settlement_selection"), Mapping
     ):
-        selection = SettlementSelection.model_validate(
-            proposal["settlement_selection"]
-        )
+        selection = SettlementSelection.model_validate(proposal["settlement_selection"])
         options = listing.get("settlement_options") or []
         if isinstance(options, str):
             options = json.loads(options)
@@ -587,6 +577,7 @@ def lookup_pool_policy_tags(
             pool_id_for_listing,
             site_id_for_listing,
         )
+
         from market_storefront.services.site_projection_cache import (
             projection_caches,
         )
@@ -624,6 +615,7 @@ async def _place_capacity_hold(
 
     from core_storefront.stage_log import stage_event
     from market_resource_pools.hints import capped_hold_seconds
+
     from market_storefront.services.vm_job_spec_service import (
         compute_capacity_claim_from_order,
     )
@@ -699,9 +691,7 @@ def build_vm_negotiation_runtime(
     """Compose the shared lifecycle with the exact registered VM contract."""
 
     dispatch = (
-        accepted_obligation_dispatch
-        if accepted_obligation_dispatch is not None
-        else default_hosted_selection_dispatch()
+        accepted_obligation_dispatch if accepted_obligation_dispatch is not None else {}
     )
 
     if not isinstance(registry, StorefrontDomainRegistry):
@@ -738,8 +728,7 @@ def build_vm_negotiation_runtime(
             or registry.resolve(durable_binding) is not domain
         ):
             raise NegotiationStateError(
-                "durable negotiation binding does not select the configured "
-                "VM contract"
+                "durable negotiation binding does not select the configured VM contract"
             )
 
     def require_capacity_binding(
@@ -760,9 +749,7 @@ def build_vm_negotiation_runtime(
         listing_id: str,
     ) -> ResolvedNegotiation:
         require_repository_registry(repository)
-        listing_binding = await repository.load_listing_binding(
-            listing_id=listing_id
-        )
+        listing_binding = await repository.load_listing_binding(listing_id=listing_id)
         if listing_binding is None:
             raise NegotiationStateError(
                 f"listing {listing_id!r} has no durable storefront binding"
@@ -805,9 +792,7 @@ def build_vm_negotiation_runtime(
                 "negotiation binding does not match its recorded VM listing"
             )
         require_domain_binding(thread_binding.binding)
-        listing_binding = await repository.load_listing_binding(
-            listing_id=listing_id
-        )
+        listing_binding = await repository.load_listing_binding(listing_id=listing_id)
         if (
             listing_binding is None
             or listing_binding.binding != thread_binding.binding
@@ -935,8 +920,9 @@ def build_vm_negotiation_runtime(
             dispatch,
         ),
         decision_wire=_decision_wire,
-        listing_is_live=lambda record: str(record.get("status") or "").strip()
-        == "open",
+        listing_is_live=lambda record: (
+            str(record.get("status") or "").strip() == "open"
+        ),
         listing_is_paused=listing_is_paused,
         storefront_is_paused=storefront_is_paused,
         stage_event=stage_event,
@@ -963,7 +949,8 @@ async def compute_round_zero_decision(
 ) -> tuple[int, str, str, str, NegotiationDecision]:
     """Run the VM policy adapter against the exact durable capacity binding."""
 
-    if getattr(repository, "domain_registry", None) is not registry:
+    repository_registry: StorefrontDomainRegistry = getattr(repository, "domain_registry", None)
+    if repository_registry is not registry:
         raise RuntimeError(
             "round-zero evaluation and repository must share the exact registry"
         )

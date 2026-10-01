@@ -18,7 +18,6 @@ dependencies = [
   "arkhai-core-buyer>=0.3.0",
   "arkhai-core>=0.2.0",
   "arkhai-kit-alkahest",
-  "arkhai-kit-hosted-settlement==0.1.4",
   "arkhai-kit-identity==0.3.0",
   "arkhai-kit-config",
   "arkhai-kit-policy",
@@ -95,7 +94,6 @@ dev-mode-dirs = ["../../.."]
 "common.py" = "domains/vms/buyer/common.py"
 "config_cli.py" = "domains/vms/buyer/config_cli.py"
 "deal_helpers.py" = "domains/vms/buyer/deal_helpers.py"
-"hosted_authorization.py" = "domains/vms/buyer/hosted_authorization.py"
 "escrow_cli.py" = "domains/vms/buyer/escrow_cli.py"
 "listing_cli.py" = "domains/vms/buyer/listing_cli.py"
 "logs_cli.py" = "domains/vms/buyer/logs_cli.py"

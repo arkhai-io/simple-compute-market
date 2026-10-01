@@ -16,11 +16,14 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from unittest.mock import patch
+
 import pytest
-
-
-from market_policy.negotiation_middleware import load_negotiation_chain
-
+from arkhai_vms import VmProvisionTerms, make_vm_provision_terms
+from identity_helpers import (
+    BUYER_SIGNER,
+    seller_principals,
+    signed_response_headers,
+)
 from market_core.schemas import (
     EscrowProposal,
     RateValue,
@@ -28,13 +31,9 @@ from market_core.schemas import (
     SettlementSelection,
     derive_settlement_option_id,
 )
+from market_policy.negotiation_middleware import load_negotiation_chain
+
 from domains.vms.buyer.buyer_client import NegotiationOutcome, negotiate_with_seller
-from arkhai_vms import VmProvisionTerms, make_vm_provision_terms
-from identity_helpers import (
-    BUYER_SIGNER,
-    seller_principals,
-    signed_response_headers,
-)
 
 
 # Canonical provision / escrow proposals used by every negotiate test —
@@ -71,7 +70,7 @@ def _seller_proposal(amount: int) -> dict:
     }
 
 
-def _hosted_option() -> SettlementOption:
+def _example_option() -> SettlementOption:
     seller = seller_principals().identities[0]
     rates = [RateValue(field="amount", per="hour", value=50)]
     params = {
@@ -80,19 +79,19 @@ def _hosted_option() -> SettlementOption:
     }
     return SettlementOption(
         option_id=derive_settlement_option_id(
-            mechanism="fiat.stripe.v1",
+            mechanism="example.payment.v1",
             asset="usd",
             rates=rates,
             params=params,
         ),
-        mechanism="fiat.stripe.v1",
+        mechanism="example.payment.v1",
         asset="usd",
         rates=rates,
         params=params,
     )
 
 
-def _hosted_accept_reply(
+def _example_accept_reply(
     *,
     negotiation_id: str,
     selection: SettlementSelection,
@@ -228,9 +227,9 @@ def test_round_0_seller_accepts_immediately(mock_urlopen):
 
 
 @patch("core_buyer.negotiation_client.urllib.request.urlopen")
-def test_round_0_hosted_selection_is_pinned_and_returned(mock_urlopen):
+def test_round_0_example_selection_is_pinned_and_returned(mock_urlopen):
     seen_body = {}
-    option = _hosted_option()
+    option = _example_option()
     selection = SettlementSelection(
         mechanism=option.mechanism,
         option_id=option.option_id,
@@ -241,7 +240,7 @@ def test_round_0_hosted_selection_is_pinned_and_returned(mock_urlopen):
         seen_body.update(json.loads(req.data.decode("utf-8")))
         return _signed_mock_response(
             req,
-            _hosted_accept_reply(
+            _example_accept_reply(
                 negotiation_id="neg-hosted",
                 selection=selection,
                 option=option,
@@ -266,14 +265,14 @@ def test_round_0_hosted_selection_is_pinned_and_returned(mock_urlopen):
     assert seen_body["proposal"]["settlement_selection"] == selection.model_dump()
     assert outcome.settlement_selection == selection
     assert outcome.settlement_plan is not None
-    assert outcome.settlement_plan.obligations[0].mechanism == "fiat.stripe.v1"
+    assert outcome.settlement_plan.obligations[0].mechanism == "example.payment.v1"
 
 
 @patch("core_buyer.negotiation_client.urllib.request.urlopen")
 def test_round_0_delegates_domain_plan_semantics_after_universal_checks(
     mock_urlopen,
 ):
-    base = _hosted_option()
+    base = _example_option()
     params = {**base.params, "domain_binding": {"resource": "resource-1"}}
     option = SettlementOption(
         option_id=derive_settlement_option_id(
@@ -292,7 +291,7 @@ def test_round_0_delegates_domain_plan_semantics_after_universal_checks(
         option_id=option.option_id,
         expiration_unix=1_800_000_000,
     )
-    reply = _hosted_accept_reply(
+    reply = _example_accept_reply(
         negotiation_id="neg-domain",
         selection=selection,
         option=option,
@@ -325,14 +324,14 @@ def test_round_0_delegates_domain_plan_semantics_after_universal_checks(
 
 @patch("core_buyer.negotiation_client.urllib.request.urlopen")
 def test_round_0_rejects_signed_seller_selection_substitution(mock_urlopen):
-    option = _hosted_option()
+    option = _example_option()
     selection = SettlementSelection(
         mechanism=option.mechanism,
         option_id=option.option_id,
         expiration_unix=1_800_000_000,
     )
     substituted = selection.model_copy(update={"option_id": "f" * 64})
-    reply = _hosted_accept_reply(
+    reply = _example_accept_reply(
         negotiation_id="neg-substituted",
         selection=substituted,
         option=option,
@@ -359,13 +358,13 @@ def test_round_0_rejects_signed_seller_selection_substitution(mock_urlopen):
 
 @patch("core_buyer.negotiation_client.urllib.request.urlopen")
 def test_later_accept_rejects_plan_amount_substitution_before_observer(mock_urlopen):
-    option = _hosted_option()
+    option = _example_option()
     selection = SettlementSelection(
         mechanism=option.mechanism,
         option_id=option.option_id,
         expiration_unix=1_800_000_000,
     )
-    final_reply = _hosted_accept_reply(
+    final_reply = _example_accept_reply(
         negotiation_id="neg-later",
         selection=selection,
         option=option,
@@ -375,7 +374,7 @@ def test_later_accept_rejects_plan_amount_substitution_before_observer(mock_urlo
     mock_urlopen.side_effect = _urlopen_fake(
         [
             {
-                **_hosted_accept_reply(
+                **_example_accept_reply(
                     negotiation_id="neg-later",
                     selection=selection,
                     option=option,

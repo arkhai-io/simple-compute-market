@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 
 import pytest
+from core_storefront.auth import AuthError, ReplayClaim
 from fastapi import Request
 from market_identity import (
     EMPTY_BODY,
@@ -18,7 +19,6 @@ from market_identity import (
 
 import market_storefront.container as container
 from market_storefront.middleware.admin_identity import _contract as _admin_contract
-from core_storefront.auth import AuthError, ReplayClaim
 from market_storefront.middleware.seller_auth import (
     _buyer_response_contract,
     authenticate_listing_mutation,
@@ -58,9 +58,7 @@ class ReplayStore:
             attempt_token="attempt-1",
         )
 
-    async def record_replay_outcome(
-        self, reservation, *, attempt_token, status, body
-    ):
+    async def record_replay_outcome(self, reservation, *, attempt_token, status, body):
         key = (reservation.identity.principal, reservation.identity.request_id)
         self.outcomes[key] = (status, body)
 
@@ -97,7 +95,8 @@ def _request(
             "raw_path": path.encode(),
             "query_string": query_string,
             "headers": [
-                (name.lower().encode(), value.encode()) for name, value in headers.items()
+                (name.lower().encode(), value.encode())
+                for name, value in headers.items()
             ],
             "client": ("test", 1),
             "server": ("test", 80),
@@ -321,24 +320,6 @@ async def test_public_listing_get_is_not_authenticated(monkeypatch):
             {},
             ("deal_heartbeat", "deal-1"),
         ),
-        (
-            "POST",
-            "/api/v1/settlements",
-            {"obligation_ref": "obligation-1"},
-            ("settlement_start", "obligation-1"),
-        ),
-        (
-            "GET",
-            "/api/v1/settlements/settlement-1",
-            EMPTY_BODY,
-            ("settlement_status", "settlement-1"),
-        ),
-        (
-            "POST",
-            "/api/v1/settlements/settlement-1/reclaim",
-            EMPTY_BODY,
-            ("settlement_reclaim", "settlement-1"),
-        ),
     ],
 )
 async def test_buyer_route_response_contracts_are_scheme_neutral(
@@ -417,16 +398,13 @@ async def test_identity_status_route_binds_sorted_exact_query() -> None:
         "/api/v1/admin/identity/status",
         {},
         method="GET",
-        query_string=(
-            b"subject=operator%2Fa&authority=storefront.administrator"
-        ),
+        query_string=(b"subject=operator%2Fa&authority=storefront.administrator"),
     )
     contract = _admin_contract(request, EMPTY_BODY)
 
     assert contract is not None
     assert contract.operation == "admin_identity_status"
     assert contract.resource == (
-        "identity-status?authority=storefront.administrator"
-        "&subject=operator%2Fa"
+        "identity-status?authority=storefront.administrator&subject=operator%2Fa"
     )
     assert contract.body is EMPTY_BODY

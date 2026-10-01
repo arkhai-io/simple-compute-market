@@ -69,9 +69,7 @@ def _site_projection_identity(monkeypatch):
     monkeypatch.setattr(
         agent_config, "get_provisioning_authorities", lambda: _SITE_AUTHORITIES
     )
-    monkeypatch.setattr(
-        cli_publish, "_site_topology_sync", lambda: ("site-a", 1)
-    )
+    monkeypatch.setattr(cli_publish, "_site_topology_sync", lambda: ("site-a", 1))
 
 
 def _init_db(path: str) -> None:
@@ -400,7 +398,7 @@ class TestPoolHintResolutionSettings:
 
     def test_command_clauses_replace_per_model_settlement_defaults(self):
         model_default = {
-            "mechanism": "fiat.stripe.v1",
+            "mechanism": "example.payment.v1",
             "asset": "usd",
             "rate": "2",
             "per": "hour",

@@ -37,35 +37,11 @@ jobs:
       # v0.2.1 after the source moved to v0.4.2, so a release cut from this
       # workflow would have fetched a producer the source does not consume --
       # or, as it did, no producer at all.
-      - name: Select the hosted release this source binds
-        id: hosted
-        run: python scripts/select-hosted-client-channel.py >>"$GITHUB_OUTPUT"
-
-      # An unsigned pin is a supported state for a test run, which compiles
-      # against the wheel and cites it for nothing. It is not a state a
-      # release can be cut from: there would be no signature to carry.
-      - name: Refuse to release against an unsigned hosted pin
-        if: steps.hosted.outputs.channel != 'release'
-        run: |
-          echo "::error::hosted client ${{ steps.hosted.outputs.version }} is pinned but unsigned; sign that release before tagging a marketplace release"
-          exit 1
-
-      - name: Download exact hosted producer release
-        env:
-          GH_TOKEN: ${{ secrets.HOSTED_RELEASE_TOKEN }}
-        run: |
-          set -euo pipefail
-          test -n "$GH_TOKEN"
-          mkdir -p .hosted-release
-          gh release download "v${{ steps.hosted.outputs.version }}" \
-            --repo "${{ steps.hosted.outputs.repository }}" \
-            --dir .hosted-release
-
       - name: Verify and build exact marketplace wheel set
         run: |
           set -euo pipefail
           make dist-clean
-          make dist HOSTED_RELEASE_DIR="$GITHUB_WORKSPACE/.hosted-release"
+          make dist
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -103,15 +79,15 @@ jobs:
           tar --sort=name --mtime="@$SOURCE_DATE_EPOCH" \
             --owner=0 --group=0 --numeric-owner \
             -czf "$RELEASE_DIR/marketplace-wheelhouse.tar.gz" .dist
-          uv run --project kit/hosted-settlement --no-sources --no-dev \
+          uv run --project kit/settlement-runtime --no-sources --no-dev \
             --find-links "$GITHUB_WORKSPACE/.dist" python - <<'PY'
           import json
           from pathlib import Path
-          from market_hosted_settlement import StripeSettlementConfig
+          from market_settlement_runtime import SettlementConfig
 
           Path("marketplace-release/settlement-config-schema.json").write_text(
               json.dumps(
-                  StripeSettlementConfig.model_json_schema(),
+                  SettlementConfig.model_json_schema(),
                   separators=(",", ":"),
                   sort_keys=True,
               )

@@ -7,7 +7,6 @@ from core_storefront.publication_runner import (
     PublicationCommandResult,
     PublicationCycleResult,
 )
-from market_settlement_runtime import SettlementPublicationClause
 
 from tests.fixtures.publish import build_failed_resource, build_published_entry
 
@@ -58,50 +57,6 @@ def test_publish_exits_when_db_not_resolvable(monkeypatch, runner, app):
 
     assert result.exit_code == 1
     assert "db" in result.output.lower() or "db" in (result.stderr or "").lower()
-
-
-def test_publish_allows_ready_stripe_when_alkahest_has_no_chains(
-    monkeypatch, runner, app
-):
-    stripe_clause = SettlementPublicationClause(
-        mechanism="fiat.stripe.v1",
-        asset="usd",
-        rate="2",
-        per="hour",
-        mechanism_input={
-            "funding_profile": "card.v1",
-            "interaction": "interactive",
-            "funds_flow": "separate_charges_transfers",
-        },
-    )
-    monkeypatch.setattr(
-        "market_storefront.cli_publish._resolve_db_path",
-        lambda _db: "/fake/agent.db",
-    )
-    monkeypatch.setattr("market_storefront.utils.config.CHAINS", {})
-    monkeypatch.setattr(
-        "market_storefront.utils.config.settlement_config_mapping",
-        lambda: {
-            "priority": ["fiat.stripe.v1", "alkahest.v1"],
-            "stripe": {"enabled": True},
-            "alkahest": {"enabled": True},
-        },
-    )
-    monkeypatch.setattr(
-        "market_storefront.cli_publish._compile_publication_clauses",
-        lambda _values: (stripe_clause,),
-    )
-    monkeypatch.setattr(
-        "market_storefront.cli_publish._open_publication_keys", lambda _db: set()
-    )
-    monkeypatch.setattr(
-        "market_storefront.cli_publish._publish_command_round",
-        lambda **_kwargs: _publication_result(published=[build_published_entry()]),
-    )
-
-    result = runner.invoke(app, ["publish", "--settlement", "stripe"])
-
-    assert result.exit_code == 0
 
 
 def test_publish_abort_all_exclusive_with_inventory(monkeypatch, tmp_path, runner, app):

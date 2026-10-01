@@ -110,9 +110,7 @@ def _run_round(db_path: str, command_settlements, monkeypatch):
                 storefront_url=agent_url,
                 seller_principal=Identity(
                     scheme="ed25519",
-                    identifier=(
-                        "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
-                    ),
+                    identifier=("AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"),
                 ),
             )
         )
@@ -196,7 +194,7 @@ def test_resource_settlements_replace_command_settlements(tmp_path, monkeypatch)
     _init_db(db_path)
     resource_clauses = [
         _clause(
-            "fiat.stripe.v1",
+            "example.payment.v1",
             asset="usd",
             rate="125",
             funding_profile="card.v1",
@@ -233,7 +231,7 @@ def test_resource_settlements_replace_command_settlements(tmp_path, monkeypatch)
         "gpu_count": 1,
     }
     assert [clause["mechanism"] for clause in payloads[0]["settlements"]] == [
-        "fiat.stripe.v1"
+        "example.payment.v1"
     ]
 
 
@@ -253,7 +251,7 @@ def test_command_dual_mechanism_order_reaches_listing(tmp_path, monkeypatch):
             },
         ),
         SettlementPublicationClause(
-            mechanism="fiat.stripe.v1",
+            mechanism="example.payment.v1",
             asset="usd",
             rate="125",
             per="hour",
@@ -270,5 +268,5 @@ def test_command_dual_mechanism_order_reaches_listing(tmp_path, monkeypatch):
     assert not result.failed
     assert [clause["mechanism"] for clause in payloads[0]["settlements"]] == [
         "alkahest.v1",
-        "fiat.stripe.v1",
+        "example.payment.v1",
     ]

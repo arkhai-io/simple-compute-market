@@ -1,23 +1,14 @@
 from __future__ import annotations
 
-from pathlib import Path
 import json
+from pathlib import Path
 
 import pytest
-import typer
-from typer.testing import CliRunner
-from arkhai_bare_metal_buyer.cli import (
-    _json,
-    _safe_projection,
-    _validate_hosted_option_binding,
-    register_commands,
-)
+from arkhai_bare_metal_buyer.cli import _json, _safe_projection
 from arkhai_bare_metal_buyer.config import load_bare_metal_buyer_config
+from arkhai_bare_metal_buyer.fulfillment import BareMetalFulfillmentTransport
 from arkhai_bare_metal_buyer.plugin import domain
 from market_core import DomainCapability
-from arkhai_bare_metal import BareMetalListing
-
-from arkhai_bare_metal_buyer.fulfillment import BareMetalFulfillmentTransport
 from market_identity import IdentityScheme, TrustedIdentitySet, create_signer
 from pydantic import BaseModel
 
@@ -70,19 +61,6 @@ def test_plugin_declares_real_buyer_capability() -> None:
     assert DomainCapability.BUYER in contract.declared_capabilities
     assert contract.buyer is not None
     assert contract.buyer.register_commands is not None
-
-
-def test_hosted_payer_commands_are_available() -> None:
-    app = typer.Typer()
-    register_commands(app)
-
-    result = CliRunner().invoke(
-        app,
-        ["settlement", "stripe", "payer", "--help"],
-    )
-
-    assert result.exit_code == 0, result.output
-    assert "create" in result.output
 
 
 def test_physical_transport_uses_signed_buyer_routes(monkeypatch) -> None:
@@ -151,23 +129,6 @@ def test_json_output_serializes_nested_wire_models(capsys) -> None:
         "results": [{"value": "ready"}],
     }
 
-
-def test_hosted_option_binding_compares_physical_host_identity() -> None:
-    listing = BareMetalListing(
-        machine_id="machine-1",
-        physical_host_id="physical-host-1",
-        access_methods=["ssh"],
-    )
-
-    _validate_hosted_option_binding(
-        listing,
-        physical_host_id="physical-host-1",
-    )
-    with pytest.raises(typer.BadParameter, match="conflicts with trusted listing"):
-        _validate_hosted_option_binding(
-            listing,
-            physical_host_id="different-host",
-        )
 
 def test_contact_entries_parse_as_bounded_pairs() -> None:
     from arkhai_bare_metal_buyer.cli import _parse_contact

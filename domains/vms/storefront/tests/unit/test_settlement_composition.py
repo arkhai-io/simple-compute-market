@@ -1,39 +1,38 @@
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from datetime import datetime
-import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 from arkhai_vms import make_vm_provision_terms
-from market_hosted_settlement import StripeResolverConfig
-from market_identity import Ed25519Signer
-from market_settlement_runtime import PreparedSettlement, derive_obligation_ref
 from core_storefront.domain_lifecycle import StorefrontSettlementFulfillmentInput
 from core_storefront.domain_registry import (
+    StorefrontDomainBindingError,
     StorefrontListingBinding,
     StorefrontThreadBinding,
     build_storefront_derivation_key,
-    StorefrontDomainBindingError,
 )
+from market_identity import Ed25519Signer
+from market_settlement_runtime import PreparedSettlement, derive_obligation_ref
 
-from market_storefront.models.hosted_settlement_models import SettlementPublicResponse
+from market_storefront.domain_runtime import (
+    build_vm_storefront_domain,
+    build_vm_storefront_registry,
+)
 from market_storefront.settlement_composition import (
-    VmProjectionContext,
-    _hosted_evidence_input,
-    _terminal_requires_lease_truncation,
     build_storefront_settlement_registry,
+    VmProjectionContext,
+    _terminal_requires_lease_truncation,
     build_vm_settlement_composition,
     fulfill_vm_settlement,
-    hosted_settlement_projection,
     persist_vm_settlement_outcome,
     prepare_vm_settlement,
     reserve_vm_settlement_start,
     serialize_settlement_job,
 )
-from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
 from market_storefront.utils.sqlite_client import SQLiteClient
 
 _BUYER_SIGNER = Ed25519Signer(b"\x31" * 32)
@@ -182,38 +181,10 @@ def _prepared(db: SQLiteClient, *, escrow_uid: str = "0xescrow") -> PreparedSett
 
 @pytest.fixture
 def db(tmp_path):
-    return SQLiteClient(db_path=str(tmp_path / "vm-settlement.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
-
-
-def test_storefront_installs_both_mechanism_registrations():
-    registry = build_storefront_settlement_registry()
-
-    assert [registration.mechanism_id for registration in registry.registrations] == [
-        "alkahest.v1",
-        "fiat.stripe.v1",
-    ]
-
-
-def test_hosted_evidence_resolver_accepts_typed_configuration():
-    evidence_client = object()
-    resolver = StripeResolverConfig(
-        chain_name="fiat.stripe.v1",
-        evidence_mode="portable-remote.v1",
+    return SQLiteClient(
+        db_path=str(tmp_path / "vm-settlement.db"),
+        registry=build_vm_storefront_registry(build_vm_storefront_domain()),
     )
-    composition = SimpleNamespace(
-        settlement_config=SimpleNamespace(
-            mechanism_config=lambda _key: SimpleNamespace(
-                resolvers={"vm-portable": resolver}
-            )
-        ),
-        evidence_clients={"fiat.stripe.v1": evidence_client},
-    )
-    condition = SimpleNamespace(evaluator=SimpleNamespace(resolver_id="vm-portable"))
-
-    assert _hosted_evidence_input(
-        composition=composition,
-        condition=condition,
-    ) == ("vm-portable", "portable-remote.v1", evidence_client)
 
 
 @pytest.mark.parametrize(
@@ -233,61 +204,6 @@ def test_terminal_cleanup_never_truncates_a_collected_vm_lease(
     record = SimpleNamespace(collection_state=collection_state)
 
     assert _terminal_requires_lease_truncation(record, outcome) is expected
-
-
-@pytest.mark.asyncio
-async def test_hosted_projection_exposes_portable_fulfillment_binding():
-    record = SimpleNamespace(
-        mechanism_ref="settlement-1",
-        obligation_ref="obligation-1",
-        payer_principal=_BUYER,
-        claimant_principal=_SELLER,
-        obligation={
-            "params": {
-                "funding_profile": "card.v1",
-            }
-        },
-        mechanism_params={
-            "funding_profile": "card.v1",
-            "funding_authorization_ref": "authorization-1",
-        },
-        mechanism_status="ready",
-        mechanism_state={"funding_reason": "available"},
-        reclaim_state="pending",
-        collection_state="pending",
-        materialization_state="materialized",
-        condition_state="pending",
-        condition_anchor="0xanchor",
-        fulfillment_ref="0xfulfillment",
-        buyer_action=None,
-        status_receipt={"funding_reason": "available"},
-        materialization_receipt=None,
-        collection_receipt=None,
-        reclaim_receipt=None,
-    )
-    projection = await hosted_settlement_projection(
-        composition=SimpleNamespace(),
-        record=record,
-    )
-
-    response = SettlementPublicResponse.model_validate(projection)
-    assert response.funding_profile.value == "card.v1"
-    assert response.funding_authorization_ref == "authorization-1"
-    assert response.receipt == {"funding_reason": "available"}
-    # Both halves of the binding a buyer verifies fulfillment against.
-    assert response.condition_anchor == "0xanchor"
-    assert response.fulfillment_ref == "0xfulfillment"
-    record.mechanism_status = "manual_required"
-    record.collection_state = "succeeded"
-    record.status_receipt = {"funding_reason": "post_collection_loss"}
-    late_loss = SettlementPublicResponse.model_validate(
-        await hosted_settlement_projection(
-            composition=SimpleNamespace(),
-            record=record,
-        )
-    )
-    assert late_loss.status == "manual_required"
-    assert late_loss.funding_reason == "post_collection_loss"
 
 
 @pytest.mark.asyncio
@@ -365,37 +281,6 @@ async def test_prepare_pins_the_exact_verified_obligation(tmp_path, monkeypatch)
         prepared.fulfillment_input.domain_input["provision"].ssh_public_key
         == "ssh-ed25519 accepted"
     )
-
-
-@pytest.mark.asyncio
-async def test_prepare_hosted_rejects_the_removed_legacy_start_route(db):
-    await _persist_accepted_negotiation(
-        db,
-        negotiation_id="neg-hosted",
-        listing_id="listing-hosted",
-        proposal={
-            "settlement_selection": {
-                "mechanism": "fiat.stripe.v1",
-                "option_id": "accepted-option",
-                "expiration_unix": 1_900_000_000,
-            }
-        },
-    )
-
-    with pytest.raises(
-        ValueError,
-        match="accepted settlement endpoint",
-    ):
-        await prepare_vm_settlement(
-            domain=db.domain_registry.resolve_mode("vm").contract,
-            escrow_uid="settlement-1",
-            negotiation_id="neg-hosted",
-            local_principal=_SELLER,
-            mechanism_client=object(),
-            chain_name="",
-            request={"caller_override": "rejected"},
-            sqlite_client=db,
-        )
 
 
 @pytest.mark.asyncio
@@ -508,7 +393,10 @@ async def test_fulfillment_keeps_private_delivery_out_of_public_runtime_result(
         domain,
         fulfillment=replace(domain.fulfillment, fulfill=fulfill),
     )
-    db = SQLiteClient(db_path=str(tmp_path / "injected-fulfillment.db"), registry=build_vm_storefront_registry(domain))
+    db = SQLiteClient(
+        db_path=str(tmp_path / "injected-fulfillment.db"),
+        registry=build_vm_storefront_registry(domain),
+    )
     prepared = _prepared(db)
 
     outcome = await fulfill_vm_settlement(
@@ -595,3 +483,11 @@ def test_serialize_keeps_physical_and_onchain_fulfillment_ids_distinct():
     assert serialized["fulfillment_uid"] == "0xonchain"
     assert serialized["tenant_credentials"] == {"password": "secret"}
     assert "obligation_ref" not in serialized
+
+
+def test_storefront_installs_alkahest_registration():
+    registry = build_storefront_settlement_registry()
+
+    assert [registration.mechanism_id for registration in registry.registrations] == [
+        "alkahest.v1",
+    ]

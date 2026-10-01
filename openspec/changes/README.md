@@ -199,3 +199,15 @@ Changes with no campaign; each stands alone.
 ## Archived and superseded
 
 `prune-storefront-database` was archived because dead policy tables are already gone and the remaining candidates carry continuation, idempotency, or observability state. `complete-development-documentation` was synchronized and archived after audience-owned documentation became permanent planning governance. `add-storefront-principal-authentication` and `provisioning-result-push-delivery` were superseded on 2026-08-06 by `service-identity-signing` and `replace-polling-with-authenticated-push` respectively.
+
+## Superseded by settle-through-arkhai-payments
+
+The following changes are superseded by `settle-through-arkhai-payments`:
+
+- `consume-expanded-stripe-funding`
+- `add-api-credits-hosted-settlement`
+- `add-bare-metal-hosted-settlement`
+- `bind-one-hosted-release-coordinate`
+- `carry-the-payer-return-address`
+- `project-an-authoritative-funding-loss`
+- The hosted sections of `disburse-a-settlement-disposition`; its Alkahest work remains applicable.

@@ -195,51 +195,6 @@ def test_config_init_user_new_file(monkeypatch, tmp_path, runner, app):
     assert "# settlements = [" in cfg.read_text()
 
 
-def test_config_migrate_registers_settlement_check(monkeypatch, tmp_path, runner, app):
-    from market_config.settlement_migration import (
-        MigrationAction,
-        SettlementMigrationResult,
-    )
-
-    import market_storefront.groups.config as config_group
-
-    cfg = tmp_path / "storefront.toml"
-    cfg.write_text("[hosted_settlement]\nenabled = true\n")
-    captured = {}
-
-    def migrate(path, **kwargs):
-        captured.update(kwargs)
-        return SettlementMigrationResult(
-            path=path,
-            changed=True,
-            written=False,
-            actions=(
-                MigrationAction(
-                    "move",
-                    "hosted_settlement.enabled",
-                    "Settlement.stripe.enabled",
-                ),
-            ),
-        )
-
-    monkeypatch.setattr(config_group, "storefront_config_file", lambda: cfg)
-    monkeypatch.setattr(config_group, "migrate_settlement_config", migrate)
-
-    result = runner.invoke(
-        app,
-        ["config", "migrate", "--scope", "settlement", "--check"],
-    )
-
-    assert result.exit_code == 0
-    assert captured["role"] == "seller"
-    assert captured["check"] is True
-    assert captured["write"] is False
-    assert captured["backup"] is False
-    assert callable(captured["validator"])
-    assert "value redacted" in result.output
-    assert "Settlement.stripe.enabled" in result.output
-
-
 def test_config_set_rejects_legacy_path_with_exact_migration_command(
     monkeypatch, runner, app
 ):

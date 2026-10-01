@@ -20,7 +20,6 @@ global:
 
   # ---------------------------------------------------------------------------
   # Optional chain/network configuration. Required only by explicitly selected
-  # EVM effects; hosted-only profiles omit this block and disable dev-env.
   # ---------------------------------------------------------------------------
   rpc:
     enabled: true

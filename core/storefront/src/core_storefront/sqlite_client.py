@@ -337,8 +337,8 @@ class SQLiteClient:
                   -- the listing means the negotiated artifact is the literal
                   -- source of truth.
                   buyer_escrow_proposal TEXT,
-                  -- Accepted schema-owned delivery input. Hosted settlement start
-                  -- reloads this server-side so the public route needs identifiers only.
+                  -- Accepted schema-owned delivery input, reloaded server-side
+                  -- rather than trusted from a later settlement request.
                   provision_terms TEXT,
                   -- Immutable accepted settlement plan pinned at seller acceptance.
                   settlement_plan TEXT,

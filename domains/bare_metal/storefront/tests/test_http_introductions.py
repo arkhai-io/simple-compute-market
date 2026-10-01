@@ -6,6 +6,16 @@ import time
 import uuid
 from typing import Any
 
+from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
+from arkhai_bare_metal_storefront.runtime import BareMetalStorefrontRuntime
+from arkhai_bare_metal_storefront.server import (
+    build_bare_metal_storefront_app,
+    build_bare_metal_storefront_registry,
+)
+from arkhai_bare_metal_storefront.settlement_composition import (
+    BareMetalStorefrontSettlementComposition,
+)
+from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 from fastapi.testclient import TestClient
 from market_contact_exchange import MECHANISM as CONTACT_MECHANISM
 from market_core.schemas import derive_settlement_option_id
@@ -18,17 +28,6 @@ from market_identity import (
     sign_request,
 )
 from market_settlement_runtime import derive_obligation_ref
-
-from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
-from arkhai_bare_metal_storefront.runtime import BareMetalStorefrontRuntime
-from arkhai_bare_metal_storefront.server import (
-    build_bare_metal_storefront_app,
-    build_bare_metal_storefront_registry,
-)
-from arkhai_bare_metal_storefront.settlement_composition import (
-    BareMetalStorefrontSettlementComposition,
-)
-from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 
 BUYER_SIGNER = Eip191Signer(bytes.fromhex("22" * 32))
 SELLER_SIGNER = Eip191Signer(bytes.fromhex("11" * 32))
@@ -188,9 +187,7 @@ def _accept_and_start(client: TestClient, option: dict) -> tuple[str, str, dict]
     assert payload["action"] == "accept"
     negotiation_id = payload["negotiation_id"]
     plan = payload["settlement_plan"]
-    obligation_ref = derive_obligation_ref(
-        negotiation_id, 0, plan["obligations"][0]
-    )
+    obligation_ref = derive_obligation_ref(negotiation_id, 0, plan["obligations"][0])
     start_body = {
         "negotiation_id": negotiation_id,
         "obligation_ref": obligation_ref,
@@ -208,7 +205,6 @@ def _accept_and_start(client: TestClient, option: dict) -> tuple[str, str, dict]
 
 
 async def test_contact_options_publish_through_the_composition() -> None:
-    from datetime import datetime, timedelta, timezone
 
     from market_settlement_runtime import SettlementPublicationClause
 
@@ -230,7 +226,6 @@ async def test_contact_options_publish_through_the_composition() -> None:
             "claimant_principal": SELLER_SIGNER.identity,
         },
     )
-    now = datetime.now(timezone.utc)
     payload = await composition.publication_payload(
         candidate={"machine_id": "machine-1"},
         clauses=[
@@ -240,9 +235,6 @@ async def test_contact_options_publish_through_the_composition() -> None:
                 mechanism_input={"profile": "default"},
             )
         ],
-        offer_expires_at=now + timedelta(hours=2),
-        funding_deadlines={},
-        fulfillment_deadline=now + timedelta(hours=3),
     )
     assert payload.accepted_escrows == ()
     (option,) = payload.settlement_options

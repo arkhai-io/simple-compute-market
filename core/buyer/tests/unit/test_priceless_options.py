@@ -18,18 +18,3 @@ def test_non_scalar_option_listing_is_priceless() -> None:
         ]
     }
     assert extract_seller_min_price(listing) is None
-
-
-def test_scalar_option_listing_extracts_rate() -> None:
-    listing = {
-        "settlement_options": [
-            {
-                "option_id": "aa" * 32,
-                "mechanism": "fiat.stripe.v1",
-                "asset": "usd",
-                "rates": [{"field": "amount", "per": "hour", "value": "100"}],
-                "params": {},
-            }
-        ]
-    }
-    assert extract_seller_min_price(listing) == 100.0

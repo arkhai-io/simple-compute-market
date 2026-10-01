@@ -51,6 +51,7 @@ def test_terms_obligation_round_trip_is_lossless() -> None:
     back = settlement_obligation_to_escrow_terms(ob)
     assert back == terms
 
+
 def test_terms_obligation_uses_uint256_strings_in_mechanism_params() -> None:
     amount = 150 * 10**18
     ob = escrow_terms_to_settlement_obligation(
@@ -82,7 +83,7 @@ def test_unwrap_rejects_foreign_mechanisms() -> None:
         payer="buyer",
         claimant="seller",
         expiration_unix=1_800_000_000,
-        mechanism="fiat.stripe.v1",
+        mechanism="example.payment.v1",
         params={},
     )
     with pytest.raises(ValueError, match="alkahest.v1"):

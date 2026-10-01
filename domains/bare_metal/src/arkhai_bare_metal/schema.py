@@ -9,13 +9,13 @@ from __future__ import annotations
 
 import hashlib
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Final, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
 from .provision_terms import BareMetalProvisionTerms
 
-BARE_METAL_SCHEMA_KIND = "bare_metal.v1"
+BARE_METAL_SCHEMA_KIND: Final = "bare_metal.v1"
 BARE_METAL_EXECUTOR_KIND = "bare_metal"
 SSH_ACCESS_METHOD = "ssh"
 NODE_GRANT_ACCESS_ACTION = "node_grant_access"
@@ -190,7 +190,7 @@ class BareMetalMaterialization(BaseModel):
     )
     settlement_obligation_ref: str | None = Field(
         default=None,
-        description="Hosted settlement obligation identity from accepted state.",
+        description="Settlement obligation identity from accepted state.",
     )
     machine_id: str = Field(
         description="Bare-metal executor-local machine identity.",
@@ -300,7 +300,7 @@ class BareMetalLeaseCreate(BaseModel):
     )
     settlement_obligation_ref: str | None = Field(
         default=None,
-        description="Hosted settlement obligation identity from accepted state.",
+        description="Settlement obligation identity from accepted state.",
     )
     machine_id: str = Field(
         description=(
@@ -355,7 +355,7 @@ class BareMetalLeaseCreate(BaseModel):
     @property
     def settlement_identity_kind(self) -> str:
         return (
-            "hosted_obligation"
+            "settlement_obligation"
             if self.settlement_obligation_ref is not None
             else "alkahest_escrow"
         )
@@ -399,7 +399,7 @@ class BareMetalAccessResult(BaseModel):
     )
     settlement_obligation_ref: str | None = Field(
         default=None,
-        description="Hosted settlement obligation identity associated with the lease.",
+        description="Settlement obligation identity associated with the lease.",
     )
     access_grant_ref: str | None = Field(
         default=None,

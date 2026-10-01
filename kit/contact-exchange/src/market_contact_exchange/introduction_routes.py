@@ -1,6 +1,6 @@
 """Framework-free introduction reveal mechanics for accepted contact deals.
 
-Mirrors the hosted settlement route service — signed operations keyed by the
+Signed operations are keyed by the
 negotiation and obligation ref, authorization delegated to the domain through
 callbacks — with inverted durability: the contact payloads persist and the
 read is idempotent. An introduction that could be lost to a missed poll would

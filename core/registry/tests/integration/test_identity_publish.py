@@ -9,12 +9,18 @@ import uuid
 import httpx
 import pytest
 
-from market_identity import RequestEnvelope, TrustedIdentitySet, canonical_body_hash, sign_request
+from market_identity import (
+    RequestEnvelope,
+    TrustedIdentitySet,
+    canonical_body_hash,
+    sign_request,
+)
 from registry_client import RegistryClient, RegistryClientError
 from registry_client.models import ListingRequest, UpdateListingRequest
 from src.main import app
 
 pytestmark = pytest.mark.asyncio
+
 
 def _signed_headers(
     *,
@@ -47,7 +53,6 @@ def _signed_headers(
     }
 
 
-
 def _listing(listing_id: str, *, region: str = "us") -> ListingRequest:
     return ListingRequest(
         listing_id=listing_id,
@@ -57,7 +62,7 @@ def _listing(listing_id: str, *, region: str = "us") -> ListingRequest:
         settlement_options=[
             {
                 "option_id": "a" * 64,
-                "mechanism": "fiat.stripe.v1",
+                "mechanism": "example.payment.v1",
                 "asset": "usd",
                 "rates": [{"field": "amount", "per": "hour", "value": "100"}],
                 "params": {"account_ref": "seller-account"},
@@ -240,6 +245,7 @@ async def test_version_one_header_is_rejected(
     assert response.status_code == 401
     assert response.json()["detail"] == "unsupported_version"
 
+
 async def test_deterministic_four_xx_is_cached_for_exact_retry(
     registry_client,
     db_session,
@@ -261,9 +267,11 @@ async def test_deterministic_four_xx_is_cached_for_exact_retry(
 
     from src.db.models import PublisherReplayReservation
 
-    replay = db_session.query(PublisherReplayReservation).filter_by(
-        request_id=request_id
-    ).one()
+    replay = (
+        db_session.query(PublisherReplayReservation)
+        .filter_by(request_id=request_id)
+        .one()
+    )
     assert replay.completed_at is not None
     assert replay.response_status == 404
 
@@ -299,9 +307,11 @@ async def test_active_lease_blocks_then_expired_lease_resumes(
     assert exc_info.value.status_code == 409
     assert "request_in_progress" in exc_info.value.body
 
-    replay = db_session.query(PublisherReplayReservation).filter_by(
-        request_id=request_id
-    ).one()
+    replay = (
+        db_session.query(PublisherReplayReservation)
+        .filter_by(request_id=request_id)
+        .one()
+    )
     replay.lease_expires_at = datetime.utcnow() - timedelta(seconds=1)
     db_session.commit()
     monkeypatch.setattr(

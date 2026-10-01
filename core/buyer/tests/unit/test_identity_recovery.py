@@ -6,16 +6,12 @@ import json
 import uuid
 from pathlib import Path
 
-import pytest
-
 import core_buyer.buyer_config as buyer_config_module
 import core_buyer.run_log as run_log_module
+import pytest
 from core_buyer.buyer_config import BuyerProfileResolver, ResolvedBuyerIdentity
 from core_buyer.deal_helpers import (
-    accepted_settlement_mechanism,
-    load_deal_context,
     load_negotiation_resume_point,
-    settlement_acceptance_fields,
 )
 from core_buyer.profile_service import BuyerProfileService, ProfileServiceError
 from core_buyer.run_log import (
@@ -130,72 +126,6 @@ def test_ed25519_run_log_v3_and_resume_need_no_wallet(
     assert "buyer_address" not in json.dumps(events)
 
 
-def test_hosted_recovery_preserves_every_settlement_identity(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _state_dir(monkeypatch, tmp_path)
-    buyer = Ed25519Signer(b"\x19" * 32)
-    publisher = Ed25519Signer(b"\x1a" * 32)
-    log = RunLog.start(
-        profile_id=uuid.uuid4(),
-        publisher_id="publisher-2",
-        source_registry_url="http://registry",
-        source_registry_authority="registry",
-        principal=buyer.identity,
-        seller_url="http://seller",
-        listing_id="listing-2",
-        publisher_principals=_trust(publisher).model_dump(mode="json"),
-    )
-    acceptance = settlement_acceptance_fields(
-        negotiation_id="neg-2",
-        selection={
-            "mechanism": "fiat.stripe.v1",
-            "option_id": "a" * 64,
-            "expiration_unix": 2_000_000_000,
-        },
-        plan={
-            "obligations": [
-                {
-                    "payer": "buyer",
-                    "claimant": "seller",
-                    "amount": "20",
-                    "asset": "usd",
-                    "expiration_unix": 2_000_000_000,
-                    "mechanism": "fiat.stripe.v1",
-                    "params": {"condition_profile": "vm"},
-                }
-            ]
-        },
-    )
-    log.event(
-        "negotiation_completed",
-        status="agreed",
-        seller_url="http://seller",
-        publisher_id="publisher-2",
-        source_registry_url="http://registry",
-        source_registry_authority="registry",
-        listing_id="listing-2",
-        negotiation_id="neg-2",
-        agreed_amount=20,
-        publisher_principals=_trust(publisher).model_dump(mode="json"),
-        **acceptance,
-    )
-    log.event("settlement_started", settlement_ref="settlement-2")
-    context = load_deal_context(
-        log.run_id,
-        signer=buyer,
-        refresh_publisher_principals=lambda *_binding: _trust(publisher),
-    )
-    assert context.publisher_principals == _trust(publisher)
-    assert context.settlement_ref == "settlement-2"
-    assert context.escrow_uid is None
-    assert accepted_settlement_mechanism(context) == "fiat.stripe.v1"
-    assert context.settlement_operation_identities == tuple(
-        acceptance["settlement_operation_identities"]
-    )
-
-
 def test_recovery_rejects_another_signer_or_profile(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -290,7 +220,9 @@ def test_fresh_resolver_tracks_selection_while_recovery_uses_recorded_profile(
         generate=False,
         select=False,
     )
-    monkeypatch.setattr(buyer_config_module, "reject_legacy_buyer_identity_config", lambda: None)
+    monkeypatch.setattr(
+        buyer_config_module, "reject_legacy_buyer_identity_config", lambda: None
+    )
     resolver = BuyerProfileResolver(service)
     assert resolver.fresh().principal == old.identity
     run = RunLog.start(
@@ -431,19 +363,24 @@ def test_ambiguous_migration_rewrites_nothing(
     )
     repository = ProfileRepository((tmp_path / "profiles.json").absolute())
     repository.replace(
-        ProfileStore(revision=1, selected_profile_id=first.profile_id, profiles=(first, retired)),
+        ProfileStore(
+            revision=1, selected_profile_id=first.profile_id, profiles=(first, retired)
+        ),
         expected_revision=0,
     )
     path = directory / "ambiguous.jsonl"
-    original = json.dumps(
-        {
-            "run_id": "ambiguous",
-            "event": "run_started",
-            "log_version": 2,
-            "signature_protocol": REQUEST_PROTOCOL,
-            "buyer_principal": signer.identity.model_dump(mode="json"),
-        }
-    ) + "\n"
+    original = (
+        json.dumps(
+            {
+                "run_id": "ambiguous",
+                "event": "run_started",
+                "log_version": 2,
+                "signature_protocol": REQUEST_PROTOCOL,
+                "buyer_principal": signer.identity.model_dump(mode="json"),
+            }
+        )
+        + "\n"
+    )
     path.write_text(original)
     with pytest.raises(RunLogError, match="exactly one"):
         migrate_run_logs(repository)
@@ -460,16 +397,19 @@ def test_failure_after_first_replacement_restores_every_run(
     originals: dict[Path, str] = {}
     for run_id in ("first", "second"):
         path = directory / f"{run_id}.jsonl"
-        original = json.dumps(
-            {
-                "run_id": run_id,
-                "event": "run_started",
-                "log_version": 2,
-                "signature_protocol": REQUEST_PROTOCOL,
-                "buyer_principal": signer.identity.model_dump(mode="json"),
-                "operation_id": f"operation-{run_id}",
-            }
-        ) + "\n"
+        original = (
+            json.dumps(
+                {
+                    "run_id": run_id,
+                    "event": "run_started",
+                    "log_version": 2,
+                    "signature_protocol": REQUEST_PROTOCOL,
+                    "buyer_principal": signer.identity.model_dump(mode="json"),
+                    "operation_id": f"operation-{run_id}",
+                }
+            )
+            + "\n"
+        )
         path.write_text(original)
         originals[path] = original
     real_replace = run_log_module.os.replace

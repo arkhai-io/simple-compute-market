@@ -8,10 +8,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from arkhai_bare_metal import (
-    BareMetalBuyerDemand,
     BareMetalMessage,
     BareMetalTerms,
-    validate_buyer_selection,
 )
 from core_storefront.models.negotiation_models import (
     NegotiateNewRequest,
@@ -27,8 +25,8 @@ from market_core.schemas import (
     SettlementSelection,
     compute_rate_total,
 )
-from market_policy.negotiation_middleware import NegotiationRound
 from market_identity import Identity
+from market_policy.negotiation_middleware import NegotiationRound
 from market_settlement_runtime import AcceptedObligationArtifacts
 
 from .negotiation import BareMetalSellerRoundHook
@@ -92,7 +90,7 @@ def _exact_selection(request: NegotiateNewRequest) -> SettlementSelection | None
         fields = proposal.get("fields", {})
         if unknown or not isinstance(fields, Mapping):
             raise NegotiationRequestError(
-                "hosted settlement proposal has invalid fields",
+                "settlement settlement proposal has invalid fields",
                 status_code=400,
             )
         try:
@@ -101,19 +99,19 @@ def _exact_selection(request: NegotiateNewRequest) -> SettlementSelection | None
             )
         except (TypeError, ValueError) as exc:
             raise NegotiationRequestError(
-                "hosted settlement proposal has an invalid selection",
+                "settlement settlement proposal has an invalid selection",
                 status_code=400,
             ) from exc
     if direct is not None and isinstance(proposal, Mapping) and nested is None:
         unknown = sorted(set(proposal).difference({"fields"}))
         if unknown:
             raise NegotiationRequestError(
-                "hosted settlement proposal mixes incompatible carriers",
+                "settlement settlement proposal mixes incompatible carriers",
                 status_code=400,
             )
     if direct is not None and nested is not None and direct != nested:
         raise NegotiationRequestError(
-            "hosted settlement proposal contains ambiguous selections",
+            "settlement settlement proposal contains ambiguous selections",
             status_code=400,
         )
     return direct or nested
@@ -126,13 +124,13 @@ def _selection_proposal_amount(request: NegotiateNewRequest) -> int | None:
     fields = proposal.get("fields", {})
     if not isinstance(fields, Mapping):
         raise NegotiationRequestError(
-            "hosted settlement proposal fields must be an object",
+            "settlement settlement proposal fields must be an object",
             status_code=400,
         )
     unknown = sorted(set(fields).difference({"amount"}))
     if unknown:
         raise NegotiationRequestError(
-            "hosted settlement proposal may contain only amount",
+            "settlement settlement proposal may contain only amount",
             status_code=400,
         )
     value = fields.get("amount")
@@ -140,7 +138,7 @@ def _selection_proposal_amount(request: NegotiateNewRequest) -> int | None:
         return None
     if isinstance(value, bool):
         raise NegotiationRequestError(
-            "hosted settlement amount must be a non-negative integer",
+            "settlement settlement amount must be a non-negative integer",
             status_code=400,
         )
     if isinstance(value, int) and value >= 0:
@@ -148,7 +146,7 @@ def _selection_proposal_amount(request: NegotiateNewRequest) -> int | None:
     if isinstance(value, str) and value.strip().isdigit():
         return int(value.strip())
     raise NegotiationRequestError(
-        "hosted settlement amount must be a non-negative integer",
+        "settlement settlement amount must be a non-negative integer",
         status_code=400,
     )
 
@@ -465,25 +463,6 @@ class BareMetalNegotiationService:
     ) -> tuple[BareMetalTerms, dict[str, Any]]:
         """Hold a machine-provisioning selection to the trusted physical facts."""
 
-        try:
-            demand = BareMetalBuyerDemand(
-                duration_seconds=message.duration_seconds,
-                access_method=message.access_method,
-                ssh_public_key=message.ssh_public_key or "",
-                settlement=selection,
-                allow_off_session=(
-                    selected_option.params.get("interaction") == "saved_instrument"
-                ),
-            )
-            selected = validate_buyer_selection(
-                demand=demand,
-                advertised_options=options,
-            )
-        except (TypeError, ValueError) as exc:
-            raise NegotiationRequestError(
-                "hosted selection does not exact-match one trusted listing option",
-                status_code=400,
-            ) from exc
         trusted_listing = await self.db.load_bare_metal_listing_payload(
             listing_id=request.listing_id
         )
@@ -492,17 +471,6 @@ class BareMetalNegotiationService:
         )
         if trusted_listing is None or listing_binding is None:
             raise NegotiationRequestError("trusted bare-metal listing is unavailable")
-        facts = selected.facts
-        if (
-            facts.site_id != listing_binding.site_id
-            or facts.physical_resource_id != listing_binding.physical_resource_id
-            or facts.pool_id != listing_binding.pool_id
-            or facts.physical_host_id != trusted_listing.physical_host_id
-            or facts.access_method != message.access_method
-        ):
-            raise NegotiationRequestError(
-                "hosted selection changes trusted physical listing terms"
-            )
         if (
             trusted_listing.min_duration_seconds is not None
             and message.duration_seconds < trusted_listing.min_duration_seconds
@@ -511,15 +479,15 @@ class BareMetalNegotiationService:
             and message.duration_seconds > trusted_listing.max_duration_seconds
         ):
             raise NegotiationRequestError(
-                "hosted selection duration is outside listing bounds"
+                "settlement selection duration is outside listing bounds"
             )
         if message.access_method not in trusted_listing.access_methods:
             raise NegotiationRequestError(
-                "hosted selection uses an unadvertised access method"
+                "settlement selection uses an unadvertised access method"
             )
         if message.access_ref is not None:
             raise NegotiationRequestError(
-                "buyer cannot supply hosted bare-metal access authority",
+                "buyer cannot supply settlement bare-metal access authority",
                 status_code=400,
             )
         terms = BareMetalTerms(
@@ -532,8 +500,8 @@ class BareMetalNegotiationService:
         )
         physical_terms = {
             "listing_id": request.listing_id,
-            "option_id": selected.option.option_id,
-            "option_facts": selected.facts.model_dump(mode="json", exclude_none=True),
+            "option_id": selected_option.option_id,
+            "option_facts": listing_binding.model_dump(mode="json", exclude_none=True),
             "provision_terms": terms.model_dump(mode="json", exclude_none=True),
         }
         return terms, {"bare_metal.v1": physical_terms}

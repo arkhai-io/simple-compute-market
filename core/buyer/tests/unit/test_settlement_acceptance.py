@@ -1,6 +1,6 @@
 """Buyer-side validation of an option-selected seller acceptance.
 
-The seller reply shape under test mirrors what every hosted storefront
+The seller reply shape under test mirrors what an option-selected storefront
 emits at acceptance: an obligation built from the advertised option plus
 the party principals, and a domain-namespaced ``service_terms`` package
 (``vm.v1`` / ``bare_metal.v1`` / api-credits equivalents).
@@ -9,6 +9,7 @@ the party principals, and a domain-namespaced ``service_terms`` package
 from __future__ import annotations
 
 import pytest
+from core_buyer.negotiation_client import _validate_settlement_acceptance
 from market_core.schemas import (
     SettlementObligation,
     SettlementOption,
@@ -18,11 +19,9 @@ from market_core.schemas import (
 )
 from market_identity import Identity, TrustedIdentitySet
 
-from core_buyer.negotiation_client import _validate_settlement_acceptance
-
 _BUYER = Identity(scheme="eip191", identifier="0x" + "11" * 20)
 _SELLER = Identity(scheme="eip191", identifier="0x" + "22" * 20)
-_CONDITION = {"kind": "hosted_funding.v1", "resolver": "authority"}
+_CONDITION = {"kind": "example.condition.v1", "resolver": "authority"}
 _EXPIRATION = 1_900_000_000
 _AMOUNT = 4200
 _PARAMS = {
@@ -30,7 +29,7 @@ _PARAMS = {
     "claimant_principal": _SELLER.model_dump(mode="json"),
 }
 _OPTION_ID = derive_settlement_option_id(
-    mechanism="fiat.stripe.v1",
+    mechanism="example.payment.v1",
     asset="usd",
     rates=[],
     params=_PARAMS,
@@ -40,7 +39,7 @@ _OPTION_ID = derive_settlement_option_id(
 def _advertised_option() -> SettlementOption:
     return SettlementOption(
         option_id=_OPTION_ID,
-        mechanism="fiat.stripe.v1",
+        mechanism="example.payment.v1",
         asset="usd",
         rates=[],
         params={key: dict(value) for key, value in _PARAMS.items()},
@@ -66,7 +65,7 @@ def _seller_plan(service_terms: dict) -> SettlementPlan:
                 asset="usd",
                 expiration_unix=_EXPIRATION,
                 conditions=[dict(_CONDITION)],
-                mechanism="fiat.stripe.v1",
+                mechanism="example.payment.v1",
                 params=params,
             )
         ],
@@ -75,7 +74,7 @@ def _seller_plan(service_terms: dict) -> SettlementPlan:
 
 def _validate(plan: SettlementPlan) -> None:
     selection = SettlementSelection(
-        mechanism="fiat.stripe.v1",
+        mechanism="example.payment.v1",
         option_id=_OPTION_ID,
         expiration_unix=_EXPIRATION,
     )

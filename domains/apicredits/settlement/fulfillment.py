@@ -15,6 +15,7 @@ import json
 import logging
 import uuid
 from typing import Any, Awaitable, Callable
+
 from market_identity import Identity
 
 from domains.apicredits.settlement.credits_client import (
@@ -45,22 +46,18 @@ def prepare_credit_issuance_request(
 ) -> CreditIssuanceRequest:
     """Build one deterministic command only from an authoritative settlement gate."""
 
-    admitted_gate = {
-        "alkahest.v1": "alkahest_verified",
-        "fiat.stripe.v1": "hosted_funded",
-    }.get(mechanism)
-    if admitted_gate is None or authoritative_gate != admitted_gate:
+    if mechanism != "alkahest.v1" or authoritative_gate != "alkahest_verified":
         raise ValueError(
             "credit issuance requires the exact mechanism's authoritative funding gate"
         )
     return CreditIssuanceRequest.create(
         obligation_ref=obligation_ref,
-        mechanism=mechanism,
+        mechanism="alkahest.v1",
         owner=owner,
         service=service,
         resource_id=resource_id,
         quantity=quantity,
-        key=CreditKeyTarget(mode=key_mode, key_id=key_id),
+        key=CreditKeyTarget.model_validate({"mode": key_mode, "key_id": key_id}),
         capacity_reservation_id=capacity_reservation_id,
     )
 

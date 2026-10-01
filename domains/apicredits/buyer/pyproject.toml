@@ -18,7 +18,6 @@ dependencies = [
   "arkhai-kit-alkahest",
   "arkhai-kit-config",
   "arkhai-kit-policy",
-  "arkhai-kit-hosted-settlement>=0.1.1",
   "arkhai-kit-settlement-runtime",
 ]
 
@@ -56,7 +55,6 @@ only-include = ["__init__.py"]
 "deal_helpers.py" = "domains/apicredits/buyer/deal_helpers.py"
 "escrow_client.py" = "domains/apicredits/buyer/escrow_client.py"
 "escrow_selection.py" = "domains/apicredits/buyer/escrow_selection.py"
-"hosted_authorization.py" = "domains/apicredits/buyer/hosted_authorization.py"
 "cli.py" = "domains/apicredits/buyer/cli.py"
 "cli_helpers.py" = "domains/apicredits/buyer/cli_helpers.py"
 "common.py" = "domains/apicredits/buyer/common.py"

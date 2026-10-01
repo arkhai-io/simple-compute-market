@@ -25,7 +25,6 @@ from market_config import (
 from market_settlement_runtime import SettlementPublicationClause
 
 _ALKAHEST = "alkahest.v1"
-_STRIPE = "fiat.stripe.v1"
 _EVM_ADDRESS = re.compile(r"0x[0-9a-fA-F]{40}")
 _ZERO_DECIMAL_CURRENCIES = frozenset(
     {
@@ -147,7 +146,7 @@ def _legacy_context(
 ) -> tuple[str | None, dict[str, Any], tuple[str, ...]]:
     settlement = _table(config, "Settlement") or {}
     enabled: list[str] = []
-    for key, mechanism in (("alkahest", _ALKAHEST), ("stripe", _STRIPE)):
+    for key, mechanism in (("alkahest", _ALKAHEST),):
         section = settlement.get(key)
         if isinstance(section, Mapping) and _plain(section.get("enabled")) is True:
             enabled.append(mechanism)
@@ -161,15 +160,6 @@ def _legacy_context(
         )
 
     mechanism = enabled[0]
-    if mechanism == _STRIPE:
-        stripe = settlement.get("stripe")
-        currency = (
-            _plain(stripe.get("currency")) if isinstance(stripe, Mapping) else None
-        )
-        exponent = _currency_exponent(currency) if isinstance(currency, str) else None
-        if exponent is None:
-            return None, {}, ("Stripe currency scale is missing or unsupported",)
-        return mechanism, {"asset": currency, "exponent": exponent}, ()
 
     chains = _table(config, "Chains") or {}
     chain_names = [
@@ -213,22 +203,6 @@ def _clause_for_legacy_price(
     if not amount.is_finite() or amount <= 0:
         raise ValueError("legacy price must be positive")
 
-    if mechanism == _STRIPE:
-        exponent = int(context["exponent"])
-        if amount != amount.to_integral_value():
-            raise ValueError("legacy Stripe price is not an integer minor-unit amount")
-        return SettlementPublicationClause(
-            mechanism=mechanism,
-            asset=str(context["asset"]),
-            rate=_decimal_text(amount / (Decimal(10) ** exponent)),
-            per="hour",
-            mechanism_input={
-                "funding_profile": "card.v1",
-                "interaction": "interactive",
-                "funds_flow": "separate_charges_transfers",
-            },
-        )
-
     asset = _plain(token)
     if not isinstance(asset, str) or not _EVM_ADDRESS.fullmatch(asset):
         raise ValueError(
@@ -245,100 +219,6 @@ def _clause_for_legacy_price(
             "escrow_kind": "erc20_escrow_obligation_default",
         },
     )
-
-
-def _migrate_existing_settlement_clauses(
-    existing: list[Any],
-) -> tuple[list[Any], tuple[str, ...], tuple[str, ...]]:
-    migrated = copy.deepcopy(existing)
-    actions: list[str] = []
-    conflicts: list[str] = []
-    for index, raw_clause in enumerate(migrated):
-        if not isinstance(raw_clause, MutableMapping):
-            continue
-        if _plain(raw_clause.get("mechanism")) != _STRIPE:
-            continue
-        raw_input = raw_clause.get("mechanism_input")
-        if not isinstance(raw_input, MutableMapping):
-            conflicts.append(
-                f"Pricing.settlements[{index}] Stripe mechanism_input must be a table"
-            )
-            continue
-        method_present = "method" in raw_input
-        methods_present = "payment_method_types" in raw_input
-        profile_present = "funding_profile" in raw_input
-        legacy_count = int(method_present) + int(methods_present)
-        if profile_present and legacy_count:
-            conflicts.append(
-                f"Pricing.settlements[{index}] mixes funding_profile with legacy methods"
-            )
-            continue
-        if legacy_count > 1:
-            conflicts.append(
-                f"Pricing.settlements[{index}] has ambiguous legacy method fields"
-            )
-            continue
-        expected_fields = {"funding_profile", "interaction", "funds_flow"}
-        if not legacy_count:
-            profile = _plain(raw_input.get("funding_profile"))
-            interaction = _plain(raw_input.get("interaction"))
-            funds_flow = _plain(raw_input.get("funds_flow"))
-            allowed_interactions = {
-                "card.v1": {"interactive", "saved_instrument"},
-                "us_bank_transfer.v1": {"interactive"},
-                "us_ach_debit.v1": {"interactive", "saved_instrument"},
-            }
-            if (
-                not isinstance(profile, str)
-                or profile not in allowed_interactions
-                or set(raw_input) != expected_fields
-                or interaction not in allowed_interactions.get(profile, set())
-                or funds_flow != "separate_charges_transfers"
-            ):
-                conflicts.append(
-                    f"Pricing.settlements[{index}] has a partial or unsupported exact funding profile"
-                )
-            continue
-        if method_present:
-            legacy = _plain(raw_input.get("method"))
-            supported = legacy == "card"
-        else:
-            legacy = _plain(raw_input.get("payment_method_types"))
-            supported = legacy == ["card"]
-        if not supported:
-            conflicts.append(
-                f"Pricing.settlements[{index}] has unsupported legacy methods"
-            )
-            continue
-        allowed_legacy_fields = {
-            "method" if method_present else "payment_method_types",
-            "interaction",
-            "funds_flow",
-        }
-        if set(raw_input) - allowed_legacy_fields:
-            conflicts.append(
-                f"Pricing.settlements[{index}] legacy input has unsupported fields"
-            )
-            continue
-        interaction = _plain(raw_input.get("interaction"))
-        funds_flow = _plain(raw_input.get("funds_flow"))
-        if interaction not in (None, "interactive") or funds_flow not in (
-            None,
-            "separate_charges_transfers",
-        ):
-            conflicts.append(
-                f"Pricing.settlements[{index}] conflicts with the card.v1 legacy mapping"
-            )
-            continue
-        raw_input.pop("method", None)
-        raw_input.pop("payment_method_types", None)
-        raw_input["funding_profile"] = "card.v1"
-        raw_input["interaction"] = "interactive"
-        raw_input["funds_flow"] = "separate_charges_transfers"
-        actions.append(
-            f"Pricing.settlements[{index}].mechanism_input <- card.v1"
-        )
-    return migrated, tuple(actions), tuple(conflicts)
 
 
 def migrate_publication_config(
@@ -380,9 +260,7 @@ def migrate_publication_config(
                 config_path, "toml", False, False, (), conflicts
             )
         if not actions:
-            return PublicationMigrationResult(
-                config_path, "toml", False, False, (), ()
-            )
+            return PublicationMigrationResult(config_path, "toml", False, False, (), ())
         planned = copy.deepcopy(document)
         _mutable_table(planned, "Pricing")["settlements"] = clauses
         candidate_text = tomlkit.dumps(planned)
@@ -599,3 +477,9 @@ def format_publication_migration_result(
     elif not result.changed and not result.conflicts:
         lines.append(f"No publication migration required for {result.path}.")
     return tuple(lines)
+
+
+def _migrate_existing_settlement_clauses(
+    existing: list[Any],
+) -> tuple[list[Any], tuple[str, ...], tuple[str, ...]]:
+    return copy.deepcopy(existing), (), ()

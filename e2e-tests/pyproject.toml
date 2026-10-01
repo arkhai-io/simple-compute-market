@@ -22,9 +22,6 @@ dependencies = [
     "python-dotenv>=1.0",
     "rich>=13.0",
     "httpx>=0.27",            # used by storefront smoke and canonical service clients
-    # Validates written protected-lane evidence against the published
-    # evidence.schema.json. A base dependency, not a stripe-test extra:
-    # the schema check is a credential-free public check.
     "jsonschema>=4.21",
     # Workspace dependency: tests use the real discovery/matching logic,
     # not a re-implementation. Keeps test behavior aligned with storefront behavior.
@@ -55,9 +52,6 @@ dev = [
     "isort>=5.13",
     "mypy>=1.8",
     "ruff>=0.3",
-]
-stripe-test = [
-    "playwright==1.54.0",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -96,7 +90,6 @@ markers = [
     "e2e_bare_metal_deal: Full installed-plugin whole-host deal — discovery, negotiation, settlement, SSH access, teardown, and access revocation",
     "e2e_alkahest_escrow_codecs: Real Alkahest escrow codec create/read scenario",
     "e2e_non_erc20_settlement: Full settlement path for scalar non-ERC20 Alkahest escrow variants",
-    "e2e_hosted_stripe_test: Protected Stripe test-mode hosted settlement compatibility evidence",
     "smoke: Quick smoke tests",
     "slow: Tests that may take longer due to RPC latency",
     "mock_provisioning: E2E mock provisioning flow tests",
@@ -118,7 +111,7 @@ markers = [
     "roles_post_settlement_buyer: Post-settlement stage, buyer perspective",
     "roles_cli_buy: CLI tests for `market buy` (consumes seller inventory; run separately from roles_stage_*)",
     "roles_cli_provide: CLI tests for `market provide` (imports a throwaway CSV, publishes orders)",
-    
+
 ]
 log_cli = true
 log_cli_level = "INFO"

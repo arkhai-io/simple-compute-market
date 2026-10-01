@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import re
-from typing import Any, Literal, Optional, Self
+from typing import Any, Final, Literal, Optional, Self
 
 from market_identity import Identity, canonical_json
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-ISSUANCE_REQUEST_SCHEMA = "arkhai.api-credits.issuance-request.v1"
-ISSUANCE_RESULT_SCHEMA = "arkhai.api-credits.issuance-result.v1"
+ISSUANCE_REQUEST_SCHEMA: Final = "arkhai.api-credits.issuance-request.v1"
+ISSUANCE_RESULT_SCHEMA: Final = "arkhai.api-credits.issuance-result.v1"
 _SAFE_REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,254}$")
 
 
@@ -107,10 +107,11 @@ class IssuanceRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
-    schema: Literal["arkhai.api-credits.issuance-request.v1"] = ISSUANCE_REQUEST_SCHEMA
+    # The wire schema field shadows Pydantic's deprecated schema() method.
+    schema: Literal["arkhai.api-credits.issuance-request.v1"] = ISSUANCE_REQUEST_SCHEMA  # type: ignore[assignment]
     fulfillment_id: str = Field(min_length=1, max_length=320)
     obligation_ref: str = Field(min_length=1, max_length=255)
-    mechanism: Literal["alkahest.v1", "fiat.stripe.v1"]
+    mechanism: Literal["alkahest.v1"]
     owner: Identity
     service: str = Field(min_length=1, max_length=255)
     resource_id: str = Field(min_length=1, max_length=255)
@@ -145,11 +146,11 @@ class IssuanceRequest(BaseModel):
 class IssuanceResponse(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    schema: Literal["arkhai.api-credits.issuance-result.v1"] = ISSUANCE_RESULT_SCHEMA
+    schema: Literal["arkhai.api-credits.issuance-result.v1"] = ISSUANCE_RESULT_SCHEMA  # type: ignore[assignment]
     fulfillment_id: str
     grant_id: str
     obligation_ref: str
-    mechanism: Literal["alkahest.v1", "fiat.stripe.v1"]
+    mechanism: Literal["alkahest.v1"]
     owner: Optional[Identity]
     service: str
     resource_id: str

@@ -17,7 +17,7 @@ MODULE ?= contracts
 # CLI instead; this variable is for local development only.
 DIST_DIR ?= ../.dist
 
-.PHONY: build venv test test-e2e hosted-preflight hosted-start hosted-restart hosted-clean hosted-stripe-test hosted-stripe-test-stop
+.PHONY: build venv test test-e2e
 
 # -----------------------------------------------------------------------
 # Setup
@@ -42,8 +42,6 @@ reinit: init-venv
 	--upgrade-package arkhai-kit-settlement-runtime          --reinstall-package arkhai-kit-settlement-runtime \
 	--upgrade-package arkhai-kit-storefront                 --reinstall-package arkhai-kit-storefront \
 	--upgrade-package arkhai-kit-alkahest                    --reinstall-package arkhai-kit-alkahest \
-	--upgrade-package arkhai-hosted-settlement-client        --reinstall-package arkhai-hosted-settlement-client \
-	--upgrade-package arkhai-kit-hosted-settlement           --reinstall-package arkhai-kit-hosted-settlement \
 	--upgrade-package arkhai-kit-site                        --reinstall-package arkhai-kit-site \
 	--upgrade-package arkhai-kit-site-client                 --reinstall-package arkhai-kit-site-client \
 	--upgrade-package arkhai-kit-resource-pools              --reinstall-package arkhai-kit-resource-pools \
@@ -71,29 +69,6 @@ build-images: reinit
 	cd .. && docker build -t $(IMAGE_NAME):$(IMAGE_TAG) -f e2e-tests/Dockerfile .
 	docker tag $(IMAGE_NAME):$(IMAGE_TAG) $(IMAGE_NAME):$(IMAGE_TAG)-$(GIT_SUFFIX)
 
-
-hosted-preflight:
-	$(MAKE) -C .. hosted-preflight
-
-hosted-start:
-	$(MAKE) -C .. hosted-compose-start
-
-hosted-restart:
-	$(MAKE) -C .. hosted-compose-restart
-
-hosted-clean:
-	$(MAKE) -C .. hosted-compose-clean
-
-
-hosted-stripe-test:
-	$(MAKE) -C .. hosted-stripe-test
-
-hosted-stripe-test-stop:
-	$(MAKE) -C .. hosted-stripe-test-stop
-
-# -----------------------------------------------------------------------
-# Tests — local
-# -----------------------------------------------------------------------
 
 test:
 	ACTIVE_PROFILES=$(ACTIVE_PROFILES) \
