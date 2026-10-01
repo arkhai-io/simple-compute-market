@@ -63,6 +63,6 @@ Built on `fiat.stripe.v1` and `kit/hosted-settlement`: `consume-expanded-stripe-
 ## Resolved Questions
 
 - No mechanism-neutral recipient field remains in `SettlementObligation`. The Agreement carries buyer and seller principals, and the Arkhai mandate's `to` comes from the payment option; Alkahest's claimant moves into its `params`. Core keeps only what at least two parties read.
-- `kit/settlement-runtime` moves into `kit/alkahest`. Arkhai payments keeps no client-side servicing state, so Alkahest is the runtime's only user.
+- `kit/settlement-runtime` stays where it is for now: Alkahest, contact exchange, core and the domains all use it. Arkhai payments keeps no client-side servicing state and bypasses it, producing no settlement plan or obligation; moving escrow semantics out of core is a follow-up change.
 - Both kits poll the payments service by transaction ID; the storefront relays nothing. A push hook from the payments service is tracked as an idea in arkhai-payments (`transaction-webhooks`) and is expected to replace polling.
 - The SDK's default window is `P7D`. The payments service enforces no minimum; chargeback exposure is covered by its cash reserve.

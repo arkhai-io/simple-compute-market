@@ -1,17 +1,12 @@
 # Implementation Tasks
 
-## 1. Move escrow semantics into `alkahest.v1`
+## 1. Move escrow semantics into `alkahest.v1` (deferred)
 
-Dependency: Section 2 consumes the settlement-option and accepted-carrier shapes established here. Section 3 depends on Sections 1 and 2. The recipient field and shared settlement-runtime disposition are settled in `design.md#resolved-questions`.
-
-- [ ] 1.1 Remove `claimant`, `claimant_principal`, `expiration_unix`, and `conditions` as universal fields from `core/src/market_core/schemas.py`. Keep the accepted mechanism and opaque `params`; carry Alkahest escrow data in its mechanism-owned option and obligation parameters. No neutral recipient field replaces them.
-- [ ] 1.2 Move Alkahest listing escrow forms, arbiter demands, oracle address, claimant, expiration, and condition decoding into `kit/alkahest/src/market_alkahest/{schemas.py,proposals.py,plans.py,settlement_config.py,claims.py,claim_hooks.py,escrow_verification.py}`. Update existing regression coverage in `kit/alkahest/tests/unit/{test_settlement_config.py,test_proposal_normalization.py,test_plans.py,test_claims.py,test_conditional_escrow_client.py}`.
-- [ ] 1.3 Move `kit/settlement-runtime` into `kit/alkahest`. Update the affected `src/market_settlement_runtime/{models.py,ports.py,servicing.py,runtime.py,configuration.py}` and existing `tests/unit/{test_accepted_obligation.py,test_servicing.py,test_runtime.py,test_configuration.py}` so no shared mechanism contract imposes Alkahest collect/reclaim semantics on charge-first settlement.
-- [ ] 1.4 Preserve recovery of already accepted Alkahest work while moving its immutable option and obligation parameters. Update the owning persisted carrier/migration and recovery tests where those records are read; fail closed on records that cannot be unambiguously reconstructed.
+Deferred to a follow-up change. `kit/settlement-runtime` is shared by Alkahest, contact exchange, core and all three domains, and the escrow fields are persisted in negotiation threads and obligation records, so the move is a refactor of its own. `arkhai.payments.v1` does not need it: it settles from the Agreement and option params and produces no `SettlementPlan` or `SettlementObligation`, so escrow semantics stay out of its path without leaving core.
 
 ## 2. Emit one explicit Agreement from negotiation
 
-Dependency: Section 2 follows Section 1's accepted settlement-option and parameter carrier. Section 3 depends on this section's exact Agreement bytes.
+Dependency: Section 2 uses the existing `SettlementOption` (mechanism, option id, asset, rates, opaque params) as the Agreement's settlement section. Section 3 depends on this section's exact Agreement bytes.
 
 - [ ] 2.1 Add the Agreement wire model in `core/src/market_core/schemas.py` with negotiation/listing identity, canonical buyer and seller principals, exact selected settlement option and parameters, accepted amount/asset/duration, explicit `start_utc`, domain provision terms, and `accepted_at`.
 - [ ] 2.2 Update the acceptance chokepoint and response construction in `kit/negotiation-runtime/src/market_negotiation_runtime/runtime.py` to emit one Agreement containing accepted terms only. Resolve “now” to an explicit start at acceptance and preserve the exact serialized bytes for both parties; do not rebuild the object from negotiation history.
@@ -19,7 +14,7 @@ Dependency: Section 2 follows Section 1's accepted settlement-option and paramet
 
 ## 3. Add Arkhai payments, remove hosted Stripe, and wire domain stages
 
-Dependency: This section depends on Sections 1 and 2. Its three domain compositions may be delivered as separate changes after the shared kit and Agreement contracts are stable.
+Dependency: This section depends on Section 2. Its three domain compositions may be delivered as separate changes after the shared kit and Agreement contracts are stable.
 
 - [x] 3.1 Add `kit/arkhai-payments` as a stateless `arkhai.payments.v1` client over the published `arkhai-io/arkhai-payments/schema/payments.schema.json` contract. Generate Python wire models from that schema; use RFC 8785 JCS for Agreement and mandate hashes. Implement seller mandate derivation, buyer policy validation/approval with owner-scoped WorkOS credentials, optional Agreement attachment, polling by transaction ID, Ed25519 receipt verification using the `arkhai.payments.receipt.v1` identity framing, seller-side `reverse`, and retries that preserve transaction identity. Keep transaction servicing state and any daemon in the payments service, not this kit. Extend existing package/release and typing checks for the new kit. Landed: stateless client, vendored generated contract and vectors, mandate/receipt checks, end-to-end API operations, and package/release/typing integration.
 - [x] 3.2 Remove `fiat.stripe.v1`, `kit/hosted-settlement`, and Stripe funding, setup, and recovery configuration. Delete `kit/hosted-settlement/**`, remove hosted-specific `kit/settlement-runtime/src/market_settlement_runtime/hosted_routes.py` behavior, registrations, routes, commands, dependencies, locks, and fixtures. Do not map old Stripe settings, funding profiles, operation IDs, or credentials to Arkhai payments.
