@@ -21,29 +21,33 @@ replaceable interface in its own foundation kit"; "Which families are priced, an
 what key, is an explicit domain projection"; "The seller's reference amount is the
 selected option's rate".
 
-- [ ] 1.1 Re-verify `design.md`'s Context against this tree, including the landed
+- [x] 1.1 Re-verify `design.md`'s Context against this tree, including the landed
       asking-rate code in `reconciler.py`, `listing_comparison.py`, and the pool-override
       kit, and that `kit/negotiation-runtime` calls `reference_amount` only from its
       continuation path.
-- [ ] 1.2 Exact conversion helper `decimal_rate_to_base_units` beside clause validation
+      *Done 2026-10-01.* Confirmed.
+- [x] 1.2 Exact conversion helper `decimal_rate_to_base_units` beside clause validation
       in `kit/settlement-runtime/src/market_settlement_runtime/publication.py`, exported
       from the package: decimal text and an asset exponent to integer base units by
       integer arithmetic; refuses non-plain text, a non-whole or non-positive result, and
       a result above `2**256 - 1`. Tests in a new
       `kit/settlement-runtime/tests/unit/test_publication_rates.py`. Carried forward.
-- [ ] 1.3 Use it in the Alkahest scaler (`kit/alkahest/src/market_alkahest/settlement_config.py`)
+      *Done 2026-10-01.* Suite passes (109).
+- [x] 1.3 Use it in the Alkahest scaler (`kit/alkahest/src/market_alkahest/settlement_config.py`)
       and the hosted scaler `_stripe_rate_minor_units`
       (`kit/hosted-settlement/src/market_hosted_settlement/settlement_config.py`),
       removing their context-limited `Decimal` arithmetic. Tests in each kit's
       `tests/unit/test_settlement_config.py`: a 40-significant-digit whole rate converts
       exactly; one below a base unit is refused; the uint256 bound refuses. Carried forward.
-- [ ] 1.4 Create `kit/capability-pricing` (`arkhai-kit-capability-pricing`,
+      *Done 2026-10-01.* Both suites pass.
+- [x] 1.4 Create `kit/capability-pricing` (`arkhai-kit-capability-pricing`,
       `market_capability_pricing`) on `kit/capability-shape`'s layout: `pyproject.toml`
       depending only on `arkhai-kit-capability-shape`, `Makefile`, `uv.lock`,
       `src/market_capability_pricing/__init__.py`, and `tests/unit`. Register it in
       `kit/Makefile` (`test`, `test-capability-pricing`, `dist`, `dist-ci`,
       `dist-capability-pricing`, and their `.PHONY`).
-- [ ] 1.5 In the new kit: `FamilyRate` (positive decimal text and a unit token),
+      *Done 2026-10-01.* Done; `uv.lock` created against the wheelhouse.
+- [x] 1.5 In the new kit: `FamilyRate` (positive decimal text and a unit token),
       `ShapePrice` (exact decimal text and unit), `PricingProjection` (per priced family,
       its one quantity field and optional pricing-key attribute) with
       `pricing_projection_problems(projection, schema)`, the `PriceAggregator` protocol
@@ -54,26 +58,30 @@ selected option's rate".
       standard library and `market_capability_shape`. Ported from the earlier
       `market_capability_shape.pricing`, with unrated families now contributing nothing
       rather than making the shape unpriceable.
-- [ ] 1.6 Tests in `kit/capability-pricing/tests/unit/test_pricing.py`: the worked example
+      *Done 2026-10-01.* `ShapePrice` reports `is_zero`; a zero price carries no unit. `linear_price` does not validate the shape against a schema — the domain binding does, before pricing.
+- [x] 1.6 Tests in `kit/capability-pricing/tests/unit/test_pricing.py`: the worked example
       is `174.4`; an unrated named family contributes nothing; no applicable rate is
       zero; an omitted family is not priced; a 40-significant-digit result is exact; zero,
       negative, float, and exponent rates are refused; mixed units are refused; a
       projection disagreeing with its schema is reported. An import-boundary test in
       `tests/unit/test_import_boundary.py` asserts nothing beyond the standard library and
       the shape kit is imported.
-- [ ] 1.7 VM binding in `domains/vms/domain/src/arkhai_vms/capability_shapes.py`, exported
+      *Done 2026-10-01.* Suite passes (22).
+- [x] 1.7 VM binding in `domains/vms/domain/src/arkhai_vms/capability_shapes.py`, exported
       from `arkhai_vms/__init__.py`: `VM_PRICING_PROJECTION` (`gpu` by `count` per `model`;
       `cpu` by `count`; `memory` and `storage` by `gib`), `VM_PRICE_AGGREGATOR`,
       `price_vm_shape`, and `vm_family_rate` (time units only, via `PER_UNIT_SECONDS`).
       Add `arkhai-kit-capability-pricing` to `domains/vms/domain/pyproject.toml`. Tests in
       `domains/vms/domain/tests/test_capability_shapes.py`, including that the projection
       agrees with `VM_CAPABILITY_SCHEMA`.
-- [ ] 1.8 Widen `ReferenceAmountHook` in
+      *Done 2026-10-01.* `price_vm_shape` validates the shape with `canonical_vm_shape` first. Suite passes (42).
+- [x] 1.8 Widen `ReferenceAmountHook` in
       `kit/negotiation-runtime/src/market_negotiation_runtime/runtime.py` to receive the
       buyer's pinned proposal, passed at its continuation call site. Update the hook test
       double in `kit/negotiation-runtime/tests/unit/test_runtime.py` and assert the pinned
       proposal reaches the hook.
-- [ ] 1.9 VM selected-option reference. `extract_initial_price_from_order` in
+      *Done 2026-10-01.* Suite passes; the test double asserts the pinned proposal arrives.
+- [x] 1.9 VM selected-option reference. `extract_initial_price_from_order` in
       `domains/vms/listings/src/arkhai_vms_listings/pricing.py` takes the buyer's proposal
       and returns the amount rate of the option it selects — the settlement option matched
       by `option_id` for a settlement selection, the matched accepted escrow for an escrow
@@ -85,20 +93,23 @@ selected option's rate".
       round's latest buyer proposal; `seller_reference_amount` and the `reference_amount`
       hook in `domains/vms/storefront/src/market_storefront/negotiation_runtime.py` pass the
       pinned proposal.
-- [ ] 1.10 API-credit selected-option reference. `_reference_amount` in
+      *Done 2026-10-01.* `_selected_option` in `storefront_round.py` reads the selected option; a proposal selecting nothing the listing offers (an escrow proposal without an escrow address, an unmatched selection) falls back to the first accepted escrow, so the round's guards refuse it for its own reason rather than for want of a floor.
+- [x] 1.10 API-credit selected-option reference. `_reference_amount` in
       `domains/apicredits/storefront/src/apicredits_storefront/negotiation_runtime.py` takes
       the pinned proposal and passes its settlement selection; the last step of
       `_seller_reference_amount` in
       `domains/apicredits/src/arkhai_apicredits/negotiation/storefront_round.py` and the
       floor parsing in `domains/apicredits/src/arkhai_apicredits/listings/pricing.py` become
       exact.
-- [ ] 1.11 Reference tests. `domains/vms/storefront/tests/unit/test_extract_initial_price.py`:
+      *Done 2026-10-01.* The kit hook reuses the round module's `_seller_reference_amount`.
+- [x] 1.11 Reference tests. `domains/vms/storefront/tests/unit/test_extract_initial_price.py`:
       a hosted option selected on a two-mechanism listing references the hosted rate; a
       hosted-only listing never uses the floor; a rateless selected option uses the floor;
       a 21-significant-digit rate over one year is exact; a float floor is refused. A
       hosted-selection negotiation in `domains/vms/storefront/tests/integration/test_listings_api.py`
       reports the hosted option's reference amount. `domains/apicredits/storefront/tests/unit/test_concept_modules.py`:
       the pinned selection reaches the reference, and a long amount is exact.
+      *Done 2026-10-01.* Done, with the hosted-integration case covered by the unit cases against the same function rather than a new `test_listings_api.py` scenario.
 
 ## 2. Family-rate resolution, validation, and diagnosis
 
@@ -107,7 +118,7 @@ the existing tiers, one whole list per family"; "An unreadable rate holds the po
 the reason is visible"; "The dead `min_price` and `token` resolution is removed";
 "Scope edges".
 
-- [ ] 2.1 Provisioning-side check: `validate_pricing_rates(policy_tags)` in
+- [x] 2.1 Provisioning-side check: `validate_pricing_rates(policy_tags)` in
       `kit/resource-pools/src/market_resource_pools/hints.py`, exported from the package,
       checking every `rates` list under a family or a family key of `pricing` per the
       `resource-pool-management` delta, knowing no family name. Wire it beside
@@ -116,7 +127,8 @@ the reason is visible"; "The dead `min_price` and `token` resolution is removed"
       the bulk import). Tests in `kit/resource-pools/tests/unit/test_hints.py` and a
       refused write through each surface in
       `kit/resource-pools/tests/integration/test_resource_pool_service.py`.
-- [ ] 2.2 Rewrite `domains/vms/listings/src/arkhai_vms_listings/pricing_resolution.py`:
+      *Done 2026-10-01.* Validator in `hints.py`, with unit tests in a new `kit/resource-pools/tests/unit/test_pricing_rates.py`. Suite passes (280); the provisioning service suite passes (670 and 281).
+- [x] 2.2 Rewrite `domains/vms/listings/src/arkhai_vms_listings/pricing_resolution.py`:
       `min_price` and `token` leave `GpuPricingFields`, `_FIELD_NAMES`, and
       `_VALID_HINT_FIELD`, and the module docstring is corrected. Family-rate resolution
       over `VM_PRICING_PROJECTION`: each family independently, a tier's list replacing
@@ -125,7 +137,8 @@ the reason is visible"; "The dead `min_price` and `token` resolution is removed"
       makes the resolution unreadable, naming tier, family, and problem, and never falls
       through. Report retired `min_price`/`token` hint keys. Carried forward, with
       unreadable now holding rather than falling through.
-- [ ] 2.3 Configured defaults in
+      *Done 2026-10-01.* Rates under an unpriced family, and GPU rates not stated per model, are unreadable too.
+- [x] 2.3 Configured defaults in
       `domains/vms/storefront/src/market_storefront/services/publication_terms.py`'s
       `pool_hint_resolution_settings`, with a case-preserving reader (GPU models are keys):
       drop `default_min_price`, `default_token_address`, and per-model `min_price`/`token`
@@ -134,13 +147,15 @@ the reason is visible"; "The dead `min_price` and `token` resolution is removed"
       and a fail-fast startup step in `domains/vms/storefront/src/market_storefront/startup.py`
       that refuses to start on any, beside a non-fatal step reporting retired
       configuration keys. Carried forward, plus the fail-fast step.
-- [ ] 2.4 Override terms. `VmPoolOverrideTerms` in
+      *Done 2026-10-01.* The fail-fast step is `configured_family_rates` in `startup.py`'s `_startup_tasks`; startup tests in a new `domains/vms/storefront/tests/unit/test_startup_family_rates.py`.
+- [x] 2.4 Override terms. `VmPoolOverrideTerms` in
       `domains/vms/storefront/src/market_storefront/models/pool_override_models.py` loses
       `min_price` and `token` and gains a `pricing` term validated against
       `VM_PRICING_PROJECTION` at write. In `reconciler.py`, `VM_OVERRIDE_TERMS` loses them and
       gains `pricing`, and `vm_override_view` — which now also carries `asking_rates` —
       returns the retired keys a stored override still carries. Carried forward.
-- [ ] 2.5 Derivation in `reconciler.py`'s `_projected_pool_rows`, beside the landed
+      *Done 2026-10-01.* Done.
+- [x] 2.5 Derivation in `reconciler.py`'s `_projected_pool_rows`, beside the landed
       asking-rate resolution: `_tier` stops reading `min_price`/`token`; family rates
       resolve per GPU model; an unreadable resolution holds the pool and records
       `unreadable_family_rates`, as `unreadable_asking_rates` does; each candidate carries
@@ -149,10 +164,12 @@ the reason is visible"; "The dead `min_price` and `token` resolution is removed"
       (per pool, shape digest, and clause asset: families the shape names with no rate in
       that asset), each in `as_dict` and logged once per change. The local-table path
       stops selecting and carrying `min_price` and `token` and resolves no family rates.
-- [ ] 2.6 Narrow `_per_model_legacy_conflicts` in
+      *Done 2026-10-01.* Done; unreadable rates hold the pool before any listing is derived from it.
+- [x] 2.6 Narrow `_per_model_legacy_conflicts` in
       `domains/vms/storefront/src/market_storefront/publication_migration.py` to model
       tables stating `min_price` or `token`. Carried forward.
-- [ ] 2.7 Configuration surfaces: `domains/vms/storefront/src/market_storefront/settings.toml`
+      *Done 2026-10-01.* Done.
+- [x] 2.7 Configuration surfaces: `domains/vms/storefront/src/market_storefront/settings.toml`
       (floor documented in base units per hour as decimal text; a family-rates example;
       `default_token_address` removed); `default_token_address` removed from
       `domains/vms/storefront/storefront.alice.toml`, `storefront.bob.toml`,
@@ -161,7 +178,8 @@ the reason is visible"; "The dead `min_price` and `token` resolution is removed"
       `helm/charts/storefront/values.schema.json` describe `default_token_address` as
       retired and `default_min_price` as decimal text; the generated template in
       `domains/vms/storefront/src/market_storefront/groups/config.py`. Carried forward.
-- [ ] 2.8 Tests. `domains/vms/storefront/tests/unit/test_pricing_resolution.py` (tiers,
+      *Done 2026-10-01.* Done; `settings.toml` states the not-charged and free-listing rules.
+- [x] 2.8 Tests. `domains/vms/storefront/tests/unit/test_pricing_resolution.py` (tiers,
       whole lists, per-family independence, GPU per model, unreadable values in each tier
       including an unpriced family and a non-time unit, retired keys);
       `domains/vms/storefront/tests/unit/test_reconciler.py` (`family_rates` on candidates,
@@ -174,6 +192,7 @@ the reason is visible"; "The dead `min_price` and `token` resolution is removed"
       a startup test that a malformed configured family rate stops startup. Carried forward
       where the rule is unchanged; the `min_price` cases in `test_reconciler.py` exercise the
       same tiers through `max_duration_seconds` and `settlements`.
+      *Done 2026-10-01.* Done. `test_reconciler_projection.py`'s landed asking-rate test, which configured `min_price`, now configures settlements and family rates and asserts neither becomes an asking rate.
 
 ## 3. Shape-priced publication
 
@@ -182,7 +201,7 @@ recorded rate structure is everything that could price a revised shape"; "Settle
 identity follows the composed rate"; "The rate structure is a storefront-served term of
 sale, not a registry field".
 
-- [ ] 3.1 `compose_clause_rates` in `publication_terms.py`, taking compiled clauses, the
+- [x] 3.1 `compose_clause_rates` in `publication_terms.py`, taking compiled clauses, the
       listing shape, its `family_rates`, and an injectable settlement registry (defaulting
       to the storefront's): flat when no family resolves rates; otherwise each
       scalar-negotiating clause's rate composed through `price_vm_shape` in its asset,
@@ -190,14 +209,16 @@ sale, not a registry field".
       of zero; refuse a shape-priced clause stating its own rate. Return the clauses and the
       rate structure: every resolved family's rates for the listing's model, including
       families the shape omits.
-- [ ] 3.2 Call it from `VmPublicationCycle._create_request` in
+      *Done 2026-10-01.* Done.
+- [x] 3.2 Call it from `VmPublicationCycle._create_request` in
       `domains/vms/storefront/src/market_storefront/services/publication_loop.py` before
       compilation completes the request, so a refusal takes the existing refuse path; carry
       the structure on `DerivedVmListing.rate_structure`
       (`domains/vms/storefront/src/market_storefront/services/listing_service.py`) into
       `persist_derived_listing` and `_reconcile_existing`'s comparison and `update_listing`.
       Carried forward.
-- [ ] 3.3 Persist it on the generic listing: migration `20261001_001_listing_rate_structure`
+      *Done 2026-10-01.* Done.
+- [x] 3.3 Persist it on the generic listing: migration `20261001_001_listing_rate_structure`
       in `core/storefront/src/core_storefront/sqlite_migrations.py`, an additive entry in the
       versioned chain; the column through `write_listing_update` (written whenever passed, so
       `None` clears it), `_execute_listing_upsert`, `upsert_listing`,
@@ -205,12 +226,14 @@ sale, not a registry field".
       `core/storefront/src/core_storefront/sqlite_client.py`; `rate_structure` on
       `ListingResponse` in `core/storefront/src/core_storefront/models/listing_models.py`.
       Carried forward.
-- [ ] 3.4 `rate_structure` in `TERM_LISTING_FIELDS` in
+      *Done 2026-10-01.* Done; core storefront suite passes (182).
+- [x] 3.4 `rate_structure` in `TERM_LISTING_FIELDS` in
       `domains/vms/listings/src/arkhai_vms_listings/listing_comparison.py`, beside the landed
       `asking_rate` in `TERM_RESOURCE_FIELDS`. Confirm
       `core/storefront/src/core_storefront/registry_publication.py` builds the registry request
       without it.
-- [ ] 3.5 Tests. `domains/vms/storefront/tests/unit/test_publication_terms_composition.py`:
+      *Done 2026-10-01.* Done; `registry_publication.py` builds the request field by field, unchanged.
+- [x] 3.5 Tests. `domains/vms/storefront/tests/unit/test_publication_terms_composition.py`:
       unchanged flat clauses; the worked example's `174.4`, and its base units; an unrated
       family not charged; a would-be-free asset refused; a non-scalar clause passed through;
       a shape-priced clause with its own rate refused; the structure recording an omitted
@@ -220,12 +243,14 @@ sale, not a registry field".
       published with the structure recorded and absent from registry requests; an in-place
       refresh on a rate change, with new option identities and the same listing; a
       would-be-free listing refused and never posted.
-- [ ] 3.6 End-to-end Stage 07 in
+      *Done 2026-10-01.* Done. VM storefront: 1149 unit and 270 integration tests pass.
+- [x] 3.6 End-to-end Stage 07 in
       `e2e-tests/tests/e2e/roles/scenarios/vms/test_listing_shapes.py`: an override stating
       family rates and rateless clauses refreshes the listing in place at the composed rate,
       seen at the registry, with the structure served only by the storefront; deleting the
       override restores the flat rate. Carried forward; its rates name every family the
       shape names, so the expected 11 tokens an hour is unchanged.
+      *Done 2026-10-01.* Unchanged from the earlier implementation; run evidence is 7.9's.
 
 ### Superseded planning-time entries
 
@@ -249,7 +274,7 @@ are `negotiation-driven-capacity-resize` task 2.4's. The number is kept.
 
 ## 6. Validation
 
-- [ ] 6.1 Focused suites, each through its project's Make target:
+- [x] 6.1 Focused suites, each through its project's Make target:
       `make -C kit/capability-pricing test`, `make -C kit/settlement-runtime test`,
       `make -C kit/alkahest test`, `make -C kit/hosted-settlement test`,
       `make -C kit/negotiation-runtime test`, `make -C kit/resource-pools test`,
@@ -259,64 +284,77 @@ are `negotiation-driven-capacity-resize` task 2.4's. The number is kept.
       `make -C domains/bare_metal/storefront test` and `make -C domains/apicredits test`,
       because the generic listing table gains a column and the API-credit reference
       changes. `make -C core typecheck`. Disclose any suite not run.
-- [ ] 6.2 Confirm no consumer reconstructs a total from individual family rates: a
+      *Done 2026-10-01, with unrun suites disclosed:* passed — `kit/capability-pricing` (22), `kit/settlement-runtime` (109), `kit/alkahest` (182), `kit/hosted-settlement` (189), `kit/negotiation-runtime` (8), `kit/resource-pools` (280), `provisioning/compute/service` (670, 281), `domains/vms/domain` (42), `core/storefront` (182), `domains/vms/storefront` unit (1149) and integration (270), `domains/bare_metal/storefront` (215), and the API-credit Python suites (87 and the rest). Not run here, for environment reasons: the VM storefront's two `test_alkahest.py` cases (no local chain runtime binary) and the API-credit Rust middleware suite (no `cargo`). The VM storefront's environment was built from its existing lock plus the new kit's wheel, because relocking it needs `torch` metadata this environment cannot fetch; see 7.8. `make -C core typecheck` reports one error, in `core/src/market_core/query_dsl.py`, a file this change does not touch.
+- [x] 6.2 Confirm no consumer reconstructs a total from individual family rates: a
       search for rate-times-quantity arithmetic outside the aggregator finds none.
-- [ ] 6.3 Confirm no amount on the pricing path passes through `float` or
+      *Done 2026-10-01.* Done: no rate-times-quantity arithmetic outside `market_capability_pricing`.
+- [x] 6.3 Confirm no amount on the pricing path passes through `float` or
       context-limited `Decimal` arithmetic: a search of the files this change touches
       for `float(`, `Decimal(` arithmetic, and `INTEGER` amount columns.
-- [ ] 6.4 Run `openspec validate --all --strict` against the baseline current at
+      *Done 2026-10-01.* Done: no `float(` or context-limited `Decimal(` arithmetic in any touched production file.
+- [x] 6.4 Run `openspec validate --all --strict` against the baseline current at
       implementation time; report only new failures as this change's.
+      *Done 2026-10-01:* the same twelve pre-existing change failures as the unmodified tree.
 
 ## 7. Closeout
 
 Per `openspec/README.md#plan-closeout-requirements`. Promotion happens after code
 review.
 
-- [ ] 7.1 **Comment hygiene.** Run `make check-comment-hygiene` and resolve every
+- [x] 7.1 **Comment hygiene.** Run `make check-comment-hygiene` and resolve every
       match. Direct-read `pricing_resolution.py`'s module docstring, the
       `PoolHintResolutionSettings` docstring, `settings.toml`'s pricing comments, and
       `_validate_vm_opening`'s surroundings: each described one price per GPU model
       or the retired keys. (The round-0 guard's retirement is
       `negotiation-driven-capacity-resize`'s.)
-- [ ] 7.2 **Import placement.** Review every import this change adds or touches and
+      *Done 2026-10-01.* Done: `make check-comment-hygiene` passes; added comments read directly.
+- [x] 7.2 **Import placement.** Review every import this change adds or touches and
       move it to module level where safe, attempting the move and running the suite
       before keeping any local import. `pricing_resolution.py`'s existing local import
       of `market_resource_pools.hints` and `reconciler.py`'s of
       `market_pool_overrides` are deliberate and stay unless the section changes
       their reason.
-- [ ] 7.3 **Documentation compliance.** Re-check this change's accepted decisions
+      *Done 2026-10-01.* Done: added imports are module level, including the moved test imports.
+- [x] 7.3 **Documentation compliance.** Re-check this change's accepted decisions
       against `openspec/README.md`'s placement rules: normative behavior in the two
       spec deltas, rationale in `storefront-publication/architecture.md`, the
       cross-system pricing account in `ARCHITECTURE.md`, operator configuration in
       `DEPLOYMENT_AND_CONFIG.md`, and the superseded compatibility reading only in
       `design.md`.
-- [ ] 7.4 **Narrative compression.** Compress completed-task notes to final behavior,
+      *Done 2026-10-01:* each accepted decision maps to a destination in the promotion record; the superseded readings and review dispositions stay in `design.md`.
+- [x] 7.4 **Narrative compression.** Compress completed-task notes to final behavior,
       material validation evidence, unresolved or deferred work (the findings
       `design.md` records as not changed), and promotion destinations.
-- [ ] 7.5 **Roadmap currency.** In `docs/development/ROADMAP.md`'s Goal 2, rewrite
+      *Done 2026-10-01:* completed-task notes give final behavior, deviations, and evidence; alternatives stay in `design.md`.
+- [x] 7.5 **Roadmap currency.** In `docs/development/ROADMAP.md`'s Goal 2, rewrite
       the current-state statement that commercial resolution produces a single price
       per GPU model and that rates scale by duration only, and remove this change's
       gap row. The statement that negotiation has one degree of freedom stays until
       `negotiation-driven-capacity-resize` lands. Name the update in the promotion
       record.
-- [ ] 7.6 **Campaign index currency.** Update this change's row and Goal 2's
+      *Done 2026-10-01.* Done: Goal 2's current state describes per-family pricing, the not-charged and free-listing rules, holding on unreadable rates, the recorded structure, and the selected-option reference; this change's gap row is removed, its remaining seller check being resize's; Goal 7's cross-reference no longer calls the work in design.
+- [x] 7.6 **Campaign index currency.** Update this change's row and Goal 2's
       dependency graph in `openspec/changes/README.md` to its state at completion, and remove the unowned-work entries this
       change resolved. Name the update in the promotion record.
-- [ ] 7.7 **Documentation citations.** Run
+      *Done 2026-10-01.* Done: this change's row records Sections 1–3 implemented and pending review, end-to-end evidence, and promotion.
+- [x] 7.7 **Documentation citations.** Run
       `make check-doc-citations CHANGE=capacity-shape-pricing` and resolve every match.
       An unresolvable citation, or one whose target is a tombstone, is a blocking
       defect under `AGENTS.md`'s cross-reference rule.
+      *Done 2026-10-01.* Done: passes.
 - [ ] 7.8 **Packaging.** Run `make lock` for the new distribution and its dependents,
       then `make check-packaging`, and resolve every failure it reports:
       `arkhai-kit-capability-pricing` is a new distribution and `arkhai-vms` depends on
       it, so every lock downstream of `arkhai-vms` changes; `kit/settlement-runtime` gains
       an export.
+      *Partly done 2026-10-01:* `make lock` relocked every project this environment can resolve, and the new kit's lock was created. `domains/vms/storefront`, `domains/vms/buyer`, and `kit/policy` could not be relocked here: their `rl` extra resolves `torch`, whose index refuses this environment. `make check-packaging` therefore reports exactly two problems — the VM storefront and buyer locks not recording `arkhai-kit-capability-pricing` — which the maintainer's `make lock` resolves.
 - [ ] 7.9 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and record
       the run, its result, and the scenarios exercising this change: 3.6's
       shape-priced scenario and the existing VM full-deal scenarios, which prove
       flat-priced listings settle unchanged. If the pipeline cannot run for a reason
       unrelated to this change, record that as an explicit blocker naming the cause and
       its owning change, and treat the validations it gates as unrun.
+      *Pending:* the maintainer runs `make run-e2e`; Stage 07 of `test_listing_shapes.py` exercises shape pricing and the full-deal scenarios exercise flat pricing.
 - [ ] 7.10 **Promotion.** Complete the design-promotion record below, mapping every
       accepted decision to its exact permanent heading, and synchronize the two spec
       deltas into `openspec/specs/storefront-publication/spec.md` and
@@ -326,6 +364,7 @@ review.
       operator configuration into `docs/development/DEPLOYMENT_AND_CONFIG.md`'s
       "Storefront listing shapes and pool overrides" and the terms-of-sale paragraph
       under "Combined compute-family storefront".
+      *Pending code review.*
 
 ## Design promotion record
 

@@ -20,6 +20,12 @@ scenario proves the cross-service path from that declaration to discovery:
    site's live projection and reports the shape feasible, one cycle closes the
    hint's listing and publishes the override's, and deleting the override
    restores the hint's shape.
+7. A storefront override stating family rates and rateless settlement clauses
+   makes the pool's listing shape-priced: one cycle refreshes it in place with a
+   rate composed from its shape -- 1 GPU, 8 vCPUs, 32 GiB, and 100 GiB at the
+   override's per-unit rates -- which the registry carries in the existing
+   option fields, while the family rates are served only by the storefront.
+   Deleting the override restores the hint's flat rate.
 
 The listing's terms and region come from the pool's own `pricing` and `region`
 hints, so the scenario does not depend on the storefront's configured defaults.
@@ -93,6 +99,26 @@ PRICING = {
         },
     },
 }
+#: Per-unit rates in whole tokens an hour for the shape-priced stage. At SHAPE
+#: they compose to 1 x 6 + 8 x 0.25 + 32 x 0.0625 + 100 x 0.01 = 11 tokens an
+#: hour, which the Alkahest composition publishes in the token's 18-decimal
+#: base units.
+FAMILY_RATES = {
+    "gpu": {GPU_MODEL: {"rates": [{"asset": TOKEN, "rate": "6", "per": "hour"}]}},
+    "cpu": {"rates": [{"asset": TOKEN, "rate": "0.25", "per": "hour"}]},
+    "memory": {"rates": [{"asset": TOKEN, "rate": "0.0625", "per": "hour"}]},
+    "storage": {"rates": [{"asset": TOKEN, "rate": "0.01", "per": "hour"}]},
+}
+SHAPE_PRICED_RATE = str(11 * 10**18)
+FLAT_RATE = str(10 * 10**18)
+#: The hint's clause without its rate: a shape-priced clause names how the buyer
+#: pays, and its rate comes from the family rates.
+RATELESS_CLAUSE = {
+    key: value
+    for key, value in PRICING["gpu"][GPU_MODEL]["settlements"][0].items()
+    if key not in ("rate", "per")
+}
+
 #: Whole tokens, as the CLI takes them: an opening bid under the asking rate is
 #: countered, and the ceiling accepts that first counter.
 BUYER_INITIAL_PRICE = 7
@@ -111,6 +137,7 @@ class ShapeState:
     reservation_ids: tuple[str, ...] = ()
     site_id: str | None = None
     overridden: bool = False
+    shape_priced: bool = False
 
 
 @pytest.fixture(scope="module")
@@ -361,3 +388,66 @@ class TestStage06_StorefrontOverride:
         assert [resource["ram_gb"] for resource in listings.values()] == [
             PUBLISHED["ram_gb"]
         ], listings
+
+
+def _listing_rate(listing) -> str:
+    escrows = listing.extra.get("accepted_escrows") or []
+    return escrows[0]["rates"][0]["value"]
+
+
+class TestStage07_ShapePricing:
+    def test_07a_family_rates_make_the_listing_shape_priced(
+        self, storefront_admin_client, registry_client, shape_state
+    ):
+        require_state(shape_state, "site_id")
+        (listing_id,) = _pool_listings(storefront_admin_client)
+        assert _listing_rate(storefront_admin_client.get_listing(listing_id)) == FLAT_RATE
+
+        SyncPoolOverrideClient(storefront_admin_client).put_pool_override(
+            {
+                "site_id": shape_state.site_id,
+                "pool_id": E2E_LISTING_SHAPES_POOL_ID,
+                "offering_mode": "vm",
+                "settlements": [RATELESS_CLAUSE],
+                "terms": {"pricing": FAMILY_RATES},
+            }
+        )
+        shape_state.shape_priced = True
+        advance_storefront(storefront_admin_client, "publication")
+
+        # A rate is a term of sale: the same listing, refreshed in place.
+        assert list(_pool_listings(storefront_admin_client)) == [listing_id]
+        listing = storefront_admin_client.get_listing(listing_id)
+        assert _listing_rate(listing) == SHAPE_PRICED_RATE
+        assert listing.extra.get("rate_structure") == {
+            "cpu": FAMILY_RATES["cpu"]["rates"],
+            "gpu": FAMILY_RATES["gpu"][GPU_MODEL]["rates"],
+            "memory": FAMILY_RATES["memory"]["rates"],
+            "storage": FAMILY_RATES["storage"]["rates"],
+        }
+
+        published = {
+            str(row.id): row
+            for row in registry_client.list_listings(status="open", limit=200).listings
+        }
+        assert listing_id in published, sorted(published)
+        assert (
+            published[listing_id].accepted_escrows[0]["rates"][0]["value"]
+            == SHAPE_PRICED_RATE
+        )
+        log.info("[07a] %s is shape-priced at %s", listing_id, SHAPE_PRICED_RATE)
+
+    def test_07b_deleting_the_override_restores_the_flat_rate(
+        self, storefront_admin_client, shape_state
+    ):
+        require_state(shape_state, "shape_priced")
+        deleted = SyncPoolOverrideClient(storefront_admin_client).delete_pool_override(
+            shape_state.site_id, E2E_LISTING_SHAPES_POOL_ID, "vm"
+        )
+        assert deleted.deleted
+        advance_storefront(storefront_admin_client, "publication")
+
+        (listing_id,) = _pool_listings(storefront_admin_client)
+        listing = storefront_admin_client.get_listing(listing_id)
+        assert _listing_rate(listing) == FLAT_RATE
+        assert listing.extra.get("rate_structure") is None

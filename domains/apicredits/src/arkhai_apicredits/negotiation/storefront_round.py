@@ -13,7 +13,8 @@ the domain's policy seam — and runs the configured middleware chain.
 from __future__ import annotations
 
 import logging
-from decimal import Decimal
+import math
+from fractions import Fraction
 from typing import Any, Awaitable, Callable, Mapping, Protocol
 
 from market_identity import Identity
@@ -124,7 +125,9 @@ def _seller_reference_amount(
     count = int(quantity) if quantity is not None else 1
     if settlement_selection is not None:
         return checked_credit_total(unit, count)
-    return int(Decimal(str(unit)) * count)
+    # Exact: the unit may be a base-unit rate or a rational floor, and a long
+    # amount must not round through a fixed-precision decimal context.
+    return math.floor(Fraction(unit) * count)
 
 
 async def _run_seller_round(

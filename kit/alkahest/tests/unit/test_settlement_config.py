@@ -326,6 +326,75 @@ def test_alkahest_publication_clause_builds_exact_scaled_option(monkeypatch) -> 
     assert option["params"] == {"accepted_escrow": escrow}
 
 
+def _build_alkahest_option(monkeypatch, rate: str, decimals: int) -> dict:
+    registration = create_alkahest_registration()
+    clause = SettlementPublicationClause(
+        mechanism=ALKAHEST_MECHANISM_ID,
+        asset="0x" + "12" * 20,
+        rate=rate,
+        per="hour",
+        mechanism_input={
+            "chain": "base_sepolia",
+            "escrow_kind": "erc20_escrow_obligation_default",
+        },
+    )
+    monkeypatch.setattr(
+        "market_alkahest.token.resolve_token",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            contract_address=clause.asset,
+            decimals=decimals,
+        ),
+    )
+    monkeypatch.setattr(
+        "market_alkahest.alkahest.get_erc20_escrow_obligation_default",
+        lambda *_args, **_kwargs: "0x" + "34" * 20,
+    )
+    readiness = MechanismReadiness(
+        mechanism=ALKAHEST_MECHANISM_ID,
+        configured=True,
+        enabled=True,
+        ready=True,
+    )
+    return registration.option_builder(
+        AlkahestSettlementConfig(enabled=True),
+        readiness,
+        {
+            "publication_clause": clause,
+            "chains": {
+                "base_sepolia": {
+                    "rpc_url": "https://rpc.example",
+                    "chain_id": 84532,
+                }
+            },
+        },
+        "seller",
+    )
+
+
+def test_alkahest_rate_longer_than_a_decimal_context_scales_exactly(monkeypatch) -> None:
+    # 40 significant digits: a 28-digit Decimal context would round the product.
+    rate = "1234567890123456789012.123456789012345678"
+    artifacts = _build_alkahest_option(monkeypatch, rate, 18)
+    assert artifacts["settlement_options"][0]["rates"] == [
+        {
+            "field": "amount",
+            "per": "hour",
+            "value": "1234567890123456789012123456789012345678",
+        }
+    ]
+
+
+def test_alkahest_long_rate_below_one_base_unit_is_refused(monkeypatch) -> None:
+    rate = "1234567890123456789012.1234567890123456789"  # 19 decimal places
+    with pytest.raises(ValueError, match="more than 18 decimal places"):
+        _build_alkahest_option(monkeypatch, rate, 18)
+
+
+def test_alkahest_rate_beyond_uint256_is_refused(monkeypatch) -> None:
+    with pytest.raises(ValueError, match="uint256"):
+        _build_alkahest_option(monkeypatch, str(2**256), 0)
+
+
 def test_registration_owns_settlement_verification() -> None:
     from market_alkahest import verify_escrow_for_settlement
 

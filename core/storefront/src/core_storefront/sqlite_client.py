@@ -198,6 +198,23 @@ def _stored_closed_by(conn: sqlite3.Connection, listing_id: str) -> str | None:
     return str(row[0]) if row and row[0] is not None else None
 
 
+class _Unset:
+    """Marks a keyword argument the caller did not pass, where ``None`` means null."""
+
+    def __repr__(self) -> str:
+        return "UNSET"
+
+
+UNSET: Any = _Unset()
+
+
+def _deserialize_json_object(value: Any) -> Any:
+    """A JSON-text column read back as its value; ``None`` stays ``None``."""
+    if isinstance(value, str):
+        return json.loads(value)
+    return value
+
+
 def _serialize_json(value: Any) -> str | None:
     if value is None:
         return None
@@ -227,8 +244,13 @@ def write_listing_update(
     demands: Any | None = None,
     closed_by: str | None = None,
     reopened_by: str | None = None,
+    rate_structure: Any = UNSET,
 ) -> None:
     """Update the supplied listing columns inside the caller's transaction.
+
+    ``None`` on a column means "not supplied", except ``rate_structure``, which
+    is written whenever it is passed: a listing that stops recording a rate
+    structure must have it cleared, not kept.
 
     A change to ``closed`` must name who closed the listing; any other status
     change clears the reason. A change to ``open`` on a listing its seller
@@ -283,6 +305,9 @@ def write_listing_update(
     add("settlement_options", settlement_options, serialize=True)
     add("publication_clauses", publication_clauses, serialize=True)
     add("demands", demands, serialize=True)
+    if rate_structure is not UNSET:
+        updates.append("rate_structure=?")
+        values.append(None if rate_structure is None else _serialize_json(rate_structure))
     conn.execute(
         f"UPDATE listings SET {', '.join(updates)} WHERE listing_id=?",
         (*values, listing_id),
@@ -1280,6 +1305,7 @@ class SQLiteClient:
         publication_clauses: Any | None,
         demands: Any | None,
         closed_by: str | None = None,
+        rate_structure: Any | None = None,
     ) -> None:
         _require_consistent_closure(status, closed_by)
         # An upsert names no reopener, so it may never overwrite a seller's
@@ -1309,9 +1335,10 @@ class SQLiteClient:
               settlement_options,
               publication_clauses,
               demands,
-              closed_by
+              closed_by,
+              rate_structure
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(listing_id) DO UPDATE SET
               status=excluded.status,
               closed_by=excluded.closed_by,
@@ -1327,7 +1354,8 @@ class SQLiteClient:
               accepted_escrows=excluded.accepted_escrows,
               settlement_options=excluded.settlement_options,
               publication_clauses=excluded.publication_clauses,
-              demands=excluded.demands
+              demands=excluded.demands,
+              rate_structure=excluded.rate_structure
             """,
             (
                 listing_id,
@@ -1347,6 +1375,7 @@ class SQLiteClient:
                 self._serialize_resource(publication_clauses),
                 self._serialize_resource(demands),
                 closed_by,
+                self._serialize_resource(rate_structure),
             ),
         )
 
@@ -1369,6 +1398,7 @@ class SQLiteClient:
         publication_clauses: Any | None = None,
         demands: Any | None = None,
         closed_by: str | None = None,
+        rate_structure: Any | None = None,
     ) -> None:
         def _save() -> None:
             with sqlite3.connect(self.db_path) as conn:
@@ -1390,6 +1420,7 @@ class SQLiteClient:
                     publication_clauses=publication_clauses,
                     demands=demands,
                     closed_by=closed_by,
+                    rate_structure=rate_structure,
                 )
 
         await asyncio.to_thread(_save)
@@ -1413,6 +1444,7 @@ class SQLiteClient:
         publication_clauses: Any | None = None,
         demands: Any | None = None,
         closed_by: str | None = None,
+        rate_structure: Any | None = None,
     ) -> None:
         """Persist a mutable listing projection and immutable binding atomically."""
 
@@ -1448,6 +1480,7 @@ class SQLiteClient:
                     publication_clauses=publication_clauses,
                     demands=demands,
                     closed_by=closed_by,
+                    rate_structure=rate_structure,
                 )
                 conn.execute(
                     """
@@ -1609,6 +1642,7 @@ class SQLiteClient:
         demands: Any | None = None,
         closed_by: str | None = None,
         reopened_by: str | None = None,
+        rate_structure: Any = UNSET,
     ) -> None:
         """Update the supplied listing columns.
 
@@ -1639,6 +1673,7 @@ class SQLiteClient:
                     demands=demands,
                     closed_by=closed_by,
                     reopened_by=reopened_by,
+                    rate_structure=rate_structure,
                 )
                 conn.commit()
             except Exception:
@@ -1671,7 +1706,8 @@ class SQLiteClient:
                            settlement_options,
                            publication_clauses,
                            demands,
-                           closed_by
+                           closed_by,
+                           rate_structure
                     FROM listings WHERE listing_id = ?
                     """,
                     (listing_id,),
@@ -1697,6 +1733,7 @@ class SQLiteClient:
                     "publication_clauses",
                     "demands",
                     "closed_by",
+                    "rate_structure",
                 ]
                 d = dict(zip(keys, row))
                 d["paused"] = bool(d["paused"])
@@ -1717,6 +1754,7 @@ class SQLiteClient:
                 d["demands"] = self._deserialize_accepted_escrows(
                     d.get("demands"),
                 )
+                d["rate_structure"] = _deserialize_json_object(d.get("rate_structure"))
                 return d
             finally:
                 conn.close()
@@ -4354,7 +4392,8 @@ class SQLiteClient:
                            settlement_options,
                            publication_clauses,
                            demands,
-                           closed_by
+                           closed_by,
+                           rate_structure
                     FROM listings {where}
                     ORDER BY created_at DESC
                     LIMIT ? OFFSET ?
@@ -4379,6 +4418,7 @@ class SQLiteClient:
                     "publication_clauses",
                     "demands",
                     "closed_by",
+                    "rate_structure",
                 ]
                 rows = cur.fetchall()
                 result = []
@@ -4401,6 +4441,9 @@ class SQLiteClient:
                     )
                     d["demands"] = self._deserialize_accepted_escrows(
                         d.get("demands"),
+                    )
+                    d["rate_structure"] = _deserialize_json_object(
+                        d.get("rate_structure")
                     )
                     result.append(d)
                 return result

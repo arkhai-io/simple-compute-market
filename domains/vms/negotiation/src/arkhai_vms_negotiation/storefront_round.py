@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import importlib.util
 import logging
+import math
 import os
 from dataclasses import dataclass
-from decimal import Decimal
+from fractions import Fraction
 from pathlib import Path
 from collections.abc import Awaitable, Callable
 from typing import Any, Iterable, Mapping
@@ -19,6 +20,10 @@ from arkhai_vms_negotiation.policies import (
     make_escrow_kind_dispatch_middleware,
     proposal_uses_scalar_amount,
 )
+from market_policy.scalar_policies import (
+    _accepted_escrow_for_proposal,
+    _settlement_option_for_selection,
+)
 from market_policy.negotiation_middleware import (
     NegotiationContext,
     NegotiationMiddleware,
@@ -30,6 +35,8 @@ from market_policy.negotiation_middleware import (
 )
 
 logger = logging.getLogger(__name__)
+
+_NO_PROPOSAL = object()
 
 
 # The result carrier and hook protocol are domain-invariant and live in
@@ -202,21 +209,53 @@ def _direction_from_strategy_label(strategy: str) -> str:
     raise ValueError(f"Unknown order strategy {strategy!r}")
 
 
+def _selected_option(listing: Any, proposal: Any) -> Any:
+    """The accepted escrow or settlement option ``proposal`` selects.
+
+    ``_NO_PROPOSAL`` when there is no buyer proposal to read, or when it selects
+    nothing the listing offers -- an escrow proposal naming no escrow address, or
+    a selection the round's guards will refuse. The reference amount then falls
+    back to the listing's first accepted escrow, so a proposal the guards are
+    about to refuse is refused for its own reason rather than for want of a floor.
+    """
+    if not isinstance(proposal, Mapping):
+        return _NO_PROPOSAL
+    listing_dict = (
+        listing.model_dump(mode="json") if hasattr(listing, "model_dump") else dict(listing)
+    )
+    if isinstance(proposal.get("settlement_selection"), Mapping):
+        selected = _settlement_option_for_selection(listing_dict, dict(proposal))
+    else:
+        selected = _accepted_escrow_for_proposal(listing_dict, dict(proposal))
+    return _NO_PROPOSAL if selected is None else selected
+
+
 def _seller_reference_amount(
     listing: Any,
     duration_seconds: int | None,
     *,
     default_min_price: Any = None,
+    proposal: Any = None,
 ) -> int:
-    """Compute the seller's absolute reference amount in base units."""
-    per_hour = Decimal(str(
-        extract_initial_price_from_order(
-            listing,
-            default_min_price=default_min_price,
+    """The seller's absolute reference amount in base units.
+
+    The selected option's per-hour rate -- the one ``proposal`` selects, so the
+    seller negotiates in the asset the buyer chose -- scaled by the duration and
+    truncated to whole base units, in exact integer and rational arithmetic. A
+    rate in an 18-decimal token over a long duration exceeds what a
+    fixed-precision decimal context holds, and rounding there would silently
+    change the amount the seller negotiates from.
+    """
+    selected = _selected_option(listing, proposal)
+    per_hour = (
+        extract_initial_price_from_order(listing, default_min_price=default_min_price)
+        if selected is _NO_PROPOSAL
+        else extract_initial_price_from_order(
+            listing, default_min_price=default_min_price, selected_option=selected
         )
-    ))
+    )
     seconds = int(duration_seconds) if duration_seconds is not None else 3600
-    return int(per_hour * seconds // Decimal(3600))
+    return math.floor(Fraction(per_hour) * seconds / 3600)
 
 
 async def _run_default_seller_round_policy(
@@ -259,6 +298,7 @@ async def _run_default_seller_round_policy(
             listing,
             requested_duration_seconds,
             default_min_price=default_min_price,
+            proposal=their_proposal,
         )
         if uses_scalar_amount else 0
     )

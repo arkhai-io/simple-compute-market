@@ -11,6 +11,8 @@ surface (work item 5).
 from __future__ import annotations
 
 import json
+import re
+from fractions import Fraction
 from typing import Any
 
 from arkhai_apicredits.listings.models import resource_is_api_credits
@@ -100,7 +102,7 @@ def extract_unit_price_from_order(
     *,
     default_min_price: Any = None,
     settlement_selection: SettlementSelection | dict[str, Any] | None = None,
-) -> int | float:
+) -> int | Fraction:
     """The seller's per-token floor from an API-credits listing.
 
     Mirrors the VM domain's ``extract_initial_price_from_order``: the
@@ -124,17 +126,9 @@ def extract_unit_price_from_order(
         if len(amount_rates) == 1:
             return checked_credit_total(amount_rates[0].value, 1)
 
-    if default_min_price is not None and str(default_min_price).strip():
-        try:
-            parsed = float(default_min_price)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(
-                f"[seller.pricing].default_min_price={default_min_price!r} "
-                "is not a valid number; hidden-reserve listing "
-                f"{order.get('listing_id')} has no usable floor."
-            ) from exc
-        if parsed > 0:
-            return parsed
+    floor = _exact_floor(default_min_price, listing_id=order.get("listing_id"))
+    if floor is not None and floor > 0:
+        return floor
 
     raise ValueError(
         f"Listing {order.get('listing_id')} has hidden reserve "
@@ -142,6 +136,34 @@ def extract_unit_price_from_order(
         "[seller.pricing].default_min_price is not configured. The seller "
         "has no floor to negotiate against; refusing the negotiation."
     )
+
+
+_DECIMAL_TEXT = re.compile(r"(?:0|[1-9][0-9]*)(?:\.[0-9]+)?")
+
+
+def _exact_floor(value: Any, *, listing_id: Any) -> Fraction | None:
+    """``default_min_price`` as an exact rational, or None when unset.
+
+    Base units reach on-chain settlement, so the floor is parsed from its
+    decimal text and never through a binary float.
+    """
+    if value is None:
+        return None
+    if isinstance(value, (bool, float)):
+        raise ValueError(
+            f"[seller.pricing].default_min_price={value!r} is not a valid number "
+            "for an exact floor; state it as decimal text. Hidden-reserve "
+            f"listing {listing_id} has no usable floor."
+        )
+    text = str(value).strip()
+    if not text:
+        return None
+    if not _DECIMAL_TEXT.fullmatch(text):
+        raise ValueError(
+            f"[seller.pricing].default_min_price={value!r} is not a valid number; "
+            f"hidden-reserve listing {listing_id} has no usable floor."
+        )
+    return Fraction(text)
 
 
 def determine_strategy_from_order(order: dict[str, Any] | None) -> str | None:

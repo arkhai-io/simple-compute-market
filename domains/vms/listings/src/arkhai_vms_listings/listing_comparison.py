@@ -54,12 +54,15 @@ TERM_RESOURCE_FIELDS: tuple[str, ...] = (
     "asking_rate",
 )
 
-# Terms of sale carried beside the listing shape.
+# Terms of sale carried beside the listing shape. ``rate_structure`` is a
+# shape-priced listing's resolved family rates, recorded by the storefront and
+# never published to a registry.
 TERM_LISTING_FIELDS: tuple[str, ...] = (
     "accepted_escrows",
     "settlement_options",
     "demands",
     "max_duration_seconds",
+    "rate_structure",
 )
 
 BACKING_FIELD = "capacity_backing"

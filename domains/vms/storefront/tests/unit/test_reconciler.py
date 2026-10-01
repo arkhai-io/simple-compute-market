@@ -46,6 +46,7 @@ from arkhai_vms_listings.reconciler import (
     pool_id_for_listing,
     site_id_for_listing,
     stale_open_listing_ids as _stale_open_listing_ids,
+    vm_override_view,
 )
 from arkhai_vms_listings.listing_shapes import resolve_shape
 from market_storefront.domain_runtime import (
@@ -504,10 +505,12 @@ class TestAvailableComputeSlices:
         assert slices
         assert all(row["site_id"] == "site-a" for row in slices)
         # Structure/GPU model from the projection (8, not the local
-        # table's seeded 4), pricing from the local table.
+        # table's seeded 4), terms from the local table.
         assert max(row["gpu_count"] for row in slices) == 8
         assert all(row["gpu_model"] == "H100" for row in slices)
-        assert all(row["min_price"] == "10" for row in slices)  # _seed_pool's fixed price
+        assert all(row["max_duration_seconds"] == 3600 for row in slices)  # _seed_pool's term
+        # min_price and token are not listing terms, from any tier.
+        assert all("min_price" not in row and "token" not in row for row in slices)
 
     def test_projection_pool_for_non_home_site_never_uses_another_sites_local_row(
         self, db_path,
@@ -537,7 +540,7 @@ class TestAvailableComputeSlices:
         }
         slices = _available_vm_slices(db_path, home_site="site-a", site_pool_projection=projection,)
         assert slices
-        assert all(s.get("min_price") is None for s in slices)
+        assert all(s.get("max_duration_seconds") is None for s in slices)
         assert all(s.get("region") is None for s in slices)
 
     def test_projection_pool_with_no_local_pricing_row_publishes_priceless(
@@ -563,7 +566,7 @@ class TestAvailableComputeSlices:
         }
         slices = _available_vm_slices(db_path, home_site="site-a", site_pool_projection=projection,)
         assert slices
-        assert all(s.get("min_price") is None for s in slices)
+        assert all(s.get("max_duration_seconds") is None for s in slices)
 
     def test_projection_disabled_resource_excluded_from_capacity(self, db_path):
         _seed_pool(db_path, pool_id="gpu-pool", gpu_count=4)
@@ -620,8 +623,8 @@ class TestAvailableComputeSlices:
         for row in slices:
             by_site.setdefault(row["site_id"], []).append(row)
         assert set(by_site) == {"site-a", "site-b"}
-        assert all(row["min_price"] == "10" for row in by_site["site-a"])
-        assert all(row["min_price"] is None for row in by_site["site-b"])
+        assert all(row["max_duration_seconds"] == 3600 for row in by_site["site-a"])
+        assert all(row["max_duration_seconds"] is None for row in by_site["site-b"])
 
     def test_resource_keys_are_identical_regardless_of_hint_resolution(self, db_path):
         """The invariant `current_available_resource_keys`/
@@ -652,7 +655,12 @@ class TestAvailableComputeSlices:
         hint_resolution=PoolHintResolutionSettings(
             accept_pool_declared_sla=True, default_sla=7.0,
             gpu_pricing_defaults_by_model={
-                "H100": GpuPricingFields(min_price="0.01"),
+                "H100": GpuPricingFields(max_duration_seconds=60),
+            },
+            family_rate_defaults={
+                "gpu": {"H100": {"rates": [
+                    {"asset": "usd", "rate": "1", "per": "hour"},
+                ]}},
             },
         ),)
         default_keys = {r["resource_key"] for r in default_rows}
@@ -1316,7 +1324,7 @@ class TestProjectedPoolRows:
         local_pricing={"gpu-pool": self._pricing_row()},
         member_availability=None, capacity_buckets=None,)
         assert len(rows) == 1
-        assert _term(rows[0], "min_price") is None
+        assert _term(rows[0], "max_duration_seconds") is None
         assert rows[0]["region"] is None
 
     def test_non_home_site_pool_publishes_from_a_complete_hint_alone(self):
@@ -1339,7 +1347,7 @@ class TestProjectedPoolRows:
                     "pricing": {
                         "gpu": {
                             "H100": {
-                                "min_price": "5.00", "token": "0xhint",
+                                "settlements": ["hint-clause"],
                                 "max_duration_seconds": 3600,
                             },
                         },
@@ -1351,8 +1359,8 @@ class TestProjectedPoolRows:
         local_pricing={}, member_availability=None, capacity_buckets=None,)
         assert len(rows) == 1
         assert rows[0]["region"] == "Nevada, US"
-        assert _term(rows[0], "min_price") == "5.00"
-        assert _term(rows[0], "token") == "0xhint"
+        assert _term(rows[0], "settlements") == ["hint-clause"]
+        assert _term(rows[0], "max_duration_seconds") == 3600
 
     def test_home_site_pool_with_no_local_row_publishes_priceless_by_default(self):
         rows = _project_vm_pool_rows({"pool_id": "unpriced", "resources": [
@@ -1365,7 +1373,7 @@ class TestProjectedPoolRows:
         site_id="site-a", home_site="site-a",
         local_pricing={}, member_availability=None, capacity_buckets=None,)
         assert len(rows) == 1
-        assert _term(rows[0], "min_price") is None
+        assert _term(rows[0], "max_duration_seconds") is None
         assert rows[0]["region"] is None
         assert rows[0]["sla"] == 0.0
 
@@ -1385,11 +1393,11 @@ class TestProjectedPoolRows:
         local_pricing={}, member_availability=None, capacity_buckets=None,
         hint_resolution=PoolHintResolutionSettings(
             gpu_pricing_defaults_by_model={
-                "A100": GpuPricingFields(min_price="3.00"),
+                "A100": GpuPricingFields(max_duration_seconds=1800),
             },
         ),)
         assert len(rows) == 1
-        assert _term(rows[0], "min_price") == "3.00"
+        assert _term(rows[0], "max_duration_seconds") == 1800
 
     def test_home_site_pool_with_local_row_still_uses_it_as_the_override(self):
         """The corrected behavior doesn't disturb the ordinary case: a
@@ -1402,10 +1410,10 @@ class TestProjectedPoolRows:
             },
         ]},
         site_id="site-a", home_site="site-a",
-        local_pricing={"gpu-pool": self._pricing_row(min_price="10")},
+        local_pricing={"gpu-pool": self._pricing_row(max_duration_seconds=7200)},
         member_availability=None, capacity_buckets=None,)
         assert len(rows) == 1
-        assert _term(rows[0], "min_price") == "10"
+        assert _term(rows[0], "max_duration_seconds") == 7200
 
     def test_builds_one_fungible_row_for_home_site_pool_with_pricing(self):
         rows = _project_vm_pool_rows({
@@ -1433,7 +1441,7 @@ class TestProjectedPoolRows:
         assert row["pool_id"] == "gpu-pool"
         assert row["site_id"] == "site-a"
         assert row["total_gpu_count"] == 4
-        assert _term(row, "min_price") == "10"
+        assert _term(row, "max_duration_seconds") == 3600
         assert row["listing_cardinality_mode"] == "fungible"
         assert row["listing_cardinality_mode_explanation"] is None
         assert row["single_resource_id"] is None
@@ -1645,13 +1653,13 @@ class TestProjectedPoolRows:
                 },
             ],
             "pool_metadata": {
-                "policy_tags": {"pricing": {"gpu": {"H100": {"min_price": "5.00"}}}},
+                "policy_tags": {"pricing": {"gpu": {"H100": {"max_duration_seconds": 1800}}}},
             },
         },
         site_id="site-a", home_site="site-a",
-        local_pricing={"gpu-pool": self._pricing_row(min_price="10")},
+        local_pricing={"gpu-pool": self._pricing_row(max_duration_seconds=7200)},
         member_availability=None, capacity_buckets=None,)
-        assert _term(rows[0], "min_price") == "10"
+        assert _term(rows[0], "max_duration_seconds") == 7200
 
     def test_pricing_pool_hint_used_when_no_storefront_override(self):
         rows = _project_vm_pool_rows({
@@ -1663,13 +1671,13 @@ class TestProjectedPoolRows:
                 },
             ],
             "pool_metadata": {
-                "policy_tags": {"pricing": {"gpu": {"H100": {"min_price": "5.00"}}}},
+                "policy_tags": {"pricing": {"gpu": {"H100": {"max_duration_seconds": 1800}}}},
             },
         },
         site_id="site-a", home_site="site-a",
-        local_pricing={"gpu-pool": self._pricing_row(min_price=None)},
+        local_pricing={"gpu-pool": self._pricing_row(max_duration_seconds=None)},
         member_availability=None, capacity_buckets=None,)
-        assert _term(rows[0], "min_price") == "5.00"
+        assert _term(rows[0], "max_duration_seconds") == 1800
 
     def test_pricing_falls_back_to_per_model_config_default(self):
         rows = _project_vm_pool_rows({
@@ -1682,14 +1690,14 @@ class TestProjectedPoolRows:
             ],
         },
         site_id="site-a", home_site="site-a",
-        local_pricing={"gpu-pool": self._pricing_row(min_price=None)},
+        local_pricing={"gpu-pool": self._pricing_row(max_duration_seconds=None)},
         member_availability=None, capacity_buckets=None,
         hint_resolution=PoolHintResolutionSettings(
             gpu_pricing_defaults_by_model={
-                "H100": GpuPricingFields(min_price="3.00"),
+                "H100": GpuPricingFields(max_duration_seconds=900),
             },
         ),)
-        assert _term(rows[0], "min_price") == "3.00"
+        assert _term(rows[0], "max_duration_seconds") == 900
 
     def test_pricing_falls_back_to_flat_config_default_as_last_resort(self):
         rows = _project_vm_pool_rows({
@@ -1702,12 +1710,12 @@ class TestProjectedPoolRows:
             ],
         },
         site_id="site-a", home_site="site-a",
-        local_pricing={"gpu-pool": self._pricing_row(min_price=None)},
+        local_pricing={"gpu-pool": self._pricing_row(max_duration_seconds=None)},
         member_availability=None, capacity_buckets=None,
         hint_resolution=PoolHintResolutionSettings(
-            gpu_pricing_flat_default=GpuPricingFields(min_price="1.00"),
+            gpu_pricing_flat_default=GpuPricingFields(max_duration_seconds=60),
         ),)
-        assert _term(rows[0], "min_price") == "1.00"
+        assert _term(rows[0], "max_duration_seconds") == 60
 
     def test_specific_resource_multi_member_prices_each_by_its_own_model(self):
         """Two members with different GPU models must resolve pricing
@@ -1730,19 +1738,22 @@ class TestProjectedPoolRows:
                     "listing_cardinality_mode": "specific_resource",
                     "pricing": {
                         "gpu": {
-                            "H100": {"min_price": "5.00"},
-                            "A100": {"min_price": "3.00"},
+                            "H100": {"max_duration_seconds": 3600},
+                            "A100": {"max_duration_seconds": 1800},
                         },
                     },
                 },
             },
         },
         site_id="site-a", home_site="site-a",
-        local_pricing={"gpu-pool": self._pricing_row(min_price=None)},
+        local_pricing={"gpu-pool": self._pricing_row(max_duration_seconds=None)},
         member_availability=None, capacity_buckets=None,)
         # Every row carries each model's terms; a listing takes its shape's.
         pricing = rows[0]["pricing_by_model"]
-        assert (pricing["H100"].min_price, pricing["A100"].min_price) == ("5.00", "3.00")
+        assert (
+            pricing["H100"].max_duration_seconds,
+            pricing["A100"].max_duration_seconds,
+        ) == (3600, 1800)
 
     # -- listing_cardinality_mode resolution --------------------------------------
 
@@ -2615,6 +2626,149 @@ def _digests(shapes) -> set[str]:
     return {shape.digest for shape in shapes}
 
 
+_TOKEN = "0x" + "11" * 20
+
+
+def _rate(rate: str, asset: str = _TOKEN) -> list[dict[str, str]]:
+    return [{"asset": asset, "rate": rate, "per": "hour"}]
+
+
+class TestFamilyRateDerivation:
+    """Family rates resolve per GPU model on the projection path and ride on
+    each candidate; the local-table path never resolves them."""
+
+    def test_candidates_carry_their_models_resolved_family_rates(self, db_path):
+        pool = _shaped_pool("gpu", [_member("m1", capacity=_BIG)], shapes=[_SMALL_SHAPE])
+        pool["pool_metadata"]["policy_tags"]["pricing"] = {
+            "gpu": {"H100": {"rates": _rate("80")}},
+            "memory": {"rates": _rate("0.05")},
+        }
+
+        (row,) = _shape_slices(db_path, [pool])
+
+        assert row["family_rates"] == {"gpu": _rate("80"), "memory": _rate("0.05")}
+        assert "min_price" not in row and "token" not in row
+
+    def test_an_override_states_rates_above_the_hint(self):
+        pool = _shaped_pool("gpu", [_member("m1", capacity=_BIG)], shapes=[_SMALL_SHAPE])
+        pool["pool_metadata"]["policy_tags"]["pricing"] = {
+            "gpu": {"H100": {"rates": _rate("80")}},
+        }
+
+        (row,), _report, _ = _override_rows(
+            pool, override={"pricing": {"gpu": {"H100": {"rates": _rate("90")}}}}
+        )
+
+        assert row["family_rates_by_model"]["H100"]["gpu"] == tuple(_rate("90"))
+
+    def test_configured_family_rates_are_the_lowest_tier(self):
+        pool = _shaped_pool("gpu", [_member("m1", capacity=_BIG)], shapes=[_SMALL_SHAPE])
+
+        (row,), _report, _ = _override_rows(
+            pool,
+            hint_resolution=PoolHintResolutionSettings(
+                family_rate_defaults={"cpu": {"rates": _rate("0.5")}},
+            ),
+        )
+
+        assert row["family_rates_by_model"]["H100"] == {"cpu": tuple(_rate("0.5"))}
+
+    def test_retired_pricing_keys_are_reported_without_holding(self):
+        pool = _shaped_pool("gpu", [_member("m1", capacity=_BIG)], shapes=[_SMALL_SHAPE])
+        pool["pool_metadata"]["policy_tags"]["pricing"] = {
+            "gpu": {"H100": {"min_price": "5", "token": "0xhint"}},
+        }
+
+        (row,), report, holds = _override_rows(
+            pool, override={"retired_terms": ("min_price",)}
+        )
+
+        assert holds == set()
+        assert row["family_rates_by_model"]["H100"] == {}
+        assert report.retired_pricing_keys == {
+            "gpu": [
+                "override terms.min_price",
+                "hint pricing.gpu.H100.min_price",
+                "hint pricing.gpu.H100.token",
+            ]
+        }
+        assert report.as_dict()["retired_pricing_keys"]["gpu"]
+
+    def test_an_unreadable_hint_rate_holds_the_pool_rather_than_falling_through(self):
+        pool = _shaped_pool("gpu", [_member("m1", capacity=_BIG)], shapes=[_SMALL_SHAPE])
+        pool["pool_metadata"]["policy_tags"]["pricing"] = {"cpu": {"rates": "not-a-list"}}
+
+        rows, report, holds = _override_rows(
+            pool,
+            hint_resolution=PoolHintResolutionSettings(
+                family_rate_defaults={"cpu": {"rates": _rate("0.5")}},
+            ),
+        )
+
+        # The configured default is a price nobody stated for this pool.
+        assert rows == []
+        assert ("pool", "site-a", "gpu") in holds
+        (problem,) = report.unreadable_family_rates["gpu"]
+        assert problem.startswith("hint pricing.cpu")
+        assert report.as_dict()["unreadable_family_rates"]["gpu"] == [problem]
+
+    @pytest.mark.parametrize(
+        ("pricing", "fragment"),
+        [
+            ({"fpga": {"rates": _rate("1")}}, "no VM family is priced by it"),
+            ({"gpu": {"rates": _rate("1")}}, "must be stated per model"),
+            (
+                {"cpu": {"rates": [{"asset": _TOKEN, "rate": "1", "per": "request"}]}},
+                "time unit",
+            ),
+        ],
+    )
+    def test_rates_no_vm_family_is_priced_by_hold_the_pool(self, pricing, fragment):
+        pool = _shaped_pool("gpu", [_member("m1", capacity=_BIG)], shapes=[_SMALL_SHAPE])
+        pool["pool_metadata"]["policy_tags"]["pricing"] = pricing
+
+        rows, report, holds = _override_rows(pool)
+
+        assert rows == []
+        assert ("pool", "site-a", "gpu") in holds
+        assert fragment in report.unreadable_family_rates["gpu"][0]
+
+    def test_families_without_a_rate_are_reported_per_asset(self):
+        pool = _shaped_pool("gpu", [_member("m1", capacity=_BIG)], shapes=[_SMALL_SHAPE])
+        pool["pool_metadata"]["policy_tags"]["pricing"] = {
+            "gpu": {"H100": {
+                "rates": _rate("80"),
+                "settlements": [{"mechanism": "alkahest.v1", "asset": _TOKEN}],
+            }},
+            "memory": {"rates": _rate("0.05")},
+        }
+
+        (row,), report, holds = _override_rows(pool)
+
+        assert holds == set()
+        (entry,) = report.families_without_rates["gpu"]
+        assert (entry["asset"], entry["families"]) == (_TOKEN, ["cpu", "storage"])
+
+    def test_a_stored_override_with_retired_terms_is_read_not_held(self):
+        view = vm_override_view(
+            listing_shapes=None,
+            settlements=None,
+            terms={"min_price": "4", "token": "0xold", "sla": 99.0},
+        )
+        assert view["retired_terms"] == ("min_price", "token")
+        assert view["sla"] == 99.0
+        assert "min_price" not in view and "token" not in view
+
+    def test_the_local_table_path_resolves_no_family_rates(self, db_path):
+        _seed_pool(db_path, pool_id="gpu-pool", gpu_count=2)
+
+        slices = _available_vm_slices(db_path, home_site="site-a")
+
+        assert slices
+        assert all(not row.get("family_rates") for row in slices)
+        assert all("min_price" not in row and "token" not in row for row in slices)
+
+
 class TestStorefrontOverrideTier:
     """The site-scoped override is the first shape and term tier."""
 
@@ -2665,14 +2819,16 @@ class TestStorefrontOverrideTier:
         }
 
         (row,), report, _ = _override_rows(
-            pool, override={"min_price": "7", "sla": 99.5}, local_pricing=legacy,
+            pool, override={"settlements": ["override-clause"], "sla": 99.5},
+            local_pricing=legacy,
             hint_resolution=PoolHintResolutionSettings(),
         )
 
         terms = row["pricing_by_model"]["H100"]
-        assert (terms.min_price, terms.token, terms.max_duration_seconds) == ("7", "0xlegacy", 3600)
+        assert (terms.settlements, terms.max_duration_seconds) == (["override-clause"], 3600)
         assert row["sla"] == 99.5
-        assert report.legacy_overrides_in_effect == {"gpu": ["max_duration_seconds", "token"]}
+        # The legacy row's min_price and token are not terms, so not reported.
+        assert report.legacy_overrides_in_effect == {"gpu": ["max_duration_seconds"]}
 
     def test_the_legacy_report_names_region_and_accepted_escrows(self):
         pool = _shaped_pool("gpu", [_member("m1", capacity={"gpu_count": 1})])
@@ -2707,14 +2863,14 @@ class TestStorefrontOverrideTier:
         (row,), report, _ = _override_rows(
             pool,
             site_id="site-b",
-            override={"listing_shapes": [_SMALL_SHAPE], "min_price": "4"},
+            override={"listing_shapes": [_SMALL_SHAPE], "max_duration_seconds": 900},
             # The same-named home-site legacy row must not reach another site.
             local_pricing={"gpu": {"gpu_model": None, "region": None, "sla": None,
-                                   "min_price": "10", "token": None, "accepted_escrows": None,
-                                   "settlements": None, "max_duration_seconds": None}},
+                                   "accepted_escrows": None, "settlements": None,
+                                   "max_duration_seconds": 3600}},
         )
 
         assert [shape.shape for shape in row["listing_shapes"]] == [_SMALL_SHAPE]
-        assert row["pricing_by_model"]["H100"].min_price == "4"
+        assert row["pricing_by_model"]["H100"].max_duration_seconds == 900
         assert report.legacy_overrides_in_effect == {}
 

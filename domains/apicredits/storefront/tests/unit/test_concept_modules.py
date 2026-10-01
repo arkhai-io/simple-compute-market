@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import pytest
+from apicredits_storefront import negotiation_runtime
+from market_negotiation_runtime import NegotiationTerms
 from market_identity import Ed25519Signer, Identity, IdentityScheme
 
 from arkhai_apicredits.listings.pricing import (
@@ -14,6 +16,7 @@ from arkhai_apicredits.listings.reconciler import (
     reopenable_credit_listing_ids,
     stale_open_credit_listing_ids,
 )
+from arkhai_apicredits.negotiation.storefront_round import _seller_reference_amount
 from arkhai_apicredits.negotiation.policies import (
     api_credits_round_zero_guard,
     key_owned_by_buyer_principal,
@@ -398,3 +401,40 @@ def test_ownership_guard_rejects_cross_scheme_collision():
     )
     assert decision.action == "reject"
     assert decision.reason.startswith("key_not_owned")
+
+
+def test_round_reference_amount_is_exact_for_a_rational_floor_and_a_long_rate():
+    hidden = _listing()
+    hidden["accepted_escrows"][0]["rates"] = []
+    assert _seller_reference_amount(hidden, 3, default_min_price="1.5") == 4
+
+    long_rate = "123456789012345678901234567"
+    assert _seller_reference_amount(_listing(rate=long_rate), 1000) == int(long_rate) * 1000
+
+
+def test_float_floor_is_refused():
+    hidden = _listing()
+    hidden["accepted_escrows"][0]["rates"] = []
+    with pytest.raises(ValueError, match="decimal text"):
+        extract_unit_price_from_order(hidden, default_min_price=1.5)
+
+
+def test_kit_reference_hook_passes_the_pinned_selection(monkeypatch):
+    seen = {}
+
+    def fake_reference(listing, quantity, *, default_min_price, settlement_selection):
+        seen["selection"] = settlement_selection
+        return 42
+
+    monkeypatch.setattr(negotiation_runtime, "_seller_reference_amount", fake_reference)
+    monkeypatch.setattr(negotiation_runtime, "provision_quantity", lambda _decoded: 3)
+    selection = {"mechanism": "fiat.stripe.v1", "option_id": "a" * 64, "expiration_unix": 1}
+    terms = NegotiationTerms(decoded={}, wire=None)
+
+    amount = negotiation_runtime._reference_amount(
+        _listing(), {}, terms, True, {"settlement_selection": selection}
+    )
+
+    assert amount == 42
+    assert seen["selection"] == selection
+    assert negotiation_runtime._reference_amount(_listing(), {}, terms, False, None) == 0

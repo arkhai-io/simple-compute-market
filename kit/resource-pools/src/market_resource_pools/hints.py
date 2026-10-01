@@ -47,6 +47,7 @@ concession is on the read path only.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any, Literal, Mapping, cast
 
@@ -340,6 +341,69 @@ def raw_pricing(policy_tags: Mapping[str, Any]) -> Any:
     `raw_listing_cardinality_mode` and `raw_region`.
     """
     return policy_tags.get(PRICING_POLICY_TAG)
+
+
+_RATE_TEXT = re.compile(r"(?:0|[1-9][0-9]*)(?:\.[0-9]+)?")
+_RATE_UNIT = re.compile(r"[a-z][a-z0-9_-]*")
+_RATE_ENTRY_KEYS = frozenset({"asset", "rate", "per"})
+
+
+def _rate_list_problems(path: str, rates: Any) -> list[str]:
+    if not isinstance(rates, list):
+        return [f"{path} must be a list of rate entries"]
+    problems: list[str] = []
+    seen: set[str] = set()
+    for index, entry in enumerate(rates):
+        where = f"{path}[{index}]"
+        if not isinstance(entry, Mapping) or set(entry) != _RATE_ENTRY_KEYS:
+            problems.append(f"{where} must be a mapping of exactly asset, rate, and per")
+            continue
+        asset, rate, per = entry["asset"], entry["rate"], entry["per"]
+        if not isinstance(asset, str) or not asset or asset != asset.strip():
+            problems.append(f"{where}.asset must be a trimmed, non-empty string")
+        elif asset in seen:
+            problems.append(f"{where}.asset {asset!r} appears more than once")
+        else:
+            seen.add(asset)
+        if (
+            not isinstance(rate, str)
+            or not _RATE_TEXT.fullmatch(rate)
+            or not rate.strip("0.")
+        ):
+            problems.append(
+                f"{where}.rate must be positive decimal text without a sign or an exponent"
+            )
+        if not isinstance(per, str) or not _RATE_UNIT.fullmatch(per):
+            problems.append(f"{where}.per must be a canonical lowercase unit token")
+    return problems
+
+
+def validate_pricing_rates(policy_tags: Mapping[str, Any]) -> list[str]:
+    """Human-readable structural problems with the rate lists in ``pricing``.
+
+    Empty means valid, including absent. A ``rates`` value may sit under a
+    family (``pricing.cpu.rates``) or under a key within one
+    (``pricing.gpu.H100.rates``); each must be a list of ``asset``/``rate``/``per``
+    entries with no asset twice. Which families are priced, by what key, and in
+    which units is the reading domain's to validate, so no family name is known
+    here, and the rest of ``pricing`` is left to its reader too.
+    """
+    pricing = policy_tags.get(PRICING_POLICY_TAG)
+    if not isinstance(pricing, Mapping):
+        return []
+    problems: list[str] = []
+    for family, body in pricing.items():
+        if not isinstance(body, Mapping):
+            continue
+        base = f"{PRICING_POLICY_TAG}.{family}"
+        if "rates" in body:
+            problems.extend(_rate_list_problems(f"{base}.rates", body["rates"]))
+        for key, item in body.items():
+            if isinstance(item, Mapping) and "rates" in item:
+                problems.extend(
+                    _rate_list_problems(f"{base}.{key}.rates", item["rates"])
+                )
+    return problems
 
 
 def raw_listing_shapes(policy_tags: Mapping[str, Any], offering_mode: str) -> Any:

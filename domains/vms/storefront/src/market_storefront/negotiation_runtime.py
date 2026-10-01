@@ -98,11 +98,14 @@ def load_storefront_chain() -> Any:
 def seller_reference_amount(
     listing: Any,
     duration_seconds: int | None,
+    proposal: Mapping[str, Any] | None = None,
 ) -> int:
+    """The seller's reference amount from the option ``proposal`` selects."""
     return vm_storefront_round._seller_reference_amount(
         listing,
         duration_seconds,
         default_min_price=_default_min_price(),
+        proposal=proposal,
     )
 
 
@@ -961,8 +964,8 @@ def build_vm_negotiation_runtime(
         determine_strategy=lambda listing, _record: determine_strategy_from_order(
             listing
         ),
-        reference_amount=lambda _listing, record, terms, scalar: (
-            seller_reference_amount(record, terms.requested_duration_seconds)
+        reference_amount=lambda _listing, record, terms, scalar, pinned: (
+            seller_reference_amount(record, terms.requested_duration_seconds, pinned)
             if scalar
             else 0
         ),

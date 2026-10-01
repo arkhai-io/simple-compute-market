@@ -6,7 +6,6 @@ import hashlib
 import inspect
 import json
 import re
-from decimal import Decimal, InvalidOperation
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -21,6 +20,7 @@ from market_settlement_runtime import (
     SettlementClauseField,
     SettlementPublicationClause,
     SettlementRole,
+    decimal_rate_to_base_units,
 )
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -401,22 +401,14 @@ def _alkahest_escrow_from_clause(
     rates: list[dict[str, Any]] = []
     if clause.rate is not None:
         try:
-            human = Decimal(clause.rate)
-        except InvalidOperation as exc:
-            raise ValueError(f"invalid Alkahest rate {clause.rate!r}") from exc
-        scaled = human * (Decimal(10) ** token.decimals)
-        if scaled != scaled.to_integral_value():
-            raise ValueError(
-                f"Alkahest rate {clause.rate!r} has more than "
-                f"{token.decimals} decimal places"
-            )
-        if scaled < 0:
-            raise ValueError("Alkahest rate must not be negative")
+            base_units = decimal_rate_to_base_units(clause.rate, token.decimals)
+        except ValueError as exc:
+            raise ValueError(f"Alkahest rate {clause.rate!r}: {exc}") from exc
         rates.append(
             {
                 "field": "amount",
                 "per": clause.per,
-                "value": str(int(scaled)),
+                "value": str(base_units),
             }
         )
     escrow_address = get_erc20_escrow_obligation_default(
