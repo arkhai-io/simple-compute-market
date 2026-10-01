@@ -101,8 +101,8 @@ None.
 - **Affected code:** `domains/vms/listings` (`pricing_resolution.py`,
   `reconciler.py`, `pricing.py`), `domains/vms/negotiation/storefront_round.py`,
   the VM storefront's `services/publication_terms.py`, `services/publication_loop.py`,
-  `models/pool_override_models.py`, `negotiation_runtime.py`, its listing read and
-  `settings.toml`; `kit/capability-shape`; `kit/settlement-runtime`; the Alkahest
+  `models/pool_override_models.py`, `publication_migration.py`, `server.py`, and
+  `settings.toml`; the generic listing persistence and models in `core/storefront`; `kit/capability-shape`; `kit/settlement-runtime`; the Alkahest
   and hosted mechanism scalers in `kit/alkahest` and `kit/hosted-settlement`; the
   example storefront configurations and Helm values schemas that state retired
   keys. Section 5 adds `domains/vms/negotiation/policies.py` and the VM
@@ -116,8 +116,10 @@ None.
   existing fields. The storefront's listing read gains the rate structure.
 - **Configuration:** new `rates` lists under `[pricing.defaults.<family>]`, the
   pool hint, and the override terms. Retired keys are accepted and reported.
-- **Persistence:** the storefront's listing record carries the rate structure as
-  JSON text. No amount is stored in a fixed-width column.
+- **Persistence:** the generic storefront `listings` table gains a nullable
+  `rate_structure` text column, added to existing databases by a storefront
+  migration; it stays null for every other domain. No amount is stored in a
+  fixed-width column.
 - **Rollback:** a code revert. Shape-priced listings' rateless clauses are then read
   as today — an Alkahest clause as a hidden reserve, a hosted clause refused — so an
   operator reverting restores clause rates first.

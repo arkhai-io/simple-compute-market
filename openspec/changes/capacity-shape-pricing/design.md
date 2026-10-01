@@ -138,10 +138,14 @@ rate must not change a listing's shape digest or identity.
 Every compute shape names the `gpu` family, so the GPU family decides the mode:
 
 - **Shape-priced** — the listing's GPU model resolves a non-empty `rates` list.
-  Its clauses state mechanism, asset, and mechanism input only. For each clause,
-  the storefront evaluates the listing's own shape against the family rates in
-  that clause's asset, through the aggregator, and supplies the result as the
-  clause's `rate` and `per` before the mechanism compiles it.
+  Its clauses state mechanism, asset, and mechanism input only. For each clause
+  whose mechanism negotiates a scalar amount, the storefront evaluates the
+  listing's own shape against the family rates in that clause's asset, through
+  the aggregator, and supplies the result as the clause's `rate` and `per` before
+  the mechanism compiles it. A clause whose mechanism declines the scalar
+  (`contact-exchange.v1`, per `negotiation-protocol`'s "Scalar negotiation
+  participation is a mechanism declaration") is passed through rateless in either
+  mode: it carries no price to compose, and its mechanism refuses a rate.
 - **Flat-priced** — no GPU rates resolve. A clause's own `rate` is the listing's
   rate whatever its shape, and a rateless Alkahest clause is a hidden reserve
   priced by the `default_min_price` floor, both exactly as today.
@@ -154,9 +158,9 @@ A candidate is refused, with a reason naming the family and asset, when:
 
 - a shape-priced listing's clause also states its own `rate` (two sources for one
   price);
-- a family the listing's shape names has no rate in a shape-priced clause's asset
-  (unpriceable, never free and never a hidden reserve — which also catches a
-  mistyped asset);
+- a family the listing's shape names has no rate in the asset of a shape-priced
+  clause whose mechanism negotiates a scalar (unpriceable, never free and never a
+  hidden reserve — which also catches a mistyped asset);
 - any non-GPU family resolves rates while the GPU family resolves none (a
   partially stated shape-priced intent).
 
@@ -309,6 +313,16 @@ storefront's listing record as a term of sale — refreshed in place on change,
 never part of the listing's identity, its shape digest, or any option's identity —
 and returned by the storefront's listing read.
 
+The record is a nullable `rate_structure` text column on the generic storefront
+`listings` table, holding the domain's JSON: for a shape-priced VM listing, each
+family the listing's shape names mapped to its resolved `rates` list, with the GPU
+family already resolved to the listing's model; null for a flat-priced listing.
+`storefront-publication`'s "Commercial mapping identity" keeps pricing on the
+generic table and forbids a domain mapping carrying commercial fields, and the
+column's content is opaque to core as `listing_resource`'s is. The registry
+request is built field by field from the stored listing, so the column never
+reaches a registry.
+
 That read is unsigned. Whether a buyer may derive a quote from it, or needs the
 structure bound into a signed negotiation response, is
 `negotiation-driven-capacity-resize`'s decision, its first consumer. So is whether
@@ -316,6 +330,31 @@ any buyer needs the structure at discovery time; that would require the registry
 keep listing-level fields it currently discards, which is
 `store-registry-listings-as-published`'s concern, and that change's accepted
 carrier policy is the input to the decision.
+
+### Scope edges found during planning
+
+- **The local-table derivation path is flat-priced only.** Family rates resolve on
+  the projection path, as site-scoped overrides do; the legacy local-table path,
+  which `pools-9-retire-local-physical-authority` retires, never resolves them, in
+  the same way overrides are inactive there.
+- **Helm values do not expose family-rate defaults.** The storefront chart's
+  `pricing` schema describes the hosted-fiat flat clause form. Helm deployments
+  price shapes through pool hints and site-scoped overrides; adding
+  `[pricing.defaults.<family>]` to the chart is a chart change no deployment needs
+  yet. The chart keeps accepting `default_token_address` as a retired key.
+- **The legacy pricing migration must not mistake family rates for legacy pricing.**
+  It reports any `[pricing.defaults.gpu.<model>]` table as per-model legacy pricing
+  needing manual clauses. It is narrowed to tables stating the retired `min_price`
+  or `token`, so a model table carrying only `rates` or `settlements` is not a
+  conflict.
+- **Found, not changed here.** The legacy migration reads `default_min_price` as a
+  display-unit rate for an Alkahest clause, while the negotiation floor reads the
+  same key as base units per hour; this change documents the floor's unit and
+  leaves the migration's reading, which only runs on pre-clause configurations.
+  The API-credit domain computes its reference amount as
+  `int(Decimal(str(unit)) * count)` under the default decimal context, the same
+  class of defect fixed here for VM; it is outside this change's domain and is
+  recorded as unowned work in the campaign index.
 
 ### The negotiated variable is unchanged here
 
@@ -335,12 +374,16 @@ resolver's documented contract false. They are removed.
 
 Compatibility for inputs that still state them:
 
-- **Stored site-scoped overrides.** `VmPoolOverrideTerms` forbids unknown fields,
-  and the reconciler holds the pool of an override it cannot decode. Removing the
-  fields outright would therefore hold every pool whose stored override carries
-  either key. Decoding instead tolerates the two retired keys, ignores them, and
-  reports them in the override's system-status entry; a write stating them is
-  refused.
+- **Stored site-scoped overrides.** `VmPoolOverrideTerms` (which forbids unknown
+  fields) validates an override only at write. Derivation reads stored terms
+  through `vm_override_view`, which takes the keys it names and ignores the rest,
+  and holds a pool only when the kit cannot decode the stored JSON at all. A stored
+  override still carrying `min_price` or `token` therefore stays readable once the
+  keys leave the terms contract; derivation reports the retired keys per pool in
+  its derivation report, which system status surfaces. A write stating them is
+  refused. *Amended during planning:* the design originally said removal would
+  hold such pools; the read path shows it would not, so no tolerant decoder is
+  needed, only the report.
 - **Configuration.** A configuration still stating the retired keys is accepted;
   they are not read, and startup reports them.
 - **Unchanged:** the legacy pricing migration's reading of legacy inputs, which is

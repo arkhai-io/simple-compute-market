@@ -11,13 +11,16 @@ MUST resolve independently of the others. A family rate MUST be positive decimal
 MUST be refused.
 
 A VM listing whose GPU model resolves a non-empty rate list is **shape-priced**: each of its
-settlement clauses names mechanism, asset, and mechanism input, and the storefront composes the
-clause's rate by evaluating the listing's own shape against the family rates in that clause's asset.
+settlement clauses names mechanism, asset, and mechanism input, and for each clause whose mechanism
+negotiates a scalar amount the storefront composes the clause's rate by evaluating the listing's own
+shape against the family rates in that clause's asset. A clause whose mechanism declines the scalar
+is published rateless in either mode.
 Otherwise the listing is **flat-priced**: a clause's own rate is the listing's rate whatever its
 shape, and a stated flat rate MUST NOT be reinterpreted as a rate for any one family.
 
 A family the listing's shape does not name MUST NOT contribute to its price. A family its shape names
-with no rate in a shape-priced clause's asset MUST render the candidate unpriceable rather than
+with no rate in the asset of a shape-priced clause whose mechanism negotiates a scalar MUST render the
+candidate unpriceable rather than
 pricing that family at zero or treating the clause as a hidden reserve. A candidate MUST be refused,
 with a reason naming the family and asset, when it is unpriceable, when a shape-priced clause also
 states its own rate, or when a family other than the GPU family resolves rates while the GPU family
@@ -58,6 +61,11 @@ resolves none.
 
 - **WHEN** a shape-priced listing's shape omits a family for which rates resolve
 - **THEN** that family contributes nothing to the listing's price
+
+#### Scenario: A shape-priced listing also offers a non-scalar mechanism
+
+- **WHEN** a shape-priced listing has a clause whose mechanism declines the scalar amount
+- **THEN** that clause is published without a rate and does not make the listing unpriceable
 
 #### Scenario: Pricing inputs mix the two modes
 
@@ -100,8 +108,8 @@ rates and quantities directly, and evaluation MUST be callable outside the negot
 
 ### Requirement: A shape-priced listing's rates are a storefront term of sale
 
-A shape-priced listing's resolved family rates MUST be recorded on the storefront's listing record
-and returned by the storefront's listing read. They are a term of sale: a change MUST refresh the
+A shape-priced listing's resolved family rates MUST be recorded on the storefront's generic listing
+record and returned by the storefront's listing read; a flat-priced listing records none. They are a term of sale: a change MUST refresh the
 listing in place, and they MUST NOT be part of the listing's identity, its shape digest, or any
 settlement option's identity. Publication to a registry MUST carry each settlement option's composed
 rate for the listing's own shape and MUST NOT depend on the registry keeping any listing field it does
