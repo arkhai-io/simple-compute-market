@@ -18,7 +18,11 @@ from typing import Any
 from core_storefront.publication_runner import PublicationPayload
 from market_settlement_runtime import SettlementPublicationClause
 
-from .pool_overrides import compile_publication_clauses
+from .pool_overrides import (
+    MAX_DURATION_SECONDS_ENV,
+    compile_publication_clauses,
+    configured_max_duration_seconds,
+)
 from .publication import BareMetalPublicationCycle
 from .publication_service import BareMetalRegistryConfiguration
 from .runtime import BareMetalStorefrontRuntime
@@ -71,7 +75,9 @@ def publication_payload_builder(
     fulfillment_deadline = _instant(
         environ, "BARE_METAL_STOREFRONT_FULFILLMENT_DEADLINE"
     )
-    max_duration = int(environ["BARE_METAL_STOREFRONT_MAX_DURATION_SECONDS"])
+    max_duration = configured_max_duration_seconds(environ)
+    if max_duration is None:
+        raise RuntimeError(f"{MAX_DURATION_SECONDS_ENV} is required for publication")
 
     async def build(candidate: dict[str, Any]) -> PublicationPayload:
         # A pool's storefront override replaces the configured clauses and
@@ -125,6 +131,7 @@ def build_publication_cycle(
         storefront_url=runtime.storefront_url,
         seller_principal=runtime.seller_principal,
         build_payload=publication_payload_builder(runtime, environ),
+        configured_max_duration_seconds=configured_max_duration_seconds(environ),
     )
 
 

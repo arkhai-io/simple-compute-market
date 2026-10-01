@@ -469,8 +469,8 @@ class TestCapacityBackingFilter:
 
 
 # ---------------------------------------------------------------------------
-# decimal_text and requires — constructed specs, independent of the deployed
-# compute filter-spec.yaml (which does not yet declare asking_rate filters).
+# decimal_text and requires, over constructed specs so each case states exactly
+# the declarations it depends on rather than the deployed compute spec's.
 # ---------------------------------------------------------------------------
 
 def _rate_spec(*extra_filters: FilterDecl) -> FilterSpec:
@@ -597,3 +597,26 @@ def test_cross_period_query_excludes_rather_than_converts() -> None:
     # Listing quoted in a period the query didn't name — excluded by the
     # (unsatisfied) asking_rate_period `in` criterion, not converted.
     assert not evaluate_all(_rate_listing("10.00", period="month"), criteria)
+
+
+@pytest.mark.parametrize("bound", ["NaN", "sNaN", "Infinity", "-Infinity", "inf"])
+def test_a_non_finite_decimal_bound_is_refused(bound):
+    with pytest.raises(FilterParamError, match="finite decimal"):
+        build_criteria(
+            _rate_spec(),
+            {"asking_rate_max": bound, "asking_rate_asset": "usd", "asking_rate_period": "hour"},
+        )
+
+
+@pytest.mark.parametrize("stored", ["NaN", "sNaN", "Infinity", "-Infinity"])
+def test_a_non_finite_listing_amount_is_excluded_rather_than_raised_on(stored):
+    upper = build_criteria(
+        _rate_spec(),
+        {"asking_rate_max": "16", "asking_rate_asset": "usd", "asking_rate_period": "hour"},
+    )
+    lower = build_criteria(
+        _rate_spec(),
+        {"asking_rate_min": "0", "asking_rate_asset": "usd", "asking_rate_period": "hour"},
+    )
+    assert not evaluate_all(_rate_listing(stored), upper)
+    assert not evaluate_all(_rate_listing(stored), lower)

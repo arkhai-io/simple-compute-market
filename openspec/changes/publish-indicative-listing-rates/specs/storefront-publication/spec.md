@@ -74,7 +74,8 @@ price the same shape, or when any entry's amount, asset, or period is invalid.
 
 An unreadable declaration MUST NOT fall through to a lower tier or to no rate. An
 absent declaration and a malformed one are different: falling through would silently
-drop a price the seller believes they advertised.
+drop a price the seller believes they advertised. A declaration stated as `null`,
+for the whole `asking_rates` key or for one offering mode, is malformed, not absent.
 
 #### Scenario: A declaration names an unknown shape field
 
@@ -87,6 +88,12 @@ drop a price the seller believes they advertised.
 
 - **WHEN** a declaration or override quotes a rate per a period other than `hour`
 - **THEN** that pool's listings are held rather than published with or without the rate
+
+#### Scenario: A declaration is stated as null
+
+- **WHEN** a pool states `asking_rates` as `null`, or states `null` for the listing's
+  offering mode
+- **THEN** that pool's listings are held rather than published without a rate
 
 #### Scenario: Two entries price one shape
 
@@ -190,8 +197,13 @@ The bare-metal vocabulary is:
 - asking rates, resolved as every compute listing's asking rate is.
 
 A bare-metal override MUST NOT state listing shapes. An override's settlement clauses
-replace the storefront's configured publication clauses for that site's pool, and its
-duration bounds replace the configured bounds.
+replace the storefront's configured publication clauses for that site's pool as a
+whole. Each of its duration bounds replaces its configured counterpart independently,
+as configuration overlays do, and the effective pair a listing would publish MUST be
+ordered. A write whose minimum exceeds the effective maximum MUST be refused. Because
+configuration can change after a write, publication MUST also check the effective
+pair, holding the pool's listings and reporting the conflict rather than publishing
+an unordered pair or failing the run.
 
 A bare-metal storefront's command line MUST offer the same replace, read, list, and delete
 operations through its administrator API, with the offering mode never defaulted, and MUST
@@ -223,6 +235,19 @@ be judged against that generation. A site with no recorded generation is `unknow
   the `bare_metal` mode
 - **THEN** the command sends it through the administrator API, which checks it against
   the site's live projection, and prints the stored override
+
+#### Scenario: An override minimum exceeds the configured maximum
+
+- **WHEN** an operator writes a bare-metal override stating only a minimum duration
+  above the storefront's configured maximum
+- **THEN** the write is refused, naming the effective maximum
+
+#### Scenario: Configuration falls below an accepted override
+
+- **WHEN** an override's minimum was accepted and the configured maximum is later set
+  below it
+- **THEN** the next publication run holds that pool's listings and reports the
+  conflict
 
 #### Scenario: A stored bare-metal override cannot be read
 

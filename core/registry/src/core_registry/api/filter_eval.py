@@ -116,6 +116,21 @@ class FilterParamError(ValueError):
 # ---------------------------------------------------------------------------
 
 
+def _finite_decimal(raw: str) -> Decimal | None:
+    """``raw`` as a finite exact decimal, or None.
+
+    ``Decimal`` also parses ``NaN``, ``sNaN``, and the infinities. None of them
+    is a value a bound can compare against: ordering a NaN raises, and an
+    infinity would match or exclude everything. They are refused as a query
+    bound and read as no value in a listing.
+    """
+    try:
+        parsed = Decimal(raw)
+    except InvalidOperation:
+        return None
+    return parsed if parsed.is_finite() else None
+
+
 def _coerce_scalar(raw: str, value_type: str, filter_name: str) -> Any:
     if value_type == "string" or value_type == "address":
         return raw
@@ -134,12 +149,12 @@ def _coerce_scalar(raw: str, value_type: str, filter_name: str) -> Any:
                 f"{filter_name}: expected number, got {raw!r}"
             ) from exc
     if value_type == "decimal_text":
-        try:
-            return Decimal(raw)
-        except InvalidOperation as exc:
+        parsed = _finite_decimal(raw)
+        if parsed is None:
             raise FilterParamError(
-                f"{filter_name}: expected decimal text, got {raw!r}"
-            ) from exc
+                f"{filter_name}: expected finite decimal text, got {raw!r}"
+            )
+        return parsed
     if value_type == "boolean":
         if raw.lower() in ("true", "1", "yes"):
             return True
@@ -398,19 +413,17 @@ def _resolve(listing: dict[str, Any], crit: Criterion) -> list[Any]:
 
 
 def _coerce_resolved_decimal(value: Any) -> Decimal | None:
-    """Parse a resolved listing value as decimal text; None if it won't parse.
+    """Parse a resolved listing value as finite decimal text; None otherwise.
 
     A `decimal_text` field's wire and stored representation is a JSON string
     (e.g. `"16.00"`), unlike `number`'s native JSON number. Only a string
     coerces here; a listing value of the wrong shape (a number, a bool, a
-    list) is treated as not matching rather than raised on.
+    list) or a non-finite one is treated as absent rather than raised on, so a
+    malformed stored listing cannot fail a query.
     """
     if not isinstance(value, str):
         return None
-    try:
-        return Decimal(value)
-    except InvalidOperation:
-        return None
+    return _finite_decimal(value)
 
 
 def evaluate(listing: dict[str, Any], crit: Criterion) -> bool:

@@ -178,3 +178,20 @@ async def test_a_signed_caller_who_is_not_an_administrator_is_refused(world):
         ) as stranger:
             refusal = await _refused(PoolOverrideClient(stranger).list_pool_overrides())
     assert refusal.status_code in (401, 403)
+
+
+async def test_a_minimum_above_the_configured_maximum_is_refused(world, monkeypatch):
+    _, admin = world
+    monkeypatch.setenv("BARE_METAL_STOREFRONT_MAX_DURATION_SECONDS", "3600")
+    overrides = PoolOverrideClient(admin)
+
+    refusal = await _refused(
+        overrides.put_pool_override(_record(terms={"min_duration_seconds": 7200}))
+    )
+    raised = await overrides.put_pool_override(
+        _record(terms={"min_duration_seconds": 7200, "max_duration_seconds": 10800})
+    )
+
+    assert refusal.status_code == 422
+    assert "effective maximum 3600" in str(refusal)
+    assert raised.override.terms["max_duration_seconds"] == 10800

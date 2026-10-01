@@ -154,3 +154,24 @@ class TestResolution:
     def test_a_priced_shape_no_listing_publishes_is_reported(self):
         resolution = _resolve({"asking_rates": {"vm": [_entry(), _entry(H100_8)]}})
         assert resolution.unpublished([_digest(H100_1)]) == {_digest(H100_8): H100_8}
+
+
+class TestStatedNull:
+    """A stated ``null`` is malformed, never absent: it holds the pool."""
+
+    @pytest.mark.parametrize(
+        "tags",
+        [
+            pytest.param({"asking_rates": None}, id="whole tag"),
+            pytest.param({"asking_rates": {"vm": None}}, id="one mode"),
+        ],
+    )
+    def test_a_stated_null_is_refused_at_write_and_holds_at_read(self, tags):
+        assert validate_asking_rates(tags) != []
+        resolution = _resolve(tags)
+        assert resolution.unreadable
+        assert resolution.source == ASKING_RATE_SOURCE_HINT
+
+    def test_a_null_for_another_mode_leaves_this_mode_unstated(self):
+        resolution = _resolve({"asking_rates": {"bare_metal": None}})
+        assert resolution.source == ASKING_RATE_SOURCE_NONE

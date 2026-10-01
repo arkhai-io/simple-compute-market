@@ -199,6 +199,7 @@ class Storefront:
         self.sites = sites
         self.registries = RecordingRegistries()
         self.terms = Terms()
+        self.configured_max: int | None = None
 
     async def run(self) -> dict[str, Any]:
         self.registries.sent.clear()
@@ -213,6 +214,7 @@ class Storefront:
             storefront_url=STOREFRONT_URL,
             seller_principal=SELLER,
             build_payload=self.terms,
+            configured_max_duration_seconds=self.configured_max,
         )
         return await cycle.run()
 
@@ -910,3 +912,39 @@ async def test_an_unreadable_stored_override_holds_its_pool(db):
     assert storefront.listing("site-a", "pool-1", "r1")[:2] == (listing_id, "open")
     assert {item["reason"] for item in actions(report, "hold")} == {"pool_override_unreadable"}
     assert storefront.registries.operations() == []
+
+
+async def test_an_override_minimum_above_the_configured_maximum_holds_its_pool(db):
+    """Written while the configured maximum allowed it; configuration then fell
+    below the override's minimum, so the effective pair is unordered."""
+    storefront = Storefront(db, {"site-a": Site(pool("pool-1", member("r1", "pool-1")))})
+    await storefront.run()
+    listing_id = storefront.listing("site-a", "pool-1", "r1")[0]
+    await _override(db, terms={"min_duration_seconds": 7200})
+    storefront.configured_max = 3600
+
+    report = await storefront.run()
+
+    assert storefront.listing("site-a", "pool-1", "r1")[:2] == (listing_id, "open")
+    assert {item["reason"] for item in actions(report, "hold")} == {
+        "pool_override_terms_conflict"
+    }
+    assert storefront.registries.operations() == []
+
+
+async def test_stored_terms_that_are_not_a_mapping_hold_rather_than_read_as_absent(db):
+    storefront = Storefront(db, {"site-a": Site(pool("pool-1", member("r1", "pool-1")))})
+    await storefront.run()
+    conn = sqlite3.connect(db.db_path)
+    try:
+        with conn:
+            conn.execute(
+                "INSERT INTO pool_overrides (site_id, pool_id, offering_mode, terms) "
+                "VALUES ('site-a', 'pool-1', 'bare_metal', '[]')"
+            )
+    finally:
+        conn.close()
+
+    report = await storefront.run()
+
+    assert {item["reason"] for item in actions(report, "hold")} == {"pool_override_unreadable"}

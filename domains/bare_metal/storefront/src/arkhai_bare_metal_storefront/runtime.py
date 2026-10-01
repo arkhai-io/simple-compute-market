@@ -51,6 +51,7 @@ from .pool_overrides import (
     BareMetalPoolOverrideContribution,
     accepted_site_projection,
     compile_publication_clauses,
+    configured_max_duration_seconds,
 )
 from .sqlite_client import SQLiteClient
 from .site_clients import (
@@ -228,7 +229,11 @@ class BareMetalStorefrontRuntime:
             site_client=self.capacity_client.site,
             contributions={
                 BareMetalPoolOverrideContribution.offering_mode: (
-                    BareMetalPoolOverrideContribution()
+                    BareMetalPoolOverrideContribution(
+                        configured_max_duration_seconds=lambda: (
+                            configured_max_duration_seconds(os.environ)
+                        )
+                    )
                 )
             },
             compile_clauses=compile_publication_clauses,

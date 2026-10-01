@@ -151,19 +151,27 @@ def validate_asking_rates(policy_tags: Mapping[str, Any]) -> list[str]:
     return problems
 
 
-def raw_asking_rates(policy_tags: Mapping[str, Any], offering_mode: str) -> Any:
-    """The unvalidated rate list a pool states for ``offering_mode``, or None.
+#: What ``raw_asking_rates`` returns when nothing is stated, as distinct from a
+#: stated JSON ``null``, which is malformed and must not read as absent.
+NOT_STATED: Any = object()
 
-    None when the pool states no ``asking_rates`` or names no list for this
-    mode. A value that is not a mapping is returned as-is so the resolver can
-    report it unreadable rather than read it as absent.
+
+def raw_asking_rates(policy_tags: Mapping[str, Any], offering_mode: str) -> Any:
+    """The unvalidated rate list a pool states for ``offering_mode``.
+
+    ``NOT_STATED`` when the pool carries no ``asking_rates`` key, or the key
+    names no entry for this mode. Anything stated is returned as-is, including
+    ``None`` and a value that is not a mapping, so the resolver can report it
+    unreadable rather than read it as absent.
     """
-    declared = policy_tags.get(ASKING_RATES_POLICY_TAG)
-    if declared is None:
-        return None
+    if ASKING_RATES_POLICY_TAG not in policy_tags:
+        return NOT_STATED
+    declared = policy_tags[ASKING_RATES_POLICY_TAG]
     if not isinstance(declared, Mapping):
         return declared
-    return declared.get(offering_mode)
+    if offering_mode not in declared:
+        return NOT_STATED
+    return declared[offering_mode]
 
 
 @dataclass(frozen=True)
@@ -255,9 +263,9 @@ def resolve_asking_rates(
     if override_rates is not None:
         return _resolve_stated(override_rates, source=ASKING_RATE_SOURCE_OVERRIDE, **resolve)
     declared = raw_asking_rates(policy_tags, offering_mode)
-    if declared is None:
+    if declared is NOT_STATED:
         return AskingRateResolution(ASKING_RATE_SOURCE_NONE)
-    if not isinstance(policy_tags.get(ASKING_RATES_POLICY_TAG), Mapping):
+    if not isinstance(policy_tags[ASKING_RATES_POLICY_TAG], Mapping):
         return AskingRateResolution(
             ASKING_RATE_SOURCE_HINT,
             problems=("must be a mapping of offering mode to a list of rates",),
@@ -272,6 +280,7 @@ __all__ = [
     "ASKING_RATE_SOURCE_NONE",
     "ASKING_RATE_SOURCE_OVERRIDE",
     "AskingRate",
+    "NOT_STATED",
     "AskingRateResolution",
     "asking_rate_entry_problems",
     "raw_asking_rates",

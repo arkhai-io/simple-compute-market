@@ -158,8 +158,10 @@ class BareMetalPublicationCycle:
         storefront_url: str,
         seller_principal: Identity,
         build_payload: PayloadBuilder,
+        configured_max_duration_seconds: int | None = None,
     ) -> None:
         self._db = sqlite_client
+        self._configured_max_duration = configured_max_duration_seconds
         self._registry = registry
         self._site_clients = dict(site_clients)
         self._storefront_url = storefront_url
@@ -188,7 +190,9 @@ class BareMetalPublicationCycle:
     async def run(self) -> dict[str, Any]:
         # Read once, before any site, so every site in a run sees one view.
         self._overrides = await asyncio.to_thread(
-            read_bare_metal_pool_overrides, self._db.db_path
+            read_bare_metal_pool_overrides,
+            self._db.db_path,
+            configured_max_duration_seconds=self._configured_max_duration,
         )
         for site_id in sorted(self._site_clients):
             await self._classify_site(site_id)
@@ -262,9 +266,9 @@ class BareMetalPublicationCycle:
                 if not override.problems and override.asking_rates is not None
             },
             override_problems={
-                pool_id: override.problems
+                pool_id: override.problems or override.term_conflicts
                 for pool_id, override in site_overrides.items()
-                if override.problems
+                if override.problems or override.term_conflicts
             },
         )
         self._report_pools(site_id, reading)
@@ -279,7 +283,12 @@ class BareMetalPublicationCycle:
             if item.pool_id in reading.regionless:
                 reason = "pool_region_missing"
             elif item.pool_id in reading.unreadable_overrides:
-                reason = "pool_override_unreadable"
+                override = site_overrides.get(item.pool_id)
+                reason = (
+                    "pool_override_terms_conflict"
+                    if override is not None and override.term_conflicts
+                    else "pool_override_unreadable"
+                )
             elif item.pool_id in reading.unreadable_asking_rates:
                 reason = "asking_rates_unreadable"
             elif item.problems:
@@ -349,7 +358,7 @@ class BareMetalPublicationCycle:
             self._held_pools.add((site_id, pool_id))
             logger.warning(
                 "bare-metal pool %s at %s has a stored override that cannot be "
-                "read (%s); its listings are held",
+                "applied (%s); its listings are held",
                 pool_id,
                 site_id,
                 "; ".join(problems),

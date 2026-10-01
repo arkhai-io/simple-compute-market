@@ -384,27 +384,43 @@ written at promotion (8.9), after code review.
       (`TestAskingRatesValidationOnEveryWriteSurface`): create, replace, patch,
       and bulk import refuse identically and store nothing; a valid
       declaration is kept verbatim.
-- [x] 7.7 **Integration.** `domains/vms/storefront/tests/integration/test_reconciler_projection.py`:
-      derivation on real SQLite prices each of two shapes and publishes no
-      field for an unpriced one;
-      `domains/vms/storefront/tests/integration/test_pool_overrides_api.py`
-      carries a rate through write, publication cycle, and the stored listing
-      over the typed client.
-- [x] 7.8 **Integration.** Same two files: an override at a non-first site
-      replaces that site's rates as a whole while the other site keeps the pool
-      declaration's; an empty override withholds a declared rate and the same
-      listing refreshes without it; a storefront with pricing defaults and no
-      declaration publishes no rate; the write refuses a rate keyed by a shape
-      outside the vocabulary, an unaccepted period, and two rates for one shape.
-- [x] 7.9 **Integration.** `test_reconciler_projection.py`: amount, asset, and
-      removal each keep the listing's key and classify as `terms_differ` on
-      `asking_rate` alone, refreshing to the fresh value.
-      `domains/bare_metal/storefront/tests/test_publication_cycle.py`: a bare-metal
-      change and removal refresh the same listing in place.
-- [x] 7.10 **Integration.** Both domains: an unreadable declaration or override
-      holds the pool (VM `unreadable_asking_rates`; bare metal
-      `asking_rates_unreadable`, its listing kept open and nothing sent), and
-      a priced shape no listing has is reported.
+Test levels for 7.7–7.10 were corrected after review against
+`docs/development/TESTING.md` §2: integration means the real app, a real database,
+wired DI, and the canonical typed client, and the library exception covers kits
+only. Derivation and cycle tests over a real database are component evidence here,
+whatever a module's header says; `test_reconciler_projection.py` calls itself an
+integration test, a description that predates this change and is left to the next
+change that touches the module.
+
+- [x] 7.7 **Integration.** VM: `domains/vms/storefront/tests/integration/test_pool_overrides_api.py`
+      carries a pool-declared rate and an override rate through the real app's
+      publication into the stored listing, over the typed client. Bare metal:
+      `domains/bare_metal/storefront/tests/test_http_publication_rates.py` (added
+      after review) drives the administrator's publication step through the
+      typed client and reads back the listing a buyer fetches, with a declared
+      rate, an override rate, and an empty override. **Component:**
+      `test_reconciler_projection.py` prices two shapes on real SQLite and omits
+      the field for an unpriced one.
+- [x] 7.8 **Integration.** `test_pool_overrides_api.py`: an empty override
+      withholds a declared rate and the same listing refreshes without it; the
+      write refuses a rate keyed by a shape outside the vocabulary, an unaccepted
+      period, and two rates for one shape. **Component:**
+      `test_reconciler_projection.py` covers an override at a non-first site
+      replacing that site's rates as a whole while the other keeps the pool's,
+      and pricing defaults with no declaration publishing no rate.
+- [x] 7.9 **Integration.** Both domains' app tests above show a rate change and
+      an empty override refreshing the same listing in place. **Component:**
+      `test_reconciler_projection.py` classifies amount, asset, and removal as
+      `terms_differ` on `asking_rate` alone under an unchanged key;
+      `domains/bare_metal/storefront/tests/test_publication_cycle.py` (which
+      describes itself as not integration evidence) shows the bare-metal refresh
+      and removal.
+- [x] 7.10 **Component.** Both domains' derivation and cycle tests: an
+      unreadable declaration or override holds the pool (VM
+      `unreadable_asking_rates`; bare metal `asking_rates_unreadable`, its listing
+      kept open and nothing sent), and a priced shape no listing has is
+      reported. Hold behaviour is orchestration, which the cycle and derivation
+      tests are the right level for; no app test is added for it.
 - [x] 7.11 **Integration.** `test_pool_overrides_api.py`: an override's rate and
       its settlement clause's rate each publish as stated, and no settlement
       option carries the asking amount.
@@ -427,6 +443,50 @@ written at promotion (8.9), after code review.
       The system scenario waits on a lane with two seller sites; the only
       two-storefront scenario is owned by `repair-multi-storefront-scenario`,
       which is active. Unrun until then.
+
+## 7b. Review findings
+
+From the implementation review. Each was reproduced before it was changed.
+
+- [x] 7b.1 **Finite decimals.** `core/registry/src/core_registry/api/filter_eval.py`:
+      `_finite_decimal` admits only finite values. A non-finite query bound is a
+      `FilterParamError` (400), not the `decimal.InvalidOperation` a `NaN` bound
+      raised as a server error; a non-finite listing value reads as no value.
+      Tests: `NaN`, `sNaN`, both infinities, and `inf`, on both sides
+      (`core/registry/tests/unit/test_filter_eval.py`). Delta: `registry-discovery`
+      now says finite, with two scenarios.
+- [x] 7b.2 **A stated null holds.** `kit/resource-pools/.../asking_rates.py`:
+      `raw_asking_rates` returns `NOT_STATED` for a missing key, and anything
+      stated, `None` included, as-is, so a stated `null` tag or mode holds the
+      pool instead of reading as no rate. The bare-metal override reader
+      validates `terms` stated as anything but a mapping (`[]` included) as
+      unreadable instead of defaulting it. **Not changed:** the override kit's
+      store maps both SQL `NULL` and stored JSON `"null"` to `None`. The store
+      writes `NULL` for every unset field, so `"null"` text can arise only from
+      corruption, and telling them apart is a kit change that also governs VM's
+      existing fields; it is outside this change.
+- [x] 7b.3 **Effective duration bounds.** Each bare-metal override bound replaces
+      its configured counterpart, as configuration overlays do, and the effective
+      pair must be ordered (`pool_overrides.py`, `effective_duration_problems`).
+      The write is refused against the configured maximum
+      (`BareMetalPoolOverrideContribution` reads it when judging); publication
+      rechecks against current configuration and holds the pool as
+      `pool_override_terms_conflict`. One parser,
+      `configured_max_duration_seconds`, now serves the payload builder, the
+      contribution, and the cycle. Tests: `tests/test_pool_override_terms.py`
+      (unit), `tests/test_pool_overrides_api.py` (write refusal and acceptance
+      through the typed client), `tests/test_publication_cycle.py` (a conflict
+      after the write, and stored `terms` of `[]`).
+- [x] 7b.4 **Test levels.** 7.7–7.10 relabelled; one bare-metal app integration
+      test added (see 7.7).
+- [x] 7b.5 **Stale comment.** The registry evaluator test no longer says the
+      deployed specification lacks asking-rate filters.
+- [x] 7b.6 **Placement of precedence.** Kept beside the declaration parser, with
+      the reasoning and a revisit trigger in `design.md`.
+- [x] 7b.7 **Scope.** The review diff included edits to
+      `pools-9-retire-local-physical-authority` and
+      `remove-dead-storefront-physical-surfaces`. No fileset of this change
+      touches them; they are concurrent work outside this change.
 
 ## 8. Closeout
 
@@ -467,16 +527,25 @@ written at promotion (8.9), after code review.
 - [x] 8.7 **Documentation citations.**
       `make check-doc-citations CHANGE=publish-indicative-listing-rates` passes;
       rerun after promotion.
-- [ ] 8.8 **End-to-end pipeline.** Run 36837675676: the VM lane passed, 126
-      passed and 2 existing skips, with the registry serving the compute
-      specification's new filters and no related errors in its container logs.
-      The bare-metal lane failed before any scenario ran: its storefront did not
-      start (`NameError` on `identity_config`; see 3b.4), so stages 05b–05d are
-      unproven. Owed: a rerun with the fix. Note for that run:
-      `e2e-tests/tests/unit/test_hosted_public_boundary.py::
-      test_buyer_deployment_mounts_separate_profile_state_and_credential` fails
-      before this change too; it reads compose files this change does not
-      touch.
+- [ ] 8.8 **End-to-end pipeline.**
+      - Run 36837675676: VM lane 126 passed with its 2 existing skips; the
+        bare-metal lane failed before any scenario, its storefront unable to
+        start (the 3b.4 defect).
+      - Run 36839524415, with that fix: both lanes passed. VM: 126 passed and
+        2 existing skips. Bare metal: all 11 stages of
+        `test_bare_metal_publication.py` passed, including 05b (a declared rate
+        refreshes the listing in place and rate queries find it at, and only at,
+        its bound by both bound names), 05c (a storefront override replaces the
+        rate and maximum duration and reports `applied`), and 05d (deleting it
+        restores the pool's rate). No tracebacks in either lane's container
+        logs.
+      - Owed: a run including the 7b review fixes, which change the registry
+        evaluator, the asking-rate reader, and bare-metal override handling.
+      - Unrun by design: 7.13 and 7.14 (blocked; see those tasks).
+      - Note: `e2e-tests/tests/unit/test_hosted_public_boundary.py::
+        test_buyer_deployment_mounts_separate_profile_state_and_credential`
+        fails before this change too; it reads compose files this change does
+        not touch.
 - [ ] 8.9 **Promotion.** Complete the design-promotion record below.
 - [x] 8.10 **Packaging.** `make check-packaging` passes after `make lock` in the
       reviewer's environment, which relocked two projects (including
@@ -508,3 +577,7 @@ written at promotion (8.9), after code review.
 | An unpriced listing publishes no `asking_rate` field rather than null, so a withdrawn rate refreshes in place | `openspec/specs/storefront-publication/spec.md` (delta: "A shape is priced nowhere") |
 | The bare-metal command signs as the storefront's own identity from the server's inputs | `docs/development/DEPLOYMENT_AND_CONFIG.md` ("Storefront listing shapes and pool overrides") |
 | `kit/pool-overrides` keeps its version: backward-compatible additions, unchanged requirements | Temporary: change history only |
+| The decimal value type is finite: a non-finite bound is refused, a non-finite listing value is no value | `openspec/specs/registry-discovery/spec.md` |
+| A stated `null` asking-rate declaration is malformed and holds the pool | `openspec/specs/storefront-publication/spec.md` |
+| Bare-metal duration bounds replace their configured counterparts independently; the effective pair is checked at write and at publication | `openspec/specs/storefront-publication/spec.md`, and the operator rule in `docs/development/DEPLOYMENT_AND_CONFIG.md` |
+| Storefront precedence stays beside the pool declaration's parser, with its revisit trigger | `openspec/specs/storefront-publication/architecture.md` |

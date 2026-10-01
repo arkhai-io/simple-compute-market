@@ -289,6 +289,16 @@ coercion branch and the range domain. The buyer side already renders `Decimal`
 exactly, so it needs one mapping entry to `QueryValueType.DECIMAL` and no rendering
 change.
 
+**Only finite values are decimal values.** Python's `Decimal` also parses `NaN`,
+`sNaN`, and the infinities. Ordering a NaN raises, and an infinity matches or
+excludes everything, so neither is a price a bound can compare against. A
+non-finite query bound is refused as an invalid parameter; a non-finite listing
+value reads as no value, so `on_missing` decides it. The listing side matters
+more than it looks: the registry validates the full listing shape only in its dry
+run, so a malformed stored listing must not be able to turn a query into a server
+error. Found in review; left implicit in the first design, which let the parsing
+library decide.
+
 A registry running the current engine, handed a filter spec declaring
 `decimal_text`, fails to load that spec rather than ignoring the unknown type,
 because `FilterDecl` forbids extras and `ValueType` is closed. The engine ships
@@ -478,6 +488,12 @@ field as absent and falls through, on purpose. Falling through here means silent
 dropping a price the seller believes they advertised, and unlike `min_price` this
 value is public buyer-facing information. An absent declaration and a malformed one
 stay distinct.
+
+A stated `null`, for the whole tag or for one mode, is malformed, not absent. The
+write path already refuses it; the reader must too, because the reader exists for
+data the write path did not produce: older or skewed producers and corrupt rows.
+The reader therefore tests whether a key is present rather than whether its value
+is `None`. Found in review.
 
 ### A rate is a term of sale, so a change refreshes the listing in place
 
@@ -673,6 +689,18 @@ replace the configured `BARE_METAL_STOREFRONT_PUBLICATION_CLAUSES` for that site
 pool as a whole. Its duration bounds replace the configured bounds. Region and backing
 remain the site's.
 
+**Duration bounds combine by overlay precedence.** Each override bound replaces its
+configured counterpart independently, as configuration overlays do. Replacing the
+pair as a unit was the alternative: an override stating only a minimum would then
+drop the configured maximum, changing meaning by omission. Independent replacement
+can produce an unordered effective pair, since configuration states a maximum and no
+minimum. The write is therefore checked against the configured maximum the server
+holds, and publication checks the pair again, because configuration can change after
+the write. A conflict found there holds the pool under its own reason,
+`pool_override_terms_conflict`, distinct from an unreadable override: the stored
+record is valid, and its combination with current configuration is not. Found in
+review.
+
 **One route service, bound per storefront.** The override HTTP handling moves out of
 VM's admin controller into `kit/pool-overrides` as a framework-free
 `PoolOverrideRouteService`:
@@ -722,6 +750,22 @@ copying it would add dead behaviour to make a future merge mechanical.
 **The combined compute-family shell** registers no `bare_metal` override
 contribution. It does not run bare-metal publication, so it keeps refusing
 `bare_metal` writes as a mode no market serves until it does.
+
+### Storefront precedence sits beside the pool declaration's parser
+
+`kit/resource-pools` both reads a pool's `asking_rates` and states the three-tier
+precedence: override, then pool, then none. Precedence is storefront authority, not
+resource-pool authority, so a split into "read this pool's rates" and a separate
+precedence rule would draw that boundary more cleanly.
+
+It is not split, because both places it could move cost more than they buy. In
+`kit/pool-overrides` it would need the resource-pool kit to parse the pool tier,
+adding a dependency that kit deliberately does not have. In each domain it would be
+two copies of one rule. The dependency direction is already legal: the override
+arrives as plain data and the kit imports no storefront.
+
+**Revisit trigger:** a second consumer of pool-declared rates that is not a
+storefront, which would make the storefront precedence an imposition on it.
 
 ## Risks / Trade-offs
 

@@ -3,10 +3,16 @@
 ### Requirement: The filter grammar can compare exact decimal values
 
 The filter specification MUST support a declared value type whose wire and stored
-representation is a decimal-text string and whose comparison domain is exact
-decimal. Range bounds declared under it MUST be parsed as exact decimals, resolved
-listing values MUST be accepted when they are decimal text, and comparison MUST
-NOT pass through a binary floating-point representation at any point.
+representation is a decimal-text string and whose comparison domain is finite
+exact decimal. Range bounds declared under it MUST be parsed as exact decimals,
+resolved listing values MUST be accepted when they are decimal text, and comparison
+MUST NOT pass through a binary floating-point representation at any point.
+
+Only finite values are decimal values of this type. A query bound that parses as a
+non-number or an infinity MUST be refused as an invalid parameter, never evaluated.
+A listing value that does MUST be treated as no value, so `on_missing` decides it:
+because the registry validates the full listing shape only in its dry run, a
+malformed stored listing must not be able to fail a query.
 
 The type is domain-neutral: it names no market, field, or unit, and any
 specification may declare it for any decimal quantity.
@@ -36,6 +42,17 @@ MUST resolve its type from the specification like any other.
 
 - **WHEN** a listing's decimal-text value equals an inclusive bound exactly
 - **THEN** it matches, and it does not match an exclusive bound of the same value
+
+#### Scenario: A query bound is not finite
+
+- **WHEN** a request bounds a decimal-text filter by a non-number or an infinity
+- **THEN** the registry refuses the parameter rather than evaluating the query
+
+#### Scenario: A stored listing value is not finite
+
+- **WHEN** a listing's decimal-text value is a non-number or an infinity and a query
+  bounds that field
+- **THEN** the listing is treated as publishing no value, and the query completes
 
 #### Scenario: A registry is given a specification it cannot honour
 

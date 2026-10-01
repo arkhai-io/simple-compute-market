@@ -5,7 +5,10 @@ bare metal an override may state settlement clauses, lease-duration bounds, and
 asking rates. It states no shapes: a whole machine has no shape to choose, so a
 record stating ``listing_shapes`` is refused. Region and capacity backing remain
 the site's. An override's clauses replace the configured publication clauses for
-that pool as a whole, and its bounds replace the configured bounds.
+that pool as a whole, and each bound replaces its configured counterpart, as
+configuration overlays do. The effective pair must still be ordered: a minimum
+above the effective maximum is refused at the write and holds the pool at
+publication, since configuration can change after the write.
 
 Bare-metal publication runs in the server's administrator step or in the
 one-shot publication command, and either may be the last thing to read a site.
@@ -19,7 +22,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -53,6 +56,39 @@ class BareMetalPoolOverrideTerms(BaseModel):
         return self
 
 
+MAX_DURATION_SECONDS_ENV = "BARE_METAL_STOREFRONT_MAX_DURATION_SECONDS"
+
+
+def configured_max_duration_seconds(environ: Mapping[str, str]) -> int | None:
+    """The configured lease maximum, or None when none is configured."""
+    raw = environ.get(MAX_DURATION_SECONDS_ENV)
+    return None if raw is None or raw == "" else int(raw)
+
+
+def effective_duration_problems(
+    terms: BareMetalPoolOverrideTerms, configured_max: int | None
+) -> list[str]:
+    """Problems with the bounds a listing would publish under ``terms``.
+
+    Each override bound replaces its configured counterpart; the pair that
+    results must be ordered. Configuration states no minimum, so the only
+    combination across tiers is an override minimum with the configured
+    maximum.
+    """
+    effective_max = (
+        terms.max_duration_seconds if terms.max_duration_seconds is not None else configured_max
+    )
+    low = terms.min_duration_seconds
+    if low is not None and effective_max is not None and low > effective_max:
+        return [
+            f"terms.min_duration_seconds {low} exceeds the effective maximum "
+            f"{effective_max} (the configured maximum, which this override does not replace)"
+            if terms.max_duration_seconds is None
+            else f"terms.min_duration_seconds {low} exceeds max_duration_seconds {effective_max}"
+        ]
+    return []
+
+
 def compile_publication_clauses(
     values: Sequence[Mapping[str, Any]],
 ) -> tuple[SettlementPublicationClause, ...]:
@@ -74,7 +110,7 @@ def _record_problems(
             "declaration, so an override states none"
         )
     try:
-        BareMetalPoolOverrideTerms.model_validate(terms or {})
+        BareMetalPoolOverrideTerms.model_validate({} if terms is None else terms)
     except ValidationError as exc:
         problems.extend(
             f"terms.{'.'.join(str(part) for part in error['loc'])}: {error['msg']}"
@@ -94,19 +130,33 @@ def _record_problems(
 
 
 class BareMetalPoolOverrideContribution:
-    """Pool overrides for the ``bare_metal`` offering mode."""
+    """Pool overrides for the ``bare_metal`` offering mode.
+
+    ``configured_max_duration_seconds`` reads the storefront's current lease
+    maximum when a record is judged, so the effective bounds are checked
+    against the configuration publication would combine them with.
+    """
 
     offering_mode = BARE_METAL_OFFERING_MODE
+
+    def __init__(
+        self, *, configured_max_duration_seconds: Callable[[], int | None] = lambda: None
+    ) -> None:
+        self._configured_max = configured_max_duration_seconds
 
     def vocabulary_problems(self, record: PoolOverrideRecord) -> Sequence[str]:
         # Judged by the same function publication reads a stored override with,
         # so a write accepted here is one publication can read.
-        return _record_problems(
+        problems = _record_problems(
             listing_shapes=record.listing_shapes,
             settlements=None,
             asking_rates=record.asking_rates,
             terms=record.terms,
         )
+        if problems:
+            return problems
+        terms = BareMetalPoolOverrideTerms.model_validate(record.terms or {})
+        return effective_duration_problems(terms, self._configured_max())
 
     def judge_shapes(
         self,
@@ -121,8 +171,10 @@ class BareMetalPoolOverrideContribution:
 class BareMetalPoolOverride:
     """One stored override as bare-metal publication reads it.
 
-    ``problems`` is non-empty when the stored override cannot be read; such an
-    override holds its pool rather than letting configuration speak for it.
+    ``problems`` is non-empty when the stored override cannot be read;
+    ``term_conflicts`` when it reads but its bounds conflict with current
+    configuration. Either holds its pool rather than letting configuration
+    speak for it or publishing an unordered pair.
     """
 
     clauses: tuple[SettlementPublicationClause, ...] | None = None
@@ -130,12 +182,16 @@ class BareMetalPoolOverride:
     max_duration_seconds: int | None = None
     asking_rates: Any = None
     problems: tuple[str, ...] = ()
+    term_conflicts: tuple[str, ...] = ()
 
 
 def read_bare_metal_pool_overrides(
     db_path: str,
+    *,
+    configured_max_duration_seconds: int | None = None,
 ) -> dict[tuple[str, str], BareMetalPoolOverride]:
-    """Every stored bare-metal override, keyed by ``(site_id, pool_id)``."""
+    """Every stored bare-metal override, keyed by ``(site_id, pool_id)``,
+    judged against the configured lease maximum it would combine with."""
     conn = sqlite3.connect(db_path)
     try:
         stored = read_pool_overrides(conn, offering_mode=BARE_METAL_OFFERING_MODE)
@@ -153,7 +209,13 @@ def read_bare_metal_pool_overrides(
         if problems:
             overrides[key] = BareMetalPoolOverride(problems=tuple(problems))
             continue
-        terms = BareMetalPoolOverrideTerms.model_validate(item.terms or {})
+        terms = BareMetalPoolOverrideTerms.model_validate(
+            {} if item.terms is None else item.terms
+        )
+        conflicts = effective_duration_problems(terms, configured_max_duration_seconds)
+        if conflicts:
+            overrides[key] = BareMetalPoolOverride(term_conflicts=tuple(conflicts))
+            continue
         overrides[key] = BareMetalPoolOverride(
             clauses=(
                 compile_publication_clauses(item.settlements)
@@ -223,6 +285,8 @@ __all__ = [
     "BareMetalPoolOverrideTerms",
     "accepted_site_projection",
     "compile_publication_clauses",
+    "configured_max_duration_seconds",
+    "effective_duration_problems",
     "read_bare_metal_pool_overrides",
     "record_accepted_generation",
 ]
