@@ -255,6 +255,8 @@ def register(app: typer.Typer) -> None:
         chain_settings = None
         if deal.escrow_uid:
             chain_name = _accepted_proposal_chain(deal) or _first_listing_chain(deal)
+            if chain_name is None:
+                raise typer.BadParameter("accepted escrow has no selected chain")
             chain_cfg = chain_by_name(chain_name)
             chain_settings = resolve_chain_settings(
                 buyer_address=None,

@@ -266,6 +266,7 @@ def request_introduction(
         listing = client.get_listing(listing_id)
     if not listing.storefront_url or listing.publisher_principals is None:
         raise typer.BadParameter("listing has no trusted storefront identity")
+    publisher_principals = listing.publisher_principals
     options = [
         SettlementOption.model_validate(item) for item in listing.settlement_options
     ]
@@ -304,7 +305,7 @@ def request_introduction(
         principal=identity.principal,
         signer=identity.signer,
         listing_id=listing_id,
-        resolve_seller_principals=lambda: listing.publisher_principals,
+        resolve_seller_principals=lambda: publisher_principals,
         initial_price=0.0,
         max_price=0.0,
         unit_count=duration_seconds / 3600,

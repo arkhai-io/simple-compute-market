@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
-from typing import Any, Literal, Self
+from typing import Any, Final, Literal, Self
 
 import httpx
 from market_identity import Identity, canonical_json
@@ -13,8 +13,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 logger = logging.getLogger(__name__)
 
-ISSUANCE_REQUEST_SCHEMA = "arkhai.api-credits.issuance-request.v1"
-ISSUANCE_RESULT_SCHEMA = "arkhai.api-credits.issuance-result.v1"
+ISSUANCE_REQUEST_SCHEMA: Final = "arkhai.api-credits.issuance-request.v1"
+ISSUANCE_RESULT_SCHEMA: Final = "arkhai.api-credits.issuance-result.v1"
 _SAFE_REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,254}$")
 
 
@@ -84,7 +84,8 @@ def credit_issuance_request_digest(
 class CreditIssuanceRequest(_CreditsContract):
     """Complete immutable command accepted by the credits authority."""
 
-    schema: Literal["arkhai.api-credits.issuance-request.v1"] = ISSUANCE_REQUEST_SCHEMA
+    # The wire schema field shadows Pydantic's deprecated schema() method.
+    schema: Literal["arkhai.api-credits.issuance-request.v1"] = ISSUANCE_REQUEST_SCHEMA  # type: ignore[assignment]
     fulfillment_id: str = Field(min_length=1, max_length=320)
     obligation_ref: str = Field(min_length=1, max_length=255)
     mechanism: Literal["alkahest.v1"]
@@ -164,7 +165,7 @@ class CreditIssuanceRequest(_CreditsContract):
 class CreditIssuanceResult(_CreditsContract):
     """Committed grant projection; bearer material is excluded from serialization."""
 
-    schema: Literal["arkhai.api-credits.issuance-result.v1"] = ISSUANCE_RESULT_SCHEMA
+    schema: Literal["arkhai.api-credits.issuance-result.v1"] = ISSUANCE_RESULT_SCHEMA  # type: ignore[assignment]
     fulfillment_id: str = Field(min_length=1, max_length=320)
     grant_id: str = Field(min_length=1, max_length=320)
     obligation_ref: str = Field(min_length=1, max_length=255)

@@ -239,7 +239,7 @@ def run_settle_from_log(
                 chain_name=chain.chain_name, addr_config_path=chain.alkahest_addr_config
             )
             escrow_terms_list = build_terms(
-                proposal, deal.seller_wallet_address, float(deal.agreed_amount), 0
+                proposal, deal.seller_wallet_address, int(deal.agreed_amount), 0
             )
         create_escrow = make_create_escrow_fn(
             private_key=chain.buyer_private_key,

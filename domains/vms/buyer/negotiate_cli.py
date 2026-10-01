@@ -18,6 +18,7 @@ from market_alkahest.schemas import accepted_token_address
 from market_alkahest.token import TokenResolutionError, resolve_token
 from market_core.schemas import SettlementSelection
 from market_identity import TrustedIdentitySet
+from market_settlement_runtime import CompiledSettlementClause
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -232,7 +233,7 @@ def register(app: typer.Typer) -> None:
             )
 
         settlement_policy = None
-        settlement_clauses = ()
+        settlement_clauses: tuple[CompiledSettlementClause, ...] = ()
         resolved_ssh_public_key: str | None = None
         if resume_state is None:
             try:

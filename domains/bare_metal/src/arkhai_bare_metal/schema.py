@@ -9,13 +9,13 @@ from __future__ import annotations
 
 import hashlib
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Final, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
 from .provision_terms import BareMetalProvisionTerms
 
-BARE_METAL_SCHEMA_KIND = "bare_metal.v1"
+BARE_METAL_SCHEMA_KIND: Final = "bare_metal.v1"
 BARE_METAL_EXECUTOR_KIND = "bare_metal"
 SSH_ACCESS_METHOD = "ssh"
 NODE_GRANT_ACCESS_ACTION = "node_grant_access"

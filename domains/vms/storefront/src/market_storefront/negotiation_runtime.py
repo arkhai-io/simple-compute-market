@@ -949,7 +949,8 @@ async def compute_round_zero_decision(
 ) -> tuple[int, str, str, str, NegotiationDecision]:
     """Run the VM policy adapter against the exact durable capacity binding."""
 
-    if getattr(repository, "domain_registry", None) is not registry:
+    repository_registry: StorefrontDomainRegistry = getattr(repository, "domain_registry", None)
+    if repository_registry is not registry:
         raise RuntimeError(
             "round-zero evaluation and repository must share the exact registry"
         )

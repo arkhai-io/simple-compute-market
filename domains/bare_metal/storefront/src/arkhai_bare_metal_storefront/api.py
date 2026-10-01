@@ -338,7 +338,7 @@ async def list_negotiations(
         )
     try:
         buyer_principal = (
-            Identity(scheme=buyer_scheme, identifier=buyer_identifier)
+            Identity.model_validate({"scheme": buyer_scheme, "identifier": buyer_identifier})
             if buyer_scheme is not None and buyer_identifier is not None
             else None
         )

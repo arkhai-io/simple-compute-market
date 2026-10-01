@@ -60,7 +60,7 @@ async def buyer_settlement_readiness() -> tuple[
     policy = resolve_buyer_settlement_policy(identity=identity)
     resources: dict[str, Any] = {}
     alkahest = policy.config.mechanism_config("alkahest")
-    if alkahest is not None and alkahest.enabled:
+    if alkahest is not None and getattr(alkahest, "enabled", False):
         chains = buyer_chains()
         address, _private_key = resolve_buyer_wallet()
         resources["chains"] = chains

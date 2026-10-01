@@ -19,6 +19,7 @@ from .buy_orchestrator import (
     wait_for_settlement,
 )
 from .deal_helpers import (
+    ChainSettings,
     accepted_settlement_mechanism,
     load_deal_context,
     make_deal_publisher_trust_resolver,
@@ -145,6 +146,7 @@ def run_settle_from_log(
         )
         raise typer.Exit(2)
     chain_cfg = chain_by_name(chain_cfg_name)
+    chain: SimpleNamespace | ChainSettings
     if deal.accepted_escrow_proposal is not None:
         from .common import resolve_buyer_wallet, resolve_ssh_public_key
 
@@ -258,7 +260,7 @@ def run_settle_from_log(
             escrow_terms_list = build_terms(
                 proposal,
                 seller_wallet,
-                float(deal.agreed_amount),
+                int(deal.agreed_amount),
                 int(effective_duration),
             )
         create_escrow = make_create_escrow_fn(

@@ -52,12 +52,12 @@ def prepare_credit_issuance_request(
         )
     return CreditIssuanceRequest.create(
         obligation_ref=obligation_ref,
-        mechanism=mechanism,
+        mechanism="alkahest.v1",
         owner=owner,
         service=service,
         resource_id=resource_id,
         quantity=quantity,
-        key=CreditKeyTarget(mode=key_mode, key_id=key_id),
+        key=CreditKeyTarget.model_validate({"mode": key_mode, "key_id": key_id}),
         capacity_reservation_id=capacity_reservation_id,
     )
 

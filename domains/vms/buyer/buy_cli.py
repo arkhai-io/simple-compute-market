@@ -467,7 +467,7 @@ def register(app: typer.Typer) -> None:
             for url, key in resolve_registry_api_keys().items()
             if url in registry_authorities
         }
-        required_values = [("registry_urls", reg_urls)]
+        required_values: list[tuple[str, object]] = [("registry_urls", reg_urls)]
         if not explain:
             required_values.append(("ssh_public_key", ssh))
         missing = [name for name, value in required_values if not value]
