@@ -39,6 +39,12 @@ PROJECTS: dict[str, Project] = {
         ("kit/hosted-settlement/tests",),
         ("dist-hosted-client", "dist-kits"),
     ),
+    "kit/arkhai-payments": Project(
+        "kit/arkhai-payments",
+        "arkhai-kit-arkhai-payments",
+        (),
+        ("dist-kits",),
+    ),
     "kit/settlement-runtime": Project(
         "kit/settlement-runtime",
         "arkhai-kit-settlement-runtime",

@@ -31,7 +31,8 @@ constrained with lower bounds (see Versioning policy).
 | `arkhai-core-registry-client` | `core/registry-client/` | 0.10.0 | none |
 | `arkhai-core-registry` | `core/registry/` | 0.1.0 | `arkhai-kit-identity` |
 | `arkhai-kit-site` | `kit/site/` | 0.1.0 | none |
-| `arkhai-kit-identity` | `kit/identity/` | 0.1.0 | none |
+| `arkhai-kit-identity` | `kit/identity/` | 0.3.0 | none |
+| `arkhai-kit-arkhai-payments` | `kit/arkhai-payments/` | 0.1.0 | `arkhai-kit-identity` |
 | `arkhai-kit-policy` | `kit/policy/` | 0.1.0 | none |
 | `arkhai-kit-alkahest` | `kit/alkahest/` | 0.1.0 | none |
 | `arkhai-kit-config` | `kit/config/` | 0.1.0 | `arkhai-kit-alkahest` |

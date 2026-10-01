@@ -171,6 +171,19 @@ jobs:
           PYTEST_ARGS: ${{ matrix.pytest_args }}
         run: uv run --find-links "$GITHUB_WORKSPACE/.dist" --with pytest --with pytest-asyncio pytest -q $PYTEST_ARGS
 
+  arkhai-payments-kit:
+    name: py · kit-arkhai-payments
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.11.17"
+      - name: Check generated wire models, typing, and upstream vectors
+        run: make -C kit/arkhai-payments test
+      - name: Build the portable wheel
+        run: make -C kit/arkhai-payments build
+
   release-deployment:
     name: release · deployment contracts
     runs-on: ubuntu-latest

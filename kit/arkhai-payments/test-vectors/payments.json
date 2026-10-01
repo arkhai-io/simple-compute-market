@@ -1,0 +1,214 @@
+{
+  "keys": {
+    "payee": "0303030303030303030303030303030303030303030303030303030303030303",
+    "service": "0505050505050505050505050505050505050505050505050505050505050505"
+  },
+  "mandates": [
+    {
+      "id": "cf0dba71ad962a95b80451663a079de64e0f59c5e531b893bb860f22905873a3",
+      "mandate": {
+        "from": "11111111-1111-4111-8111-111111111111",
+        "to": "22222222-2222-4222-8222-222222222222",
+        "parts": [
+          {
+            "kind": "once",
+            "asset": "USD/2",
+            "amount": "1000",
+            "hold": {
+              "for": "P0D"
+            }
+          },
+          {
+            "kind": "once",
+            "asset": "USD/2",
+            "amount": "9007199254740993",
+            "hold": {
+              "until": "stop"
+            }
+          },
+          {
+            "kind": "once",
+            "asset": "EUR/2",
+            "amount": "333",
+            "hold": {
+              "for": "P1M"
+            }
+          }
+        ],
+        "deal": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "fee": {
+          "bps": 250
+        },
+        "authorities": {
+          "start": [
+            "11111111-1111-4111-8111-111111111111",
+            "22222222-2222-4222-8222-222222222222"
+          ],
+          "stop": [
+            "11111111-1111-4111-8111-111111111111",
+            "22222222-2222-4222-8222-222222222222",
+            "33333333-3333-4333-8333-333333333333"
+          ],
+          "reverse": [
+            "22222222-2222-4222-8222-222222222222",
+            "33333333-3333-4333-8333-333333333333"
+          ]
+        },
+        "nonce": "vector-1",
+        "expires": 1900000000
+      }
+    }
+  ],
+  "receipt": {
+    "message": "0000001a61726b6861692e7061796d656e74732e726563656970742e76310000004032643761643438393135336437393363643035313564663462663262386432336364363030333265336566333062626463373866653835663230623635376533",
+    "signed": {
+      "receipt": {
+        "transaction": "cf0dba71ad962a95b80451663a079de64e0f59c5e531b893bb860f22905873a3",
+        "deal": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "from": "11111111-1111-4111-8111-111111111111",
+        "to": "22222222-2222-4222-8222-222222222222",
+        "ledger": "approval-1",
+        "parts": [
+          {
+            "asset": "USD/2",
+            "gross": "1000",
+            "fee": "25",
+            "net": "975",
+            "hold": {
+              "for": "P0D"
+            }
+          },
+          {
+            "asset": "USD/2",
+            "gross": "9007199254740993",
+            "fee": "225179981368524",
+            "net": "8782019273372469",
+            "hold": {
+              "until": "stop"
+            }
+          },
+          {
+            "asset": "EUR/2",
+            "gross": "333",
+            "fee": "8",
+            "net": "325",
+            "hold": {
+              "for": "P1M"
+            }
+          }
+        ],
+        "approvedAt": 1800000000,
+        "issuer": {
+          "scheme": "ed25519",
+          "identifier": "bnoc3Smwt4_ROvTFWY_v9O8qlxZuPKby5Pv8zYBQW_E"
+        }
+      },
+      "proof": {
+        "scheme": "ed25519",
+        "value": "M9ZDQ9K8lnFl_uyY1yRgc3P4D4yA2N5gvq1FD1cgGCEKN2CWNcY4Riw92RrlBj5tg-FHy6jEBOEoJhsf-KfICg"
+      }
+    }
+  },
+  "attachments": [
+    {
+      "request": {
+        "kind": "deal",
+        "content": {
+          "terms": "Fixture agreement — opaque to the service",
+          "price": {
+            "amount": "1000",
+            "asset": "USD/2"
+          }
+        },
+        "label": "Agreement"
+      },
+      "stored": {
+        "kind": "deal",
+        "content": {
+          "terms": "Fixture agreement — opaque to the service",
+          "price": {
+            "amount": "1000",
+            "asset": "USD/2"
+          }
+        },
+        "label": "Agreement",
+        "sha256": "a716abcad68e133e10582464eed641de7b19c9c83c72c0a05f4e47f3e8f3f642",
+        "name": "deal.json",
+        "mediaType": "application/json",
+        "size": 97,
+        "uploader": "11111111-1111-4111-8111-111111111111"
+      }
+    }
+  ],
+  "approvals": [
+    {
+      "id": "2fd5b71c42740706db1053f2f78cc656c8970aa2fb3fdc49b037bf9138db40de",
+      "request": {
+        "mandate": {
+          "from": "11111111-1111-4111-8111-111111111111",
+          "to": "22222222-2222-4222-8222-222222222222",
+          "parts": [
+            {
+              "kind": "once",
+              "asset": "USD/2",
+              "amount": "1000",
+              "hold": {
+                "for": "P0D"
+              }
+            },
+            {
+              "kind": "once",
+              "asset": "USD/2",
+              "amount": "9007199254740993",
+              "hold": {
+                "until": "stop"
+              }
+            },
+            {
+              "kind": "once",
+              "asset": "EUR/2",
+              "amount": "333",
+              "hold": {
+                "for": "P1M"
+              }
+            }
+          ],
+          "deal": "a716abcad68e133e10582464eed641de7b19c9c83c72c0a05f4e47f3e8f3f642",
+          "fee": {
+            "bps": 250
+          },
+          "authorities": {
+            "start": [
+              "11111111-1111-4111-8111-111111111111",
+              "22222222-2222-4222-8222-222222222222"
+            ],
+            "stop": [
+              "11111111-1111-4111-8111-111111111111",
+              "22222222-2222-4222-8222-222222222222",
+              "33333333-3333-4333-8333-333333333333"
+            ],
+            "reverse": [
+              "22222222-2222-4222-8222-222222222222",
+              "33333333-3333-4333-8333-333333333333"
+            ]
+          },
+          "nonce": "vector-1",
+          "expires": 1900000000
+        },
+        "attachments": [
+          {
+            "kind": "deal",
+            "content": {
+              "terms": "Fixture agreement — opaque to the service",
+              "price": {
+                "amount": "1000",
+                "asset": "USD/2"
+              }
+            },
+            "label": "Agreement"
+          }
+        ]
+      }
+    }
+  ]
+}
