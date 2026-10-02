@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
 from arkhai_bare_metal import BareMetalResourceProjection
-from compute_provisioning import JobExecution
+from vm_provisioning_adapter.services.ansible_job_executor import AnsibleJobExecutor
 
 from bare_metal_provisioning_adapter.bundle import (
     HOST_REQUIREMENT,
@@ -39,6 +39,13 @@ class BareMetalProvisioningRuntime:
     # the mock profile this adapter's own mock.
     ansible_service: Any
     playbook_path: Any
+    settings: Any
+
+    def job_executor(self) -> AnsibleJobExecutor:
+        """What runs both bare-metal access actions."""
+        return AnsibleJobExecutor(
+            self.ansible_service, self.playbook_path, settings=self.settings
+        )
 
     def readiness(self) -> dict[str, bool]:
         return {"operations_service": self.operations_service is not None}
@@ -67,10 +74,7 @@ class BareMetalProvisioningRuntime:
             ),
             fulfillment_provider=self.fulfillment_provider,
             pool_config_handler=self.pool_config_handler,
-            job_execution=JobExecution(
-                runner=self.ansible_service,
-                playbook_path=self.playbook_path,
-            ),
+            job_executor=self.job_executor(),
             readiness_check=self.readiness,
         )
 
@@ -119,4 +123,5 @@ def build_bare_metal_runtime(
         pool_config_handler=BareMetalPoolConfigHandler(),
         ansible_service=ansible_service,
         playbook_path=config.resolved_bare_metal_playbook_path,
+        settings=config,
     )

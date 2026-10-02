@@ -14,7 +14,7 @@ from arkhai_bare_metal import (
 from compute_provisioning.executor_mock import MockRule
 from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
 from vm_provisioning_adapter.services.ansible_service import AnsibleError
-from vm_provisioning_adapter.services.job_service import AnsibleJobService
+from vm_provisioning_adapter.services.ansible_job_executor import AnsibleJobExecutor
 from vm_provisioning_adapter.services.mock_ansible_service import (
     ProgrammableMockAnsibleService,
 )
@@ -62,13 +62,7 @@ async def _run(mock, params):
 
 
 def _job_payload(run_result) -> dict:
-    service = AnsibleJobService(
-        settings=MagicMock(),
-        session_factory=MagicMock(),
-        executors=MagicMock(),
-        host_service=MagicMock(),
-    )
-    return service._build_result_payload(run_result)
+    return AnsibleJobExecutor.build_result_payload(run_result)
 
 
 @pytest.mark.asyncio

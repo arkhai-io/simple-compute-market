@@ -296,28 +296,32 @@ def test_a_provider_that_declares_no_host_need_is_refused():
         )
 
 
-def _with_jobs(kind: str, actions: tuple[str, ...], runner, playbook):
-    from compute_provisioning import JobExecution
+class FakeJobExecutor:
+    async def execute(self, run):
+        raise NotImplementedError
 
+    async def cancel(self, handle):
+        return None
+
+
+def _with_jobs(kind: str, actions: tuple[str, ...], executor):
     return ExecutorAdapterContribution(
         adapter=FakeAdapter(kind),
         action_kinds=frozenset(actions[:1]),
         release_executor=FakeReleaseExecutor(),
-        job_executions={
-            action: JobExecution(runner, playbook) for action in actions
-        },
+        job_executors={action: executor for action in actions},
     )
 
 
 def test_composition_registers_job_executors_by_mode_and_action_and_freezes():
     from compute_provisioning import JobExecutorTable
 
-    vm_runner, bm_runner = object(), object()
+    vm_executor, bm_executor = FakeJobExecutor(), FakeJobExecutor()
     table = JobExecutorTable()
     composed = compose_adapter_bundles([
         ExecutorAdapterBundle(
             name="vm",
-            executors=(_with_jobs("vm", ("create", "destroy"), vm_runner, "vm.yaml"),),
+            executors=(_with_jobs("vm", ("create", "destroy"), vm_executor),),
         ),
         ExecutorAdapterBundle(
             name="bare-metal",
@@ -325,8 +329,7 @@ def test_composition_registers_job_executors_by_mode_and_action_and_freezes():
                 _with_jobs(
                     "bare_metal",
                     ("node_grant_access", "node_reclaim_access"),
-                    bm_runner,
-                    "bm.yaml",
+                    bm_executor,
                 ),
             ),
         ),
@@ -334,8 +337,8 @@ def test_composition_registers_job_executors_by_mode_and_action_and_freezes():
 
     assert composed.job_executors is table
     assert table.frozen
-    assert table.resolve("vm", "destroy").runner is vm_runner
-    assert table.resolve("bare_metal", "node_reclaim_access").playbook_path == "bm.yaml"
+    assert table.resolve("vm", "destroy") is vm_executor
+    assert table.resolve("bare_metal", "node_reclaim_access") is bm_executor
 
 
 def test_job_executors_without_a_table_are_refused():
@@ -343,20 +346,20 @@ def test_job_executors_without_a_table_are_refused():
         compose_adapter_bundles([
             ExecutorAdapterBundle(
                 name="vm",
-                executors=(_with_jobs("vm", ("create",), object(), None),),
+                executors=(_with_jobs("vm", ("create",), FakeJobExecutor()),),
             ),
         ], host_requirement={})
 
 
 def test_a_duplicate_job_executor_names_the_bundle():
-    from compute_provisioning import JobExecution, JobExecutorTable
+    from compute_provisioning import JobExecutorTable
 
     table = JobExecutorTable()
-    table.register("vm", "create", JobExecution(object()))
+    table.register("vm", "create", FakeJobExecutor())
     with pytest.raises(ValueError, match="adapter bundle 'vm'.*duplicate job executor"):
         compose_adapter_bundles([
             ExecutorAdapterBundle(
                 name="vm",
-                executors=(_with_jobs("vm", ("create",), object(), None),),
+                executors=(_with_jobs("vm", ("create",), FakeJobExecutor()),),
             ),
         ], host_requirement={}, job_executors=table)

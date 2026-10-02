@@ -7,7 +7,7 @@ from types import MappingProxyType
 from compute_provisioning import (
     ExecutorAdapterBundle,
     ExecutorAdapterContribution,
-    JobExecution,
+    JobExecutor,
 )
 
 from vm_provisioning_adapter.compute_adapter import VmComputeAdapter
@@ -57,7 +57,7 @@ def build_vm_adapter_bundle(
     release_executor: VmReleaseExecutor,
     fulfillment_provider: AnsibleFulfillmentProvider,
     pool_config_handler: AnsiblePoolConfigHandler,
-    job_execution: JobExecution,
+    job_executor: JobExecutor,
     readiness_check=None,
 ) -> ExecutorAdapterBundle:
     checks = {"ansible": readiness_check} if readiness_check is not None else {}
@@ -68,7 +68,7 @@ def build_vm_adapter_bundle(
                 adapter=compute_adapter,
                 action_kinds=frozenset({"create"}),
                 release_executor=release_executor,
-                job_executions={action: job_execution for action in VM_JOB_ACTIONS},
+                job_executors={action: job_executor for action in VM_JOB_ACTIONS},
             ),
         ),
         fulfillment_providers={ANSIBLE_PROVIDER: fulfillment_provider},

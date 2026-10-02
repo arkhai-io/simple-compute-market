@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from .contracts import CredentialEnvelope, ExecutorActionEnvelope, ResultEnvelope
+from .jobs.executor import JobExecutor
 
 
 class UnsupportedExecutorActionError(LookupError):
@@ -104,23 +105,10 @@ class ExecutorAdapterRegistry:
             ) from exc
 
 
-@dataclass(frozen=True)
-class JobExecution:
-    """What runs one executor action: the runner and the playbook it runs.
-
-    ``runner`` is opaque here; the job service that persists the job defines the
-    interface it calls. ``playbook_path`` is the runner's default playbook for the
-    action, used when the job itself names none.
-    """
-
-    runner: Any
-    playbook_path: Any = None
-
-
 class JobExecutorResolver(Protocol):
-    def resolve(self, offering_mode: str, action: str) -> JobExecution:
-        """Return what runs ``action`` for ``offering_mode``, or raise
-        ``UnsupportedExecutorActionError``."""
+    def resolve(self, offering_mode: str, action: str) -> JobExecutor:
+        """Return the executor that runs ``action`` for ``offering_mode``, or
+        raise ``UnsupportedExecutorActionError``."""
 
 
 class JobExecutorTable:
@@ -134,18 +122,18 @@ class JobExecutorTable:
     """
 
     def __init__(self) -> None:
-        self._executions: dict[tuple[str, str], JobExecution] = {}
+        self._executors: dict[tuple[str, str], JobExecutor] = {}
         self._frozen = False
 
-    def register(self, offering_mode: str, action: str, execution: JobExecution) -> None:
+    def register(self, offering_mode: str, action: str, executor: JobExecutor) -> None:
         if self._frozen:
             raise RuntimeError("job executor table is frozen")
         key = (offering_mode, action)
-        if key in self._executions:
+        if key in self._executors:
             raise ValueError(
                 f"duplicate job executor for {offering_mode!r}/{action!r}"
             )
-        self._executions[key] = execution
+        self._executors[key] = executor
 
     def freeze(self) -> None:
         self._frozen = True
@@ -154,11 +142,11 @@ class JobExecutorTable:
     def frozen(self) -> bool:
         return self._frozen
 
-    def resolve(self, offering_mode: str, action: str) -> JobExecution:
+    def resolve(self, offering_mode: str, action: str) -> JobExecutor:
         if not self._frozen:
             raise RuntimeError("job executor table has not been composed")
         try:
-            return self._executions[(offering_mode, action)]
+            return self._executors[(offering_mode, action)]
         except KeyError as exc:
             raise UnsupportedExecutorActionError(
                 f"no job executor for offering mode {offering_mode!r} "
@@ -166,27 +154,27 @@ class JobExecutorTable:
             ) from exc
 
     def executor_modes(self) -> dict[str, str]:
-        """``mock`` or ``real`` per offering mode, from the runners it registered.
+        """``mock`` or ``real`` per offering mode, from the executors it registered.
 
-        A mode is ``mock`` only when every runner registered for it carries the
+        A mode is ``mock`` only when every executor registered for it carries the
         compute mock mechanism's rules.
         """
         from .executor_mock import MockRuleSet
 
         modes: dict[str, str] = {}
-        for (offering_mode, _action), execution in self._executions.items():
-            is_mock = isinstance(getattr(execution.runner, "rules", None), MockRuleSet)
+        for (offering_mode, _action), executor in self._executors.items():
+            is_mock = isinstance(getattr(executor, "rules", None), MockRuleSet)
             current = modes.get(offering_mode)
             modes[offering_mode] = (
                 "mock" if is_mock and current in (None, "mock") else "real"
             )
         return modes
 
-    def runners(self) -> tuple[Any, ...]:
-        """Each distinct runner once, in registration order."""
+    def executors(self) -> tuple[JobExecutor, ...]:
+        """Each distinct executor once, in registration order."""
 
-        seen: list[Any] = []
-        for execution in self._executions.values():
-            if not any(execution.runner is runner for runner in seen):
-                seen.append(execution.runner)
+        seen: list[JobExecutor] = []
+        for executor in self._executors.values():
+            if not any(executor is known for known in seen):
+                seen.append(executor)
         return tuple(seen)

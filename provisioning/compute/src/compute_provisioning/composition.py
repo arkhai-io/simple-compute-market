@@ -17,9 +17,9 @@ from typing import Any
 from .adapters import (
     ExecutorAdapter,
     ExecutorAdapterRegistry,
-    JobExecution,
     JobExecutorTable,
 )
+from .jobs.executor import JobExecutor
 from .app import ComputeProvisioningRouterMount
 from .release import ExecutorReleaseDispatcher, ExecutorReleasePort
 from market_fulfillment import FulfillmentProvider, ProviderRegistry, provider_needs_host
@@ -35,7 +35,7 @@ class ExecutorAdapterContribution:
     # What runs each job action of this offering mode, keyed by action. Wider
     # than ``action_kinds``, which names only what callers may submit through
     # the compute contract; a job may run an action no contract call submits.
-    job_executions: Mapping[str, JobExecution] = field(default_factory=dict)
+    job_executors: Mapping[str, JobExecutor] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -202,7 +202,7 @@ def compose_adapter_bundles(
     ``host_requirement`` is the per-provider host need already handed to the
     site ledger and scheduler; it must match the registered providers exactly.
     ``job_executors`` is the table the job service was built with; every
-    bundle's job executions are registered into it under the same duplicate
+    bundle's job executors are registered into it under the same duplicate
     refusal as contract actions, and it is frozen before composition returns.
     """
 
@@ -248,14 +248,14 @@ def compose_adapter_bundles(
                 action_owners[key] = bundle_name
             adapters.append(contribution.adapter)
             release_executors[offering_mode] = contribution.release_executor
-            if contribution.job_executions and job_executors is None:
+            if contribution.job_executors and job_executors is None:
                 raise ValueError(
                     f"adapter bundle {bundle_name!r} contributes job executors "
                     "but composition was given no job executor table"
                 )
-            for action, execution in contribution.job_executions.items():
+            for action, executor in contribution.job_executors.items():
                 try:
-                    job_executors.register(offering_mode, action, execution)
+                    job_executors.register(offering_mode, action, executor)
                 except ValueError as exc:
                     raise ValueError(f"adapter bundle {bundle_name!r}: {exc}") from exc
 

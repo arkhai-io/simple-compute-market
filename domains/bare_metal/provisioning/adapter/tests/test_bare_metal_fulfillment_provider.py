@@ -15,7 +15,7 @@ from market_fulfillment import (
 )
 
 from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
-from vm_provisioning_adapter.services.job_service import AnsibleJobService
+from vm_provisioning_adapter.services.ansible_job_executor import AnsibleJobExecutor
 
 from bare_metal_provisioning_adapter.services.bare_metal_fulfillment_provider import (
     BareMetalFulfillmentProvider,
@@ -203,9 +203,9 @@ def test_buyer_payload_cannot_replace_selected_machine():
 async def _mock_grant_job_result() -> dict:
     """The result a grant job records when the bare-metal mock runs it.
 
-    The mock's default output is parsed by the real result parser and stored
-    through the job service's result payload, exactly as the job service does
-    for any run, so this is what the provider reads after a mock-profile grant.
+    The mock's default output is parsed by the real result parser and shaped
+    into the result payload by the Ansible job executor, exactly as for any run,
+    so this is what the provider reads after a mock-profile grant.
     """
     host = SimpleNamespace(
         host_id="machine-1",
@@ -235,13 +235,7 @@ async def _mock_grant_job_result() -> dict:
     run_result = mock.parse_playbook_result(
         output, params, tenant_address=host.public_host
     )
-    job_service = AnsibleJobService(
-        settings=MagicMock(),
-        session_factory=MagicMock(),
-        executors=MagicMock(),
-        host_service=MagicMock(),
-    )
-    return job_service._build_result_payload(run_result)
+    return AnsibleJobExecutor.build_result_payload(run_result)
 
 
 @pytest.mark.asyncio

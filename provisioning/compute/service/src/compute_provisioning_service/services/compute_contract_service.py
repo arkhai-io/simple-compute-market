@@ -109,8 +109,8 @@ class ComputeContractService:
             }
         )
 
-    def cancel_job(self, job_id: str) -> ProvisioningJob:
-        self._job_service.cancel_job(job_id)
+    async def cancel_job(self, job_id: str) -> ProvisioningJob:
+        await self._job_service.cancel_job(job_id)
         return self.get_job(job_id)
 
     def get_credentials(self, job_id: str) -> list[CredentialEnvelope]:

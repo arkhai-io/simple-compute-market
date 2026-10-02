@@ -148,13 +148,13 @@ class AnsibleJobsController:
         summary="Cancel a job",
         response_description="Cancellation confirmation with final job status",
     )
-    def cancel_job(self, job_id: str) -> dict:
-        """Cancel a queued or running Ansible job.
+    async def cancel_job(self, job_id: str) -> dict:
+        """Cancel a queued or running job.
 
-        Sends SIGTERM to the Ansible process if the job is running.
+        A running job's executor is asked to stop it.
         """
         try:
-            return self._job_service.cancel_job(job_id)
+            return await self._job_service.cancel_job(job_id)
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
 

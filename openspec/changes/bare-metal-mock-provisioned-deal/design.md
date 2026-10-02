@@ -403,42 +403,45 @@ provisioning-wide execution machinery around it. The postcondition is concrete:
 
 | Concern | Owner | What domains contribute |
 |---|---|---|
-| Durable job engine: identity, state, retries, scheduling, cancellation through the executor, logs, result and credential envelopes, the job queue and retry coordination, job routes | `compute_provisioning.jobs` | nothing |
-| Host authority: identity, enabled state, pool association, connection information and protected connection material, CRUD, applying an imported inventory to the registry with its pool-change and capacity effects, the capacity-derivation port, the pre-execution lookup, host routes, a pool-change hook | `compute_provisioning.hosts` | VM subscribes its relay rebinding to the pool-change hook |
+| Durable job engine: identity, state, the route key, `host_id`, retry counts and timing, scheduling, cancellation through the executor and its opaque handle, logs, `ResultEnvelope` and `CredentialEnvelope` persistence, the job queue and retry coordination, job routes | `compute_provisioning.jobs` | whether a failure is retryable, decided by the executor |
+| Host authority: identity, enabled state, pool association, a connection envelope (`kind`, version, public fields, and opaque protected values it never decrypts or discloses), CRUD, applying an imported inventory to the registry with its pool-change and capacity effects, the capacity-derivation port, the pre-execution lookup yielding an immutable `ExecutionHost`, host routes, a pool-change hook | `compute_provisioning.hosts` | connection codecs (public fields, protected values and their schemes, just-in-time decryption) come from implementation distributions; VM subscribes its relay rebinding to the pool-change hook |
 | Executor table: `(offering_mode, action)` → one complete `JobExecutor` | `compute_provisioning` | each bundle's executors |
 | Rule and gate mechanism, with a deterministic gate-reached signal | `compute_provisioning` (beside the job engine) | each mode's rule routes and default outputs |
-| Job-backed fulfillment-provider shape (5B.10) | `compute_provisioning` | job preparation and result mapping |
+| Job-backed fulfillment-provider shape (5B.12) | `compute_provisioning` | job preparation and result mapping |
 | Composition contract types (`ExecutorAdapterBundle`, `ExecutorAdapterContribution`, `compose_adapter_bundles`) | `compute_provisioning` | — |
-| Ansible mechanics: subprocess and run lifecycle, transient inventory rendering, INI parsing and rendering to and from host-record representations (not applying them), group naming, redaction, fact extraction, connectivity probes, readiness, the `AnsibleJobExecutor` and its mock | `provisioning/compute/ansible` (`compute_provisioning_ansible`), the compute family kit's optional Ansible implementation distribution (confirmed by the maintainer) | codec, playbook, preparation |
+| SSH connection codec (validation, decrypting a protected private key just in time, transient key material) and Ansible mechanics: subprocess and run lifecycle, transient inventory rendering from an `ExecutionHost`, INI parsing and rendering to and from host records with `ssh` connections (not applying them), group naming, redaction, failure classification for transport and Ansible errors, fact extraction, connectivity probes, readiness, the `AnsibleJobExecutor` and its mock | `provisioning/compute/ansible` (`compute_provisioning_ansible`), the compute family kit's optional Ansible implementation distribution (confirmed by the maintainer) | codec, playbook, preparation |
 | VM vars, golden-image credentials, VM facts and credential meaning, VM playbooks and roles, relays, pool configuration with VM defaults, VM operations and routes | VM domain | — |
 | Bare-metal access vars and facts, the `node-access` playbook and `bare-metal-access` role, access parameters | bare-metal domain | — |
 | Aggregate health and diagnostics, instance wiring, table composition, route mounting | the provisioning service | domain diagnostics (Ansible readiness, host reachability) are contributed, not built in |
 
 **A job executor is one complete executable.** The table resolves
 `(offering_mode, action)` to a `JobExecutor` that executes a job and returns a
-normalized outcome, cancels through its own handle, and receives job-done notification.
-Composition builds, for example, `AnsibleJobExecutor(runner, codec, playbook)` per mode.
-The job engine knows job identity, state, opaque parameters, route key and action,
-retries, scheduling, outcomes, cancellation through the executor, logs, and generic
-result and credential envelopes; it never knows playbooks, facts, inventory, process
-IDs, SSH, or how a domain's parameters are built. The VM provider's extra-vars check
-calls the VM codec directly instead of the job service.
+normalized outcome and cancels through its own handle (refined by "Job and host
+authority shape" below). Composition builds, for example,
+`AnsibleJobExecutor(runner, codec, playbook)` per mode. The job engine knows job
+identity, state, opaque parameters, route key and action, `host_id`, retries,
+scheduling, outcomes, cancellation through the executor, logs, and generic result and
+credential envelopes; it never knows playbooks, facts, inventory, process IDs, SSH, or
+how a domain's parameters are built. The VM provider's extra-vars check calls the VM
+codec directly instead of the job service.
 
 **The job and host wire models move to `compute_provisioning`**, the provisioning client
-library, with the client operations; `vm_provisioning_operator` re-exports them so wire
-paths and existing imports keep working. No neutral provisioning module imports
+library, with the client operations. No neutral provisioning module imports
 `vm_provisioning_operator`. The models are classified by owner, not copied wholesale:
 the job authority's canonical result and credential forms are the existing opaque
-`ResultEnvelope` and `CredentialEnvelope`, and SSH-shaped wire DTOs such as
-`CredentialResponse` are compatibility models built from them at the route boundary,
-never the job authority's semantic model.
+`ResultEnvelope` and `CredentialEnvelope`, and they are also its wire forms. Refined
+under "Pre-release wire and schema changes are accepted": there are no compatibility
+models or re-exports; callers import models from their owners, and SSH-shaped models
+such as `CredentialResponse` are removed.
 
 **`system_service.py` is split by owner**: aggregate health and status go to the
 service, which composes contributed diagnostics; Ansible readiness goes to the Ansible
 distribution; convergence and lease controls go to their owning capabilities. Generic
-lease read, update, terminate, and admin routes move to `compute_provisioning`.
+lease read, update, terminate, and admin routes move to `compute_provisioning` and serve
+the neutral `LeaseView` (reopened with the maintainer; see "Job and host authority
+shape").
 
-**The job-backed fulfillment-provider helper lands last (5B.10).** Decided with the
+**The job-backed fulfillment-provider helper lands last (5B.12).** Decided with the
 maintainer. VM's and bare metal's fulfillment providers share one shape: prepare a domain
 job from the settlement resource, submit it, map job status to fulfillment status, and
 read the result and credentials. Once the job boundary has landed and been checked, that
@@ -447,88 +450,22 @@ job authority, so `kit/fulfillment` stays provider-neutral and each domain keeps
 job preparation and result mapping. It is a separate step so the boundary is proven
 before the providers are restructured.
 
-**Job authority shape (5B.2): proposed, awaiting design review.** Implementation found
-that `vm_provisioning_adapter/services/job_service.py`'s `AnsibleJobService` mixes the
-generic engine with Ansible and domain work, and that the persistence 5B.2 would move
-is Ansible- and SSH-shaped. What the file holds today:
-
-- *Generic engine:* submission with operation and contract idempotency, the in-process
-  queue, retry with backoff and the non-retryable error patterns, the retry scheduler,
-  status, list, log, and contract-record reads, cancellation, and every database
-  transition.
-- *Ansible and domain work:* rebuilding the `AnsibleJobParams` dataclass (VM and
-  bare-metal fields) from stored JSON; relay-token resolution; the vars file, inventory
-  rendering, and `start_playbook`; waiting, parsing, and the VM-vocabulary result
-  payload; extracting `root` and `tenant` credentials from VM's `authentication` fact;
-  log redaction; cancellation by `SIGTERM` to `process_id`.
-- *Persistence:* `ansible_jobs` (with `process_id`, an operating-system process id, and
-  `escrow_uid`) and `credentials` (`role`, `password`, `ssh_commands`,
-  `ssh_key_path_host`, `key_type`), both on the service's single declarative base.
-
-Proposed, each sub-step behaviour-neutral and green before the next:
-
-1. **Executor contract.** `compute_provisioning.jobs` defines `JobExecutor`, replacing
-   `JobExecution(runner, playbook_path)` in `JobExecutorTable`:
-   `execute(run) -> JobOutcome`, `cancel(handle)`, and optional
-   `notify_job_done(job_id)`. A `run` carries the job id, its opaque parameters, the
-   registered host record from the pre-execution lookup, and callbacks through which the
-   executor reports its cancellation handle and streams logs. A `JobOutcome` is success
-   (result mapping, credential records, logs) or failure (error message, logs). The
-   engine keeps retry policy, the host lookup (`host_id` is compute-family vocabulary),
-   and every database transition; it never sees a playbook, vars file, inventory,
-   process id, or fact.
-2. **Transitional Ansible executor.** The Ansible half of today's `_process_job` becomes
-   `AnsibleJobExecutor` in the VM adapter, over the existing runner and playbook path,
-   including relay-token resolution, result parsing, credential extraction, log
-   redaction, and `SIGTERM` cancellation. The bare-metal bundle registers an instance
-   through its existing VM-adapter dependency. 5B.4 moves it to the Ansible distribution
-   and 5B.5 splits out each domain's codec, as planned; until then the VM adapter still
-   holds bare-metal knowledge it already holds today.
-3. **Engine.** The generic half moves to `compute_provisioning/jobs/` with
-   `AsyncJobQueue` (from `compute_provisioning_service/services/async_job_queue.py`), the
-   retry scheduler, and the rule and gate mechanism (`executor_mock.py`). `submit` takes
-   the route key (offering mode and action), `host_id`, opaque parameters, and the
-   contract or operation identity; callers pass `dataclasses.asdict(params)`, so stored
-   parameters are unchanged. The service and both adapters import it from there.
-4. **Tables.** `ansible_jobs` and `credentials` move to a declarative base of their own in
-   `compute_provisioning.jobs`, table and column names unchanged; the service's
-   `db/database.py` composes it beside the pool and fulfillment bases, and
-   `db/migrations.py` references it where it references these tables today.
-   `process_id` keeps its name and holds the executor's opaque cancellation handle.
-5. **Route services.** Framework-free job route services (read, list, logs, cancel,
-   contract record, and the shared test drain, wait, and summary) in
-   `compute_provisioning.jobs`. The existing controllers keep their wire paths and are
-   rebound to them when the routes move (5B.6).
-
-Open for review — **who owns credential persistence:**
-
-- **A. Move as-is.** The job authority owns `credentials` with its current columns;
-  an executor returns per-role credential records the engine stores verbatim and reads
-  back for the route boundary to shape. Behaviour-neutral, no migration; SSH column
-  names sit in family-kit persistence, though not in its interface.
-- **B. Store envelopes.** An expand migration adds an opaque envelope column; the engine
-  writes `CredentialEnvelope`s and maps old rows' SSH columns to envelopes on read.
-  Matches the decided canonical form, but is a schema change in a step meant to be
-  behaviour-neutral, and a later contract migration removes the old columns.
-- **C. The executor owns credential storage.** The job authority stores no credentials;
-  the Ansible executor keeps `credentials`, and credential reads dispatch to the job's
-  executor by offering mode. Keeps SSH vocabulary out of the family kit with no
-  migration, at the cost of splitting one job's reads across two owners.
-
-Recommended: **A** for 5B.2, recording **B** as follow-up work against its owner. A keeps
-the step behaviour-neutral, and the SSH vocabulary left is confined to columns the engine
-copies without interpreting, while the job routes' canonical credential form stays
-`CredentialEnvelope`, built at the route boundary as decided above.
-
-Also for review: whether the transitional executor in the VM adapter (point 2) is
-acceptable for the two steps until 5B.4, or whether 5B.4 should land before 5B.2.
-
 Invariants this change must leave true:
 
 - `provisioning/compute` owns durable physical-execution jobs and operational host
   registration.
 - The job engine has no Ansible, SSH, playbook, VM, or bare-metal vocabulary in its
-  interface.
+  interface or its persistence: results and credentials are stored as envelopes, and an
+  execution handle is opaque.
+- The engine owns retry counts and timing; the executor decides whether a failure is
+  retryable, and redacts what it reports.
+- A cancelled job stays cancelled whatever its executor later reports.
+- The host authority's model is connection-neutral; a connection kind's codec belongs to
+  the implementation distribution that supports it, and executors receive an immutable
+  `ExecutionHost`.
+- Connection secrets are persisted and passed only in a protected form; the host
+  authority never decrypts or discloses them, and only a connection codec decrypts, just
+  in time for execution.
 - `(offering_mode, action)` resolves to a complete job executor.
 - Shared Ansible machinery owns process, inventory, and redaction mechanics and no VM or
   bare-metal result meaning.
@@ -536,8 +473,8 @@ Invariants this change must leave true:
   credential semantics.
 - `kit/site` references `host_id` and never owns provisioning connection information.
 - No provisioning adapter imports another adapter or the deployed service.
-- No neutral provisioning module imports `vm_provisioning_operator`; compatibility flows
-  from the old client to the neutral contract.
+- No neutral provisioning module imports `vm_provisioning_operator`, and no compatibility
+  models or re-exports remain.
 - `compute_provisioning` names no domain's routes: the provisioning route-contract table
   is assembled from contributions, and the client and the service's authentication read
   the assembled table.
@@ -545,6 +482,169 @@ Invariants this change must leave true:
 - Provider-neutral fulfillment stays unaware that these providers are job-backed; the
   job-backed shape lives in `compute_provisioning`.
 - Each domain's fulfillment provider supplies only job preparation and result mapping.
+
+
+### Pre-release wire and schema changes are accepted
+
+Decided with the maintainer on 2026-10-02. The system is pre-release: no deployment runs
+a storefront or provisioning service of one version against another, and users of an
+early version are expected to migrate with it. This change therefore makes wire and
+schema changes directly instead of carrying compatibility models, re-exports,
+dual-written columns, or expand-then-contract phases. Each schema change is one forward
+migration that converts existing rows and drops what it replaces; rollback does not
+cross a migration that has run. Earlier decisions in this document that kept a legacy
+shape only to avoid a wire change are refined where they appear.
+
+### Job and host authority shape
+
+Decided with the maintainer after design review (2026-10-02). Implementation of the job
+move found that `vm_provisioning_adapter/services/job_service.py`'s `AnsibleJobService`
+mixes the generic engine (submission and idempotency, the queue, retry and backoff, the
+retry scheduler, reads, cancellation, every database transition) with Ansible and domain
+work (rebuilding the `AnsibleJobParams` dataclass, relay-token resolution, vars files,
+inventory, `start_playbook`, result parsing into a VM-vocabulary payload, extracting
+`root` and `tenant` credentials from VM's `authentication` fact, log redaction, and
+`SIGTERM` cancellation), and that its persistence is Ansible- and SSH-shaped
+(`ansible_jobs.process_id`, the SSH columns of `credentials`). The host registry has the
+same problem: its models and `hosts` table carry `ssh_host`, `ssh_port`, `ssh_user`,
+`ssh_key_type`, and `ssh_key_value`. Moving either as-is would fail the third-domain test:
+a compute domain whose credential is a certificate or token, or whose target is reached
+through a cloud or cluster API, would have to change the family kit's model.
+
+**The executor contract.** `compute_provisioning.jobs` defines
+`JobExecutor`: `async execute(run) -> JobOutcome` and `async cancel(handle)`. `JobExecutorTable`
+resolves `(offering_mode, action)` to one, replacing `JobExecution(runner, playbook_path)`.
+A `run` carries the job id, its opaque parameters, the immutable `ExecutionHost` from the
+host authority's pre-execution lookup, and callbacks through which the executor reports
+an opaque cancellation handle and streams logs. A `JobOutcome` is `JobSuccess(result:
+ResultEnvelope | None, credentials: tuple[CredentialEnvelope, ...], logs)` or
+`JobFailure(error: ProvisioningErrorEnvelope, logs)`, the error carrying `retryable`.
+Responsibilities split as follows:
+
+- The executor decides whether a failure is retryable. Today's operator-configurable
+  `non_retryable_errors` patterns are Ansible and VM semantics, so they configure the
+  executor, not the engine; the Ansible implementation classifies transport and Ansible
+  failures, and each domain's codec its own.
+- The engine decides whether and when a retry happens: attempt counts, maximum attempts,
+  backoff, and scheduling, from a family-kit `JobRetryPolicy` value the composition root
+  builds from its settings. The engine never reads the service's `Settings`; execution
+  timeouts and similar values stay on the executor side.
+- The executor redacts everything it hands the engine; `compute_provisioning.jobs` does
+  not import an Ansible redactor.
+- There is no `notify_job_done` on the executor. The engine knows when a job reaches a
+  terminal state and signals its own observer, which the rule and gate mechanism beside
+  it and the shared `/test/jobs/{id}/wait` route read.
+
+**Cancellation is terminal.** Once a job is cancelled, a later outcome from its executor
+cannot change its state: the engine applies outcomes as conditional transitions, and a
+cancellation requested before the executor reports its handle takes effect when the
+handle arrives. Today's job service writes the outcome unconditionally, so a job
+finishing after cancellation overwrites `cancelled`; this change fixes that, and the fix
+is tested.
+
+**Job persistence is neutral.** The `ansible_jobs` and `credentials` tables keep their
+names (a physical name costs nothing when the model and interface are neutral) and move
+to a declarative base of their own in `compute_provisioning.jobs`, which the service's
+`db/database.py` composes. One forward migration:
+
+- adds `host_id`, filled from each row's parameters with today's fallback (the
+  parameter, else `executor_target`, else the deployment's `default_host_id`), which is
+  why the migration runs in the service, where settings are available;
+- replaces `process_id` with a JSON `execution_handle` the engine stores and returns
+  without interpreting (the Ansible executor stores `{"pid": ...}`);
+- stores `result` as a `ResultEnvelope`, converting each existing row exactly as the
+  contract route's adapter builds it today;
+- replaces the SSH columns of `credentials` with one `CredentialEnvelope` per row,
+  converted exactly as VM's contract credentials route builds it today (`offering_mode`
+  `vm`, `credential_kind` from the row's role, the remaining non-empty columns as its
+  value). Every existing credential row is VM's — bare-metal grants write none — so this
+  one-time conversion may name VM's kinds; the migration lives in the service, never in
+  the family kit.
+
+The job routes return the envelopes; `CredentialResponse` and `CredentialListResponse`
+are removed, and every reader of a job's result (both fulfillment providers, the
+contract route, and the shared test wait route) reads the envelope.
+
+**The host authority is connection-neutral, and connection secrets stay protected.**
+Settled with the maintainer after design review of the secret question (2026-10-02):
+callers encrypt an embedded private key today (`HostCreate` documents Fernet-encrypted
+material) and the runner decrypts it, and that stays the rule. A signed API
+authenticates a request and protects its integrity, not its confidentiality, and moving
+to plaintext submission would trade defence in depth for nothing the architecture needs.
+The host authority owns protected secret persistence, not secret cryptography:
+
+> Connection secrets cross service boundaries and are persisted only in a protected
+> representation. The host authority treats protected values as opaque, keeps them out
+> of every read and logging surface, and never decrypts them. A connection kind's codec
+> validates its protected values and decrypts them just in time for execution;
+> plaintext stays confined to the execution boundary and the transient storage the
+> connection needs.
+
+`compute_provisioning.hosts` defines a host as `host_id`, `pool_id`, `enabled`, and a
+`ConnectionEnvelope`: `kind`, `version`, `public` fields, and `protected` values, each a
+`ProtectedValue` (`scheme`, `ciphertext`) whose representation never shows the ciphertext.
+The authority owns identity, pool association, enabled state, the durable envelope,
+keeping protected values out of responses and logs, CRUD, the import operation and its
+pool-change and capacity effects, and the pre-execution lookup, which yields an immutable
+`ExecutionHost` carrying the protected envelope; executors receive that, never the
+persistence row, and never decrypted material from the authority. A connection kind's
+codec (its public fields, which protected values it takes and in which schemes, and
+just-in-time decryption) belongs to the implementation distribution that supports it, so
+the family kit accumulates no per-kind connection types and no cryptography.
+
+The `ssh` codec is a connection codec, not an Ansible one: its public fields are
+`ssh_host`, `public_host`, `ssh_port`, `ssh_user`, and optionally `key_path` (a key on
+the service's own filesystem, not secret); its protected value is optionally
+`private_key` in the `fernet-v1` scheme; exactly one of the two names the key. It
+validates an envelope and materializes a connection for execution: it decrypts
+`private_key` with the decryption key composition gives it, writes it to a transient
+owner-only file, and removes that file when execution ends. The Ansible executor consumes
+the materialized connection and holds no cryptography of its own. It lives in the Ansible
+distribution while that is its only consumer, behind an interface another SSH-based
+executor can use without importing Ansible mechanics. The current host authority
+implements only this codec; that is an implementation capability, not part of the
+family's model: a future kind adds a codec, not a change to the host authority or the
+executor contract.
+
+The wire models follow, pre-release: `HostCreate`, `HostUpdate`, and `HostResponse` carry
+`connection` (`kind`, `version`, `public`, `protected`) in place of the `ssh_*` fields; a
+request's protected values are `{"scheme", "ciphertext"}`, still encrypted by the caller,
+and a response names each protected value and its scheme without its ciphertext. The
+`hosts` table's `ssh_*` columns are replaced in one forward migration by
+`connection_kind`, `connection_version`, JSON `connection_public`, and JSON
+`connection_protected`: a `path` key becomes `key_path`, and an `embedded` key's stored
+ciphertext becomes a `fernet-v1` `private_key` unchanged, so the migration performs no
+cryptography. Callers change with them: the VM operator client, the e2e harness and host
+registration, and the development environment's host configuration.
+
+Deferred, not in this change: `fernet-v1` is symmetric, so any writer holding the key can
+decrypt every stored key encrypted with it. A stronger scheme — sealed submission to the
+provisioning service's public key, references to a secret authority, or managed envelope
+encryption — needs only a new protected-value scheme and its codec support, not a change
+to the host authority or the executor contract. Recorded for the roadmap at closeout.
+
+**The generic lease routes serve the neutral view.** Reopened with the maintainer: the
+`Lease*` operator models stayed VM's only to avoid a wire change. When the generic lease
+read, update, terminate, and administration routes move (5B.8), they serve
+`compute_provisioning`'s `LeaseView` and its request models; VM-only fields
+(`vm_target`, `resource_id`) leave the generic surface, and the e2e lease stages read the
+neutral view.
+
+**The transitional executor.** The Ansible half of today's `_process_job` becomes an
+`AnsibleJobExecutor` in the VM adapter first (5B.2), with today's classification,
+redaction, and cancellation, so the Ansible distribution later implements a contract that
+already exists. The bare-metal bundle registers an instance through its existing
+VM-adapter dependency until 5B.6 and 5B.7 remove it; "neither adapter imports the other"
+is claimed only once 5B.10 enforces it.
+
+**Order.** The host authority moves before the engine, because the engine performs the
+pre-execution host lookup, and the Ansible distribution's `ssh` codec is needed before the
+host authority: the executor contract with the transitional executor (5B.2); the Ansible
+distribution's skeleton holding the `ssh` codec (5B.3); the host authority (5B.4); the job
+authority (5B.5); the rest of the Ansible distribution (5B.6); domain codecs (5B.7);
+controls and routes (5B.8); relays (5B.9); the boundary check (5B.10); the gate (5B.11);
+the job-backed fulfillment-provider helper (5B.12). Steps 5B.4, 5B.5, and 5B.8 change
+wire formats and schemas; the others are behaviour-neutral.
 
 ### Implementation-review fixes for Sections 4–5
 
@@ -577,11 +677,12 @@ authentication read the assembled table.
 
 Settled with the maintainer when 5B.1 began:
 
-- **The `Lease*` operator models stay VM's.** They are the VM administration surface
+- **The `Lease*` operator models stay VM's.** *Reopened under "Job and host authority
+  shape": the generic lease routes serve the neutral `LeaseView`.* They are the VM administration surface
   (`LeaseCreate` and `LeaseResponse` require `vm_target`), and `compute_provisioning`
   already owns the neutral lease contract (`LeaseRegistration`, `LeaseView`,
   `LeaseTermination`, `LeaseRetryRelease`, `LeaseForceRelease`). When the generic lease
-  routes move (5B.6), the lease lifecycle serves the neutral view and VM keeps
+  routes move (5B.8), the lease lifecycle serves the neutral view and VM keeps
   `/api/v1/leases` as a compatibility surface built from it, its VM fields blank for
   bare metal. Moving them would put VM vocabulary in the family kit; neutralizing them
   would change the wire the lease stages read.
@@ -604,7 +705,7 @@ Settled with the maintainer when 5B.1 began:
   family entry because it leaves the family kit's declarations unchanged.
 - **Relay routes stay in the family table until relays move.** Relay models, client
   methods, controller, and services all live in `compute_provisioning` and the service
-  today; their contracts move to VM with them (5B.7). Today they admit the seller role
+  today; their contracts move to VM with them (5B.9). Today they admit the seller role
   only, because they are absent from the admin set; that is preserved, and worth a
   review when they move.
 - Noted, not pursued here: a complete plain-data route declaration is close to what a
@@ -712,6 +813,22 @@ with `compose.local-identities.yml` removed and `docker-compose.yml` layering bo
 stack's two registries and stays in the VM lane.
 
 ## Superseded decisions
+
+Superseded after the 2026-10-02 job and host design review:
+
+- **Compatibility models and re-exports** (`CredentialResponse` built from envelopes at
+  the route boundary; `vm_provisioning_operator` re-exporting moved models) → "Pre-release
+  wire and schema changes are accepted".
+- **The `Lease*` operator models stay VM's** → the generic lease routes serve the neutral
+  `LeaseView` ("Job and host authority shape").
+- **The proposed job authority shape with credential option A** (the job authority owning
+  `credentials` with its SSH columns) and **the executor's `notify_job_done`** → "Job and
+  host authority shape": envelopes in persistence, engine-signalled terminal observation.
+- **Host connection information as SSH fields in the family kit's models** → a
+  connection envelope with per-kind codecs.
+- **The host authority encrypting codec-declared secret fields at rest** (and the codec's
+  `secret_fields`) → protected values the caller encrypts, the authority stores opaquely,
+  and the connection codec decrypts just in time ("Job and host authority shape").
 
 Superseded after the 2026-10-02 layering review:
 

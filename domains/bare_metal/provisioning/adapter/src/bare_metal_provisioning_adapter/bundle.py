@@ -8,7 +8,7 @@ from arkhai_bare_metal import NODE_GRANT_ACCESS_ACTION, NODE_RECLAIM_ACCESS_ACTI
 from compute_provisioning import (
     ExecutorAdapterBundle,
     ExecutorAdapterContribution,
-    JobExecution,
+    JobExecutor,
 )
 
 from bare_metal_provisioning_adapter.compute_adapter import BareMetalComputeAdapter
@@ -40,7 +40,7 @@ def build_bare_metal_adapter_bundle(
     release_executor: BareMetalReleaseExecutor,
     fulfillment_provider: BareMetalFulfillmentProvider,
     pool_config_handler: BareMetalPoolConfigHandler,
-    job_execution: JobExecution,
+    job_executor: JobExecutor,
     readiness_check=None,
 ) -> ExecutorAdapterBundle:
     checks = (
@@ -55,9 +55,9 @@ def build_bare_metal_adapter_bundle(
                 adapter=compute_adapter,
                 action_kinds=frozenset({NODE_GRANT_ACCESS_ACTION}),
                 release_executor=release_executor,
-                job_executions={
-                    NODE_GRANT_ACCESS_ACTION: job_execution,
-                    NODE_RECLAIM_ACCESS_ACTION: job_execution,
+                job_executors={
+                    NODE_GRANT_ACCESS_ACTION: job_executor,
+                    NODE_RECLAIM_ACCESS_ACTION: job_executor,
                 },
             ),
         ),

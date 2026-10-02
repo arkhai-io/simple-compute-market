@@ -442,24 +442,27 @@ def job_executor_table_for():
 
 def _job_executor_table(runner, settings, bare_metal_runner=None):
     """Every VM job action runs through ``runner`` and every bare-metal one
-    through ``bare_metal_runner`` (``runner`` when absent), each with its mode's
-    playbook, as composition registers them in the service."""
+    through ``bare_metal_runner`` (``runner`` when absent), each in an Ansible
+    executor with its mode's playbook, as composition registers them in the
+    service."""
     from arkhai_bare_metal import BARE_METAL_ACCESS_ACTIONS
-    from compute_provisioning import JobExecution, JobExecutorTable
+    from compute_provisioning import JobExecutorTable
     from vm_provisioning_adapter.bundle import VM_JOB_ACTIONS
+    from vm_provisioning_adapter.services.ansible_job_executor import (
+        AnsibleJobExecutor,
+    )
 
+    vm = AnsibleJobExecutor(runner, settings.resolved_playbook_path, settings=settings)
+    bare_metal = AnsibleJobExecutor(
+        bare_metal_runner if bare_metal_runner is not None else runner,
+        settings.resolved_bare_metal_playbook_path,
+        settings=settings,
+    )
     table = JobExecutorTable()
     for action in VM_JOB_ACTIONS:
-        table.register("vm", action, JobExecution(runner, settings.resolved_playbook_path))
+        table.register("vm", action, vm)
     for action in BARE_METAL_ACCESS_ACTIONS:
-        table.register(
-            "bare_metal",
-            action,
-            JobExecution(
-                bare_metal_runner if bare_metal_runner is not None else runner,
-                settings.resolved_bare_metal_playbook_path,
-            ),
-        )
+        table.register("bare_metal", action, bare_metal)
     table.freeze()
     return table
 

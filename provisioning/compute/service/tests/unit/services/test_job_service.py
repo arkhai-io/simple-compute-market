@@ -1,11 +1,10 @@
 """
-Unit tests for AnsibleJobService private utility methods.
+Unit tests for AnsibleJobService's routing and retry arithmetic.
 
-Covers: _build_params, _redact_logs, _calculate_retry_delay,
-_should_retry_error, _build_result_payload.
-
+Covers: which executor a job's stored parameters select, and retry delays.
 Orchestration methods (submit, list_jobs, _process_job, etc.) delegate to
-the DB and queue — they are exercised in integration tests.
+the DB and queue — they are exercised in integration tests; how an executor
+interprets parameters and output is covered in test_ansible_job_executor.py.
 """
 from __future__ import annotations
 
@@ -19,13 +18,10 @@ from arkhai_bare_metal import (
     NODE_GRANT_ACCESS_ACTION,
     NODE_RECLAIM_ACCESS_ACTION,
 )
-from compute_provisioning import (
-    JobExecution,
-    JobExecutorTable,
-    UnsupportedExecutorActionError,
-)
+from compute_provisioning import JobExecutorTable, UnsupportedExecutorActionError
 from vm_provisioning_adapter.bundle import VM_JOB_ACTIONS
-from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams, AnsibleRunResult
+from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
+from vm_provisioning_adapter.services.ansible_job_executor import AnsibleJobExecutor
 from vm_provisioning_adapter.services.job_service import AnsibleJobService
 
 
@@ -64,15 +60,15 @@ def _make_service(*, host_service=None, **settings_overrides) -> AnsibleJobServi
 
 def _executors(settings, runner=None):
     runner = runner if runner is not None else MagicMock()
+    vm = AnsibleJobExecutor(runner, settings.resolved_playbook_path, settings=settings)
+    bare_metal = AnsibleJobExecutor(
+        runner, settings.resolved_bare_metal_playbook_path, settings=settings
+    )
     table = JobExecutorTable()
     for action in VM_JOB_ACTIONS:
-        table.register("vm", action, JobExecution(runner, settings.resolved_playbook_path))
+        table.register("vm", action, vm)
     for action in BARE_METAL_ACCESS_ACTIONS:
-        table.register(
-            "bare_metal",
-            action,
-            JobExecution(runner, settings.resolved_bare_metal_playbook_path),
-        )
+        table.register("bare_metal", action, bare_metal)
     table.freeze()
     return table
 
@@ -82,320 +78,68 @@ def _executors(settings, runner=None):
 # ---------------------------------------------------------------------------
 
 
-class TestBuildParams:
-    def test_basic_fields_mapped(self):
-        svc = _make_service()
-        params = svc._build_params({
-            "host_id": "ww2",
-            "offering_mode": "vm",
-            "vm_target": "my-vm",
-            "vm_action": "shutdown",
-        })
-        assert params.host_id == "ww2"
-        assert params.vm_target == "my-vm"
-        assert params.vm_action == "shutdown"
-
-    def test_defaults_applied_for_missing_keys(self):
-        svc = _make_service()
-        params = svc._build_params({"offering_mode": "vm"})
-        assert params.host_id == "kvm1"  # from settings.default_host_id
-        assert params.vm_action == "create"
-        assert params.image_setup_type == "scratch"
-
-    def test_optional_fields_are_none_when_absent(self):
-        svc = _make_service()
-        params = svc._build_params({
-            "offering_mode": "vm",
-            "host_id": "kvm1",
-            "vm_action": "list",
-        })
-        assert params.vm_ram is None
-        assert params.vm_vcpus is None
-        assert params.ssh_pubkey is None
-        assert params.gpu_provisioned is None
-
-    def test_all_optional_fields_mapped(self):
-        svc = _make_service()
-        raw = {
-            "host_id": "kvm1",
-            "vm_target": "test-vm",
-            "vm_action": "create",
-            "offering_mode": "vm",
-            "image_setup_type": "golden",
-            "vm_ram": 8192,
-            "vm_vcpus": 8,
-            "vm_disk_size": "40G",
-            "vm_os_variant": "ubuntu22.04",
-            "ssh_pubkey": "ssh-ed25519 AAAA...",
-            "gpu_provisioned": True,
-            "vm_gpu_count": 2,
-            "vm_gpu_device": "0000:03:00.0",
-            "vm_gpu_devices": ["0000:03:00.0", "0000:04:00.0"],
-            "vm_gpu_partition_size": "1g.5gb",
-            "relay_id": "site-a",
-            "vm_remote_port": 6100,
-            "golden_image_name": "base-v3",
-            "gcs_bucket_url": "gs://bucket",
-            "gcs_image_path": "images/img.qcow2",
-        }
-        params = svc._build_params(raw)
-        assert params.image_setup_type == "golden"
-        assert params.vm_ram == 8192
-        assert params.vm_vcpus == 8
-        assert params.vm_disk_size == "40G"
-        assert params.vm_os_variant == "ubuntu22.04"
-        assert params.ssh_pubkey == "ssh-ed25519 AAAA..."
-        assert params.gpu_provisioned is True
-        assert params.vm_gpu_count == 2
-        assert params.vm_gpu_device == "0000:03:00.0"
-        assert params.vm_gpu_devices == ["0000:03:00.0", "0000:04:00.0"]
-        assert params.vm_gpu_partition_size == "1g.5gb"
-        assert params.relay_id == "site-a"
-        assert params.vm_remote_port == 6100
-        # Stored params never carry the endpoint or the token.
-        assert params.relay_addr is None
-        assert params.relay_token is None
-        assert params.golden_image_name == "base-v3"
-        assert params.gcs_bucket_url == "gs://bucket"
-        assert params.gcs_image_path == "images/img.qcow2"
-
-    def test_relay_fields_have_no_settings_fallback(self):
-        """A service-wide relay default would let a job reach a relay its pool
-        does not name, and would substitute one relay's window for another's.
-        Relay location is resolved from the pool's referenced relay at dispatch
-        or it is absent."""
-        svc = _make_service()
-        params = svc._build_params(
-            {"host_id": "kvm1", "vm_action": "create", "offering_mode": "vm"}
-        )
-        assert params.relay_id is None
-        assert params.vm_remote_port is None
-        assert params.relay_addr is None
-        assert params.relay_token is None
-
-    def test_returns_ansible_job_params_instance(self):
-        svc = _make_service()
-        params = svc._build_params({"offering_mode": "vm"})
-        assert isinstance(params, AnsibleJobParams)
-
-    def test_bare_metal_fields_mapped(self):
-        svc = _make_service()
-        params = svc._build_params({
-            "host_id": "bm-node-1",
-            "vm_target": "bm-node-1",
-            "vm_action": NODE_GRANT_ACCESS_ACTION,
-            "offering_mode": "bare_metal",
-            "executor_action": NODE_GRANT_ACCESS_ACTION,
-            "executor_target": "bm-node-1",
-            "executor_ref": {
-                "physical_host_id": "host-physical-1",
-                "ssh_user": "tenant-a",
-            },
-            "escrow_uid": "0xbm",
-            "physical_host_id": "host-physical-1",
-            "ssh_user": "tenant-a",
-            "ssh_public_key": "ssh-ed25519 AAAA tenant-a",
-            "access_ref": {"ssh_user": "tenant-a"},
-            "bare_metal_reclaim_policy": "delete_user",
-        })
-
-        assert params.escrow_uid == "0xbm"
-        assert params.offering_mode == "bare_metal"
-        assert params.executor_action == NODE_GRANT_ACCESS_ACTION
-        assert params.executor_target == "bm-node-1"
-        assert params.executor_ref == {
-            "physical_host_id": "host-physical-1",
-            "ssh_user": "tenant-a",
-        }
-        assert params.physical_host_id == "host-physical-1"
-        assert params.ssh_user == "tenant-a"
-        assert params.ssh_public_key == "ssh-ed25519 AAAA tenant-a"
-        assert params.access_ref == {"ssh_user": "tenant-a"}
-        assert params.bare_metal_reclaim_policy == "delete_user"
-
-    def test_explicit_vm_identity_maps_legacy_vm_action_fields(self):
-        svc = _make_service()
-        params = svc._build_params({
-            "offering_mode": "vm",
-            "host_id": "kvm1",
-            "vm_target": "test-vm",
-            "vm_action": "shutdown",
-        })
-
-        assert params.offering_mode == "vm"
-        assert params.executor_action == "shutdown"
-        assert params.executor_target == "test-vm"
-
-    def test_missing_offering_mode_fails_closed(self):
-        svc = _make_service()
-
-        with pytest.raises(KeyError, match="offering_mode"):
-            svc._build_params({
-                "host_id": "kvm1",
-                "vm_target": "test-vm",
-                "vm_action": "shutdown",
-            })
-
-    def test_executor_target_does_not_force_vm_target(self):
-        svc = _make_service()
-        params = svc._build_params({
-            "host_id": "kvm1",
-            "vm_action": "list",
-            "offering_mode": "vm",
-            "executor_action": "list",
-            "executor_target": "kvm1",
-        })
-
-        assert params.vm_target is None
-        assert params.executor_target == "kvm1"
-
-
 class TestExecutorSelection:
+    """A job's stored parameters name its offering mode, action, and host."""
+
+    def _resolved(self, svc, params: AnsibleJobParams):
+        import dataclasses
+
+        offering_mode, action, host_id = svc._route(dataclasses.asdict(params))
+        return svc._executors.resolve(offering_mode, action), action, host_id
+
     def test_vm_actions_use_the_vm_registration(self):
         svc = _make_service()
-        params = AnsibleJobParams(
-            host_id="kvm1", vm_action="create", offering_mode="vm"
+        executor, action, host_id = self._resolved(
+            svc, AnsibleJobParams(host_id="kvm1", vm_action="create", offering_mode="vm")
         )
 
-        assert svc._execution_for(params).playbook_path == Path(
-            "/playbooks/vm-operations.yaml"
-        )
+        assert executor._playbook_path == Path("/playbooks/vm-operations.yaml")
+        assert (action, host_id) == ("create", "kvm1")
 
     def test_bare_metal_actions_use_the_bare_metal_registration(self):
         svc = _make_service()
-        params = AnsibleJobParams(
-            host_id="bm-node-1",
-            vm_action=NODE_RECLAIM_ACCESS_ACTION,
-            offering_mode="bare_metal",
+        executor, _, _ = self._resolved(
+            svc,
+            AnsibleJobParams(
+                host_id="bm-node-1",
+                vm_action=NODE_RECLAIM_ACCESS_ACTION,
+                offering_mode="bare_metal",
+            ),
         )
 
-        assert svc._execution_for(params).playbook_path == Path(
-            "/playbooks/node-access.yaml"
-        )
+        assert executor._playbook_path == Path("/playbooks/node-access.yaml")
 
     def test_executor_action_takes_precedence_over_vm_action(self):
         svc = _make_service()
-        params = AnsibleJobParams(
-            host_id="bm-node-1",
-            vm_action="create",
-            offering_mode="bare_metal",
-            executor_action=NODE_GRANT_ACCESS_ACTION,
+        executor, action, _ = self._resolved(
+            svc,
+            AnsibleJobParams(
+                host_id="bm-node-1",
+                vm_action="create",
+                offering_mode="bare_metal",
+                executor_action=NODE_GRANT_ACCESS_ACTION,
+            ),
         )
 
-        assert svc._execution_for(params).playbook_path == Path(
-            "/playbooks/node-access.yaml"
-        )
+        assert action == NODE_GRANT_ACCESS_ACTION
+        assert executor._playbook_path == Path("/playbooks/node-access.yaml")
 
     def test_an_unregistered_mode_and_action_is_refused(self):
         svc = _make_service()
-        params = AnsibleJobParams(
-            host_id="bm-node-1",
-            vm_action="create",
-            offering_mode="bare_metal",
-        )
 
         with pytest.raises(UnsupportedExecutorActionError):
-            svc._execution_for(params)
+            self._resolved(
+                svc,
+                AnsibleJobParams(
+                    host_id="bm-node-1", vm_action="create", offering_mode="bare_metal"
+                ),
+            )
 
-
-# ---------------------------------------------------------------------------
-# _redact_logs
-# ---------------------------------------------------------------------------
-
-
-class TestRedactLogs:
-    def test_redacts_json_password_field(self):
+    def test_a_job_naming_no_host_runs_against_its_target_or_the_default(self):
         svc = _make_service()
-        logs = '"password": "supersecret"'
-        result = svc._redact_logs(logs)
-        assert "supersecret" not in result
-        assert '"password": "[REDACTED]"' in result
 
-    def test_redacts_json_ssh_key_path_host(self):
-        svc = _make_service()
-        logs = '"ssh_key_path_host": "/root/.ssh/id_ed25519"'
-        result = svc._redact_logs(logs)
-        assert "/root/.ssh/id_ed25519" not in result
-        assert '"ssh_key_path_host": "[REDACTED]"' in result
-
-    def test_redacts_yaml_password_line(self):
-        svc = _make_service()
-        logs = "password: mysecretpassword"
-        result = svc._redact_logs(logs)
-        assert "mysecretpassword" not in result
-        assert "password: [REDACTED]" in result
-
-    def test_does_not_double_redact_already_redacted(self):
-        svc = _make_service()
-        logs = "password: [REDACTED]"
-        result = svc._redact_logs(logs)
-        assert result.count("[REDACTED]") == 1
-
-    def test_redacts_ssh_key_in_cli_flag(self):
-        svc = _make_service()
-        logs = "ansible -i inv ... -i /root/.ssh/id_ed25519 host"
-        result = svc._redact_logs(logs)
-        assert "/root/.ssh/id_ed25519" not in result
-        assert "-i [REDACTED]" in result
-
-    def test_redacts_sshpass_password(self):
-        svc = _make_service()
-        logs = "sshpass -p mysecretpw ssh root@host"
-        result = svc._redact_logs(logs)
-        assert "mysecretpw" not in result
-        assert "sshpass -p [REDACTED]" in result
-
-    def test_non_sensitive_content_preserved(self):
-        svc = _make_service()
-        logs = "TASK [Create VM] *** ok: [kvm1] => status: running"
-        result = svc._redact_logs(logs)
-        assert result == logs
-
-    def test_redacts_backslash_escaped_json_password(self):
-        """`json-output.yml`'s `debug: msg: "{{ vm_creation_json }}"` task
-        is the literal transport `_extract_ansible_json` parses, so it
-        cannot get `no_log`. Depending on Ansible's
-        stdout_callback/result_format, that debug message can render as a
-        backslash-escaped JSON string nested inside the outer task result
-        -- the redaction pattern must match both the unescaped and
-        escaped forms.
-        """
-        svc = _make_service()
-        logs = (
-            'ok: [kvm1] => {\n'
-            '    "msg": "{\\n    \\"authentication\\": {\\n        '
-            '\\"root\\": {\\n            \\"password\\": \\"aB3xY9zQ1mK7pL2n\\"'
-            '\\n        }\\n    }\\n}"\n'
-            '}'
-        )
-        result = svc._redact_logs(logs)
-        assert "aB3xY9zQ1mK7pL2n" not in result
-
-    def test_redacts_nested_yaml_authentication_block(self):
-        """`json-output.yml`'s `debug: var: vm_creation_data` task renders
-        as a nested YAML dump, not a top-level `password:` key -- the
-        scrubber must catch this shape too."""
-        svc = _make_service()
-        logs = (
-            "ok: [kvm1] => \n"
-            "  vm_creation_data:\n"
-            "    authentication:\n"
-            "      root:\n"
-            "        password: aB3xY9zQ1mK7pL2n\n"
-            "      tenant:\n"
-            "        password: zQ1mK7pL2naB3xY9\n"
-        )
-        result = svc._redact_logs(logs)
-        assert "aB3xY9zQ1mK7pL2n" not in result
-        assert "zQ1mK7pL2naB3xY9" not in result
-
-    def test_empty_string_returned_unchanged(self):
-        svc = _make_service()
-        assert svc._redact_logs("") == ""
-
-    def test_none_returned_unchanged(self):
-        svc = _make_service()
-        assert svc._redact_logs(None) is None
+        assert svc._route({"offering_mode": "vm", "executor_target": "kvm9"})[2] == "kvm9"
+        assert svc._route({"offering_mode": "vm"})[2] == "kvm1"
 
 
 # ---------------------------------------------------------------------------
@@ -427,162 +171,6 @@ class TestCalculateRetryDelay:
     def test_returns_int(self):
         svc = _make_service()
         assert isinstance(svc._calculate_retry_delay(0), int)
-
-
-# ---------------------------------------------------------------------------
-# _should_retry_error
-# ---------------------------------------------------------------------------
-
-
-class TestShouldRetryError:
-    def test_retryable_generic_error(self):
-        svc = _make_service()
-        assert svc._should_retry_error("Unexpected connection reset") is True
-
-    def test_non_retryable_exact_match(self):
-        svc = _make_service()
-        assert svc._should_retry_error("Invalid SSH key") is False
-
-    def test_non_retryable_substring_match(self):
-        svc = _make_service()
-        assert svc._should_retry_error("Fatal: Invalid SSH key provided") is False
-
-    def test_non_retryable_case_insensitive(self):
-        svc = _make_service()
-        assert svc._should_retry_error("INVALID SSH KEY") is False
-
-    def test_unreachable_is_non_retryable(self):
-        svc = _make_service()
-        assert svc._should_retry_error("host UNREACHABLE: timeout") is False
-
-    def test_empty_error_is_retryable(self):
-        svc = _make_service()
-        assert svc._should_retry_error("") is True
-
-
-# ---------------------------------------------------------------------------
-# _build_result_payload
-# ---------------------------------------------------------------------------
-
-
-def _base_run_result(**overrides) -> AnsibleRunResult:
-    defaults = dict(
-        stdout="",
-        stderr="",
-        ssh_port=None,
-        tenant_user=None,
-        host_ip=None,
-        ssh_command=None,
-        ansible_result=None,
-        process_id=12345,
-    )
-    defaults.update(overrides)
-    return AnsibleRunResult(**defaults)
-
-
-class TestBuildResultPayload:
-    def test_no_ansible_result_returns_base_fields(self):
-        svc = _make_service()
-        result = _base_run_result(ssh_port="2222", tenant_user="agent", host_ip="10.0.0.1")
-        payload = svc._build_result_payload(result)
-        assert payload["ssh_port"] == "2222"
-        assert payload["tenant_user"] == "agent"
-        assert payload["host_ip"] == "10.0.0.1"
-        assert payload["ansible_result"] is None
-
-    def test_ansible_result_fields_promoted(self):
-        svc = _make_service()
-        ar = {
-            "action": "create",
-            "vm_name": "test-vm",
-            "status": "running",
-            "host": "kvm1",
-            "timestamp": "2025-01-01T00:00:00Z",
-        }
-        payload = svc._build_result_payload(_base_run_result(ansible_result=ar))
-        assert payload["action"] == "create"
-        assert payload["vm_name"] == "test-vm"
-        assert payload["status"] == "running"
-
-    def test_authentication_block_nested_correctly(self):
-        svc = _make_service()
-        ar = {
-            "action": "create",
-            "authentication": {
-                "tenant": {
-                    "password": "pw",
-                    "key_type": "provided",
-                    "ssh_commands": {"external": "ssh -p 2222 user@host"},
-                },
-                "root": {
-                    "password": "rootpw",
-                    "ssh_commands": {},
-                    "ssh_key_path_host": "/root/.ssh/id_ed25519",
-                },
-            },
-        }
-        payload = svc._build_result_payload(_base_run_result(ansible_result=ar))
-        assert payload["authentication"]["tenant"]["password"] == "pw"
-        assert payload["authentication"]["root"]["ssh_key_path_host"] == "/root/.ssh/id_ed25519"
-
-    def test_tenant_ssh_command_overrides_top_level(self):
-        svc = _make_service()
-        ar = {
-            "action": "create",
-            "authentication": {
-                "tenant": {
-                    "ssh_commands": {"external": "ssh -p 9000 agent@frp.host"},
-                    "password": "pw",
-                    "key_type": "provided",
-                },
-                "root": {},
-            },
-        }
-        payload = svc._build_result_payload(
-            _base_run_result(ssh_command="ssh -p 0 fallback@host", ansible_result=ar)
-        )
-        assert payload["ssh_command"] == "ssh -p 9000 agent@frp.host"
-
-    def test_frp_remote_port_overrides_ssh_port(self):
-        svc = _make_service()
-        ar = {"action": "create", "frp": {"remote_port": "54321", "subdomain": "vm-abc"}}
-        payload = svc._build_result_payload(_base_run_result(ssh_port="2222", ansible_result=ar))
-        assert payload["ssh_port"] == "54321"
-        assert payload["frp"]["subdomain"] == "vm-abc"
-
-    def test_vms_list_with_count(self):
-        svc = _make_service()
-        vms = [{"name": "vm-a"}, {"name": "vm-b"}]
-        ar = {"action": "list", "vms": vms, "vm_count": 2}
-        payload = svc._build_result_payload(_base_run_result(ansible_result=ar))
-        assert payload["vms"] == vms
-        assert payload["vm_count"] == 2
-
-    def test_flat_resource_fields_restructured(self):
-        svc = _make_service()
-        ar = {
-            "action": "monitor",
-            "cpu_usage_percent": 42.0,
-            "memory_used_mb": 4096,
-            "memory_available_mb": 4096,
-            "memory_usage_percent": 50.0,
-        }
-        payload = svc._build_result_payload(_base_run_result(ansible_result=ar))
-        assert payload["resources"]["cpu"]["usage_percent"] == 42.0
-        assert payload["resources"]["memory"]["used_mb"] == 4096
-
-    def test_prebuilt_resources_block_used_directly(self):
-        svc = _make_service()
-        resources = {"vcpus_total": 32, "vcpus_available": 16}
-        ar = {"action": "check", "resources": resources}
-        payload = svc._build_result_payload(_base_run_result(ansible_result=ar))
-        assert payload["resources"] == resources
-
-    def test_ansible_result_included_in_payload(self):
-        svc = _make_service()
-        ar = {"action": "create", "vm_name": "test-vm"}
-        payload = svc._build_result_payload(_base_run_result(ansible_result=ar))
-        assert payload["ansible_result"] is ar
 
 
 def test_the_host_registry_is_required():

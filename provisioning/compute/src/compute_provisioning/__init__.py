@@ -5,10 +5,17 @@ from .adapters import (
     ExecutorAdapterRegistry,
     ExecutorMismatchError,
     FunctionalExecutorAdapter,
-    JobExecution,
     JobExecutorResolver,
     JobExecutorTable,
     UnsupportedExecutorActionError,
+)
+from .jobs.executor import (
+    JobExecutor,
+    JobFailure,
+    JobOutcome,
+    JobRetryPolicy,
+    JobRun,
+    JobSuccess,
 )
 from .composition import (
     ComposedComputeAdapters,
@@ -135,8 +142,13 @@ __all__ = [
     "ExecutorAdapterRegistry",
     "compose_adapter_bundles",
     "ExecutorMismatchError",
-    "JobExecution",
+    "JobExecutor",
     "JobExecutorResolver",
+    "JobFailure",
+    "JobOutcome",
+    "JobRetryPolicy",
+    "JobRun",
+    "JobSuccess",
     "JobExecutorTable",
     "FulfillmentAcceptanceResponse",
     "FulfillmentRequestBody",

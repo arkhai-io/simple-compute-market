@@ -68,6 +68,13 @@ API-credit deal runs inside the VM lane.
   Once that boundary is proven, the two job-backed fulfillment providers' shared shape
   becomes a helper in `compute_provisioning`, leaving each domain its job preparation
   and result mapping.
+  Job results and credentials are stored and served as envelopes, executors classify
+  retryability and redact, a cancelled job stays cancelled, and hosts carry a connection
+  envelope whose codec belongs to its implementation (only `ssh` today); connection
+  secrets stay caller-encrypted, opaque to the host authority, and decrypted only by
+  their codec at execution. Being
+  pre-release, this changes the host, job-credential, and generic lease wire formats and
+  their schemas directly, through forward migrations, with no compatibility layer.
 - Share compute deal stages in `compute_deal_stages.py` with a per-domain driver, move
   VM's scenario onto them, and add the bare-metal mock-provisioned deal.
 - Prove bare-metal storefront restart recovery at integration level, as VM's is.

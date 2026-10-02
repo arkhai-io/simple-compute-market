@@ -118,9 +118,9 @@ class ComputeContractController:
             raise _http_error(exc) from exc
 
     @router.post("/jobs/{job_id}/contract/cancel", response_model=ProvisioningJob)
-    def cancel_job(self, job_id: str) -> ProvisioningJob:
+    async def cancel_job(self, job_id: str) -> ProvisioningJob:
         try:
-            return self._contract.cancel_job(job_id)
+            return await self._contract.cancel_job(job_id)
         except Exception as exc:
             raise _http_error(exc) from exc
 

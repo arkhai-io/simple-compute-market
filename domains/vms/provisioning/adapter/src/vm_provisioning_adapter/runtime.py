@@ -6,7 +6,7 @@ import os
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
-from compute_provisioning import JobExecution, JobExecutorResolver
+from compute_provisioning import JobExecutorResolver
 from vm_provisioning_adapter.bundle import HOST_REQUIREMENT, build_vm_adapter_bundle
 from vm_provisioning_adapter.compute_adapter import VmComputeAdapter
 from vm_provisioning_adapter.release import VmFulfillmentReleaseJobPort, VmReleaseExecutor
@@ -22,6 +22,7 @@ from vm_provisioning_adapter.services.ansible_fulfillment_provider import (
 from vm_provisioning_adapter.services.ansible_pool_config_handler import (
     AnsiblePoolConfigHandler,
 )
+from vm_provisioning_adapter.services.ansible_job_executor import AnsibleJobExecutor
 from vm_provisioning_adapter.services.ansible_service import AnsibleService
 from vm_provisioning_adapter.services.host_operations_service import (
     HostOperationsService,
@@ -45,6 +46,18 @@ class VmProvisioningRuntime:
     settlement_repository: Any
     teardown_port: Any
     job_executors: Any = None
+    # Fills a referenced relay's address and token into a VM job's parameters
+    # immediately before it runs; a deployment with no relay needs none.
+    relay_resolver: Any = None
+
+    def job_executor(self) -> AnsibleJobExecutor:
+        """What runs every VM job action: this runtime's runner and playbook."""
+        return AnsibleJobExecutor(
+            self.ansible_service,
+            self.config.resolved_playbook_path,
+            settings=self.config,
+            relay_resolver=self.relay_resolver,
+        )
 
     def fulfillment_provider(self):
         return AnsibleFulfillmentProvider(
@@ -69,10 +82,7 @@ class VmProvisioningRuntime:
             ),
             fulfillment_provider=self.fulfillment_provider(),
             pool_config_handler=self.pool_config_handler,
-            job_execution=JobExecution(
-                runner=self.ansible_service,
-                playbook_path=self.config.resolved_playbook_path,
-            ),
+            job_executor=self.job_executor(),
             readiness_check=self.readiness,
         )
 
@@ -154,15 +164,15 @@ def build_vm_runtime(
         session_factory=session_factory,
         executors=job_executors,
         host_service=host_service,
-        relay_resolver=RelayExecutionResolver(
-            session_factory=session_factory, settings=config
-        ),
     )
     vm_operations_service = VmOperationsService(
         job_service=job_service,
         job_queue_provider=job_queue_provider,
     )
     return VmProvisioningRuntime(
+        relay_resolver=RelayExecutionResolver(
+            session_factory=session_factory, settings=config
+        ),
         config=config,
         session_factory=session_factory,
         job_queue_provider=job_queue_provider,

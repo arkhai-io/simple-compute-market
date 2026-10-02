@@ -4,8 +4,9 @@
   - Job submission (HTTP layer -> DB -> queue).
   - Job read operations (list, get, credentials, logs).
   - Job cancellation.
-  - The ``_process_job`` coroutine: DB state transitions, playbook dispatch,
-    retry logic, log streaming, and credential storage.
+  - The ``_process_job`` coroutine: DB state transitions, the pre-execution
+    host lookup, dispatch to the job's executor, retry scheduling, and storage
+    of the logs, result, and credentials the executor reports.
 
 It does **not** own queue mechanics (concurrency, task dispatch).  That belongs
 to ``AsyncJobQueue``, which is injected and started separately in the FastAPI
@@ -15,30 +16,27 @@ lifespan.
 from __future__ import annotations
 
 import asyncio
-import copy
 import dataclasses
+import json
 import logging
-import os
-import signal
 import uuid
+from collections.abc import Mapping
 from datetime import datetime, timedelta
+from typing import Any
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from compute_provisioning import JobExecutorResolver, UnsupportedExecutorActionError
 from compute_provisioning.contracts import ExecutorActionEnvelope
+from compute_provisioning.jobs import JobRun, JobSuccess
 from compute_provisioning_service.config import Settings
 from compute_provisioning_service.db.models import (
     AnsibleJob,
     Credential,
-    CredentialRole,
     JobStatus,
 )
-from vm_provisioning_adapter.models.jobs_model import (
-    AnsibleJobParams,
-    AnsibleRunResult,
-)
+from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
 from vm_provisioning_operator.models import (
     CredentialListResponse,
     CredentialResponse,
@@ -47,12 +45,15 @@ from vm_provisioning_operator.models import (
     JobStatusResponse,
     JobSubmitResponse,
 )
-from vm_provisioning_adapter.services.ansible_service import (
-    AnsibleError,
-    redact_ansible_output,
+from vm_provisioning_adapter.services.ansible_job_executor import (
+    execution_host_from_record,
 )
 
 logger = logging.getLogger(__name__)
+
+# The columns a stored credential row has; a reported credential's value
+# supplies them by name.
+_CREDENTIAL_COLUMNS = ("password", "ssh_commands", "ssh_key_path_host", "key_type")
 
 
 class AnsibleJobService:
@@ -73,21 +74,16 @@ class AnsibleJobService:
         session_factory: sessionmaker[Session],
         executors: JobExecutorResolver,
         host_service,  # services.host_service.HostService
-        relay_resolver=None,  # services.relay_execution.RelayExecutionResolver | None
     ) -> None:
-        # The host registry is required: it is the only source of the
-        # inventory a job runs against. See _process_job.
+        # The host registry is required: it is the only source of the host a
+        # job runs against. See _process_job.
         self._settings = settings
         self._session_factory = session_factory
-        # Which runner executes a job, and with which playbook, is decided by
-        # compute-provisioning composition from the job's offering mode and
-        # action; this service persists and drives the job but routes nothing.
+        # Which executor runs a job is decided by compute-provisioning
+        # composition from the job's offering mode and action; this service
+        # persists and drives the job but routes nothing.
         self._executors = executors
         self._host_service = host_service
-        # Optional: a deployment with no relay uses the direct-NAT path and
-        # resolves nothing. A job that does reference a relay and finds no
-        # resolver fails at the relay rather than dispatching without a token.
-        self._relay_resolver = relay_resolver
 
     # ------------------------------------------------------------------
     # HTTP-layer operations
@@ -280,12 +276,13 @@ class AnsibleJobService:
     def reserved_var_keys(self, params: AnsibleJobParams) -> frozenset[str]:
         """Built-in variable keys that would be emitted for these params.
 
-        Thin passthrough to the runner that would execute these params — see
-        AnsibleService's docstring. Lets callers (AnsibleFulfillmentProvider)
-        validate proposed pool extra-vars synchronously, before submit(),
-        without depending on the runner directly.
+        Thin passthrough to the executor that would run these params. Lets
+        callers (AnsibleFulfillmentProvider) validate proposed pool extra-vars
+        synchronously, before submit(), without depending on the runner directly.
         """
-        return self._execution_for(params).runner.reserved_var_keys(params)
+        return self._executors.resolve(
+            params.offering_mode, params.executor_action or params.vm_action
+        ).reserved_var_keys(params)
 
     def get_contract_job_record(self, job_id: str) -> dict:
         """Return persisted contract correlation and executor-owned payloads."""
@@ -375,8 +372,8 @@ class AnsibleJobService:
 
             return JobLogsResponse(job_id=job.id, status=job.status, logs=job.logs)
 
-    def cancel_job(self, job_id: str) -> dict:
-        """Cancel a queued or running job. Sends SIGTERM if Ansible is running."""
+    async def cancel_job(self, job_id: str) -> dict:
+        """Cancel a queued or running job, asking a running job's executor to stop."""
         with self._session_factory() as db:
             job = (
                 db.query(AnsibleJob)
@@ -395,18 +392,12 @@ class AnsibleJobService:
 
             if job.status == JobStatus.running.value and job.process_id:
                 try:
-                    pid = int(job.process_id)
-                    os.kill(pid, signal.SIGTERM)
-                    logger.info("Sent SIGTERM to process %d for job %s", pid, job_id)
-                except ProcessLookupError:
-                    logger.warning(
-                        "Process %d for job %s not found (already terminated)",
-                        int(job.process_id),
-                        job_id,
-                    )
-                except (ValueError, Exception) as exc:
+                    offering_mode, action, _host_id = self._route(job.params)
+                    executor = self._executors.resolve(offering_mode, action)
+                    await executor.cancel(json.loads(job.process_id))
+                except Exception as exc:
                     logger.error(
-                        "Failed to terminate process for job %s: %s", job_id, exc
+                        "Failed to cancel the execution of job %s: %s", job_id, exc
                     )
 
             job.status = JobStatus.cancelled.value
@@ -443,16 +434,14 @@ class AnsibleJobService:
     # ------------------------------------------------------------------
 
     async def _process_job(self, job_id: str) -> None:
-        """Execute a single Ansible job end-to-end.
+        """Run one attempt of a job end-to-end.
 
         This is the ``handler`` argument to ``AsyncJobQueue.start()``.
-        ``AsyncJobQueue`` owns concurrency and task dispatch; this method
-        owns all DB state transitions, playbook invocation, retry scheduling,
-        log streaming, and credential storage.
+        ``AsyncJobQueue`` owns concurrency and task dispatch; this method owns
+        every DB state transition, the pre-execution host lookup, retry
+        scheduling, and storing what the job's executor reports.
         """
         db = self._session_factory()
-        rendered_inv_path = None
-        runner = None
         try:
             job = (
                 db.query(AnsibleJob)
@@ -477,18 +466,18 @@ class AnsibleJobService:
             )
 
             self._update_job(db, job, status=JobStatus.running.value)
-            params = self._build_params(job.params)
+            offering_mode, action, host_id = self._route(job.params)
             # The job runs only against the registered host record it names: the
             # record is its whole inventory and its tenant-facing address. A
             # host with no record fails here, before any credential or
-            # variable reaches a file and before any playbook starts; there is
+            # variable reaches a file and before any executor runs; there is
             # no fallback inventory, because one would run against whatever a
             # file happens to say rather than what the registry holds. See
             # openspec/specs/physical-provisioning/spec.md#requirement-execution-inventory-comes-only-from-the-registered-host-record.
-            host = self._host_service.get_host(params.host_id)
+            host = self._host_service.get_host(host_id)
             if host is None:
                 error_message = (
-                    f"host {params.host_id!r} is not registered; register or "
+                    f"host {host_id!r} is not registered; register or "
                     "import it before dispatching work to it"
                 )
                 self._update_job(
@@ -496,141 +485,103 @@ class AnsibleJobService:
                 )
                 logger.error("Job %s refused: %s", job_id, error_message)
                 return
-            # Last point before the token reaches a file. Resolved here rather
-            # than at acceptance so a rotation takes effect on a retry, and so
-            # the credential never enters job.params, which this service
-            # persists and returns.
-            if self._relay_resolver is not None:
-                params = self._relay_resolver.resolve_into(params)
             try:
-                execution = self._execution_for(params)
+                executor = self._executors.resolve(offering_mode, action)
             except UnsupportedExecutorActionError as exc:
                 self._update_job(
                     db, job, status=JobStatus.failed.value, error=str(exc)
                 )
                 logger.error("Job %s refused: %s", job_id, exc)
                 return
-            runner = execution.runner
-            vars_path = runner.build_vars_file(params)
 
-            # rendered_inv_path is initialised before the try block so the
-            # outer finally block can always clean it up.
-            rendered_inv_path = runner.write_inventory([host])
-            # Buyers may reach the host on a different network than the
-            # provisioner does; with no public address configured, the
-            # connection address is the one there is.
-            tenant_address = host.public_host or host.ssh_host
+            def report_handle(handle: Mapping[str, Any]) -> None:
+                self._update_job(
+                    db,
+                    job,
+                    status=JobStatus.running.value,
+                    process_id=json.dumps(dict(handle), sort_keys=True),
+                )
 
-            run = runner.start_playbook(
-                playbook_path=params.playbook_path or execution.playbook_path,
-                inventory_path=rendered_inv_path,
-                extra_vars_path=vars_path,
-                limit=params.host_id,
+            outcome = await executor.execute(
+                JobRun(
+                    job_id=job_id,
+                    offering_mode=offering_mode,
+                    action=action,
+                    host=execution_host_from_record(host),
+                    parameters=dict(job.params),
+                    report_handle=report_handle,
+                    report_logs=self._log_writer(job_id),
+                )
             )
-            # Inject params onto the run handle so ProgrammableMockAnsibleService
-            # can match rules in wait_for_playbook. Real AnsibleRun ignores it.
-            run._params = params  # type: ignore[attr-defined]
-            self._update_job(
-                db, job, status=JobStatus.running.value, process_id=str(run.process_id)
-            )
-            logger.info("Job %s running with PID=%d", job_id, run.process_id)
 
-            def log_callback(stdout: str, stderr: str) -> None:
-                try:
-                    callback_db = self._session_factory()
-                    try:
-                        with callback_db.begin():
-                            callback_job = (
-                                callback_db.query(AnsibleJob)
-                                .filter(AnsibleJob.id == job_id)
-                                .one_or_none()
-                            )
-                            if callback_job:
-                                logs = stdout + (
-                                    "\n\nSTDERR:\n" + stderr if stderr else ""
-                                )
-                                callback_job.logs = self._redact_logs(logs)
-                    finally:
-                        callback_db.close()
-                except Exception as e:
-                    logger.warning("Failed to update logs for job %s: %s", job_id, e)
-
-            try:
-                ansible_result = await runner.wait_for_playbook(
-                    run,
-                    timeout_seconds=self._settings.ansible_timeout_seconds,
-                    log_callback=log_callback,
-                )
-                run_result: AnsibleRunResult = runner.parse_playbook_result(
-                    ansible_result, params, tenant_address=tenant_address
-                )
-                logs = run_result.stdout + (
-                    "\n\nSTDERR:\n" + run_result.stderr if run_result.stderr else ""
-                )
-                logs = self._redact_logs(logs)
-                result_payload = self._build_result_payload(run_result)
-                sanitized_payload = self._extract_and_store_credentials(
-                    db, job, result_payload
-                )
+            if isinstance(outcome, JobSuccess):
+                for credential in outcome.credentials:
+                    db.add(
+                        Credential(
+                            job_id=job.id,
+                            role=credential.credential_kind,
+                            **{
+                                name: credential.value.get(name)
+                                for name in _CREDENTIAL_COLUMNS
+                            },
+                        )
+                    )
                 self._update_job(
                     db,
                     job,
                     status=JobStatus.succeeded.value,
-                    result=sanitized_payload,
+                    result=(
+                        dict(outcome.result.value)
+                        if outcome.result is not None
+                        else None
+                    ),
                     error=None,
-                    logs=logs,
+                    logs=outcome.logs,
                 )
                 logger.info("Job %s succeeded", job_id)
+                return
 
-            except AnsibleError as exc:
-                logs = exc.stdout + (
-                    "\n\nSTDERR:\n" + exc.stderr if exc.stderr else ""
+            error_message = outcome.error.message
+            should_retry = (
+                job.retry_count < job.max_retries and outcome.error.retryable
+            )
+            if should_retry:
+                retry_delay = self._calculate_retry_delay(job.retry_count)
+                next_retry_at = datetime.utcnow() + timedelta(seconds=retry_delay)
+                job.retry_count += 1
+                job.next_retry_at = next_retry_at
+                job.status = JobStatus.queued.value
+                job.error = (
+                    f"Attempt {job.retry_count} failed: {error_message}. "
+                    f"Retrying at {next_retry_at}"
                 )
-                logs = self._redact_logs(logs)
-                error_message = str(exc)
-
-                should_retry = (
-                    job.retry_count < job.max_retries
-                    and self._should_retry_error(error_message)
+                job.logs = outcome.logs
+                db.add(job)
+                db.commit()
+                # The job now sits in `queued` with next_retry_at set;
+                # run_retry_scheduler re-enqueues it once the delay elapses.
+                logger.warning(
+                    "Job %s failed (attempt %d/%d), retry at %s: %s",
+                    job_id,
+                    job.retry_count,
+                    job.max_retries + 1,
+                    next_retry_at,
+                    error_message,
                 )
-
-                if should_retry:
-                    retry_delay = self._calculate_retry_delay(job.retry_count)
-                    next_retry_at = datetime.utcnow() + timedelta(seconds=retry_delay)
-                    job.retry_count += 1
-                    job.next_retry_at = next_retry_at
-                    job.status = JobStatus.queued.value
-                    job.error = (
-                        f"Attempt {job.retry_count} failed: {error_message}. "
-                        f"Retrying at {next_retry_at}"
-                    )
-                    job.logs = logs
-                    db.add(job)
-                    db.commit()
-                    # The job now sits in `queued` with next_retry_at set;
-                    # run_retry_scheduler re-enqueues it once the delay elapses.
-                    logger.warning(
-                        "Job %s failed (attempt %d/%d), retry at %s: %s",
-                        job_id,
-                        job.retry_count,
-                        job.max_retries + 1,
-                        next_retry_at,
-                        error_message,
-                    )
-                else:
-                    reason = (
-                        "max retries exceeded"
-                        if job.retry_count >= job.max_retries
-                        else "non-retryable error"
-                    )
-                    self._update_job(
-                        db,
-                        job,
-                        status=JobStatus.failed.value,
-                        error=f"Job failed ({reason}): {error_message}",
-                        logs=logs,
-                    )
-                    logger.error("Job %s failed permanently: %s", job_id, error_message)
+            else:
+                reason = (
+                    "max retries exceeded"
+                    if job.retry_count >= job.max_retries
+                    else "non-retryable error"
+                )
+                self._update_job(
+                    db,
+                    job,
+                    status=JobStatus.failed.value,
+                    error=f"Job failed ({reason}): {error_message}",
+                    logs=outcome.logs,
+                )
+                logger.error("Job %s failed permanently: %s", job_id, error_message)
 
         except Exception as exc:
             logger.exception("Unexpected error processing job %s: %s", job_id, exc)
@@ -659,19 +610,41 @@ class AnsibleJobService:
                     job_id,
                 )
         finally:
-            # Clean up the DB-rendered temp inventory file if one was created.
-            if rendered_inv_path is not None:
-                try:
-                    rendered_inv_path.unlink(missing_ok=True)
-                except Exception as _exc:
-                    logger.warning("Failed to remove temp inventory %s: %s", rendered_inv_path, _exc)
             db.close()
-            # Tell the runner that executed this job it has reached a terminal
-            # state; mock runners release waiters on it, the real AnsibleService
-            # has no such method.
-            notify = getattr(runner, "notify_job_done", None)
-            if notify is not None:
-                notify(job_id)
+
+    def _log_writer(self, job_id: str):
+        """Write a job's reported output in a session of its own."""
+
+        def write(logs: str) -> None:
+            try:
+                callback_db = self._session_factory()
+                try:
+                    with callback_db.begin():
+                        callback_job = (
+                            callback_db.query(AnsibleJob)
+                            .filter(AnsibleJob.id == job_id)
+                            .one_or_none()
+                        )
+                        if callback_job:
+                            callback_job.logs = logs
+                finally:
+                    callback_db.close()
+            except Exception as e:
+                logger.warning("Failed to update logs for job %s: %s", job_id, e)
+
+        return write
+
+    def _route(self, params: Mapping[str, Any]) -> tuple[str, str, Any]:
+        """The offering mode, action, and host a job's stored parameters name."""
+        executor_action = params.get("executor_action") or params.get(
+            "vm_action", "create"
+        )
+        executor_target = params.get("executor_target") or params.get("vm_target")
+        action = executor_action or params.get("vm_action")
+        host_id = params.get(
+            "host_id", executor_target or self._settings.default_host_id
+        )
+        return params["offering_mode"], action, host_id
 
     # ------------------------------------------------------------------
     # Private utilities
@@ -707,195 +680,6 @@ class AnsibleJobService:
             self._settings.retry_backoff_multiplier ** retry_count
         )
         return min(int(delay), self._settings.retry_backoff_max_seconds)
-
-    def _should_retry_error(self, error_message: str) -> bool:
-        error_lower = error_message.lower()
-        for pattern in self._settings.non_retryable_errors:
-            if pattern.lower() in error_lower:
-                return False
-        return True
-
-    def _build_params(self, params: dict) -> AnsibleJobParams:
-        """Reconstruct an ``AnsibleJobParams`` from the DB JSON params column."""
-        executor_action = params.get("executor_action") or params.get(
-            "vm_action", "create"
-        )
-        executor_target = params.get("executor_target") or params.get("vm_target")
-        return AnsibleJobParams(
-            host_id=params.get(
-                "host_id",
-                executor_target or self._settings.default_host_id,
-            ),
-            vm_target=params.get("vm_target"),
-            vm_action=params.get("vm_action") or executor_action,
-            offering_mode=params["offering_mode"],
-            executor_action=executor_action,
-            executor_target=executor_target,
-            executor_ref=params.get("executor_ref"),
-            image_setup_type=params.get("image_setup_type", "scratch"),
-            vm_ram=params.get("vm_ram"),
-            vm_vcpus=params.get("vm_vcpus"),
-            vm_disk_size=params.get("vm_disk_size"),
-            vm_os_variant=params.get("vm_os_variant"),
-            ssh_pubkey=params.get("ssh_pubkey"),
-            gpu_provisioned=params.get("gpu_provisioned"),
-            vm_gpu_count=params.get("vm_gpu_count"),
-            vm_gpu_device=params.get("vm_gpu_device"),
-            vm_gpu_devices=params.get("vm_gpu_devices"),
-            vm_gpu_partition_size=params.get("vm_gpu_partition_size"),
-            # No settings fallback. Relay location is a property of the relay a
-            # pool references, resolved at dispatch; a service-wide default
-            # would let a job reach a relay its pool does not name, and would
-            # silently substitute one relay's window for another's.
-            # Only the reference and the leased port come from stored params.
-            # The address and token are absent by construction and are filled
-            # in immediately before the vars file is written.
-            relay_id=params.get("relay_id"),
-            vm_remote_port=params.get("vm_remote_port"),
-            golden_image_name=params.get("golden_image_name"),
-            gcs_bucket_url=params.get("gcs_bucket_url"),
-            gcs_image_path=params.get("gcs_image_path"),
-            escrow_uid=params.get("escrow_uid"),
-            physical_host_id=params.get("physical_host_id"),
-            ssh_user=params.get("ssh_user"),
-            ssh_public_key=params.get("ssh_public_key"),
-            access_ref=params.get("access_ref"),
-            bare_metal_reclaim_policy=params.get("bare_metal_reclaim_policy"),
-            max_retries=params.get("max_retries"),
-            playbook_path=params.get("playbook_path"),
-            provider_extra_vars=params.get("provider_extra_vars") or {},
-        )
-
-    def _execution_for(self, params: AnsibleJobParams):
-        return self._executors.resolve(
-            params.offering_mode, params.executor_action or params.vm_action
-        )
-
-    def _redact_logs(self, logs: str) -> str:
-        """Delegate to the shared scrubber both this module's persisted
-        ``job.logs`` and ``ansible_service.py``'s real-time debug stream
-        use, so there is exactly one place defining what
-        "credential-shaped" means. See ``redact_ansible_output``'s
-        docstring for why this is defense in depth, not the primary
-        control.
-        """
-        return redact_ansible_output(logs)
-
-
-    def _extract_and_store_credentials(
-        self, db: Session, job: AnsibleJob, result_payload: dict
-    ) -> dict:
-        auth = result_payload.get("authentication")
-        if not auth:
-            return result_payload
-
-        sanitized = copy.deepcopy(result_payload)
-
-        def _store_role(role_name: str, role_data: dict) -> None:
-            if not role_data:
-                return
-            cred = Credential(
-                job_id=job.id,
-                role=role_name,
-                password=role_data.get("password"),
-                ssh_commands=role_data.get("ssh_commands"),
-                ssh_key_path_host=role_data.get("ssh_key_path_host"),
-                key_type=role_data.get("key_type"),
-            )
-            db.add(cred)
-
-        _store_role(CredentialRole.root.value, auth.get("root", {}))
-        _store_role(CredentialRole.tenant.value, auth.get("tenant", {}))
-
-        sanitized.pop("authentication", None)
-        if isinstance(sanitized.get("ansible_result"), dict):
-            sanitized["ansible_result"].pop("authentication", None)
-
-        return sanitized
-
-    def _build_result_payload(self, result: AnsibleRunResult) -> dict:
-        ar = result.ansible_result or {}
-        payload: dict = {
-            "ssh_port": result.ssh_port,
-            "tenant_user": result.tenant_user,
-            "host_ip": result.host_ip,
-            "ssh_command": result.ssh_command,
-        }
-        if not ar:
-            payload["ansible_result"] = None
-            return payload
-
-        payload["status"] = ar.get("status")
-        payload["action"] = ar.get("action")
-        payload["vm_name"] = ar.get("vm_name")
-        payload["host"] = ar.get("host")
-        payload["timestamp"] = ar.get("timestamp")
-
-        if ar.get("tenant_user"):
-            payload["tenant_user"] = ar["tenant_user"]
-
-        auth = ar.get("authentication")
-        if auth:
-            tenant_auth = auth.get("tenant", {})
-            root_auth = auth.get("root", {})
-            payload["authentication"] = {
-                "tenant": {
-                    "password": tenant_auth.get("password"),
-                    "key_type": tenant_auth.get("key_type"),
-                    "ssh_commands": tenant_auth.get("ssh_commands"),
-                },
-                "root": {
-                    "password": root_auth.get("password"),
-                    "ssh_commands": root_auth.get("ssh_commands"),
-                    "ssh_key_path_host": root_auth.get("ssh_key_path_host"),
-                },
-            }
-            tenant_cmds = tenant_auth.get("ssh_commands", {})
-            if tenant_cmds.get("external"):
-                payload["ssh_command"] = tenant_cmds["external"]
-
-        frp = ar.get("frp")
-        if frp:
-            payload["frp"] = frp
-            if frp.get("remote_port"):
-                payload["ssh_port"] = frp["remote_port"]
-
-        for key in ("gpu", "network", "vm_ip_internal", "vm_state",
-                    "result_message", "note", "operation_initiated"):
-            if ar.get(key):
-                payload[key] = ar[key]
-
-        if ar.get("vms"):
-            payload["vms"] = ar["vms"]
-            payload["vm_count"] = ar.get("vm_count")
-
-        if ar.get("resources"):
-            payload["resources"] = ar["resources"]
-        elif ar.get("cpu_usage_percent") is not None or ar.get("memory_used_mb") is not None:
-            payload["resources"] = {
-                "cpu": {
-                    "usage_percent": ar.get("cpu_usage_percent"),
-                    "vcpus_provisioned": ar.get("cpu_vcpus_provisioned"),
-                },
-                "memory": {
-                    "used_mb": ar.get("memory_used_mb"),
-                    "available_mb": ar.get("memory_available_mb"),
-                    "usage_percent": ar.get("memory_usage_percent"),
-                },
-                "storage": {
-                    "allocation_gb": ar.get("host_storage_allocation_gb"),
-                    "capacity_gb": ar.get("host_storage_capacity_gb"),
-                    "usage_percent": ar.get("host_storage_usage_percent"),
-                    "guest_total": ar.get("guest_storage_total"),
-                    "guest_used": ar.get("guest_storage_used"),
-                    "guest_available": ar.get("guest_storage_available"),
-                },
-                "network_interfaces": ar.get("network_interfaces"),
-                "error": ar.get("error") or None,
-            }
-
-        payload["ansible_result"] = ar
-        return payload
 
     @staticmethod
     def _to_status_response(job: AnsibleJob) -> JobStatusResponse:

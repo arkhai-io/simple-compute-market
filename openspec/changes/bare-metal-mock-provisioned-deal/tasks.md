@@ -93,7 +93,7 @@ migrated from three sibling changes; `design.md` records each decision.
 - [x] 1.19 **Decision gate.** Confirm the Ansible distribution and the fulfillment-provider
       helper's timing. Decided with the maintainer: the Ansible mechanics are a sibling
       family-kit distribution, `provisioning/compute/ansible`; the job-backed
-      fulfillment-provider helper lands in this change as 5B.10, after the boundary is
+      fulfillment-provider helper lands in this change as 5B.12, after the boundary is
       proven. The family-kit definition was refined after architectural review
       ("Compute provisioning is a family kit").
 
@@ -178,7 +178,7 @@ mock". Reviewable alone: provisioning only, no storefront or scenario change.
       matches a VM job and the reverse.
       Corrected 2026-10-02: the test parses through the real parser and the job service's
       result payload; it does not call `fetch_credentials` (added by 5A.4). The mock is
-      replaced by 5B.5.
+      replaced by 5B.7.
 - [x] 4.6 Compose it: `provisioning/compute/service/src/compute_provisioning_service/container.py`
       builds the table from both bundles and passes the resolver to the job service;
       `main.py` mounts the bare-metal test router under the mock profile beside VM's.
@@ -481,10 +481,13 @@ code that is already correctly covered.
 ## 5B. Provisioning execution boundary
 
 Decisions: "Compute provisioning is a family kit", "Provisioning execution leaves the VM
-adapter". Each step is behaviour-neutral unless it says otherwise and ends with the
-provisioning, provisioning-service, both adapters', and operator-client suites green;
-5B.9 is the lane gate. Planning names files; implementation re-verifies them by grep
-before each move.
+adapter", "Pre-release wire and schema changes are accepted", "Job and host authority
+shape". Steps run in the order listed (5B.2a before 5B.3). Each is behaviour-neutral
+unless it says it changes a wire format or schema, and ends with the provisioning,
+provisioning-service, both adapters', and operator-client suites green; a step that
+changes a schema includes migration tests (fresh database, upgrade with conversion,
+idempotent rerun). 5B.11 is the lane gate. Planning names files; implementation
+re-verifies them by grep before each move.
 
 - [x] 5B.1 Neutral contracts first: move `ExecutorAdapterBundle`,
       `ExecutorAdapterContribution`, `ComposedComputeAdapters`, and
@@ -502,7 +505,7 @@ before each move.
       `CredentialResponse` and `CredentialListResponse` become compatibility DTOs built
       from them at the route boundary; readiness models (`AnsibleReadinessResponse`,
       `InventoryInfo`, `FileInfo`, `SshKeyInfo`) and `HostConnectivityResponse` go to the
-      Ansible distribution in 5B.4; `VmActionRequest` and `CreateVmRequest` stay VM's.
+      Ansible distribution in 5B.6; `VmActionRequest` and `CreateVmRequest` stay VM's.
       `vm_provisioning_operator` re-exports every moved name.
       Added 2026-10-02 with the maintainer: the provisioning route-contract table becomes
       contributable. `compute_provisioning/client.py` keeps the contract type, the
@@ -530,6 +533,10 @@ before each move.
         compatibility DTOs, built from `CredentialEnvelope` when the job routes move
         (5B.6). The `Lease*` models stay VM's (design: "the `Lease*` operator models stay
         VM's").
+      - Amended after the job and host design review: the re-exports and the credential
+        DTOs are removed in 5B.5, the host models above are replaced by
+        connection-neutral ones in 5B.4, and the `Lease*` models leave the generic
+        surface in 5B.8.
       - Route contracts: `ProvisioningRouteContract` carries `roles`;
         `route_contract_from_declaration`, `ProvisioningRouteTable`, and
         `assemble_provisioning_route_table` are in `compute_provisioning/client.py`.
@@ -557,70 +564,209 @@ before each move.
       - Validation: `provisioning/compute` 163; provisioning service 694 unit and 287
         integration; `arkhai_bare_metal` 136; bare-metal adapter 8; the VM adapter's
         `make test` file 39; e2e unit 236 with the known pre-existing failure.
-- [ ] 5B.2 **Decision gate, then implementation.** Review the proposed job authority
-      shape in `design.md` ("Job authority shape (5B.2): proposed, awaiting design
-      review"): the `JobExecutor` contract and `JobOutcome`, the transitional
-      `AnsibleJobExecutor` in the VM adapter until 5B.4, the engine and table moves, and
-      who owns credential persistence (options A, B, C; A recommended). Record the
-      decision there, then amend this task's file list to match before implementing.
-      As planned before review:
-      Job authority: `compute_provisioning/jobs/` — the engine from the generic
-      parts of `vm_provisioning_adapter/services/job_service.py`; the `JobExecutor`
-      protocol and `JobExecutorTable` resolving it (replacing `JobExecution`); the
-      `ansible_jobs` and `credentials` table metadata from the service's `db/models.py`
-      (table names unchanged); the job queue from
-      `compute_provisioning_service/services/async_job_queue.py` and retry coordination;
-      framework-free job route services (read, logs, cancel, test drain, wait, summary);
-      the rule and gate mechanism from `executor_mock.py` beside it. The service's
-      `db/database.py` composes the metadata.
-- [ ] 5B.3 Host authority: `compute_provisioning/hosts/` — the `hosts` table metadata, the
-      generic parts of `host_service.py` (CRUD, enabled state, pool association,
-      protected key material, the capacity-derivation port, pre-execution lookup), the
-      operation that applies an imported inventory to the registry with its pool-change
-      and capacity effects, a pool-change hook, and a framework-free host route service.
-- [ ] 5B.4 Ansible distribution: `provisioning/compute/ansible`
-      (`compute_provisioning_ansible`) with `pyproject.toml`, `Makefile`, and tests — the
-      runner and redaction from `ansible_service.py`, transient inventory rendering with
-      contributed group names, INI parsing and rendering to and from host-record
-      representations from `host_service.py` (applying an import stays with the host
-      authority, 5B.3), the codec protocol, `AnsibleJobExecutor`, connectivity probes and readiness from
-      `system_service.py`, and the mock executor over the gate mechanism with a
-      contributed default-output hook (replacing `mock_ansible_service.py`). It is the
-      compute family kit's optional implementation distribution: it depends on
-      `compute_provisioning` and nothing in `compute_provisioning` depends on it. Register
-      in the build and dist targets.
-- [ ] 5B.5 Domain codecs: `vm_provisioning_adapter/codec.py` (VM vars, golden-image
-      credentials, VM facts, tenant credentials, VM parameter building) and
+- [x] 5B.2 **Decision gate.** Review the proposed job authority shape. Decided with the
+      maintainer after design review (2026-10-02): `design.md`, "Pre-release wire and
+      schema changes are accepted" and "Job and host authority shape" (credential option
+      B as one forward migration; envelopes for results and credentials; executor-owned
+      retry classification and redaction; `JobRetryPolicy`; first-class `host_id`;
+      opaque execution handle; terminal cancellation; no `notify_job_done`; a
+      connection-neutral host authority with per-kind codecs; the generic lease routes
+      serving `LeaseView`; host authority before the engine). The steps below are
+      replanned accordingly.
+- [x] 5B.2a Executor contract and the transitional executor. Behaviour-neutral.
+      `provisioning/compute/src/compute_provisioning/jobs/executor.py`: `JobExecutor`
+      (`execute`, `cancel`), `JobRun` (job id, opaque parameters, `ExecutionHost`, handle
+      and log callbacks), `JobSuccess`, `JobFailure` (carrying
+      `ProvisioningErrorEnvelope` with `retryable`), and `JobRetryPolicy`;
+      `ExecutionHost` (`host_id`, `pool_id`, connection envelope) in
+      `compute_provisioning/hosts/execution.py`, built for now from today's host row by a
+      transitional function in the VM adapter. `compute_provisioning/adapters.py`:
+      `JobExecutorTable` resolves `JobExecutor`s; `JobExecution` is removed and
+      `executor_modes`/`runners` follow. `domains/vms/provisioning/adapter/src/vm_provisioning_adapter/services/ansible_job_executor.py`:
+      `AnsibleJobExecutor(runner, playbook_path, classification, timeout)` holding the
+      Ansible half of `_process_job` (parameter rebuild, relay-token resolution, vars
+      file, inventory, playbook, parse, result payload as a `ResultEnvelope`, credential
+      extraction as `CredentialEnvelope`s, redaction, `non_retryable_errors`
+      classification, `SIGTERM` cancellation). `job_service.py` drives it through the
+      contract and keeps its persistence for now, writing the outcome in today's row
+      shape. Both bundles, both runtimes, `container.py`, and the integration conftest's
+      executor table register `AnsibleJobExecutor`s; the mock runners stay the runner
+      inside them. Tests: `provisioning/compute/tests/unit/test_job_executor_table.py`
+      updated; `provisioning/compute/service/tests/unit/services/test_job_service.py`
+      and `test_ansible_job_executor.py` (classification, redaction, handle, cancel); the
+      service suites pass unchanged.
+      Done 2026-10-02:
+      - `compute_provisioning/jobs/executor.py` (`JobExecutor`, `JobRun`, `JobSuccess`,
+        `JobFailure`, `JobRetryPolicy`), `compute_provisioning/hosts/execution.py`
+        (`ExecutionHost`), and `compute_provisioning/hosts/connection.py`
+        (`ConnectionEnvelope`, brought forward from 5B.3 because `ExecutionHost`
+        carries it; the `ConnectionCodec` protocol stays in 5B.3). `JobExecutorTable`
+        resolves executors; `JobExecution` and `runners()` are gone (`executors()`
+        replaces the latter); `ExecutorAdapterContribution.job_executors` replaces
+        `job_executions`.
+      - `vm_provisioning_adapter/services/ansible_job_executor.py`: `AnsibleJobExecutor`
+        and `execution_host_from_record` (today's host row as an `ssh` connection). Both
+        runtimes build one in `adapter_bundle` (VM's with the relay resolver, which moved
+        from the job service; bare-metal jobs name no relay). `job_service.py` routes,
+        looks up the host, runs the executor, and stores what it reports in today's row
+        shape; it stores the reported handle as JSON in `process_id` and hands it back to
+        `cancel`. `cancel_job` is async, as are the job and contract cancel routes and
+        `ComputeContractService.cancel_job`.
+      - The executor-side job-done notification is dropped: nothing consumed it (the
+        shared wait route polls the job), and the engine's own terminal observer
+        arrives with 5B.5. `JobRetryPolicy` is defined here and adopted by the engine in
+        5B.5; the job service keeps its settings-based backoff until then.
+      - Tests: `provisioning/compute/tests/unit/test_job_executor_table.py` rewritten,
+        `test_job_contract_values.py` added, `test_composition.py` updated; the service's
+        `tests/unit/services/test_job_service.py` keeps routing and retry arithmetic, and
+        `test_ansible_job_executor.py` takes parameter rebuilding, redaction, retry
+        classification, and the result payload, and adds a run's handle, outcome, and
+        credentials, failure classification, refusal of a non-`ssh` host, and
+        cancellation of a real process.
+      - Validation: `provisioning/compute` 174; provisioning service 701 unit and 287
+        integration; bare-metal adapter 8; the VM adapter's `make test` file 39.
+- [x] 5B.3 Ansible distribution skeleton with the `ssh` connection codec. Behaviour-neutral.
+      `provisioning/compute/ansible/` (`compute_provisioning_ansible`): `pyproject.toml`
+      depending on `arkhai-compute-provisioning` and pydantic only (verify it needs no
+      Ansible Python package before committing), `Makefile`, `tests/`, registered in the
+      root `Makefile`'s build and dist targets and `docs/development/BUILD_AND_PACKAGING.md`'s
+      project list if it lists projects. `connection.py`: the `ssh` codec (payload
+      model: `ssh_host`, `public_host`, `ssh_port`, `ssh_user`, `ssh_key_type`,
+      `ssh_key_value`; `ssh_key_value` declared secret; validation).
+      `compute_provisioning/hosts/connection.py`: the `ConnectionCodec` protocol (kind,
+      version, payload validation, secret fields) beside `ConnectionEnvelope`. Tests
+      in `provisioning/compute/ansible/tests/unit/test_ssh_connection.py`.
+      Done 2026-10-02: `provisioning/compute/ansible/` (`pyproject.toml`, `Makefile`,
+      `README.md`, `uv.lock`) with `compute_provisioning_ansible.connection`
+      (`SshConnection`, `SshConnectionCodec`; key material is secret only when
+      `ssh_key_type` is `embedded`, a key path is not); `ConnectionCodec` in
+      `compute_provisioning/hosts/connection.py`. Confirmed no Ansible Python package is
+      needed: Ansible runs as a subprocess. Root `Makefile`: `dist-compute-provisioning-ansible`
+      (a prerequisite of `dist`, `dist-ci`, and `dist-domains`) and
+      `test-compute-provisioning-ansible` (in `test`); `BUILD_AND_PACKAGING.md` lists no
+      projects, and the layout and lock checks discover the project from its lock. The
+      first lock was created with `uv lock --find-links ../../../.dist`, since
+      `scripts/uv_project.py lock` refreshes only an existing lock. Validation: the
+      distribution 9; `provisioning/compute` 174; `make check-packaging` passes.
+      Found for 5B.4: embedded keys are encrypted by the caller today (`HostCreate`
+      documents Fernet-encrypted material) and decrypted by the runner. Settled with the
+      maintainer: they stay caller-encrypted (design: "The host authority is
+      connection-neutral, and connection secrets stay protected"); 5B.4 reshapes this
+      step's codec to public fields and protected values, replacing `secret_fields`.
+- [ ] 5B.4 Host authority. Changes the host wire format and schema.
+      `compute_provisioning/hosts/connection.py`: `ConnectionEnvelope` gains `public` and
+      `protected` in place of `payload`; `ProtectedValue` (`scheme`, `ciphertext`, a
+      representation that never shows the ciphertext); `ConnectionCodec` validates public
+      fields and protected values (names and schemes) in place of `secret_fields`.
+      `compute_provisioning_ansible/connection.py`: the `ssh` codec reshaped to public
+      fields (`ssh_host`, `public_host`, `ssh_port`, `ssh_user`, optional `key_path`) and
+      an optional `fernet-v1` `private_key`, exactly one naming the key; no decryption yet
+      (5B.6). `compute_provisioning/hosts/`: the host record; the service from the generic
+      parts of `vm_provisioning_adapter/services/host_service.py` (CRUD, enabled state,
+      pool association, codec validation, the capacity-derivation port, the
+      pre-execution lookup returning `ExecutionHost` with the protected envelope,
+      applying an imported inventory with its pool-change and capacity effects, a
+      pool-change hook); a framework-free host route service; the `hosts` table metadata
+      on the hosts base. `hosts/models.py`: `HostCreate`, `HostUpdate`, `HostResponse`
+      carry `connection`; a response names protected values and schemes without
+      ciphertext. The Ansible distribution gains INI parsing and rendering between
+      inventory files and host records with `ssh` connections (from `host_service.py`;
+      an imported embedded key arrives as caller-encrypted ciphertext, as today).
+      Migration in `compute_provisioning_service/db/migrations.py`: `connection_kind`,
+      `connection_version`, JSON `connection_public` and `connection_protected` replace the
+      `ssh_*` columns; `path` keys become `key_path` and `embedded` ciphertext becomes a
+      `fernet-v1` `private_key` byte for byte, with no cryptography in the migration.
+      The transitional `AnsibleJobExecutor` reads the envelope (a `private_key` is handed
+      to the runner as today's embedded key, which the runner still decrypts until 5B.6).
+      Callers: VM's host controller and operations, `vm_provisioning_operator/client.py`,
+      the bare-metal adapter, e2e's host registration (`e2e-tests/src/e2e_harness/`,
+      `tests/e2e/roles/`), the development environment's host configuration (`dev-env/`,
+      `e2e-tests/config/`), and the integration fixtures. Tests:
+      `provisioning/compute/tests/unit/test_hosts.py` (envelope and `ProtectedValue`
+      never disclose ciphertext in representations or responses) and
+      `tests/integration/test_host_authority.py` (CRUD, codec refusal, lookup carrying
+      the protected envelope, import application, pool-change hook, no protected value
+      in any read); the codec's tests updated; migration tests (fresh database, upgrade
+      with conversion, idempotent rerun, ciphertext preserved byte for byte); the
+      service suites.
+- [ ] 5B.5 Job authority. Changes job wire formats and the schema, and fixes the
+      cancellation race. `compute_provisioning/jobs/`: the engine from the generic parts
+      of `job_service.py` (submission and idempotency, `JobRetryPolicy` retry timing and
+      counts, the retry scheduler, reads, cancellation through the executor with
+      conditional terminal transitions, the engine-signalled terminal observer), the job
+      queue from `compute_provisioning_service/services/async_job_queue.py`, the rule and
+      gate mechanism moved from `compute_provisioning/executor_mock.py` beside it, the
+      `ansible_jobs` and `credentials` table metadata on a jobs base, and framework-free
+      route services (read, list, logs, cancel, contract record, test drain, wait,
+      summary). Migration: `host_id` added and filled (parameter, else
+      `executor_target`, else `default_host_id`); JSON `execution_handle` replaces
+      `process_id`; `result` stored as `ResultEnvelope`, converted as the contract route
+      builds it; `credentials` stores one `CredentialEnvelope` per row in place of its
+      SSH columns, converted as VM's contract credentials route builds it. Removed:
+      `CredentialResponse`, `CredentialListResponse`, and the operator client's
+      re-exports (callers import from `compute_provisioning`). Readers move to the
+      envelope: both fulfillment providers, the compute adapters' contract route, the
+      shared test wait route, `e2e-tests/src/e2e_harness/provisioning_test_client.py`,
+      and VM and bare-metal e2e scenarios that read job results. Tests: engine unit tests
+      in `provisioning/compute/tests/unit/test_job_engine.py` (retry policy, outcome
+      application, classification honoured); `provisioning/compute/tests/integration/test_job_authority.py`
+      (idempotency, cancellation before and after a handle, a late outcome after
+      cancellation leaves `cancelled`); migration tests; the service suites.
+- [ ] 5B.6 The rest of the Ansible distribution. Behaviour-neutral.
+      `compute_provisioning_ansible`: the runner and redaction from `ansible_service.py`,
+      transport and Ansible failure classification, the codec protocol,
+      `AnsibleJobExecutor` (moved from the VM adapter, consuming connections the `ssh`
+      codec materializes: the codec decrypts a `private_key` just in time with the
+      decryption key composition gives it, writes a transient owner-only key file, and
+      removes it when execution ends; the runner's own decryption and the service-wide
+      `ssh_decryption_key` read in `ansible_service.py` are removed), connectivity probes
+      and readiness
+      (with `AnsibleReadinessResponse`, `InventoryInfo`, `FileInfo`, `SshKeyInfo`, and
+      `HostConnectivityResponse`) from `system_service.py`, and the mock executor over the
+      gate mechanism with a contributed default-output hook (replacing
+      `mock_ansible_service.py`). It depends on `compute_provisioning`; nothing in
+      `compute_provisioning` depends on it.
+- [ ] 5B.7 Domain codecs. Behaviour-neutral on the wire.
+      `vm_provisioning_adapter/codec.py` (VM vars, golden-image credentials, VM facts,
+      VM failure classification, credential meaning, VM parameter building) and
       `bare_metal_provisioning_adapter/codec.py` (access vars and facts, access
-      parameters); both bundles register `AnsibleJobExecutor`s; move
+      parameters); both bundles register the distribution's `AnsibleJobExecutor`s; move
       `iac/ansible/playbooks/bare-metal` and `roles/bare-metal-access` to
-      `domains/bare_metal/provisioning/iac`, with
-      `provisioning/compute/service/Dockerfile` and `settings.toml` following; delete
-      `bare_metal_mock_executor.py`, replaced by bare metal's contributed default output.
-      Behaviour change: none on the wire; each mode's jobs now run through its own codec.
-- [ ] 5B.6 Controls and routes: split `system_service.py` — aggregate health and status to
-      the service, which composes contributed diagnostics; Ansible readiness to the
-      Ansible distribution; convergence and lease-watchdog controls to their owners.
-      Generic job, host, and lease routes become `compute_provisioning` route services
-      the service mounts; VM keeps `/api/v1/vms`; adapter routes receive injected
-      collaborators instead of reading the service's `container` module.
-- [ ] 5B.7 Relays to VM: `relay_rebinding.py`, `relay_port_allocator.py`, and
+      `domains/bare_metal/provisioning/iac`, with `provisioning/compute/service/Dockerfile`
+      and `settings.toml` following; delete `bare_metal_mock_executor.py`, replaced by
+      bare metal's contributed default output.
+- [ ] 5B.8 Controls and routes. Changes the generic lease wire format. Split
+      `system_service.py`: aggregate health and status to the service, which composes
+      contributed diagnostics; Ansible readiness to the Ansible distribution; convergence
+      and lease-watchdog controls to their owners. Generic job, host, and lease routes
+      become `compute_provisioning` route services the service mounts, with their route
+      contracts in the family table; the generic lease read, update, terminate, and
+      administration routes serve `LeaseView` and its request models, and VM's `Lease*`
+      models and VM-only lease fields are removed from the generic surface (VM's route
+      declarations shrink to match). VM keeps its VM routes; adapter routes receive
+      injected collaborators instead of reading the service's `container` module.
+      Callers: `vm_provisioning_operator/client.py`, the e2e lease view and backdating
+      stages, the integration fixtures.
+- [ ] 5B.9 Relays to VM: `relay_rebinding.py`, `relay_port_allocator.py`, and
       `relay_execution.py` from the service's `services/` into the VM adapter; the relay,
       relay-port-lease, and Ansible pool-configuration table metadata into VM-owned
-      metadata the service composes; VM's relay rebinding subscribes to the host
-      authority's pool-change hook.
-- [ ] 5B.8 Boundary check: remove `arkhai-compute-provisioning-service` from both
+      metadata the service composes; the relay models and client methods from
+      `compute_provisioning` and their route contracts from the family table to VM;
+      VM's relay rebinding subscribes to the host authority's pool-change hook. Review
+      the relay routes' seller-only roles while moving them.
+- [ ] 5B.10 Boundary check: remove `arkhai-compute-provisioning-service` from both
       adapters' dependencies and `arkhai-vms-provisioning-adapter` from bare metal's; add
       an import-boundary test asserting neither adapter imports
       `compute_provisioning_service` or the other adapter (including under
-      `TYPE_CHECKING`), and no neutral provisioning module imports
-      `vm_provisioning_operator`.
-- [ ] 5B.9 **Gate.** All provisioning-family suites, `make check-packaging`, comment
+      `TYPE_CHECKING`), no neutral provisioning module imports
+      `vm_provisioning_operator`, and `compute_provisioning.jobs` and
+      `compute_provisioning.hosts` import no Ansible or SSH module.
+- [ ] 5B.11 **Gate.** All provisioning-family suites, `make check-packaging`, comment
       hygiene; the VM lane and the bare-metal publication lane pass.
-- [ ] 5B.10 Job-backed fulfillment-provider helper: `compute_provisioning` gains the shared
+- [ ] 5B.12 Job-backed fulfillment-provider helper: `compute_provisioning` gains the shared
       provider shape — prepare a domain job from the settlement resource, submit, map job
-      status to fulfillment status, read result and credentials — implementing
-      `kit/fulfillment`'s provider protocol over the job authority.
+      status to fulfillment status, read the result and credential envelopes —
+      implementing `kit/fulfillment`'s provider protocol over the job authority.
       `vm_provisioning_adapter/services/ansible_fulfillment_provider.py` and
       `bare_metal_provisioning_adapter/services/bare_metal_fulfillment_provider.py` keep
       only their job preparation and result mapping. Tests: the helper against fake
@@ -823,7 +969,7 @@ service code.
       family vocabulary; the compute family's packages (`domains/compute`,
       `compute_provisioning`, the service as composition root) — promoted 2026-10-02 at
       the maintainer's request, as "Family kits" under "Package and dependency layers";
-      when 5B.4 lands, name the Ansible distribution there as the compute family kit's
+      when 5B.3 lands, name the Ansible distribution there as the compute family kit's
       optional Ansible implementation distribution. Still to do: kit layers gain the deal-control route
       services and the negotiation runtime's administrative acceptance and opening
       preview; the compute provisioning description gains the `(offering_mode, action)`
@@ -861,6 +1007,8 @@ service code.
 - [ ] 2.6 **Roadmap currency.** Update Goal 7's current state (and Goal 4's, for the
       bare-metal deal and the negotiation composition) in
       `docs/development/ROADMAP.md`.
+      Record the deferred stronger protection scheme for host connection secrets
+      (design: "Deferred, not in this change") as an open gap with no owning change.
 - [ ] 2.7 **Campaign index currency.** Update this change's row and the Goal 3, 4, and 7
       graphs in `openspec/changes/README.md`, and the rows of
       `bare-metal-and-credits-domain-stacks`, `kit-owned-storefront-shell`,
@@ -892,5 +1040,8 @@ service code.
 | Settlement starts bare-metal fulfillment through the kit servicing worker, composed for every mechanism; the Alkahest path commits and registers its lease | `openspec/specs/storefront-publication/spec.md` — "Complete bare-metal seller lifecycle"; `docs/development/ARCHITECTURE.md` |
 | Lane composition files split per market | `docs/development/DEPLOYMENT_AND_CONFIG.md`; `docs/development/TESTING.md` |
 | A family kit is the family-level owner of mechanism, authority, and persistence | `docs/development/ARCHITECTURE.md` — "Repository layers" and "Family kits" (promoted 2026-10-02) |
+| The job authority persists result and credential envelopes and an opaque execution handle, owns retry timing while executors classify retryability and redact, and never lets a late outcome undo cancellation | `openspec/specs/physical-provisioning/spec.md` — "Compute provisioning owns the job and host authorities", "A cancelled job stays cancelled"; `docs/development/ARCHITECTURE.md` |
+| The host authority is connection-neutral: a connection envelope with public fields and opaque protected values it never decrypts or discloses, an immutable `ExecutionHost`, per-kind codecs in implementation distributions that decrypt just in time (only `ssh` implemented) | `openspec/specs/physical-provisioning/spec.md` — "Host connections are typed by their implementation's codec", "Connection secrets stay protected"; `docs/development/ARCHITECTURE.md` "Family kits" compute example |
+| Provisioning route contracts are contributed as plain data and assembled by the composition root | `openspec/specs/physical-provisioning/spec.md` — "Compute-owned caller contract"; `docs/development/ARCHITECTURE.md` |
 | Compute provisioning owns jobs and hosts; executors are complete; adapters contribute preparation and meaning and import neither each other nor the deployed service | `openspec/specs/physical-provisioning/spec.md` — "Adapter-owned compute execution", "Compute-owned caller contract", "Compute provisioning owns the job and host authorities", "Provisioning adapters import neither each other nor the deployed service"; `docs/development/ARCHITECTURE.md` |
 | Scope migrations, the real-host scenario's disposition, and why the scenario uses typed clients | This change's `design.md` |

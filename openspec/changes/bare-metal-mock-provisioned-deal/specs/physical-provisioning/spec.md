@@ -46,13 +46,17 @@ its own offering mode only.
 ### Requirement: Compute provisioning owns the job and host authorities
 
 Compute provisioning MUST own durable physical-execution jobs — their identity, state,
-retries, scheduling, cancellation through the executor, logs, and result and credential
-envelopes — and operational host registration — host identity, enabled state, pool
-association, connection information and protected connection material, and the lookup
-made immediately before execution. Shared execution technology MAY own the mechanics of
-invoking a prepared execution: process lifecycle, transient inventory rendering,
-redaction, and connectivity probes. The site authority MUST reference a host only by
-`host_id` and MUST NOT own provisioning connection information.
+route key, `host_id`, retry counts and timing, scheduling, cancellation through the
+executor and its opaque handle, logs, and results and credentials, persisted and served as
+`ResultEnvelope` and `CredentialEnvelope` — and operational host registration — host
+identity, enabled state, pool association, a connection envelope whose secrets it holds
+only in a protected form, and the lookup made immediately before execution, which yields
+an immutable execution-host value. An executor MUST decide whether its failure is retryable
+and MUST redact what it reports; the job authority decides whether and when a retry
+happens. Shared execution technology MAY own the mechanics of invoking a prepared
+execution: process lifecycle, transient inventory rendering, redaction, failure
+classification, and connectivity probes. The site authority MUST reference a host only
+by `host_id` and MUST NOT own provisioning connection information.
 
 #### Scenario: A host changes pool
 
@@ -60,11 +64,69 @@ redaction, and connectivity probes. The site authority MUST reference a host onl
 - **THEN** the host authority records it and notifies subscribers, and a domain's
   dependent state (such as VM relay rebinding) reacts through that notification
 
+#### Scenario: An executor reports a non-retryable failure
+- **WHEN** a job's executor returns a failure it classifies as not retryable
+- **THEN** the job fails without another attempt, whatever attempts remain under the retry policy
+
 #### Scenario: A VM and a bare-metal job are in flight
 
 - **WHEN** both run at once
 - **THEN** one job engine and one host registry serve both, and neither domain's adapter
   holds either
+
+### Requirement: A cancelled job stays cancelled
+
+Once a job is cancelled, no outcome its executor reports later MAY change its state. A
+cancellation requested before the executor reports its cancellation handle MUST take
+effect when the handle is reported.
+
+#### Scenario: A running job is cancelled and its execution then completes
+
+- **WHEN** an operator cancels a running job and its executor afterwards reports success
+- **THEN** the job remains cancelled and records no result or credentials from that outcome
+
+#### Scenario: A job is cancelled before its executor reports a handle
+
+- **WHEN** cancellation is requested before the executor has reported a handle
+- **THEN** the executor is asked to cancel through the handle as soon as it is reported
+
+### Requirement: Host connections are typed by their implementation's codec
+
+A host's connection MUST be held as a connection envelope (a kind, a version, public
+fields, and protected values) whose kind names the codec of the implementation
+distribution that supports it. Compute provisioning MUST NOT define per-kind connection
+fields; it validates an envelope through its codec. An executor MUST receive an immutable
+execution-host value, not the persistence record, and MUST refuse a connection kind it
+does not support.
+
+#### Scenario: A compute domain needs another connection kind
+
+- **WHEN** a domain's executor reaches its targets by a means other than SSH
+- **THEN** an implementation distribution adds a codec for that kind, and neither the host
+  authority's model nor the executor contract changes
+
+### Requirement: Connection secrets stay protected
+
+Connection secrets MUST cross service boundaries and be persisted only in a protected
+representation (a scheme and its ciphertext). The host authority MUST treat a protected
+value as opaque, MUST NOT decrypt it, and MUST keep it out of every read, logging, and
+error surface. Only a connection codec MAY decrypt a protected value, just in time for
+execution, and plaintext MUST stay confined to the execution boundary and the transient
+storage the connection requires.
+
+#### Scenario: A host is registered with an embedded key
+
+- **WHEN** an operator registers a host whose `ssh` connection carries a caller-encrypted
+  private key
+- **THEN** the host authority validates the envelope through the `ssh` codec, stores the
+  ciphertext as received, and its responses name the protected value and its scheme
+  without the ciphertext
+
+#### Scenario: A job runs against a host with an embedded key
+
+- **WHEN** an executor runs a job against that host
+- **THEN** it receives the protected envelope, and only the `ssh` codec decrypts the key,
+  into transient storage removed when execution ends
 
 ### Requirement: Provisioning adapters import neither each other nor the deployed service
 
@@ -99,7 +161,7 @@ VM and bare-metal execution MUST consume the common compute-provisioning envelop
 - **THEN** the domain's codec renders its variables and interprets its result, and the shared mechanics hold no VM or bare-metal meaning
 
 ### Requirement: Compute-owned caller contract
-Shared storefront/provisioner DTOs, offering-mode-neutral resource-pool models, the job, host, credential, and readiness wire models, and generic client behavior MUST be owned by compute provisioning rather than the VM domain. Direct VM operator APIs MAY retain VM-owned VM action, relay, and VM pool-configuration models, and a VM operator client MAY re-export compute-owned models for compatibility. Compute provisioning MUST NOT name a domain's routes: a domain MUST contribute the route contracts of the routes it mounts, and the client and the service's request authentication MUST read the table the provisioning service assembles from those contributions.
+Shared storefront/provisioner DTOs, offering-mode-neutral resource-pool models, the job, host, credential, and readiness wire models, and generic client behavior MUST be owned by compute provisioning rather than the VM domain. Direct VM operator APIs MAY retain VM-owned VM action, relay, and VM pool-configuration models; callers import compute-owned models from compute provisioning. Compute provisioning MUST NOT name a domain's routes: a domain MUST contribute the route contracts of the routes it mounts, and the client and the service's request authentication MUST read the table the provisioning service assembles from those contributions.
 
 #### Scenario: Bare-metal storefront installs the shared client
 - **WHEN** a bare-metal caller installs the compute-provisioning client without VM execution extras
@@ -113,9 +175,9 @@ Shared storefront/provisioner DTOs, offering-mode-neutral resource-pool models, 
 - **WHEN** a compute domain mounts routes on the provisioning service
 - **THEN** it contributes their route contracts, and neither the compute-provisioning client nor the service's authentication needs a compute-provisioning change to sign or authorize them
 
-#### Scenario: An existing VM operator import of a job model
-- **WHEN** a caller imports a job or host model from the VM operator client
-- **THEN** it receives the compute-owned model, and the wire shape is unchanged
+#### Scenario: An operator reads a lease
+- **WHEN** an operator reads a VM or bare-metal lease through the generic lease routes
+- **THEN** the response is the neutral lease view, carrying no VM-only field
 
 ### Requirement: Executor-dispatched lifecycle
 Market-managed release MUST dispatch by offering mode; direct VM host administration endpoints MAY remain separate operator surfaces.
