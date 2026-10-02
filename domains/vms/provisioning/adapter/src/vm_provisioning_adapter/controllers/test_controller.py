@@ -49,7 +49,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from compute_provisioning.executor_mock import (
+from compute_provisioning.jobs.executor_mock import (
     MockRouteError,
     MockRuleRouteService,
     MockRuleSet,
@@ -214,34 +214,27 @@ async def wait_for_job(
     timeout: float = Query(default=10.0, description="Max seconds to wait"),
     job_service: AnsibleJobService = Depends(_get_job_service),
 ) -> dict:
-    """Long-poll until ``job_id`` reaches a terminal status.
+    """Wait until ``job_id`` reaches a terminal status.
 
-    Returns the final job status immediately if already terminal.
-    Times out with HTTP 408 if the job has not terminated within ``timeout``.
+    Returns the final job status immediately if already terminal; answers 404
+    if the job does not exist by the deadline and 408 if it is not terminal by
+    then. The job authority signals completion in-process, and re-reads the job
+    for one finished elsewhere.
 
     This is the replacement for ``asyncio.sleep`` polling loops in tests.
     """
-    deadline = asyncio.get_event_loop().time() + timeout
-    while True:
-        remaining = deadline - asyncio.get_event_loop().time()
-        try:
-            job = job_service.get_job(job_id)
-        except LookupError:
-            if remaining <= 0:
-                raise HTTPException(status_code=404, detail=f"Job {job_id!r} not found")
-            await asyncio.sleep(min(0.25, remaining))
-            continue
-        if job.status in TERMINAL_STATUSES:
-            return {"job_id": job_id, "status": job.status, "result": job.result,
-                    "error": job.error}
-        if remaining <= 0:
-            raise HTTPException(
-                status_code=408,
-                detail=f"Job {job_id!r} did not reach terminal state within {timeout}s "
-                       f"(current status: {job.status!r})",
-            )
-        await asyncio.sleep(min(0.25, remaining))
-
+    try:
+        job = await job_service.wait_for_terminal(job_id, timeout)
+    except LookupError:
+        raise HTTPException(status_code=404, detail=f"Job {job_id!r} not found")
+    except TimeoutError as exc:
+        raise HTTPException(status_code=408, detail=str(exc))
+    return {
+        "job_id": job_id,
+        "status": job.status,
+        "result": job.result.model_dump(mode="json") if job.result is not None else None,
+        "error": job.error,
+    }
 
 @router.post(
     "/evaluate-job",
@@ -267,7 +260,7 @@ async def evaluate_job(body: EvaluateJobRequest) -> EvaluateJobResponse:
             detail="evaluate-job is only available when ACTIVE_PROFILES=mock",
         )
     if host_svc is None:
-        raise HTTPException(status_code=503, detail="HostService not available")
+        raise HTTPException(status_code=503, detail="host registry not available")
 
     params = AnsibleJobParams(
         host_id=body.host,

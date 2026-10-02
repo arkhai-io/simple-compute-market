@@ -8,9 +8,10 @@ through ``ProvisioningClient``, and every read of capacity through
 """
 
 from __future__ import annotations
+from compute_provisioning_ansible import ssh_connection
 
 import pytest
-from vm_provisioning_operator.models import HostCreate
+from compute_provisioning.hosts import HostCreate
 
 from compute_provisioning_service import container as _container_module
 
@@ -63,8 +64,7 @@ async def test_registering_a_host_through_the_api_derives_nothing(
     client, _ = client_and_queue
 
     await client.register_host(HostCreate(
-        host_id="kvm1", ssh_host="10.0.0.1", ssh_user="ubuntu",
-        ssh_key_value="/keys/id", gpu_count=4,
+        host_id="kvm1", connection=ssh_connection(ssh_host="10.0.0.1", ssh_user="ubuntu", key_path="/keys/id"), gpu_count=4,
     ))
 
     assert await _resources(capacity) == {}

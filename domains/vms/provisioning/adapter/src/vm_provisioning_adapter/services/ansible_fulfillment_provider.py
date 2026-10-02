@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import logging
 from typing import TYPE_CHECKING, Any, Callable
 
 from compute_provisioning.contracts import ExecutorActionEnvelope
@@ -36,10 +37,12 @@ from vm_provisioning_adapter.models.fulfillment_model import (
 from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
 from vm_provisioning_adapter.requirement_delegates import resolve_requirement_delegate
 
+logger = logging.getLogger(__name__)
+
 _VM_OFFERING_MODE = "vm"
 
 if TYPE_CHECKING:
-    from compute_provisioning_service.services.async_job_queue import AsyncJobQueue
+    from compute_provisioning.jobs.queue import AsyncJobQueue
     from vm_provisioning_adapter.services.job_service import AnsibleJobService
 
 _CREATE_KIND = "vm.ansible.create.v1"
@@ -516,8 +519,8 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
         result: dict[str, Any] = {}
         try:
             job = self._job_service.get_job(job_id)
-            if isinstance(job.result, dict):
-                result = job.result
+            if job.result is not None:
+                result = dict(job.result.value)
         except Exception as exc:
             logger.warning(
                 "Could not read job %s result for fulfillment metadata: %s",
@@ -539,11 +542,11 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
             provisioned_resources,
             tuple(
                 VmFulfillmentCredential(
-                    role=credential.role,
-                    password=credential.password,
-                    ssh_commands=credential.ssh_commands,
-                    ssh_key_path_host=credential.ssh_key_path_host,
-                    key_type=credential.key_type,
+                    role=credential.credential_kind,
+                    password=credential.value.get("password"),
+                    ssh_commands=credential.value.get("ssh_commands"),
+                    ssh_key_path_host=credential.value.get("ssh_key_path_host"),
+                    key_type=credential.value.get("key_type"),
                     provisioned_resource_ids=output_ids,
                 )
                 for credential in response.credentials

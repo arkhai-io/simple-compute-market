@@ -433,7 +433,7 @@ class BareMetalFulfillmentProvider(FulfillmentProvider):
         except Exception as exc:
             raise CredentialFetchFailedError(str(exc)) from exc
 
-        result = job.result if isinstance(job.result, dict) else {}
+        result = dict(job.result.value) if job.result is not None else {}
         operation_result = result.get("ansible_result")
         if not isinstance(operation_result, dict):
             operation_result = result

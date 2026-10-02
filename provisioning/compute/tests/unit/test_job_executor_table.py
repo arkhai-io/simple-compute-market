@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from compute_provisioning import JobExecutorTable, UnsupportedExecutorActionError
-from compute_provisioning.executor_mock import MockRuleSet
+from compute_provisioning.jobs.executor_mock import MockRuleSet
 
 
 class _Executor:

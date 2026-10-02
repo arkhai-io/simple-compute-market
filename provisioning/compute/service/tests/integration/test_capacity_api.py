@@ -5,10 +5,13 @@ SiteCapacityClient will speak — payload shapes here are the wire contract.
 """
 
 from __future__ import annotations
+from compute_provisioning_ansible import ssh_connection
 
 from typing import Any
 
 import pytest
+from compute_provisioning.hosts import ConnectionEnvelope
+from compute_provisioning.hosts.db import Host
 from httpx import ASGITransport, AsyncClient
 
 from market_site.ledger import ALLOCATION_MODE_EXCLUSIVE, ALLOCATION_MODE_SHAREABLE
@@ -28,9 +31,20 @@ from market_resource_pools import read_site_declarations, resolve_pool_declarati
 from market_site_client.fixtures.resource_pools import (
     validate_resource_pool_projection,
 )
-from vm_provisioning_operator.models import HostCreate
+from compute_provisioning.hosts import HostCreate
 
 from .conftest import SERVICE_AUTHORITIES, STOREFRONT_SIGNER
+
+
+def _host_row(**fields) -> Host:
+    """A host row reached over ssh; its connection is incidental here."""
+    host = Host(**fields)
+    host.set_connection(ConnectionEnvelope(
+        kind="ssh",
+        version=1,
+        public={"ssh_host": "10.0.0.1", "ssh_user": "root", "key_path": "/dev/null"},
+    ))
+    return host
 
 
 def _site_capacity_client(base_url: str, *, transport):
@@ -445,9 +459,8 @@ async def test_site_resource_pools_projection_surfaces_region_sla_pricing_policy
     )
 
     with container.session_factory()() as db:
-        db.add(Host(
-            host_id="kvm1", ssh_host="10.0.0.1", ssh_user="root",
-            ssh_key_value="/dev/null", gpu_count=8, gpu_model="H200",
+        db.add(_host_row(
+            host_id="kvm1", gpu_count=8, gpu_model="H200",
             pool_id="hetzner-eu",
         ))
         db.commit()
@@ -694,9 +707,8 @@ async def test_site_resource_pools_projection_omits_pool_views_with_no_defaults(
     from compute_provisioning_service.db.models import Host
 
     with container.session_factory()() as db:
-        db.add(Host(
-            host_id="kvm1", ssh_host="10.0.0.1", ssh_user="root",
-            ssh_key_value="/dev/null", gpu_count=8, pool_id="default",
+        db.add(_host_row(
+            host_id="kvm1", gpu_count=8, pool_id="default",
         ))
         db.commit()
 
@@ -740,9 +752,8 @@ async def test_site_capacity_projection_version_endpoints_through_the_real_clien
     assert "digest" in bucket_version_before
 
     with container.session_factory()() as db:
-        db.add(Host(
-            host_id="kvm-version-test", ssh_host="10.0.0.2", ssh_user="root",
-            ssh_key_value="/dev/null", gpu_count=4, pool_id="version-pool",
+        db.add(_host_row(
+            host_id="kvm-version-test", gpu_count=4, pool_id="version-pool",
         ))
         db.commit()
     await capacity.register(
@@ -862,8 +873,7 @@ async def test_the_resource_pool_projection_publishes_declarations_not_hosts(
         ssh_key_type="path",
     )
     await provisioning_client.register_host(HostCreate(
-        host_id="kvm2", ssh_host="10.0.0.2", ssh_user="ubuntu",
-        ssh_key_value="/keys/id", gpu_count=8,
+        host_id="kvm2", connection=ssh_connection(ssh_host="10.0.0.2", ssh_user="ubuntu", key_path="/keys/id"), gpu_count=8,
     ))
     reserved = await capacity.reserve(
         {"offering_mode": "vm", "gpu_count": 1, "resource_id": "kvm1"}, {}
@@ -966,8 +976,7 @@ async def test_a_declaration_naming_no_host_reaches_the_resource_pool_projection
     provisioning_client, _ = client_and_queue
     # The host record carries a GPU model; the declaration naming it does not.
     await provisioning_client.register_host(HostCreate(
-        host_id="kvm1", ssh_host="10.0.0.1", public_host="203.0.113.10",
-        ssh_user="ubuntu", ssh_key_value="/keys/id", gpu_model="H100",
+        host_id="kvm1", connection=ssh_connection(ssh_host="10.0.0.1", ssh_user="ubuntu", public_host="203.0.113.10", key_path="/keys/id"), gpu_model="H100",
     ))
     await capacity.register(
         "no-host", pool_id="default",

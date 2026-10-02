@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from .contracts import CredentialEnvelope, ExecutorActionEnvelope, ResultEnvelope
+from .contracts import ExecutorActionEnvelope
 from .jobs.executor import JobExecutor
 
 
@@ -29,14 +29,6 @@ class ExecutorAdapter(Protocol):
     ) -> str:
         """Submit executor work and return its durable job identifier."""
 
-    def validate_result(self, action_kind: str, result: Mapping[str, Any]) -> ResultEnvelope:
-        """Validate and classify an executor-owned terminal result."""
-
-    def validate_credentials(
-        self, action_kind: str, credentials: list[Mapping[str, Any]]
-    ) -> list[CredentialEnvelope]:
-        """Validate and classify executor-owned credentials."""
-
 
 @dataclass(frozen=True)
 class FunctionalExecutorAdapter:
@@ -45,10 +37,6 @@ class FunctionalExecutorAdapter:
     offering_mode: str
     parameter_validators: Mapping[str, Callable[[Mapping[str, Any]], Any]]
     submit_action: Callable[[ExecutorActionEnvelope, Any], Awaitable[str]]
-    result_validators: Mapping[str, Callable[[Mapping[str, Any]], ResultEnvelope]]
-    credential_validators: Mapping[
-        str, Callable[[list[Mapping[str, Any]]], list[CredentialEnvelope]]
-    ]
 
     def validate_parameters(self, action_kind: str, parameters: Mapping[str, Any]) -> Any:
         try:
@@ -63,20 +51,6 @@ class FunctionalExecutorAdapter:
         self, envelope: ExecutorActionEnvelope, validated_parameters: Any
     ) -> str:
         return await self.submit_action(envelope, validated_parameters)
-
-    def validate_result(self, action_kind: str, result: Mapping[str, Any]) -> ResultEnvelope:
-        try:
-            return self.result_validators[action_kind](result)
-        except KeyError as exc:
-            raise UnsupportedExecutorActionError(
-                f"executor {self.offering_mode!r} has no result codec for {action_kind!r}"
-            ) from exc
-
-    def validate_credentials(
-        self, action_kind: str, credentials: list[Mapping[str, Any]]
-    ) -> list[CredentialEnvelope]:
-        validator = self.credential_validators.get(action_kind)
-        return validator(credentials) if validator is not None else []
 
 
 class ExecutorAdapterRegistry:
@@ -159,7 +133,7 @@ class JobExecutorTable:
         A mode is ``mock`` only when every executor registered for it carries the
         compute mock mechanism's rules.
         """
-        from .executor_mock import MockRuleSet
+        from .jobs.executor_mock import MockRuleSet
 
         modes: dict[str, str] = {}
         for (offering_mode, _action), executor in self._executors.items():

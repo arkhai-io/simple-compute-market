@@ -21,12 +21,13 @@ What is NOT covered here (unit test jurisdiction):
 """
 
 from __future__ import annotations
+from compute_provisioning_ansible import ssh_connection
 
 import pytest
 
 from compute_provisioning import PoolCreate, PoolReplace, PoolUpdate
 from vm_provisioning_operator import ProvisioningClient, ProvisioningError
-from vm_provisioning_operator.models import HostCreate, HostUpdate
+from compute_provisioning.hosts import HostCreate, HostUpdate
 
 
 _ANSIBLE_CONFIG = {
@@ -539,10 +540,7 @@ class TestDeletePool:
         host = await client.register_host(
             HostCreate(
                 host_id="kvm1",
-                ssh_host="10.0.0.1",
-                ssh_user="ubuntu",
-                ssh_key_type="path",
-                ssh_key_value="/key",
+                connection=ssh_connection(ssh_host="10.0.0.1", ssh_user="ubuntu", key_path="/key"),
             )
         )
         assert host.pool_id == "default"
@@ -629,10 +627,7 @@ class TestHostPoolIntegration:
         host = await client.register_host(
             HostCreate(
                 host_id="kvm1",
-                ssh_host="10.0.0.1",
-                ssh_user="ubuntu",
-                ssh_key_type="path",
-                ssh_key_value="/key",
+                connection=ssh_connection(ssh_host="10.0.0.1", ssh_user="ubuntu", key_path="/key"),
                 pool_id="hetzner-eu",
             )
         )
@@ -643,10 +638,7 @@ class TestHostPoolIntegration:
         host = await client.register_host(
             HostCreate(
                 host_id="kvm1",
-                ssh_host="10.0.0.1",
-                ssh_user="ubuntu",
-                ssh_key_type="path",
-                ssh_key_value="/key",
+                connection=ssh_connection(ssh_host="10.0.0.1", ssh_user="ubuntu", key_path="/key"),
             )
         )
         assert host.pool_id == "default"
@@ -659,10 +651,7 @@ class TestHostPoolIntegration:
             await client.register_host(
                 HostCreate(
                     host_id="kvm1",
-                    ssh_host="10.0.0.1",
-                    ssh_user="ubuntu",
-                    ssh_key_type="path",
-                    ssh_key_value="/key",
+                    connection=ssh_connection(ssh_host="10.0.0.1", ssh_user="ubuntu", key_path="/key"),
                     pool_id="does-not-exist",
                 )
             )
@@ -674,10 +663,7 @@ class TestHostPoolIntegration:
         await client.register_host(
             HostCreate(
                 host_id="kvm1",
-                ssh_host="10.0.0.1",
-                ssh_user="ubuntu",
-                ssh_key_type="path",
-                ssh_key_value="/key",
+                connection=ssh_connection(ssh_host="10.0.0.1", ssh_user="ubuntu", key_path="/key"),
             )
         )
         updated = await client.update_host("kvm1", HostUpdate(pool_id="hetzner-eu"))

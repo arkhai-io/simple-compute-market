@@ -236,12 +236,27 @@ wheels = [
 ]
 
 [[package]]
+name = "arkhai-compute-provisioning-ansible"
+version = "0.1.0"
+source = { registry = "../../../../.dist" }
+dependencies = [
+    { name = "arkhai-compute-provisioning" },
+    { name = "arkhai-kit-config" },
+    { name = "arkhai-kit-resource-pools" },
+    { name = "pydantic" },
+]
+wheels = [
+    { path = "arkhai_compute_provisioning_ansible-0.1.0-py3-none-any.whl" },
+]
+
+[[package]]
 name = "arkhai-compute-provisioning-service"
 version = "0.5.0"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "aiohttp" },
     { name = "arkhai-compute-provisioning" },
+    { name = "arkhai-compute-provisioning-ansible" },
     { name = "arkhai-core-storefront-client" },
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-fulfillment" },
@@ -420,6 +435,7 @@ source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "arkhai-bare-metal" },
     { name = "arkhai-compute-provisioning" },
+    { name = "arkhai-compute-provisioning-ansible" },
     { name = "arkhai-compute-provisioning-service" },
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-fulfillment" },

@@ -15,7 +15,7 @@ import pytest
 
 from market_identity import Identity, TrustedIdentitySet, create_signer
 from vm_provisioning_operator import ProvisioningError, SyncProvisioningClient
-from vm_provisioning_operator import HostCreate, HostUpdate
+from compute_provisioning.hosts import ConnectionSubmission, HostCreate, HostUpdate
 
 log = logging.getLogger(__name__)
 
@@ -114,10 +114,10 @@ class TestProvisioningSmoke:
         """Register -> GET -> disable -> re-enable -> cleanup a transient test host."""
         test_host = HostCreate(
             host_id="smoke-test-host",
-            ssh_host="192.0.2.1",
-            ssh_user="ubuntu",
-            ssh_key_type="path",
-            ssh_key_value="/home/appuser/.ssh/id_ed25519",
+            connection=ConnectionSubmission(
+                kind="ssh",
+                public={"ssh_host": "192.0.2.1", "ssh_user": "ubuntu", "key_path": "/home/appuser/.ssh/id_ed25519"},
+            ),
             gpu_count=0,
             enabled=True,
         )
@@ -130,16 +130,15 @@ class TestProvisioningSmoke:
                     raise
                 log.info("smoke-test-host already exists - updating instead of inserting")
                 reg = client.update_host(
-                    "smoke-test-host",
-                    HostUpdate(ssh_host=test_host.ssh_host, ssh_user=test_host.ssh_user),
+                    "smoke-test-host", HostUpdate(connection=test_host.connection),
                 )
                 client.enable_host("smoke-test-host")
 
             assert reg.host_id == "smoke-test-host"
-            assert not hasattr(reg, "ssh_key_value"), "ssh_key_value must never be returned"
+            assert "secrets" not in reg.connection.model_dump(), "secrets must never be returned"
 
             got = client.get_host("smoke-test-host")
-            assert got.ssh_host == "192.0.2.1"
+            assert got.connection.public["ssh_host"] == "192.0.2.1"
 
             disabled = client.disable_host("smoke-test-host")
             assert disabled.enabled is False

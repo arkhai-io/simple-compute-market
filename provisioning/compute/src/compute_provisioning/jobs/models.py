@@ -1,7 +1,8 @@
 """Wire models of the job authority's operator routes.
 
-Parameters and results are carried as opaque mappings: what a job's parameters
-mean and how its result reads belong to the domain whose executor ran it.
+Parameters are carried as opaque mappings, and results and credentials as the
+envelopes the job's executor reported: what any of them mean belongs to the
+domain whose executor ran the job.
 """
 
 from __future__ import annotations
@@ -10,6 +11,8 @@ from datetime import datetime
 from typing import Optional
 
 from pydantic import BaseModel, Field
+
+from compute_provisioning.contracts import CredentialEnvelope, ResultEnvelope
 
 
 class JobSubmitResponse(BaseModel):
@@ -33,9 +36,10 @@ class JobStatusResponse(BaseModel):
     params: dict = Field(
         description="Original request parameters submitted with the job"
     )
-    result: Optional[dict] = Field(
+    host_id: Optional[str] = Field(default=None, description="The host the job runs against")
+    result: Optional[ResultEnvelope] = Field(
         default=None,
-        description="Structured result the job's executor reported on success",
+        description="The result the job's executor reported on success",
     )
     error: Optional[str] = Field(default=None, description="Error message if the job failed")
     retry_count: int = Field(default=0, description="Number of retries attempted so far")
@@ -48,6 +52,13 @@ class JobStatusResponse(BaseModel):
         default=None,
         description="On-chain escrow UID linking this job to a deal (set at submission time)",
     )
+
+
+class JobCredentialsResponse(BaseModel):
+    """The credentials a job's executor reported, as envelopes."""
+
+    job_id: str
+    credentials: list[CredentialEnvelope] = Field(default_factory=list)
 
 
 class JobLogsResponse(BaseModel):
@@ -69,4 +80,10 @@ class JobListResponse(BaseModel):
     limit: int = Field(description="Maximum jobs returned per page")
 
 
-__all__ = ["JobListResponse", "JobLogsResponse", "JobStatusResponse", "JobSubmitResponse"]
+__all__ = [
+    "JobCredentialsResponse",
+    "JobListResponse",
+    "JobLogsResponse",
+    "JobStatusResponse",
+    "JobSubmitResponse",
+]

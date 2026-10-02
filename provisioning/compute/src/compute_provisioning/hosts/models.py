@@ -1,56 +1,57 @@
 """Wire models of the host registry's operator routes.
 
-A host is the machine a provisioning executor connects to, identified by
-``host_id``, with its connection information and protected connection material.
-The site authority references a host only by ``host_id``.
+A host is the machine a provisioning executor runs jobs against, identified by
+``host_id``, with a connection whose kind names the codec that understands it.
+A request submits a connection's public fields and any secrets; a secret is
+write-only: it is protected by the kind's codec before it is stored, and a
+response names each protected value and its scheme, never its content. The site
+authority references a host only by ``host_id``.
 """
 
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
+
+
+class ConnectionSubmission(BaseModel):
+    """A connection as an operator submits it."""
+
+    kind: str = Field(min_length=1, description="The connection kind, e.g. 'ssh'.")
+    version: int = Field(default=1, ge=1, description="The kind's payload version.")
+    public: dict[str, Any] = Field(
+        default_factory=dict, description="The kind's non-secret fields."
+    )
+    secrets: dict[str, str] = Field(
+        default_factory=dict,
+        repr=False,
+        description=(
+            "Secret material the kind takes, protected before storage and never "
+            "returned. Omitted on an update, a stored secret the connection still "
+            "needs is kept."
+        ),
+    )
+
+
+class ConnectionView(BaseModel):
+    """A stored connection as a read returns it: protected values by scheme only."""
+
+    kind: str
+    version: int
+    public: dict[str, Any]
+    protected: dict[str, str] = Field(
+        default_factory=dict,
+        description="Each protected value's name and the scheme protecting it.",
+    )
 
 
 class HostCreate(BaseModel):
     """Body accepted by ``POST /api/v1/hosts/``."""
 
     host_id: str = Field(description="The host's identity, e.g. 'kvm1' or 'bm-node-1'.")
-    ssh_host: str = Field(description="IP/hostname the provisioner SSHes to.")
-    public_host: Optional[str] = Field(
-        default=None,
-        description=(
-            "Address tenants use to reach what this host delivers "
-            "(public IP, DNS, or overlay IP). Defaults to ssh_host when "
-            "omitted — set it when buyers reach the host on a different "
-            "network than the provisioner does."
-        ),
-    )
-    ssh_user: str = Field(default="root", description="SSH user the provisioner connects as.")
-    ssh_port: int = Field(
-        default=22,
-        ge=1,
-        le=65535,
-        description=(
-            "Port the provisioner connects to. Set it when the host answers "
-            "SSH somewhere other than port 22 at ssh_host — through a reverse "
-            "tunnel, a NAT forward, or a bastion."
-        ),
-    )
-    ssh_key_type: Literal["path", "embedded"] = Field(
-        default="path",
-        description=(
-            "'path' stores a filesystem path to the SSH key; "
-            "'embedded' stores Fernet-encrypted key material in the database."
-        ),
-    )
-    ssh_key_value: str = Field(
-        description=(
-            "For 'path': absolute path to the SSH private key on the service host. "
-            "For 'embedded': Fernet-encrypted PEM key material."
-        )
-    )
+    connection: ConnectionSubmission
     gpu_count: int = Field(default=0, ge=0, description="Number of GPU cards on the host.")
     gpu_model: Optional[str] = Field(
         default=None, description="Descriptive GPU model, e.g. 'H100', 'A100'.",
@@ -65,14 +66,9 @@ class HostCreate(BaseModel):
 class HostUpdate(BaseModel):
     """Body accepted by ``PUT /api/v1/hosts/{host_id}``."""
 
-    ssh_host: Optional[str] = Field(default=None, description="Updated IP/hostname.")
-    public_host: Optional[str] = Field(default=None, description="Updated public address.")
-    ssh_user: Optional[str] = Field(default=None, description="Updated SSH user.")
-    ssh_port: Optional[int] = Field(
-        default=None, ge=1, le=65535, description="Updated SSH port.",
+    connection: Optional[ConnectionSubmission] = Field(
+        default=None, description="A replacement connection."
     )
-    ssh_key_type: Optional[Literal["path", "embedded"]] = Field(default=None)
-    ssh_key_value: Optional[str] = Field(default=None, description="Updated key path or material.")
     gpu_count: Optional[int] = Field(default=None, ge=0)
     gpu_model: Optional[str] = Field(default=None, description="Updated descriptive GPU model.")
     enabled: Optional[bool] = Field(default=None)
@@ -80,26 +76,16 @@ class HostUpdate(BaseModel):
 
 
 class HostResponse(BaseModel):
-    """Serialised host row returned by all host endpoints.
-
-    ``ssh_key_value`` is intentionally absent — callers have no need to
-    read back raw or encrypted key material.
-    """
+    """A registered host as every host endpoint returns it."""
 
     host_id: str
-    ssh_host: str
-    public_host: Optional[str] = None
-    ssh_user: str
-    ssh_port: int
-    ssh_key_type: str
+    connection: ConnectionView
     gpu_count: int
     gpu_model: Optional[str] = None
     enabled: bool
     pool_id: str
     created_at: datetime
     updated_at: datetime
-
-    model_config = {"from_attributes": True}
 
 
 class HostListResponse(BaseModel):
@@ -109,4 +95,11 @@ class HostListResponse(BaseModel):
     total: int
 
 
-__all__ = ["HostCreate", "HostListResponse", "HostResponse", "HostUpdate"]
+__all__ = [
+    "ConnectionSubmission",
+    "ConnectionView",
+    "HostCreate",
+    "HostListResponse",
+    "HostResponse",
+    "HostUpdate",
+]

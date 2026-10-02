@@ -22,8 +22,8 @@ from arkhai_bare_metal import (
 from compute_provisioning.contracts import ExecutorActionEnvelope
 from compute_provisioning_service.config import DEFAULT_BARE_METAL_RECLAIM_POLICY
 from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
-from vm_provisioning_operator.models import JobSubmitResponse
-from compute_provisioning_service.services.async_job_queue import AsyncJobQueue
+from compute_provisioning.jobs import JobSubmitResponse
+from compute_provisioning.jobs.queue import AsyncJobQueue
 from bare_metal_provisioning_adapter.services.bare_metal_lease_service import bare_metal_access_ref
 from bare_metal_provisioning_adapter.release import get_physical_host_id
 

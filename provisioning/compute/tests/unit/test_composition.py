@@ -4,10 +4,8 @@ from dataclasses import dataclass
 
 import pytest
 from compute_provisioning import (
-    CredentialEnvelope,
     ExecutorAdapterBundle,
     ExecutorAdapterContribution,
-    ResultEnvelope,
     compose_adapter_bundles,
 )
 from market_fulfillment import (
@@ -29,23 +27,6 @@ class FakeAdapter:
 
     async def submit(self, envelope, validated_parameters):
         return "job-1"
-
-    def validate_result(self, action_kind, result):
-        return ResultEnvelope(
-            offering_mode=self.offering_mode,
-            result_kind=action_kind,
-            value=dict(result),
-        )
-
-    def validate_credentials(self, action_kind, credentials):
-        return [
-            CredentialEnvelope(
-                offering_mode=self.offering_mode,
-                credential_kind="access",
-                value=dict(item),
-            )
-            for item in credentials
-        ]
 
 
 class FakeReleaseExecutor:

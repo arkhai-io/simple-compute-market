@@ -70,12 +70,7 @@ def _validate_executor(bundle_name: str, contribution: ExecutorAdapterContributi
         raise ValueError(
             f"adapter bundle {bundle_name!r} executor {offering_mode!r} declares no action kinds"
         )
-    for hook in (
-        "validate_parameters",
-        "submit",
-        "validate_result",
-        "validate_credentials",
-    ):
+    for hook in ("validate_parameters", "submit"):
         if not callable(getattr(adapter, hook, None)):
             raise ValueError(
                 f"adapter bundle {bundle_name!r} executor {offering_mode!r} "

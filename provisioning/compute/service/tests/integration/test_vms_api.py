@@ -16,15 +16,17 @@ What is NOT covered here (unit test jurisdiction):
 """
 
 from __future__ import annotations
+from compute_provisioning_ansible import ssh_connection
 
 import asyncio
 
 import pytest
 
 from vm_provisioning_operator import ProvisioningError, ProvisioningJobError
-from vm_provisioning_operator.models import CreateVmRequest, HostCreate
+from vm_provisioning_operator.models import CreateVmRequest
+from compute_provisioning.hosts import HostCreate
 from compute_provisioning_service import container as _container_module
-from compute_provisioning_service.services.async_job_queue import AsyncJobQueue
+from compute_provisioning.jobs.queue import AsyncJobQueue
 
 
 HOST = "kvm1"
@@ -99,10 +101,7 @@ class TestCreateVmViaClient:
         client, _ = client_and_queue
         await client.register_host(HostCreate(
             host_id=HOST,
-            ssh_host="10.0.0.1",
-            ssh_user="root",
-            ssh_key_type="path",
-            ssh_key_value="/tmp/test-key",
+            connection=ssh_connection(ssh_host="10.0.0.1", ssh_user="root", key_path="/tmp/test-key"),
         ))
 
     async def test_create_vm_returns_queued_job(self, client_and_queue):
@@ -136,7 +135,9 @@ class TestCreateVmViaClient:
         await asyncio.wait_for(dispatched.wait(), timeout=5.0)
         final = await client.poll_until_complete(submit.job_id, timeout=5.0, poll_interval=0.05)
 
-        result = final.result
+        assert final.result.offering_mode == "vm"
+        assert final.result.result_kind == "vm_create"
+        result = final.result.value
         assert result["vm_name"] == VM_NAME
         assert result["tenant_user"] == "agentvm01"
         assert result["ssh_port"] == "54321"
@@ -229,7 +230,7 @@ class TestCreateVmViaClient:
         await client.poll_until_complete(submit.job_id, timeout=5.0, poll_interval=0.05)
 
         creds = await client.get_job_credentials(submit.job_id)
-        roles = {c.role for c in creds.credentials}
+        roles = {c.credential_kind for c in creds.credentials}
         assert roles == {"root", "tenant"}
 
     async def test_create_vm_full_request_body_accepted(self, client_and_queue):
@@ -290,10 +291,7 @@ class TestDispatchRequiresARegisteredHost:
         client, job_queue = client_and_queue
         await client.register_host(HostCreate(
             host_id="registered-kvm",
-            ssh_host="192.0.2.10",
-            ssh_user="root",
-            ssh_key_type="path",
-            ssh_key_value="/tmp/test-key",
+            connection=ssh_connection(ssh_host="192.0.2.10", ssh_user="root", key_path="/tmp/test-key"),
         ))
         dispatched = _make_event_seam(job_queue)
 
@@ -311,4 +309,4 @@ class TestDispatchRequiresARegisteredHost:
         start = fake_ansible.start_playbook.call_args.kwargs
         assert start["inventory_path"] == fake_ansible.write_inventory.return_value
         # No public address is configured, so tenants get the connection address.
-        assert final.result["host_ip"] == "192.0.2.10"
+        assert final.result.value["host_ip"] == "192.0.2.10"

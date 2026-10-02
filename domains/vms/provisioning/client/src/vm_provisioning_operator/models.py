@@ -1,9 +1,8 @@
 """Typed request and response models for the Arkhai provisioning service REST API.
 
 These models are the direct VM operator HTTP contract. The host, job, and
-aggregate health and version models are compute provisioning's and are
-re-exported here, so existing imports receive the compute-owned models and the
-wire shapes do not change.
+aggregate health and version models are compute provisioning's; callers import
+them from ``compute_provisioning``.
 
 Internal server-only types (``AnsibleJobParams``, ``AnsibleRunResult``,
 ``build_simple_params``, ``EvaluateJobRequest``, ``EvaluateJobResponse``) remain
@@ -15,19 +14,6 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal, Optional
 
-from compute_provisioning.hosts import (
-    HostCreate,
-    HostListResponse,
-    HostResponse,
-    HostUpdate,
-)
-from compute_provisioning.jobs import (
-    JobListResponse,
-    JobLogsResponse,
-    JobStatusResponse,
-    JobSubmitResponse,
-)
-from compute_provisioning.system_models import HealthResponse, VersionResponse
 from pydantic import BaseModel, Field, model_validator
 
 
@@ -54,36 +40,6 @@ class HostConnectivityResponse(BaseModel):
 
 # ---------------------------------------------------------------------------
 # Jobs
-# ---------------------------------------------------------------------------
-
-
-class CredentialResponse(BaseModel):
-    """A single credential (one role) for a job."""
-
-    role: str = Field(description="Credential role: 'root' or 'tenant'")
-    password: Optional[str] = Field(default=None, description="Login password")
-    ssh_commands: Optional[dict] = Field(
-        default=None, description="SSH connection commands (external/internal)"
-    )
-    ssh_key_path_host: Optional[str] = Field(
-        default=None, description="Path to SSH key on the host"
-    )
-    key_type: Optional[str] = Field(
-        default=None, description="SSH key type (e.g. 'provided')"
-    )
-
-
-class CredentialListResponse(BaseModel):
-    """All credentials for a job, one entry per role."""
-
-    job_id: str = Field(description="Unique job identifier")
-    credentials: list[CredentialResponse] = Field(
-        description="Every role's credentials for the job"
-    )
-
-
-# ---------------------------------------------------------------------------
-# VM operations — request models
 # ---------------------------------------------------------------------------
 
 
@@ -523,20 +479,9 @@ class AnsibleReadinessResponse(BaseModel):
 __all__ = [
     "AnsibleReadinessResponse",
     "CreateVmRequest",
-    "CredentialListResponse",
-    "CredentialResponse",
     "FileInfo",
-    "HealthResponse",
     "HostConnectivityResponse",
-    "HostCreate",
-    "HostListResponse",
-    "HostResponse",
-    "HostUpdate",
     "InventoryInfo",
-    "JobListResponse",
-    "JobLogsResponse",
-    "JobStatusResponse",
-    "JobSubmitResponse",
     "LeaseCreate",
     "LeaseForceReleaseRequest",
     "LeaseListResponse",
@@ -546,6 +491,5 @@ __all__ = [
     "LeaseTerminateRequest",
     "LeaseUpdate",
     "SshKeyInfo",
-    "VersionResponse",
     "VmActionRequest",
 ]

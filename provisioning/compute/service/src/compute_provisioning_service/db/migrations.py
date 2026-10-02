@@ -58,6 +58,7 @@ def apply_schema_migrations(
     *,
     default_playbook_path: str = "/opt/domains/vms/provisioning/iac/ansible/playbooks/single-tenant/vm-operations.yaml",
     default_inventory_group: str = "kvm_hosts",
+    default_host_id: str | None = None,
 ) -> None:
     """Apply all known migrations once, tracking completion in the database.
 
@@ -77,6 +78,8 @@ def apply_schema_migrations(
                 default_playbook_path=default_playbook_path,
                 default_inventory_group=default_inventory_group,
             )
+        elif migration.id == "20261002_002_job_envelopes":
+            _migrate_job_envelopes(engine, default_host_id=default_host_id)
         else:
             migration.apply(engine)
         _record_migration(engine, migration.id)
@@ -201,12 +204,12 @@ def _drop_columns_via_table_rebuild(
     ``PRAGMA foreign_key_check`` before committing, and restores whatever
     the connection's foreign-key setting was before this function ran.
 
-    Does not preserve triggers, views, or outbound foreign-key constraints
-    *defined on this table* — ``capacity_reservations`` (this helper's
-    only caller today) has none of those, confirmed by inspection, and
-    this function refuses to run against a table that does rather than
-    silently dropping them unnoticed. Extend it deliberately if a future
-    caller needs that.
+    Outbound foreign-key constraints defined on this table are recreated on
+    the rebuilt table, with their referenced columns and ``ON UPDATE`` and
+    ``ON DELETE`` actions, provided none of their columns is being dropped;
+    dropping a column a foreign key uses is refused. Does not preserve
+    triggers or views, and refuses to run against a table that has them
+    rather than silently dropping them unnoticed.
     """
     _validate_sql_identifier(table_name)
     for column in columns_to_drop:
@@ -234,13 +237,31 @@ def _drop_columns_via_table_rebuild(
         outbound_fks = connection.execute(
             text(f"PRAGMA foreign_key_list({table_name})")
         ).fetchall()
-        if outbound_fks:
-            raise NotImplementedError(
-                f"_drop_columns_via_table_rebuild does not preserve "
-                f"outbound foreign key constraints, but {table_name!r} "
-                f"has some. Extend this helper before using it on this "
-                "table."
+        foreign_keys: dict[int, list] = {}
+        for row in outbound_fks:
+            fk_id, _seq, referenced, from_column, to_column, on_update, on_delete, _match = row
+            if from_column in present:
+                raise ValueError(
+                    f"Refusing to drop {from_column!r} from {table_name!r}: a "
+                    "foreign key uses it"
+                )
+            foreign_keys.setdefault(fk_id, []).append(
+                (referenced, from_column, to_column, on_update, on_delete)
             )
+        foreign_key_clauses = []
+        for parts in foreign_keys.values():
+            referenced = _validate_sql_identifier(parts[0][0])
+            from_columns = ", ".join(_validate_sql_identifier(p[1]) for p in parts)
+            to_columns = ", ".join(_validate_sql_identifier(p[2]) for p in parts)
+            clause = (
+                f"FOREIGN KEY ({from_columns}) REFERENCES {referenced} ({to_columns})"
+            )
+            on_update, on_delete = parts[0][3], parts[0][4]
+            if on_update and on_update.upper() != "NO ACTION":
+                clause += f" ON UPDATE {on_update.upper()}"
+            if on_delete and on_delete.upper() != "NO ACTION":
+                clause += f" ON DELETE {on_delete.upper()}"
+            foreign_key_clauses.append(clause)
 
         # PRAGMA foreign_keys can only be changed with no transaction
         # open -- read and set it before starting the rebuild's own
@@ -290,7 +311,7 @@ def _drop_columns_via_table_rebuild(
                 connection.execute(text(f"DROP TABLE IF EXISTS {rebuild_table}"))
                 connection.execute(text(
                     f"CREATE TABLE {rebuild_table} "
-                    f"({', '.join(_column_def(c) for c in keep)})"
+                    f"({', '.join([*(_column_def(c) for c in keep), *foreign_key_clauses])})"
                 ))
                 column_list = ", ".join(keep_names)
                 connection.execute(text(
@@ -2585,6 +2606,222 @@ def _migrate_drop_reservation_release_mirror(engine: Engine) -> None:
         engine, "capacity_reservations", ["vm_remove_job_id"]
     )
 
+# The host connection columns the connection envelope replaced, and the
+# ``ssh`` connection kind and key scheme existing rows convert to.
+_LEGACY_HOST_CONNECTION_COLUMNS = (
+    "ssh_host",
+    "public_host",
+    "ssh_user",
+    "ssh_port",
+    "ssh_key_type",
+    "ssh_key_value",
+)
+
+
+def _migrate_host_connection_envelope(engine: Engine) -> None:
+    """Hold each host's connection as an envelope instead of SSH columns.
+
+    Every existing host is reached over SSH, so each row becomes an ``ssh``
+    connection: its address, port, user, and public address become public
+    fields; a ``path`` key becomes ``key_path``; an ``embedded`` key's stored
+    ciphertext, which the service encrypted with its Fernet key when the key
+    was submitted, becomes the ``fernet-v1`` protected ``private_key`` byte for
+    byte, so nothing here encrypts or decrypts. The SSH columns are then
+    dropped.
+
+    On a database created from the current model the SSH columns some earlier
+    migrations add back are empty and are simply dropped. Irreversible through
+    this chain; rerunning it after the columns are gone is a no-op.
+    """
+    if not _table_exists(engine, "hosts"):
+        return
+    present = [
+        column
+        for column in _LEGACY_HOST_CONNECTION_COLUMNS
+        if _column_exists(engine, "hosts", column)
+    ]
+    if not present:
+        return
+    _add_column_if_missing(
+        engine, "hosts", "connection_kind", "VARCHAR NOT NULL DEFAULT 'ssh'"
+    )
+    _add_column_if_missing(
+        engine, "hosts", "connection_version", "INTEGER NOT NULL DEFAULT 1"
+    )
+    _add_column_if_missing(
+        engine, "hosts", "connection_public", "JSON NOT NULL DEFAULT '{}'"
+    )
+    _add_column_if_missing(
+        engine, "hosts", "connection_protected", "JSON NOT NULL DEFAULT '{}'"
+    )
+    if "ssh_host" in present:
+        with engine.begin() as connection:
+            rows = connection.execute(text(
+                "SELECT host_id, " + ", ".join(present) + " FROM hosts"
+            )).mappings().all()
+            for row in rows:
+                key_type = row.get("ssh_key_type") or "path"
+                key_value = row.get("ssh_key_value")
+                public = {
+                    "ssh_host": row.get("ssh_host"),
+                    "public_host": row.get("public_host"),
+                    "ssh_port": int(row.get("ssh_port") or 22),
+                    "ssh_user": row.get("ssh_user") or "root",
+                    "key_path": key_value if key_type == "path" else None,
+                }
+                protected = (
+                    {"private_key": {"scheme": "fernet-v1", "ciphertext": key_value}}
+                    if key_type == "embedded" and key_value
+                    else {}
+                )
+                connection.execute(
+                    text(
+                        "UPDATE hosts SET connection_kind = 'ssh', "
+                        "connection_version = 1, connection_public = :public, "
+                        "connection_protected = :protected WHERE host_id = :host_id"
+                    ),
+                    {
+                        "public": json.dumps(public, sort_keys=True),
+                        "protected": json.dumps(protected, sort_keys=True),
+                        "host_id": row["host_id"],
+                    },
+                )
+    _drop_columns_via_table_rebuild(engine, "hosts", present)
+
+
+# What a VM or bare-metal result was labelled when the compute contract route
+# built its envelope, before results were stored as envelopes. Every job that
+# predates this migration ran one of those two modes.
+def _legacy_result_kind(offering_mode: str | None, action: str | None) -> str:
+    if offering_mode == "bare_metal":
+        return "bare_metal_access"
+    return f"vm_{action}"
+
+
+_LEGACY_CREDENTIAL_COLUMNS = (
+    "role", "password", "ssh_commands", "ssh_key_path_host", "key_type",
+)
+
+
+def _migrate_job_envelopes(engine: Engine, *, default_host_id: str | None = None) -> None:
+    """Store jobs' results and credentials as envelopes, with neutral routing columns.
+
+    A job row gains ``host_id``, taken from its parameters with the fallback job
+    execution applied (the parameter, else the job's target, else the
+    deployment's default host), has its ``offering_mode`` and ``action_kind``
+    filled from its parameters where they were never recorded, and gains
+    ``execution_handle``, the executor's opaque
+    cancellation handle, in place of ``process_id`` (a bare process id becomes
+    ``{"pid": n}``). A stored result becomes the ``ResultEnvelope`` the compute
+    contract route built from it, and each credential row becomes the
+    ``CredentialEnvelope`` that route built: the job's offering mode, the row's
+    role as its kind, and its non-empty columns as its value. Every job before
+    this migration ran a VM or bare-metal action, so this one conversion may
+    name their result kinds. The replaced columns are then dropped.
+
+    Irreversible through this chain; rerunning it after the columns are gone
+    is a no-op.
+    """
+    if not _table_exists(engine, "ansible_jobs"):
+        return
+    _add_column_if_missing(engine, "ansible_jobs", "host_id", "VARCHAR")
+    _add_column_if_missing(engine, "ansible_jobs", "execution_handle", "JSON")
+    has_process_id = _column_exists(engine, "ansible_jobs", "process_id")
+    credentials_legacy = _table_exists(engine, "credentials") and _column_exists(
+        engine, "credentials", "role"
+    )
+    if credentials_legacy:
+        _add_column_if_missing(
+            engine, "credentials", "envelope", "JSON NOT NULL DEFAULT '{}'"
+        )
+
+    with engine.begin() as connection:
+        select = "SELECT id, params, result, offering_mode, action_kind, host_id"
+        if has_process_id:
+            select += ", process_id"
+        jobs = connection.execute(text(select + " FROM ansible_jobs")).mappings().all()
+        modes: dict[str, str | None] = {}
+        for job in jobs:
+            params = _json_mapping(job["params"], label=f"ansible_jobs {job['id']} params")
+            # A job predating offering modes was a VM job.
+            offering_mode = job["offering_mode"] or params.get("offering_mode") or "vm"
+            action = (
+                job["action_kind"]
+                or params.get("executor_action")
+                or params.get("vm_action")
+                or "create"
+            )
+            modes[job["id"]] = offering_mode
+            host_id = job["host_id"] or params.get("host_id") or (
+                params.get("executor_target") or params.get("vm_target") or default_host_id
+            )
+            # The route key every job is executed by, recorded on the row so
+            # nothing reads it out of a job's parameters again.
+            updates: dict[str, object] = {
+                "id": job["id"],
+                "host_id": host_id,
+                "offering_mode": offering_mode,
+                "action_kind": action,
+            }
+            assignments = [
+                "host_id = :host_id",
+                "offering_mode = :offering_mode",
+                "action_kind = :action_kind",
+            ]
+            result = job["result"]
+            if isinstance(result, str):
+                result = json.loads(result) if result else None
+            if isinstance(result, dict) and not (
+                {"offering_mode", "result_kind", "value"} <= set(result)
+            ):
+                updates["result"] = json.dumps({
+                    "offering_mode": offering_mode,
+                    "result_kind": _legacy_result_kind(offering_mode, action),
+                    "value": result,
+                }, sort_keys=True)
+                assignments.append("result = :result")
+            if has_process_id and job["process_id"]:
+                raw = str(job["process_id"])
+                handle = json.loads(raw) if raw.startswith("{") else {"pid": int(raw)}
+                updates["handle"] = json.dumps(handle, sort_keys=True)
+                assignments.append("execution_handle = :handle")
+            connection.execute(
+                text("UPDATE ansible_jobs SET " + ", ".join(assignments) + " WHERE id = :id"),
+                updates,
+            )
+
+        if credentials_legacy:
+            rows = connection.execute(text(
+                "SELECT id, job_id, " + ", ".join(_LEGACY_CREDENTIAL_COLUMNS)
+                + " FROM credentials"
+            )).mappings().all()
+            for row in rows:
+                value = {}
+                for column in _LEGACY_CREDENTIAL_COLUMNS[1:]:
+                    item = row[column]
+                    if item is None:
+                        continue
+                    if column == "ssh_commands" and isinstance(item, str):
+                        item = json.loads(item)
+                    value[column] = item
+                envelope = {
+                    "offering_mode": modes.get(row["job_id"]) or "vm",
+                    "credential_kind": row["role"] or "access",
+                    "value": value,
+                }
+                connection.execute(
+                    text("UPDATE credentials SET envelope = :envelope WHERE id = :id"),
+                    {"envelope": json.dumps(envelope, sort_keys=True), "id": row["id"]},
+                )
+
+    if has_process_id:
+        _drop_columns_via_table_rebuild(engine, "ansible_jobs", ["process_id"])
+    if credentials_legacy:
+        _drop_columns_via_table_rebuild(
+            engine, "credentials", list(_LEGACY_CREDENTIAL_COLUMNS)
+        )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration("20260603_001_ansible_jobs_escrow_uid", _migrate_ansible_jobs_escrow_uid),
     Migration("20260603_002_hosts_public_host", _migrate_hosts_public_host),
@@ -2665,5 +2902,13 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260927_001_drop_reservation_release_mirror",
         _migrate_drop_reservation_release_mirror,
+    ),
+    Migration(
+        "20261002_001_host_connection_envelope",
+        _migrate_host_connection_envelope,
+    ),
+    Migration(
+        "20261002_002_job_envelopes",
+        _migrate_job_envelopes,
     ),
 )

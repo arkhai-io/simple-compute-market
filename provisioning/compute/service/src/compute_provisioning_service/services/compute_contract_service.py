@@ -13,6 +13,7 @@ from compute_provisioning import (
     LogsReference,
     ProvisioningErrorEnvelope,
     ProvisioningJob,
+    ResultEnvelope,
 )
 from market_site.authority import SiteAuthorityPort
 
@@ -71,16 +72,17 @@ class ComputeContractService:
 
     def get_job(self, job_id: str) -> ProvisioningJob:
         record = self._job_service.get_contract_job_record(job_id)
-        adapter = self._adapters.get(str(record["offering_mode"]))
+        # The job authority stores the envelopes its executor reported; the
+        # contract serves them as stored.
         result = (
-            adapter.validate_result(str(record["action_kind"]), record["result"])
+            ResultEnvelope.model_validate(record["result"])
             if record["result"] is not None
             else None
         )
-        credentials = adapter.validate_credentials(
-            str(record["action_kind"]),
-            record["credentials"],
-        )
+        credentials = [
+            CredentialEnvelope.model_validate(credential)
+            for credential in record["credentials"]
+        ]
         error = (
             ProvisioningErrorEnvelope(
                 code=(

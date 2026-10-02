@@ -41,6 +41,7 @@ from compute_provisioning import (
     PoolUpdate,
     PoolValidateResponse,
 )
+from compute_provisioning.jobs import JobCredentialsResponse
 from compute_provisioning.client import (
     ComputeProvisioningAuthenticationError,
     ComputeProvisioningClient,
@@ -53,19 +54,22 @@ from vm_provisioning_operator.routes import VM_PROVISIONING_ROUTES
 from vm_provisioning_operator.models import (
     AnsibleReadinessResponse,
     CreateVmRequest,
-    CredentialListResponse,
-    HealthResponse,
     HostConnectivityResponse,
+    VmActionRequest,
+)
+from compute_provisioning.hosts import (
     HostCreate,
     HostListResponse,
     HostResponse,
     HostUpdate,
+)
+from compute_provisioning.jobs import (
     JobListResponse,
     JobLogsResponse,
     JobStatusResponse,
     JobSubmitResponse,
-    VmActionRequest,
 )
+from compute_provisioning.system_models import HealthResponse
 
 logger = logging.getLogger(__name__)
 
@@ -529,9 +533,9 @@ class ProvisioningClient(_ProvisioningClientBase):
         """GET /api/v1/jobs/{job_id}"""
         return JobStatusResponse(**(await self._get(f"/api/v1/jobs/{job_id}")))
 
-    async def get_job_credentials(self, job_id: str) -> CredentialListResponse:
+    async def get_job_credentials(self, job_id: str) -> JobCredentialsResponse:
         """GET /api/v1/jobs/{job_id}/credentials — returns all job credentials."""
-        return CredentialListResponse(**(await self._get(
+        return JobCredentialsResponse(**(await self._get(
             f"/api/v1/jobs/{job_id}/credentials"
         )))
 
@@ -1027,8 +1031,8 @@ class SyncProvisioningClient(_ProvisioningClientBase):
     def get_job(self, job_id: str) -> JobStatusResponse:
         return JobStatusResponse(**(self._get(f"/api/v1/jobs/{job_id}")))
 
-    def get_job_credentials(self, job_id: str) -> CredentialListResponse:
-        return CredentialListResponse(**(self._get(
+    def get_job_credentials(self, job_id: str) -> JobCredentialsResponse:
+        return JobCredentialsResponse(**(self._get(
             f"/api/v1/jobs/{job_id}/credentials"
         )))
 

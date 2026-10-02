@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from arkhai_bare_metal import BARE_METAL_OFFERING_MODE, NODE_GRANT_ACCESS_ACTION
+from compute_provisioning.contracts import ResultEnvelope
 from market_fulfillment import (
     ProviderConfigInvalidError,
     ProviderOperationState,
@@ -39,13 +40,20 @@ class FakeOperations:
         return SimpleNamespace(job_id="job-teardown")
 
 
+def _access_result(value: dict) -> ResultEnvelope:
+    """A bare-metal access job's result as the job authority stores it."""
+    return ResultEnvelope(
+        offering_mode=BARE_METAL_OFFERING_MODE, result_kind="bare_metal_access", value=value
+    )
+
+
 class FakeJobs:
     def __init__(self) -> None:
         self.jobs = {
             "job-create": SimpleNamespace(
                 status="succeeded",
                 error=None,
-                result={
+                result=_access_result({
                     "tenant_user": None,
                     "host": "203.0.113.25",
                     "ssh_port": None,
@@ -60,12 +68,12 @@ class FakeJobs:
                         "status": "success",
                         "timestamp": "2030-01-01T00:00:01Z",
                     },
-                },
+                }),
             ),
             "job-teardown": SimpleNamespace(
                 status="succeeded",
                 error=None,
-                result={"result_message": "access reclaimed"},
+                result=_access_result({"result_message": "access reclaimed"}),
             ),
         }
 
@@ -242,7 +250,9 @@ async def _mock_grant_job_result() -> dict:
 async def test_a_mock_profile_grant_reads_as_the_buyers_access_result():
     jobs = FakeJobs()
     jobs.jobs["job-create"] = SimpleNamespace(
-        status="succeeded", error=None, result=await _mock_grant_job_result()
+        status="succeeded",
+        error=None,
+        result=_access_result(await _mock_grant_job_result()),
     )
     provider = BareMetalFulfillmentProvider(
         operations_service=FakeOperations(), job_service=jobs

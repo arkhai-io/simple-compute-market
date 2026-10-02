@@ -31,7 +31,7 @@ from compute_provisioning_service.identity import resolve_identity_context
 from compute_provisioning_service.middleware.auth import (
     SqlAlchemyProvisioningReplayStore,
 )
-from compute_provisioning_service.services.async_job_queue import AsyncJobQueue
+from compute_provisioning.jobs.queue import AsyncJobQueue
 from compute_provisioning import compose_adapter_bundles
 from compute_provisioning_service.services.compute_contract_service import ComputeContractService
 from compute_provisioning_service.services.deal_event_sink import (

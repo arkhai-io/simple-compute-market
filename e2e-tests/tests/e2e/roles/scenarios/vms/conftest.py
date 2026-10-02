@@ -651,7 +651,7 @@ def _ensure_provisioning_host_registered(provisioning_client):
     only relevant when ``ACTIVE_PROFILES=mock``.
     """
     from vm_provisioning_operator import ProvisioningError
-    from vm_provisioning_operator import HostCreate
+    from compute_provisioning.hosts import ConnectionSubmission, HostCreate
 
     host_name = "kvm1"
 
@@ -666,10 +666,10 @@ def _ensure_provisioning_host_registered(provisioning_client):
 
     body = HostCreate(
         host_id=host_name,
-        ssh_host="127.0.0.1",
-        ssh_user="stub",
-        ssh_key_type="path",
-        ssh_key_value="/tmp/stub-e2e-key",
+        connection=ConnectionSubmission(
+            kind="ssh",
+            public={"ssh_host": "127.0.0.1", "ssh_user": "stub", "key_path": "/tmp/stub-e2e-key"},
+        ),
         gpu_count=1,
         enabled=True,
     )

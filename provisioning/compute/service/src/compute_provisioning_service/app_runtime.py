@@ -4,6 +4,7 @@ import logging
 from datetime import timedelta
 import os
 
+from compute_provisioning_ansible import parse_inventory_ini
 from compute_provisioning.startup import (
     ComputeProvisioningBackgroundTask,
     ComputeProvisioningShutdownStep,
@@ -15,7 +16,7 @@ from compute_provisioning_service.config import settings
 from compute_provisioning_service.container import container
 from compute_provisioning_service.db.migrations import check_schema_version
 from market_fulfillment.db import SettlementRecord, SettlementRecordState
-from compute_provisioning_service.services.async_job_queue import AsyncJobQueue
+from compute_provisioning.jobs.queue import AsyncJobQueue
 from compute_provisioning_service.services.definition_documents import (
     DefinitionDocumentImporter,
 )
@@ -139,7 +140,7 @@ def seed_inventory_if_empty() -> None:
 
     if ini_text:
         try:
-            seeded = host_service.seed_from_ini(ini_text)
+            seeded = host_service.apply_inventory(parse_inventory_ini(ini_text))
             logger.info(
                 "Inventory seeding: registered %d host(s) from %s",
                 len(seeded),
@@ -254,7 +255,7 @@ def background_tasks() -> tuple[ComputeProvisioningBackgroundTask, ...]:
         ComputeProvisioningBackgroundTask(
             "job-processing-loop",
             lambda: job_queue.start(
-                _container_module.resolved_job_service._process_job
+                _container_module.resolved_job_service.process_job
             ),
             "Job processing loop started (max_concurrent=%d)",
             (settings.max_concurrent_jobs,),

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from compute_provisioning.hosts import ConnectionEnvelope
 from market_site import CapacityDeclaration, CapacityLedgerService
 from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
@@ -14,6 +15,18 @@ from compute_provisioning_service.services.capacity_derivation import (
     LegacyHostCapacityDerivation,
     plan_derived_declarations,
 )
+
+
+
+def _registered_host(**fields) -> Host:
+    """A registered host reached over ssh; its connection is incidental here."""
+    host = Host(**fields)
+    host.set_connection(ConnectionEnvelope(
+        kind="ssh",
+        version=1,
+        public={"ssh_host": "10.0.0.1", "ssh_user": "root", "key_path": "/key"},
+    ))
+    return host
 
 
 def _host(host_id: str = "kvm1", **overrides) -> LegacyHostCapacity:
@@ -121,9 +134,8 @@ def stores():
             policy_tags={"deliverable_modes": ["vm"]},
         ))
         for host_id, gpus, pool in (("kvm1", 4, "gpu-pool"), ("kvm2", 0, DEFAULT_POOL_ID)):
-            db.add(Host(
-                host_id=host_id, ssh_host="10.0.0.1", ssh_user="root",
-                ssh_key_value="/key", gpu_count=gpus, gpu_model="H200",
+            db.add(_registered_host(
+                host_id=host_id, gpu_count=gpus, gpu_model="H200",
                 pool_id=pool, enabled=True,
             ))
     return session_factory, ledger
@@ -207,10 +219,8 @@ def test_hosts_added_but_not_flushed_are_derived(stores):
     rows must be visible to the derivation."""
     session_factory, ledger = stores
     with ledger.serialized(), session_factory() as db, db.begin():
-        db.add(Host(
-            host_id="kvm3", ssh_host="10.0.0.3", ssh_user="root",
-            ssh_key_value="/key", gpu_count=2, pool_id=DEFAULT_POOL_ID,
-            enabled=True,
+        db.add(_registered_host(
+            host_id="kvm3", gpu_count=2, pool_id=DEFAULT_POOL_ID, enabled=True,
         ))
         derived = LegacyHostCapacityDerivation(ledger).derive_in_session(db, ["kvm3"])
 

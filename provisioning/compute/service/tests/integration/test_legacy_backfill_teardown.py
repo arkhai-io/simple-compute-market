@@ -106,9 +106,11 @@ def test_pre_cutover_vm_lease_backfills_and_tears_down_to_release():
     # case that happens to skip the "initiate teardown" step.
     with engine.begin() as connection:
         connection.execute(text(
-            "INSERT INTO hosts (host_id, ssh_host, ssh_user, ssh_key_type, ssh_key_value, "
-            "gpu_count, enabled, pool_id) "
-            "VALUES ('kvm1', '10.0.0.1', 'root', 'path', '/keys/id_ed25519', 0, 1, 'default')"
+            "INSERT INTO hosts (host_id, connection_kind, connection_version, "
+            "connection_public, connection_protected, gpu_count, enabled, pool_id) "
+            "VALUES ('kvm1', 'ssh', 1, '{\"ssh_host\": \"10.0.0.1\", \"ssh_user\": "
+            "\"root\", \"ssh_port\": 22, \"public_host\": null, \"key_path\": "
+            "\"/keys/id_ed25519\"}', '{}', 0, 1, 'default')"
         ))
         connection.execute(text(
             "INSERT INTO capacity_reservations (capacity_reservation_id, units, state) "

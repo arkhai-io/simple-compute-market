@@ -12,6 +12,7 @@ test bodies.  See AsyncProvisioningTestClient below for rationale.
 """
 
 from __future__ import annotations
+from compute_provisioning_ansible import ssh_connection
 
 import asyncio
 from pathlib import Path
@@ -49,8 +50,10 @@ from compute_provisioning_service.db.database import create_db_engine
 from compute_provisioning_service.main import app
 from vm_provisioning_operator.models import CreateVmRequest
 from vm_provisioning_adapter.services.ansible_service import AnsibleService
-from compute_provisioning_service.services.async_job_queue import AsyncJobQueue
-from vm_provisioning_adapter.services.host_service import HostService
+from compute_provisioning.jobs.queue import AsyncJobQueue
+from compute_provisioning.hosts import ConnectionCodecs
+from compute_provisioning.hosts.service import HostAuthority
+from compute_provisioning_ansible import SshConnectionCodec
 from vm_provisioning_adapter.services.job_service import AnsibleJobService
 from vm_provisioning_adapter.services.mock_ansible_service import MockRule, ProgrammableMockAnsibleService
 from vm_provisioning_adapter.services.system_service import SystemService
@@ -133,9 +136,9 @@ async def client_and_queue(
     app.container.principal_authority.override(principal_authority)
     app.container.provisioning_replay_store.override(replay_store)
 
-    host_service = HostService(
-        session_factory=session_factory,
-        settings=mock_settings,
+    host_service = HostAuthority(
+        session_factory,
+        codecs=ConnectionCodecs([SshConnectionCodec()]),
         capacity_derivation=LegacyHostCapacityDerivation(
             CapacityLedgerService(
                 session_factory,
@@ -144,13 +147,10 @@ async def client_and_queue(
             )
         ),
     )
-    from vm_provisioning_operator.models import HostCreate
+    from compute_provisioning.hosts import HostCreate
     host_service.register_host(HostCreate(
         host_id=HOST,
-        ssh_host="10.0.0.1",
-        ssh_user="root",
-        ssh_key_type="path",
-        ssh_key_value="~/.ssh/id_ed25519",
+        connection=ssh_connection(ssh_host="10.0.0.1", ssh_user="root", key_path="~/.ssh/id_ed25519"),
         gpu_count=0,
     ))
 
@@ -233,7 +233,7 @@ async def client_and_queue(
     _container_module.resolved_host_operations_service = app.container.host_operations_service()
 
     processing_task = asyncio.create_task(
-        job_queue.start(job_service._process_job),
+        job_queue.start(job_service.process_job),
         name="test-job-processing-loop",
     )
 

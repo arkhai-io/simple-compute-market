@@ -32,7 +32,6 @@ from compute_provisioning import (
     FunctionalExecutorAdapter,
     IdempotentLifecycleEventSink,
     LifecycleEvent,
-    ResultEnvelope,
     UnsupportedExecutorActionError,
     resolve_provisioning_route,
 )
@@ -75,8 +74,6 @@ async def test_registry_validates_without_generic_field_inspection():
         offering_mode="vm",
         parameter_validators={"create": lambda payload: payload["vm_target"]},
         submit_action=submit,
-        result_validators={"create": lambda payload: ResultEnvelope(offering_mode="vm", result_kind="created", value=dict(payload))},
-        credential_validators={},
     )
     registry = ExecutorAdapterRegistry([adapter])
     action = _action()

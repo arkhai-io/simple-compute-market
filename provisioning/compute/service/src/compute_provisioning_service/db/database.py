@@ -39,6 +39,7 @@ def run_migrations(
     *,
     default_playbook_path: str = "/opt/domains/vms/provisioning/iac/ansible/playbooks/single-tenant/vm-operations.yaml",
     default_inventory_group: str = "kvm_hosts",
+    default_host_id: str | None = None,
 ) -> None:
     """Create all tables and apply versioned migrations.
 
@@ -56,11 +57,15 @@ def run_migrations(
     # and SQLAlchemy's cross-metadata FK resolution during create_all needs
     # the referenced table to already exist.
     from sqlalchemy import inspect
+    from compute_provisioning.hosts.db import Base as HostsBase
+    from compute_provisioning.jobs.db import Base as JobsBase
     from market_fulfillment.db import Base as FulfillmentBase
     from market_resource_pools.db import Base as PoolsBase
     from market_site.db import Base as SiteBase
 
     PoolsBase.metadata.create_all(bind=engine)
+    HostsBase.metadata.create_all(bind=engine)
+    JobsBase.metadata.create_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     FulfillmentBase.metadata.create_all(bind=engine)
 
@@ -77,5 +82,6 @@ def run_migrations(
         engine,
         default_playbook_path=default_playbook_path,
         default_inventory_group=default_inventory_group,
+        default_host_id=default_host_id,
     )
     SiteBase.metadata.create_all(bind=engine)

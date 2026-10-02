@@ -51,7 +51,7 @@ from market_resource_pools.hints import (
 )
 from vm_provisioning_operator import PoolCreate, PoolUpdate
 from vm_provisioning_operator.client import ProvisioningError
-from vm_provisioning_operator.models import HostCreate, HostUpdate
+from compute_provisioning.hosts import ConnectionSubmission, HostCreate, HostUpdate
 
 #: GPUs physically present on an executor host. Must cover the largest single
 #: slice any scenario reserves — 4, in the dynamic-listings cases.
@@ -212,9 +212,9 @@ def register_e2e_host(
 ) -> Any:
     """Register one executor host into `pool_id`, idempotently.
 
-    `ssh_key_type='path'` stores the value verbatim, so no key material is needed:
-    nothing here SSHes anywhere — provisioning runs in mock mode — and the host
-    exists to be an executor identity, not to be reached.
+    A `key_path` connection names a key file without carrying it, so no key
+    material is needed: nothing here SSHes anywhere — provisioning runs in mock
+    mode — and the host exists to be an executor identity, not to be reached.
 
     Reconciles rather than accepting what is there. A host may survive an earlier
     run against the same stack with a different GPU count or pool, and the contract
@@ -228,11 +228,11 @@ def register_e2e_host(
     if existing is None:
         provisioning_client.register_host(HostCreate(
             host_id=name,
-            ssh_host="127.0.0.1",
-            ssh_user="e2e",
+            connection=ConnectionSubmission(
+                kind="ssh",
+                public={"ssh_host": "127.0.0.1", "ssh_user": "e2e", "key_path": "/dev/null"},
+            ),
             gpu_count=gpu_count,
-            ssh_key_type="path",
-            ssh_key_value="/dev/null",
             pool_id=pool_id,
         ))
     elif (existing.gpu_count or 0) < gpu_count or existing.pool_id != pool_id:

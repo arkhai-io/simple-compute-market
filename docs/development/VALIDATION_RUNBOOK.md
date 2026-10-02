@@ -366,7 +366,7 @@ Register mock `kvm1` if provisioning returns `{"hosts":[]}`:
 ```bash
 curl -sf -X POST http://localhost:8081/api/v1/hosts/ \
   -H 'Content-Type: application/json' \
-  -d '{"host_id":"kvm1","ssh_host":"127.0.0.1","ssh_user":"appuser","ssh_key_type":"path","ssh_key_value":"/home/appuser/.ssh/id_ed25519","gpu_count":1,"enabled":true}' | jq
+  -d '{"host_id":"kvm1","connection":{"kind":"ssh","public":{"ssh_host":"127.0.0.1","ssh_user":"appuser","key_path":"/home/appuser/.ssh/id_ed25519"}},"gpu_count":1,"enabled":true}' | jq
 ```
 
 ## 10. Failure Diagnostics
@@ -1070,10 +1070,14 @@ curl -sf http://localhost:8081/health | jq
 cat >/tmp/scm-gcp-host.json <<EOF
 {
   "host_id":"${KVM_HOST_ALIAS}",
-  "ssh_host":"${KVM_EXTERNAL_IP}",
-  "ssh_user":"ubuntu",
-  "ssh_key_type":"path",
-  "ssh_key_value":"/home/appuser/.ssh/id_ed25519",
+  "connection":{
+    "kind":"ssh",
+    "public":{
+      "ssh_host":"${KVM_EXTERNAL_IP}",
+      "ssh_user":"ubuntu",
+      "key_path":"/home/appuser/.ssh/id_ed25519"
+    }
+  },
   "gpu_count":0,
   "enabled":true
 }
@@ -1090,10 +1094,14 @@ if [ "$register_status" = "409" ]; then
   curl -sf -X PUT "http://localhost:8081/api/v1/hosts/${KVM_HOST_ALIAS}" \
     -H 'Content-Type: application/json' \
     -d "{
-      \"ssh_host\":\"${KVM_EXTERNAL_IP}\",
-      \"ssh_user\":\"ubuntu\",
-      \"ssh_key_type\":\"path\",
-      \"ssh_key_value\":\"/home/appuser/.ssh/id_ed25519\",
+      \"connection\":{
+        \"kind\":\"ssh\",
+        \"public\":{
+          \"ssh_host\":\"${KVM_EXTERNAL_IP}\",
+          \"ssh_user\":\"ubuntu\",
+          \"key_path\":\"/home/appuser/.ssh/id_ed25519\"
+        }
+      },
       \"gpu_count\":0
     }" | jq
 

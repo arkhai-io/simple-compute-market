@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from compute_provisioning.executor_mock import (
+from compute_provisioning.jobs.executor_mock import (
     MockRouteError,
     MockRule,
     MockRuleRouteService,
@@ -122,15 +122,6 @@ async def test_hold_returns_at_once_without_a_gate() -> None:
     rules = MockRuleSet()
     await asyncio.wait_for(rules.hold(None), timeout=1.0)
     await asyncio.wait_for(rules.hold(rules.add(MockRule(match={}))), timeout=1.0)
-
-
-def test_job_done_notification_sets_the_job_event() -> None:
-    rules = MockRuleSet()
-    event = rules.job_done_event("job-1")
-    rules.notify_job_done("job-2")
-    assert not event.is_set()
-    rules.notify_job_done("job-1")
-    assert event.is_set()
 
 
 def test_evaluate_reports_host_rule_and_missing_parameters() -> None:

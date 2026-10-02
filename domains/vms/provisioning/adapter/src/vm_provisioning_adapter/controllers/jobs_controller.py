@@ -21,9 +21,10 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi_utils.cbv import cbv
 
+from compute_provisioning.jobs import JobCredentialsResponse
+
 from compute_provisioning_service import container as _container_module
-from vm_provisioning_operator.models import (
-    CredentialListResponse,
+from compute_provisioning.jobs import (
     JobListResponse,
     JobLogsResponse,
     JobStatusResponse,
@@ -107,11 +108,11 @@ class AnsibleJobsController:
 
     @router.get(
         "/{job_id}/credentials",
-        response_model=CredentialListResponse,
+        response_model=JobCredentialsResponse,
         summary="Get job credentials",
         response_description="Credentials granted to the requesting agent for this job",
     )
-    def get_credentials(self, job_id: str) -> CredentialListResponse:
+    def get_credentials(self, job_id: str) -> JobCredentialsResponse:
         """Return all credentials for a job.
 
         The storefront (the sole caller) decides which credentials to surface

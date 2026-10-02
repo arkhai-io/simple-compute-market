@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from compute_provisioning.hosts import ConnectionEnvelope, ExecutionHost
+from compute_provisioning.hosts import (
+    ConnectionCodecs,
+    ConnectionEnvelope,
+    ExecutionHost,
+    ProtectedValue,
+)
 from compute_provisioning.jobs import JobRetryPolicy
 
 
@@ -30,14 +35,52 @@ def test_a_retry_policy_refuses_an_impossible_value(values) -> None:
         JobRetryPolicy(**values)
 
 
-def test_a_connection_payload_cannot_be_changed_through_the_envelope() -> None:
+def test_a_connection_cannot_be_changed_through_the_envelope() -> None:
     source = {"address": "192.0.2.10"}
-    envelope = ConnectionEnvelope(kind="ssh", version=1, payload=source)
+    envelope = ConnectionEnvelope(kind="ssh", version=1, public=source)
     source["address"] = "198.51.100.1"
 
-    assert envelope.payload["address"] == "192.0.2.10"
+    assert envelope.public["address"] == "192.0.2.10"
     with pytest.raises(TypeError):
-        envelope.payload["address"] = "203.0.113.1"  # type: ignore[index]
+        envelope.public["address"] = "203.0.113.1"  # type: ignore[index]
+
+
+def test_a_protected_value_never_shows_its_ciphertext() -> None:
+    value = ProtectedValue(scheme="fernet-v1", ciphertext="gAAAA-secret")
+    envelope = ConnectionEnvelope(
+        kind="ssh", version=1, public={}, protected={"private_key": value}
+    )
+
+    for rendering in (repr(value), str(value), repr(envelope), str(envelope)):
+        assert "gAAAA-secret" not in rendering
+    assert envelope.protected_schemes() == {"private_key": "fernet-v1"}
+    assert ProtectedValue.from_stored(value.to_stored()) == value
+
+
+def test_an_envelope_holds_only_protected_values_as_secrets() -> None:
+    with pytest.raises(TypeError):
+        ConnectionEnvelope(kind="ssh", version=1, protected={"private_key": "plain"})  # type: ignore[dict-item]
+
+
+def test_codecs_refuse_an_unsupported_kind_or_version() -> None:
+    class _Codec:
+        kind, version = "ssh", 1
+
+        def build(self, public, secrets, *, previous=None):
+            return ConnectionEnvelope(kind="ssh", version=1, public=public)
+
+        def validate(self, envelope):
+            return envelope
+
+    codecs = ConnectionCodecs([_Codec()])
+
+    assert codecs.build("ssh", 1, {"a": 1}, {}).public["a"] == 1
+    with pytest.raises(ValueError, match="not supported"):
+        codecs.build("cloud_api", 1, {}, {})
+    with pytest.raises(ValueError, match="version"):
+        codecs.build("ssh", 2, {}, {})
+    with pytest.raises(ValueError, match="duplicate"):
+        ConnectionCodecs([_Codec(), _Codec()])
 
 
 @pytest.mark.parametrize("kind,version", [("", 1), ("  ", 1), ("ssh", 0)])

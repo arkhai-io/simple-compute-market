@@ -8,9 +8,16 @@ from .executor import (
     JobRun,
     JobSuccess,
 )
-from .models import JobListResponse, JobLogsResponse, JobStatusResponse, JobSubmitResponse
+from .models import (
+    JobCredentialsResponse,
+    JobListResponse,
+    JobLogsResponse,
+    JobStatusResponse,
+    JobSubmitResponse,
+)
 
 __all__ = [
+    "JobCredentialsResponse",
     "JobExecutor",
     "JobFailure",
     "JobListResponse",

@@ -98,8 +98,9 @@ relay_token = ""
 # Rate limiting
 enable_rate_limiting = false
 rate_limit_requests_per_minute = 30
-# SSH key encryption
-# Required when registering hosts with ssh_key_type='embedded'.
+# SSH key encryption: the key the ssh connection codec protects a submitted
+# private key with, and the runner decrypts it with. Required to register a host
+# whose ssh connection submits a private_key.
 # Generate: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ssh_decryption_key = ""
 

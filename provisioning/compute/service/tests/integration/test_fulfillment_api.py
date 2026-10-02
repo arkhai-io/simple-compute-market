@@ -32,6 +32,7 @@ calls into.
 """
 
 from __future__ import annotations
+from compute_provisioning_ansible import ssh_connection
 
 import uuid
 from typing import Any
@@ -57,7 +58,7 @@ from market_fulfillment import (
 )
 from market_resource_pools import PoolCreate, PoolUpdate
 from market_site.router import make_capacity_router
-from vm_provisioning_operator.models import HostCreate
+from compute_provisioning.hosts import HostCreate
 
 _PLAYBOOK_PATH = "playbooks/vm-operations.yaml"
 _PROVIDER_CONFIG = {"playbook_path": _PLAYBOOK_PATH, "extra_vars": {"region": "eu"}}
@@ -590,13 +591,13 @@ class TestAcknowledgementFailureRecovery:
             record = SettlementRepository().get(db, capacity_reservation_id)
             job_id = record.provider_metadata["create_job_id"]
 
-            from compute_provisioning_service.db.models import AnsibleJob
+            from compute_provisioning_service.db.models import JobRecord
 
             jobs = (
-                db.query(AnsibleJob)
+                db.query(JobRecord)
                 .filter(
-                    AnsibleJob.capacity_reservation_id == capacity_reservation_id,
-                    AnsibleJob.action_kind == "create",
+                    JobRecord.capacity_reservation_id == capacity_reservation_id,
+                    JobRecord.action_kind == "create",
                 )
                 .all()
             )
@@ -667,10 +668,7 @@ class TestStatusAndResultQueries:
         # registered host record.
         await client_and_queue[0].register_host(HostCreate(
             host_id="kvm-fulfillment-1",
-            ssh_host="10.0.0.1",
-            ssh_user="root",
-            ssh_key_type="path",
-            ssh_key_value="/tmp/test-key",
+            connection=ssh_connection(ssh_host="10.0.0.1", ssh_user="root", key_path="/tmp/test-key"),
         ))
         capacity_reservation_id = await _scheduled_reservation(
             pool_id="pool-fulfillment-result-active"

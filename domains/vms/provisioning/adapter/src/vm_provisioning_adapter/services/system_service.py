@@ -8,7 +8,7 @@ This service is intentionally free of FastAPI and any HTTP concerns — those
 live in the controller.  It can be instantiated and tested without starting
 the application.
 
-The ``ansible_readiness`` method reads host inventory from the ``HostService``
+The ``ansible_readiness`` method reads host inventory from the host authority
 (DB table), not from the Ansible INI file on disk.  SSH key diagnostics:
   - ``path`` hosts: stat the key file and compute its SHA-256.
   - ``embedded`` hosts: report ``exists=True``; no SHA-256 (key is encrypted
@@ -49,8 +49,8 @@ from vm_provisioning_adapter.services.ansible_service import AnsibleService
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session, sessionmaker
 
-    from vm_provisioning_adapter.services.host_service import HostService
-    from compute_provisioning_service.services.async_job_queue import AsyncJobQueue
+    from compute_provisioning.hosts.service import HostAuthority
+    from compute_provisioning.jobs.queue import AsyncJobQueue
     from compute_provisioning.lease_lifecycle import LeaseLifecycleService
 
 
@@ -127,9 +127,11 @@ def collect_ssh_keys_from_hosts(hosts: list) -> list[SshKeyInfo]:
     embedded_hosts: list[str] = []
 
     for host in hosts:
-        if host.ssh_key_type == "path":
-            path_to_hosts.setdefault(host.ssh_key_value, []).append(host.host_id)
-        else:
+        connection = host.connection()
+        key_path = connection.public.get("key_path")
+        if key_path:
+            path_to_hosts.setdefault(key_path, []).append(host.host_id)
+        elif "private_key" in connection.protected:
             embedded_hosts.append(host.host_id)
 
     results: list[SshKeyInfo] = []
@@ -172,7 +174,7 @@ class SystemService:
     """Diagnostics operations for the system controller.
 
     Depends on ``AnsibleService`` and ``Settings``; optionally accepts
-    ``HostService`` for DB-backed inventory diagnostics, a DB session factory
+    the host authority for DB-backed inventory diagnostics, a DB session factory
     and job-queue provider for local health checks, and a lease lifecycle
     service for watchdog status/admin operations. Filesystem-oriented public
     methods are synchronous; callers that need to run them from an async
@@ -183,7 +185,7 @@ class SystemService:
         self,
         ansible_service: AnsibleService,
         settings,
-        host_service: "Optional[HostService]" = None,
+        host_service: "Optional[HostAuthority]" = None,
         session_factory: "Optional[sessionmaker[Session]]" = None,
         job_queue_provider: "Optional[Callable[[], AsyncJobQueue]]" = None,
         lease_lifecycle_service: "Optional[LeaseLifecycleService]" = None,
@@ -244,7 +246,7 @@ class SystemService:
         """Collect full Ansible readiness information synchronously.
 
         Inventory data is sourced from the ``hosts`` DB table via
-        ``HostService``.  SSH key diagnostics iterate DB rows instead of
+        host authority.  SSH key diagnostics iterate DB rows instead of
         parsing the INI file.
 
         This method performs filesystem and subprocess I/O; callers in an
@@ -271,7 +273,7 @@ class SystemService:
                 )
                 ssh_keys = []
         else:
-            # Fallback: no HostService wired (e.g. during early startup or tests)
+            # Fallback: no host authority wired (e.g. during early startup or tests)
             inventory_info = InventoryInfo(
                 source="database",
                 path=str(self._settings.database_url),

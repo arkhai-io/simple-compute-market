@@ -4,12 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-from compute_provisioning import (
-    CredentialEnvelope,
-    ExecutorActionEnvelope,
-    ResultEnvelope,
-    UnsupportedExecutorActionError,
-)
+from compute_provisioning import ExecutorActionEnvelope, UnsupportedExecutorActionError
 from market_site.authority import SiteAuthorityPort
 from vm_provisioning_operator.models import CreateVmRequest
 
@@ -61,29 +56,3 @@ class VmComputeAdapter:
         )
         return accepted.job_id
 
-    def validate_result(
-        self, action_kind: str, result: Mapping[str, Any]
-    ) -> ResultEnvelope:
-        return ResultEnvelope(
-            offering_mode=self.offering_mode,
-            result_kind=f"vm_{action_kind}",
-            value=dict(result),
-        )
-
-    def validate_credentials(
-        self,
-        action_kind: str,
-        credentials: list[Mapping[str, Any]],
-    ) -> list[CredentialEnvelope]:
-        return [
-            CredentialEnvelope(
-                offering_mode=self.offering_mode,
-                credential_kind=str(item.get("role") or "access"),
-                value={
-                    key: value
-                    for key, value in item.items()
-                    if key != "role" and value is not None
-                },
-            )
-            for item in credentials
-        ]

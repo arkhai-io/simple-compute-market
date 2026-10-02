@@ -9,12 +9,7 @@ from arkhai_bare_metal import (
     NODE_GRANT_ACCESS_ACTION,
     BareMetalLeaseCreate,
 )
-from compute_provisioning import (
-    CredentialEnvelope,
-    ExecutorActionEnvelope,
-    ResultEnvelope,
-    UnsupportedExecutorActionError,
-)
+from compute_provisioning import ExecutorActionEnvelope, UnsupportedExecutorActionError
 from market_site.authority import SiteAuthorityPort
 
 from compute_provisioning_service.services.compute_contract_service import (
@@ -70,29 +65,3 @@ class BareMetalComputeAdapter:
         accepted = await self._operations.grant_access(body, contract=envelope)
         return accepted.job_id
 
-    def validate_result(
-        self, action_kind: str, result: Mapping[str, Any]
-    ) -> ResultEnvelope:
-        return ResultEnvelope(
-            offering_mode=self.offering_mode,
-            result_kind="bare_metal_access",
-            value=dict(result),
-        )
-
-    def validate_credentials(
-        self,
-        action_kind: str,
-        credentials: list[Mapping[str, Any]],
-    ) -> list[CredentialEnvelope]:
-        return [
-            CredentialEnvelope(
-                offering_mode=self.offering_mode,
-                credential_kind=str(item.get("role") or "access"),
-                value={
-                    key: value
-                    for key, value in item.items()
-                    if key != "role" and value is not None
-                },
-            )
-            for item in credentials
-        ]

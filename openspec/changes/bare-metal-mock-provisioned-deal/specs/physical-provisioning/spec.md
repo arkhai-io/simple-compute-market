@@ -107,20 +107,20 @@ does not support.
 
 ### Requirement: Connection secrets stay protected
 
-Connection secrets MUST cross service boundaries and be persisted only in a protected
-representation (a scheme and its ciphertext). The host authority MUST treat a protected
-value as opaque, MUST NOT decrypt it, and MUST keep it out of every read, logging, and
-error surface. Only a connection codec MAY decrypt a protected value, just in time for
-execution, and plaintext MUST stay confined to the execution boundary and the transient
-storage the connection requires.
+Connection secrets MUST be persisted, stored, and passed to executors only in a protected
+representation (a scheme and its ciphertext). A secret submitted with a host's
+connection MUST be turned into a protected value by that connection kind's codec before
+it is persisted, and the submitted secret MUST NOT be stored, returned, or logged. The
+host authority MUST treat a protected value as opaque, MUST NOT encrypt or decrypt it, and
+MUST keep it out of every read, logging, and error surface. Only a connection codec MAY
+decrypt a protected value, just in time for execution, and plaintext MUST stay confined
+to the submitting request, the codec, and the transient storage the connection requires.
 
 #### Scenario: A host is registered with an embedded key
 
-- **WHEN** an operator registers a host whose `ssh` connection carries a caller-encrypted
-  private key
-- **THEN** the host authority validates the envelope through the `ssh` codec, stores the
-  ciphertext as received, and its responses name the protected value and its scheme
-  without the ciphertext
+- **WHEN** an operator registers a host whose `ssh` connection submits a private key
+- **THEN** the `ssh` codec protects it, the host authority stores only the protected
+  value, and its responses name the protected value and its scheme without the ciphertext
 
 #### Scenario: A job runs against a host with an embedded key
 

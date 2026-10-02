@@ -41,7 +41,8 @@ from market_settlement_runtime import derive_obligation_ref
 from market_site_client import SiteCapacityAdminClient
 from registry_client import SyncRegistryClient
 from storefront_client import SyncStorefrontClient
-from vm_provisioning_operator import HostCreate, SyncProvisioningClient
+from compute_provisioning.hosts import ConnectionSubmission, HostCreate
+from vm_provisioning_operator import SyncProvisioningClient
 
 from .authority import released_authority_client
 from .driver import (
@@ -413,10 +414,10 @@ class NetworkMarketplacePort:
             provisioning_admin.register_host(
                 HostCreate(
                     host_id=self._host_id,
-                    ssh_host="127.0.0.1",
-                    ssh_user="hosted-e2e",
-                    ssh_key_type="path",
-                    ssh_key_value="/tmp/hosted-e2e-key",
+                    connection=ConnectionSubmission(
+                        kind="ssh",
+                        public={"ssh_host": "127.0.0.1", "ssh_user": "hosted-e2e", "key_path": "/tmp/hosted-e2e-key"},
+                    ),
                     gpu_count=1,
                     gpu_model="H100",
                     enabled=True,

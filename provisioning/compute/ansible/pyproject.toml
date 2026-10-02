@@ -6,6 +6,8 @@ description = "Ansible implementation of compute provisioning execution: the ssh
 requires-python = ">=3.12"
 dependencies = [
     "arkhai-compute-provisioning>=0.8.0",
+    "arkhai-kit-config>=0.1.2",
+    "arkhai-kit-resource-pools>=0.3.0",
     "pydantic>=2",
 ]
 

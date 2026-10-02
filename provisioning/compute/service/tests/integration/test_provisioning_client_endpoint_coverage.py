@@ -7,6 +7,7 @@ contract authority for every public client operation.
 """
 
 from __future__ import annotations
+from compute_provisioning_ansible import ssh_connection
 
 from datetime import datetime, timezone
 from unittest.mock import MagicMock
@@ -18,7 +19,8 @@ from bare_metal_provisioning_adapter.services.bare_metal_mock_executor import (
 from compute_provisioning_service import container as _container_module
 import pytest
 
-from vm_provisioning_operator.models import CreateVmRequest, HostCreate
+from vm_provisioning_operator.models import CreateVmRequest
+from compute_provisioning.hosts import HostCreate
 
 
 HOST = "kvm1"
@@ -29,9 +31,7 @@ async def _register_host(client) -> None:
     await client.register_host(
         HostCreate(
             host_id=HOST,
-            ssh_host="10.0.0.1",
-            ssh_user="root",
-            ssh_key_value="~/.ssh/id_ed25519",
+            connection=ssh_connection(ssh_host="10.0.0.1", ssh_user="root", key_path="~/.ssh/id_ed25519"),
         )
     )
 
@@ -261,10 +261,7 @@ def _register_host_record(host_id: str) -> None:
     _container_module.resolved_host_service.register_host(
         HostCreate(
             host_id=host_id,
-            ssh_host="192.0.2.10",
-            ssh_user="root",
-            ssh_key_type="path",
-            ssh_key_value="/fake/id_ed25519",
+            connection=ssh_connection(ssh_host="192.0.2.10", ssh_user="root", key_path="/fake/id_ed25519"),
             gpu_count=0,
         )
     )

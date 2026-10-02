@@ -44,7 +44,10 @@ class BareMetalProvisioningRuntime:
     def job_executor(self) -> AnsibleJobExecutor:
         """What runs both bare-metal access actions."""
         return AnsibleJobExecutor(
-            self.ansible_service, self.playbook_path, settings=self.settings
+            self.ansible_service,
+            self.playbook_path,
+            settings=self.settings,
+            result_kind=bare_metal_result_kind,
         )
 
     def readiness(self) -> dict[str, bool]:
@@ -77,6 +80,11 @@ class BareMetalProvisioningRuntime:
             job_executor=self.job_executor(),
             readiness_check=self.readiness,
         )
+
+
+def bare_metal_result_kind(action: str) -> str:
+    """Both bare-metal access actions produce the access result."""
+    return "bare_metal_access"
 
 
 def project_bare_metal_resource(raw_view: Mapping[str, Any]) -> dict[str, Any]:

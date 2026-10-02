@@ -31,11 +31,8 @@ from fastapi.responses import JSONResponse
 from fastapi_utils.cbv import cbv
 
 from compute_provisioning_service import container as _container_module
-from vm_provisioning_operator.models import (
-    AnsibleReadinessResponse,
-    HealthResponse,
-    VersionResponse,
-)
+from vm_provisioning_operator.models import AnsibleReadinessResponse
+from compute_provisioning.system_models import HealthResponse, VersionResponse
 from vm_provisioning_adapter.services.system_service import SystemService
 
 _health_router = APIRouter(tags=["system"])

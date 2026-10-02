@@ -16,7 +16,7 @@ from __future__ import annotations
 from typing import Any
 
 from arkhai_bare_metal import BARE_METAL_ACCESS_ACTIONS
-from compute_provisioning.executor_mock import (
+from compute_provisioning.jobs.executor_mock import (
     MockRouteError,
     MockRuleRouteService,
     MockRuleSet,

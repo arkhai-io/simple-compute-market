@@ -151,8 +151,8 @@ def test_the_previous_schema_is_migrated_on_every_surface():
     apply_schema_migrations(engine)
 
     host_columns = {c["name"] for c in inspect(engine).get_columns("hosts")}
-    assert {"host_id", "ssh_host"} <= host_columns
-    assert not {"name", "kvm_host"} & host_columns
+    assert {"host_id", "connection_public"} <= host_columns
+    assert not {"name", "kvm_host", "ssh_host"} & host_columns
     # A column rename keeps the table's indexes.
     assert {i["name"] for i in inspect(engine).get_indexes("hosts")} == indexes_before
     assert "host_id" in {
@@ -194,7 +194,14 @@ def test_the_previous_schema_is_migrated_on_every_surface():
             "SELECT resource_host_id, resource_attributes FROM settlement_records"
         )).one() == ("kvm1", "{}")
     assert _json(engine, "SELECT params FROM ansible_jobs") == {"host_id": "kvm1"}
-    assert _json(engine, "SELECT result FROM ansible_jobs") == {"host_ip": "203.0.113.9"}
+    # Results are then stored as the envelope the contract route served.
+    assert _json(engine, "SELECT result FROM ansible_jobs") == {
+        "offering_mode": "vm",
+        "result_kind": "vm_create",
+        "value": {"host_ip": "203.0.113.9"},
+    }
+    with engine.begin() as connection:
+        assert connection.execute(text("SELECT host_id FROM ansible_jobs")).scalar() == "kvm1"
 
 
 def test_the_retired_key_count_sees_every_unmigrated_row():

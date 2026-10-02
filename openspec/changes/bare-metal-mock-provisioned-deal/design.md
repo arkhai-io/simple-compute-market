@@ -463,9 +463,10 @@ Invariants this change must leave true:
 - The host authority's model is connection-neutral; a connection kind's codec belongs to
   the implementation distribution that supports it, and executors receive an immutable
   `ExecutionHost`.
-- Connection secrets are persisted and passed only in a protected form; the host
-  authority never decrypts or discloses them, and only a connection codec decrypts, just
-  in time for execution.
+- Connection secrets are persisted, stored, and passed to executors only in a protected
+  form; the host authority never encrypts, decrypts, or discloses them; a connection
+  codec protects a submitted secret before it is persisted and decrypts it just in time
+  for execution.
 - `(offering_mode, action)` resolves to a complete job executor.
 - Shared Ansible machinery owns process, inventory, and redaction mechanics and no VM or
   bare-metal result meaning.
@@ -566,39 +567,47 @@ are removed, and every reader of a job's result (both fulfillment providers, the
 contract route, and the shared test wait route) reads the envelope.
 
 **The host authority is connection-neutral, and connection secrets stay protected.**
-Settled with the maintainer after design review of the secret question (2026-10-02):
-callers encrypt an embedded private key today (`HostCreate` documents Fernet-encrypted
-material) and the runner decrypts it, and that stays the rule. A signed API
-authenticates a request and protects its integrity, not its confidentiality, and moving
-to plaintext submission would trade defence in depth for nothing the architecture needs.
-The host authority owns protected secret persistence, not secret cryptography:
+Settled with the maintainer after design review of the secret question (2026-10-02),
+then corrected against the code the same day. Today an operator submits an embedded
+private key as plaintext over the authenticated host API (the route documents "raw
+PEM"), `HostService` encrypts it with the service's Fernet key before storing it, and
+the runner decrypts it when writing inventory; `HostCreate`'s description of the field
+as already encrypted was stale. That submission behaviour is kept. What changes is who
+holds the cryptography: the host authority owns protected secret persistence, not
+secret cryptography, and the connection codec protects a submitted secret on write and
+decrypts it just in time for execution:
 
-> Connection secrets cross service boundaries and are persisted only in a protected
+> Connection secrets are persisted, stored, and passed to executors only in a protected
 > representation. The host authority treats protected values as opaque, keeps them out
-> of every read and logging surface, and never decrypts them. A connection kind's codec
-> validates its protected values and decrypts them just in time for execution;
-> plaintext stays confined to the execution boundary and the transient storage the
-> connection needs.
+> of every read and logging surface, and never encrypts or decrypts them. A connection
+> kind's codec turns a submitted secret into a protected value before it is persisted
+> and decrypts a protected value just in time for execution; plaintext exists only in
+> the submitting request, at those two codec boundaries, and in the transient storage
+> the connection needs.
 
 `compute_provisioning.hosts` defines a host as `host_id`, `pool_id`, `enabled`, and a
 `ConnectionEnvelope`: `kind`, `version`, `public` fields, and `protected` values, each a
 `ProtectedValue` (`scheme`, `ciphertext`) whose representation never shows the ciphertext.
+A registration or update may also carry submitted secrets, which the authority hands to
+the codec to protect and never stores, returns, or logs.
 The authority owns identity, pool association, enabled state, the durable envelope,
 keeping protected values out of responses and logs, CRUD, the import operation and its
 pool-change and capacity effects, and the pre-execution lookup, which yields an immutable
 `ExecutionHost` carrying the protected envelope; executors receive that, never the
 persistence row, and never decrypted material from the authority. A connection kind's
-codec (its public fields, which protected values it takes and in which schemes, and
-just-in-time decryption) belongs to the implementation distribution that supports it, so
-the family kit accumulates no per-kind connection types and no cryptography.
+codec (its public fields, which secrets it takes, how it protects them and in which
+schemes, and just-in-time decryption) belongs to the implementation distribution that
+supports it, so the family kit accumulates no per-kind connection types and no
+cryptography.
 
 The `ssh` codec is a connection codec, not an Ansible one: its public fields are
 `ssh_host`, `public_host`, `ssh_port`, `ssh_user`, and optionally `key_path` (a key on
 the service's own filesystem, not secret); its protected value is optionally
-`private_key` in the `fernet-v1` scheme; exactly one of the two names the key. It
-validates an envelope and materializes a connection for execution: it decrypts
-`private_key` with the decryption key composition gives it, writes it to a transient
-owner-only file, and removes that file when execution ends. The Ansible executor consumes
+`private_key` in the `fernet-v1` scheme; exactly one of the two names the key. With the
+Fernet key composition gives it, it protects a submitted private key into `private_key`,
+validates an envelope, and materializes a connection for execution: it decrypts
+`private_key`, writes it to a transient owner-only file, and removes that file when
+execution ends. The Ansible executor consumes
 the materialized connection and holds no cryptography of its own. It lives in the Ansible
 distribution while that is its only consumer, behind an interface another SSH-based
 executor can use without importing Ansible mechanics. The current host authority
@@ -607,21 +616,24 @@ family's model: a future kind adds a codec, not a change to the host authority o
 executor contract.
 
 The wire models follow, pre-release: `HostCreate`, `HostUpdate`, and `HostResponse` carry
-`connection` (`kind`, `version`, `public`, `protected`) in place of the `ssh_*` fields; a
-request's protected values are `{"scheme", "ciphertext"}`, still encrypted by the caller,
-and a response names each protected value and its scheme without its ciphertext. The
+`connection` (`kind`, `version`, `public`, and write-only `secrets`) in place of the
+`ssh_*` fields; an embedded key is submitted as `secrets.private_key`, plaintext as
+today, and a response's connection names each protected value and its scheme without its
+ciphertext. The
 `hosts` table's `ssh_*` columns are replaced in one forward migration by
 `connection_kind`, `connection_version`, JSON `connection_public`, and JSON
 `connection_protected`: a `path` key becomes `key_path`, and an `embedded` key's stored
-ciphertext becomes a `fernet-v1` `private_key` unchanged, so the migration performs no
-cryptography. Callers change with them: the VM operator client, the e2e harness and host
+ciphertext, which the service encrypted when the key was submitted, becomes a
+`fernet-v1` `private_key` unchanged, so the migration performs no cryptography. Callers change with them: the VM operator client, the e2e harness and host
 registration, and the development environment's host configuration.
 
-Deferred, not in this change: `fernet-v1` is symmetric, so any writer holding the key can
-decrypt every stored key encrypted with it. A stronger scheme — sealed submission to the
-provisioning service's public key, references to a secret authority, or managed envelope
-encryption — needs only a new protected-value scheme and its codec support, not a change
-to the host authority or the executor contract. Recorded for the roadmap at closeout.
+Deferred, not in this change: an embedded key crosses the operator-to-provisioning hop in
+plaintext, protected only by the authenticated transport, and `fernet-v1` is a single
+service-held symmetric key. Sealed submission to the provisioning service's public key
+(which also removes the plaintext hop), references to a secret authority, or managed
+envelope encryption need only a new protected-value scheme and its codec support, not a
+change to the host authority or the executor contract. Recorded for the roadmap at
+closeout.
 
 **The generic lease routes serve the neutral view.** Reopened with the maintainer: the
 `Lease*` operator models stayed VM's only to avoid a wire change. When the generic lease
@@ -827,8 +839,12 @@ Superseded after the 2026-10-02 job and host design review:
 - **Host connection information as SSH fields in the family kit's models** → a
   connection envelope with per-kind codecs.
 - **The host authority encrypting codec-declared secret fields at rest** (and the codec's
-  `secret_fields`) → protected values the caller encrypts, the authority stores opaquely,
-  and the connection codec decrypts just in time ("Job and host authority shape").
+  `secret_fields`) → protected values the connection codec produces from a submitted
+  secret, the authority stores opaquely, and the codec decrypts just in time ("Job and
+  host authority shape").
+- **Callers encrypting embedded keys before submission**, a premise taken from a stale
+  model description → submission stays plaintext over the authenticated API, as the
+  code does; on-wire protection is deferred with sealed submission.
 
 Superseded after the 2026-10-02 layering review:
 

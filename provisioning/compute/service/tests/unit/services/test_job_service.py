@@ -1,7 +1,8 @@
 """
-Unit tests for AnsibleJobService's routing and retry arithmetic.
+Unit tests for AnsibleJobService's submissions and retry policy.
 
-Covers: which executor a job's stored parameters select, and retry delays.
+Covers: the route key and host a job is submitted under, and the retry policy
+read from settings.
 Orchestration methods (submit, list_jobs, _process_job, etc.) delegate to
 the DB and queue — they are exercised in integration tests; how an executor
 interprets parameters and output is covered in test_ansible_job_executor.py.
@@ -22,7 +23,7 @@ from compute_provisioning import JobExecutorTable, UnsupportedExecutorActionErro
 from vm_provisioning_adapter.bundle import VM_JOB_ACTIONS
 from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
 from vm_provisioning_adapter.services.ansible_job_executor import AnsibleJobExecutor
-from vm_provisioning_adapter.services.job_service import AnsibleJobService
+from vm_provisioning_adapter.services.job_service import AnsibleJobService, retry_policy_from
 
 
 # ---------------------------------------------------------------------------
@@ -60,9 +61,13 @@ def _make_service(*, host_service=None, **settings_overrides) -> AnsibleJobServi
 
 def _executors(settings, runner=None):
     runner = runner if runner is not None else MagicMock()
-    vm = AnsibleJobExecutor(runner, settings.resolved_playbook_path, settings=settings)
+    vm = AnsibleJobExecutor(
+        runner, settings.resolved_playbook_path, settings=settings,
+        result_kind=lambda action: f"vm_{action}",
+    )
     bare_metal = AnsibleJobExecutor(
-        runner, settings.resolved_bare_metal_playbook_path, settings=settings
+        runner, settings.resolved_bare_metal_playbook_path, settings=settings,
+        result_kind=lambda action: "bare_metal_access",
     )
     table = JobExecutorTable()
     for action in VM_JOB_ACTIONS:
@@ -73,104 +78,107 @@ def _executors(settings, runner=None):
     return table
 
 
-# ---------------------------------------------------------------------------
-# _build_params
-# ---------------------------------------------------------------------------
+class _RecordingEngine:
+    def __init__(self) -> None:
+        self.submitted: list[dict] = []
+
+    async def submit(self, **fields):
+        self.submitted.append(fields)
+        return None
 
 
-class TestExecutorSelection:
-    """A job's stored parameters name its offering mode, action, and host."""
+def _submitted(svc, params: AnsibleJobParams) -> dict:
+    import asyncio
 
-    def _resolved(self, svc, params: AnsibleJobParams):
-        import dataclasses
+    engine = _RecordingEngine()
+    svc._engine = engine
+    asyncio.run(svc.submit(params, job_queue=object()))
+    return engine.submitted[0]
 
-        offering_mode, action, host_id = svc._route(dataclasses.asdict(params))
-        return svc._executors.resolve(offering_mode, action), action, host_id
+
+class TestSubmission:
+    """A job is submitted under its offering mode, action, and host."""
 
     def test_vm_actions_use_the_vm_registration(self):
         svc = _make_service()
-        executor, action, host_id = self._resolved(
-            svc, AnsibleJobParams(host_id="kvm1", vm_action="create", offering_mode="vm")
-        )
+        params = AnsibleJobParams(host_id="kvm1", vm_action="create", offering_mode="vm")
 
-        assert executor._playbook_path == Path("/playbooks/vm-operations.yaml")
-        assert (action, host_id) == ("create", "kvm1")
+        fields = _submitted(svc, params)
+
+        assert (fields["offering_mode"], fields["action"], fields["host_id"]) == (
+            "vm", "create", "kvm1",
+        )
+        assert svc._executors.resolve("vm", "create")._playbook_path == Path(
+            "/playbooks/vm-operations.yaml"
+        )
 
     def test_bare_metal_actions_use_the_bare_metal_registration(self):
         svc = _make_service()
-        executor, _, _ = self._resolved(
-            svc,
-            AnsibleJobParams(
-                host_id="bm-node-1",
-                vm_action=NODE_RECLAIM_ACCESS_ACTION,
-                offering_mode="bare_metal",
-            ),
-        )
 
-        assert executor._playbook_path == Path("/playbooks/node-access.yaml")
+        assert svc._executors.resolve(
+            "bare_metal", NODE_RECLAIM_ACCESS_ACTION
+        )._playbook_path == Path("/playbooks/node-access.yaml")
 
     def test_executor_action_takes_precedence_over_vm_action(self):
         svc = _make_service()
-        executor, action, _ = self._resolved(
-            svc,
-            AnsibleJobParams(
-                host_id="bm-node-1",
-                vm_action="create",
-                offering_mode="bare_metal",
-                executor_action=NODE_GRANT_ACCESS_ACTION,
-            ),
+        params = AnsibleJobParams(
+            host_id="bm-node-1",
+            vm_action="create",
+            offering_mode="bare_metal",
+            executor_action=NODE_GRANT_ACCESS_ACTION,
         )
 
-        assert action == NODE_GRANT_ACCESS_ACTION
-        assert executor._playbook_path == Path("/playbooks/node-access.yaml")
+        assert _submitted(svc, params)["action"] == NODE_GRANT_ACCESS_ACTION
 
     def test_an_unregistered_mode_and_action_is_refused(self):
         svc = _make_service()
 
         with pytest.raises(UnsupportedExecutorActionError):
-            self._resolved(
-                svc,
-                AnsibleJobParams(
-                    host_id="bm-node-1", vm_action="create", offering_mode="bare_metal"
-                ),
-            )
+            svc._executors.resolve("bare_metal", "create")
 
     def test_a_job_naming_no_host_runs_against_its_target_or_the_default(self):
         svc = _make_service()
 
-        assert svc._route({"offering_mode": "vm", "executor_target": "kvm9"})[2] == "kvm9"
-        assert svc._route({"offering_mode": "vm"})[2] == "kvm1"
+        targeted = AnsibleJobParams(
+            host_id=None, vm_action="create", offering_mode="vm", executor_target="kvm9"
+        )
+        untargeted = AnsibleJobParams(host_id=None, vm_action="create", offering_mode="vm")
+
+        assert _submitted(svc, targeted)["host_id"] == "kvm9"
+        assert _submitted(svc, untargeted)["host_id"] == "kvm1"
+
+    def test_its_parameters_are_stored_as_submitted(self):
+        import dataclasses
+
+        svc = _make_service()
+        params = AnsibleJobParams(host_id="kvm1", vm_action="create", offering_mode="vm")
+
+        assert _submitted(svc, params)["params"] == dataclasses.asdict(params)
 
 
 # ---------------------------------------------------------------------------
-# _calculate_retry_delay
+# retry_policy_from
 # ---------------------------------------------------------------------------
 
 
-class TestCalculateRetryDelay:
-    def test_first_retry_uses_initial_seconds(self):
-        svc = _make_service(retry_backoff_initial_seconds=60, retry_backoff_multiplier=2.0)
-        assert svc._calculate_retry_delay(0) == 60
+class TestRetryPolicyFromSettings:
+    def _policy(self, **overrides):
+        return retry_policy_from(_make_service(**overrides)._settings)
 
-    def test_second_retry_doubles(self):
-        svc = _make_service(retry_backoff_initial_seconds=60, retry_backoff_multiplier=2.0)
-        assert svc._calculate_retry_delay(1) == 120
-
-    def test_third_retry_quadruples(self):
-        svc = _make_service(retry_backoff_initial_seconds=60, retry_backoff_multiplier=2.0)
-        assert svc._calculate_retry_delay(2) == 240
+    def test_delays_grow_by_the_multiplier(self):
+        policy = self._policy(retry_backoff_initial_seconds=60, retry_backoff_multiplier=2.0)
+        assert [policy.delay_seconds(n) for n in range(3)] == [60, 120, 240]
 
     def test_capped_at_max(self):
-        svc = _make_service(
+        policy = self._policy(
             retry_backoff_initial_seconds=60,
             retry_backoff_multiplier=2.0,
             retry_backoff_max_seconds=200,
         )
-        assert svc._calculate_retry_delay(2) == 200
+        assert policy.delay_seconds(2) == 200
 
-    def test_returns_int(self):
-        svc = _make_service()
-        assert isinstance(svc._calculate_retry_delay(0), int)
+    def test_the_default_retry_count_is_the_deployment_s(self):
+        assert self._policy(default_max_retries=5).default_max_retries == 5
 
 
 def test_the_host_registry_is_required():

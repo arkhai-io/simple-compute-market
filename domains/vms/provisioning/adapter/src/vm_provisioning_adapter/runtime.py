@@ -7,6 +7,10 @@ from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
 from compute_provisioning import JobExecutorResolver
+from compute_provisioning.hosts import ConnectionCodecs
+from compute_provisioning.hosts.service import HostAuthority
+from compute_provisioning_ansible import SshConnectionCodec
+from compute_provisioning_service.services.relay_rebinding import check_host_pool_change
 from vm_provisioning_adapter.bundle import HOST_REQUIREMENT, build_vm_adapter_bundle
 from vm_provisioning_adapter.compute_adapter import VmComputeAdapter
 from vm_provisioning_adapter.release import VmFulfillmentReleaseJobPort, VmReleaseExecutor
@@ -27,7 +31,6 @@ from vm_provisioning_adapter.services.ansible_service import AnsibleService
 from vm_provisioning_adapter.services.host_operations_service import (
     HostOperationsService,
 )
-from vm_provisioning_adapter.services.host_service import HostService
 from vm_provisioning_adapter.services.job_service import AnsibleJobService
 from vm_provisioning_adapter.services.vm_operations_service import VmOperationsService
 
@@ -38,7 +41,7 @@ class VmProvisioningRuntime:
     session_factory: Any
     job_queue_provider: Callable[[], Any]
     ansible_service: Any
-    host_service: HostService
+    host_service: HostAuthority
     pool_config_handler: AnsiblePoolConfigHandler
     job_service: AnsibleJobService
     vm_operations_service: VmOperationsService
@@ -56,6 +59,7 @@ class VmProvisioningRuntime:
             self.ansible_service,
             self.config.resolved_playbook_path,
             settings=self.config,
+            result_kind=vm_result_kind,
             relay_resolver=self.relay_resolver,
         )
 
@@ -130,6 +134,22 @@ def project_ansible_pool_defaults(raw_view: Mapping[str, Any]) -> dict[str, Any]
     }
 
 
+def vm_result_kind(action: str) -> str:
+    """The kind of the result a VM action's job produces."""
+    return f"vm_{action}"
+
+
+def _relay_pool_change(db, host_id: str, current_pool_id: str, new_pool_id: str) -> None:
+    # A host moving to a pool on a different relay while it holds leases would
+    # strand its VMs' buyers on the old address; the move is refused.
+    check_host_pool_change(
+        db,
+        host_id=host_id,
+        current_pool_id=current_pool_id,
+        new_pool_id=new_pool_id,
+    )
+
+
 def build_vm_runtime(
     *,
     config,
@@ -154,10 +174,11 @@ def build_vm_runtime(
     else:
         ansible_service = AnsibleService(config)
 
-    host_service = HostService(
-        session_factory=session_factory,
-        settings=config,
+    host_service = HostAuthority(
+        session_factory,
+        codecs=ConnectionCodecs([SshConnectionCodec(config.ssh_decryption_key)]),
         capacity_derivation=capacity_derivation,
+        pool_change_hooks=(_relay_pool_change,),
     )
     job_service = AnsibleJobService(
         settings=config,

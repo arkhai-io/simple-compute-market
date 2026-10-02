@@ -12,6 +12,7 @@ signal, never through elapsed time.
 """
 
 from __future__ import annotations
+from compute_provisioning_ansible import ssh_connection
 
 import asyncio
 from datetime import datetime, timedelta, timezone
@@ -25,13 +26,13 @@ from arkhai_bare_metal import (
     BareMetalLeaseView,
 )
 from market_site.ledger import ALLOCATION_MODE_EXCLUSIVE
-from vm_provisioning_operator.models import HostCreate
+from compute_provisioning.hosts import HostCreate
 
 from bare_metal_provisioning_adapter.services.bare_metal_mock_executor import (
     BareMetalMockAnsibleService,
 )
 from compute_provisioning_service import container as _container_module
-from compute_provisioning_service.services.async_job_queue import AsyncJobQueue
+from compute_provisioning.jobs.queue import AsyncJobQueue
 
 HOST_ID = "bm-node-1"
 SSH_HOST = "192.0.2.10"
@@ -46,11 +47,7 @@ def _register_host() -> None:
     _container_module.resolved_host_service.register_host(
         HostCreate(
             host_id=HOST_ID,
-            ssh_host=SSH_HOST,
-            ssh_port=2201,
-            ssh_user="root",
-            ssh_key_type="path",
-            ssh_key_value="/fake/id_ed25519",
+            connection=ssh_connection(ssh_host=SSH_HOST, ssh_user="root", ssh_port=2201, key_path="/fake/id_ed25519"),
             gpu_count=0,
         )
     )
@@ -163,7 +160,7 @@ async def test_a_held_grant_runs_through_the_bare_metal_mock(
     finished = await test_client.wait_for_job(grant_job_id, timeout=5.0)
 
     assert finished["status"] == "succeeded", finished
-    access = finished["result"]["ansible_result"]
+    access = finished["result"]["value"]["ansible_result"]
     assert access["action"] == NODE_GRANT_ACCESS_ACTION
     assert access["ssh_user"] == "tenant-a"
     assert access["host"] == SSH_HOST
