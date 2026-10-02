@@ -8,6 +8,8 @@ dicts or temp files.
 
 from __future__ import annotations
 
+import json
+
 from pathlib import Path
 
 import pytest
@@ -303,10 +305,48 @@ def test_chains_dict_empty_when_no_chains_section(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Layered loading: settings.toml → storefront.toml → storefront.secrets.toml.
-# Tests build a fresh dynaconf instance pointing at a tmp XDG dir to verify
-# the overlay precedence end-to-end.
+# Layered loading: settings.toml → storefront.toml → storefront.json →
+# storefront.secrets.toml. Tests build a fresh dynaconf instance pointing at a
+# tmp XDG dir to verify the overlay precedence end-to-end.
 # ---------------------------------------------------------------------------
+
+
+def test_build_settings_reads_a_rendered_json_layer_under_the_overlay(
+    tmp_path, monkeypatch
+):
+    """The runtime path a chart deployment takes: no storefront.toml, a
+    rendered storefront.json, and the Secret overlay winning over it."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    config_dir = tmp_path / "arkhai"
+    config_dir.mkdir()
+    address = "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
+    (config_dir / "storefront.json").write_text(
+        json.dumps(
+            {
+                "port": 8001,
+                "log_level": "DEBUG",
+                "Wallet": {"address": address},
+                "Chains": {"anvil": {"chain_id": 31337, "rpc_url": "http://public:8545"}},
+            }
+        )
+    )
+    (config_dir / "storefront.secrets.toml").write_text(
+        '[chains.anvil]\nrpc_url = "http://credentialed:8545"\n'
+    )
+
+    s = agent_config._build_settings()
+
+    assert s.port == 8001
+    assert s.log_level == "DEBUG"
+    assert agent_config.get_evm_wallet_address(s) == address
+    assert s.chains.anvil.chain_id == 31337
+    assert s.chains.anvil.rpc_url == "http://credentialed:8545"
+    # Untouched key still has its settings.toml default.
+    assert s.negotiation.policies == [
+        "has_matching_inventory_guard",
+        "escrow_shape_guard",
+        "bisection",
+    ]
 
 
 def _build_isolated(tmp_path: Path, overlay_files: list[Path]) -> Dynaconf:

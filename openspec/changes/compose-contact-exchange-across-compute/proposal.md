@@ -162,9 +162,11 @@ None.
   mechanism more widely multiplies the deployments holding contact payloads, so
   retention had to exist first. That change implemented retention in the kit and
   composed it into bare metal; this change composes it into VM with the mechanism.
-- **Blocked on `pass-through-storefront-config`**, which makes the VM storefront chart
+- **Depended on `pass-through-storefront-config`**, now complete, which makes the VM storefront chart
   pass service configuration through instead of enumerating each mechanism. On its
-  baseline this change's settlement and delivery sections deploy by Helm values alone.
+  baseline this change's settlement and delivery sections deploy by Helm values once
+  the contact mechanism is registered and the generated values schema regenerated,
+  with the generator extended for `kind`-dependent delivery sinks.
 - **Task 6.5 is blocked on `bare-metal-mock-provisioned-deal`**'s two-storefront,
   two-site topology and is redesigned from it.
 - **Runs alongside `bare-metal-mock-provisioned-deal`**, which is moving bare-metal

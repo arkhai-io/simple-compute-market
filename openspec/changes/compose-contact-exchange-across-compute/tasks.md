@@ -3,7 +3,7 @@
 Depended on `contact-payload-retention`, which is complete and archived
 (`openspec/changes/archive/2026-10-01-contact-payload-retention/`).
 
-Blocked on `pass-through-storefront-config`. Task 6.5 is blocked on
+Depended on `pass-through-storefront-config`, which is complete. Task 6.5 is blocked on
 `bare-metal-mock-provisioned-deal`'s two-storefront topology. Decision 13 in
 `design.md` records what planning review settled; the planning pass amends these
 sections to match it.

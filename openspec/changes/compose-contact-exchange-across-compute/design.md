@@ -399,9 +399,14 @@ storefront for the multi-seller scenario — and each such edit is named in its 
 through the umbrella chart in this change. The VM storefront chart currently
 enumerates each settlement mechanism, its defaults, and its validation, so a further
 mechanism needs chart edits. `pass-through-storefront-config` removes that first and
-is this change's prerequisite; on its baseline `[Settlement.contact]` and `[Delivery]`
-reach the storefront through values alone, and this change owes only example values,
-a render test, and the Helm verification command.
+is this change's prerequisite. On its baseline `[Delivery]` reaches the storefront
+through values alone. `[Settlement.contact]` does once the VM storefront registers the
+contact mechanism: the chart's values schema is generated from the storefront's typed
+models and closes `Settlement` to the registered mechanisms, so registering it and
+running `make helm-values-schema` admits the section with no template edit. Delivery
+sinks' settings depend on each sink's `kind`, so this change also extends that
+generator to express the built-in sinks. Beyond that it owes example values, a render
+test, and the Helm verification command.
 
 **Contact details are ordinary configuration.** A seller's onboarding contact is not
 the class of secret the Secret overlay carries, and placing it there would force

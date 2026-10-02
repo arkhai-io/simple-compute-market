@@ -82,6 +82,11 @@ application Deployment and to Helm test pods.
   a ConfigMap, mounted at `CONFIG_DIRECTORY` as a `config-<profile>.yml`
   file. Adding a new non-secret key requires only a `values.yaml`
   change — no Deployment template change.
+  The provisioning chart and the umbrella's generated smoke-test profile
+  write JSON syntax into that YAML profile so 0x-prefixed EIP-191
+  identifiers remain strings when Dynaconf reads it: Helm's YAML encoder
+  leaves a 160-bit address unquoted, and a YAML loader reads it as an
+  integer.
 - Secret material (key material, credentials) that cannot go in a
   ConfigMap renders into a Kubernetes Secret whose data contains its own
   `config-<profile>.yml` key, mounted at the same `CONFIG_DIRECTORY`.
@@ -102,6 +107,66 @@ the same mechanism Helm test pods use to layer in test-only
 configuration: the shared non-secret values merge through one profile,
 and a pod needing secret material mounts an additional Secret-backed
 profile on top.
+
+### Storefront agents: pass-through configuration
+
+The VM storefront does not use profiles; it reads up to three files from
+`$XDG_CONFIG_HOME/arkhai/`, a later file winning on a conflicting key:
+`storefront.toml` (an operator's own file), `storefront.json` (the public
+document the chart renders), then `storefront.secrets.toml` (the Secret
+overlay). The chart mounts the last two at `/etc/arkhai/`.
+`market-storefront config show` reports the files merged as the server merges
+them; `--raw` prints each public file and never the overlay.
+
+Each entry of `storefront.agents` carries the storefront's own configuration
+in `config`, in the storefront's own key names, and the chart renders it
+unchanged into `storefront.json`. A setting or settlement mechanism the
+storefront gains deploys through values alone. Keys may be spelled in any case,
+as the storefront's loader reads them; a key stated in two spellings is refused
+at render. The chart adds only what the release knows, and except for the port
+only where `config` does not state it:
+
+| Setting | Derived from |
+|---|---|
+| `port` | the agent's `port`; always set, and a different stated value is refused |
+| `base_url` | the agent's Service |
+| `registry.urls`, `registry.authorities.<url>` | the internal registry's Service, with the agent's `internalRegistryTrust` written under its URL |
+| `provisioning.service_url` | the provisioning Service |
+| `capacity.sites` | `{default: <provisioning URL>}` |
+| `db_path` | `agent.db` under `persistence.mountPath` |
+
+`internalRegistryTrust` sits outside `config` because its key is the registry's
+release-derived URL; it is required while the agent uses the internal registry,
+and it must name `global.registryIdentity`'s authority and principal. When the
+agent uses the release's provisioning service, `config.provisioning.identity`
+and an `Identity.service_peers` entry for the site bound to it must include
+`global.provisioningIdentity`. Those checks relate the release's parts; the
+chart supplies no service default and does not validate the storefront's own
+settings. The storefront validates its typed sections at startup; untyped
+sections are not checked key by key (see below). Because the Deployment uses
+the `Recreate` strategy, a configuration the storefront refuses leaves no
+running pod; recover with `helm rollback`.
+
+`config` is public: it renders into a ConfigMap. The values schema carries one
+definition generated from the storefront's typed configuration models
+(`make helm-values-schema` regenerates it; a storefront unit test fails when it
+is stale). That definition refuses, in any spelling, every field a model marks
+secret or not applicable to the seller role, every field a typed section's
+model does not have, and every key in `Identity` other than its public
+principal, administrators, and service peers. So a wallet private key, a
+registry write token, private identity material, and hosted payer data are
+refused before anything renders; they belong in the Secret overlay, or for the
+signer credential in `identity.credentialSecret`. Untyped sections such as
+`provisioning`, `negotiation`, and `pricing` pass through unchecked, and a
+misspelled key there is ignored by the storefront. The schema also refuses the
+values shape of storefront chart releases before 0.2.0 — `seller`,
+`storefrontDomains`, `registryAuthority`, `registryUrl`, and `configMapName`
+under `config`; `agentId`, `autoRegister`, and `rootPath` on an agent; and
+`image.settlementConfigSchemaVersion` — naming the key.
+
+`storefront.json` is JSON so every string, including a 160-bit address, is read
+back as a string. Every number in a values file passes through a float on its
+way into Helm, so write an integer above 2^53 as a string.
 
 ## Marketplace identity configuration
 
@@ -222,7 +287,9 @@ configuration contains a non-empty `storefront_domains` list; every row names
 one contribution, exact offering mode, domain identity, and contract version.
 Trusted provisioning authorities remain separately configured site bindings.
 The Helm chart and Compose profile run one storefront process against one
-single-writer SQLite volume; they do not start one container per domain.
+single-writer SQLite volume; they do not start one container per domain. Under
+Helm the list is each agent's `config.storefront_domains`, passed through as
+written (see "Storefront agents: pass-through configuration").
 
 `storefront_domains` is public routing metadata only. Signing credentials,
 provider settings, SSH material, tenant credentials, hosted provider objects,
@@ -647,7 +714,11 @@ sequence:
 
 4. Repeat `--check` for every file and render the Helm or Compose deployment.
    Do not proceed if a migration, typed configuration validation, generated
-   schema check, hosted manifest check, or image/config schema check fails.
+   schema check, or hosted manifest check fails. Helm values are not a file
+   `config migrate` reads: rendering applies the values schema, and at startup
+   the storefront applies its typed validation — refusing, for example, a
+   settlement schema version other than its own. Untyped settings are not
+   checked key by key.
 5. Quiesce publication, negotiation, settlement, and recovery automation.
    Deploy the coordinated marketplace configuration, wheels, image, Secret,
    and ConfigMap set. Keep automation quiesced while every storefront reports

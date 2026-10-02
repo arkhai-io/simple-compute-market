@@ -5,55 +5,113 @@
     "global": {
       "type": "object",
       "properties": {
-        "integrationTests": {"$ref": "#/definitions/image"},
-        "registryIdentity": {"$ref": "#/definitions/activeRegistryIdentity"},
-        "provisioningIdentity": {"$ref": "#/definitions/publicIdentity"},
+        "integrationTests": {
+          "$ref": "#/definitions/image"
+        },
+        "registryIdentity": {
+          "$ref": "#/definitions/activeRegistryIdentity"
+        },
+        "provisioningIdentity": {
+          "$ref": "#/definitions/publicIdentity"
+        },
         "rpc": {
           "type": "object",
-          "required": ["enabled", "chainId", "host", "port"],
+          "required": [
+            "enabled",
+            "chainId",
+            "host",
+            "port"
+          ],
           "properties": {
-            "enabled": {"type": "boolean"},
-            "chainId": {"type": "integer", "minimum": 1},
-            "host": {"type": "string", "minLength": 1},
-            "port": {"type": "integer", "minimum": 1, "maximum": 65535}
+            "enabled": {
+              "type": "boolean"
+            },
+            "chainId": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "host": {
+              "type": "string",
+              "minLength": 1
+            },
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            }
           }
         }
       }
     },
-    "registry": {"$ref": "#/definitions/registryInstance"},
-    "api-credits-registry": {"$ref": "#/definitions/registryInstance"},
+    "registry": {
+      "$ref": "#/definitions/registryInstance"
+    },
+    "api-credits-registry": {
+      "$ref": "#/definitions/registryInstance"
+    },
     "storefront": {
       "type": "object",
       "properties": {
-        "image": {"$ref": "#/definitions/image"},
+        "image": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/image"
+            },
+            {
+              "properties": {
+                "settlementConfigSchemaVersion": false
+              }
+            }
+          ]
+        },
         "agents": {
           "type": "array",
           "minItems": 1,
-          "items": {"$ref": "#/definitions/storefrontAgent"}
+          "items": {
+            "$ref": "#/definitions/storefrontAgent"
+          }
         }
       }
     },
     "bare-metal-storefront": {
       "type": "object",
       "properties": {
-        "enabled": {"type": "boolean"}
+        "enabled": {
+          "type": "boolean"
+        }
       }
     },
     "provisioning": {
       "type": "object",
-      "required": ["identity", "storefrontIdentity", "adminIdentity"],
+      "required": [
+        "identity",
+        "storefrontIdentity",
+        "adminIdentity"
+      ],
       "properties": {
         "server": {
           "type": "object",
           "properties": {
-            "image": {"$ref": "#/definitions/image"}
+            "image": {
+              "$ref": "#/definitions/image"
+            }
           }
         },
-        "identity": {"$ref": "#/definitions/identity"},
-        "storefrontIdentity": {"$ref": "#/definitions/bootstrapIdentity"},
-        "adminIdentity": {"$ref": "#/definitions/bootstrapIdentity"},
-        "sshKey": {"$ref": "#/definitions/externalSecretReference"},
-        "sshDecryptionKey": {"$ref": "#/definitions/externalSecretReference"},
+        "identity": {
+          "$ref": "#/definitions/identity"
+        },
+        "storefrontIdentity": {
+          "$ref": "#/definitions/bootstrapIdentity"
+        },
+        "adminIdentity": {
+          "$ref": "#/definitions/bootstrapIdentity"
+        },
+        "sshKey": {
+          "$ref": "#/definitions/externalSecretReference"
+        },
+        "sshDecryptionKey": {
+          "$ref": "#/definitions/externalSecretReference"
+        },
         "config": {
           "type": "object",
           "properties": {
@@ -76,34 +134,63 @@
     "integrationTests": {
       "type": "object",
       "properties": {
-        "image": {"$ref": "#/definitions/image"}
+        "image": {
+          "$ref": "#/definitions/image"
+        }
       }
     },
     "e2e-tests": {
       "type": "object",
       "properties": {
-        "integrationTests": {"$ref": "#/definitions/image"},
-        "createSecret": {"const": false},
-        "secretName": {"type": "string", "minLength": 1},
-        "seller": {"$ref": "#/definitions/publicEip191Principal"},
-        "buyer": {"$ref": "#/definitions/publicEip191Principal"}
+        "integrationTests": {
+          "$ref": "#/definitions/image"
+        },
+        "createSecret": {
+          "const": false
+        },
+        "secretName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "seller": {
+          "$ref": "#/definitions/publicEip191Principal"
+        },
+        "buyer": {
+          "$ref": "#/definitions/publicEip191Principal"
+        }
       }
     }
   },
   "definitions": {
     "registryInstance": {
       "type": "object",
-      "required": ["identity", "descriptor"],
+      "required": [
+        "identity",
+        "descriptor"
+      ],
       "properties": {
-        "enabled": {"type": "boolean"},
-        "image": {"$ref": "#/definitions/image"},
-        "identity": {"$ref": "#/definitions/identity"},
-        "descriptor": {"$ref": "#/definitions/registryDescriptor"},
+        "enabled": {
+          "type": "boolean"
+        },
+        "image": {
+          "$ref": "#/definitions/image"
+        },
+        "identity": {
+          "$ref": "#/definitions/identity"
+        },
+        "descriptor": {
+          "$ref": "#/definitions/registryDescriptor"
+        },
         "config": {
           "type": "object",
           "properties": {
-            "filterSpecPath": {"type": "string", "pattern": "^/\\S+\\.ya?ml$"},
-            "rootPath": {"type": "string"}
+            "filterSpecPath": {
+              "type": "string",
+              "pattern": "^/\\S+\\.ya?ml$"
+            },
+            "rootPath": {
+              "type": "string"
+            }
           }
         }
       }
@@ -113,8 +200,12 @@
       "properties": {
         "digest": {
           "anyOf": [
-            {"const": ""},
-            {"pattern": "^sha256:[0-9a-f]{64}$"}
+            {
+              "const": ""
+            },
+            {
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            }
           ]
         }
       }
@@ -122,10 +213,18 @@
     "externalSecretReference": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["createSecret", "secretName"],
+      "required": [
+        "createSecret",
+        "secretName"
+      ],
       "properties": {
-        "createSecret": {"const": false},
-        "secretName": {"type": "string", "minLength": 1},
+        "createSecret": {
+          "const": false
+        },
+        "secretName": {
+          "type": "string",
+          "minLength": 1
+        },
         "sshPrivateKey": false,
         "privateKey": false,
         "key": false
@@ -134,93 +233,167 @@
     "credentialSecret": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "key"],
+      "required": [
+        "name",
+        "key"
+      ],
       "properties": {
-        "name": {"type": "string", "minLength": 1},
-        "key": {"type": "string", "minLength": 1}
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1
+        }
       }
     },
     "identity": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["principal", "credentialSecret"],
+      "required": [
+        "principal",
+        "credentialSecret"
+      ],
       "properties": {
-        "authority": {"type": "string", "minLength": 1},
-        "principal": {"$ref": "#/definitions/publicIdentity"},
-        "credentialSecret": {"$ref": "#/definitions/credentialSecret"},
-        "servicePeers": {"$ref": "#/definitions/servicePeers"},
-        "administrators": {"$ref": "#/definitions/administrators"}
+        "authority": {
+          "type": "string",
+          "minLength": 1
+        },
+        "principal": {
+          "$ref": "#/definitions/publicIdentity"
+        },
+        "credentialSecret": {
+          "$ref": "#/definitions/credentialSecret"
+        },
+        "servicePeers": {
+          "$ref": "#/definitions/servicePeers"
+        },
+        "administrators": {
+          "$ref": "#/definitions/administrators"
+        }
       }
     },
     "publicIdentity": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["scheme", "identifier"],
+      "required": [
+        "scheme",
+        "identifier"
+      ],
       "properties": {
-        "scheme": {"enum": ["ed25519", "eip191"]},
-        "identifier": {"type": "string"}
+        "scheme": {
+          "enum": [
+            "ed25519",
+            "eip191"
+          ]
+        },
+        "identifier": {
+          "type": "string"
+        }
       },
       "allOf": [
         {
-          "if": {"properties": {"scheme": {"const": "eip191"}}},
-          "then": {"properties": {"identifier": {"pattern": "^0x[0-9a-f]{40}$"}}}
+          "if": {
+            "properties": {
+              "scheme": {
+                "const": "eip191"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "identifier": {
+                "pattern": "^0x[0-9a-f]{40}$"
+              }
+            }
+          }
         },
         {
-          "if": {"properties": {"scheme": {"const": "ed25519"}}},
-          "then": {"properties": {"identifier": {"pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$"}}}
+          "if": {
+            "properties": {
+              "scheme": {
+                "const": "ed25519"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "identifier": {
+                "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$"
+              }
+            }
+          }
         }
       ]
-    },
-    "trustedIdentitySet": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["principals"],
-      "properties": {
-        "principals": {
-          "type": "array",
-          "minItems": 1,
-          "maxItems": 2,
-          "uniqueItems": true,
-          "items": {"$ref": "#/definitions/publicIdentity"}
-        }
-      }
     },
     "bootstrapIdentity": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["principals"],
+      "required": [
+        "principals"
+      ],
       "properties": {
         "principals": {
           "type": "array",
           "minItems": 1,
           "maxItems": 1,
           "uniqueItems": true,
-          "items": {"$ref": "#/definitions/publicIdentity"}
+          "items": {
+            "$ref": "#/definitions/publicIdentity"
+          }
         }
       }
     },
     "activeRegistryIdentity": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["authority", "principal"],
+      "required": [
+        "authority",
+        "principal"
+      ],
       "properties": {
-        "authority": {"type": "string", "minLength": 1},
-        "principal": {"$ref": "#/definitions/publicIdentity"}
+        "authority": {
+          "type": "string",
+          "minLength": 1
+        },
+        "principal": {
+          "$ref": "#/definitions/publicIdentity"
+        }
       }
     },
     "registryDescriptor": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["baseUrl", "displayName", "operatorIdentity"],
+      "required": [
+        "baseUrl",
+        "displayName",
+        "operatorIdentity"
+      ],
       "properties": {
-        "baseUrl": {"type": "string", "pattern": "^https?://\\S+$"},
-        "displayName": {"type": "string", "minLength": 1, "maxLength": 256},
-        "operatorIdentity": {"type": "string", "minLength": 1, "maxLength": 256},
+        "baseUrl": {
+          "type": "string",
+          "pattern": "^https?://\\S+$"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operatorIdentity": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
         "accessAcquisitionPointer": {
           "type": "string",
           "anyOf": [
-            {"const": ""},
-            {"pattern": "^https?://\\S+$"}
+            {
+              "const": ""
+            },
+            {
+              "pattern": "^https?://\\S+$"
+            }
           ]
         }
       }
@@ -228,15 +401,23 @@
     "registryAuthority": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["authority", "principals"],
+      "required": [
+        "authority",
+        "principals"
+      ],
       "properties": {
-        "authority": {"type": "string", "minLength": 1},
+        "authority": {
+          "type": "string",
+          "minLength": 1
+        },
         "principals": {
           "type": "array",
           "minItems": 1,
           "maxItems": 2,
           "uniqueItems": true,
-          "items": {"$ref": "#/definitions/publicIdentity"}
+          "items": {
+            "$ref": "#/definitions/publicIdentity"
+          }
         }
       }
     },
@@ -246,11 +427,22 @@
       "additionalProperties": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["role", "siteId", "principals"],
+        "required": [
+          "role",
+          "siteId",
+          "principals"
+        ],
         "properties": {
-          "role": {"const": "service"},
-          "siteId": {"type": "string", "minLength": 1},
-          "principals": {"$ref": "#/definitions/trustedIdentitySet/properties/principals"}
+          "role": {
+            "const": "service"
+          },
+          "siteId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "principals": {
+            "$ref": "#/definitions/trustedIdentitySet/properties/principals"
+          }
         }
       }
     },
@@ -260,388 +452,87 @@
       "additionalProperties": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["principals"],
-        "properties": {
-          "principals": {"$ref": "#/definitions/trustedIdentitySet/properties/principals"}
-        }
-      }
-    },
-    "stripeSettlement": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["enabled"],
-      "properties": {
-        "enabled": {"type": "boolean"},
-        "base_url": {"type": "string", "minLength": 1},
-        "authority_id": {"type": "string", "minLength": 1},
-        "environment": {"type": "string", "minLength": 1},
-        "authority": {"$ref": "#/definitions/trustedIdentitySet"},
-        "expected_manifest_digest": {"pattern": "^sha256:[0-9a-f]{64}$"},
-        "expected_api_version": {"const": "0.2.1"},
-        "expected_schema_version": {"const": 5},
-        "required_capabilities": {
-          "const": [
-            "scheme-tagged-identities.v1",
-            "account-owner-admission.v1",
-            "account-owner-rotation.v1",
-            "account-owner-retirement.v1",
-            "signer-injected-client.v1",
-            "provider-neutral-seller-onboarding.v1",
-            "conditional-escrow.v2",
-            "stripe-connect-separate-charges-transfers.v2",
-            "portable-attestation.v1",
-            "eas-arbiter.v1",
-            "payer-profile.v1",
-            "funding-authorization.v1",
-            "funding-profile.card.v1",
-            "funding-profile.us_bank_transfer.v1",
-            "funding-profile.us_ach_debit.v1",
-            "normalized-funding-reversal.v1",
-            "operator-recovery-redaction.v1"
-          ]
-        },
-        "account_ref": {"type": "string", "minLength": 1},
-        "currency": {"const": "usd"},
-        "country": {"const": "US"},
-        "condition_profile": {"type": "string", "minLength": 1},
-        "condition_profiles": {"type": "object", "additionalProperties": {"type": "object"}},
-        "resolvers": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["chain_name", "evidence_mode"],
-            "properties": {
-              "chain_name": {"type": "string", "minLength": 1},
-              "evidence_mode": {"enum": ["eas.v1", "portable-remote.v1"]}
-            }
-          }
-        },
-        "request_timeout_seconds": {"type": "number", "exclusiveMinimum": 0},
-        "preflight_timeout_seconds": {"type": "number", "exclusiveMinimum": 0},
-        "allow_insecure_loopback": {"type": "boolean"}
-      },
-      "if": {"properties": {"enabled": {"const": true}}, "required": ["enabled"]},
-      "then": {
         "required": [
-          "base_url",
-          "authority_id",
-          "environment",
-          "authority",
-          "expected_manifest_digest",
-          "expected_api_version",
-          "expected_schema_version",
-          "required_capabilities",
-          "account_ref",
-          "currency",
-          "country",
-          "condition_profile",
-          "condition_profiles",
-          "resolvers"
-        ]
-      }
-    },
-    "alkahestSettlement": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["enabled"],
-      "properties": {
-        "enabled": {"type": "boolean"},
-        "address_config_path": {"type": "string", "minLength": 1},
-        "oracle_gated": {"type": "boolean"},
-        "trusted_oracle_addresses": {
-          "type": "array",
-          "uniqueItems": true,
-          "items": {"type": "string", "pattern": "^0x[0-9A-Fa-f]{40}$"}
-        },
-        "interruptible": {"type": "boolean"},
-        "interruptible_oracle_addresses": {
-          "type": "array",
-          "uniqueItems": true,
-          "items": {"type": "string", "pattern": "^0x[0-9A-Fa-f]{40}$"}
-        }
-      }
-    },
-    "settlement": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["schema_version", "priority"],
-      "properties": {
-        "schema_version": {"const": 1},
-        "priority": {
-          "type": "array",
-          "uniqueItems": true,
-          "items": {"enum": ["fiat.stripe.v1", "alkahest.v1"]}
-        },
-        "stripe": {"$ref": "#/definitions/stripeSettlement"},
-        "alkahest": {"$ref": "#/definitions/alkahestSettlement"}
-      },
-      "allOf": [
-        {
-          "if": {"properties": {"priority": {"contains": {"const": "fiat.stripe.v1"}}}},
-          "then": {
-            "required": ["stripe"],
-            "properties": {
-              "stripe": {
-                "properties": {"enabled": {"const": true}},
-                "required": ["enabled"]
-              }
-            }
-          }
-        },
-        {
-          "if": {"properties": {"priority": {"contains": {"const": "alkahest.v1"}}}},
-          "then": {
-            "required": ["alkahest"],
-            "properties": {
-              "alkahest": {
-                "properties": {"enabled": {"const": true}},
-                "required": ["enabled"]
-              }
-            }
-          }
-        }
-      ]
-    },
-    "pricing": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["settlements"],
-      "properties": {
-        "default_min_price": {"type": ["string", "number"], "description": "Hidden-reserve negotiation floor in base units per hour. State it as decimal text: a fractional number is refused."},
-        "default_token_address": {"type": "string", "description": "Retired: accepted so existing values still validate, and not read by the storefront."},
-        "default_max_duration_seconds": {"type": "integer", "minimum": 0},
-        "settlements": {
-          "type": "array",
-          "minItems": 1,
-          "items": {
-            "oneOf": [
-              {
-                "type": "object",
-                "additionalProperties": false,
-                "required": ["mechanism", "asset", "rate", "per", "mechanism_input"],
-                "properties": {
-                  "mechanism": {"const": "fiat.stripe.v1"},
-                  "asset": {"const": "usd"},
-                  "rate": {
-                    "anyOf": [
-                      {"type": "number", "exclusiveMinimum": 0},
-                      {"type": "string", "pattern": "^(?:[1-9][0-9]*(?:\\.[0-9]+)?|0\\.[0-9]*[1-9][0-9]*)$"}
-                    ]
-                  },
-                  "per": {"type": "string", "minLength": 1},
-                  "mechanism_input": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": ["funding_profile", "interaction", "funds_flow"],
-                    "properties": {
-                      "funding_profile": {"enum": ["card.v1", "us_bank_transfer.v1", "us_ach_debit.v1"]},
-                      "interaction": {"enum": ["interactive", "saved_instrument"]},
-                      "funds_flow": {"const": "separate_charges_transfers"}
-                    },
-                    "allOf": [
-                      {
-                        "if": {
-                          "properties": {"funding_profile": {"const": "us_bank_transfer.v1"}},
-                          "required": ["funding_profile"]
-                        },
-                        "then": {
-                          "properties": {"interaction": {"const": "interactive"}},
-                          "required": ["interaction"]
-                        }
-                      }
-                    ]
-                  }
-                }
-              },
-              {
-                "type": "object",
-                "additionalProperties": false,
-                "required": ["mechanism", "asset", "rate", "per", "mechanism_input"],
-                "properties": {
-                  "mechanism": {"const": "alkahest.v1"},
-                  "asset": {"type": "string", "minLength": 1},
-                  "rate": {
-                    "anyOf": [
-                      {"type": "number", "exclusiveMinimum": 0},
-                      {"type": "string", "pattern": "^(?:[1-9][0-9]*(?:\\.[0-9]+)?|0\\.[0-9]*[1-9][0-9]*)$"}
-                    ]
-                  },
-                  "per": {"type": "string", "minLength": 1},
-                  "mechanism_input": {"type": "object"}
-                }
-              }
-            ]
-          }
-        }
-      }
-    },
-    "wallet": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "address": {
-          "anyOf": [
-            {"const": ""},
-            {"type": "string", "pattern": "^0x[0-9A-Fa-f]{40}$"}
-          ]
-        },
-        "ssh_public_key": {"type": "string", "minLength": 1}
-      }
-    },
-    "chains": {
-      "type": "object",
-      "additionalProperties": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["chain_id"],
-        "properties": {
-          "rpc_url": {
-            "anyOf": [
-              {"const": ""},
-              {"type": "string", "minLength": 1}
-            ]
-          },
-          "chain_id": {"type": "integer", "minimum": 1}
-        }
-      }
-    },
-    "storefrontDomains": {
-      "type": "array",
-      "minItems": 1,
-      "uniqueItems": true,
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "contribution",
-          "offeringMode",
-          "domainIdentity",
-          "contractVersion"
+          "principals"
         ],
         "properties": {
-          "contribution": {"type": "string", "minLength": 1},
-          "offeringMode": {"type": "string", "minLength": 1},
-          "domainIdentity": {"type": "string", "minLength": 1},
-          "contractVersion": {"type": "string", "pattern": "^[1-9][0-9]*\\.[0-9]+$"}
+          "principals": {
+            "$ref": "#/definitions/trustedIdentitySet/properties/principals"
+          }
         }
       }
     },
     "storefrontAgent": {
       "type": "object",
-      "required": ["name", "identity"],
+      "required": [
+        "name",
+        "identity"
+      ],
       "properties": {
-        "name": {"type": "string", "minLength": 1},
-        "identity": {"$ref": "#/definitions/identity"},
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "component": {
+          "type": "string",
+          "minLength": 1
+        },
+        "configMapName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "identity": {
+          "$ref": "#/definitions/storefrontIdentity"
+        },
+        "internalRegistryTrust": {
+          "$ref": "#/definitions/registryAuthority"
+        },
         "secret": {
           "type": "object",
           "properties": {
-            "createSecret": {"const": false},
-            "secretName": {"type": "string"},
-            "configKey": {"type": "string", "minLength": 1},
+            "createSecret": {
+              "const": false
+            },
+            "secretName": {
+              "type": "string"
+            },
+            "configKey": {
+              "type": "string",
+              "minLength": 1
+            },
             "privKey": false,
             "privateKey": false,
             "walletPrivateKey": false
           }
         },
+        "agentId": false,
+        "autoRegister": false,
+        "rootPath": false,
         "config": {
-          "type": "object",
-          "required": ["registryAuthority", "storefrontDomains"],
-          "properties": {
-            "hostedSettlement": false,
-            "chain": false,
-            "settlement": {"$ref": "#/definitions/settlement"},
-            "pricing": {"$ref": "#/definitions/pricing"},
-            "wallet": {"$ref": "#/definitions/wallet"},
-            "chains": {"$ref": "#/definitions/chains"},
-            "storefrontDomains": {"$ref": "#/definitions/storefrontDomains"},
-            "registryAuthority": {"$ref": "#/definitions/registryAuthority"}
-          }
-        }
-      },
-      "allOf": [
-        {
-          "if": {
-            "properties": {
-              "config": {
-                "properties": {
-                  "settlement": {
-                    "properties": {
-                      "alkahest": {
-                        "properties": {"enabled": {"const": true}},
-                        "required": ["enabled"]
-                      }
-                    },
-                    "required": ["alkahest"]
-                  }
-                },
-                "required": ["settlement"]
-              }
+          "allOf": [
+            {
+              "$ref": "#/definitions/storefrontServiceConfig"
             },
-            "required": ["config"]
-          },
-          "then": {
-            "required": ["secret"],
-            "properties": {
-              "secret": {
-                "required": ["createSecret", "secretName"],
-                "properties": {
-                  "createSecret": {"const": false},
-                  "secretName": {"type": "string", "minLength": 1}
-                }
-              },
-              "config": {
-                "required": ["wallet", "chains"],
-                "properties": {
-                  "wallet": {"required": ["address"]},
-                  "chains": {"minProperties": 1}
-                }
+            {
+              "type": "object",
+              "patternProperties": {
+                "^[sS][eE][lL][lL][eE][rR]$": false,
+                "^[rR][eE][gG][iI][sS][tT][rR][yY][aA][uU][tT][hH][oO][rR][iI][tT][yY]$": false,
+                "^[rR][eE][gG][iI][sS][tT][rR][yY][uU][rR][lL]$": false,
+                "^[sS][tT][oO][rR][eE][fF][rR][oO][nN][tT][dD][oO][mM][aA][iI][nN][sS]$": false,
+                "^[cC][oO][nN][fF][iI][gG][mM][aA][pP][nN][aA][mM][eE]$": false,
+                "^[hH][oO][sS][tT][eE][dD][sS][eE][tT][tT][lL][eE][mM][eE][nN][tT]$": false,
+                "^[cC][hH][aA][iI][nN]$": false
               }
             }
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "config": {
-                "properties": {
-                  "settlement": {
-                    "properties": {
-                      "stripe": {
-                        "properties": {"enabled": {"const": true}},
-                        "required": ["enabled"]
-                      }
-                    },
-                    "required": ["stripe"]
-                  }
-                },
-                "required": ["settlement"]
-              }
-            },
-            "required": ["config"]
-          },
-          "then": {
-            "properties": {
-              "config": {
-                "required": ["pricing"],
-                "properties": {
-                  "pricing": {
-                    "properties": {
-                      "settlements": {
-                        "contains": {
-                          "type": "object",
-                          "properties": {"mechanism": {"const": "fiat.stripe.v1"}},
-                          "required": ["mechanism"]
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
+          ]
         }
-      ]
+      }
     },
     "publicEip191Principal": {
       "type": "object",
@@ -650,10 +541,540 @@
         "identity": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["scheme", "identifier"],
+          "required": [
+            "scheme",
+            "identifier"
+          ],
           "properties": {
-            "scheme": {"const": "eip191"},
-            "identifier": {"pattern": "^0x[0-9a-f]{40}$"}
+            "scheme": {
+              "const": "eip191"
+            },
+            "identifier": {
+              "pattern": "^0x[0-9a-f]{40}$"
+            }
+          }
+        }
+      }
+    },
+    "storefrontIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "credentialSecret"
+      ],
+      "properties": {
+        "credentialSecret": {
+          "$ref": "#/definitions/credentialSecret"
+        }
+      }
+    },
+    "storefrontServiceConfig": {
+      "type": "object",
+      "patternProperties": {
+        "^[iI][dD][eE][nN][tT][iI][tT][yY]$": {
+          "additionalProperties": false,
+          "type": "object",
+          "patternProperties": {
+            "^[pP][rR][iI][nN][cC][iI][pP][aA][lL]$": {
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "type": "object",
+                  "patternProperties": {
+                    "^[sS][cC][hH][eE][mM][eE]$": {
+                      "enum": [
+                        "eip191",
+                        "ed25519"
+                      ],
+                      "type": "string"
+                    },
+                    "^[iI][dD][eE][nN][tT][iI][fF][iI][eE][rR]$": {
+                      "type": "string"
+                    }
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "^[aA][dD][mM][iI][nN][iI][sS][tT][rR][aA][tT][oO][rR][sS]$": {
+              "additionalProperties": {
+                "additionalProperties": false,
+                "type": "object",
+                "patternProperties": {
+                  "^[pP][rR][iI][nN][cC][iI][pP][aA][lL][sS]$": {
+                    "items": {
+                      "additionalProperties": false,
+                      "type": "object",
+                      "patternProperties": {
+                        "^[sS][cC][hH][eE][mM][eE]$": {
+                          "enum": [
+                            "eip191",
+                            "ed25519"
+                          ],
+                          "type": "string"
+                        },
+                        "^[iI][dD][eE][nN][tT][iI][fF][iI][eE][rR]$": {
+                          "maxLength": 128,
+                          "minLength": 1,
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "type": "array"
+                  }
+                }
+              },
+              "type": "object"
+            },
+            "^[sS][eE][rR][vV][iI][cC][eE]_[pP][eE][eE][rR][sS]$": {
+              "additionalProperties": {
+                "additionalProperties": false,
+                "type": "object",
+                "patternProperties": {
+                  "^[rR][oO][lL][eE]$": {
+                    "type": "string"
+                  },
+                  "^[sS][iI][tT][eE]_[iI][dD]$": {
+                    "type": "string"
+                  },
+                  "^[pP][rR][iI][nN][cC][iI][pP][aA][lL][sS]$": {
+                    "items": {
+                      "additionalProperties": false,
+                      "type": "object",
+                      "patternProperties": {
+                        "^[sS][cC][hH][eE][mM][eE]$": {
+                          "enum": [
+                            "eip191",
+                            "ed25519"
+                          ],
+                          "type": "string"
+                        },
+                        "^[iI][dD][eE][nN][tT][iI][fF][iI][eE][rR]$": {
+                          "maxLength": 128,
+                          "minLength": 1,
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "type": "array"
+                  }
+                }
+              },
+              "type": "object"
+            }
+          }
+        },
+        "^[rR][eE][gG][iI][sS][tT][rR][yY]$": {
+          "additionalProperties": true,
+          "type": "object",
+          "patternProperties": {
+            "^[aA][uU][tT][hH]$": false
+          }
+        },
+        "^[sS][eE][tT][tT][lL][eE][mM][eE][nN][tT]$": {
+          "type": "object",
+          "additionalProperties": false,
+          "patternProperties": {
+            "^[sS][cC][hH][eE][mM][aA]_[vV][eE][rR][sS][iI][oO][nN]$": {
+              "type": "integer"
+            },
+            "^[pP][rR][iI][oO][rR][iI][tT][yY]$": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "^[aA][lL][kK][aA][hH][eE][sS][tT]$": {
+              "additionalProperties": false,
+              "type": "object",
+              "patternProperties": {
+                "^[eE][nN][aA][bB][lL][eE][dD]$": {
+                  "type": "boolean"
+                },
+                "^[aA][dD][dD][rR][eE][sS][sS]_[cC][oO][nN][fF][iI][gG]_[pP][aA][tT][hH]$": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "^[oO][rR][aA][cC][lL][eE]_[gG][aA][tT][eE][dD]$": {
+                  "type": "boolean"
+                },
+                "^[tT][rR][uU][sS][tT][eE][dD]_[oO][rR][aA][cC][lL][eE]_[aA][dD][dD][rR][eE][sS][sS][eE][sS]$": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "^[iI][nN][tT][eE][rR][rR][uU][pP][tT][iI][bB][lL][eE]$": {
+                  "type": "boolean"
+                },
+                "^[iI][nN][tT][eE][rR][rR][uU][pP][tT][iI][bB][lL][eE]_[oO][rR][aA][cC][lL][eE]_[aA][dD][dD][rR][eE][sS][sS][eE][sS]$": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "^[sS][tT][rR][iI][pP][eE]$": {
+              "additionalProperties": false,
+              "type": "object",
+              "patternProperties": {
+                "^[eE][nN][aA][bB][lL][eE][dD]$": {
+                  "type": "boolean"
+                },
+                "^[bB][aA][sS][eE]_[uU][rR][lL]$": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "^[aA][uU][tT][hH][oO][rR][iI][tT][yY]_[iI][dD]$": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "^[eE][nN][vV][iI][rR][oO][nN][mM][eE][nN][tT]$": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "^[aA][uU][tT][hH][oO][rR][iI][tT][yY]$": {
+                  "anyOf": [
+                    {
+                      "additionalProperties": false,
+                      "type": "object",
+                      "patternProperties": {
+                        "^[pP][rR][iI][nN][cC][iI][pP][aA][lL][sS]$": {
+                          "items": {
+                            "additionalProperties": false,
+                            "type": "object",
+                            "patternProperties": {
+                              "^[sS][cC][hH][eE][mM][eE]$": {
+                                "enum": [
+                                  "eip191",
+                                  "ed25519"
+                                ],
+                                "type": "string"
+                              },
+                              "^[iI][dD][eE][nN][tT][iI][fF][iI][eE][rR]$": {
+                                "maxLength": 128,
+                                "minLength": 1,
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "maxItems": 2,
+                          "minItems": 1,
+                          "type": "array"
+                        }
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "^[eE][xX][pP][eE][cC][tT][eE][dD]_[mM][aA][nN][iI][fF][eE][sS][tT]_[dD][iI][gG][eE][sS][tT]$": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "^[eE][xX][pP][eE][cC][tT][eE][dD]_[aA][pP][iI]_[vV][eE][rR][sS][iI][oO][nN]$": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "^[eE][xX][pP][eE][cC][tT][eE][dD]_[sS][cC][hH][eE][mM][aA]_[vV][eE][rR][sS][iI][oO][nN]$": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "^[rR][eE][qQ][uU][iI][rR][eE][dD]_[cC][aA][pP][aA][bB][iI][lL][iI][tT][iI][eE][sS]$": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "^[aA][cC][cC][oO][uU][nN][tT]_[rR][eE][fF]$": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "^[cC][uU][rR][rR][eE][nN][cC][yY]$": {
+                  "const": "usd",
+                  "type": "string"
+                },
+                "^[cC][oO][uU][nN][tT][rR][yY]$": {
+                  "const": "US",
+                  "type": "string"
+                },
+                "^[cC][oO][nN][dD][iI][tT][iI][oO][nN]_[pP][rR][oO][fF][iI][lL][eE]$": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "^[cC][oO][nN][dD][iI][tT][iI][oO][nN]_[pP][rR][oO][fF][iI][lL][eE][sS]$": {
+                  "additionalProperties": {
+                    "additionalProperties": false,
+                    "type": "object",
+                    "patternProperties": {
+                      "^[pP][rR][oO][tT][oO][cC][oO][lL]$": {
+                        "const": "arkhai.condition.v1",
+                        "type": "string"
+                      },
+                      "^[cC][oO][nN][dD][iI][tT][iI][oO][nN]_[iI][dD]$": {
+                        "maxLength": 128,
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "^[eE][vV][aA][lL][uU][aA][tT][oO][rR]$": {
+                        "additionalProperties": false,
+                        "type": "object",
+                        "patternProperties": {
+                          "^[kK][iI][nN][dD]$": {
+                            "enum": [
+                              "alkahest.evm-arbiter.v1",
+                              "external-http.v1",
+                              "builtin.v1"
+                            ],
+                            "type": "string"
+                          },
+                          "^[vV][eE][rR][sS][iI][oO][nN]$": {
+                            "maxLength": 64,
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "^[rR][eE][sS][oO][lL][vV][eE][rR]_[iI][dD]$": {
+                            "anyOf": [
+                              {
+                                "maxLength": 128,
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "^[aA][rR][bB][iI][tT][eE][rR]_[iI][dD]$": {
+                            "anyOf": [
+                              {
+                                "maxLength": 128,
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "^[pP][aA][rR][aA][mM][sS]$": {
+                            "additionalProperties": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "items": {},
+                                  "type": "array"
+                                },
+                                {
+                                  "additionalProperties": {},
+                                  "type": "object"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "type": "object"
+                          }
+                        }
+                      },
+                      "^[dD][eE][mM][aA][nN][dD]$": {
+                        "additionalProperties": false,
+                        "type": "object",
+                        "patternProperties": {
+                          "^[eE][nN][cC][oO][dD][iI][nN][gG]$": {
+                            "enum": [
+                              "evm-abi",
+                              "application/jcs+json"
+                            ],
+                            "type": "string"
+                          },
+                          "^[vV][aA][lL][uU][eE]$": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "anyOf": [
+                                  {
+                                    "type": "boolean"
+                                  },
+                                  {
+                                    "type": "integer"
+                                  },
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "items": {},
+                                    "type": "array"
+                                  },
+                                  {
+                                    "additionalProperties": {},
+                                    "type": "object"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        }
+                      },
+                      "^[eE][vV][mM]_[sS][uU][bB][jJ][eE][cC][tT]$": {
+                        "anyOf": [
+                          {
+                            "additionalProperties": false,
+                            "type": "object",
+                            "patternProperties": {
+                              "^[aA][dD][dD][rR][eE][sS][sS]$": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "type": "object"
+                },
+                "^[rR][eE][sS][oO][lL][vV][eE][rR][sS]$": {
+                  "additionalProperties": {
+                    "additionalProperties": false,
+                    "type": "object",
+                    "patternProperties": {
+                      "^[cC][hH][aA][iI][nN]_[nN][aA][mM][eE]$": {
+                        "maxLength": 128,
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "^[eE][vV][iI][dD][eE][nN][cC][eE]_[mM][oO][dD][eE]$": {
+                        "enum": [
+                          "eas.v1",
+                          "portable-remote.v1"
+                        ],
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "type": "object"
+                },
+                "^[rR][eE][qQ][uU][eE][sS][tT]_[tT][iI][mM][eE][oO][uU][tT]_[sS][eE][cC][oO][nN][dD][sS]$": {
+                  "exclusiveMinimum": 0,
+                  "type": "number"
+                },
+                "^[pP][rR][eE][fF][lL][iI][gG][hH][tT]_[tT][iI][mM][eE][oO][uU][tT]_[sS][eE][cC][oO][nN][dD][sS]$": {
+                  "exclusiveMinimum": 0,
+                  "type": "number"
+                },
+                "^[aA][lL][lL][oO][wW]_[iI][nN][sS][eE][cC][uU][rR][eE]_[lL][oO][oO][pP][bB][aA][cC][kK]$": {
+                  "type": "boolean"
+                },
+                "^[oO][fF][fF]_[sS][eE][sS][sS][iI][oO][nN]_[pP][oO][lL][iI][cC][yY]$": false,
+                "^[aA][uU][tT][hH][oO][rR][iI][zZ][aA][tT][iI][oO][nN]_[jJ][oO][uU][rR][nN][aA][lL]_[pP][aA][tT][hH]$": false
+              }
+            }
+          }
+        },
+        "^[wW][aA][lL][lL][eE][tT]$": {
+          "additionalProperties": false,
+          "type": "object",
+          "patternProperties": {
+            "^[aA][dD][dD][rR][eE][sS][sS]$": {
+              "type": "string"
+            },
+            "^[sS][sS][hH]_[pP][uU][bB][lL][iI][cC]_[kK][eE][yY]$": {
+              "type": "string"
+            },
+            "^[pP][rR][iI][vV][aA][tT][eE]_[kK][eE][yY]$": false
+          }
+        }
+      }
+    },
+    "trustedIdentitySet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "principals"
+      ],
+      "properties": {
+        "principals": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/definitions/publicIdentity"
           }
         }
       }

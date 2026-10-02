@@ -3,9 +3,10 @@
 Layered (highest priority last):
   1. ``settings.toml`` next to this package — committed defaults
      documenting every supported key.
-  2. ``$XDG_CONFIG_HOME/arkhai/storefront.toml`` — ConfigMap base.
-  3. ``$XDG_CONFIG_HOME/arkhai/storefront.secrets.toml`` — Secret overlay.
-  4. ``APICREDITS_STOREFRONT_*`` environment variables (separator ``__``).
+  2. ``$XDG_CONFIG_HOME/arkhai/storefront.toml`` — an operator's own file.
+  3. ``$XDG_CONFIG_HOME/arkhai/storefront.json`` — a chart-rendered document.
+  4. ``$XDG_CONFIG_HOME/arkhai/storefront.secrets.toml`` — Secret overlay.
+  5. ``APICREDITS_STOREFRONT_*`` environment variables (separator ``__``).
 
 The overlay files are the same ones the VM storefront reads — one
 storefront per container, each with its own mount; the env prefix

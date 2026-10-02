@@ -6,8 +6,9 @@
 # Override via (highest priority first):
 #   1. STOREFRONT_* environment variables (separator __)
 #   2. $XDG_CONFIG_HOME/arkhai/storefront.secrets.toml  (Secret overlay)
-#   3. $XDG_CONFIG_HOME/arkhai/storefront.toml          (ConfigMap base)
-#   4. This file
+#   3. $XDG_CONFIG_HOME/arkhai/storefront.json          (rendered by the Helm chart)
+#   4. $XDG_CONFIG_HOME/arkhai/storefront.toml          (an operator's own file)
+#   5. This file
 # ---------------------------------------------------------------------------
 
 
