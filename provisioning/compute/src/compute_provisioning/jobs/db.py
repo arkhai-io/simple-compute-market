@@ -1,7 +1,7 @@
 """The job authority's persistence: one row per job, one per credential it produced.
 
 The tables keep their names, ``ansible_jobs`` and ``credentials``. A job row
-holds its identity, state, route key (``offering_mode`` and ``action_kind``),
+holds its identity, state, route key (``offering_mode`` and ``executor_action``),
 ``host_id``, its opaque parameters, retry bookkeeping, the contract identity it
 was submitted under if any, the opaque cancellation handle its executor
 reported, its logs, and its result as a ``ResultEnvelope``. A credential row
@@ -63,7 +63,13 @@ class JobRecord(Base):
     capacity_reservation_id = Column(String, nullable=True, index=True)
     deal_ref = Column(JSON, nullable=True)
     offering_mode = Column(String, nullable=True)
+    # The contract action this job was submitted under, part of its contract
+    # identity; for a job submitted without a contract, the action it runs.
     action_kind = Column(String, nullable=True)
+    # The action the job's executor runs, which the job is routed by. A
+    # contract action may run as a different executor action (a VM teardown
+    # runs ``destroy``).
+    executor_action = Column(String, nullable=True)
     idempotency_key = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(

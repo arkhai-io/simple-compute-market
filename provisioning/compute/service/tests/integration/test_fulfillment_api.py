@@ -453,6 +453,15 @@ class TestTeardownPreparation:
         assert teardown_params["escrow_uid"] == capacity_reservation_id
         assert teardown_params["playbook_path"] == _PLAYBOOK_PATH
 
+        # The job runs as soon as it is enqueued, against this registered host.
+        from compute_provisioning.hosts import HostCreate
+        from compute_provisioning_ansible import ssh_connection
+
+        _container_module.resolved_host_service.register_host(HostCreate(
+            host_id="kvm-fulfillment-1",
+            connection=ssh_connection(ssh_host="192.0.2.30", key_path="/keys/id"),
+            pool_id=pool_id,
+        ))
         result = await provider.dispatch_teardown(
             VersionedEnvelope.model_validate(prepared.model_dump(mode="json"))
         )
@@ -463,6 +472,14 @@ class TestTeardownPreparation:
         job = await fulfillment.get_job(teardown_job_id)
         assert job["deal_ref"] == {}
         assert job["idempotency_key"] == f"{capacity_reservation_id}:teardown"
+        assert job["action_kind"] == "teardown"
+
+        # The contract action is "teardown"; the job runs the executor action
+        # its parameters name, which has a registered executor.
+        processed = await _container_module.resolved_job_service.wait_for_terminal(
+            teardown_job_id, timeout=5
+        )
+        assert processed.status == "succeeded", processed.error
 
 
 class TestPoolConfigFrozenAtAcceptance:

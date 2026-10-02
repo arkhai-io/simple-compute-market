@@ -38,6 +38,8 @@ def _legacy(engine) -> None:
              {"action": "node_grant_access"}, '{"pid": 7}', "bare_metal", "node_grant_access"),
             ("old-1", {"vm_target": "t1"}, None, None, None, None),
             ("bare-1", {"offering_mode": "vm"}, None, None, "vm", "destroy"),
+            ("down-1", {"offering_mode": "vm", "vm_action": "destroy", "host_id": "kvm1"},
+             {"vm_name": "t1"}, None, "vm", "teardown"),
         ]
         for job_id, params, result, pid, mode, action in jobs:
             connection.execute(
@@ -107,10 +109,19 @@ def test_results_and_handles_convert_and_hosts_are_recorded() -> None:
     assert jobs["old-1"] == {"host_id": "t1", "handle": None, "result": None}
     with engine.connect() as connection:
         route = connection.execute(text(
-            "SELECT offering_mode, action_kind FROM ansible_jobs WHERE id = 'old-1'"
+            "SELECT offering_mode, action_kind, executor_action FROM ansible_jobs "
+            "WHERE id = 'old-1'"
         )).one()
-    assert tuple(route) == ("vm", "create")
+    assert tuple(route) == ("vm", "create", "create")
     assert jobs["bare-1"]["host_id"] == "kvm-default"
+    # A contract action keeps its identity; the job is routed, and its result
+    # labelled, by the action its executor ran.
+    assert jobs["down-1"]["result"]["result_kind"] == "vm_destroy"
+    with engine.connect() as connection:
+        route = connection.execute(text(
+            "SELECT action_kind, executor_action FROM ansible_jobs WHERE id = 'down-1'"
+        )).one()
+    assert tuple(route) == ("teardown", "destroy")
 
 
 def test_credentials_become_the_envelopes_the_contract_route_served() -> None:

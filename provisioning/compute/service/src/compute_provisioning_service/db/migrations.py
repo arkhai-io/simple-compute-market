@@ -2689,8 +2689,8 @@ def _migrate_host_connection_envelope(engine: Engine) -> None:
     _drop_columns_via_table_rebuild(engine, "hosts", present)
 
 
-# What a VM or bare-metal result was labelled when the compute contract route
-# built its envelope, before results were stored as envelopes. Every job that
+# The kind a VM or bare-metal job's result is labelled with, named by the
+# action its executor ran, as the executors label new results. Every job that
 # predates this migration ran one of those two modes.
 def _legacy_result_kind(offering_mode: str | None, action: str | None) -> str:
     if offering_mode == "bare_metal":
@@ -2709,12 +2709,14 @@ def _migrate_job_envelopes(engine: Engine, *, default_host_id: str | None = None
     A job row gains ``host_id``, taken from its parameters with the fallback job
     execution applied (the parameter, else the job's target, else the
     deployment's default host), has its ``offering_mode`` and ``action_kind``
-    filled from its parameters where they were never recorded, and gains
-    ``execution_handle``, the executor's opaque
+    filled from its parameters where they were never recorded, gains
+    ``executor_action`` (the action its executor runs, which routing reads and a
+    contract action may differ from), and gains ``execution_handle``, the executor's opaque
     cancellation handle, in place of ``process_id`` (a bare process id becomes
-    ``{"pid": n}``). A stored result becomes the ``ResultEnvelope`` the compute
-    contract route built from it, and each credential row becomes the
-    ``CredentialEnvelope`` that route built: the job's offering mode, the row's
+    ``{"pid": n}``). A stored result becomes a ``ResultEnvelope`` labelled by the
+    action its executor ran, and each credential row becomes the
+    ``CredentialEnvelope`` the compute contract route built from it: the job's
+    offering mode, the row's
     role as its kind, and its non-empty columns as its value. Every job before
     this migration ran a VM or bare-metal action, so this one conversion may
     name their result kinds. The replaced columns are then dropped.
@@ -2726,6 +2728,7 @@ def _migrate_job_envelopes(engine: Engine, *, default_host_id: str | None = None
         return
     _add_column_if_missing(engine, "ansible_jobs", "host_id", "VARCHAR")
     _add_column_if_missing(engine, "ansible_jobs", "execution_handle", "JSON")
+    _add_column_if_missing(engine, "ansible_jobs", "executor_action", "VARCHAR")
     has_process_id = _column_exists(engine, "ansible_jobs", "process_id")
     credentials_legacy = _table_exists(engine, "credentials") and _column_exists(
         engine, "credentials", "role"
@@ -2736,7 +2739,9 @@ def _migrate_job_envelopes(engine: Engine, *, default_host_id: str | None = None
         )
 
     with engine.begin() as connection:
-        select = "SELECT id, params, result, offering_mode, action_kind, host_id"
+        select = (
+            "SELECT id, params, result, offering_mode, action_kind, executor_action, host_id"
+        )
         if has_process_id:
             select += ", process_id"
         jobs = connection.execute(text(select + " FROM ansible_jobs")).mappings().all()
@@ -2745,8 +2750,10 @@ def _migrate_job_envelopes(engine: Engine, *, default_host_id: str | None = None
             params = _json_mapping(job["params"], label=f"ansible_jobs {job['id']} params")
             # A job predating offering modes was a VM job.
             offering_mode = job["offering_mode"] or params.get("offering_mode") or "vm"
+            # The action the executor ran, which a contract action may differ
+            # from (a VM teardown runs ``destroy``).
             action = (
-                job["action_kind"]
+                job["executor_action"]
                 or params.get("executor_action")
                 or params.get("vm_action")
                 or "create"
@@ -2761,12 +2768,14 @@ def _migrate_job_envelopes(engine: Engine, *, default_host_id: str | None = None
                 "id": job["id"],
                 "host_id": host_id,
                 "offering_mode": offering_mode,
-                "action_kind": action,
+                "action_kind": job["action_kind"] or action,
+                "executor_action": action,
             }
             assignments = [
                 "host_id = :host_id",
                 "offering_mode = :offering_mode",
                 "action_kind = :action_kind",
+                "executor_action = :executor_action",
             ]
             result = job["result"]
             if isinstance(result, str):
