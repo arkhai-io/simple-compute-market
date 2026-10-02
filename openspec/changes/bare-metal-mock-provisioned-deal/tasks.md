@@ -933,9 +933,9 @@ re-verifies them by grep before each move.
         dev group declares `cryptography`. Relocked: `provisioning/compute`,
         `provisioning/compute/ansible`, `domains/vms/provisioning/client`, both adapters,
         `domains/bare_metal/storefront`, `provisioning/compute/service`, `e2e-tests`.
-        `domains/vms/storefront` could not be relocked here (its PyTorch index redirects
-        to a host this environment cannot reach); the maintainer relocks it, and until
-        then `make check-packaging` reports it.
+        `domains/vms/storefront`, whose PyTorch index redirects to a host the implementing
+        environment cannot reach, was relocked by the maintainer; the lock now records
+        `sqlalchemy` for the family kit.
       - `reserved_var_keys`: `ReservesVariableKeys` (in `ansible_job_executor.py`) is an
         explicit capability the job service checks; an executor without it is refused
         with a `TypeError` naming the route. It moves into the VM codec in slice B.
@@ -943,6 +943,11 @@ re-verifies them by grep before each move.
         935; bare-metal adapter 8; the VM adapter's `make test` file 39; e2e unit 236 with
         the known pre-existing failure, and every e2e and smoke module collects (167);
         comment hygiene passes.
+      - Checkpoint (2026-10-02), after the maintainer relocked `domains/vms/storefront`:
+        `make test` and `make check-packaging` pass; the bare-metal lane passes (11) and
+        the VM lane passes in full (129, none skipped), with stage 08a previewing the
+        held host and stage 08c and the teardown completion (11b) passing; no job-engine
+        error or traceback in any service's logs.
 - [ ] 5B.7 Domain codecs. Behaviour-neutral on the wire.
       `vm_provisioning_adapter/codec.py` (VM vars, golden-image credentials, VM facts,
       VM failure classification, credential meaning, VM parameter building) and
