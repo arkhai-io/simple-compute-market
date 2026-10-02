@@ -4,10 +4,9 @@
 
 A storefront chart MUST render an agent's service configuration from its values
 without enumerating the service's keys, so a setting or settlement mechanism the
-storefront gains deploys through values alone with no template change. The chart
-MUST NOT supply a default for a service setting and MUST NOT validate a service's own
-configuration; the storefront's typed configuration, applied at startup, is the only
-validation of its keys.
+storefront gains deploys through values alone with no template or hand-written schema
+change. The chart MUST NOT supply a default for a service setting and MUST NOT
+implement a service's semantic validation of its own configuration.
 
 The chart MAY add a value only the release knows: the agent's port, which MUST equal
 the port its container, probes, and Service use; the agent's Service URL as its public
@@ -25,16 +24,13 @@ a principal to a trust list.
 The chart MAY refuse a release whose parts disagree with each other: internal-registry
 trust whose authority or principals do not include the release's registry identity;
 provisioning trust, or a provisioning service peer for a site bound to the internal
-provisioning service, that does not include the release's provisioning principal; a
-configuration that does not state the settlement configuration schema version, or
-states one that differs from the image's; or a stated port that differs from the
-agent's. The chart MAY read the passed-through configuration to make a Kubernetes
-decision, such as waiting for a configured chain's RPC endpoint, or for the internal
-registry when the agent uses it, before the storefront starts.
-
-An agent's pass-through configuration is public: it renders into a ConfigMap as
-written. Settings the storefront's typed configuration marks secret belong in the
-storefront's Secret overlay.
+provisioning service, that does not include the release's provisioning principal; or a
+stated port that differs from the agent's. The chart MAY read the passed-through
+configuration to make a Kubernetes decision, such as waiting for a configured chain's
+RPC endpoint, or for the internal registry when the agent uses it, before the
+storefront starts. Where it reads a top-level section the storefront accepts in more
+than one spelling, it MUST accept each and MUST refuse a configuration that states
+more than one.
 
 A values file using a retired values shape MUST be refused at render, naming the
 retired key, rather than passed through as keys the storefront ignores.
@@ -45,7 +41,7 @@ retired key, rather than passed through as keys the storefront ignores.
   configuration values
 - **THEN** the rendered storefront configuration carries the section exactly as
   written
-- **AND** no chart template or values schema changed
+- **AND** no chart template or hand-written values schema changed
 
 #### Scenario: Numbers keep their type
 
@@ -60,10 +56,10 @@ retired key, rather than passed through as keys the storefront ignores.
 - **THEN** the rendered configuration omits it and the storefront applies its own
   default
 
-#### Scenario: A service setting is invalid
+#### Scenario: A setting fails the storefront's semantic validation
 
-- **WHEN** an agent's configuration carries a value the storefront's typed
-  configuration refuses
+- **WHEN** an agent's configuration passes the values schema but carries a value the
+  storefront's typed configuration refuses
 - **THEN** the chart renders it unchanged and the storefront refuses it at startup
 
 #### Scenario: The release knows a value the agent omits
@@ -78,9 +74,13 @@ retired key, rather than passed through as keys the storefront ignores.
 #### Scenario: Release parts disagree
 
 - **WHEN** an agent's internal-registry trust or provisioning trust omits the
-  release's principal, its settlement schema version is absent or differs from the
-  image's, or its stated port differs from the agent's port
+  release's principal, or its stated port differs from the agent's port
 - **THEN** rendering fails with a message naming the disagreement
+
+#### Scenario: A section is stated in two spellings
+
+- **WHEN** an agent's configuration states both `Settlement` and `settlement`
+- **THEN** rendering fails naming both
 
 #### Scenario: A values file uses the retired shape
 
@@ -92,8 +92,9 @@ retired key, rather than passed through as keys the storefront ignores.
 A storefront MUST read its public configuration from `storefront.toml`, then
 `storefront.yaml`, then its Secret overlay `storefront.secrets.toml`, under its
 configuration directory, with a later file winning on a conflicting key. Its
-configuration-reporting commands MUST report the same merged configuration the server
-loads, including when only the rendered files are present.
+configuration-reporting commands MUST report the configuration the server loads,
+merged by the same rules, including when only the rendered files are present, and
+MUST NOT print the Secret overlay verbatim.
 
 #### Scenario: A chart-deployed storefront starts
 
@@ -102,6 +103,18 @@ loads, including when only the rendered files are present.
 - **THEN** the storefront loads both, with the overlay's values winning
 - **AND** `market-storefront config show` reports the merged configuration
 
+#### Scenario: Two layers spell a section differently
+
+- **WHEN** one layer states `[Chains.anvil]` and a later layer states `[chains.anvil]`
+- **THEN** `market-storefront config show` reports one merged `chains` section, as the
+  server loads it
+
+#### Scenario: The raw layers are shown
+
+- **WHEN** an operator runs `market-storefront config show --raw`
+- **THEN** each public layer present is printed verbatim under its path, in load
+  order, and the Secret overlay is not printed
+
 ## MODIFIED Requirements
 
 ### Requirement: Generated configuration has one source of truth
@@ -109,42 +122,39 @@ loads, including when only the rendered files are present.
 Typed configuration metadata MUST generate role-appropriate init templates, dotted-path
 editing validation, environment schema fragments, and reference tables. Generated
 outputs MUST be checked for drift in CI and MUST omit secret values and fields not
-applicable to the role. A Helm values schema MUST NOT carry a fragment describing a
-service's own configuration: a chart passes that configuration through, and the
-service's typed configuration validates it.
+applicable to the role.
+
+A chart that passes a service's configuration through MUST carry a values-schema
+fragment generated from that service's typed configuration models, refusing under the
+pass-through configuration every field the models mark secret or not applicable to the
+role, and every field a typed section's model does not have. The fragment MUST NOT
+carry defaults and MUST NOT constrain settings the service reads untyped. A secret the
+service reads without a typed model MUST be declared by the service with the same
+secret marker, so the generated fragment refuses it.
 
 #### Scenario: Mechanism field changes
 
 - **WHEN** a mechanism's typed configuration adds or removes an operator field
-- **THEN** drift validation requires the applicable templates, schema, and reference
-  output to change together
-- **AND** no Helm values schema changes
+- **THEN** drift validation requires the applicable templates, schema, reference
+  output, and generated values-schema fragment to change together
 
-### Requirement: Identity configuration separates public and secret material
+#### Scenario: A secret is placed in pass-through configuration
 
-Private identity credentials MUST arrive through role-scoped Secret references and MUST NOT enter committed values, ConfigMaps, manifests, run logs, public principal fields, public URLs, or generated evidence. A chart's own credential values accept only Secret references; a credential an operator places in pass-through service configuration is rendered as written and refused by the service at startup. Hosted consumer profiles MUST additionally keep provider credentials and provider/customer/payment-method/mandate/bank/card data out of all marketplace roles; opaque payer binding belongs only to owner-restricted local buyer profile state, while stable instrument refs remain authority-side or transient direct-client state. Runtime MUST derive the public principal from the credential and compare it with configured public identity before readiness.
+- **WHEN** a storefront agent's configuration values carry a secret-marked setting,
+  such as a wallet private key or a registry write token
+- **THEN** values-schema validation fails before render, naming the setting
+- **AND** no ConfigMap is produced
 
-#### Scenario: Public identity configuration contains a private credential
+#### Scenario: Hosted payer data is placed in pass-through configuration
 
-- **WHEN** a chart's own values, a release artifact, readiness response, log, or conformance fixture contains private identity material
-- **THEN** validation fails and the value is not deployed or published
+- **WHEN** a storefront agent's configuration values declare a payer profile,
+  instrument, Customer, PaymentMethod, mandate, bank detail, or action URL in a
+  settlement section
+- **THEN** values-schema validation fails before render, naming the field
 
-#### Scenario: Hosted payer data enters storefront values
+#### Scenario: A typed section gains a field
 
-- **WHEN** a storefront's configuration declares a payer profile, instrument, Customer, PaymentMethod, mandate, bank detail, or action URL
-- **THEN** the storefront's typed configuration refuses it before serving
-
-#### Scenario: Fiat-only storefront is rendered
-
-- **WHEN** a profile enables only Ed25519 marketplace identity and hosted non-EVM settlement
-- **THEN** Helm/Compose rendering requires the identity Secret reference but no wallet, chain, RPC, deployed-address, or gas configuration
-
-#### Scenario: Identity secret is missing
-
-- **WHEN** a role has a public principal but cannot load matching private credential material
-- **THEN** startup fails before serving authenticated routes, publishing, negotiating, or submitting settlement operations
-
-#### Scenario: A service-peer profile is rendered
-
-- **WHEN** a storefront and provisioning authority are configured to trust one another
-- **THEN** ordinary configuration contains each exact scheme-tagged public principal and site trust binding, while each role's matching signer credential is supplied only through its own Secret boundary
+- **WHEN** a storefront's settlement mechanism adds a public operator field and the
+  fragment is regenerated
+- **THEN** the field passes through the chart with no template or hand-written schema
+  change

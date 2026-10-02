@@ -31,17 +31,21 @@ storefront principals).
 ## Goals / Non-Goals
 
 **Goals.** A storefront setting, including a whole settlement mechanism, deploys by
-values alone. The service is the only validator of its own configuration. The chart
-keeps what only the Kubernetes layer knows.
+values alone, with no hand-written chart or schema change. The service is the only
+source of its configuration's defaults and semantics. The chart keeps what only the
+Kubernetes layer knows. No secret-marked setting can reach a ConfigMap.
 
 **Non-Goals.**
 
 - No move to the profile-based loader (decision 10).
 - No change to what the Secret overlay carries, to the service's configuration
-  models, defaults, or validation, or to other charts.
-- No chart-side guard against secrets placed in pass-through configuration
-  (decision 8).
-- No pre-deploy validation of chart values (decision 9).
+  defaults, or to what its configuration accepts. The storefront gains typed
+  declarations for the secrets it reads untyped (decision 8), which change no
+  accepted value.
+- No validation of the storefront's untyped configuration sections beyond what
+  Dynaconf does today (decision 9).
+- No pre-deploy validation of chart values beyond the values schema (decision 9).
+- No change to other charts.
 
 ## Decisions
 
@@ -50,22 +54,14 @@ keeps what only the Kubernetes layer knows.
 Settlement is where the problem blocks work, but the same hand rendering covers every
 section, and fixing one section would leave the chart enumerating the rest. Each
 agent's `config` value becomes the service's configuration in the service's own key
-names: `[Settlement]`, `[Delivery]`, `[pricing]`, `[capacity]`, `[negotiation]`,
-`[registry]`, `[provisioning]`, `[gateway]`, `[Identity]`, `[Wallet]`, `[Chains]`,
-`storefront_domains`, top-level scalars such as `agent_id` and `log_file_path`, and
-anything a storefront later reads.
+names: `Settlement`, `Delivery`, `pricing`, `capacity`, `negotiation`, `registry`,
+`provisioning`, `gateway`, `Identity`, `Wallet`, `Chains`, `storefront_domains`,
+top-level scalars such as `agent_id` and `log_file_path`, and anything a storefront
+later reads.
 
-`[Identity]` passes through like everything else: principals, administrators, and
+`Identity` passes through like everything else: principals, administrators, and
 service peers are public configuration. The agent's `identity` value keeps only what
 is Kubernetes-shaped, the credential Secret reference.
-
-**Spelling.** Values use the spelling of the storefront's packaged `settings.toml`:
-`Settlement`, `Identity`, `Wallet`, `Chains` capitalized; other sections lowercase.
-Dynaconf treats top-level keys case-insensitively, so a lowercase `settlement` would
-load, but the chart reads `Settlement`, `Chains`, and `Identity` for its own checks
-(decision 4), and two spellings of one section in one document would merge in an
-unspecified order. The schema therefore refuses the lowercase spellings the old shape
-used (decision 5).
 
 ### 2. The document renders as YAML into `storefront.yaml`
 
@@ -111,15 +107,26 @@ string. Storefront amounts are already decimal text.
 **Loader.** `kit/config`'s storefront discovery reads `storefront.toml`, then
 `storefront.yaml`, then `storefront.secrets.toml`, so the Secret overlay still has the
 final word. The same three-place discovery under `XDG_CONFIG_HOME`; no profiles, no
-`ACTIVE_PROFILES`. Three consumers need more than the name:
+`ACTIVE_PROFILES`. The server loads the list through Dynaconf `includes`, which reads
+YAML already.
 
-- The server loads the list through Dynaconf `includes`, which reads YAML already.
-- `load_storefront_config()` reads each file with `tomllib` and backs `config show`,
-  `config get`, and the CLI's `base_url` and `db_path` lookups. It reads each file by
-  its suffix, and reads YAML with the parser Dynaconf uses, so `config show` reports
-  what the server loads.
-- `config show` refuses to run when `storefront.toml` is absent, which in the pod it
-  is. It reports the merged layers when any layer exists.
+**The reporting commands merge as Dynaconf does.** `load_storefront_config()` backs
+`config show`, `config get`, and the CLI's `base_url` and `db_path` lookups. It reads
+each file with `tomllib` and merges with a case-sensitive dictionary merge. Dynaconf
+merges case-insensitively at every level: tested with Dynaconf 3, `[Settlement.Stripe]`
+and `[settlement.stripe]` in two files become one table, and one file holding both
+`[chains.anvil]` and `[chains.Anvil]` loses a key. A dictionary merge cannot reproduce
+that, so the reporting view is built by Dynaconf over the same file list, without the
+packaged defaults, and returned as plain data with top-level keys in lowercase. The
+mismatch exists today between `storefront.toml` and the overlay; this change removes
+it rather than adding a third file to it.
+
+**`config show` with no `storefront.toml`.** It refuses to run when `storefront.toml`
+is absent, which in the pod it is. It reports the merged layers when any layer exists.
+`config show --raw` prints each public layer present — `storefront.toml`, then
+`storefront.yaml` — verbatim under a header naming its path, and never the Secret
+overlay. The merged `config show` already includes the overlay's values; that is
+unchanged here.
 
 The editing commands — `config set`, `config init-user`, `config migrate` — operate on
 `storefront.toml` and stay TOML-only: they edit a user's file, and a rendered
@@ -196,10 +203,6 @@ service cannot see:
   `provisioning.identity.principals` must include `global.provisioningIdentity`, and
   a service peer (`Identity.service_peers.*`, `role = "service"`) whose `site_id` is a
   `capacity.sites` key mapped to that URL must include it too;
-- `Settlement.schema_version` must be stated and equal the image's
-  `settlementConfigSchemaVersion`, so an image is never deployed with configuration
-  written for another. The service would default an absent version; the release check
-  needs the configuration to say which contract it was written for;
 - a stated `port` must equal the agent's `port`.
 
 Two Kubernetes decisions read the passed-through configuration, which is not
@@ -211,41 +214,59 @@ re-validating it:
   internal registry. Today it always waits on the internal registry, so an agent
   pointed at an external registry in a release without one would wait forever.
 
+**The image/configuration schema-version check is removed,** with
+`image.settlementConfigSchemaVersion`. Nothing binds that value to the image: no build
+or release step reads it from, or writes it into, an image, so the chart compared two
+numbers an operator typed into the same values file. The settlement runtime owns the
+contract — it defaults an absent `schema_version` to its own version and refuses any
+other at startup, before publication or settlement mutation — which already satisfies
+"Configuration cutover is atomic and coordinated". The value joins the retired keys.
+
 A check goes when it validates one service's own configuration: `storefront_domains`
 being non-empty, a chain's `chain_id` being present, principal lists holding one or
 two entries, Stripe's condition profile and resolver references, and every
-per-mechanism default and shape. The service refuses each of these at startup
-(decision 9).
+per-mechanism default and shape. Structural refusals the typed models express —
+unknown keys, types, secret fields — come from the generated values schema
+(decision 8); cross-field and semantic refusals stay with the storefront at startup.
 
 Trust is checked rather than injected: the chart never adds a principal to a trust
 list the operator wrote.
 
-### 5. The values schema stops describing service configuration
+**Section spelling.** The repository writes top-level sections both ways —
+`[Settlement]` and `[settlement]`, `[Identity.…]` and `[identity.…]`; `config
+init-user` writes `[identity.principal]`, `[wallet]`, and `[chains.…]`; the packaged
+`settings.toml` capitalizes — and Dynaconf accepts either. The chart's own lookups of
+`Settlement`, `Chains`, and `Identity` therefore accept either spelling of each
+top-level section, and the chart refuses a `config` that states both spellings of one
+section, which Dynaconf would merge in an order the operator did not choose. Nested
+keys are the model's field names; every surface already writes them in lowercase
+snake case. Making one spelling canonical would be a service-wide cutover — settings,
+`config init-user`, documentation, CLI paths, loader, tests, and values together — and
+is not this change.
+
+### 5. The values schema stops hand-describing service configuration
 
 An agent's `config` is an open object in both `helm/charts/storefront/values.schema.json`
-and `helm/values.schema.json`. The hand-written `settlement`, `stripeSettlement`,
-`alkahestSettlement`, `pricing`, `wallet`, `chains`, and `storefrontDomains`
-definitions are removed from both, and `helm/scripts/check-settlement-schema-drift.py`,
-which only compared the two copies, is removed with them. `registryAuthority` remains
-as the definition of the chart-level `internalRegistryTrust`.
+and `helm/values.schema.json`, constrained only by the generated fragment of
+decision 8. The hand-written `settlement`, `stripeSettlement`, `alkahestSettlement`,
+`pricing`, `wallet`, `chains`, and `storefrontDomains` definitions are removed from
+both, together with their conditional rules (a priority entry requiring an enabled
+section, Alkahest requiring a wallet), which are service semantics.
+`helm/scripts/check-settlement-schema-drift.py`, which only compared the two
+hand-written copies, is removed. `registryAuthority` remains as the definition of the
+chart-level `internalRegistryTrust`.
 
 The schema refuses the values shape this change retires, naming the key, so an
 un-migrated values file fails at render instead of passing through as keys the
 service ignores: `agentId`, `autoRegister`, and `rootPath` on an agent;
-`identity.principal`, `identity.servicePeers`, `identity.administrators`, and
-`identity.authority`; and under `config`: `seller`, `registryAuthority`,
-`registryUrl`, `storefrontDomains`, `configMapName`, and the lowercase `settlement`,
-`identity`, `wallet`, and `chains`. The existing refusals of `config.hostedSettlement`,
-`config.chain`, and private keys under `secret` stay.
+`image.settlementConfigSchemaVersion`; `identity.principal`, `identity.servicePeers`,
+`identity.administrators`, and `identity.authority`; and under `config`: `seller`,
+`registryAuthority`, `registryUrl`, `storefrontDomains`, and `configMapName`. The
+existing refusals of `config.hostedSettlement`, `config.chain`, and private keys under
+`secret` stay.
 
 `configMapName` moves from `config` to the agent: inside `config` it would pass
 through into the service's document.
-
-`openspec/specs/deployment-state/spec.md`'s "Generated configuration has one source
-of truth" requires typed metadata to generate Helm schema fragments. That part of the
-requirement is withdrawn: a chart that passes configuration through has no fragment
-to keep in step. Generated templates, dotted-path editing validation, and reference
-tables stay.
 
 ### 6. The values shape changes, with a mapping and a refusal
 
@@ -259,6 +280,7 @@ every producer in this repository.
 | `agentId`, `config.seller.agentId` | `config.agent_id` |
 | `autoRegister` | none; nothing reads `auto_register` |
 | `rootPath` | `config.gateway.root_path` |
+| `image.settlementConfigSchemaVersion` | none; the storefront owns the contract (decision 4) |
 | `identity.principal` | `config.Identity.principal` |
 | `identity.administrators.<s>.principals` | `config.Identity.administrators.<s>.principals` |
 | `identity.servicePeers.<id>.{role, siteId, principals}` | `config.Identity.service_peers.<id>.{role, site_id, principals}` |
@@ -277,9 +299,7 @@ every producer in this repository.
 | `config.seller.provisioning.identity.principals` | `config.provisioning.identity.principals` |
 | `config.seller.negotiation.{policies, policyMode}` | `config.negotiation.{policies, policy_mode}` |
 | `config.seller.integrations.geminiApiKey` | none; nothing reads `gemini_api_key`, and it was a secret held under `config` |
-| `config.settlement` | `config.Settlement`, contents unchanged |
-| `config.wallet`, `config.chains` | `config.Wallet`, `config.Chains`, contents unchanged |
-| `config.pricing` | unchanged |
+| `config.settlement`, `config.wallet`, `config.chains`, `config.pricing` | unchanged; the storefront already reads these names |
 
 ### 7. The Secret overlay's contract and other charts are unchanged
 
@@ -296,38 +316,96 @@ and enumerates no mechanism. Its environment-variable carrier differs from
 `DEPLOYMENT_AND_CONFIG.md`'s mounted-file pattern, but changing it is a different
 problem and this change leaves it alone.
 
-### 8. Pass-through configuration is public, and the chart does not police it
+### 8. The secret boundary is enforced by a schema generated from the typed models
 
-The closed schemas are what currently refuse, for example, a
-`settlement.stripe.webhook_secret` value before it reaches a ConfigMap. With an open
-`config`, a secret an operator places there renders into the ConfigMap and is refused
-by the storefront only at startup. That is the cost of pass-through and is accepted.
+The closed hand-written schemas are what currently keep secrets and hosted payer data
+out of a ConfigMap: `wallet` admits only `address` and `ssh_public_key`, and the Stripe
+section admits only its public fields. An open `config` would lose that, and not only
+as exposure. The storefront reads `wallet.private_key` from its merged configuration
+whichever file supplied it, and delivery sink credentials are valid typed settings, so
+a secret placed in `config` would be rendered into the ConfigMap and then used. The
+`secret: True` marker on a typed field says where a value belongs; nothing in the
+storefront's runtime refuses a marked value for arriving through a public file.
 
-No general guard exists without a maintained list. A schema rule on key names needs a
-list of credential names. The typed models already mark secret fields with
-`json_schema_extra={"secret": True}`, but enforcing that marker against the file layer
-a value came from would run after the value is in the ConfigMap, would change the
-service's validation, and would break local setups that keep one file.
+The boundary is kept without hand-maintaining it. The typed models are already the
+source of truth: each is strict, so its JSON Schema is closed, and pydantic carries
+field metadata, including `"secret": true` and `"roles"`, into the schema it emits
+(checked against `ContactSettlementConfig`). A generator in the VM storefront:
 
-So an agent's `config` is public by definition: the spec states it, and
-`DEPLOYMENT_AND_CONFIG.md` says that secret-marked settings belong in the Secret
-overlay. The schema's refusals of private keys in the chart's own values (`secret.*`,
-`identity`) stay, because those values are the chart's, not the service's.
-`openspec/specs/deployment-state/spec.md`'s "Identity configuration separates public
-and secret material" is modified to match: its schema-refusal scenarios now describe
-the chart's own values and the storefront's startup refusal.
+1. builds the storefront's own settlement registry and takes each seller
+   registration's `config_model`, plus `Identity.principal` (`IdentityConfig`) and the
+   declarations below;
+2. emits each model's JSON Schema with references inlined, so the fragment uses no
+   draft-specific `$defs` keyword;
+3. replaces every property marked `"secret": true`, or whose `"roles"` exclude
+   `seller`, with `false`, a schema nothing satisfies;
+4. nests each fragment at its section's path under an agent's `config` — top-level
+   sections under both spellings (decision 4) — closes `Settlement` to the root keys
+   and the mechanisms the storefront registers, as the settlement runtime does, and
+   leaves `config` and every untyped section open;
+5. writes the result into one generated definition in each of the two values schemas,
+   replacing that definition whole and touching nothing else.
 
-### 9. Configuration validation is the service's, at startup
+Helm validates values against the schema on every `template`, `install`, `upgrade`,
+and `lint`, before anything renders. A demonstration chart built this way with Helm
+3.10.1 rendered public contact settings and an unknown `Delivery` section unchanged,
+refused `config.Settlement.contact.contact_payload` naming it, and refused a misspelled
+`retention_secnds` naming it.
 
-The storefront validates its own configuration when it starts, and a chart deployment
-learns of an invalid configuration there. The Deployment's `Recreate` strategy means
-the old pod is gone by then; recovery is `helm rollback`. This matches the provisioning
-chart, which also has no pre-deploy validation.
+**Coverage.** Each typed section gets refusal of secret-marked and role-inapplicable
+fields, of fields its model does not have — which is what keeps hosted payer and
+instrument data out before render — and of wrong types and bounds the model states.
+Cross-field and semantic rules stay with the storefront at startup. Untyped sections
+stay open. A mechanism or sink installed from outside this repository is not known at
+generation and passes through open; settlement mechanisms are registered explicitly in
+the storefront's composition root, so today that is none. A typed section the
+storefront gains reaches the schema by regeneration, with no template or hand-written
+schema edit. Delivery sinks, whose settings depend on each sink's `kind`, are not
+composed into the VM storefront yet; `compose-contact-exchange-across-compute`, which
+composes them, owns extending the generator to express that dependency for the
+built-in sinks.
 
-`config migrate --check` is not a pre-deploy check for chart values: it reads one
-TOML file, and a chart operator has values, not that file. The spec makes no
-pre-deploy claim. A role-neutral pre-deploy check belongs with a later move to the
-profile-based loader, if one is made.
+**Untyped secrets are declared by the storefront.** `wallet.private_key` and the
+`registry.auth` tokens are read from Dynaconf with no model to carry the marker. The
+storefront declares each with the same marker in a small typed model beside its
+reader — `[Wallet]` (`address`, `ssh_public_key`, `private_key`) and `[registry]`'s
+`auth` — so the declaration lives with the service. `[Wallet]`'s model is closed, as
+the hand-written schema was; `[registry]`'s declaration leaves the section's other
+keys open. Neither changes what the storefront accepts at runtime.
+
+**Drift.** A make target regenerates both schema files. The VM storefront's unit
+suite regenerates the fragment in memory and fails if either committed schema
+differs, so a model or registration change that is not regenerated fails CI in the
+`vms-storefront` job. The check cannot join `make check-packaging`: the generator
+imports the storefront's models and their third-party dependencies, while every
+packaging check reads only the committed tree and the built wheelhouse and resolves
+nothing (`openspec/specs/deployment-state/spec.md`, "Packaging conventions are checked
+mechanically").
+
+`openspec/specs/deployment-state/spec.md`'s "Generated configuration has one source of
+truth" names Helm schema fragments as generated output, but none were: the Helm
+schemas were hand-written and the drift script compared two hand-written copies. The
+requirement is narrowed to what this change makes true — the generated Helm fragment
+enforces the public/secret and role boundaries and closes typed sections, and carries
+no defaults and nothing for untyped settings.
+
+### 9. Validation boundaries
+
+The values schema refuses what decision 8 covers before render. The storefront
+validates its typed sections at startup: `Settlement` through the settlement runtime,
+identity and trust through their parsers. Its untyped sections — `provisioning`,
+`registry`, `negotiation`, `pricing`, timing and logging settings — are read directly
+from Dynaconf, as they are today: a misspelled key there loads, is ignored, and leaves
+the setting at its default. The hand-written schema caught such typos inside
+`pricing`, `wallet`, and `chains`, and only there; `wallet` regains it through its
+declaration, `pricing` and `chains` do not. That loss is accepted and recorded.
+Validating the whole storefront document needs a root model and an allowed-key set the
+storefront does not have; it is not this change.
+
+A chart deployment learns of a semantic refusal when the pod starts. The Deployment's
+`Recreate` strategy means the old pod is gone by then; recovery is `helm rollback`.
+This matches the provisioning chart. `config migrate --check` is not a pre-deploy
+check for chart values: it reads one TOML file, and a chart operator has values.
 
 ### 10. The storefront does not move to the profile-based loader here
 
@@ -357,7 +435,12 @@ after this change is implemented.
   decision 6's mapping.
 - **[Number typing]** → Render tests keep integer, large-integer, and float values
   under test; large integers are documented as strings.
-- **[Secrets in pass-through configuration]** → Accepted (decision 8).
+- **[Schema dialect]** → Helm's values-schema validator has changed between Helm
+  releases and CI does not pin Helm. The generated fragment inlines references and
+  uses only keywords common to draft-07 and later; render tests exercise it under
+  CI's Helm.
+- **[Stale generated schema]** → The storefront's unit suite fails on drift.
+- **[Untyped-section typos]** → Accepted (decision 9).
 - **[Invalid configuration takes the storefront down]** → Accepted (decision 9).
 - **[Intended effective-configuration differences]** → The umbrella values state
   `db_path = "./agent.db"`, outside the persistence mount, so state is lost on
@@ -372,15 +455,17 @@ None.
 
 ## Migration Plan
 
-1. Add `storefront.yaml` to the storefront discovery and make the read paths
-   format-aware.
-2. Replace `storefront.agentConfigToml` with the pass-through, derivation, and checks;
+1. Add `storefront.yaml` to the storefront discovery and build the reporting view with
+   Dynaconf.
+2. Add the storefront's secret declarations, the schema generator, its make target,
+   and its drift test; generate the fragment into both values schemas.
+3. Replace `storefront.agentConfigToml` with the pass-through, derivation, and checks;
    render `storefront.yaml`; update the overlay helper, init containers, and the
    umbrella's smoke-test configuration.
-3. Move `helm/values.yaml`, the subchart's `values.yaml`, and every fixture to the new
-   shape; replace the schemas' service definitions with the open object and the
-   retired-key refusal; remove the drift check.
-4. Update the render tests to assert pass-through, derivation, the retained checks,
-   and refusal of the old shape.
-5. Operators migrate their values by decision 6's mapping before upgrading the chart;
+4. Move `helm/values.yaml`, the subchart's `values.yaml`, and every fixture to the new
+   shape; replace the schemas' hand-written service definitions with the open object,
+   the generated definition, and the retired-key refusal; remove the drift script.
+5. Update the render tests to assert pass-through, derivation, the retained checks,
+   the generated refusals, and refusal of the old shape.
+6. Operators migrate their values by decision 6's mapping before upgrading the chart;
    the storefront image and its database are unaffected.
