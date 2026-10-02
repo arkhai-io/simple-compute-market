@@ -338,14 +338,19 @@ a repository-wide, family-neutral kit capability.
 >
 > A family kit may own durable state, workers, and authority lifecycles for its family.
 > It may depend on its family's vocabulary package, repository-wide kit capabilities,
-> and core contracts. It must not depend on a concrete domain, another family's
-> packages, a concrete role implementation, or a deployed service; imports used only
-> for typing obey the same rule. Domains compose family kits by contributing values,
-> codecs, hooks, and registrations; composition roots select those contributions,
-> provide configuration and external resources, and wire the runtime. A family kit
-> never discovers or imports its domains. A family may have more than one family-kit
-> distribution, split where dependency weight differs, so a consumer that needs one
-> capability does not install another's dependencies.
+> core contracts, and lower-level family-kit distributions of the same family.
+> Dependencies among a family's kit distributions must be acyclic: an optional
+> implementation distribution may depend on the family's base mechanisms and
+> authorities, and those base distributions must not depend back on it. A family kit
+> must not depend on a concrete domain, another family's packages, a concrete role
+> implementation, or a deployed service; imports used only for typing obey the same
+> rule. Domains define the values, codecs, hooks, and registrations a family kit
+> consumes; composition roots select and assemble them, provide configuration and
+> external resources, and wire runtime instances. A family kit never discovers or
+> imports its domains. A family may split its kit into more than one distribution where
+> dependency weight or an optional implementation technology would otherwise force
+> unrelated consumers to install dependencies they do not use; such optional
+> implementation distributions are not a further architectural tier.
 >
 > Family vocabulary packages stay a lower and narrower layer: they define a family's
 > shared names, schemas, identifiers, and value semantics, own no authority or
@@ -377,9 +382,10 @@ The compute family: `domains/compute` (`arkhai_compute`) is its vocabulary.
 `provisioning/compute` (`compute_provisioning`) is its family kit for cross-domain
 physical provisioning — executor registration, provisioning jobs, operational hosts,
 lease lifecycle, shared release, job-backed fulfillment support, and the mock gate
-mechanism. `provisioning/compute/ansible` is a second compute family-kit distribution
-holding the Ansible execution mechanics, split out so consumers of jobs or hosts do not
-install subprocess and Ansible dependencies. VM and bare-metal adapters contribute their
+mechanism. `provisioning/compute/ansible` is the compute family kit's optional Ansible
+implementation distribution: it depends on `compute_provisioning`'s job, executor, and
+host contracts, never the reverse, so consumers of jobs or hosts do not install
+subprocess and Ansible dependencies. VM and bare-metal adapters contribute their
 preparation, codecs, playbooks, result interpretation, credentials, and provider
 semantics. `compute_provisioning_service` is the composition root. Applied to this
 change: the job state machine, executor registry, host authority, lease lifecycle, and
@@ -398,12 +404,12 @@ provisioning-wide execution machinery around it. The postcondition is concrete:
 | Concern | Owner | What domains contribute |
 |---|---|---|
 | Durable job engine: identity, state, retries, scheduling, cancellation through the executor, logs, result and credential envelopes, the job queue and retry coordination, job routes | `compute_provisioning.jobs` | nothing |
-| Host authority: identity, enabled state, pool association, connection information and protected connection material, CRUD, the capacity-derivation port, the pre-execution lookup, host routes, a pool-change hook | `compute_provisioning.hosts` | VM subscribes its relay rebinding to the pool-change hook |
+| Host authority: identity, enabled state, pool association, connection information and protected connection material, CRUD, applying an imported inventory to the registry with its pool-change and capacity effects, the capacity-derivation port, the pre-execution lookup, host routes, a pool-change hook | `compute_provisioning.hosts` | VM subscribes its relay rebinding to the pool-change hook |
 | Executor table: `(offering_mode, action)` → one complete `JobExecutor` | `compute_provisioning` | each bundle's executors |
 | Rule and gate mechanism, with a deterministic gate-reached signal | `compute_provisioning` (beside the job engine) | each mode's rule routes and default outputs |
 | Job-backed fulfillment-provider shape (5B.10) | `compute_provisioning` | job preparation and result mapping |
 | Composition contract types (`ExecutorAdapterBundle`, `ExecutorAdapterContribution`, `compose_adapter_bundles`) | `compute_provisioning` | — |
-| Ansible mechanics: subprocess and run lifecycle, transient inventory rendering, INI import and export, group naming, redaction, fact extraction, connectivity probes, readiness, the `AnsibleJobExecutor` and its mock | `provisioning/compute/ansible` (`compute_provisioning_ansible`), the compute family's second family-kit distribution (confirmed by the maintainer) | codec, playbook, preparation |
+| Ansible mechanics: subprocess and run lifecycle, transient inventory rendering, INI parsing and rendering to and from host-record representations (not applying them), group naming, redaction, fact extraction, connectivity probes, readiness, the `AnsibleJobExecutor` and its mock | `provisioning/compute/ansible` (`compute_provisioning_ansible`), the compute family kit's optional Ansible implementation distribution (confirmed by the maintainer) | codec, playbook, preparation |
 | VM vars, golden-image credentials, VM facts and credential meaning, VM playbooks and roles, relays, pool configuration with VM defaults, VM operations and routes | VM domain | — |
 | Bare-metal access vars and facts, the `node-access` playbook and `bare-metal-access` role, access parameters | bare-metal domain | — |
 | Aggregate health and diagnostics, instance wiring, table composition, route mounting | the provisioning service | domain diagnostics (Ansible readiness, host reachability) are contributed, not built in |
@@ -421,7 +427,11 @@ calls the VM codec directly instead of the job service.
 **The job and host wire models move to `compute_provisioning`**, the provisioning client
 library, with the client operations; `vm_provisioning_operator` re-exports them so wire
 paths and existing imports keep working. No neutral provisioning module imports
-`vm_provisioning_operator`.
+`vm_provisioning_operator`. The models are classified by owner, not copied wholesale:
+the job authority's canonical result and credential forms are the existing opaque
+`ResultEnvelope` and `CredentialEnvelope`, and SSH-shaped wire DTOs such as
+`CredentialResponse` are compatibility models built from them at the route boundary,
+never the job authority's semantic model.
 
 **`system_service.py` is split by owner**: aggregate health and status go to the
 service, which composes contributed diagnostics; Ansible readiness goes to the Ansible

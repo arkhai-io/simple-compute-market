@@ -421,10 +421,20 @@ before each move.
       `ExecutorAdapterContribution`, `ComposedComputeAdapters`, and
       `compose_adapter_bundles` from
       `provisioning/compute/service/src/compute_provisioning_service/composition.py` into
-      `provisioning/compute/src/compute_provisioning/composition.py`; move the job, host,
-      credential, and readiness wire models and their client operations from
-      `domains/vms/provisioning/client/src/vm_provisioning_operator/models.py` into
-      `compute_provisioning`, with `vm_provisioning_operator` re-exporting them.
+      `provisioning/compute/src/compute_provisioning/composition.py`; move the wire models
+      and client operations from
+      `domains/vms/provisioning/client/src/vm_provisioning_operator/models.py`, classified
+      by owner rather than copied wholesale: host models (`HostCreate`, `HostUpdate`,
+      `HostResponse`, `HostListResponse`), job models (`JobSubmitResponse`,
+      `JobStatusResponse`, `JobLogsResponse`, `JobListResponse`), lease models
+      (`Lease*`), and aggregate `HealthResponse` and `VersionResponse` to
+      `compute_provisioning`; the job authority's canonical result and credential forms
+      are the existing `ResultEnvelope` and `CredentialEnvelope`, and
+      `CredentialResponse` and `CredentialListResponse` become compatibility DTOs built
+      from them at the route boundary; readiness models (`AnsibleReadinessResponse`,
+      `InventoryInfo`, `FileInfo`, `SshKeyInfo`) and `HostConnectivityResponse` go to the
+      Ansible distribution in 5B.4; `VmActionRequest` and `CreateVmRequest` stay VM's.
+      `vm_provisioning_operator` re-exports every moved name.
 - [ ] 5B.2 Job authority: `compute_provisioning/jobs/` — the engine from the generic
       parts of `vm_provisioning_adapter/services/job_service.py`; the `JobExecutor`
       protocol and `JobExecutorTable` resolving it (replacing `JobExecution`); the
@@ -436,16 +446,20 @@ before each move.
       `db/database.py` composes the metadata.
 - [ ] 5B.3 Host authority: `compute_provisioning/hosts/` — the `hosts` table metadata, the
       generic parts of `host_service.py` (CRUD, enabled state, pool association,
-      protected key material, the capacity-derivation port, pre-execution lookup), a
-      pool-change hook, and a framework-free host route service.
+      protected key material, the capacity-derivation port, pre-execution lookup), the
+      operation that applies an imported inventory to the registry with its pool-change
+      and capacity effects, a pool-change hook, and a framework-free host route service.
 - [ ] 5B.4 Ansible distribution: `provisioning/compute/ansible`
       (`compute_provisioning_ansible`) with `pyproject.toml`, `Makefile`, and tests — the
       runner and redaction from `ansible_service.py`, transient inventory rendering with
-      contributed group names and INI import and export from `host_service.py`, the codec
-      protocol, `AnsibleJobExecutor`, connectivity probes and readiness from
+      contributed group names, INI parsing and rendering to and from host-record
+      representations from `host_service.py` (applying an import stays with the host
+      authority, 5B.3), the codec protocol, `AnsibleJobExecutor`, connectivity probes and readiness from
       `system_service.py`, and the mock executor over the gate mechanism with a
-      contributed default-output hook (replacing `mock_ansible_service.py`). Register in
-      the build and dist targets.
+      contributed default-output hook (replacing `mock_ansible_service.py`). It is the
+      compute family kit's optional implementation distribution: it depends on
+      `compute_provisioning` and nothing in `compute_provisioning` depends on it. Register
+      in the build and dist targets.
 - [ ] 5B.5 Domain codecs: `vm_provisioning_adapter/codec.py` (VM vars, golden-image
       credentials, VM facts, tenant credentials, VM parameter building) and
       `bare_metal_provisioning_adapter/codec.py` (access vars and facts, access
@@ -680,8 +694,8 @@ service code.
       family vocabulary; the compute family's packages (`domains/compute`,
       `compute_provisioning`, the service as composition root) — promoted 2026-10-02 at
       the maintainer's request, as "Family kits" under "Package and dependency layers";
-      when 5B.4 lands, name the Ansible distribution there as the compute family's second
-      family-kit distribution. Still to do: kit layers gain the deal-control route
+      when 5B.4 lands, name the Ansible distribution there as the compute family kit's
+      optional Ansible implementation distribution. Still to do: kit layers gain the deal-control route
       services and the negotiation runtime's administrative acceptance and opening
       preview; the compute provisioning description gains the `(offering_mode, action)`
       executor table and the compute-family mock mechanism; "Release" states that every offering mode
