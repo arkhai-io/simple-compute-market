@@ -3,9 +3,12 @@
 ### Requirement: Delivery is available wherever the mechanism composes
 
 Introduction delivery MUST be available in every domain that composes the
-contact-exchange mechanism, not in one domain alone. A domain gaining the mechanism
-MUST gain delivery through the same injected dispatch seam, sink discovery, and
-configuration shape, and MUST NOT carry a domain-local delivery implementation.
+contact-exchange mechanism, not in one domain alone. Seller-side dispatch — running
+delivery off the reveal's critical path, keeping each dispatch alive until it
+finishes, reporting outcomes, and re-delivering an already-revealed introduction —
+MUST have one implementation in the delivery capability. A composing domain MUST
+supply only its configuration carrier and its operator command or route binding, and
+MUST NOT carry a delivery implementation of its own.
 
 Delivery MUST remain non-authoritative in every domain that gains it. That property
 is what makes best-effort delivery safe: the durable, idempotently re-readable
@@ -13,11 +16,15 @@ reveal is what both parties can always fall back to. Re-delivery MUST read that
 durable reveal rather than reconstructing one, so a re-send cannot invent contact
 data that was never exchanged.
 
+The delivery capability MUST NOT depend on a settlement mechanism, and a mechanism
+MUST NOT depend on the delivery capability: dispatch reads the reveal and the
+agreement by shape, and the mechanism receives dispatch as an injected callable.
+
 #### Scenario: A newly composing domain delivers
 
 - **WHEN** a compute-family storefront composes the mechanism and configures a sink
 - **THEN** revealed introductions in that domain reach the configured sink through
-  the same dispatch seam bare metal uses
+  the delivery capability's seller-side dispatch
 - **AND** the domain carries no delivery implementation of its own
 
 #### Scenario: Re-delivery in a newly composing domain
@@ -39,13 +46,23 @@ counterparty-supplied contact entry as a delivery destination, and neither side
 MUST deliver anything to the counterparty.
 
 Where one storefront publishes listings originating at several seller sites,
-seller-side destinations MUST resolve from the origin of the listing the deal was
-negotiated against. The seller's delivery carries the buyer's contact entries, so
-dispatching to another origin's destinations would disclose the buyer's personal
-details to a seller who was not party to the deal. A storefront with one origin
-MUST resolve to the destinations it configures today, and an origin with no
-configured destinations MUST deliver nothing rather than fall back to another
-origin's.
+seller-side destinations MUST be selectable by the origin of the listing the deal
+was negotiated against. The seller's delivery carries the buyer's contact entries,
+so dispatching to another origin's destinations would disclose the buyer's personal
+details to a seller who was not party to the deal.
+
+The seller-side configuration MAY carry a routing table naming, for each origin, the
+configured sink instances that receive its reveals. Origins MUST be treated as
+opaque identifiers supplied by the composing domain. Without a routing table, every
+enabled instance MUST receive every reveal. With one, an origin the table does not
+name MUST receive no seller-side delivery rather than fall back to another origin's
+destinations, and re-delivery MUST route by the introduction's origin through the
+same table.
+
+A seller-side routing table MUST be refused when constructed if it names an instance
+that is not enabled, if an enabled instance is routed for no origin, or if it names
+an origin the storefront is not configured with. A buyer-side routing table MUST be
+refused, because the buyer has no origin.
 
 #### Scenario: Each side receives the counterparty's contact
 
@@ -63,14 +80,71 @@ origin's.
 #### Scenario: Two origins publish through one storefront
 
 - **WHEN** an introduction is revealed for a listing originating at one of several
-  seller sites behind one storefront
-- **THEN** the seller-side delivery reaches only that origin's configured
-  destinations
-- **AND** no other origin's destinations receive the buyer's contact entries
+  seller sites behind one storefront that routes deliveries by origin
+- **THEN** the seller-side delivery reaches only the instances routed for that origin
+- **AND** no instance routed only for another origin receives the buyer's contact
+  entries
 
-#### Scenario: An origin configures no destinations
+#### Scenario: An origin is not routed
 
-- **WHEN** an introduction is revealed for a listing whose origin has no configured
-  destinations
+- **WHEN** an introduction is revealed for a listing whose origin the routing table
+  does not name
 - **THEN** nothing is delivered seller-side and the reveal, its obligation, and the
   counterparty's request are unaffected
+
+#### Scenario: No routing table is configured
+
+- **WHEN** a storefront configures sinks and no routing table
+- **THEN** every enabled sink receives every reveal, whatever its origin
+
+#### Scenario: A routing table is inconsistent
+
+- **WHEN** a routing table names an instance that is not enabled, leaves an enabled
+  instance unrouted, or names an origin the storefront is not configured with
+- **THEN** construction fails with a message naming the offending entry, before any
+  deal is negotiated
+
+### Requirement: Sinks are installed and configured, never enumerated in code
+
+A delivery sink MUST be discoverable as an installed plugin and selectable by name
+in the local configuration, so that adding a destination requires no change to
+core, kit, or domain packages. An enabled name that resolves to no installed sink,
+or a sink whose configuration fails validation, MUST fail when the sink set is
+constructed rather than when an introduction is revealed. A sink distribution that
+fails to load MUST NOT prevent process startup or prevent other configured sinks
+from delivering.
+
+The configuration MUST enable named sink instances rather than plugins, so one
+installed sink can serve several destinations. An instance MAY name the plugin it
+instantiates; an instance that names none instantiates the plugin of its own name,
+so a configuration written before instances existed keeps its meaning. Instance
+names MUST NOT collide with the section's own reserved settings.
+
+#### Scenario: A third-party sink is installed
+
+- **WHEN** an operator installs a sink package and enables it by name
+- **THEN** it receives revealed introductions with no change to any marketplace
+  package
+
+#### Scenario: A sink is misconfigured
+
+- **WHEN** an enabled sink names an uninstalled plugin or carries invalid settings
+- **THEN** construction fails with a message naming the sink, before any deal is
+  negotiated
+
+#### Scenario: One installed sink is broken
+
+- **WHEN** one sink distribution raises while loading
+- **THEN** the process starts, the broken sink is reported, and the remaining
+  configured sinks still deliver
+
+#### Scenario: One plugin serves two destinations
+
+- **WHEN** an operator enables two instances naming the same installed plugin with
+  different settings
+- **THEN** each instance delivers to its own destination
+
+#### Scenario: A configuration predates instances
+
+- **WHEN** a configuration enables a sink by plugin name and its table names no plugin
+- **THEN** it delivers exactly as it did before instances existed

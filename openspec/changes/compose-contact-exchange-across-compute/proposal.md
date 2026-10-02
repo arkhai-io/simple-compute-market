@@ -19,34 +19,57 @@ values and hooks that instantiate a kit mechanism. Doing it once is duplication;
 doing it for every compute domain is a maintenance surface where the mechanism's
 own invariants get re-derived inconsistently.
 
-`docs/development/ROADMAP.md` records cross-domain contact-exchange composition
-beyond bare metal as an unowned gap.
+The same holds one layer out. Bare metal's seller-side delivery dispatch and its
+buyer's introduction commands are also domain-local and also almost entirely
+domain-neutral, so composing VM by copying them would duplicate them too.
+
+And one value is wrong for the shape Goal 7 needs. The seller's contact is a single
+storefront-wide setting, so a storefront publishing for several seller sites would
+reveal one seller's contact on another seller's deal, and would deliver every
+buyer's contact to the same destinations whichever seller the deal was with.
+
+`docs/development/ROADMAP.md` assigns both gaps to this change: contact exchange
+composed beyond bare metal (Goal 6), and the per-origin contact Goal 7's
+multi-seller introductions depend on.
 
 ## What Changes
 
 - Promote the domain-neutral part of the introduction composition glue out of the
-  bare-metal storefront: accepted-state interpretation, obligation-ref
-  re-derivation, and the obligation drive sequence, with persistence injected.
-- Leave the bare-metal storefront holding only its persistence client and its
-  configured values, matching how it composes every other kit mechanism.
-- Compose the mechanism in the VM storefront, the one remaining compute-family
-  domain, so a seller there can settle by introduction. Bare metal already
-  composes it; API credits is a separate market family with its own registry
-  schema identity and is out of scope.
-- Extend introduction delivery to VM, so a revealed introduction reaches its owner
-  rather than only being readable.
+  bare-metal storefront into `kit/contact-exchange`: accepted-state interpretation,
+  obligation-ref re-derivation, the obligation drive sequence, and the read an
+  operator's re-delivery takes, with three domain reads injected (the negotiation
+  thread, the settlement obligation, and the agreement's origin).
+- Leave the bare-metal storefront holding only its persistence client, its
+  configuration carrier, and its route bindings, matching how it composes every
+  other kit mechanism.
 - Resolve the seller's contact payload per listing origin rather than per
   storefront. `ContactSettlementConfig.contact_payload` is one static value for a
-  whole storefront, which is coherent only at one seller per storefront. Goal 7
-  publishes listings from several seller sites through one storefront, so a
-  storefront-wide payload would reveal the wrong seller's contact details. The
-  payload becomes resolvable from the listing's origin site; a single-origin
-  deployment resolves to the same value it configures today. Resolution lives in
-  the promoted composition, so it applies to bare metal and VM alike rather than
-  being solved once per domain.
-- State normatively that accepted-state interpretation for this mechanism has one
-  implementation, and that a composing domain supplies persistence and values
-  rather than lifecycle logic.
+  whole storefront, which is coherent only at one seller per storefront; Goal 7
+  publishes listings from several seller sites through one storefront, where it
+  would reveal the wrong seller's contact details. A new origin-keyed form,
+  `[Settlement.contact.origins.<origin>]`, treats origins as opaque strings the
+  domain supplies; the storefront-wide form remains as shorthand for a storefront
+  with exactly one origin. A listing whose origin has no contact publishes no
+  contact-exchange option, and a reveal whose origin has none is refused before
+  anything is persisted. Resolution lives in the promoted composition, so it
+  applies to bare metal and VM alike.
+- Extend `kit/delivery` with named sink instances and an origin routing table, so
+  a storefront publishing for several sellers delivers each reveal to its own
+  origin's destinations, and move the seller-side background dispatch and
+  re-delivery out of bare metal into it. Existing `[Delivery]` sections keep
+  working unchanged.
+- Compose the mechanism in the VM storefront, the one remaining compute-family
+  domain, with retention, introduction routes, and delivery. Bare metal already
+  composes it; API credits is a separate market family with its own registry
+  schema identity and is out of scope.
+- Promote the buyer's `introduce` and `introduction [--deliver]` command bodies
+  into `core_buyer` as a group each domain buyer mounts, and give the VM buyer
+  `request-introduction`, `introduce`, and `introduction`, matching the typed
+  clients bare metal's buyer already uses.
+- State normatively that accepted-state interpretation, seller-side delivery
+  dispatch, and the buyer's introduction commands each have one implementation,
+  and that a composing domain supplies persistence, configuration, and route
+  bindings rather than lifecycle logic.
 
 ## Capabilities
 
@@ -54,12 +77,13 @@ beyond bare metal as an unowned gap.
 
 - `contact-exchange-settlement`: accepted-state interpretation and the obligation
   drive sequence have one implementation; a composing domain supplies persistence
-  and configured values.
-- `introduction-delivery`: delivery is available to every composing domain rather
-  than to bare metal alone, and reaches the seller at the origin the listing came
-  from.
-- `contact-exchange-settlement`: the seller's contact payload is resolved from a
-  listing's origin rather than from one static storefront-wide value.
+  and configured values; the seller's contact payload is resolved from a listing's
+  origin, with publication and reveal refusing an origin that has none.
+- `introduction-delivery`: delivery is available to every composing domain through
+  one seller-side dispatch; sinks are named instances; seller-side delivery routes
+  by the listing's origin.
+- `buyer-orchestration`: the buyer's introduction commands have one core-owned
+  implementation every domain buyer mounts.
 
 ### New Capabilities
 
@@ -74,6 +98,14 @@ None.
   test's deny list is unchanged and `uuid` is the only permitted root added.
 - Do not change the reveal surface, its authentication, its idempotency, or the
   option shape.
+- Do not give `kit/delivery` a mechanism dependency or the mechanism kit a
+  delivery dependency; each reads the other's shapes rather than importing it.
+- Do not check an origin's contact at acceptance. The reveal is the safety
+  guarantee and publication catches the standing misconfiguration; see
+  `design.md` decision 5.
+- Do not edit shared end-to-end helpers or fixtures, which are under refactor;
+  system evidence is new scenario modules, with lane configuration changed only
+  where a named task needs it.
 - Do not build per-deal contact aliasing. Making the payload resolvable is the hook
   aliasing would also need, but choosing an alias per deal is a separate concern.
 - Do not add scalar participation. The mechanism declines it, and
@@ -85,16 +117,31 @@ None.
 
 ## Impact
 
-- Affected code: the bare-metal storefront's introduction composition, a new
-  module and one boundary-test line in `kit/contact-exchange`, and the VM
-  storefront's settlement composition, introduction persistence, migration tuple,
-  delivery wiring, and retention wiring — the sweep loop, the admin deletion routes,
-  and the readiness disclosure `contact-payload-retention` requires of every
-  composing storefront.
+- Affected code:
+  - `kit/contact-exchange`: a new composition module, the origin-keyed
+    configuration and its resolver, the option builder's origin check, the reveal
+    service's per-agreement contact resolution, and one boundary-test line.
+  - `kit/delivery`: named instances, the origin routing table, and the seller-side
+    background dispatcher and re-delivery.
+  - `core/buyer`: the introduction command group.
+  - The bare-metal storefront: its introduction glue and delivery module reduce to
+    persistence, configuration carrier, and route bindings; its publication passes
+    the listing origin.
+  - The bare-metal buyer: mounts the core introduction commands.
+  - The VM storefront: settlement composition, introduction persistence, migration
+    tuple, introduction routes, delivery wiring, retention wiring (the sweep loop,
+    the admin deletion routes, and the readiness disclosure
+    `contact-payload-retention` requires of every composing storefront), and the
+    listing origin passed to publication.
+  - The VM buyer: `request-introduction`, plus the mounted core commands.
+  - `e2e-tests`: new scenario modules and, where named, lane configuration.
 - Affected specification: `openspec/specs/contact-exchange-settlement/spec.md`,
-  `openspec/specs/introduction-delivery/spec.md`.
-- Not affected: the mechanism kit's registration, option builder, settlement
-  configuration, or migrations.
+  `openspec/specs/introduction-delivery/spec.md`,
+  `openspec/specs/buyer-orchestration/spec.md`.
+- Affected documentation: `docs/development/DEPLOYMENT_AND_CONFIG.md`'s
+  contact-exchange section, for the origin-keyed form and delivery routing.
+- Not affected: the mechanism kit's registration identity, option shape,
+  retention, or migrations; the reveal's wire shape.
 
 ## Dependencies and Related Changes
 
@@ -111,11 +158,15 @@ None.
   may publish until this change composes introduction, so no stack could show one
   to a buyer. The scenarios live here, with the flow that first makes them
   runnable.
-- **Depends on `contact-payload-retention`.** Composing the mechanism more widely
-  multiplies the number of deployments holding contact payloads, and the
-  retention obligation is currently satisfied only in principle. The dependency is
-  a gate, not a coordination note. That change implements retention in the kit and
-  composes it into bare metal; this change composes it into VM with the mechanism.
+- **Depended on `contact-payload-retention`**, now archived. Composing the
+  mechanism more widely multiplies the deployments holding contact payloads, so
+  retention had to exist first. That change implemented retention in the kit and
+  composed it into bare metal; this change composes it into VM with the mechanism.
+- **Runs alongside `bare-metal-mock-provisioned-deal`**, which is moving bare-metal
+  negotiation onto the kit runtime and deal controls into kit route services. This
+  change edits the bare-metal storefront's introduction, delivery, publication, and
+  route wiring, not its negotiation or acceptance path; whichever lands second
+  rebases onto the other.
 - No longer coupled to `bare-metal-and-credits-domain-stacks` or
   `kit-storefront-composition-seam` for placement. Those own where kit-owned
   *storefront* runtime sits; the promoted glue is mechanism-shaped and lands in the
@@ -138,19 +189,31 @@ None.
 
 ## Permanent documentation impact
 
-- [ ] `docs/development/ARCHITECTURE.md` — no change expected; the
-      composition-from-kit principle is already recorded. Re-confirm rather than
-      assuming.
+- [ ] `docs/development/ARCHITECTURE.md` — the settlement-configuration section's
+      delivery paragraph describes delivery as storefront-wide; it gains per-origin
+      routing and the per-origin contact. Re-confirm the composition-from-kit
+      principle needs no change.
 - [x] Existing subsystem specification —
-      `openspec/specs/contact-exchange-settlement/spec.md` and
-      `openspec/specs/introduction-delivery/spec.md`.
+      `openspec/specs/contact-exchange-settlement/spec.md`,
+      `openspec/specs/introduction-delivery/spec.md`, and
+      `openspec/specs/buyer-orchestration/spec.md`.
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
+
+`docs/development/DEPLOYMENT_AND_CONFIG.md` also changes: its contact-exchange
+section documents the origin-keyed form and its startup refusals, and delivery
+routing.
 
 ### Knowledge to promote
 
 - Accepted-state interpretation and the obligation drive sequence have one
   implementation; a composing domain supplies persistence and configured values —
   `openspec/specs/contact-exchange-settlement/spec.md`.
-- Delivery is available to every composing domain and remains non-authoritative —
-  `openspec/specs/introduction-delivery/spec.md`.
+- The seller's contact is resolved per opaque origin, guarded at publication and
+  reveal — `openspec/specs/contact-exchange-settlement/spec.md`; configuration in
+  `docs/development/DEPLOYMENT_AND_CONFIG.md`.
+- Seller-side delivery has one implementation, sinks are named instances, and
+  delivery routes per origin — `openspec/specs/introduction-delivery/spec.md`;
+  `docs/development/ARCHITECTURE.md`'s settlement configuration section.
+- The buyer's introduction commands are core-owned and domain-mounted —
+  `openspec/specs/buyer-orchestration/spec.md`.
