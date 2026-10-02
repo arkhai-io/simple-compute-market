@@ -200,7 +200,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-compute-provisioning"
-version = "0.7.1"
+version = "0.8.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-fulfillment" },
@@ -211,7 +211,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_compute_provisioning-0.7.1-py3-none-any.whl" },
+    { path = "arkhai_compute_provisioning-0.8.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -481,7 +481,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms-provisioning-operator-client"
-version = "0.5.0"
+version = "0.6.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-compute-provisioning" },
@@ -490,7 +490,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_vms_provisioning_operator_client-0.5.0-py3-none-any.whl" },
+    { path = "arkhai_vms_provisioning_operator_client-0.6.0-py3-none-any.whl" },
 ]
 
 [[package]]
