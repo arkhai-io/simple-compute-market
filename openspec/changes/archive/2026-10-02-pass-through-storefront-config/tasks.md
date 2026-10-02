@@ -108,10 +108,11 @@ the planning pass names every file and suite.
       settlement, chains). With an Alkahest local overlay,
       `make -C helm test-module MODULE=e2e-tests` passed 32, 377 deselected (bundle
       `helm-local-20261002-183115`). That run exposed findings 1 and 8, both fixed. It
-      predates the `Identity` closure, key folding, and finding 2's fix; re-verify
-      with 8.8. Offline before/after comparison of rendered documents: only
-      `auto_register` (dropped), `db_path` (now under the persistence mount), and the
-      fixtures' corrected `agent_id` differ.
+      predates the `Identity` closure, key folding, finding 2's fix, and the any-case
+      schema; the re-run on the final tree is owed under 8.8. Offline before/after
+      comparison of rendered documents: only `auto_register` (dropped), `db_path`
+      (now under the persistence mount), and the fixtures' corrected `agent_id`
+      differ.
 
 ## 7. Documentation
 
@@ -163,13 +164,16 @@ the planning pass names every file and suite.
       indexed as the owner of finding 9.
 - [x] 8.7 **Documentation citations.**
       `make check-doc-citations CHANGE=pass-through-storefront-config` passes.
-- [x] 8.8 **End-to-end pipeline.** Actions run 37040193730 on
-      `feat/pass-through-storefront-config` at `d8a6c8d2`: Compose VM lane 129
-      passed, bare-metal lane 16 passed; both lanes run the storefront's new
-      configuration discovery. Earlier: run 37015527919 (129 and 16), and the Helm
-      E2E module, 32 (6.3). The Compose lanes do not render the chart; the Helm
-      module run predates the `Identity` closure, key folding, and the any-case
-      schema, which the render tests cover.
+- [ ] 8.8 **End-to-end pipeline.** Compose lanes on the final implementation:
+      Actions run 37042815441 on `feat/pass-through-storefront-config` at
+      `f14bc445`, VM lane 129 passed and bare-metal lane 16 passed, exercising the
+      storefront's three-file configuration discovery. Earlier runs 37040193730
+      (`d8a6c8d2`) and 37015527919 passed the same. **Owed:** the Helm E2E module
+      (`make -C helm test-module MODULE=e2e-tests`) on the final chart and schema.
+      The only recorded Helm run (6.3, 32 passed) predates the `Identity` closure,
+      key folding, and the any-case schema; the Compose lanes do not render the
+      chart, and render tests are not deployment evidence. The change was archived
+      with this outstanding by decision; record the run here when it passes.
 - [x] 8.9 **Packaging.** `make check-packaging` passes.
 - [x] 8.10 **Promotion.** Record below; the two production comments that cite
       `openspec/specs/deployment-state/spec.md` headings resolve.
