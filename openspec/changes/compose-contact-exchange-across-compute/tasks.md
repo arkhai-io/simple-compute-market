@@ -3,6 +3,11 @@
 Depended on `contact-payload-retention`, which is complete and archived
 (`openspec/changes/archive/2026-10-01-contact-payload-retention/`).
 
+Blocked on `pass-through-storefront-config`. Task 6.5 is blocked on
+`bare-metal-mock-provisioned-deal`'s two-storefront topology. Decision 13 in
+`design.md` records what planning review settled; the planning pass amends these
+sections to match it.
+
 The design was settled in review; see `design.md` decisions 1–12. These tasks are
 amended to match it at section level. The planning pass names the files each task
 touches and the focused suites that prove it.
@@ -93,14 +98,22 @@ configuration; this section is VM's wiring of them.
 
 - [ ] 3b.1 Add the origin-keyed form `[Settlement.contact.origins.<origin>]` to the
       kit's contact configuration, each origin a table carrying `contact_payload`,
-      with origins as bounded opaque strings and their count bounded. Keep
-      `contact_payload` as the single form (`design.md` decision 4).
+      with origins as bounded opaque strings, their count bounded, and each entry's
+      payload required non-empty. Keep `contact_payload` as the single form
+      (`design.md` decision 4).
+- [ ] 3b.1a Rework `contact_preflight` for the keyed form: unready on no profiles
+      or on no contact in either form, otherwise ready whatever individual origins
+      lack; no per-origin detail in the public projection (`design.md` decision 4,
+      "Readiness").
 - [ ] 3b.2 Add the kit's composition check over the domain's known origins: refuse
       both forms together, the single form with more than one origin, and a keyed
       origin the storefront is not configured with, each naming the offending key or
       origins. Each storefront calls it at startup with its configured site keys.
 - [ ] 3b.3 Pass the listing's origin into the kit option builder's publication
-      inputs from both storefronts. Build no contact-exchange option for an origin
+      inputs from both storefronts, taking it from the value the listing's durable
+      binding records — in VM's `create_listing`, reorder so the settlement
+      artifacts are built after the capacity source's site is read, and pass that
+      site (`design.md` decision 5, "The origin is the binding's origin"). Build no contact-exchange option for an origin
       that resolves no contact; refuse the option when the keyed form is configured
       and no origin is supplied. No check is added at acceptance (`design.md`
       decision 5).
@@ -111,10 +124,13 @@ configuration; this section is VM's wiring of them.
       503 check (`design.md` decision 6).
 - [ ] 3b.5 Resolve a single-origin deployment configured with the single form to the
       value it configures today, so existing operators see no change.
-- [ ] 3b.6 **Unit.** Configuration forms, every startup refusal, the resolver, and the
-      option builder's suppression and fail-closed refusal.
+- [ ] 3b.6 **Unit.** Configuration forms including an empty entry's refusal, every
+      startup refusal, readiness under each form, the resolver, and the option
+      builder's suppression and fail-closed refusal.
 - [ ] 3b.7 **Integration.** Two origins configured behind one storefront: a deal on
       each listing reveals that origin's payload, and neither reveals the other's.
+      One listing is followed from publication through acceptance to reveal,
+      asserting its binding's origin governed all three.
 - [ ] 3b.8 **Integration.** An origin with no configured payload publishes no
       contact option, and a start for an accepted deal whose origin has lost its
       payload is refused with nothing persisted or delivered.
@@ -127,7 +143,9 @@ configuration; this section is VM's wiring of them.
       Reserve `origins` beside `enabled` and `timeout_seconds`.
 - [ ] 4.2 Add the seller-side `[Delivery.origins]` routing table with its
       construction refusals (unenabled routed instance, unrouted enabled instance,
-      unknown origin) and refuse a routing table on the buyer side.
+      unknown origin) and refuse a routing table on the buyer side. Refuse
+      seller-side sinks with no routing table when more than one origin is known,
+      unconditionally, naming the origins (`design.md` decision 7).
 - [ ] 4.3 Move seller-side background dispatch (task retention, outcome logging),
       sink-set construction with warnings, and re-delivery into `kit/delivery`,
       reading the reveal and the agreement by shape and routing by the agreement's
@@ -140,8 +158,9 @@ configuration; this section is VM's wiring of them.
 - [ ] 4.6 Confirm delivery remains non-authoritative and that re-delivery reads the
       durable reveal and routes by its origin.
 - [ ] 4.7 **Unit.** Instance parsing including configurations that predate
-      instances, two instances of one plugin, routing and every refusal, and the
-      dispatcher's routing and outcome reporting.
+      instances, two instances of one plugin, routing and every refusal including the
+      multi-origin refusal without a table, a destination shared by every origin, and
+      the dispatcher's routing and outcome reporting.
 
 ## 4a. Buyer introduction commands
 
@@ -175,7 +194,8 @@ configuration; this section is VM's wiring of them.
       instances and routing in `docs/development/DEPLOYMENT_AND_CONFIG.md`'s
       contact-exchange section.
 - [ ] 5.7 Update `docs/development/ARCHITECTURE.md`'s settlement-configuration
-      delivery paragraph for per-origin contact and routing.
+      delivery paragraph for per-origin contact and routing, including that a
+      multi-origin storefront must route deliberately.
 
 ## 6. Validation
 
@@ -219,7 +239,9 @@ named in the task.
 - [ ] 7.5 **Roadmap currency.** In `docs/development/ROADMAP.md`, remove this change's
       rows from Goal 6's and Goal 7's gap tables and absorb the result into their
       current-state prose: contact exchange composed on VM, the contact resolved per
-      origin, and delivery routed per origin.
+      origin, and delivery routed per origin. Keep the note beside Goal 6's unowned
+      second-delivery-producer row current: the multi-origin routing refusal is
+      unconditional, and a second producer revisits it.
 - [ ] 7.6 **Campaign index currency.** Update this change's row and its campaign's
       dependency graph in `openspec/changes/README.md`, and
       `unbacked-bare-metal-listings`' blocker.
@@ -251,9 +273,9 @@ named in the task.
 |---|---|
 | Accepted-state interpretation and the obligation drive sequence have one implementation | `openspec/specs/contact-exchange-settlement/spec.md` |
 | A composing domain supplies persistence, configuration, and route bindings, not lifecycle logic | `openspec/specs/contact-exchange-settlement/spec.md` |
-| The seller's contact is resolved per opaque origin, guarded at publication and reveal | `openspec/specs/contact-exchange-settlement/spec.md`; configuration in `docs/development/DEPLOYMENT_AND_CONFIG.md` |
+| The seller's contact is resolved per opaque origin, guarded at publication and reveal; readiness stays storefront-wide; one origin from binding to reveal | `openspec/specs/contact-exchange-settlement/spec.md`; configuration in `docs/development/DEPLOYMENT_AND_CONFIG.md` |
 | Seller-side delivery has one implementation and remains non-authoritative across composing domains | `openspec/specs/introduction-delivery/spec.md` |
-| Sinks are named instances; seller-side delivery routes by origin | `openspec/specs/introduction-delivery/spec.md`; `docs/development/DEPLOYMENT_AND_CONFIG.md`; `docs/development/ARCHITECTURE.md` |
+| Sinks are named instances; seller-side delivery routes by origin, and a multi-origin storefront must route deliberately | `openspec/specs/introduction-delivery/spec.md`; `docs/development/DEPLOYMENT_AND_CONFIG.md`; `docs/development/ARCHITECTURE.md` |
 | Buyer introduction commands are core-owned and domain-mounted | `openspec/specs/buyer-orchestration/spec.md` |
 | Roadmap currency | `docs/development/ROADMAP.md`, Goals 6 and 7 |
 | Campaign index currency | `openspec/changes/README.md` |

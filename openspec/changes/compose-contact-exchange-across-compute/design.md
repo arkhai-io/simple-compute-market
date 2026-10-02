@@ -162,7 +162,27 @@ The storefront refuses to start, naming the offending key or site, when:
 - an `origins` key names no configured origin.
 
 A configured origin with no entry is legal: a site selling only through Alkahest
-needs no contact. Decision 5 says what happens to a contact option there.
+needs no contact. Decision 5 says what happens to a contact option there. An entry
+that is present must carry a non-empty `contact_payload`: an empty entry is
+refused as configuration rather than read as absence, so readiness never has to
+interpret one.
+
+Once a storefront has more than one origin, nothing applies to every origin
+implicitly. Here that refuses the single form; decision 7 applies the same rule to
+seller-side delivery.
+
+**Readiness.** The mechanism's readiness stays storefront-wide and no longer means
+"every origin has a contact":
+
+- no profiles configured → unready, `no_contact_profiles`, as today;
+- neither the single form nor any `origins` entry configured → unready,
+  `no_contact_payload`, as today;
+- otherwise ready. A configured origin without an entry does not affect readiness;
+  publication and the reveal enforce availability for that origin.
+
+The public readiness projection carries nothing per origin: origins can be internal
+identifiers, and a buyer learns an origin's availability from whether its listing
+advertises the option.
 
 The storefront-wide form is kept as shorthand for one origin rather than retired,
 so every existing single-seller deployment is unchanged. It is not a fallback: it is
@@ -202,6 +222,18 @@ listing's origin among its publication inputs. Where the origin has no resolvabl
 contact it builds no option, logged like a suppressed unready mechanism; where the
 origin-keyed form is configured and no origin was supplied, it refuses rather than
 guessing, so a composition that forgot to pass one fails closed.
+
+**The origin is the binding's origin, from publication through reveal.** The
+origin a storefront passes to the option builder MUST be the site recorded on that
+listing's durable binding — the value the negotiation inherits and the reveal and
+delivery routing later resolve. A composing storefront must not supply an origin
+derived any other way, or a contact option could be advertised under one origin and
+revealed under another. The kit cannot check this, since it treats origins as
+opaque; it is the storefront's obligation, pinned by an integration case that
+publishes, accepts, and reveals and asserts one origin throughout. VM's listing
+creation currently builds its settlement artifacts before it reads the capacity
+source's site, so meeting this means reordering it to take the origin from the
+value the binding is prepared from.
 
 **No acceptance check.** Cases B and C are rare operator actions, no funds are at
 stake in an introduction, and an accepted deal refused at reveal registers nothing
@@ -270,8 +302,15 @@ dc-east = ["east-hook", "audit"]
 - A table with no `sink` key is the plugin of the same name, so every existing
   configuration keeps working unchanged. `origins` joins `enabled` and
   `timeout_seconds` as a reserved section key.
-- With no routing table, every enabled instance receives every reveal: today's
-  behaviour, and right for one seller.
+- With no routing table and one known origin, every enabled instance receives
+  every reveal: today's behaviour, and right for one seller.
+- With no routing table and more than one known origin, sink-set construction is
+  refused at startup, naming the configured origins. Broadcasting every reveal to
+  every sink is exactly the cross-seller disclosure this decision exists to
+  prevent, so a multi-origin storefront routes deliberately — a destination shared
+  by every seller, such as an audit file, is still expressible by listing it for
+  each origin. This applies the rule decision 4 states for the contact: once there
+  is more than one origin, nothing applies to every origin implicitly.
 - With a routing table, an origin it does not list receives no seller-side delivery;
   every routed name must be enabled; every enabled instance must be routed for at
   least one origin; and every origin key must name a known origin, checked at
@@ -283,11 +322,20 @@ dc-east = ["east-hook", "audit"]
   origin.
 - Operator re-delivery routes by the introduction's origin, through the same table.
 
+The multi-origin refusal is unconditional: it applies whenever seller-side sinks are
+enabled and more than one origin is known, whether or not contact exchange is
+enabled. `kit/delivery` deliberately knows no mechanism, and today introductions
+are its only events, so tying the refusal to the mechanism would mean passing
+mechanism state into the delivery kit for no present benefit. A second delivery
+event producer — unowned, per `docs/development/ROADMAP.md`'s Goal 6 — should
+revisit whether its events are origin-scoped and whether the refusal should then
+follow the event rather than the sink set.
+
 Option (b) — leave delivery storefront-wide and record routing as unowned — was
 rejected: the first multi-seller deployment would need it, and it would rework the
 same configuration grammar this change already extends.
 
-### 8. VM buyers complete an introduction from the CLI; the bodies are core-owned
+### 8. VM buyers complete an introduction from the CLI (placement superseded by decision 13)
 
 The bare-metal buyer has `request-introduction`, `introduce`, and
 `introduction [--deliver]`. The last two are domain-neutral given a recovered run:
@@ -297,6 +345,14 @@ buyer mounts, supplying its run-recovery hook (domain buyer configuration and
 registry trust refresh) and the mechanism identity. The mechanism identity is
 injected rather than named in `core_buyer`, because a core role package must not
 depend on a mechanism kit or branch on a concrete mechanism identifier.
+
+Placing mechanism-shaped commands in a core role package sits against
+`docs/development/ARCHITECTURE.md`'s rule that what stays in core is universal to
+every market. It follows existing precedent rather than setting one: `core_buyer`
+already owns the schema-opaque `IntroductionTransport` and buyer-side introduction
+delivery, and `openspec/specs/market-composition/spec.md` already has the core buyer
+delivering a revealed introduction without depending on a mechanism kit. Injecting
+the mechanism identity is what keeps that precedent within the rule's intent.
 
 `request-introduction` opens a negotiation, which is domain-specific: provision
 terms and the domain's opening. VM gets its own thin command over the VM opening and
@@ -336,6 +392,74 @@ The end-to-end harness is being refactored in parallel. This change adds new sce
 modules only and edits no shared helper or fixture. Lane configuration may change
 where a scenario needs topology the lanes lack — two seller sites behind one VM
 storefront for the multi-seller scenario — and each such edit is named in its task.
+
+### 13. Decisions settled during planning review
+
+**Deployable by Helm, on the pass-through baseline.** VM contact exchange must deploy
+through the umbrella chart in this change. The VM storefront chart currently
+enumerates each settlement mechanism, its defaults, and its validation, so a further
+mechanism needs chart edits. `pass-through-storefront-config` removes that first and
+is this change's prerequisite; on its baseline `[Settlement.contact]` and `[Delivery]`
+reach the storefront through values alone, and this change owes only example values,
+a render test, and the Helm verification command.
+
+**Contact details are ordinary configuration.** A seller's onboarding contact is not
+the class of secret the Secret overlay carries, and placing it there would force
+secret management on every operator. `contact_payload` and per-origin contacts are
+public-layer configuration. The `"secret": True` marker they carry today does two
+jobs — it forbids the value from a public configuration layer, and it feeds the
+settlement runtime's readiness leak check — so it is replaced by a marker meaning
+"never published, any layer": the value may come from any configuration layer and
+must still never appear in a listing, option, readiness projection, or obligation.
+Sink credentials such as a webhook token may still sit in the Secret overlay when an
+operator wants that.
+
+**Seller delivery reaches the seller's own systems.** The built-in `webhook` sink
+already POSTs the delivery event to any REST endpoint; with origin routing, each
+origin's reveals go to that seller's own API. It gains optional request signing with
+the storefront's marketplace signer, so the receiving API can verify the sender
+against the storefront principal it already pins. For the wider range of
+integrations, an installable `apprise` sink plugin, `kit/delivery-apprise`, wraps the
+Apprise library, which reaches over a hundred services from one URL each, rather than
+this repository writing them; both storefront images install it. Alertmanager was
+considered and rejected as the carrier: buyer contact details would rest in its alert
+state and interface. A site-owned path, where the storefront hands the contact to the
+site authority and the site runs its own sinks, is a larger cross-service contract
+left for later.
+
+**Buyer introduction commands are mechanism-owned.** Contact exchange is a settlement
+mechanism, not a listing type (decision 9), and mechanism kits already own buyer
+command groups: `kit/hosted-settlement` provides `market settlement stripe …` through
+its registration's `command_group`, with a context factory the domain buyer supplies.
+`kit/contact-exchange` gains the same: `market settlement contact introduce` and
+`… introduction [--deliver]`, with the transport, run recovery, and buyer sinks
+injected through the context. The kit gains `typer`; its deny list is unchanged and it
+imports neither `core_buyer` nor `kit/delivery`. `request-introduction` stays a domain
+command because it opens a negotiation in the domain's terms. This supersedes decision
+8's placement in `core_buyer`; `core_buyer`'s existing `IntroductionTransport` stays
+where it is.
+
+**More of the composition is kit-owned.** `kit/contact-exchange` gains a SQLite
+introduction store over its own table, so neither storefront keeps persistence
+wrappers, and a composition object that builds the retention service, the
+disclosures, and the reveal service from the running configuration. A domain supplies
+its injected reads, configuration carrier, route bindings, and loop registration.
+
+**No clause, no contact option.** The contact option builder publishes no option when
+no publication clause selects it, rather than raising, so a VM listing published
+without explicit clauses is unaffected by contact exchange being enabled.
+
+**Disclosures on core health.** VM's health route returns core `HealthResponse`, which
+gains `disclosures`. That bumps `arkhai-core-storefront`, and the exact-pin cascade
+through `arkhai-kit-capacity-publication` to the VM, bare-metal, and API-credit
+storefronts is taken rather than a VM-local response model.
+
+**System evidence.** Mailpit, an off-the-shelf SMTP server with a query API, joins the
+VM lane and, optionally, the Helm `dev-env` subchart. The VM introduction scenario
+routes its origin to an Apprise `mailto://` instance pointed at Mailpit and reads the
+result back, proving seller-side delivery without a bespoke receiver. The two-seller
+scenario (6.5) is blocked until `bare-metal-mock-provisioned-deal` lands its
+two-storefront, two-site topology, and is redesigned from that baseline.
 
 ## Risks / Trade-offs
 

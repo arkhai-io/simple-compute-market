@@ -66,11 +66,21 @@ is configured while more than one origin is configured, or when a keyed contact
 names an origin the storefront is not configured with. A configured origin with no
 contact is permitted, and a deployment configured with one origin and the single
 form MUST resolve to the value it configures. Every keyed contact MUST be bounded as
-the single form is, and the number of keyed origins MUST be bounded.
+the single form is and MUST carry a non-empty payload, and the number of keyed
+origins MUST be bounded.
+
+The mechanism's readiness MUST remain storefront-wide. It MUST be unready when no
+profiles are configured or when neither form configures any contact, and otherwise
+ready: a configured origin without a contact MUST NOT make the mechanism unready.
+The public readiness projection MUST NOT disclose which origins have contacts.
 
 A listing whose origin resolves no contact MUST NOT publish a contact-exchange
 option. Where contacts are keyed by origin and publication supplies no origin, the
-option MUST be refused rather than built.
+option MUST be refused rather than built. The origin a storefront supplies to
+publication MUST be the origin recorded on that listing's durable binding — the
+value its negotiation inherits and its reveal resolves — and MUST NOT be derived any
+other way, so an option is never advertised under one origin and revealed under
+another.
 
 An introduction start whose agreement's origin resolves no contact under the running
 configuration MUST be refused with a stable code before any contact payload is
@@ -104,6 +114,25 @@ listing-level field may name a settlement mechanism.
 
 - **WHEN** a keyed contact names an origin the storefront is not configured with
 - **THEN** the storefront refuses to start and names the unknown origin
+
+#### Scenario: One origin has a contact and another does not
+
+- **WHEN** contacts are keyed by origin, one configured origin has a contact, and
+  another has none
+- **THEN** the mechanism reports ready
+- **AND** listings from the origin with no contact publish no contact-exchange option
+
+#### Scenario: No contact is configured in either form
+
+- **WHEN** contact exchange is enabled with profiles but no contact in either form
+- **THEN** the mechanism reports unready with a stable blocker code
+
+#### Scenario: One origin governs publication, negotiation, and reveal
+
+- **WHEN** a listing is published with a contact-exchange option, negotiated to
+  acceptance, and revealed
+- **THEN** publication eligibility, the negotiation's binding, and the revealed
+  contact all use the origin recorded on the listing's durable binding
 
 #### Scenario: An origin's pools offer an introduction it has no contact for
 

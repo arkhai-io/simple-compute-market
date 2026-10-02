@@ -53,11 +53,15 @@ details to a seller who was not party to the deal.
 
 The seller-side configuration MAY carry a routing table naming, for each origin, the
 configured sink instances that receive its reveals. Origins MUST be treated as
-opaque identifiers supplied by the composing domain. Without a routing table, every
-enabled instance MUST receive every reveal. With one, an origin the table does not
-name MUST receive no seller-side delivery rather than fall back to another origin's
-destinations, and re-delivery MUST route by the introduction's origin through the
-same table.
+opaque identifiers supplied by the composing domain. A storefront with one origin
+and no routing table MUST deliver every reveal to every enabled instance. A storefront
+with more than one origin and any enabled seller-side instance MUST configure a
+routing table, and MUST refuse to construct its sink set without one, whether or not
+any mechanism producing delivery events is enabled: broadcasting every reveal to every
+destination is the cross-seller disclosure this requirement exists to prevent. With a
+routing table, an origin the table does not name MUST receive no seller-side delivery
+rather than fall back to another origin's destinations, and re-delivery MUST route by
+the introduction's origin through the same table.
 
 A seller-side routing table MUST be refused when constructed if it names an instance
 that is not enabled, if an enabled instance is routed for no origin, or if it names
@@ -92,10 +96,24 @@ refused, because the buyer has no origin.
 - **THEN** nothing is delivered seller-side and the reveal, its obligation, and the
   counterparty's request are unaffected
 
-#### Scenario: No routing table is configured
+#### Scenario: A single-origin storefront configures no routing table
 
-- **WHEN** a storefront configures sinks and no routing table
-- **THEN** every enabled sink receives every reveal, whatever its origin
+- **WHEN** a storefront with one origin configures sinks and no routing table
+- **THEN** every enabled sink receives every reveal
+
+#### Scenario: A multi-origin storefront configures no routing table
+
+- **WHEN** a storefront with two origins enables seller-side sinks and configures no
+  routing table
+- **THEN** sink-set construction fails at startup, naming the configured origins
+- **AND** no reveal is ever delivered to a destination chosen without its origin
+
+#### Scenario: A destination is shared by every origin
+
+- **WHEN** a multi-origin storefront routes one instance for every origin alongside
+  each origin's own instance
+- **THEN** that instance receives every reveal and each origin's own instance
+  receives only its origin's
 
 #### Scenario: A routing table is inconsistent
 
