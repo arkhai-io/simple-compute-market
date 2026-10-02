@@ -182,7 +182,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-compute-provisioning"
-version = "0.8.0"
+version = "0.7.1"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-fulfillment" },
@@ -193,12 +193,12 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_compute_provisioning-0.8.0-py3-none-any.whl" },
+    { path = "arkhai_compute_provisioning-0.7.1-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-compute-provisioning-service"
-version = "0.5.0"
+version = "0.4.1"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "aiohttp" },
@@ -225,7 +225,7 @@ dependencies = [
     { name = "uvicorn", extra = ["standard"] },
 ]
 wheels = [
-    { path = "arkhai_compute_provisioning_service-0.5.0-py3-none-any.whl" },
+    { path = "arkhai_compute_provisioning_service-0.4.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -241,14 +241,14 @@ wheels = [
 
 [[package]]
 name = "arkhai-core-storefront-client"
-version = "0.23.0"
+version = "0.22.0"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-identity" },
     { name = "httpx" },
 ]
 wheels = [
-    { path = "arkhai_core_storefront_client-0.23.0-py3-none-any.whl" },
+    { path = "arkhai_core_storefront_client-0.22.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -423,7 +423,7 @@ dev = [
 
 [[package]]
 name = "arkhai-vms-provisioning-operator-client"
-version = "0.6.0"
+version = "0.5.0"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "arkhai-compute-provisioning" },
@@ -432,7 +432,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_vms_provisioning_operator_client-0.6.0-py3-none-any.whl" },
+    { path = "arkhai_vms_provisioning_operator_client-0.5.0-py3-none-any.whl" },
 ]
 
 [[package]]
