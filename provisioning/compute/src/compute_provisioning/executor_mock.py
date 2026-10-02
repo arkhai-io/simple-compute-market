@@ -8,8 +8,10 @@ framework-free route service each adapter binds under its own ``/test`` prefix.
 
 The mechanism knows nothing about how a job runs or what its output looks like:
 rules match an opaque parameter mapping, and ``result_stdout`` is handed back to
-the adapter's own mock untouched. It serves the compute family only and is not a
-foundation kit.
+the adapter's own mock untouched. A job held at a gate is counted on its rule, so
+a test waits for it with ``MockRuleSet.wait_until_held`` rather than on elapsed
+time, and the rule routes report the count. It serves the compute family only
+and is not a foundation kit.
 """
 
 from __future__ import annotations
@@ -38,6 +40,8 @@ class MockRule:
     fail_with: str | None = None
     rule_id: str = ""
     gate: asyncio.Event | None = field(default=None, repr=False)
+    #: Jobs currently held at this rule's closed gate.
+    waiting: int = field(default=0, repr=False)
 
 
 class MockRuleSet:
@@ -46,6 +50,9 @@ class MockRuleSet:
     def __init__(self) -> None:
         self._rules: dict[str, MockRule] = {}
         self._job_done_events: dict[str, asyncio.Event] = {}
+        # Set and replaced whenever a job arrives at or leaves a gate, or a rule
+        # is removed, so a waiter re-checks its condition rather than polling.
+        self._gates_changed = asyncio.Event()
 
     def add(self, rule: MockRule) -> MockRule:
         if not rule.rule_id:
@@ -56,7 +63,10 @@ class MockRuleSet:
         return rule
 
     def delete(self, rule_id: str) -> bool:
-        return self._rules.pop(rule_id, None) is not None
+        if self._rules.pop(rule_id, None) is None:
+            return False
+        self._notify_gates_changed()
+        return True
 
     def list(self) -> list[dict[str, Any]]:
         return [
@@ -67,6 +77,7 @@ class MockRuleSet:
                 "fail_with": rule.fail_with,
                 "result_stdout": rule.result_stdout is not None,
                 "paused": rule.gate is not None and not rule.gate.is_set(),
+                "waiting": rule.waiting,
             }
             for rule in self._rules.values()
         ]
@@ -85,10 +96,51 @@ class MockRuleSet:
         return None
 
     async def hold(self, rule: MockRule | None) -> None:
-        """Wait on a matching rule's gate, if it has one."""
+        """Wait on a matching rule's gate, if it has one and it is closed.
 
-        if rule is not None and rule.pause_before_result and rule.gate is not None:
+        A held job is counted on the rule while it waits, which is what
+        ``wait_until_held`` and ``list`` observe. A gate already opened passes
+        the job through uncounted.
+        """
+
+        if rule is None or not rule.pause_before_result or rule.gate is None:
+            return
+        if rule.gate.is_set():
+            return
+        rule.waiting += 1
+        self._notify_gates_changed()
+        try:
             await rule.gate.wait()
+        finally:
+            rule.waiting -= 1
+            self._notify_gates_changed()
+
+    async def wait_until_held(self, rule_id: str, *, count: int = 1) -> int:
+        """Return once at least ``count`` jobs are held at ``rule_id``'s gate.
+
+        This is the deterministic signal a test waits on instead of elapsed
+        time. It does not bound its own wait: callers wrap it in
+        ``asyncio.wait_for`` so a gate never reached fails the test. Raises
+        ``LookupError`` if the rule is unknown, has no gate, or is removed while
+        waited on, since no job can then arrive at it.
+        """
+
+        if count < 1:
+            raise ValueError("count must be at least 1")
+        while True:
+            rule = self._rules.get(rule_id)
+            if rule is None or rule.gate is None:
+                raise LookupError(f"rule {rule_id!r} has no gate to wait at")
+            if rule.waiting >= count:
+                return rule.waiting
+            await self._gates_changed.wait()
+
+    def _notify_gates_changed(self) -> None:
+        # Waking every waiter on the current event and handing later waiters a
+        # fresh one keeps notification synchronous, so ``hold`` and ``delete``
+        # need no lock and schedule nothing.
+        changed, self._gates_changed = self._gates_changed, asyncio.Event()
+        changed.set()
 
     def notify_job_done(self, job_id: str) -> None:
         event = self._job_done_events.get(job_id)

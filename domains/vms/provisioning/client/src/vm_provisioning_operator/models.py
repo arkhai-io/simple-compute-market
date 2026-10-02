@@ -1,7 +1,9 @@
 """Typed request and response models for the Arkhai provisioning service REST API.
 
-These models are the direct VM operator HTTP contract. They intentionally live
-outside the offering-mode-neutral ``compute_provisioning`` caller contract.
+These models are the direct VM operator HTTP contract. The host, job, and
+aggregate health and version models are compute provisioning's and are
+re-exported here, so existing imports receive the compute-owned models and the
+wire shapes do not change.
 
 Internal server-only types (``AnsibleJobParams``, ``AnsibleRunResult``,
 ``build_simple_params``, ``EvaluateJobRequest``, ``EvaluateJobResponse``) remain
@@ -13,108 +15,25 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal, Optional
 
+from compute_provisioning.hosts import (
+    HostCreate,
+    HostListResponse,
+    HostResponse,
+    HostUpdate,
+)
+from compute_provisioning.jobs import (
+    JobListResponse,
+    JobLogsResponse,
+    JobStatusResponse,
+    JobSubmitResponse,
+)
+from compute_provisioning.system_models import HealthResponse, VersionResponse
 from pydantic import BaseModel, Field, model_validator
 
 
 # ---------------------------------------------------------------------------
 # Host registry
 # ---------------------------------------------------------------------------
-
-
-class HostCreate(BaseModel):
-    """Body accepted by ``POST /api/v1/hosts/``."""
-
-    host_id: str = Field(description="The host's identity: its Ansible alias, e.g. 'kvm1'.")
-    ssh_host: str = Field(description="IP/hostname the provisioner SSHes to.")
-    public_host: Optional[str] = Field(
-        default=None,
-        description=(
-            "Address tenants use to reach this host's VM port-forwards "
-            "(public IP, DNS, or overlay IP). Defaults to ssh_host when "
-            "omitted — set it when buyers reach the host on a different "
-            "network than the provisioner does."
-        ),
-    )
-    ssh_user: str = Field(default="root", description="SSH user on the KVM host.")
-    ssh_port: int = Field(
-        default=22,
-        ge=1,
-        le=65535,
-        description=(
-            "Port the provisioner connects to. Set it when the host answers "
-            "SSH somewhere other than port 22 at ssh_host — through a reverse "
-            "tunnel, a NAT forward, or a bastion."
-        ),
-    )
-    ssh_key_type: Literal["path", "embedded"] = Field(
-        default="path",
-        description=(
-            "'path' stores a filesystem path to the SSH key; "
-            "'embedded' stores Fernet-encrypted key material in the database."
-        ),
-    )
-    ssh_key_value: str = Field(
-        description=(
-            "For 'path': absolute path to the SSH private key on the service host. "
-            "For 'embedded': Fernet-encrypted PEM key material."
-        )
-    )
-    gpu_count: int = Field(default=0, ge=0, description="Number of GPU cards on the host.")
-    gpu_model: Optional[str] = Field(
-        default=None, description="Descriptive GPU model, e.g. 'H100', 'A100'.",
-    )
-    enabled: bool = Field(default=True, description="Whether this host is available for jobs.")
-    pool_id: Optional[str] = Field(
-        default=None,
-        description="Resource pool this host belongs to. Defaults to the 'default' pool.",
-    )
-
-
-class HostUpdate(BaseModel):
-    """Body accepted by ``PUT /api/v1/hosts/{host_id}``."""
-
-    ssh_host: Optional[str] = Field(default=None, description="Updated IP/hostname.")
-    public_host: Optional[str] = Field(default=None, description="Updated public address.")
-    ssh_user: Optional[str] = Field(default=None, description="Updated SSH user.")
-    ssh_port: Optional[int] = Field(
-        default=None, ge=1, le=65535, description="Updated SSH port.",
-    )
-    ssh_key_type: Optional[Literal["path", "embedded"]] = Field(default=None)
-    ssh_key_value: Optional[str] = Field(default=None, description="Updated key path or material.")
-    gpu_count: Optional[int] = Field(default=None, ge=0)
-    gpu_model: Optional[str] = Field(default=None, description="Updated descriptive GPU model.")
-    enabled: Optional[bool] = Field(default=None)
-    pool_id: Optional[str] = Field(default=None, description="Reassign this host to a different pool.")
-
-
-class HostResponse(BaseModel):
-    """Serialised host row returned by all host endpoints.
-
-    ``ssh_key_value`` is intentionally absent — callers have no need to
-    read back raw or encrypted key material.
-    """
-
-    host_id: str
-    ssh_host: str
-    public_host: Optional[str] = None
-    ssh_user: str
-    ssh_port: int
-    ssh_key_type: str
-    gpu_count: int
-    gpu_model: Optional[str] = None
-    enabled: bool
-    pool_id: str
-    created_at: datetime
-    updated_at: datetime
-
-    model_config = {"from_attributes": True}
-
-
-class HostListResponse(BaseModel):
-    """Response body for ``GET /api/v1/hosts/``."""
-
-    hosts: list[HostResponse]
-    total: int
 
 
 class HostConnectivityResponse(BaseModel):
@@ -136,63 +55,6 @@ class HostConnectivityResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Jobs
 # ---------------------------------------------------------------------------
-
-
-class JobSubmitResponse(BaseModel):
-    """Returned immediately when a job is accepted into the queue.
-
-    Poll ``GET /api/v1/jobs/{job_id}`` for status updates.
-    The job_id is stable across retries; use it for credentials and logs too.
-    """
-
-    job_id: str = Field(description="Stable unique identifier for the queued job")
-    status: str = Field(description="Initial job status (always 'queued')")
-
-
-class JobStatusResponse(BaseModel):
-    """Full job status including parameters, result, and retry metadata."""
-
-    job_id: str = Field(description="Unique job identifier")
-    status: str = Field(
-        description="Current status: queued, running, succeeded, failed, or cancelled"
-    )
-    params: dict = Field(
-        description="Original request parameters submitted with the job"
-    )
-    result: Optional[dict] = Field(
-        default=None,
-        description="Structured result from Ansible on success (SSH info, VM state, etc.)",
-    )
-    error: Optional[str] = Field(default=None, description="Error message if the job failed")
-    retry_count: int = Field(default=0, description="Number of retries attempted so far")
-    max_retries: int = Field(default=3, description="Maximum retries allowed for this job")
-    next_retry_at: Optional[datetime] = Field(
-        default=None,
-        description="Scheduled time for the next retry attempt (UTC)",
-    )
-    escrow_uid: Optional[str] = Field(
-        default=None,
-        description="On-chain escrow UID linking this job to a deal (set at submission time)",
-    )
-
-
-class JobLogsResponse(BaseModel):
-    """Raw Ansible playbook output for a job."""
-
-    job_id: str = Field(description="Unique job identifier")
-    status: str = Field(description="Current job status")
-    logs: Optional[str] = Field(
-        default=None, description="Raw Ansible stdout/stderr captured during execution"
-    )
-
-
-class JobListResponse(BaseModel):
-    """Paginated list of Ansible jobs."""
-
-    jobs: list[JobStatusResponse] = Field(description="Jobs on the current page")
-    total: int = Field(description="Total number of jobs matching the query")
-    offset: int = Field(description="Number of jobs skipped (pagination offset)")
-    limit: int = Field(description="Maximum jobs returned per page")
 
 
 class CredentialResponse(BaseModel):
@@ -577,35 +439,6 @@ class LeaseListResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class HealthResponse(BaseModel):
-    status: str = Field(description="'ok' when all checks pass, 'degraded' otherwise")
-    checks: dict[str, str] = Field(description="Per-subsystem status strings")
-    #: The storefront-to-provisioning contract major this service speaks, and
-    #: the majors it admits. A cutover requires every participant to report
-    #: its pin before mutations resume, and this is the only way to ask a
-    #: running service for it.
-    #:
-    #: Declared here because this model governs what the route emits: a field
-    #: the service puts in its status dict but this model does not name is
-    #: dropped before any caller sees it. Optional so `GET /health`, which
-    #: shares the model and reports neither, stays valid.
-    provisioning_contract_version: str | None = Field(
-        default=None,
-        description="Contract major.minor this service speaks (status only)",
-    )
-    provisioning_contract_supported_majors: list[int] | None = Field(
-        default=None,
-        description="Contract majors this service admits (status only)",
-    )
-
-
-class VersionResponse(BaseModel):
-    version: str = Field(description="Service version string")
-    active_profiles: list[str] = Field(
-        description="Dynaconf profiles currently active (from ACTIVE_PROFILES env var)"
-    )
-
-
 class FileInfo(BaseModel):
     path: str = Field(description="Absolute (expanded) filesystem path")
     exists: bool
@@ -685,3 +518,34 @@ class AnsibleReadinessResponse(BaseModel):
             "SSH key diagnostics per unique key reference across all enabled hosts."
         )
     )
+
+
+__all__ = [
+    "AnsibleReadinessResponse",
+    "CreateVmRequest",
+    "CredentialListResponse",
+    "CredentialResponse",
+    "FileInfo",
+    "HealthResponse",
+    "HostConnectivityResponse",
+    "HostCreate",
+    "HostListResponse",
+    "HostResponse",
+    "HostUpdate",
+    "InventoryInfo",
+    "JobListResponse",
+    "JobLogsResponse",
+    "JobStatusResponse",
+    "JobSubmitResponse",
+    "LeaseCreate",
+    "LeaseForceReleaseRequest",
+    "LeaseListResponse",
+    "LeaseReleaseOversightRequest",
+    "LeaseResponse",
+    "LeaseRetryReleaseRequest",
+    "LeaseTerminateRequest",
+    "LeaseUpdate",
+    "SshKeyInfo",
+    "VersionResponse",
+    "VmActionRequest",
+]

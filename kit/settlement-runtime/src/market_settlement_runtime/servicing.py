@@ -70,9 +70,12 @@ class SettlementServicingWorker:
 
         For a caller that has just changed an obligation's state and should not
         wait for the next pass. A failed step is scheduled for retry by the same
-        rules as in a pass, so the worker remains the only retry path; the
-        runtime's operation leases make a concurrent pass see the obligation as
-        busy rather than service it twice.
+        rules as in a pass, so the worker remains the only retry path. A
+        concurrent pass sees the obligation as busy rather than servicing it
+        twice because each step holds a runtime operation lease; for starting
+        fulfillment that lease is the one the ``on_ready`` hook takes through
+        ``SettlementRuntime.reserve_fulfillment``, so a hook must reserve before
+        it starts anything.
         """
 
         await self._service_record(await self._reload(obligation_ref), time.time())

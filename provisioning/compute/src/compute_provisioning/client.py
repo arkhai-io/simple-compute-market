@@ -6,8 +6,8 @@ import asyncio
 import re
 import time
 import uuid
-from dataclasses import dataclass
-from collections.abc import Mapping
+from dataclasses import dataclass, replace
+from collections.abc import Iterable, Mapping
 from typing import Any, Protocol
 
 import httpx
@@ -90,6 +90,10 @@ class ProvisioningRouteContract:
     body_resource: str | None = None
     optional_body_resource: bool = False
     path_resource: str | tuple[str, ...] | None = None
+    # The caller roles the route admits, the required role first. Every
+    # contract in a ``ProvisioningRouteTable`` carries them; a contract built
+    # without them takes its roles from the family kit's operation sets.
+    roles: tuple[str, ...] = ()
 
     def match(self, method: str, path: str, body: Any) -> str | None:
         if method.upper() != self.method:
@@ -118,17 +122,11 @@ class ProvisioningRouteContract:
 
     @property
     def required_role(self) -> str:
-        return (
-            "admin"
-            if self.operation in ADMIN_PROVISIONING_OPERATIONS
-            else "seller"
-        )
+        return self.allowed_roles[0]
 
     @property
     def allowed_roles(self) -> tuple[str, ...]:
-        if self.operation in DUAL_ROLE_PROVISIONING_OPERATIONS:
-            return ("seller", "admin")
-        return (self.required_role,)
+        return self.roles or _family_roles(self.operation)
 
 
 PROVISIONING_ROUTE_CONTRACTS = (
@@ -269,7 +267,7 @@ PROVISIONING_ROUTE_CONTRACTS = (
     ProvisioningRouteContract("GET", re.compile(r"/api/v1/jobs/(?P<job_id>[^/]+)/credentials"), "provisioning_job_credentials_admin", path_resource="job_id"),
     ProvisioningRouteContract("GET", re.compile(r"/api/v1/jobs/(?P<job_id>[^/]+)/logs"), "provisioning_job_logs", path_resource="job_id"),
     ProvisioningRouteContract("POST", re.compile(r"/api/v1/jobs/(?P<job_id>[^/]+)/cancel"), "provisioning_job_cancel_admin", path_resource="job_id"),
-    # Host, VM, and lease administration.
+    # Host registry administration.
     ProvisioningRouteContract("GET", re.compile(r"/api/v1/hosts/?"), "provisioning_hosts_list"),
     ProvisioningRouteContract("POST", re.compile(r"/api/v1/hosts/?"), "provisioning_host_create"),
     ProvisioningRouteContract("POST", re.compile(r"/api/v1/hosts/import"), "provisioning_hosts_import"),
@@ -277,31 +275,8 @@ PROVISIONING_ROUTE_CONTRACTS = (
     ProvisioningRouteContract("PUT", re.compile(r"/api/v1/hosts/(?P<host>[^/]+)"), "provisioning_host_update", path_resource="host"),
     ProvisioningRouteContract("POST", re.compile(r"/api/v1/hosts/(?P<host>[^/]+)/enable"), "provisioning_host_enable", path_resource="host"),
     ProvisioningRouteContract("POST", re.compile(r"/api/v1/hosts/(?P<host>[^/]+)/disable"), "provisioning_host_disable", path_resource="host"),
-    ProvisioningRouteContract("GET", re.compile(r"/api/v1/hosts/(?P<host>[^/]+)/capacity"), "provisioning_host_capacity", path_resource="host"),
     ProvisioningRouteContract("GET", re.compile(r"/api/v1/hosts/(?P<host>[^/]+)/connectivity"), "provisioning_host_connectivity", path_resource="host"),
-    ProvisioningRouteContract("POST", re.compile(r"/api/v1/hosts/(?P<host>[^/]+)/vms/?"), "provisioning_vm_create", path_resource="host"),
-    ProvisioningRouteContract("GET", re.compile(r"/api/v1/hosts/(?P<host>[^/]+)/vms/?"), "provisioning_vm_list", path_resource="host"),
-    ProvisioningRouteContract("POST", re.compile(r"/api/v1/hosts/(?P<host>[^/]+)/vms/(?P<vm_name>[^/]+)/start"), "provisioning_vm_start", path_resource=("host", "vm_name")),
-    ProvisioningRouteContract("POST", re.compile(r"/api/v1/hosts/(?P<host>[^/]+)/vms/(?P<vm_name>[^/]+)/shutdown"), "provisioning_vm_shutdown", path_resource=("host", "vm_name")),
-    ProvisioningRouteContract("POST", re.compile(r"/api/v1/hosts/(?P<host>[^/]+)/vms/(?P<vm_name>[^/]+)/reboot"), "provisioning_vm_reboot", path_resource=("host", "vm_name")),
-    ProvisioningRouteContract("POST", re.compile(r"/api/v1/hosts/(?P<host>[^/]+)/vms/(?P<vm_name>[^/]+)/destroy"), "provisioning_vm_destroy", path_resource=("host", "vm_name")),
-    ProvisioningRouteContract("POST", re.compile(r"/api/v1/hosts/(?P<host>[^/]+)/vms/(?P<vm_name>[^/]+)/undefine"), "provisioning_vm_undefine", path_resource=("host", "vm_name")),
-    ProvisioningRouteContract("GET", re.compile(r"/api/v1/hosts/(?P<host>[^/]+)/vms/(?P<vm_name>[^/]+)/monitor"), "provisioning_vm_monitor", path_resource=("host", "vm_name")),
-    ProvisioningRouteContract("POST", re.compile(r"/api/v1/hosts/(?P<host>[^/]+)/vms/(?P<vm_name>[^/]+)/reset-password"), "provisioning_vm_reset_password", path_resource=("host", "vm_name")),
-    ProvisioningRouteContract("GET", re.compile(r"/api/v1/leases/?"), "provisioning_leases_list"),
-    ProvisioningRouteContract("POST", re.compile(r"/api/v1/leases/?"), "provisioning_lease_create"),
-    ProvisioningRouteContract("GET", re.compile(r"/api/v1/leases/by-escrow/(?P<escrow_uid>[^/]+)"), "provisioning_lease_by_escrow", path_resource="escrow_uid"),
-    ProvisioningRouteContract("GET", re.compile(r"/api/v1/leases/(?P<lease_id>[^/]+)"), "provisioning_lease_admin_get", path_resource="lease_id"),
-    ProvisioningRouteContract("PATCH", re.compile(r"/api/v1/leases/(?P<lease_id>[^/]+)"), "provisioning_lease_update", path_resource="lease_id"),
-    ProvisioningRouteContract("POST", re.compile(r"/api/v1/leases/(?P<lease_id>[^/]+)/terminate"), "provisioning_lease_admin_terminate", path_resource="lease_id"),
-    ProvisioningRouteContract("POST", re.compile(r"/api/v1/leases/(?P<lease_id>[^/]+)/release-oversight"), "provisioning_lease_release_oversight", path_resource="lease_id"),
-    ProvisioningRouteContract("POST", re.compile(r"/api/v1/admin/leases/(?P<lease_id>[^/]+)/retry-release"), "provisioning_lease_admin_retry_release", path_resource="lease_id"),
-    ProvisioningRouteContract("POST", re.compile(r"/api/v1/admin/leases/(?P<lease_id>[^/]+)/force-release"), "provisioning_lease_admin_force_release", path_resource="lease_id"),
-    # Bare-metal and pool administration.
-    ProvisioningRouteContract("GET", re.compile(r"/api/v1/bare-metal/leases/?"), "provisioning_bare_metal_leases_list"),
-    ProvisioningRouteContract("POST", re.compile(r"/api/v1/bare-metal/leases/?"), "provisioning_bare_metal_lease_create"),
-    ProvisioningRouteContract("GET", re.compile(r"/api/v1/bare-metal/leases/by-escrow/(?P<escrow_uid>[^/]+)"), "provisioning_bare_metal_lease_by_escrow", path_resource="escrow_uid"),
-    ProvisioningRouteContract("GET", re.compile(r"/api/v1/bare-metal/leases/(?P<lease_id>[^/]+)"), "provisioning_bare_metal_lease_get", path_resource="lease_id"),
+    # Pool and capacity-definition administration.
     ProvisioningRouteContract("GET", re.compile(r"/api/v1/pools/?"), "provisioning_pools_list"),
     ProvisioningRouteContract("GET", re.compile(r"/api/v1/pools/export"), "provisioning_pools_export"),
     ProvisioningRouteContract("GET", re.compile(r"/api/v1/pools/(?P<pool_id>[^/]+)"), "provisioning_pool_get", path_resource="pool_id"),
@@ -323,20 +298,11 @@ PROVISIONING_ROUTE_CONTRACTS = (
     ProvisioningRouteContract("POST", re.compile(r"/api/v1/relays/?$"), "provisioning_relay_create"),
     ProvisioningRouteContract("PATCH", re.compile(r"/api/v1/relays/(?P<relay_id>[^/]+)"), "provisioning_relay_update", path_resource="relay_id"),
     ProvisioningRouteContract("POST", re.compile(r"/api/v1/fulfillment/validate"), "provisioning_fulfillment_validate", body_resource="capacity_reservation_id"),
-    # Mock-profile control routes remain authenticated when mounted.
-    ProvisioningRouteContract("POST", re.compile(r"/test/mock-rules"), "provisioning_test_rule_add"),
-    ProvisioningRouteContract("GET", re.compile(r"/test/mock-rules"), "provisioning_test_rules_list"),
-    ProvisioningRouteContract("DELETE", re.compile(r"/test/mock-rules/(?P<rule_id>[^/]+)"), "provisioning_test_rule_delete", path_resource="rule_id"),
-    ProvisioningRouteContract("POST", re.compile(r"/test/mock-rules/(?P<rule_id>[^/]+)/resume"), "provisioning_test_rule_resume", path_resource="rule_id"),
+    # Shared mock-profile job controls remain authenticated when mounted.
     ProvisioningRouteContract("GET", re.compile(r"/test/jobs/summary"), "provisioning_test_jobs_summary"),
     ProvisioningRouteContract("GET", re.compile(r"/test/jobs/drain"), "provisioning_test_jobs_drain"),
     ProvisioningRouteContract("GET", re.compile(r"/test/jobs/(?P<job_id>[^/]+)/wait"), "provisioning_test_job_wait", path_resource="job_id"),
-    ProvisioningRouteContract("POST", re.compile(r"/test/evaluate-job"), "provisioning_test_job_evaluate"),
-    ProvisioningRouteContract("POST", re.compile(r"/test/bare-metal/mock-rules"), "provisioning_test_bare_metal_rule_add"),
-    ProvisioningRouteContract("GET", re.compile(r"/test/bare-metal/mock-rules"), "provisioning_test_bare_metal_rules_list"),
-    ProvisioningRouteContract("DELETE", re.compile(r"/test/bare-metal/mock-rules/(?P<rule_id>[^/]+)"), "provisioning_test_bare_metal_rule_delete", path_resource="rule_id"),
-    ProvisioningRouteContract("POST", re.compile(r"/test/bare-metal/mock-rules/(?P<rule_id>[^/]+)/resume"), "provisioning_test_bare_metal_rule_resume", path_resource="rule_id"),
-    ProvisioningRouteContract("POST", re.compile(r"/test/bare-metal/evaluate-job"), "provisioning_test_bare_metal_job_evaluate"),
+
 )
 
 DUAL_ROLE_PROVISIONING_OPERATIONS = frozenset(
@@ -385,30 +351,7 @@ ADMIN_PROVISIONING_OPERATIONS = frozenset(
         "provisioning_host_update",
         "provisioning_host_enable",
         "provisioning_host_disable",
-        "provisioning_host_capacity",
         "provisioning_host_connectivity",
-        "provisioning_vm_create",
-        "provisioning_vm_list",
-        "provisioning_vm_start",
-        "provisioning_vm_shutdown",
-        "provisioning_vm_reboot",
-        "provisioning_vm_destroy",
-        "provisioning_vm_undefine",
-        "provisioning_vm_monitor",
-        "provisioning_vm_reset_password",
-        "provisioning_leases_list",
-        "provisioning_lease_create",
-        "provisioning_lease_by_escrow",
-        "provisioning_lease_admin_get",
-        "provisioning_lease_update",
-        "provisioning_lease_admin_terminate",
-        "provisioning_lease_release_oversight",
-        "provisioning_lease_admin_retry_release",
-        "provisioning_lease_admin_force_release",
-        "provisioning_bare_metal_leases_list",
-        "provisioning_bare_metal_lease_create",
-        "provisioning_bare_metal_lease_by_escrow",
-        "provisioning_bare_metal_lease_get",
         "provisioning_pools_list",
         "provisioning_pools_export",
         "provisioning_pool_get",
@@ -419,21 +362,155 @@ ADMIN_PROVISIONING_OPERATIONS = frozenset(
         "provisioning_pools_import",
         "provisioning_pools_validate",
         "provisioning_capacity_definitions_import",
-        "provisioning_test_rule_add",
-        "provisioning_test_rules_list",
-        "provisioning_test_rule_delete",
-        "provisioning_test_rule_resume",
         "provisioning_test_jobs_summary",
         "provisioning_test_jobs_drain",
         "provisioning_test_job_wait",
-        "provisioning_test_job_evaluate",
-        "provisioning_test_bare_metal_rule_add",
-        "provisioning_test_bare_metal_rules_list",
-        "provisioning_test_bare_metal_rule_delete",
-        "provisioning_test_bare_metal_rule_resume",
-        "provisioning_test_bare_metal_job_evaluate",
     }
 )
+
+PROVISIONING_ROLES = frozenset({"seller", "admin"})
+
+
+def _family_roles(operation: str) -> tuple[str, ...]:
+    """The roles of one of the family kit's own routes, from its operation sets."""
+
+    if operation in DUAL_ROLE_PROVISIONING_OPERATIONS:
+        return ("seller", "admin")
+    if operation in ADMIN_PROVISIONING_OPERATIONS:
+        return ("admin",)
+    return ("seller",)
+
+
+# The family kit's own routes, each carrying its roles as every contract in a
+# table does. A compute domain declares the routes it mounts in its own package.
+PROVISIONING_ROUTE_CONTRACTS = tuple(
+    replace(contract, roles=_family_roles(contract.operation))
+    for contract in PROVISIONING_ROUTE_CONTRACTS
+)
+
+_DECLARATION_KEYS = frozenset(
+    {
+        "method",
+        "path",
+        "operation",
+        "roles",
+        "body_resource",
+        "optional_body_resource",
+        "path_resource",
+    }
+)
+
+
+def route_contract_from_declaration(
+    declaration: ProvisioningRouteContract | Mapping[str, Any],
+) -> ProvisioningRouteContract:
+    """Build a route contract from a domain's plain-data declaration.
+
+    A domain declares its routes as mappings so its client package need not
+    depend on this family kit: ``method``, ``path`` (a regular expression the
+    whole path must match), ``operation``, ``roles``, and optionally
+    ``path_resource`` (a group name, or a list of them joined with ``/``),
+    ``body_resource``, and ``optional_body_resource``. A declaration must name
+    its roles, because the family kit's operation sets know no domain's routes.
+    """
+
+    if isinstance(declaration, ProvisioningRouteContract):
+        contract = declaration
+    else:
+        unknown = sorted(set(declaration) - _DECLARATION_KEYS)
+        if unknown:
+            raise ValueError(f"route declaration has unknown keys: {unknown}")
+        path_resource = declaration.get("path_resource")
+        if isinstance(path_resource, (list, tuple)):
+            path_resource = tuple(str(name) for name in path_resource)
+        contract = ProvisioningRouteContract(
+            str(declaration["method"]).upper(),
+            re.compile(str(declaration["path"])),
+            str(declaration["operation"]),
+            body_resource=declaration.get("body_resource"),
+            optional_body_resource=bool(
+                declaration.get("optional_body_resource", False)
+            ),
+            path_resource=path_resource,
+            roles=tuple(declaration.get("roles") or ()),
+        )
+    roles = contract.roles
+    if (
+        not roles
+        or len(set(roles)) != len(roles)
+        or not set(roles) <= PROVISIONING_ROLES
+    ):
+        raise ValueError(
+            f"route {contract.operation!r} must name its roles from "
+            f"{sorted(PROVISIONING_ROLES)} without repetition"
+        )
+    return contract
+
+
+class ProvisioningRouteTable:
+    """The route contracts one provisioning service authenticates.
+
+    Assembled from the family kit's routes and each domain's declarations. Every
+    operation and every ``(method, path)`` route appears once. Within one
+    contribution the first matching contract decides, as its owner ordered
+    them; a path matched by contracts of two contributions is refused, because
+    neither owner can say which signature it means.
+    """
+
+    def __init__(
+        self,
+        *contributions: Iterable[ProvisioningRouteContract | Mapping[str, Any]],
+    ) -> None:
+        groups: list[tuple[ProvisioningRouteContract, ...]] = []
+        operations: set[str] = set()
+        routes: set[tuple[str, str]] = set()
+        for contribution in contributions:
+            group = tuple(route_contract_from_declaration(item) for item in contribution)
+            for contract in group:
+                if contract.operation in operations:
+                    raise ValueError(f"duplicate route operation {contract.operation!r}")
+                route = (contract.method, contract.pattern.pattern)
+                if route in routes:
+                    raise ValueError(f"duplicate route {route[0]} {route[1]}")
+                operations.add(contract.operation)
+                routes.add(route)
+            groups.append(group)
+        self._groups = tuple(groups)
+
+    @property
+    def contracts(self) -> tuple[ProvisioningRouteContract, ...]:
+        return tuple(contract for group in self._groups for contract in group)
+
+    def resolve(
+        self, method: str, path: str, body: Any = EMPTY_BODY
+    ) -> tuple[ProvisioningRouteContract, str]:
+        """Return the exact authenticated route contract and bound resource."""
+
+        found: list[tuple[ProvisioningRouteContract, str]] = []
+        for group in self._groups:
+            for contract in group:
+                resource = contract.match(method, path, body)
+                if resource is not None:
+                    found.append((contract, resource))
+                    break
+        if not found:
+            raise ValueError(f"no authenticated provisioning contract for {method} {path}")
+        if len(found) > 1:
+            names = ", ".join(repr(contract.operation) for contract, _ in found)
+            raise ValueError(f"{method} {path} is claimed by more than one route: {names}")
+        return found[0]
+
+
+PROVISIONING_ROUTE_TABLE = ProvisioningRouteTable(PROVISIONING_ROUTE_CONTRACTS)
+
+
+def assemble_provisioning_route_table(
+    *declarations: Iterable[ProvisioningRouteContract | Mapping[str, Any]],
+) -> ProvisioningRouteTable:
+    """The family kit's routes plus each domain's declared routes."""
+
+    return ProvisioningRouteTable(PROVISIONING_ROUTE_CONTRACTS, *declarations)
+
 
 def canonical_provisioning_request_body(
     method: str,
@@ -473,25 +550,32 @@ def resolve_provisioning_route_contract(
     method: str,
     path: str,
     body: Any = EMPTY_BODY,
+    *,
+    table: ProvisioningRouteTable | None = None,
 ) -> tuple[ProvisioningRouteContract, str]:
-    """Return the exact authenticated route contract and bound resource."""
+    """Return the exact authenticated route contract and bound resource.
 
-    for contract in PROVISIONING_ROUTE_CONTRACTS:
-        resource = contract.match(method, path, body)
-        if resource is not None:
-            return contract, resource
-    raise ValueError(f"no authenticated provisioning contract for {method} {path}")
+    ``table`` defaults to the family kit's own routes; a caller reaching a
+    domain's routes passes a table assembled with that domain's declarations.
+    """
+
+    return (table or PROVISIONING_ROUTE_TABLE).resolve(method, path, body)
 
 
 def resolve_provisioning_route(
     method: str,
     path: str,
     body: Any = EMPTY_BODY,
+    *,
+    table: ProvisioningRouteTable | None = None,
 ) -> tuple[str, str]:
     """Return the authority-owned semantic operation and resource."""
 
-    contract, resource = resolve_provisioning_route_contract(method, path, body)
+    contract, resource = resolve_provisioning_route_contract(
+        method, path, body, table=table
+    )
     return contract.operation, resource
+
 
 class ComputeProvisioningClientProtocol(Protocol):
     async def submit_action(
@@ -598,6 +682,7 @@ class ComputeProvisioningClient:
         timeout: float = 60.0,
         transport: httpx.AsyncBaseTransport | None = None,
         max_timestamp_skew: int = 300,
+        route_table: ProvisioningRouteTable | None = None,
     ) -> None:
         if not isinstance(signer, Signer):
             raise TypeError("signer must implement market_identity.Signer")
@@ -610,6 +695,7 @@ class ComputeProvisioningClient:
         if max_timestamp_skew < 0:
             raise ValueError("max_timestamp_skew must not be negative")
         self._signer = signer
+        self._route_table = route_table or PROVISIONING_ROUTE_TABLE
         self._caller_role = caller_role
         self._expected_authorities = expected_authorities
         self._max_timestamp_skew = max_timestamp_skew
@@ -747,6 +833,7 @@ class ComputeProvisioningClient:
         body: Any = EMPTY_BODY,
         *,
         request_id: str | None = None,
+        route: ProvisioningRouteContract | Mapping[str, Any] | None = None,
     ) -> Any:
         payload = (
             body.model_dump(mode="json", exclude_none=True)
@@ -758,11 +845,18 @@ class ComputeProvisioningClient:
             path,
             payload,
         )
-        route, resource = resolve_provisioning_route_contract(
-            method,
-            path,
-            authenticated_body,
-        )
+        if route is None:
+            route, resource = self._route_table.resolve(
+                method, path, authenticated_body
+            )
+        else:
+            route = route_contract_from_declaration(route)
+            matched = route.match(method, path, authenticated_body)
+            if matched is None:
+                raise ValueError(
+                    f"route {route.operation!r} does not describe {method} {path}"
+                )
+            resource = matched
         operation = route.operation
         if self._caller_role not in route.allowed_roles:
             raise ComputeProvisioningAuthenticationError(
@@ -800,6 +894,29 @@ class ComputeProvisioningClient:
         )
         self._raise(response, response_body)
         return response_body
+
+    async def authenticated_request(
+        self,
+        method: str,
+        path: str,
+        body: Any = EMPTY_BODY,
+        *,
+        request_id: str | None = None,
+        route: ProvisioningRouteContract | Mapping[str, Any] | None = None,
+    ) -> Any:
+        """Send one signed request and return its verified response body.
+
+        Market-neutral transport for a route this client has no typed method
+        for: a domain's typed client wraps it, so this family-kit client carries
+        no domain's vocabulary. A domain's route is named by passing its
+        declaration as ``route``; otherwise the path resolves against this
+        client's route table. The contract supplies the signed operation and
+        resource; the response must carry a valid authority signature, and a
+        non-2xx status then raises ``ComputeProvisioningError`` carrying it.
+        """
+        return await self._request(
+            method, path, body, request_id=request_id, route=route
+        )
 
     async def submit_action(
         self,

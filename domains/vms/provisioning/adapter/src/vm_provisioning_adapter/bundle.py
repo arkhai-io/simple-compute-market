@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from types import MappingProxyType
 
-from compute_provisioning import JobExecution
-from compute_provisioning_service import (
+from compute_provisioning import (
     ExecutorAdapterBundle,
     ExecutorAdapterContribution,
+    JobExecution,
 )
 
 from vm_provisioning_adapter.compute_adapter import VmComputeAdapter

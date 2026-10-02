@@ -5,13 +5,15 @@ from __future__ import annotations
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi_utils.cbv import cbv
-from market_identity import Identity
 from market_storefront_kit import DealControlRouteError, NegotiationControlRouteService
 
 import apicredits_storefront.container as _container
-from apicredits_storefront.middleware.admin_auth import require_admin_principal
+from apicredits_storefront.middleware.admin_auth import (
+    authenticate_admin,
+    require_admin_principal,
+)
 from core_storefront.models.negotiation_models import (
     AdvanceRequest,
     AdvanceResponse,
@@ -117,8 +119,15 @@ class NegotiationsController:
         listing_id: str,
         neg_id: str,
         body: ForceAcceptRequest,
-        actor_principal: Annotated[Identity, Depends(require_admin_principal)],
+        request: Request,
     ) -> ForceAcceptResponse:
+        # The canonical storefront client's signed contract, which every
+        # storefront binding this control verifies, not this route's own name.
+        actor_principal = await authenticate_admin(
+            request,
+            operation="admin_force_accept_negotiation",
+            resource=f"{listing_id}/{neg_id}",
+        )
         runtime = _container.resolved_negotiation_runtime
         if runtime is None:
             raise HTTPException(

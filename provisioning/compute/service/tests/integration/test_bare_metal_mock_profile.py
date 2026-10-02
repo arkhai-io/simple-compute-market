@@ -5,6 +5,10 @@ service's host check, inventory rendering, and result parsing are the real ones,
 and the job's result carries the access fields the bare-metal fulfillment
 provider reads. Rules installed through ``/test/bare-metal/mock-rules`` hold or
 shape those jobs and never touch the VM mock.
+
+Leases are registered through the typed bare-metal lease client, and a held job
+is awaited through the job queue's dispatch seam and the rule's gate-reached
+signal, never through elapsed time.
 """
 
 from __future__ import annotations
@@ -14,8 +18,12 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
 import pytest
-from arkhai_bare_metal import NODE_GRANT_ACCESS_ACTION
-from httpx import ASGITransport, AsyncClient
+from arkhai_bare_metal import (
+    NODE_GRANT_ACCESS_ACTION,
+    BareMetalLeaseClient,
+    BareMetalLeaseCreate,
+    BareMetalLeaseView,
+)
 from market_site.ledger import ALLOCATION_MODE_EXCLUSIVE
 from vm_provisioning_operator.models import HostCreate
 
@@ -23,7 +31,7 @@ from bare_metal_provisioning_adapter.services.bare_metal_mock_executor import (
     BareMetalMockAnsibleService,
 )
 from compute_provisioning_service import container as _container_module
-from compute_provisioning_service.main import app
+from compute_provisioning_service.services.async_job_queue import AsyncJobQueue
 
 HOST_ID = "bm-node-1"
 SSH_HOST = "192.0.2.10"
@@ -72,29 +80,45 @@ def _reserve(escrow_uid: str) -> dict:
     return reserved
 
 
-async def _register_lease(reservation_id: str, escrow_uid: str) -> dict:
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        response = await client.post(
-            "/api/v1/bare-metal/leases/",
-            json={
-                "capacity_reservation_id": reservation_id,
-                "escrow_uid": escrow_uid,
-                "host_id": HOST_ID,
-                "physical_host_id": "host-physical-1",
-                "access_ref": {
-                    "ssh_user": "tenant-a",
-                    "ssh_public_key": "ssh-ed25519 AAAA tenant-a",
-                },
-                "lease_end_utc": (
-                    datetime.now(timezone.utc) + timedelta(hours=2)
-                ).isoformat(),
+async def _register_lease(
+    leases: BareMetalLeaseClient, reservation_id: str, escrow_uid: str
+) -> BareMetalLeaseView:
+    return await leases.register_lease(
+        BareMetalLeaseCreate(
+            capacity_reservation_id=reservation_id,
+            escrow_uid=escrow_uid,
+            host_id=HOST_ID,
+            physical_host_id="host-physical-1",
+            access_ref={
+                "ssh_user": "tenant-a",
+                "ssh_public_key": "ssh-ed25519 AAAA tenant-a",
             },
+            lease_end_utc=datetime.now(timezone.utc) + timedelta(hours=2),
         )
-    assert response.status_code < 400, response.text
-    return response.json()
+    )
 
 
-async def test_a_held_grant_runs_through_the_bare_metal_mock(test_client) -> None:
+def _record_dispatches(job_queue: AsyncJobQueue) -> tuple[list[str], asyncio.Event]:
+    """Record each job the queue dispatches, through its ``on_job_started`` seam."""
+
+    dispatched: list[str] = []
+    first = asyncio.Event()
+    previous = job_queue._on_job_started
+
+    def _on_started(job_id: str) -> None:
+        dispatched.append(job_id)
+        first.set()
+        if previous is not None:
+            previous(job_id)
+
+    job_queue._on_job_started = _on_started
+    return dispatched, first
+
+
+async def test_a_held_grant_runs_through_the_bare_metal_mock(
+    test_client, bare_metal_leases, bare_metal_runner, client_and_queue
+) -> None:
+    _, job_queue = client_and_queue
     _register_host()
     reserved = _reserve("escrow-bm-mock")
     await test_client.add_bare_metal_mock_rule(
@@ -110,16 +134,27 @@ async def test_a_held_grant_runs_through_the_bare_metal_mock(test_client) -> Non
     assert preview["rule_matched"] == "grant-gate"
     assert preview["would_pause"] is True
 
-    await _register_lease(reserved["capacity_reservation_id"], "escrow-bm-mock")
+    dispatched, first_dispatch = _record_dispatches(job_queue)
+    lease = await _register_lease(
+        bare_metal_leases, reserved["capacity_reservation_id"], "escrow-bm-mock"
+    )
+    assert lease.capacity_reservation_id == reserved["capacity_reservation_id"]
+    assert lease.state == "leased"
     reservation = _container_module.resolved_capacity_ledger_service.get_reservation(
         reserved["capacity_reservation_id"]
     )
     grant_job_id = reservation["create_job_id"]
 
-    await asyncio.sleep(0.05)
+    await asyncio.wait_for(first_dispatch.wait(), timeout=5.0)
+    assert dispatched == [grant_job_id]
+    await asyncio.wait_for(
+        bare_metal_runner.rules.wait_until_held("grant-gate"), timeout=5.0
+    )
+
     rules = await test_client.list_bare_metal_mock_rules()
     assert rules[0]["rule_id"] == "grant-gate"
     assert rules[0]["paused"] is True
+    assert rules[0]["waiting"] == 1
     assert await test_client.list_mock_rules() == []
     job = _container_module.resolved_job_service.get_job(grant_job_id)
     assert job.status not in {"succeeded", "failed"}
@@ -133,9 +168,12 @@ async def test_a_held_grant_runs_through_the_bare_metal_mock(test_client) -> Non
     assert access["ssh_user"] == "tenant-a"
     assert access["host"] == SSH_HOST
     assert access["port"] == "2201"
+    assert (await test_client.list_bare_metal_mock_rules())[0]["waiting"] == 0
 
 
-async def test_a_bare_metal_rule_can_fail_a_grant(test_client) -> None:
+async def test_a_bare_metal_rule_can_fail_a_grant(
+    test_client, bare_metal_leases
+) -> None:
     _register_host()
     reserved = _reserve("escrow-bm-mock-fail")
     await test_client.add_bare_metal_mock_rule(
@@ -144,7 +182,9 @@ async def test_a_bare_metal_rule_can_fail_a_grant(test_client) -> None:
         fail_with="host unreachable",
     )
 
-    await _register_lease(reserved["capacity_reservation_id"], "escrow-bm-mock-fail")
+    await _register_lease(
+        bare_metal_leases, reserved["capacity_reservation_id"], "escrow-bm-mock-fail"
+    )
     reservation = _container_module.resolved_capacity_ledger_service.get_reservation(
         reserved["capacity_reservation_id"]
     )

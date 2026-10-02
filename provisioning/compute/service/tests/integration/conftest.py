@@ -62,7 +62,9 @@ from compute_provisioning_service.db.database import create_session_factory
 
 from compute_provisioning_service.db.models import Base
 
+from arkhai_bare_metal import BareMetalLeaseClient
 from compute_provisioning.client import (
+    ComputeProvisioningClient,
     IDENTITY_IDENTIFIER_HEADER,
     IDENTITY_SCHEME_HEADER,
     REQUEST_ID_HEADER,
@@ -125,6 +127,7 @@ def _install_signed_asgi_transport(monkeypatch) -> None:
             request.method,
             request.url.path,
             body,
+            table=provisioning_route_table,
         )
         signer = ADMIN_SIGNER if route.required_role == "admin" else STOREFRONT_SIGNER
         authenticated = sign_request(
@@ -309,7 +312,7 @@ class AsyncProvisioningTestClient:
         if ssh_pubkey is not None:
             body["ssh_pubkey"] = ssh_pubkey
         return await self._post("/test/evaluate-job", body)
-from compute_provisioning_service.main import app
+from compute_provisioning_service.main import app, provisioning_route_table
 from vm_provisioning_adapter.services.ansible_service import AnsibleResult, AnsibleRun, AnsibleService
 from compute_provisioning_service.services.async_job_queue import AsyncJobQueue
 from vm_provisioning_adapter.services.host_service import HostService
@@ -825,16 +828,16 @@ async def client_and_queue(
 
     transport = ASGITransport(app=app)
 
-    # Mount the test controller if not already present.
-    from vm_provisioning_adapter.controllers.test_controller import (
-        make_router as _make_test_router,
-    )
-    _already_mounted = any(
-        getattr(route, "path", "").startswith("/test")
-        for route in app.routes
-    )
-    if not _already_mounted:
-        app.include_router(_make_test_router())
+    # Mount each adapter's test routes unless ``main.py`` already did: it
+    # mounts them only when the mock profile is active at import, and the suite
+    # must behave the same however pytest is invoked.
+    from bare_metal_provisioning_adapter.routers import bare_metal_mock_router
+    from vm_provisioning_adapter.routers import vm_mock_router
+
+    _mounted_paths = {getattr(route, "path", "") for route in app.routes}
+    for _test_router in (vm_mock_router(), bare_metal_mock_router()):
+        if not {route.path for route in _test_router.routes} <= _mounted_paths:
+            app.include_router(_test_router)
 
     client = ProvisioningClient(
         "http://test",
@@ -870,6 +873,23 @@ async def client_and_queue(
     app.container.lease_lifecycle_service.reset_override()
     app.container.capacity_ledger_service.reset_override()
     app.container.fulfillment_service.reset_override()
+
+
+@pytest_asyncio.fixture
+async def bare_metal_leases(client_and_queue) -> AsyncIterator[BareMetalLeaseClient]:
+    """The typed bare-metal lease client over the canonical provisioning client.
+
+    It signs as the administrator and verifies the service's signed responses,
+    so the route contract, authorization, and wire shape are all exercised.
+    """
+    async with ComputeProvisioningClient(
+        "http://test",
+        signer=ADMIN_SIGNER,
+        caller_role="admin",
+        expected_authorities=SERVICE_AUTHORITIES,
+        transport=ASGITransport(app=app),
+    ) as provisioning:
+        yield BareMetalLeaseClient(provisioning)
 
 
 @pytest_asyncio.fixture

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from typing import Annotated
+from urllib.parse import quote, urlencode
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
@@ -11,7 +12,7 @@ from fastapi_utils.cbv import cbv
 from market_storefront_kit import StageEventRouteService
 
 import apicredits_storefront.container as _container
-from apicredits_storefront.middleware.admin_auth import require_admin_principal
+from apicredits_storefront.middleware.admin_auth import authenticate_admin
 from apicredits_storefront.server import is_globally_paused
 from core_storefront.models.system_models import (
     STAGE_EVENT_PAGE_CAP,
@@ -21,6 +22,25 @@ from core_storefront.models.system_models import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["system"])
+
+
+def _stage_events_resource(request: Request) -> str:
+    """The resource the canonical storefront client signs for an events read.
+
+    Every filter the client may send is bound, with its defaults made explicit,
+    so a signed page cannot be replayed with a different filter.
+    """
+    query = request.query_params
+    values = {
+        "limit": query.get("limit", "100"),
+        "since_id": query.get("since_id", "0"),
+        "stream": query.get("stream", "false").lower(),
+    }
+    for name in ("listing_id", "negotiation_id", "stage"):
+        value = query.get(name)
+        if value is not None:
+            values[name] = value
+    return "system-events?" + urlencode(sorted(values.items()), quote_via=quote, safe="")
 
 
 @cbv(router)
@@ -58,7 +78,6 @@ class SystemController:
     @router.get(
         "/api/v1/system/events",
         summary="Stage event log",
-        dependencies=[Depends(require_admin_principal)],
     )
     async def stream_events(
         self,
@@ -70,6 +89,11 @@ class SystemController:
         listing_id: Annotated[str | None, Query()] = None,
         negotiation_id: Annotated[str | None, Query()] = None,
     ):
+        await authenticate_admin(
+            request,
+            operation="admin_system_events",
+            resource=_stage_events_resource(request),
+        )
         events = StageEventRouteService(self._db)
         since_id = events.resume_point(since_id, request.headers.get("last-event-id"))
         filters = {

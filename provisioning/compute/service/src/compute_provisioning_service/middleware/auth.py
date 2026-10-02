@@ -18,8 +18,8 @@ from compute_provisioning.client import (
     SIGNATURE_HEADER,
     SIGNATURE_VERSION_HEADER,
     TIMESTAMP_HEADER,
+    ProvisioningRouteTable,
     canonical_provisioning_request_body,
-    resolve_provisioning_route_contract,
 )
 from fastapi import Request, status
 from fastapi.responses import JSONResponse, Response
@@ -207,9 +207,13 @@ class ProvisioningAuthMiddleware(BaseHTTPMiddleware):
         identity_provider: Callable[[], ProvisioningIdentityContext],
         replay_store_provider: Callable[[], SqlAlchemyProvisioningReplayStore],
         principal_authority_provider: Callable[[], Any],
+        route_table: ProvisioningRouteTable,
         max_timestamp_skew: int = 300,
     ) -> None:
         super().__init__(app)
+        # The assembled table of every contributed route; a route outside it
+        # is refused before authentication.
+        self._route_table = route_table
         if max_timestamp_skew < 0:
             raise ValueError("max_timestamp_skew must not be negative")
         self._identity_provider = identity_provider
@@ -227,7 +231,7 @@ class ProvisioningAuthMiddleware(BaseHTTPMiddleware):
         if body_error is not None:
             return _rejection(body_error, status.HTTP_400_BAD_REQUEST)
         try:
-            route, resource = resolve_provisioning_route_contract(
+            route, resource = self._route_table.resolve(
                 request.method,
                 request.url.path,
                 body,

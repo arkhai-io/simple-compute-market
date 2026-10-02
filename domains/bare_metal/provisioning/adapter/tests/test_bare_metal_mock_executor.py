@@ -121,7 +121,7 @@ async def test_a_rule_holds_then_fails_a_grant() -> None:
     )
 
     running = asyncio.create_task(_run(mock, _params(NODE_GRANT_ACCESS_ACTION)))
-    await asyncio.sleep(0.01)
+    await asyncio.wait_for(mock.rules.wait_until_held("gate"), timeout=1.0)
     assert not running.done()
 
     mock.resume_rule("gate")

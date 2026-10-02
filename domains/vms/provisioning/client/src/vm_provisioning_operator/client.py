@@ -44,10 +44,12 @@ from compute_provisioning import (
 from compute_provisioning.client import (
     ComputeProvisioningAuthenticationError,
     ComputeProvisioningClient,
+    assemble_provisioning_route_table,
     canonical_provisioning_request_body,
     resolve_provisioning_route,
 )
 from market_identity import EMPTY_BODY, Signer, TrustedIdentitySet
+from vm_provisioning_operator.routes import VM_PROVISIONING_ROUTES
 from vm_provisioning_operator.models import (
     AnsibleReadinessResponse,
     CreateVmRequest,
@@ -72,6 +74,10 @@ logger = logging.getLogger(__name__)
 # Exceptions
 # ---------------------------------------------------------------------------
 
+
+
+# The family kit's routes and VM's: everything this operator client calls.
+_ROUTE_TABLE = assemble_provisioning_route_table(VM_PROVISIONING_ROUTES)
 
 class ProvisioningError(Exception):
     """Base class for provisioning client errors."""
@@ -134,7 +140,7 @@ class _ProvisioningClientBase:
             method, path, body, query=query
         )
         operation, resource = resolve_provisioning_route(
-            method, path, authenticated_body
+            method, path, authenticated_body, table=_ROUTE_TABLE
         )
         resolved_request_id = request_id or uuid.uuid4().hex
         headers = ComputeProvisioningClient._request_headers(

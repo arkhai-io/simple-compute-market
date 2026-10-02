@@ -5,10 +5,10 @@ from __future__ import annotations
 from types import MappingProxyType
 
 from arkhai_bare_metal import NODE_GRANT_ACCESS_ACTION, NODE_RECLAIM_ACCESS_ACTION
-from compute_provisioning import JobExecution
-from compute_provisioning_service import (
+from compute_provisioning import (
     ExecutorAdapterBundle,
     ExecutorAdapterContribution,
+    JobExecution,
 )
 
 from bare_metal_provisioning_adapter.compute_adapter import BareMetalComputeAdapter

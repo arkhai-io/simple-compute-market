@@ -19,6 +19,10 @@ from market_identity import Ed25519Signer, TrustedIdentitySet
 from market_capacity_publication import publication_binding
 
 import market_storefront.container as _container
+import market_storefront.middleware.admin_identity as _admin_identity
+from market_storefront.controllers.negotiations_controller import (
+    router as negotiations_router,
+)
 from market_storefront.publication_binding import prepare_vm_listing_binding
 from market_storefront.controllers.negotiate_controller import (
     router as negotiate_router,
@@ -64,6 +68,10 @@ async def db(tmp_path):
 _SITE_POOLS: list[dict] = []
 # The fixture's recorded site requests, for tests asserting no site call.
 _SITE_REQUESTS: list[list[str]] = []
+# The fixture's application, for tests that also drive it as an administrator.
+_APPS: list[FastAPI] = []
+# A deterministic development key for these tests only; never used on any network.
+_ADMIN_SIGNER = Ed25519Signer(b"\x31" * 32)
 
 
 def _declare_source(
@@ -234,9 +242,18 @@ async def client(db, monkeypatch):
     _container.resolved_sqlite_client = db
     _container.resolved_domain_registry = db.domain_registry
     _container.resolved_marketplace_signer = _SELLER_SIGNER
+    monkeypatch.setattr(
+        _admin_identity,
+        "get_administrator_configs",
+        lambda: {"operator": TrustedIdentitySet(identities=(_ADMIN_SIGNER.identity,))},
+    )
+    _admin_identity.initialize_administrator_identities(db.db_path)
     app = FastAPI()
     app.include_router(negotiate_router)
+    app.include_router(negotiations_router)
     app.middleware("http")(listing_lifecycle_middleware)
+    app.middleware("http")(_admin_identity.administrator_identity_middleware)
+    _APPS[:] = [app]
 
     # The injected seller-round and acceptance-hold collaborator runs against
     # an in-memory site ledger with the same exact durable site binding.
@@ -733,9 +750,10 @@ class TestUnbackedListingNegotiation:
 
 
 class TestAdministrativeAcceptance:
-    """Force-accept goes through the runtime's acceptance, so the domain's hold
-    is attempted and its accepted settlement artifacts recorded exactly as
-    after a negotiated acceptance."""
+    """Force-accept, sent through the canonical administrator client, goes
+    through the runtime's acceptance, so the domain's hold is attempted and its
+    accepted settlement artifacts recorded exactly as after a negotiated
+    acceptance."""
 
     async def test_force_accept_records_the_hold_and_settlement_plan(
         self, client, db
@@ -757,19 +775,23 @@ class TestAdministrativeAcceptance:
             (site_requests,) = _SITE_REQUESTS
             site_requests.clear()
 
-            accepted = await _container.resolved_negotiation_runtime.accept_administratively(
-                repository=db,
-                listing_id="neg-listing-force",
-                negotiation_id=negotiation_id,
-                amount=5000,
-                actor_principal=Ed25519Signer(b"\x31" * 32).identity,
-            )
+            (app,) = _APPS
+            async with StorefrontClient(
+                "http://test",
+                signer=_ADMIN_SIGNER,
+                caller_role="admin",
+                expected_publishers=_EXPECTED_PUBLISHERS,
+                transport=httpx.ASGITransport(app=app),
+            ) as admin:
+                accepted = await admin.force_accept_negotiation(
+                    "neg-listing-force", negotiation_id, amount=5000
+                )
 
-        assert accepted["action"] == "accept"
-        assert accepted["amount"] == 5000
-        plan = accepted["settlement_plan"]
-        assert plan["obligations"][0]["mechanism"] == "alkahest.v1"
+        assert accepted.action == "accept"
+        assert accepted.amount == 5000
         thread = await db.load_negotiation_thread_row(negotiation_id=negotiation_id)
+        plan = thread["settlement_plan"]
+        assert plan["obligations"][0]["mechanism"] == "alkahest.v1"
         assert thread["terminal_state"] == "success"
         assert int(thread["agreed_price"]) == 5000
         # The acceptance hold reserves at the listing's site, as it does after

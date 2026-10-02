@@ -23,6 +23,7 @@ from vm_provisioning_operator.client import (
     ProvisioningTimeoutError,
     SyncProvisioningClient,
 )
+from vm_provisioning_operator.routes import VM_PROVISIONING_ROUTES
 from vm_provisioning_operator.models import (
     AnsibleReadinessResponse,
     CreateVmRequest,
@@ -56,6 +57,7 @@ from vm_provisioning_operator.models import (
 __all__ = [
     # Clients
     "ProvisioningClient",
+    "VM_PROVISIONING_ROUTES",
     "SyncProvisioningClient",
     # Exceptions
     "ProvisioningError",

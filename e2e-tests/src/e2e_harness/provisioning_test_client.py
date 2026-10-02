@@ -39,10 +39,13 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 import httpx
+from arkhai_bare_metal import BARE_METAL_PROVISIONING_ROUTES
 from compute_provisioning import (
+    assemble_provisioning_route_table,
     canonical_provisioning_request_body,
     resolve_provisioning_route_contract,
 )
+from vm_provisioning_operator import VM_PROVISIONING_ROUTES
 from market_identity import (
     EMPTY_BODY,
     AuthenticatedResponse,
@@ -65,6 +68,12 @@ TIMESTAMP_HEADER = "X-Market-Timestamp"
 SIGNATURE_HEADER = "X-Market-Signature"
 
 log = logging.getLogger(__name__)
+
+# The routes the provisioning service authenticates under the mock profile:
+# the family kit's and each composed domain's, including their test routes.
+_ROUTE_TABLE = assemble_provisioning_route_table(
+    VM_PROVISIONING_ROUTES, BARE_METAL_PROVISIONING_ROUTES
+)
 
 
 class ProvisioningTestClientError(Exception):
@@ -130,7 +139,10 @@ class ProvisioningTestClient:
         body must match what the service recomputes.
         """
         contract, resource = resolve_provisioning_route_contract(
-            method, path, body if body is not EMPTY_BODY else EMPTY_BODY
+            method,
+            path,
+            body if body is not EMPTY_BODY else EMPTY_BODY,
+            table=_ROUTE_TABLE,
         )
         canonical_query = {
             key: str(value) for key, value in (query or {}).items() if value is not None

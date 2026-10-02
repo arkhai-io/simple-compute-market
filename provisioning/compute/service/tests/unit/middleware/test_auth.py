@@ -33,6 +33,7 @@ from compute_provisioning.client import (
     SIGNATURE_HEADER,
     SIGNATURE_VERSION_HEADER,
     TIMESTAMP_HEADER,
+    PROVISIONING_ROUTE_TABLE,
     resolve_provisioning_route,
 )
 from compute_provisioning_service.db.models import (
@@ -107,6 +108,7 @@ def _app(storefront, authority):
         identity_provider=lambda: identity,
         replay_store_provider=lambda: replay,
         principal_authority_provider=lambda: _PrincipalAuthority(storefront),
+        route_table=PROVISIONING_ROUTE_TABLE,
     )
 
     async def mutation(_: Request):

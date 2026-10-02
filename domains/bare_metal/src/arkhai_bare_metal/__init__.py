@@ -61,6 +61,11 @@ from .provision_terms import (
     BareMetalProvisionTerms,
     make_bare_metal_provision_terms,
 )
+from .provisioning_client import (
+    BARE_METAL_LEASES_PATH,
+    BARE_METAL_PROVISIONING_ROUTES,
+    BareMetalLeaseClient,
+)
 from .schema import (
     BARE_METAL_ACCESS_ACTIONS,
     BARE_METAL_OFFERING_MODE,
@@ -151,6 +156,9 @@ __all__ = [
     "BareMetalAccessResult",
     "BareMetalLeaseReadyEvidence",
     "BareMetalLeaseReadyResult",
+    "BARE_METAL_LEASES_PATH",
+    "BARE_METAL_PROVISIONING_ROUTES",
+    "BareMetalLeaseClient",
     "BareMetalLeaseCreate",
     "BareMetalLeaseView",
     "BareMetalAskingRate",

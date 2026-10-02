@@ -38,9 +38,17 @@ logger = logging.getLogger(__name__)
 
 # Adapter router imports come AFTER container.py so controller decorators can
 # resolve the shared composition module without creating an import cycle.
-from vm_provisioning_adapter.routers import vm_mock_router, vm_router_mounts  # noqa: E402
-from bare_metal_provisioning_adapter.routers import bare_metal_mock_router  # noqa: E402
-from bare_metal_provisioning_adapter.routers import bare_metal_router_mounts  # noqa: E402
+from vm_provisioning_adapter.routers import (  # noqa: E402
+    vm_mock_router,
+    vm_route_contracts,
+    vm_router_mounts,
+)
+from bare_metal_provisioning_adapter.routers import (  # noqa: E402
+    bare_metal_mock_router,
+    bare_metal_route_contracts,
+    bare_metal_router_mounts,
+)
+from compute_provisioning import assemble_provisioning_route_table  # noqa: E402
 from compute_provisioning_service.controllers.compute_contract_controller import ComputeContractController  # noqa: E402
 from compute_provisioning_service.controllers.capacity_definitions_controller import CapacityDefinitionsController  # noqa: E402
 from compute_provisioning_service.controllers.pools_controller import PoolController  # noqa: E402
@@ -172,6 +180,15 @@ def _capacity_pool_directory() -> dict[str, dict[str, object]]:
     return load_capacity_pool_metadata(container.session_factory())
 
 
+
+# Every route the composed adapters mount, with the family kit's own: what the
+# authentication middleware admits. Each adapter contributes its declarations
+# beside its routers.
+provisioning_route_table = assemble_provisioning_route_table(
+    vm_route_contracts(),
+    bare_metal_route_contracts(),
+)
+
 app = build_compute_provisioning_app(
     config=ComputeProvisioningAppConfig(
         title="Provisioning Service",
@@ -195,6 +212,7 @@ app = build_compute_provisioning_app(
                 "identity_provider": container.identity_context,
                 "replay_store_provider": container.provisioning_replay_store,
                 "principal_authority_provider": container.principal_authority,
+                "route_table": provisioning_route_table,
                 "max_timestamp_skew": int(
                     getattr(settings, "identity_max_timestamp_skew_seconds", 300)
                 ),

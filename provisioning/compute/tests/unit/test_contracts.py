@@ -255,7 +255,7 @@ async def test_client_signs_every_route_and_pins_signed_responses(
         ),
         transport=_signed_transport(caller, authority),
     ) as client:
-        assert await client._request(
+        assert await client.authenticated_request(
             method,
             path,
             body,
@@ -298,7 +298,7 @@ async def test_client_rejects_wrong_authority_role_body_and_unsigned_response(
         ),
     ) as client:
         with pytest.raises(ComputeProvisioningAuthenticationError):
-            await client._request(
+            await client.authenticated_request(
                 "POST",
                 "/api/v1/actions",
                 {"capacity_reservation_id": "reservation-1"},
@@ -336,14 +336,14 @@ async def test_client_exact_retry_fresh_signs_and_changed_reuse_fails_closed(
         ),
         transport=_signed_transport(caller, authority, seen=seen),
     ) as client:
-        await client._request(
+        await client.authenticated_request(
             "POST", "/api/v1/actions", body, request_id="durable-request"
         )
-        await client._request(
+        await client.authenticated_request(
             "POST", "/api/v1/actions", body, request_id="durable-request"
         )
         with pytest.raises(ValueError, match="changed request content"):
-            await client._request(
+            await client.authenticated_request(
                 "POST",
                 "/api/v1/actions",
                 {"capacity_reservation_id": "reservation-2"},

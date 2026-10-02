@@ -378,36 +378,105 @@ Decision: "Implementation-review fixes for Sections 4–5". Reviewable alone: te
 client method, and the gate signal; no behaviour change. Lands before 5B so 5B moves
 code that is already correctly covered.
 
-- [ ] 5A.1 Typed force-accept: in `domains/vms/storefront/tests/integration/test_negotiations_api.py`
+- [x] 5A.1 Typed force-accept: in `domains/vms/storefront/tests/integration/test_negotiations_api.py`
       the fixture gains the chain configuration `test_negotiate_controller.py` uses, opens
       a real negotiation that counters, and force-accepts it through
       `StorefrontClient.force_accept_negotiation`, asserting the settlement plan, terminal
       state at the forced amount, and the hold's reservation request at the site. Add an
       API-credit equivalent through its application and `StorefrontClient` in
       `domains/apicredits/storefront/tests/integration/test_force_accept_api.py`.
-- [ ] 5A.2 Typed lease registration: a bare-metal lease registration method on the
+- [x] 5A.2 Typed lease registration: a bare-metal lease registration method on the
       provisioning client in `provisioning/compute/src/compute_provisioning/client.py`
       for the existing `/api/v1/bare-metal/leases/` route contract;
       `test_bare_metal_mock_profile.py` uses it instead of a raw request. Extend the
       integration and e2e test-route clients with any method the tests need.
-- [ ] 5A.3 Deterministic gates: `compute_provisioning/executor_mock.py`'s `MockRuleSet`
+      Amended 2026-10-02 with the maintainer: a bare-metal-typed method there would make
+      the family kit depend on `arkhai_bare_metal`. `ComputeProvisioningClient` gains a
+      market-neutral `authenticated_request`; `domains/bare_metal/src/arkhai_bare_metal/provisioning_client.py`
+      adds `BareMetalLeaseClient` (register, get, get by escrow, list) over any transport
+      offering it, with unit tests in `domains/bare_metal/tests/test_provisioning_client.py`.
+      `test_bare_metal_mock_profile.py` and `test_bare_metal_leases_api.py` use it, and the
+      latter's hand-built lease client is removed. The integration fixture in
+      `provisioning/compute/service/tests/integration/conftest.py` mounts both adapters'
+      test routers, so the suite no longer depends on `ACTIVE_PROFILES=mock` being set when
+      `main.py` is imported (plain `pytest` mounted only VM's and the bare-metal rule
+      routes returned 404).
+- [x] 5A.3 Deterministic gates: `compute_provisioning/executor_mock.py`'s `MockRuleSet`
       signals when a job reaches a rule's gate and reports how many jobs wait there;
       `MockRuleRouteService.list` reports it. `test_bare_metal_mock_profile.py` waits on
       `AsyncJobQueue.on_job_started` and the gate-reached signal, and
       `test_bare_metal_mock_executor.py` on the gate-reached signal; both sleeps go. Unit
       tests for the signal in `provisioning/compute/tests/unit/test_executor_mock.py`.
-- [ ] 5A.4 Coverage claimed but missing: the five bare-metal test routes in
+- [x] 5A.4 Coverage claimed but missing: the five bare-metal test routes in
       `test_provisioning_client_endpoint_coverage.py`; a test in
       `domains/bare_metal/provisioning/adapter/tests/test_bare_metal_fulfillment_provider.py`
       feeding the mock's job result to `BareMetalFulfillmentProvider.fetch_credentials`.
-- [ ] 5A.5 `service_obligation` concurrency: a worker pass running while
+- [x] 5A.5 `service_obligation` concurrency: a worker pass running while
       `service_obligation` holds the fulfillment lease sees the obligation busy and
       starts no second fulfillment.
-- [ ] 5A.6 Test placement: move `kit/settlement-runtime/tests/unit/test_servicing.py` to
+- [x] 5A.6 Test placement: move `kit/settlement-runtime/tests/unit/test_servicing.py` to
       `tests/integration/` and `domains/apicredits/storefront/tests/unit/test_sync_negotiation.py`
       to `tests/integration/`, adding `tests/integration` to each project's test paths
       where missing.
-- [ ] 5A.7 **Gate.** The touched suites pass; `make check-packaging` passes.
+- [x] 5A.7 **Gate.** The touched suites pass; `make check-packaging` passes.
+      Done 2026-10-02: `provisioning/compute` 157; provisioning service 674 unit and
+      287 integration, under both plain `pytest` and `ACTIVE_PROFILES=mock`; bare-metal
+      adapter 8; `arkhai_bare_metal` 135; settlement runtime 124; API-credit storefront
+      101; VM storefront 1062 unit (1 skipped) and every integration file except
+      `test_alkahest.py` (needs Node and Anvil), failing only the seven known
+      pre-existing cases (two in `test_negotiate_controller.py`, five in
+      `test_publication_loop.py`). Run whole, `test_publication_loop.py` is killed in
+      the sandbox (SIGKILL); run test by test it gives 33 passed and those five; the
+      baseline was not compared. `make check-packaging` and `make check-comment-hygiene`
+      pass; `openspec validate --strict` passes. The VM lane is unrun (no container
+      runtime here).
+- **Section 5A implementation notes (2026-10-02).**
+  - 5A.1, VM: the administrator force-accept test lives in
+    `domains/vms/storefront/tests/integration/test_negotiate_controller.py`'s
+    `TestAdministrativeAcceptance`, not `test_negotiations_api.py`: that fixture already
+    has the chain configuration, a fake site, and a projection-backed listing, so its
+    application gains the negotiations router and administrator middleware and the test
+    force-accepts a real countered negotiation through an administrator
+    `StorefrontClient`, asserting the committed plan, terminal state at the forced
+    amount, and the hold's reservation request at the site.
+  - 5A.1, API credits: `tests/integration/test_force_accept_api.py` drives force-accept,
+    its terminal and unknown-administrator refusals, the stage-event read, and settle
+    wait through `StorefrontClient`. Found: API credits' force-accept, events, and
+    settle-wait routes authenticated their own route name and path, not the contract
+    the canonical client signs, so no client call could succeed (no e2e scenario uses
+    them). `controllers/negotiations_controller.py`, `system_controller.py`, and
+    `settle_controller.py` now authenticate the client's operations and resources, as
+    the lifecycle controller does; the four tests fail against the former controllers.
+    API credits' advance and listing-administration routes keep the same mismatch,
+    outside this change's controls. The kit route services do not yet own their signed
+    contracts (VM derives them in its administrator middleware, API credits in its
+    controllers); recorded for the maintainer's decision.
+  - 5A.2: as amended above. `BareMetalLeaseClient` takes any transport offering
+    `authenticated_request`; `arkhai_bare_metal` gains no dependency.
+  - 5A.3: `MockRuleSet.hold` counts jobs waiting at a closed gate; `wait_until_held`
+    returns once a count is reached, does not bound itself, and raises `LookupError`
+    for an unknown or gateless rule or one removed while waited on; `list()` reports
+    `waiting`. Deleting a rule still does not release a held job (unchanged).
+  - 5A.5: the worker reserves no fulfillment lease itself; the `on_ready` hook does,
+    through `SettlementRuntime.reserve_fulfillment`, and that reservation is what makes
+    a concurrent pass see the obligation as busy (the due query excludes an unexpired
+    `fulfill` lease). `service_obligation`'s docstring now says so. Every storefront
+    hook reserves today; bare metal's Alkahest hook (7.1) must too.
+  - 5A.6: both files were split by level rather than moved whole. Loop-ordering tests
+    with no database stay in `kit/settlement-runtime/tests/unit/test_servicing.py`;
+    API-credit term-decoding and artifact-assembly tests stay in
+    `tests/unit/test_sync_negotiation.py`. The real-SQLite tests are in each project's
+    `tests/integration/test_servicing.py` and `test_sync_negotiation.py`; API credits'
+    shared fixtures moved to `tests/integration/conftest.py` and
+    `tests/integration/credit_negotiation.py`. `kit/settlement-runtime`'s test paths and
+    a `tests/integration/__init__.py` were added.
+  - Found: `provisioning/compute/service/tests/integration/conftest.py` mounted only VM's
+    test router when `main.py` had not, so plain `pytest` (without the Makefile's
+    `ACTIVE_PROFILES=mock`) returned 404 for every bare-metal rule route; it now mounts
+    both.
+  - No version changes: the rebuilt `arkhai-compute-provisioning`, `arkhai-bare-metal`,
+    and `arkhai-kit-settlement-runtime` wheels keep their versions and add no
+    dependency.
 
 ## 5B. Provisioning execution boundary
 
@@ -417,7 +486,7 @@ provisioning, provisioning-service, both adapters', and operator-client suites g
 5B.9 is the lane gate. Planning names files; implementation re-verifies them by grep
 before each move.
 
-- [ ] 5B.1 Neutral contracts first: move `ExecutorAdapterBundle`,
+- [x] 5B.1 Neutral contracts first: move `ExecutorAdapterBundle`,
       `ExecutorAdapterContribution`, `ComposedComputeAdapters`, and
       `compose_adapter_bundles` from
       `provisioning/compute/service/src/compute_provisioning_service/composition.py` into
@@ -435,7 +504,67 @@ before each move.
       `InventoryInfo`, `FileInfo`, `SshKeyInfo`) and `HostConnectivityResponse` go to the
       Ansible distribution in 5B.4; `VmActionRequest` and `CreateVmRequest` stay VM's.
       `vm_provisioning_operator` re-exports every moved name.
-- [ ] 5B.2 Job authority: `compute_provisioning/jobs/` — the engine from the generic
+      Added 2026-10-02 with the maintainer: the provisioning route-contract table becomes
+      contributable. `compute_provisioning/client.py` keeps the contract type, the
+      family-kit routes, and the table's assembly; bare metal's lease and
+      `/test/bare-metal/*` contracts move beside `BareMetalLeaseClient` in
+      `arkhai_bare_metal`, and VM's VM-, relay-, and VM-test-route contracts move to its
+      operator client or adapter; the provisioning service assembles the domains'
+      contributions, and `ComputeProvisioningClient`, the e2e test client, and the
+      service's authentication middleware read the assembled table. Re-verify every
+      reader of `resolve_provisioning_route_contract` and `ADMIN_PROVISIONING_OPERATIONS`
+      by grep. Test: `compute_provisioning` names no domain route, and assembly refuses
+      a duplicate or overlapping contract.
+      Done 2026-10-02:
+      - Composition contract types and `compose_adapter_bundles` are in
+        `provisioning/compute/src/compute_provisioning/composition.py`, exported by
+        `compute_provisioning`; both bundles and `container.py` import them from there;
+        the service's `composition.py` is tombstoned, its `__init__.py` exports nothing,
+        and the unit test moved to `provisioning/compute/tests/unit/test_composition.py`.
+      - Host, job, and aggregate health and version wire models are in
+        `compute_provisioning/hosts/models.py`, `compute_provisioning/jobs/models.py`,
+        and `compute_provisioning/system_models.py`, with KVM and Ansible wording removed
+        from their descriptions (no field or validation change);
+        `vm_provisioning_operator.models` re-exports them.
+      - `CredentialResponse` and `CredentialListResponse` stay in the operator client as
+        compatibility DTOs, built from `CredentialEnvelope` when the job routes move
+        (5B.6). The `Lease*` models stay VM's (design: "the `Lease*` operator models stay
+        VM's").
+      - Route contracts: `ProvisioningRouteContract` carries `roles`;
+        `route_contract_from_declaration`, `ProvisioningRouteTable`, and
+        `assemble_provisioning_route_table` are in `compute_provisioning/client.py`.
+        VM declares `VM_PROVISIONING_ROUTES` in `vm_provisioning_operator/routes.py`
+        (24: host capacity, VM operations, `/api/v1/leases*`, `/api/v1/admin/leases/*`,
+        `/test/mock-rules*`, `/test/evaluate-job`); bare metal declares
+        `BARE_METAL_PROVISIONING_ROUTES` in `arkhai_bare_metal/provisioning_client.py`
+        (9), whose `BareMetalLeaseClient` names the declaration per call. Each adapter's
+        `routers.py` exposes its declarations; `main.py` assembles
+        `provisioning_route_table` and passes it to `ProvisioningAuthMiddleware`, whose
+        `route_table` is now required. The VM operator client, the e2e test client, and
+        the integration fixture resolve against assembled tables. Relay contracts stay in
+        the family table (design: "Relay routes stay in the family table until relays
+        move"). A one-off comparison found all 108 operations with identical method,
+        path, roles, required role, and resources before and after.
+      - Floors raised and relocked: the operator client's `arkhai-compute-provisioning`
+        to `>=0.8.0`; the bare-metal adapter's `arkhai-bare-metal` to `>=0.6.0`; e2e-tests
+        declares `arkhai-bare-metal>=0.6.0` and its operator-client floor is `>=0.6.0`.
+      - Tests: `provisioning/compute/tests/unit/test_route_table.py` (family table names
+        no domain route, roles, order within a contribution, cross-contribution
+        ambiguity, duplicates, declaration validation, the client signing a named route);
+        `provisioning/compute/service/tests/unit/test_route_table_composition.py` (every
+        contributed route resolves to itself); `domains/bare_metal/tests/test_provisioning_client.py`
+        (each call names a declaration describing its request).
+      - Validation: `provisioning/compute` 163; provisioning service 694 unit and 287
+        integration; `arkhai_bare_metal` 136; bare-metal adapter 8; the VM adapter's
+        `make test` file 39; e2e unit 236 with the known pre-existing failure.
+- [ ] 5B.2 **Decision gate, then implementation.** Review the proposed job authority
+      shape in `design.md` ("Job authority shape (5B.2): proposed, awaiting design
+      review"): the `JobExecutor` contract and `JobOutcome`, the transitional
+      `AnsibleJobExecutor` in the VM adapter until 5B.4, the engine and table moves, and
+      who owns credential persistence (options A, B, C; A recommended). Record the
+      decision there, then amend this task's file list to match before implementing.
+      As planned before review:
+      Job authority: `compute_provisioning/jobs/` — the engine from the generic
       parts of `vm_provisioning_adapter/services/job_service.py`; the `JobExecutor`
       protocol and `JobExecutorTable` resolving it (replacing `JobExecution`); the
       `ansible_jobs` and `credentials` table metadata from the service's `db/models.py`

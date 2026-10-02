@@ -99,7 +99,7 @@ VM and bare-metal execution MUST consume the common compute-provisioning envelop
 - **THEN** the domain's codec renders its variables and interprets its result, and the shared mechanics hold no VM or bare-metal meaning
 
 ### Requirement: Compute-owned caller contract
-Shared storefront/provisioner DTOs, offering-mode-neutral resource-pool models, the job, host, credential, and readiness wire models, and generic client behavior MUST be owned by compute provisioning rather than the VM domain. Direct VM operator APIs MAY retain VM-owned VM action, relay, and VM pool-configuration models, and a VM operator client MAY re-export compute-owned models for compatibility.
+Shared storefront/provisioner DTOs, offering-mode-neutral resource-pool models, the job, host, credential, and readiness wire models, and generic client behavior MUST be owned by compute provisioning rather than the VM domain. Direct VM operator APIs MAY retain VM-owned VM action, relay, and VM pool-configuration models, and a VM operator client MAY re-export compute-owned models for compatibility. Compute provisioning MUST NOT name a domain's routes: a domain MUST contribute the route contracts of the routes it mounts, and the client and the service's request authentication MUST read the table the provisioning service assembles from those contributions.
 
 #### Scenario: Bare-metal storefront installs the shared client
 - **WHEN** a bare-metal caller installs the compute-provisioning client without VM execution extras
@@ -108,6 +108,10 @@ Shared storefront/provisioner DTOs, offering-mode-neutral resource-pool models, 
 #### Scenario: Provisioning service exposes resource-pool administration
 - **WHEN** the VM operator client or provisioning service creates, validates, imports, or returns a resource-pool model
 - **THEN** that offering-mode-neutral model resolves from `compute_provisioning` without depending on a VM-domain generic provisioning-client package
+
+#### Scenario: A domain's routes are signed and authenticated
+- **WHEN** a compute domain mounts routes on the provisioning service
+- **THEN** it contributes their route contracts, and neither the compute-provisioning client nor the service's authentication needs a compute-provisioning change to sign or authorize them
 
 #### Scenario: An existing VM operator import of a job model
 - **WHEN** a caller imports a job or host model from the VM operator client

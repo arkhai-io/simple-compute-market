@@ -44,6 +44,7 @@ def test_rules_listed_in_insertion_order_report_their_pause_state() -> None:
 
     assert [rule["rule_id"] for rule in listed] == ["a", "b"]
     assert listed[0]["paused"] is True
+    assert listed[0]["waiting"] == 0
     assert listed[1]["result_stdout"] is True
     assert rules.resume("a") is True
     assert rules.list()[0]["paused"] is False
@@ -56,11 +57,64 @@ async def test_hold_waits_until_the_rule_is_resumed() -> None:
     rules = MockRuleSet()
     rule = rules.add(MockRule(rule_id="gate", match={}, pause_before_result=True))
     held = asyncio.create_task(rules.hold(rule))
-    await asyncio.sleep(0)
+    await asyncio.wait_for(rules.wait_until_held("gate"), timeout=1.0)
     assert not held.done()
 
     rules.resume("gate")
     await asyncio.wait_for(held, timeout=1.0)
+    assert rule.waiting == 0
+
+
+@pytest.mark.asyncio
+async def test_the_gate_signal_counts_every_held_job() -> None:
+    rules = MockRuleSet()
+    rule = rules.add(MockRule(rule_id="gate", match={}, pause_before_result=True))
+    held = [asyncio.create_task(rules.hold(rule)) for _ in range(2)]
+
+    assert await asyncio.wait_for(rules.wait_until_held("gate", count=2), timeout=1.0) == 2
+    assert rules.list()[0]["waiting"] == 2
+
+    rules.resume("gate")
+    await asyncio.wait_for(asyncio.gather(*held), timeout=1.0)
+    assert rules.list()[0]["waiting"] == 0
+
+
+@pytest.mark.asyncio
+async def test_a_job_meeting_an_open_gate_is_not_counted_as_held() -> None:
+    rules = MockRuleSet()
+    rule = rules.add(MockRule(rule_id="gate", match={}, pause_before_result=True))
+    rules.resume("gate")
+
+    await asyncio.wait_for(rules.hold(rule), timeout=1.0)
+
+    assert rules.list()[0]["waiting"] == 0
+
+
+@pytest.mark.asyncio
+async def test_waiting_for_a_rule_without_a_gate_is_refused() -> None:
+    rules = MockRuleSet()
+    rules.add(MockRule(rule_id="open", match={}))
+
+    with pytest.raises(LookupError):
+        await rules.wait_until_held("open")
+    with pytest.raises(LookupError):
+        await rules.wait_until_held("missing")
+    with pytest.raises(ValueError):
+        await rules.wait_until_held("open", count=0)
+
+
+@pytest.mark.asyncio
+async def test_removing_a_rule_fails_a_wait_for_its_gate() -> None:
+    rules = MockRuleSet()
+    rules.add(MockRule(rule_id="gate", match={}, pause_before_result=True))
+    waiter = asyncio.create_task(rules.wait_until_held("gate"))
+    # One loop turn lets the waiter reach its wait; nothing depends on timing.
+    await asyncio.sleep(0)
+
+    rules.delete("gate")
+
+    with pytest.raises(LookupError):
+        await asyncio.wait_for(waiter, timeout=1.0)
 
 
 @pytest.mark.asyncio

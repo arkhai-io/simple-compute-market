@@ -447,6 +447,82 @@ job authority, so `kit/fulfillment` stays provider-neutral and each domain keeps
 job preparation and result mapping. It is a separate step so the boundary is proven
 before the providers are restructured.
 
+**Job authority shape (5B.2): proposed, awaiting design review.** Implementation found
+that `vm_provisioning_adapter/services/job_service.py`'s `AnsibleJobService` mixes the
+generic engine with Ansible and domain work, and that the persistence 5B.2 would move
+is Ansible- and SSH-shaped. What the file holds today:
+
+- *Generic engine:* submission with operation and contract idempotency, the in-process
+  queue, retry with backoff and the non-retryable error patterns, the retry scheduler,
+  status, list, log, and contract-record reads, cancellation, and every database
+  transition.
+- *Ansible and domain work:* rebuilding the `AnsibleJobParams` dataclass (VM and
+  bare-metal fields) from stored JSON; relay-token resolution; the vars file, inventory
+  rendering, and `start_playbook`; waiting, parsing, and the VM-vocabulary result
+  payload; extracting `root` and `tenant` credentials from VM's `authentication` fact;
+  log redaction; cancellation by `SIGTERM` to `process_id`.
+- *Persistence:* `ansible_jobs` (with `process_id`, an operating-system process id, and
+  `escrow_uid`) and `credentials` (`role`, `password`, `ssh_commands`,
+  `ssh_key_path_host`, `key_type`), both on the service's single declarative base.
+
+Proposed, each sub-step behaviour-neutral and green before the next:
+
+1. **Executor contract.** `compute_provisioning.jobs` defines `JobExecutor`, replacing
+   `JobExecution(runner, playbook_path)` in `JobExecutorTable`:
+   `execute(run) -> JobOutcome`, `cancel(handle)`, and optional
+   `notify_job_done(job_id)`. A `run` carries the job id, its opaque parameters, the
+   registered host record from the pre-execution lookup, and callbacks through which the
+   executor reports its cancellation handle and streams logs. A `JobOutcome` is success
+   (result mapping, credential records, logs) or failure (error message, logs). The
+   engine keeps retry policy, the host lookup (`host_id` is compute-family vocabulary),
+   and every database transition; it never sees a playbook, vars file, inventory,
+   process id, or fact.
+2. **Transitional Ansible executor.** The Ansible half of today's `_process_job` becomes
+   `AnsibleJobExecutor` in the VM adapter, over the existing runner and playbook path,
+   including relay-token resolution, result parsing, credential extraction, log
+   redaction, and `SIGTERM` cancellation. The bare-metal bundle registers an instance
+   through its existing VM-adapter dependency. 5B.4 moves it to the Ansible distribution
+   and 5B.5 splits out each domain's codec, as planned; until then the VM adapter still
+   holds bare-metal knowledge it already holds today.
+3. **Engine.** The generic half moves to `compute_provisioning/jobs/` with
+   `AsyncJobQueue` (from `compute_provisioning_service/services/async_job_queue.py`), the
+   retry scheduler, and the rule and gate mechanism (`executor_mock.py`). `submit` takes
+   the route key (offering mode and action), `host_id`, opaque parameters, and the
+   contract or operation identity; callers pass `dataclasses.asdict(params)`, so stored
+   parameters are unchanged. The service and both adapters import it from there.
+4. **Tables.** `ansible_jobs` and `credentials` move to a declarative base of their own in
+   `compute_provisioning.jobs`, table and column names unchanged; the service's
+   `db/database.py` composes it beside the pool and fulfillment bases, and
+   `db/migrations.py` references it where it references these tables today.
+   `process_id` keeps its name and holds the executor's opaque cancellation handle.
+5. **Route services.** Framework-free job route services (read, list, logs, cancel,
+   contract record, and the shared test drain, wait, and summary) in
+   `compute_provisioning.jobs`. The existing controllers keep their wire paths and are
+   rebound to them when the routes move (5B.6).
+
+Open for review — **who owns credential persistence:**
+
+- **A. Move as-is.** The job authority owns `credentials` with its current columns;
+  an executor returns per-role credential records the engine stores verbatim and reads
+  back for the route boundary to shape. Behaviour-neutral, no migration; SSH column
+  names sit in family-kit persistence, though not in its interface.
+- **B. Store envelopes.** An expand migration adds an opaque envelope column; the engine
+  writes `CredentialEnvelope`s and maps old rows' SSH columns to envelopes on read.
+  Matches the decided canonical form, but is a schema change in a step meant to be
+  behaviour-neutral, and a later contract migration removes the old columns.
+- **C. The executor owns credential storage.** The job authority stores no credentials;
+  the Ansible executor keeps `credentials`, and credential reads dispatch to the job's
+  executor by offering mode. Keeps SSH vocabulary out of the family kit with no
+  migration, at the cost of splitting one job's reads across two owners.
+
+Recommended: **A** for 5B.2, recording **B** as follow-up work against its owner. A keeps
+the step behaviour-neutral, and the SSH vocabulary left is confined to columns the engine
+copies without interpreting, while the job routes' canonical credential form stays
+`CredentialEnvelope`, built at the route boundary as decided above.
+
+Also for review: whether the transitional executor in the VM adapter (point 2) is
+acceptable for the two steps until 5B.4, or whether 5B.4 should land before 5B.2.
+
 Invariants this change must leave true:
 
 - `provisioning/compute` owns durable physical-execution jobs and operational host
@@ -462,6 +538,9 @@ Invariants this change must leave true:
 - No provisioning adapter imports another adapter or the deployed service.
 - No neutral provisioning module imports `vm_provisioning_operator`; compatibility flows
   from the old client to the neutral contract.
+- `compute_provisioning` names no domain's routes: the provisioning route-contract table
+  is assembled from contributions, and the client and the service's authentication read
+  the assembled table.
 - Test gates are owned beside the job lifecycle and expose a gate-reached observation.
 - Provider-neutral fulfillment stays unaware that these providers are job-backed; the
   job-backed shape lives in `compute_provisioning`.
@@ -478,6 +557,59 @@ the pause, dry-run, advance convention. Checked task claims are corrected to wha
 tests prove, and the missing tests (endpoint coverage, the bare-metal credential
 consumer, the `service_obligation` concurrency case) are added. Touched tests running
 against real SQLite move to `integration/`.
+
+The typed bare-metal lease client follows `kit/pool-overrides`, not the family kit's
+client (corrected with the maintainer when 5A started). A bare-metal-typed method on
+`ComputeProvisioningClient` would make `compute_provisioning` depend on
+`arkhai_bare_metal`, which "Family kits" forbids. Instead `ComputeProvisioningClient`
+exposes a market-neutral `authenticated_request`, and `arkhai_bare_metal` owns
+`BareMetalLeaseClient` beside the models it sends and returns, wrapping any transport
+that offers that method. Both the mock-profile test and the bare-metal lease API test
+use it.
+
+The same rule exposes a second gap: the provisioning route-contract table in
+`compute_provisioning/client.py` lists bare-metal routes (`/api/v1/bare-metal/leases*`
+and `/test/bare-metal/*`), so a third compute domain would have to edit the family kit
+to have its routes signed. Decided with the maintainer: 5B.1 makes the table
+contributable. Each domain contributes its route contracts beside its typed client, the
+provisioning service assembles them, and both the client and the service's
+authentication read the assembled table.
+
+Settled with the maintainer when 5B.1 began:
+
+- **The `Lease*` operator models stay VM's.** They are the VM administration surface
+  (`LeaseCreate` and `LeaseResponse` require `vm_target`), and `compute_provisioning`
+  already owns the neutral lease contract (`LeaseRegistration`, `LeaseView`,
+  `LeaseTermination`, `LeaseRetryRelease`, `LeaseForceRelease`). When the generic lease
+  routes move (5B.6), the lease lifecycle serves the neutral view and VM keeps
+  `/api/v1/leases` as a compatibility surface built from it, its VM fields blank for
+  bare metal. Moving them would put VM vocabulary in the family kit; neutralizing them
+  would change the wire the lease stages read.
+- **Client packages stay light.** A domain declares its route contracts as plain data in
+  its own package, with no dependency on `compute_provisioning`; the family kit adapts
+  them when it assembles a table.
+- **Clients take contracts, not the assembled table.** `ComputeProvisioningClient`
+  resolves against the family kit's contracts; a domain's typed client passes its own
+  contract to `authenticated_request`. Each adapter contributes its declarations beside
+  its router mounts, the service's composition root (`main.py`) assembles them for
+  request authentication, and the e2e test client assembles the family and domain
+  declarations it uses. Assembly refuses a duplicate operation or route; within one
+  contribution the first matching contract decides, as its owner ordered them
+  (`/api/v1/pools/export` before `/api/v1/pools/{pool_id}`), and a path two
+  contributions both match is refused.
+- **Roles travel with each contract.** The family kit keeps writing its own routes
+  with its operation sets (`ADMIN_PROVISIONING_OPERATIONS`,
+  `DUAL_ROLE_PROVISIONING_OPERATIONS`), converted to per-contract roles when its table
+  is built; a domain declaration states its roles. Chosen over restating roles on every
+  family entry because it leaves the family kit's declarations unchanged.
+- **Relay routes stay in the family table until relays move.** Relay models, client
+  methods, controller, and services all live in `compute_provisioning` and the service
+  today; their contracts move to VM with them (5B.7). Today they admit the seller role
+  only, because they are absent from the admin set; that is preserved, and worth a
+  review when they move.
+- Noted, not pursued here: a complete plain-data route declaration is close to what a
+  generator would need to produce the controller skeleton and client method from one
+  source.
 
 ### Bare-metal publication has a dry run
 

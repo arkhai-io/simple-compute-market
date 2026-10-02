@@ -9,7 +9,12 @@ contract authority for every public client operation.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from unittest.mock import MagicMock
 
+from arkhai_bare_metal import NODE_GRANT_ACCESS_ACTION
+from bare_metal_provisioning_adapter.services.bare_metal_mock_executor import (
+    BareMetalMockAnsibleService,
+)
 from compute_provisioning_service import container as _container_module
 import pytest
 
@@ -210,3 +215,56 @@ class TestLeaseClientEndpointCoverage:
         with session_factory() as db:
             record = db.get(SettlementRecord, reserved["capacity_reservation_id"])
             assert record.state == SettlementRecordState.teardown_dispatch_pending.value
+
+
+class TestBareMetalTestRouteCoverage:
+    """Every ``/test/bare-metal`` route through its signed route contract.
+
+    The integration test client signs each request by resolving the route
+    contract, so a contract that no longer matches its mounted route, or an
+    authorization that refuses the administrator, fails here.
+    """
+
+    @pytest.fixture
+    def bare_metal_runner(self):
+        return BareMetalMockAnsibleService(MagicMock())
+
+    async def test_rule_and_evaluate_routes_use_their_route_contracts(
+        self, test_client, bare_metal_runner
+    ):
+        _register_host_record("bm-node-1")
+
+        added = await test_client.add_bare_metal_mock_rule(
+            rule_id="coverage-gate",
+            match={"executor_action": NODE_GRANT_ACCESS_ACTION},
+            pause_before_result=True,
+        )
+        listed = await test_client.list_bare_metal_mock_rules()
+        evaluated = await test_client.evaluate_bare_metal_job(
+            "bm-node-1", action=NODE_GRANT_ACCESS_ACTION
+        )
+        resumed = await test_client.resume_bare_metal_rule("coverage-gate")
+        deleted = await test_client.delete_bare_metal_mock_rule("coverage-gate")
+
+        assert added == {"rule_id": "coverage-gate", "status": "added"}
+        assert [(rule["rule_id"], rule["waiting"]) for rule in listed] == [
+            ("coverage-gate", 0)
+        ]
+        assert evaluated["rule_matched"] == "coverage-gate"
+        assert evaluated["host_exists"] is True
+        assert resumed == {"rule_id": "coverage-gate", "resumed": True}
+        assert deleted == {"rule_id": "coverage-gate", "deleted": True}
+        assert bare_metal_runner.list_rules() == []
+
+
+def _register_host_record(host_id: str) -> None:
+    _container_module.resolved_host_service.register_host(
+        HostCreate(
+            host_id=host_id,
+            ssh_host="192.0.2.10",
+            ssh_user="root",
+            ssh_key_type="path",
+            ssh_key_value="/fake/id_ed25519",
+            gpu_count=0,
+        )
+    )

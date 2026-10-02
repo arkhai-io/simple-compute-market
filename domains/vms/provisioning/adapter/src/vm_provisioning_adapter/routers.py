@@ -5,6 +5,13 @@ from __future__ import annotations
 from compute_provisioning import ComputeProvisioningRouterMount
 
 
+def vm_route_contracts():
+    """The signed contracts of every route VM mounts, test routes included."""
+    from vm_provisioning_operator.routes import VM_PROVISIONING_ROUTES
+
+    return VM_PROVISIONING_ROUTES
+
+
 def vm_mock_router():
     from vm_provisioning_adapter.controllers.test_controller import make_router
 
