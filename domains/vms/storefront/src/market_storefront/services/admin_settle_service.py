@@ -14,6 +14,7 @@ implement the evaluate→advance→observe pattern:
 from __future__ import annotations
 
 import logging
+import uuid
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,10 @@ from market_storefront.utils.escrow_verification import (  # noqa: E402
     verify_escrow_for_settlement,
 )
 from market_storefront.services.fulfillment_service import _build_provisioning_job_spec  # noqa: E402
+from market_storefront.services.capacity_client import build_capacity_client  # noqa: E402
+from market_storefront.services.vm_job_spec_service import (  # noqa: E402
+    compute_capacity_claim_from_order,
+)
 
 
 class AdminSettleService:
@@ -113,11 +118,15 @@ class AdminSettleService:
         listing_id: str,
         ssh_public_key: str,
         duration_seconds: int,
+        negotiation_id: str | None = None,
     ) -> dict:
-        """Resolve a host from inventory and build the provisioning job spec.
+        """Preview the capacity and job spec settle would use.
 
-        Tests doWork in isolation — no chain reads, no DB writes, no provisioning.
-        Uses the capacity ledger probe (read-only — consumes nothing).
+        Settle commits the capacity hold the negotiation's acceptance placed,
+        and reserves fresh capacity only when there is none. The preview does
+        the same: with a held reservation it reports the held resource's host;
+        otherwise it probes the capacity ledger (read-only — consumes nothing).
+        No chain reads, no DB writes, no provisioning.
 
         Returns:
             {"would_submit": True, "escrow_uid": ..., "host_id": ..., "vm_target": ..., "required_attributes": {...}}
@@ -129,6 +138,18 @@ class AdminSettleService:
         listing = await self._db.load_listing(listing_id=listing_id)
         if not listing:
             raise ValueError(f"Listing {listing_id!r} not found")
+
+        held = await self._held_capacity(negotiation_id)
+        if held is not None:
+            capacity_reservation_id, host_id = held
+            return {
+                "would_submit": True,
+                "escrow_uid": escrow_uid,
+                "host_id": host_id,
+                "vm_target": f"tenant-{uuid.uuid4().hex[:4]}",
+                "required_attributes": compute_capacity_claim_from_order(listing),
+                "capacity_reservation_id": capacity_reservation_id,
+            }
 
         spec = await _build_provisioning_job_spec(
             order_dict=listing,
@@ -154,3 +175,36 @@ class AdminSettleService:
             "vm_target": spec["vm_target"],
             "required_attributes": spec["required_attributes"],
         }
+
+    async def _held_capacity(
+        self, negotiation_id: str | None
+    ) -> tuple[str, str | None] | None:
+        """The reservation and host a negotiation's acceptance hold pins, if any.
+
+        Reservations are opaque at the site boundary, so the host is read from
+        the site's resource snapshot for the held resource.
+        """
+        if not negotiation_id:
+            return None
+        hold = await self._db.load_capacity_hold(negotiation_id=negotiation_id)
+        if not hold:
+            return None
+        payload = dict(hold.get("payload") or {})
+        reservation_id = str(
+            hold.get("capacity_reservation_id")
+            or payload.get("capacity_reservation_id")
+            or ""
+        )
+        resource_id = payload.get("resource_id")
+        host_id = None
+        if resource_id:
+            snapshot = await build_capacity_client(lambda: self._db).snapshot()
+            host_id = next(
+                (
+                    row.get("host_id")
+                    for row in snapshot
+                    if row.get("resource_id") == resource_id
+                ),
+                None,
+            )
+        return reservation_id, host_id

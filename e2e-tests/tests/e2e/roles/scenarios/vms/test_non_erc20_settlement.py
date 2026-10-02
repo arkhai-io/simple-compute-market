@@ -436,6 +436,7 @@ def test_scalar_non_erc20_settlement_reaches_ready(
         listing_id=listing_id,
         ssh_public_key=buyer_config["ssh_public_key"],
         duration_seconds=_DURATION_SECONDS,
+        negotiation_id=negotiation_id,
     )
     assert evaluate.get("would_submit") is True, evaluate
     host_id = evaluate.get("host_id")

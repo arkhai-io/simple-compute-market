@@ -1826,18 +1826,22 @@ class StorefrontClient(_StorefrontClientBase):
         listing_id: str,
         ssh_public_key: str = "",
         duration_seconds: int = 3600,
+        negotiation_id: str | None = None,
         request_id: str | None = None,
     ) -> dict:
         """POST /api/v1/admin/settle/{escrow_uid}/evaluate.
 
-        Resolves a host from inventory and builds the job spec without chain reads,
-        DB writes, or provisioning calls. Returns dict with would_submit, host_id,
-        vm_target, required_attributes. Used by e2e stage 8a.
+        Previews the fulfillment settle would start, without chain reads, DB
+        writes, or provisioning calls. Pass the ``negotiation_id`` settle will
+        name: when its acceptance holds capacity, settle commits that hold and
+        the preview reports it. Returns would_submit, host_id, vm_target, and
+        required_attributes.
         """
         body = {
             "listing_id": listing_id,
             "ssh_public_key": ssh_public_key,
             "duration_seconds": duration_seconds,
+            "negotiation_id": negotiation_id,
         }
         return await self._authenticated_post(
             f"/api/v1/admin/settle/{escrow_uid}/evaluate",
@@ -3237,18 +3241,22 @@ class SyncStorefrontClient(_StorefrontClientBase):
         listing_id: str,
         ssh_public_key: str = "",
         duration_seconds: int = 3600,
+        negotiation_id: str | None = None,
         request_id: str | None = None,
     ) -> dict:
         """POST /api/v1/admin/settle/{escrow_uid}/evaluate.
 
-        Resolves a host from inventory and builds the job spec without chain reads,
-        DB writes, or provisioning calls. Returns dict with would_submit, host_id,
-        vm_target, required_attributes. Used by e2e stage 8a.
+        Previews the fulfillment settle would start, without chain reads, DB
+        writes, or provisioning calls. Pass the ``negotiation_id`` settle will
+        name: when its acceptance holds capacity, settle commits that hold and
+        the preview reports it. Returns would_submit, host_id, vm_target, and
+        required_attributes.
         """
         body = {
             "listing_id": listing_id,
             "ssh_public_key": ssh_public_key,
             "duration_seconds": duration_seconds,
+            "negotiation_id": negotiation_id,
         }
         return self._authenticated_post(
             f"/api/v1/admin/settle/{escrow_uid}/evaluate",

@@ -314,6 +314,17 @@ kits, core, and the VM and API-credit storefronts; bare metal binds in Sections 
     `test_force_accept_records_what_a_negotiated_acceptance_records` replace it. The
     inventory-guard preview test runs against a negotiating publication app, and a
     policy rejection is now a refused preview.
+  - Checkpoint 1 (2026-10-02): `make test` green after the maintainer relocked the
+    projects whose locks had recorded an absolute wheelhouse path (they were run with
+    an absolute `--find-links`). The e2e run passed the bare-metal lane (11) and failed
+    VM stage 08a: force-accept now places VM's acceptance hold, and evaluate-settle
+    probed only free capacity, so it reported no VM while settle would commit that
+    hold. Evaluate-settle now takes the `negotiation_id` settle names and, when its
+    acceptance holds capacity, reports the held reservation and its host (from the
+    site snapshot); otherwise it probes. `EvaluateSettleRequest` gains
+    `negotiation_id`, `EvaluateSettleResponse` gains `capacity_reservation_id`, both
+    client variants pass it, and VM stage 08a and `test_non_erc20_settlement.py` send
+    it. VM unit 1062 passed; core storefront 182 and client 44 passed.
   - Pre-existing VM failures (unrelated modules, not caused here): in
     `test_negotiate_controller.py`, `test_amountless_exact_escrow_can_start_and_accept`
     and `test_an_unbacked_listing_negotiates_to_acceptance_without_the_site` (policy

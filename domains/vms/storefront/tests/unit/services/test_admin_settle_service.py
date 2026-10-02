@@ -209,6 +209,68 @@ class TestEvaluateSettleDryRun:
         assert result["vm_target"] == "tenant-abcd"
         assert result["required_attributes"] == {"gpu_model": "H200"}
 
+    async def test_a_held_negotiation_previews_its_held_resource(self, svc, db):
+        """Settle commits the acceptance hold, so the preview reports the held
+        resource's host rather than probing for free capacity."""
+        db.load_listing.return_value = {
+            **_LISTING_ROW,
+            "listing_resource": {
+                **dict(_LISTING_ROW.get("listing_resource") or {}),
+                "resource_id": "r-held",
+                "offering_mode": "vm",
+            },
+        }
+        db.load_capacity_hold.return_value = {
+            "capacity_reservation_id": "res-held",
+            "payload": {"resource_id": "r-held"},
+        }
+        capacity = MagicMock()
+        capacity.snapshot = AsyncMock(
+            return_value=[
+                {"resource_id": "r-other", "host_id": "host-other"},
+                {"resource_id": "r-held", "host_id": "host-held"},
+            ]
+        )
+        probe = AsyncMock()
+        with patch(
+            "market_storefront.services.admin_settle_service.build_capacity_client",
+            return_value=capacity,
+        ), patch(
+            "market_storefront.services.admin_settle_service._build_provisioning_job_spec",
+            new=probe,
+        ):
+            result = await svc.evaluate_settle_dry_run(
+                escrow_uid=_ESCROW_UID,
+                listing_id=_LISTING_ID,
+                ssh_public_key="ssh-ed25519 test",
+                duration_seconds=3600,
+                negotiation_id="neg-held",
+            )
+        db.load_capacity_hold.assert_awaited_once_with(negotiation_id="neg-held")
+        probe.assert_not_awaited()
+        assert result["would_submit"] is True
+        assert result["host_id"] == "host-held"
+        assert result["capacity_reservation_id"] == "res-held"
+
+    async def test_a_negotiation_without_a_hold_probes(self, svc, db):
+        """With no hold, settle reserves fresh capacity, so the preview probes."""
+        db.load_listing.return_value = _LISTING_ROW
+        db.load_capacity_hold.return_value = None
+        probe = AsyncMock(return_value=None)
+        with patch(
+            "market_storefront.services.admin_settle_service._build_provisioning_job_spec",
+            new=probe,
+        ):
+            result = await svc.evaluate_settle_dry_run(
+                escrow_uid=_ESCROW_UID,
+                listing_id=_LISTING_ID,
+                ssh_public_key="",
+                duration_seconds=3600,
+                negotiation_id="neg-free",
+            )
+        probe.assert_awaited_once()
+        assert result["would_submit"] is False
+
     async def test_passes_correct_args_to_build_spec(self, svc, db):
         """_build_provisioning_job_spec is called with listing and caller-supplied ssh_public_key."""
         db.load_listing.return_value = _LISTING_ROW

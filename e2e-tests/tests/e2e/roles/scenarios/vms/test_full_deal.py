@@ -1127,13 +1127,16 @@ class TestStage08a_EvaluateSettle:
         provisioning calls (read-only select_available_compute_vm). Confirms
         a matching host exists before committing to settle.
         """
-        require_state(deal_state, "real_escrow_uid", "seller_listing_id")
+        require_state(deal_state, "real_escrow_uid", "seller_listing_id", "negotiation_id")
 
         result = storefront_admin_client.evaluate_settle(
             deal_state.real_escrow_uid,
             listing_id=deal_state.seller_listing_id,
             ssh_public_key=buyer_config["ssh_public_key"],
             duration_seconds=DURATION_HOURS * 3600,
+            # Settle names this negotiation and commits its acceptance hold,
+            # so the preview is asked about the same negotiation.
+            negotiation_id=deal_state.negotiation_id,
         )
         assert result.get("would_submit") is True, (
             f"evaluate_settle returned would_submit=False.\n"

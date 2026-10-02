@@ -120,6 +120,13 @@ class EvaluateSettleRequest(BaseModel):
         default="", description="SSH public key to inject into the VM"
     )
     duration_seconds: int = Field(default=3600, description="Lease duration in seconds")
+    negotiation_id: str | None = Field(
+        default=None,
+        description=(
+            "The negotiation settle will name. When its acceptance holds "
+            "capacity, settle commits that hold, so the preview reports it."
+        ),
+    )
 
 
 class EvaluateSettleResponse(BaseModel):
@@ -130,6 +137,7 @@ class EvaluateSettleResponse(BaseModel):
     host_id: str | None = None
     vm_target: str | None = None
     required_attributes: dict[str, Any] = Field(default_factory=dict)
+    capacity_reservation_id: str | None = None
     reason: str | None = None
 
 
