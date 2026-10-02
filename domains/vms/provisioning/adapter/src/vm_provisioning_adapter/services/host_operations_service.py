@@ -58,14 +58,10 @@ class HostOperationsService:
         if execution_host is None:
             raise HostNotFoundError(f"Host '{host}' not found")
 
-        inv_path = self._ansible_service.write_inventory([inventory_target(execution_host)])
-        try:
+        with self._ansible_service.write_inventory(
+            [inventory_target(execution_host)]
+        ) as inventory:
             return await self._ansible_service.check_connectivity_with_inventory(
                 host,
-                inv_path,
+                inventory.path,
             )
-        finally:
-            try:
-                inv_path.unlink(missing_ok=True)
-            except Exception:
-                pass

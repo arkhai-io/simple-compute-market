@@ -456,21 +456,15 @@ class _FakeHost:
 class TestPublicHostInventory:
     def test_emits_public_host_var_when_set(self):
         svc = _make_service()
-        inv_path = svc.write_inventory([_FakeHost("kvm1", "10.0.0.5", "203.0.113.9")])
-        try:
-            content = inv_path.read_text(encoding="utf-8")
-        finally:
-            inv_path.unlink(missing_ok=True)
+        with svc.write_inventory([_FakeHost("kvm1", "10.0.0.5", "203.0.113.9")]) as inventory:
+            content = inventory.path.read_text(encoding="utf-8")
         assert "ansible_host=10.0.0.5" in content  # management address
         assert "public_host=203.0.113.9" in content  # tenant-facing address
 
     def test_omits_public_host_var_when_unset(self):
         svc = _make_service()
-        inv_path = svc.write_inventory([_FakeHost("kvm1", "10.0.0.5", None)])
-        try:
-            content = inv_path.read_text(encoding="utf-8")
-        finally:
-            inv_path.unlink(missing_ok=True)
+        with svc.write_inventory([_FakeHost("kvm1", "10.0.0.5", None)]) as inventory:
+            content = inventory.path.read_text(encoding="utf-8")
         assert "public_host=" not in content
 
 

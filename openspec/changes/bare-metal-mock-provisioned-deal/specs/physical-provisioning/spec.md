@@ -22,10 +22,11 @@ MUST learn that capacity was released only from the site's capacity-released cal
 ### Requirement: Job execution resolves its executor by offering mode and action
 
 Compute provisioning MUST own the table that selects the executor running a job, keyed by
-the job's `offering_mode` and action, populated by adapter bundles, and MUST reject a
-duplicate `(offering_mode, action)` registration at startup. Each entry MUST be one
-complete job executor that executes a job and returns a normalized outcome, cancels
-through its own handle, and receives job-done notification. The job engine MUST resolve
+the job's `offering_mode` and the action its executor runs, populated by adapter
+bundles, and MUST reject a duplicate `(offering_mode, action)` registration at startup.
+Each entry MUST be one complete job executor that executes a job and returns a
+normalized outcome and cancels through its own handle; the job engine, not the executor,
+knows when a job has finished. The job engine MUST resolve
 each job's executor through that table and MUST NOT know how a job runs: no playbook,
 fact, inventory, process identifier, or SSH vocabulary, and no domain's parameter
 construction. Job persistence and the pre-execution host lookup MUST be independent of

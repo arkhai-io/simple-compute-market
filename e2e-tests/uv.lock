@@ -216,6 +216,7 @@ dependencies = [
     { name = "arkhai-kit-site" },
     { name = "httpx" },
     { name = "pydantic" },
+    { name = "sqlalchemy" },
 ]
 wheels = [
     { path = "arkhai_compute_provisioning-0.8.0-py3-none-any.whl" },

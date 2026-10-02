@@ -32,7 +32,7 @@ implementation of a control it binds.
 Under the provisioning mock profile, each compute provisioning adapter MUST register a
 mock executor for its own actions built on one rule and gate mechanism owned by compute
 provisioning beside the job lifecycle: rule matching, pause gates, a deterministic
-signal when a job reaches a gate, job-done events, the evaluate-job dry run, and a
+signal when a job reaches a gate, the evaluate-job dry run, and a
 framework-free test route service. A mock executor MUST be assembled from shared
 execution mechanics and the adapter's contributed default output; no adapter's mock MAY
 derive from another adapter's. The mechanism MUST NOT be presented as a foundation kit,

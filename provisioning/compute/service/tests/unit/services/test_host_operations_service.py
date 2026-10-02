@@ -1,15 +1,22 @@
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
-from compute_provisioning.hosts import ConnectionEnvelope, ExecutionHost
+from compute_provisioning.hosts import ConnectionEnvelope, ExecutionHost, ProtectedValue
 from compute_provisioning.hosts.service import HostNotFoundError
-from compute_provisioning_service.db.models import Host
-from compute_provisioning_ansible.runner import ConnectivityResult
-from vm_provisioning_operator.models import VmActionRequest
 from compute_provisioning.jobs import JobSubmitResponse
+from compute_provisioning_ansible import SshConnectionCodec
+from compute_provisioning_ansible.runner import (
+    AnsibleRunner,
+    ConnectivityResult,
+    MaterializedInventory,
+)
+from compute_provisioning_service.db.models import Host
+from cryptography.fernet import Fernet
+from market_config import encrypt_secret
 from vm_provisioning_adapter.services.host_operations_service import HostOperationsService
+from vm_provisioning_operator.models import VmActionRequest
 
 _CONNECTION = ConnectionEnvelope(
     kind="ssh",
@@ -79,7 +86,7 @@ async def test_check_connectivity_renders_temp_inventory_and_cleans_it_up(tmp_pa
     inv_path = tmp_path / "inventory.ini"
     inv_path.write_text("[kvm_hosts]\nkvm1\n", encoding="utf-8")
     ansible_service = MagicMock()
-    ansible_service.write_inventory.return_value = inv_path
+    ansible_service.write_inventory.return_value = MaterializedInventory(path=inv_path)
     ansible_service.check_connectivity_with_inventory = AsyncMock(
         return_value=ConnectivityResult(host="kvm1", reachable=True, detail="pong")
     )
@@ -100,3 +107,44 @@ async def test_check_connectivity_renders_temp_inventory_and_cleans_it_up(tmp_pa
     assert (target.ssh_key_type, target.ssh_key_value) == ("path", "/tmp/key")
     ansible_service.check_connectivity_with_inventory.assert_awaited_once_with("kvm1", inv_path)
     assert not inv_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_a_connectivity_probe_removes_the_decrypted_key_it_used():
+    key = Fernet.generate_key().decode()
+    runner = AnsibleRunner(SimpleNamespace(), ssh_codec=SshConnectionCodec(key))
+    seen: dict = {}
+
+    async def probe(host, inventory_path):
+        reference = inventory_path.read_text().split("ansible_ssh_private_key_file=")[1]
+        seen["key"] = Path(reference.split()[0])
+        seen["key existed"] = seen["key"].exists()
+        seen["inventory"] = inventory_path
+        return ConnectivityResult(host=host, reachable=True, detail="pong")
+
+    ansible_service = MagicMock()
+    ansible_service.write_inventory = runner.write_inventory
+    ansible_service.check_connectivity_with_inventory = probe
+    host_service = MagicMock()
+    host_service.lookup.return_value = ExecutionHost(
+        host_id="kvm1",
+        pool_id="default",
+        connection=ConnectionEnvelope(
+            kind="ssh",
+            version=1,
+            public={**_CONNECTION.public, "key_path": None},
+            protected={"private_key": ProtectedValue("fernet-v1", encrypt_secret("PEM", key))},
+        ),
+    )
+    service = HostOperationsService(
+        ansible_service=ansible_service,
+        host_service=host_service,
+        job_service=MagicMock(),
+        job_queue_provider=lambda: object(),
+    )
+
+    await service.check_connectivity(host="kvm1")
+
+    assert seen["key existed"]
+    assert not seen["key"].exists()
+    assert not seen["inventory"].exists()

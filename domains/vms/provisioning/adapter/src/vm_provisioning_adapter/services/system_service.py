@@ -127,11 +127,10 @@ def collect_ssh_keys_from_hosts(hosts: list) -> list[SshKeyInfo]:
     embedded_hosts: list[str] = []
 
     for host in hosts:
-        connection = host.connection()
-        key_path = connection.public.get("key_path")
+        key_path = host.connection.public.get("key_path")
         if key_path:
             path_to_hosts.setdefault(key_path, []).append(host.host_id)
-        elif "private_key" in connection.protected:
+        elif "private_key" in host.connection.protected:
             embedded_hosts.append(host.host_id)
 
     results: list[SshKeyInfo] = []

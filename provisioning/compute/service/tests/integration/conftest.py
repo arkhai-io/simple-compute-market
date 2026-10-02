@@ -510,11 +510,13 @@ def fake_ansible() -> MagicMock:
     real_ansible_impl = AnsibleService(MagicMock())
     mock.parse_playbook_result.side_effect = real_ansible_impl.parse_playbook_result
 
-    # write_inventory — return a temp path (content irrelevant; Ansible never runs)
+    # write_inventory — a materialized inventory the caller cleans up (content
+    # irrelevant; Ansible never runs)
     import tempfile
+    from compute_provisioning_ansible.runner import MaterializedInventory
     fake_inv_tmp = Path(tempfile.gettempdir()) / "test_inventory.ini"
     fake_inv_tmp.write_text("[kvm_hosts]\nkvm1  ansible_host=10.0.0.1  ansible_user=root\n")
-    mock.write_inventory.return_value = fake_inv_tmp
+    mock.write_inventory.return_value = MaterializedInventory(path=fake_inv_tmp)
 
     # check_connectivity_with_inventory — synchronous mock returning reachable
     from compute_provisioning_ansible.runner import ConnectivityResult

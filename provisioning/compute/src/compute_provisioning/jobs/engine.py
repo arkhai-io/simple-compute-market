@@ -8,10 +8,12 @@ executor says whether a failure is retryable), cancellation through the
 executor's opaque handle, and storing the logs, result, and credentials the
 executor reports. It never reads a job's parameters: they are the executor's.
 
-State changes are conditional. A job runs only from ``queued``; once a job is
-cancelled, nothing its executor reports afterwards changes it, and a
-cancellation requested before the executor reported a handle is passed to the
-executor as soon as the handle arrives.
+State changes are conditional ``UPDATE``s on the job's current status, so they
+hold across sessions and worker processes. A job runs only from ``queued``; once
+a job is cancelled, no outcome its executor reports afterwards changes its
+state, result, or credentials (its logs are still recorded, to show what the
+cancelled execution did), and a cancellation requested before the executor
+reported a handle is passed to the executor as soon as the handle arrives.
 
 The in-process ``AsyncJobQueue`` owns concurrency and dispatch; this engine's
 ``process_job`` is the handler it runs.
@@ -26,6 +28,7 @@ from collections.abc import Callable, Mapping
 from datetime import datetime, timedelta
 from typing import Any
 
+from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -45,7 +48,7 @@ from .models import (
 
 logger = logging.getLogger(__name__)
 
-HostLookup = Callable[[str], "ExecutionHost | None"]
+HostLookup = Callable[[str], ExecutionHost | None]
 
 _UNSET = object()
 
@@ -121,6 +124,7 @@ class JobEngine:
                 deal_ref=contract.deal_ref if contract else None,
                 offering_mode=contract.offering_mode if contract else offering_mode,
                 action_kind=contract.action_kind if contract else action,
+                executor_action=action,
                 idempotency_key=contract.idempotency_key if contract else None,
             ))
             try:
@@ -329,22 +333,35 @@ class JobEngine:
     # ------------------------------------------------------------------
 
     async def cancel_job(self, job_id: str) -> dict:
-        """Cancel a queued or running job, asking a running job's executor to stop."""
+        """Cancel a queued or running job, asking a running job's executor to stop.
+
+        The cancellation is one conditional ``UPDATE``, committed before the
+        executor is asked, so no outcome reported from then on can overwrite it.
+        An executor that has not yet reported its handle is asked when it does.
+        """
         with self._session_factory() as db:
             job = self._require(db, job_id)
-            if job.status not in (JobStatus.queued.value, JobStatus.running.value):
+            route = (job.offering_mode, job.executor_action)
+            cancelled = db.execute(
+                update(JobRecord)
+                .where(
+                    JobRecord.id == job_id,
+                    JobRecord.status.in_(
+                        (JobStatus.queued.value, JobStatus.running.value)
+                    ),
+                )
+                .values(status=JobStatus.cancelled.value, error="Job cancelled by user")
+                .execution_options(synchronize_session=False)
+            ).rowcount
+            db.commit()
+            db.refresh(job)
+            if not cancelled:
                 return {
                     "job_id": job.id,
                     "status": job.status,
                     "message": f"Job cannot be cancelled (current status: {job.status})",
                 }
             handle = dict(job.execution_handle) if job.execution_handle else None
-            route = (job.offering_mode, job.action_kind)
-            job.status = JobStatus.cancelled.value
-            job.error = "Job cancelled by user"
-            db.commit()
-        # Committed before the executor is asked, so an outcome it reports from
-        # here on cannot overwrite the cancellation.
         if handle is not None:
             await self._cancel_execution(job_id, route, handle)
         self._finished(job_id, JobStatus.cancelled.value)
@@ -385,7 +402,9 @@ class JobEngine:
                 "Processing job %s (attempt %d/%d)",
                 job_id, job.retry_count + 1, job.max_retries + 1,
             )
-            if not self._transition(db, job, status=JobStatus.running.value):
+            if not self._transition(
+                db, job, expected=(JobStatus.queued.value,), status=JobStatus.running.value
+            ):
                 return
 
             # The job runs only against the registered host it names; a host
@@ -400,7 +419,9 @@ class JobEngine:
                 )
                 return
             try:
-                executor = self._executors.resolve(str(job.offering_mode), str(job.action_kind))
+                executor = self._executors.resolve(
+                    str(job.offering_mode), str(job.executor_action)
+                )
             except UnsupportedExecutorActionError as exc:
                 self._fail(db, job, str(exc))
                 return
@@ -409,18 +430,22 @@ class JobEngine:
 
             def report_handle(handle: Mapping[str, Any]) -> None:
                 stored = self._transition(
-                    db, job, status=JobStatus.running.value, execution_handle=dict(handle)
+                    db,
+                    job,
+                    expected=(JobStatus.running.value,),
+                    status=JobStatus.running.value,
+                    execution_handle=dict(handle),
                 )
                 if not stored and job.status == JobStatus.cancelled.value:
                     # Cancelled before the executor could be reached: reach it now.
                     loop.create_task(self._cancel_execution(
-                        job_id, (job.offering_mode, job.action_kind), dict(handle)
+                        job_id, (job.offering_mode, job.executor_action), dict(handle)
                     ))
 
             outcome = await executor.execute(JobRun(
                 job_id=job_id,
                 offering_mode=str(job.offering_mode),
-                action=str(job.action_kind),
+                action=str(job.executor_action),
                 host=host,
                 parameters=dict(job.params),
                 report_handle=report_handle,
@@ -431,6 +456,7 @@ class JobEngine:
                 stored = self._transition(
                     db,
                     job,
+                    expected=(JobStatus.running.value,),
                     status=JobStatus.succeeded.value,
                     result=(
                         outcome.result.model_dump(mode="json")
@@ -453,6 +479,7 @@ class JobEngine:
                 if self._transition(
                     db,
                     job,
+                    expected=(JobStatus.running.value,),
                     status=JobStatus.queued.value,
                     error=f"Attempt {job.retry_count + 1} failed: {message}. "
                     f"Retrying at {next_retry_at}",
@@ -473,6 +500,7 @@ class JobEngine:
             if self._transition(
                 db,
                 job,
+                expected=(JobStatus.running.value,),
                 status=JobStatus.failed.value,
                 error=f"Job failed ({reason}): {message}",
                 logs=outcome.logs,
@@ -504,6 +532,7 @@ class JobEngine:
         db: Session,
         job: JobRecord,
         *,
+        expected: tuple[str, ...],
         status: str,
         result: object = _UNSET,
         error: object = _UNSET,
@@ -513,37 +542,54 @@ class JobEngine:
         next_retry_at: object = _UNSET,
         credentials: tuple[CredentialEnvelope, ...] = (),
     ) -> bool:
-        """Apply a change unless the job has been cancelled; report whether it was.
+        """Apply a change only if the job is still in one of ``expected``.
 
-        The job is re-read first, so a cancellation committed by another
-        session since this one loaded the job is seen and kept.
+        One conditional ``UPDATE``: when another session or process has moved
+        the job on (cancelled it, above all) the update matches no row, nothing
+        is written, and ``False`` is returned. Credentials are written in the
+        same transaction, so they land only with the transition that reports
+        them. ``job`` is reloaded either way.
         """
-        db.refresh(job)
-        if job.status == JobStatus.cancelled.value:
-            logger.info("Job %s was cancelled; its executor's report is not applied", job.id)
+        values: dict[str, object] = {"status": status}
+        for name, value in (
+            ("result", result),
+            ("error", error),
+            ("logs", logs),
+            ("execution_handle", execution_handle),
+            ("retry_count", retry_count),
+            ("next_retry_at", next_retry_at),
+        ):
+            if value is not _UNSET:
+                values[name] = value
+        applied = db.execute(
+            update(JobRecord)
+            .where(JobRecord.id == job.id, JobRecord.status.in_(expected))
+            .values(**values)
+            .execution_options(synchronize_session=False)
+        ).rowcount
+        if not applied:
+            db.rollback()
+            db.refresh(job)
+            logger.info(
+                "Job %s is %s; its executor's report is not applied", job.id, job.status
+            )
             return False
-        job.status = status
-        if result is not _UNSET:
-            job.result = result
-        if error is not _UNSET:
-            job.error = error
-        if logs is not _UNSET:
-            job.logs = logs
-        if execution_handle is not _UNSET:
-            job.execution_handle = execution_handle
-        if retry_count is not _UNSET:
-            job.retry_count = retry_count
-        if next_retry_at is not _UNSET:
-            job.next_retry_at = next_retry_at
         for credential in credentials:
             db.add(JobCredential(job_id=job.id, envelope=credential.model_dump(mode="json")))
         db.commit()
+        db.refresh(job)
         if status in TERMINAL_JOB_STATUSES:
             self._finished(job.id, status)
         return True
 
     def _fail(self, db: Session, job: JobRecord, message: str) -> None:
-        if self._transition(db, job, status=JobStatus.failed.value, error=message):
+        if self._transition(
+            db,
+            job,
+            expected=(JobStatus.queued.value, JobStatus.running.value),
+            status=JobStatus.failed.value,
+            error=message,
+        ):
             logger.error("Job %s failed: %s", job.id, message)
 
     def _finished(self, job_id: str, status: str) -> None:

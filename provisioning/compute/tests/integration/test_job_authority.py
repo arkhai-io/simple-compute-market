@@ -50,6 +50,7 @@ class _Executor:
         self.started = asyncio.Event()
         self.release = asyncio.Event()
         self.cancelled: list[dict] = []
+        self.cancel_requested = asyncio.Event()
         self.runs = 0
         self.handle_before_start = False
 
@@ -67,12 +68,14 @@ class _Executor:
 
     async def cancel(self, handle):
         self.cancelled.append(dict(handle))
+        self.cancel_requested.set()
 
 
-def _engine(executor, *, hosts=None):
-    database = create_engine(
-        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
-    )
+def _engine(executor, *, hosts=None, database=None):
+    if database is None:
+        database = create_engine(
+            "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+        )
     JobsBase.metadata.create_all(database)
     factory = sessionmaker(bind=database)
     table = JobExecutorTable()
@@ -176,7 +179,7 @@ async def test_a_cancellation_before_the_handle_reaches_the_executor_when_it_arr
     assert executor.cancelled == []
     executor.release.set()
     await running
-    await asyncio.sleep(0)
+    await asyncio.wait_for(executor.cancel_requested.wait(), timeout=5)
 
     assert executor.cancelled == [{"pid": 7}]
     assert engine.get_job(job.job_id).status == "cancelled"
@@ -245,3 +248,83 @@ async def test_waiting_for_a_job_that_does_not_finish_times_out() -> None:
         await engine.wait_for_terminal(job.job_id, timeout=0.1)
     with pytest.raises(LookupError):
         await engine.wait_for_terminal("missing", timeout=0.1)
+
+
+@pytest.mark.asyncio
+async def test_a_contract_action_runs_as_the_executor_action_it_was_submitted_with() -> None:
+    """A contract action (``release``) may run as a different executor action
+    (``make``): the job keeps the contract's identity and is routed by the
+    executor action."""
+    executor = _Executor()
+    engine, factory = _engine(executor)
+    contract = ExecutorActionEnvelope(
+        capacity_reservation_id="r-2",
+        deal_ref={},
+        offering_mode="fake",
+        action_kind="release",
+        idempotency_key="r-2:release",
+        parameters={},
+    )
+    job = await _submit(engine, _Queue(), contract=contract)
+
+    await engine.process_job(job.job_id)
+
+    assert executor.runs == 1
+    assert engine.get_job(job.job_id).status == "succeeded"
+    assert engine.get_contract_job_record(job.job_id)["action_kind"] == "release"
+    with factory() as db:
+        assert db.get(JobRecord, job.job_id).executor_action == "make"
+
+
+
+@pytest.mark.asyncio
+async def test_a_cancellation_from_another_process_holds_against_a_late_success(tmp_path) -> None:
+    """Two engines on one database file stand for two worker processes: one runs
+    the job, the other cancels it, and the late success is not applied."""
+    url = f"sqlite:///{tmp_path / 'jobs.db'}"
+    executor = _Executor(hold=True)
+    worker, factory = _engine(executor, database=create_engine(url))
+    other, _ = _engine(executor, database=create_engine(url))
+    job = await _submit(worker, _Queue())
+
+    running = asyncio.create_task(worker.process_job(job.job_id))
+    await asyncio.wait_for(executor.started.wait(), timeout=5)
+    await other.cancel_job(job.job_id)
+    executor.release.set()
+    await running
+
+    assert executor.cancelled == [{"pid": 7}]
+    status = worker.get_job(job.job_id)
+    assert (status.status, status.result) == ("cancelled", None)
+    with factory() as db:
+        assert db.query(JobCredential).count() == 0
+
+
+@pytest.mark.asyncio
+async def test_a_transition_from_a_stale_session_does_not_overwrite_a_cancellation(
+    tmp_path,
+) -> None:
+    """The check and the write are one statement: a session that loaded the job
+    before another committed its cancellation cannot overwrite it."""
+    url = f"sqlite:///{tmp_path / 'jobs.db'}"
+    engine, factory = _engine(_Executor(), database=create_engine(url))
+    job = await _submit(engine, _Queue())
+    with factory() as db:
+        db.get(JobRecord, job.job_id).status = "running"
+        db.commit()
+
+    stale = factory()
+    try:
+        loaded = stale.get(JobRecord, job.job_id)
+        assert loaded.status == "running"
+        await engine.cancel_job(job.job_id)
+
+        applied = engine._transition(
+            stale, loaded, expected=("running",), status="succeeded", result=None
+        )
+
+        assert applied is False
+        assert loaded.status == "cancelled"
+    finally:
+        stale.close()
+    assert engine.get_job(job.job_id).status == "cancelled"

@@ -20,6 +20,7 @@ from unittest.mock import AsyncMock, MagicMock
 from typing import AsyncIterator
 
 import pytest
+from compute_provisioning_ansible.runner import MaterializedInventory
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from market_site import CapacityLedgerService
@@ -90,7 +91,7 @@ def programmable_mock() -> ProgrammableMockAnsibleService:
     import tempfile
     fake_inv = Path(tempfile.gettempdir()) / "test_inv.ini"
     fake_inv.write_text("[kvm_hosts]\nkvm1  ansible_host=10.0.0.1  ansible_user=root\n")
-    svc.write_inventory = MagicMock(return_value=fake_inv)
+    svc.write_inventory = MagicMock(return_value=MaterializedInventory(path=fake_inv))
     svc.check_connectivity_with_inventory = AsyncMock(
         return_value=MagicMock(reachable=True, detail="mock ping ok")
     )

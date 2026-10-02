@@ -231,7 +231,7 @@ async def _mock_grant_job_result() -> dict:
         ssh_user="tenant-a",
     )
     mock = BareMetalMockAnsibleService(MagicMock())
-    mock.write_inventory([host])
+    mock.write_inventory([host]).cleanup()
     run = mock.start_playbook(
         playbook_path=Path("/playbooks/node-access.yaml"),
         inventory_path=Path("/tmp/inventory"),

@@ -24,5 +24,7 @@ testpaths = ["tests/unit"]
 
 [dependency-groups]
 dev = [
+    # The tests generate throwaway Fernet keys.
+    "cryptography>=42.0",
     "pytest>=8.3.4",
 ]

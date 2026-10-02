@@ -44,6 +44,7 @@ dependencies = [
     { name = "arkhai-kit-site" },
     { name = "httpx" },
     { name = "pydantic" },
+    { name = "sqlalchemy" },
 ]
 
 [package.dev-dependencies]
@@ -61,6 +62,7 @@ requires-dist = [
     { name = "arkhai-kit-site", specifier = ">=0.4.0" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "pydantic", specifier = ">=2" },
+    { name = "sqlalchemy", specifier = ">=2.0" },
 ]
 
 [package.metadata.requires-dev]

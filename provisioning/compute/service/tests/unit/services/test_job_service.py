@@ -22,7 +22,10 @@ from arkhai_bare_metal import (
 from compute_provisioning import JobExecutorTable, UnsupportedExecutorActionError
 from vm_provisioning_adapter.bundle import VM_JOB_ACTIONS
 from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
-from vm_provisioning_adapter.services.ansible_job_executor import AnsibleJobExecutor
+from vm_provisioning_adapter.services.ansible_job_executor import (
+    AnsibleJobExecutor,
+    ReservesVariableKeys,
+)
 from vm_provisioning_adapter.services.job_service import AnsibleJobService, retry_policy_from
 
 
@@ -189,3 +192,36 @@ def test_the_host_registry_is_required():
             session_factory=MagicMock(),
             executors=MagicMock(),
         )
+
+
+class TestReservedVariableKeys:
+    """Reserved variable names are an Ansible capability, checked for, not
+    assumed of every registered executor."""
+
+    def test_the_ansible_executor_reports_its_reserved_keys(self):
+        runner = MagicMock()
+        runner.reserved_var_keys.return_value = frozenset({"vm_name"})
+        svc = _make_service()
+        svc._executors = _executors(svc._settings, runner)
+        params = AnsibleJobParams(host_id="kvm1", vm_action="create", offering_mode="vm")
+
+        assert svc.reserved_var_keys(params) == frozenset({"vm_name"})
+        assert isinstance(svc._executors.resolve("vm", "create"), ReservesVariableKeys)
+
+    def test_an_executor_without_the_capability_is_refused_clearly(self):
+        class PlainExecutor:
+            async def execute(self, run):
+                raise NotImplementedError
+
+            async def cancel(self, handle):
+                return None
+
+        table = JobExecutorTable()
+        table.register("vm", "create", PlainExecutor())
+        table.freeze()
+        svc = _make_service()
+        svc._executors = table
+        params = AnsibleJobParams(host_id="kvm1", vm_action="create", offering_mode="vm")
+
+        with pytest.raises(TypeError, match="does not report the variable names"):
+            svc.reserved_var_keys(params)

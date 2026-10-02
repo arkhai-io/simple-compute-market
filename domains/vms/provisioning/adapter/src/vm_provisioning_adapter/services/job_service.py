@@ -31,6 +31,7 @@ from compute_provisioning.jobs import (
 from compute_provisioning.jobs.engine import JobEngine
 from compute_provisioning_service.config import Settings
 from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
+from vm_provisioning_adapter.services.ansible_job_executor import ReservesVariableKeys
 
 
 def retry_policy_from(settings: Settings) -> JobRetryPolicy:
@@ -99,9 +100,16 @@ class AnsibleJobService:
         extra-vars synchronously, before submit(), without depending on the
         runner directly.
         """
-        return self._executors.resolve(
+        executor = self._executors.resolve(
             params.offering_mode, params.executor_action or params.vm_action
-        ).reserved_var_keys(params)
+        )
+        if not isinstance(executor, ReservesVariableKeys):
+            raise TypeError(
+                f"the executor for {params.offering_mode!r}/"
+                f"{params.executor_action or params.vm_action!r} does not report "
+                "the variable names it reserves"
+            )
+        return executor.reserved_var_keys(params)
 
     # The job authority's operations, unchanged.
 

@@ -485,6 +485,25 @@ Invariants this change must leave true:
 - Each domain's fulfillment provider supplies only job preparation and result mapping.
 
 
+### Maintainer rulings for review
+
+Rulings the maintainer made in conversation, recorded here because reviewers see only
+these documents. A review finding that contradicts one of these is a ruling to revisit
+with the maintainer, not an implementation defect.
+
+- **Connection secrets are submitted in plaintext over the authenticated host API
+  (option A), and protection on the wire is out of scope for this change** (ruled
+  2026-10-02, and restated after the second implementation review the same day). The
+  host authority stores secrets only in the protected form the connection codec
+  produces and never encrypts, decrypts, or discloses them; the codec protects a
+  submitted secret on write and decrypts it just in time for execution ("The host
+  authority is connection-neutral, and connection secrets stay protected"). Sealed
+  submission remains the recorded follow-up.
+- **`docs/development/ARCHITECTURE.md` describes the target compute family-kit
+  ownership, including postconditions of steps not yet landed, because this branch
+  merges whole** (ruled when 5B began, and restated after both implementation
+  reviews). The document is not revised step by step.
+
 ### Pre-release wire and schema changes are accepted
 
 Decided with the maintainer on 2026-10-02. The system is pre-release: no deployment runs
@@ -537,9 +556,12 @@ Responsibilities split as follows:
   it and the shared `/test/jobs/{id}/wait` route read.
 
 **Cancellation is terminal.** Once a job is cancelled, a later outcome from its executor
-cannot change its state: the engine applies outcomes as conditional transitions, and a
-cancellation requested before the executor reports its handle takes effect when the
-handle arrives. Today's job service writes the outcome unconditionally, so a job
+cannot change its state, result, or credentials: every transition, cancellation
+included, is one conditional SQL `UPDATE` on the job's current status, so the guarantee
+holds across sessions and worker processes, and credentials are written only in the
+transaction whose transition applied. A cancellation requested before the executor
+reports its handle takes effect when the handle arrives. The executor's logs are still
+recorded after cancellation, to show what the cancelled execution did. Today's job service writes the outcome unconditionally, so a job
 finishing after cancellation overwrites `cancelled`; this change fixes that, and the fix
 is tested.
 
@@ -553,8 +575,12 @@ to a declarative base of their own in `compute_provisioning.jobs`, which the ser
   why the migration runs in the service, where settings are available;
 - replaces `process_id` with a JSON `execution_handle` the engine stores and returns
   without interpreting (the Ansible executor stores `{"pid": ...}`);
-- stores `result` as a `ResultEnvelope`, converting each existing row exactly as the
-  contract route's adapter builds it today;
+- stores `result` as a `ResultEnvelope` labelled by the action the job's executor
+  ran, as the executors label new results;
+- adds `executor_action`, the action the executor runs and the job is routed by,
+  beside `action_kind`, the contract action that is part of a contract job's
+  identity: a VM teardown is submitted as contract action `teardown` and runs
+  executor action `vm_remove`;
 - replaces the SSH columns of `credentials` with one `CredentialEnvelope` per row,
   converted exactly as VM's contract credentials route builds it today (`offering_mode`
   `vm`, `credential_kind` from the row's role, the remaining non-empty columns as its

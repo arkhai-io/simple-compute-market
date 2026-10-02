@@ -30,7 +30,6 @@ from compute_provisioning.hosts.service import (
     HostAuthority,
     HostNotFoundError,
     InventoryHost,
-    host_response,
 )
 
 
@@ -110,17 +109,37 @@ def authority(session_factory, derivation, moves):
     )
 
 
-def test_a_registered_host_keeps_only_the_protected_form_of_its_secret(authority) -> None:
-    host = authority.register_host(
+def test_a_registered_host_keeps_only_the_protected_form_of_its_secret(
+    authority, session_factory
+) -> None:
+    registered = authority.register_host(
         HostCreate(host_id="h1", connection=_connection(token="s3cret"))
     )
 
-    assert host.pool_id == "default"
-    assert host.connection_protected == {"token": {"scheme": "reverse-v1", "ciphertext": "terc3s"}}
-    response = host_response(host)
-    assert response.connection.protected == {"token": "reverse-v1"}
-    assert "terc3s" not in response.model_dump_json()
-    assert "s3cret" not in response.model_dump_json()
+    assert registered.pool_id == "default"
+    assert registered.connection.protected == {"token": "reverse-v1"}
+    with session_factory() as db:
+        assert db.get(Host, "h1").connection_protected == {
+            "token": {"scheme": "reverse-v1", "ciphertext": "terc3s"}
+        }
+
+
+def test_no_ordinary_read_carries_a_protected_value(authority) -> None:
+    reads = [authority.register_host(HostCreate(host_id="h1", connection=_connection(token="s3cret")))]
+    reads.append(authority.get_host("h1"))
+    reads.extend(authority.list_hosts(enabled_only=False))
+    reads.append(authority.update_host("h1", HostUpdate(gpu_count=2)))
+    reads.append(authority.disable_host("h1"))
+    reads.append(authority.enable_host("h1"))
+    reads.extend(authority.apply_inventory(
+        [InventoryHost(host_id="h2", connection=_connection(token="other"))]
+    ))
+
+    for view in reads:
+        rendered = view.model_dump_json() + repr(view)
+        assert "terc3s" not in rendered and "s3cret" not in rendered
+        assert "rehto" not in rendered and "other" not in rendered
+        assert set(view.connection.protected.values()) == {"reverse-v1"}
 
 
 def test_lookup_hands_executors_the_protected_envelope(authority) -> None:
@@ -150,8 +169,8 @@ def test_an_update_without_the_secret_keeps_the_stored_one(authority) -> None:
 
     host = authority.update_host("h1", HostUpdate(connection=_connection("198.51.100.1")))
 
-    assert host.connection().public["address"] == "198.51.100.1"
-    assert host.connection().protected["token"].ciphertext == "terc3s"
+    assert host.connection.public["address"] == "198.51.100.1"
+    assert authority.lookup("h1").connection.protected["token"].ciphertext == "terc3s"
 
 
 def test_updates_leave_omitted_fields_alone(authority) -> None:
@@ -214,7 +233,7 @@ def test_an_inventory_upserts_its_hosts_and_derives_their_capacity(authority, de
     )
 
     assert [h.host_id for h in first] == ["kvm1", "kvm2"]
-    assert again[0].connection().public["address"] == "192.0.2.99"
+    assert again[0].connection.public["address"] == "192.0.2.99"
     assert (again[0].gpu_count, again[0].pool_id) == (4, "default")
     assert authority.get_host("untouched") is not None
     assert derivation.derived == [["kvm1", "kvm2"], ["kvm1"]]

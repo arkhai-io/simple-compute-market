@@ -47,7 +47,7 @@ def _params(action: str, **overrides) -> AnsibleJobParams:
 
 
 async def _run(mock, params):
-    mock.write_inventory([HOST])
+    mock.write_inventory([HOST]).cleanup()
     run = mock.start_playbook(
         playbook_path=Path("/playbooks/node-access.yaml"),
         inventory_path=Path("/tmp/inventory"),

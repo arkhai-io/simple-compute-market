@@ -220,21 +220,22 @@ class TestEvaluateSettleDryRun:
                 "offering_mode": "vm",
             },
         }
+        # Shaped as the site returns a reservation from reserving: its
+        # placement (resource and host) is withheld; it names its site.
         db.load_capacity_hold.return_value = {
             "capacity_reservation_id": "res-held",
-            "payload": {"resource_id": "r-held"},
+            "payload": {"capacity_reservation_id": "res-held", "site": "default"},
         }
-        capacity = MagicMock()
-        capacity.snapshot = AsyncMock(
-            return_value=[
-                {"resource_id": "r-other", "host_id": "host-other"},
-                {"resource_id": "r-held", "host_id": "host-held"},
-            ]
+        site = MagicMock()
+        site.get_reservation = AsyncMock(
+            return_value={"capacity_reservation_id": "res-held", "host_id": "host-held"}
         )
+        runtime = MagicMock()
+        runtime.site_client.return_value = site
         probe = AsyncMock()
         with patch(
-            "market_storefront.services.admin_settle_service.build_capacity_client",
-            return_value=capacity,
+            "market_storefront.services.admin_settle_service.build_capacity_runtime",
+            return_value=runtime,
         ), patch(
             "market_storefront.services.admin_settle_service._build_provisioning_job_spec",
             new=probe,
@@ -246,11 +247,48 @@ class TestEvaluateSettleDryRun:
                 duration_seconds=3600,
                 negotiation_id="neg-held",
             )
+        runtime.site_client.assert_called_once_with("default")
+        site.get_reservation.assert_awaited_once_with("res-held")
         db.load_capacity_hold.assert_awaited_once_with(negotiation_id="neg-held")
         probe.assert_not_awaited()
         assert result["would_submit"] is True
         assert result["host_id"] == "host-held"
         assert result["capacity_reservation_id"] == "res-held"
+
+    async def test_a_hold_the_site_no_longer_has_previews_no_host(self, svc, db):
+        from market_site_client import SiteCapacityClientError
+
+        db.load_listing.return_value = {
+            **_LISTING_ROW,
+            "listing_resource": {
+                **dict(_LISTING_ROW.get("listing_resource") or {}),
+                "resource_id": "r-held",
+                "offering_mode": "vm",
+            },
+        }
+        db.load_capacity_hold.return_value = {
+            "capacity_reservation_id": "res-gone",
+            "payload": {"capacity_reservation_id": "res-gone", "site": "default"},
+        }
+        site = MagicMock()
+        site.get_reservation = AsyncMock(
+            side_effect=SiteCapacityClientError("not found", status_code=404)
+        )
+        runtime = MagicMock()
+        runtime.site_client.return_value = site
+        with patch(
+            "market_storefront.services.admin_settle_service.build_capacity_runtime",
+            return_value=runtime,
+        ):
+            result = await svc.evaluate_settle_dry_run(
+                escrow_uid=_ESCROW_UID,
+                listing_id=_LISTING_ID,
+                ssh_public_key="",
+                duration_seconds=3600,
+                negotiation_id="neg-gone",
+            )
+        assert result["capacity_reservation_id"] == "res-gone"
+        assert result["host_id"] is None
 
     async def test_a_negotiation_without_a_hold_probes(self, svc, db):
         """With no hold, settle reserves fresh capacity, so the preview probes."""

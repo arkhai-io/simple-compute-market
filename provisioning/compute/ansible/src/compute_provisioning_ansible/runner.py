@@ -16,10 +16,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import select
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 from collections.abc import Callable
@@ -168,6 +170,45 @@ class ConnectivityResult(BaseModel):
     detail: str = Field(
         description="Ansible stdout on success, or the error message on failure."
     )
+
+
+@dataclass
+class MaterializedInventory:
+    """A rendered inventory and the decrypted key files it references.
+
+    The key files hold plaintext private keys, so this object owns their
+    lifetime: ``cleanup()`` removes the inventory and every key file, and it is
+    safe to call more than once. Use it as a context manager, or call
+    ``cleanup()`` in a ``finally``.
+    """
+
+    path: Path
+    key_paths: list[Path] = field(default_factory=list)
+
+    def cleanup(self) -> None:
+        for leftover in (*self.key_paths, self.path):
+            try:
+                leftover.unlink(missing_ok=True)
+            except OSError as exc:
+                logger.warning("Failed to remove %s: %s", leftover, exc)
+
+    def __enter__(self) -> "MaterializedInventory":
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.cleanup()
+
+
+def _write_owner_only(path: Path, text: str) -> None:
+    """Create ``path`` readable only by its owner, then write ``text``.
+
+    The file never exists with wider permissions: it is created with mode
+    0600 and made read-only once written.
+    """
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        handle.write(text)
+    os.chmod(path, 0o400)
 
 
 class AnsibleRunner:
@@ -365,71 +406,63 @@ class AnsibleRunner:
     # Inventory rendering
     # ------------------------------------------------------------------
 
-    def write_inventory(self, hosts: list) -> Path:
-        """Write a temporary Ansible INI inventory file from DB host rows.
+    def write_inventory(self, hosts: list) -> "MaterializedInventory":
+        """Write a temporary Ansible INI inventory for ``InventoryTarget``s.
 
-        Accepts ``InventoryTarget``s built from the host authority's execution
-        hosts with ``inventory_target``.
-        ``embedded``-key hosts have their key material decrypted and written
-        to additional temp files; the INI references those temp paths.
-
-        The returned ``Path`` is a temp file that the caller must delete in
-        a ``finally`` block — identical contract to ``build_vars_file``.
-
-        For ``embedded`` hosts, companion key files are written alongside
-        the inventory file (same temp directory, named
-        ``<host_id>_key``).  They are also deleted when the caller deletes
-        the inventory file's parent directory, or the caller may choose to
-        clean them up individually.
+        A ``path`` key is referenced where it lies. An ``embedded`` key is
+        decrypted just in time into an owner-only temporary file the inventory
+        references. The returned ``MaterializedInventory`` owns the inventory
+        and every such key file: the caller must ``cleanup()`` it in a
+        ``finally`` (or use it as a context manager), and if writing fails
+        part way, what was already written is removed before the error
+        propagates.
         """
-        import tempfile
-        from pathlib import Path as _Path
-
         nonce = uuid.uuid4().hex
-        inv_path = _Path(tempfile.gettempdir()) / f"inventory_{nonce}.ini"
+        directory = Path(tempfile.gettempdir())
+        inventory = MaterializedInventory(path=directory / f"inventory_{nonce}.ini")
+        try:
+            lines = ["[kvm_hosts]"]
+            for host in hosts:
+                if host.ssh_key_type == "path":
+                    key_ref = host.ssh_key_value
+                else:
+                    key_file = directory / f"{host.host_id}_key_{nonce}"
+                    inventory.key_paths.append(key_file)
+                    _write_owner_only(
+                        key_file, self._ssh_codec.decrypt_private_key(host.ssh_key_value)
+                    )
+                    key_ref = str(key_file)
 
-        lines = ["[kvm_hosts]"]
-        companion_key_paths: list[_Path] = []
-
-        for host in hosts:
-            if host.ssh_key_type == "path":
-                key_ref = host.ssh_key_value
-            else:
-                # Decrypt just in time into a companion temp key file.
-                plaintext = self._ssh_codec.decrypt_private_key(host.ssh_key_value)
-                key_file = _Path(tempfile.gettempdir()) / f"{host.host_id}_key_{nonce}"
-                key_file.write_text(plaintext, encoding="utf-8")
-                key_file.chmod(0o400)
-                companion_key_paths.append(key_file)
-                key_ref = str(key_file)
-
-            # public_host is the tenant-facing address; emit it as a host var
-            # so the playbook can use it for the connection strings it returns.
-            public_seg = (
-                f"  public_host={host.public_host}"
-                if getattr(host, "public_host", None)
-                else ""
-            )
-            # ansible_port is emitted for every host, including port 22: the
-            # registry always holds a port, and the inventory states it rather
-            # than leaving 22 implied by an absent variable.
-            lines.append(
-                f"{host.host_id}"
-                f"  ansible_host={host.ssh_host}"
-                f"{public_seg}"
-                f"  ansible_port={host.ssh_port}"
-                f"  ansible_user={host.ssh_user}"
-                f"  ansible_ssh_private_key_file={key_ref}"
-            )
-
-        inv_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+                # public_host is the tenant-facing address; emit it as a host
+                # var so the playbook can use it for the connection strings it
+                # returns.
+                public_seg = (
+                    f"  public_host={host.public_host}"
+                    if getattr(host, "public_host", None)
+                    else ""
+                )
+                # ansible_port is emitted for every host, including port 22:
+                # the registry always holds a port, and the inventory states it
+                # rather than leaving 22 implied by an absent variable.
+                lines.append(
+                    f"{host.host_id}"
+                    f"  ansible_host={host.ssh_host}"
+                    f"{public_seg}"
+                    f"  ansible_port={host.ssh_port}"
+                    f"  ansible_user={host.ssh_user}"
+                    f"  ansible_ssh_private_key_file={key_ref}"
+                )
+            inventory.path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        except BaseException:
+            inventory.cleanup()
+            raise
         logger.debug(
-            "Wrote inventory to %s (%d host(s), %d companion key file(s))",
-            inv_path,
+            "Wrote inventory to %s (%d host(s), %d key file(s))",
+            inventory.path,
             len(hosts),
-            len(companion_key_paths),
+            len(inventory.key_paths),
         )
-        return inv_path
+        return inventory
 
     @staticmethod
     def extract_json_block(text: str, search_start: int) -> Optional[dict]:
@@ -519,6 +552,7 @@ __all__ = [
     "AnsibleRunner",
     "ConnectivityResult",
     "InventoryTarget",
+    "MaterializedInventory",
     "inventory_target",
     "redact_ansible_output",
 ]

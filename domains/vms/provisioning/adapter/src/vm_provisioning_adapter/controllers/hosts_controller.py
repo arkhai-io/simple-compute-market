@@ -28,11 +28,7 @@ from compute_provisioning.hosts import (
     HostResponse,
     HostUpdate,
 )
-from compute_provisioning.hosts.service import (
-    HostAuthority,
-    HostNotFoundError,
-    host_response,
-)
+from compute_provisioning.hosts.service import HostAuthority, HostNotFoundError
 from compute_provisioning_ansible import parse_inventory_ini
 from vm_provisioning_operator.models import VmActionRequest
 from compute_provisioning.jobs import JobSubmitResponse
@@ -84,7 +80,7 @@ class HostController:
             search=search,
             enabled_only=not include_disabled,
         )
-        host_models = [host_response(h) for h in hosts]
+        host_models = list(hosts)
         return HostListResponse(hosts=host_models, total=len(host_models))
 
     # ------------------------------------------------------------------
@@ -118,7 +114,7 @@ class HostController:
                     detail=f"Host '{body.name}' already exists. Use PUT /hosts/{body.name} to update or POST /hosts/{body.name}/enable to re-enable.",
                 )
             raise
-        return host_response(host)
+        return host
 
     # ------------------------------------------------------------------
     # INI import
@@ -163,7 +159,7 @@ class HostController:
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
-        host_models = [host_response(h) for h in hosts]
+        host_models = list(hosts)
         return HostListResponse(hosts=host_models, total=len(host_models))
 
     # ------------------------------------------------------------------
@@ -183,7 +179,7 @@ class HostController:
         h = self._host_service.get_host(host)
         if h is None:
             raise HTTPException(status_code=404, detail=f"Host '{host}' not found")
-        return host_response(h)
+        return h
 
     @router.put(
         "/{host}",
@@ -202,7 +198,7 @@ class HostController:
             raise HTTPException(status_code=404, detail=f"Host '{host}' not found")
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
-        return host_response(h)
+        return h
 
     @router.post(
         "/{host}/enable",
@@ -215,7 +211,7 @@ class HostController:
             h = self._host_service.enable_host(host)
         except HostNotFoundError:
             raise HTTPException(status_code=404, detail=f"Host '{host}' not found")
-        return host_response(h)
+        return h
 
     @router.post(
         "/{host}/disable",
@@ -233,7 +229,7 @@ class HostController:
             h = self._host_service.disable_host(host)
         except HostNotFoundError:
             raise HTTPException(status_code=404, detail=f"Host '{host}' not found")
-        return host_response(h)
+        return h
 
     # ------------------------------------------------------------------
     # Capacity

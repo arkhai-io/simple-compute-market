@@ -21,7 +21,15 @@ from compute_provisioning.jobs import JobFailure, JobRun, JobSuccess
 from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams, AnsibleRunResult
 from vm_provisioning_adapter.services.ansible_job_executor import AnsibleJobExecutor
 from compute_provisioning_ansible.runner import inventory_target
-from compute_provisioning_ansible.runner import AnsibleError, AnsibleResult
+from compute_provisioning_ansible import SshConnectionCodec
+from compute_provisioning_ansible.runner import (
+    AnsibleError,
+    AnsibleResult,
+    AnsibleRunner,
+    MaterializedInventory,
+)
+from cryptography.fernet import Fernet
+from market_config import encrypt_secret
 
 
 def _make_executor(**settings_overrides) -> AnsibleJobExecutor:
@@ -514,7 +522,9 @@ _CREATE_OUTPUT = AnsibleRunResult(
 def _runner(*, failure: AnsibleError | None = None):
     runner = MagicMock()
     runner.build_vars_file.return_value = Path("/tmp/vars.yml")
-    runner.write_inventory.return_value = Path("/tmp/does-not-exist.ini")
+    runner.write_inventory.return_value = MaterializedInventory(
+        path=Path("/tmp/does-not-exist.ini")
+    )
     runner.start_playbook.return_value = SimpleNamespace(process_id=4242)
 
     async def wait(run, timeout_seconds, log_callback=None):
@@ -643,3 +653,51 @@ def test_an_embedded_key_reaches_the_runner_still_protected() -> None:
         2201,
     )
     assert "gAAAA-token" not in repr(target)
+
+
+@pytest.mark.parametrize("ending", ["success", "failure", "timeout", "cancelled"])
+def test_a_decrypted_key_exists_only_while_its_playbook_runs(ending) -> None:
+    """Whatever ends the run, the decrypted key and the inventory are removed."""
+    key = Fernet.generate_key().decode()
+    runner = _runner()
+    runner.write_inventory = AnsibleRunner(
+        SimpleNamespace(), ssh_codec=SshConnectionCodec(key)
+    ).write_inventory
+    seen: dict = {}
+
+    async def wait(run, timeout_seconds, log_callback=None):
+        inventory_path = runner.start_playbook.call_args.kwargs["inventory_path"]
+        reference = inventory_path.read_text().split("ansible_ssh_private_key_file=")[1]
+        seen["inventory"] = inventory_path
+        seen["key"] = Path(reference.split()[0])
+        seen["key existed"] = seen["key"].exists()
+        if ending == "failure":
+            raise AnsibleError("boom", stdout="", stderr="")
+        if ending == "timeout":
+            raise AnsibleError("Playbook timed out", stdout="", stderr="")
+        if ending == "cancelled":
+            raise asyncio.CancelledError()
+        return AnsibleResult(stdout="", stderr="", process_id=4242)
+
+    runner.wait_for_playbook = wait
+    host = ExecutionHost(
+        host_id="bm1",
+        pool_id="default",
+        connection=ConnectionEnvelope(
+            kind="ssh",
+            version=1,
+            public={"ssh_host": "10.0.1.1", "ssh_port": 22, "ssh_user": "ops", "key_path": None},
+            protected={"private_key": ProtectedValue("fernet-v1", encrypt_secret("PEM", key))},
+        ),
+    )
+    run, _, _ = _run(host=host)
+
+    if ending == "cancelled":
+        with pytest.raises(asyncio.CancelledError):
+            asyncio.run(_executor_over(runner).execute(run))
+    else:
+        asyncio.run(_executor_over(runner).execute(run))
+
+    assert seen["key existed"]
+    assert not seen["key"].exists()
+    assert not seen["inventory"].exists()

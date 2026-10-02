@@ -26,15 +26,22 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import logging
+import os
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 from unittest.mock import MagicMock
 
 from compute_provisioning.jobs.executor_mock import MockRule, MockRuleSet
-from compute_provisioning_ansible.runner import ConnectivityResult
+from compute_provisioning_ansible.runner import (
+    AnsibleError,
+    AnsibleResult,
+    AnsibleRun,
+    ConnectivityResult,
+    MaterializedInventory,
+)
 from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams, AnsibleRunResult
-from compute_provisioning_ansible.runner import AnsibleError, AnsibleResult, AnsibleRun
 
 if TYPE_CHECKING:
     from vm_provisioning_adapter.models.system_model import EvaluateJobResponse
@@ -197,14 +204,12 @@ class MockAnsibleService:
             detail="mock: connectivity check always succeeds",
         )
 
-    def write_inventory(self, hosts: list) -> "Path":
-        """Return a minimal temp file in mock mode; Ansible is never called."""
-        import tempfile
-        from pathlib import Path
-
-        p = Path(tempfile.gettempdir()) / "mock_inventory.ini"
-        p.write_text("[kvm_hosts]\n", encoding="utf-8")
-        return p
+    def write_inventory(self, hosts: list) -> MaterializedInventory:
+        """A minimal inventory of the caller's own in mock mode; Ansible never runs."""
+        descriptor, name = tempfile.mkstemp(prefix="mock_inventory_", suffix=".ini")
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write("[kvm_hosts]\n")
+        return MaterializedInventory(path=Path(name))
 
 
 # ---------------------------------------------------------------------------

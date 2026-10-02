@@ -21,8 +21,7 @@ import os
 import signal
 from collections.abc import Callable, Iterable, Mapping
 
-from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 from compute_provisioning.contracts import (
     CredentialEnvelope,
@@ -44,6 +43,17 @@ logger = logging.getLogger(__name__)
 # credentials are reported.
 _CREDENTIAL_ROLES = ("root", "tenant")
 _CREDENTIAL_FIELDS = ("password", "ssh_commands", "ssh_key_path_host", "key_type")
+
+
+@runtime_checkable
+class ReservesVariableKeys(Protocol):
+    """An executor that can say which variable names its runs reserve.
+
+    Not part of ``JobExecutor``: it is a capability of Ansible execution, which
+    a caller checks for before relying on it.
+    """
+
+    def reserved_var_keys(self, params: AnsibleJobParams) -> frozenset[str]: ...
 
 
 class AnsibleJobExecutor:
@@ -92,7 +102,9 @@ class AnsibleJobExecutor:
         host = inventory_target(run.host)
         runner = self._runner
         vars_path = runner.build_vars_file(params)
-        inventory_path = runner.write_inventory([host])
+        # Owns the inventory and any decrypted key file; removed in the finally
+        # below whether the run succeeds, fails, times out, or is cancelled.
+        inventory = runner.write_inventory([host])
         try:
             # Buyers may reach the host on a different network than the
             # provisioner does; with no public address configured, the
@@ -100,7 +112,7 @@ class AnsibleJobExecutor:
             tenant_address = host.public_host or host.ssh_host
             playbook_run = runner.start_playbook(
                 playbook_path=params.playbook_path or self._playbook_path,
-                inventory_path=inventory_path,
+                inventory_path=inventory.path,
                 extra_vars_path=vars_path,
                 limit=params.host_id,
             )
@@ -144,10 +156,7 @@ class AnsibleJobExecutor:
                 logs=self.redact(_joined(run_result.stdout, run_result.stderr)),
             )
         finally:
-            try:
-                Path(inventory_path).unlink(missing_ok=True)
-            except Exception as exc:
-                logger.warning("Failed to remove temp inventory %s: %s", inventory_path, exc)
+            inventory.cleanup()
 
     async def cancel(self, handle: Mapping[str, Any]) -> None:
         pid = int(handle["pid"])
@@ -351,4 +360,4 @@ def _roles(auth: Mapping[str, Any]) -> Iterable[tuple[str, Mapping[str, Any]]]:
             yield role, role_data
 
 
-__all__ = ["AnsibleJobExecutor"]
+__all__ = ["AnsibleJobExecutor", "ReservesVariableKeys"]

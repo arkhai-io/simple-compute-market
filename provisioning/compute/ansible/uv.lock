@@ -44,6 +44,7 @@ dependencies = [
     { name = "arkhai-kit-site" },
     { name = "httpx" },
     { name = "pydantic" },
+    { name = "sqlalchemy" },
 ]
 wheels = [
     { path = "arkhai_compute_provisioning-0.8.0-py3-none-any.whl" },
@@ -62,6 +63,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "cryptography" },
     { name = "pytest" },
 ]
 
@@ -74,7 +76,10 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=8.3.4" }]
+dev = [
+    { name = "cryptography", specifier = ">=42.0" },
+    { name = "pytest", specifier = ">=8.3.4" },
+]
 
 [[package]]
 name = "arkhai-core"

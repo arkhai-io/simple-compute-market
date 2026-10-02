@@ -3,8 +3,12 @@
 It owns each host's identity, pool, enabled state, and connection envelope, the
 lookup made immediately before execution, and applying an imported inventory. It
 knows no connection kind: a submitted connection is validated, and its secrets
-protected, by the kind's codec, and what it stores and returns is the resulting
-envelope, whose protected values it never decrypts or discloses.
+protected, by the kind's codec, and what it stores is the resulting envelope.
+
+Every ordinary read returns a ``HostResponse``, which names each protected value
+and its scheme but never carries its ciphertext; the persistence row never leaves
+this module. Only ``lookup``, the read made immediately before execution, returns
+the full protected envelope, inside an ``ExecutionHost``.
 """
 
 from __future__ import annotations
@@ -67,8 +71,8 @@ class InventoryHost:
     pool_id: str = DEFAULT_POOL_ID
 
 
-def host_response(host: Host) -> HostResponse:
-    """A host as every read returns it: protected values by scheme only."""
+def _view(host: Host) -> HostResponse:
+    """A host as every ordinary read returns it: protected values by scheme only."""
     connection = host.connection()
     return HostResponse(
         host_id=host.host_id,
@@ -109,7 +113,7 @@ class HostAuthority:
 
     def list_hosts(
         self, search: Optional[str] = None, enabled_only: bool = True
-    ) -> list[Host]:
+    ) -> list[HostResponse]:
         """Hosts ordered by ``host_id``, optionally only enabled ones, optionally
         filtered by a case-insensitive substring of ``host_id``."""
         with self._session_factory() as db:
@@ -118,17 +122,12 @@ class HostAuthority:
                 query = query.filter(Host.enabled.is_(True))
             if search:
                 query = query.filter(Host.host_id.ilike(f"%{search}%"))
-            hosts = query.order_by(Host.host_id).all()
-            for host in hosts:
-                db.expunge(host)
-            return hosts
+            return [_view(host) for host in query.order_by(Host.host_id).all()]
 
-    def get_host(self, host_id: str) -> Optional[Host]:
+    def get_host(self, host_id: str) -> Optional[HostResponse]:
         with self._session_factory() as db:
             host = db.query(Host).filter(Host.host_id == host_id).one_or_none()
-            if host is not None:
-                db.expunge(host)
-            return host
+            return _view(host) if host is not None else None
 
     def lookup(self, host_id: str) -> Optional[ExecutionHost]:
         """The host a job runs against, read immediately before execution.
@@ -136,18 +135,19 @@ class HostAuthority:
         ``None`` when no such host is registered: a job then fails before any
         executor runs, because there is no fallback inventory to run against.
         """
-        host = self.get_host(host_id)
-        if host is None:
-            return None
-        return ExecutionHost(
-            host_id=host.host_id, pool_id=host.pool_id, connection=host.connection()
-        )
+        with self._session_factory() as db:
+            host = db.query(Host).filter(Host.host_id == host_id).one_or_none()
+            if host is None:
+                return None
+            return ExecutionHost(
+                host_id=host.host_id, pool_id=host.pool_id, connection=host.connection()
+            )
 
     # ------------------------------------------------------------------
     # Writes
     # ------------------------------------------------------------------
 
-    def register_host(self, data: HostCreate) -> Host:
+    def register_host(self, data: HostCreate) -> HostResponse:
         connection = self._build(data.connection, previous=None)
         pool_id = data.pool_id or DEFAULT_POOL_ID
         host = Host(
@@ -163,10 +163,9 @@ class HostAuthority:
             db.add(host)
             db.commit()
             db.refresh(host)
-            db.expunge(host)
-            return host
+            return _view(host)
 
-    def update_host(self, host_id: str, data: HostUpdate) -> Host:
+    def update_host(self, host_id: str, data: HostUpdate) -> HostResponse:
         with self._session_factory() as db:
             host = self._require_host(db, host_id)
             if data.connection is not None:
@@ -183,18 +182,17 @@ class HostAuthority:
                 self._move_to_pool(db, host, data.pool_id)
             db.commit()
             db.refresh(host)
-            db.expunge(host)
-            return host
+            return _view(host)
 
-    def enable_host(self, host_id: str) -> Host:
+    def enable_host(self, host_id: str) -> HostResponse:
         return self._set_enabled(host_id, True)
 
-    def disable_host(self, host_id: str) -> Host:
+    def disable_host(self, host_id: str) -> HostResponse:
         """Exclude a host from new work; it is never deleted, so job history
         naming it stays resolvable."""
         return self._set_enabled(host_id, False)
 
-    def apply_inventory(self, entries: Sequence[InventoryHost]) -> list[Host]:
+    def apply_inventory(self, entries: Sequence[InventoryHost]) -> list[HostResponse]:
         """Upsert the hosts an imported inventory declares; leave the rest alone.
 
         Idempotent for the same input. Capacity is derived for the upserted
@@ -226,13 +224,12 @@ class HostAuthority:
             self._capacity_derivation.derive_in_session(db, applied)
             db.commit()
 
-        hosts: list[Host] = []
+        hosts: list[HostResponse] = []
         with self._session_factory() as db:
             for host_id in applied:
                 host = db.query(Host).filter(Host.host_id == host_id).one_or_none()
                 if host is not None:
-                    db.expunge(host)
-                    hosts.append(host)
+                    hosts.append(_view(host))
         logger.info("apply_inventory: applied %d host(s)", len(hosts))
         return hosts
 
@@ -257,14 +254,13 @@ class HostAuthority:
             hook(db, host.host_id, host.pool_id, pool_id)
         host.pool_id = pool_id
 
-    def _set_enabled(self, host_id: str, enabled: bool) -> Host:
+    def _set_enabled(self, host_id: str, enabled: bool) -> HostResponse:
         with self._session_factory() as db:
             host = self._require_host(db, host_id)
             host.enabled = enabled
             db.commit()
             db.refresh(host)
-            db.expunge(host)
-            return host
+            return _view(host)
 
     @staticmethod
     def _require_host(db: Session, host_id: str) -> Host:
@@ -285,5 +281,4 @@ __all__ = [
     "HostNotFoundError",
     "InventoryHost",
     "PoolChangeHook",
-    "host_response",
 ]

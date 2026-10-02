@@ -25,7 +25,8 @@ from market_storefront.utils.escrow_verification import (  # noqa: E402
     verify_escrow_for_settlement,
 )
 from market_storefront.services.fulfillment_service import _build_provisioning_job_spec  # noqa: E402
-from market_storefront.services.capacity_client import build_capacity_client  # noqa: E402
+from market_site_client import SiteCapacityClientError  # noqa: E402
+from market_storefront.services.capacity_client import build_capacity_runtime  # noqa: E402
 from market_storefront.services.vm_job_spec_service import (  # noqa: E402
     compute_capacity_claim_from_order,
 )
@@ -181,8 +182,9 @@ class AdminSettleService:
     ) -> tuple[str, str | None] | None:
         """The reservation and host a negotiation's acceptance hold pins, if any.
 
-        Reservations are opaque at the site boundary, so the host is read from
-        the site's resource snapshot for the held resource.
+        The site keeps a reservation's placement out of what reserving returns,
+        so the stored hold names only its reservation and site; the host is read
+        from the site's own record of that reservation.
         """
         if not negotiation_id:
             return None
@@ -195,16 +197,16 @@ class AdminSettleService:
             or payload.get("capacity_reservation_id")
             or ""
         )
-        resource_id = payload.get("resource_id")
+        site_id = payload.get("site")
         host_id = None
-        if resource_id:
-            snapshot = await build_capacity_client(lambda: self._db).snapshot()
-            host_id = next(
-                (
-                    row.get("host_id")
-                    for row in snapshot
-                    if row.get("resource_id") == resource_id
-                ),
-                None,
-            )
+        if reservation_id and site_id:
+            try:
+                reservation = await build_capacity_runtime(
+                    lambda: self._db
+                ).site_client(site_id).get_reservation(reservation_id)
+            except SiteCapacityClientError as exc:
+                if exc.status_code != 404:
+                    raise
+                reservation = None
+            host_id = (reservation or {}).get("host_id")
         return reservation_id, host_id

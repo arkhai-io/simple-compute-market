@@ -480,6 +480,11 @@ code that is already correctly covered.
 
 ## 5B. Provisioning execution boundary
 
+Maintainer rulings that review findings have contested are recorded in `design.md`,
+"Maintainer rulings for review": plaintext secret submission (option A) stands, with
+on-wire protection out of scope; `ARCHITECTURE.md` describes the target ownership
+because the branch merges whole.
+
 Decisions: "Compute provisioning is a family kit", "Provisioning execution leaves the VM
 adapter", "Pre-release wire and schema changes are accepted", "Job and host authority
 shape". Steps run in the order listed (5B.2a before 5B.3). Each is behaviour-neutral
@@ -746,9 +751,8 @@ re-verifies them by grep before each move.
         `TestEmbeddedKey` in `test_hosts_api.py` (protected on registration, returned by
         scheme only, decryptable only with the service's key). The integration suite's
         Fernet key is a deterministic all-zero development value.
-      - `compute_provisioning` does not declare `sqlalchemy` directly: it arrives through
-        the resource-pool and site kits, and declaring it would change the VM storefront
-        lock, which needs its own environment to relock.
+      - `compute_provisioning` did not declare `sqlalchemy` directly at first; corrected
+        after the second implementation review (see "Review round 2" under 5B.6).
       - Validation: `provisioning/compute` 187; the distribution 16; provisioning service
         926 (unit and integration); bare-metal adapter 8; the VM adapter's `make test`
         file 39; e2e unit 236 with the known pre-existing failure.
@@ -806,6 +810,15 @@ re-verifies them by grep before each move.
       - Validation: provisioning service 930; `provisioning/compute` 187; bare-metal
         adapter 8; the VM adapter's `make test` file 39; e2e unit 236 with the known
         pre-existing failure.
+      Corrected after the VM lane (2026-10-02): the engine routed by the contract's
+      `action_kind`, so a VM teardown (contract action `teardown`, executor action
+      `vm_remove`) found no executor. `JobRecord.executor_action` now holds the
+      executed action the engine routes by and `JobRun.action` carries; the job
+      migration fills it from parameters and labels converted results by it. Tests:
+      `test_job_authority.py` adds a contract action running as a different
+      executor action, and `test_fulfillment_api.py`'s teardown test now runs the
+      dispatched job to success (it fails with the lane's error under the old
+      routing).
       Engine:
       - `compute_provisioning/jobs/engine.py`: `JobEngine` (submission with operation
         and contract deduplication, `JobRetryPolicy` timing and counts, the retry
@@ -881,6 +894,55 @@ re-verifies them by grep before each move.
         reach an inventory, JSON extraction, redaction); the streaming-redaction test
         listens on the runner's logger. Validation: the distribution 21; provisioning
         service 928; bare-metal adapter 8; the VM adapter's `make test` file 39.
+      Review round 2, 2026-10-02 (fixes before slice B; maintainer rulings on the
+      contested findings are in `design.md`, "Maintainer rulings for review"):
+      - VM stage 08a/08c: introduced by Section 4 (checkpoint 1's evaluate-settle fix),
+        not pre-existing. The preview looked up the held reservation's host by the hold's
+        `resource_id`, which the site strips from what reserving returns, so it always
+        previewed no host. `market_storefront/services/admin_settle_service.py` now reads
+        the reservation from the site the hold names (`site_client(site)
+        .get_reservation`), whose record carries the host it pins;
+        `test_admin_settle_service.py`'s held hold is shaped as the site returns it, and
+        a reservation the site no longer has previews no host (both fail against the
+        previous code). VM storefront unit 1063 (1 skipped); settle and admin
+        integration 58.
+      - Host reads: every ordinary `HostAuthority` read (`get_host`, `list_hosts`,
+        register, update, enable, disable, `apply_inventory`) returns `HostResponse`,
+        protected values by scheme only; the row never leaves `hosts/service.py`, and
+        only `lookup` returns the protected envelope. `host_response` is private;
+        `test_no_ordinary_read_carries_a_protected_value` covers every read.
+      - Transient keys: `write_inventory` returns `MaterializedInventory` (the inventory
+        and every decrypted key file, `cleanup()`, a context manager); the executor and
+        the connectivity check clean it up in `finally`; key files are created
+        owner-only (0600, then 0400) rather than restricted after writing; a failure part
+        way removes what was written; the VM mock writes a unique inventory per call.
+        Tests: the distribution's `test_runner.py` (exists during use, cleanup, partial
+        failure, creation mode), `test_ansible_job_executor.py` (gone after success,
+        failure, timeout, and cancellation), `test_host_operations_service.py` (gone
+        after a connectivity probe). A key file the earlier runner test leaked in this
+        environment was found and removed; reruns leave none.
+      - Job transitions: `JobEngine._transition` and `cancel_job` are conditional
+        `UPDATE`s on the expected status; `test_job_authority.py` adds two engines on one
+        SQLite file (two worker processes) and a stale session, and its pre-handle
+        cancellation test waits on the executor's cancel signal instead of
+        `asyncio.sleep(0)`.
+      - Spec deltas: the executor's "receives job-done notification"
+        (physical-provisioning) and the mock mechanism's "job-done events"
+        (market-composition) are removed.
+      - Packaging: `compute_provisioning` declares `sqlalchemy>=2.0`; the distribution's
+        dev group declares `cryptography`. Relocked: `provisioning/compute`,
+        `provisioning/compute/ansible`, `domains/vms/provisioning/client`, both adapters,
+        `domains/bare_metal/storefront`, `provisioning/compute/service`, `e2e-tests`.
+        `domains/vms/storefront` could not be relocked here (its PyTorch index redirects
+        to a host this environment cannot reach); the maintainer relocks it, and until
+        then `make check-packaging` reports it.
+      - `reserved_var_keys`: `ReservesVariableKeys` (in `ansible_job_executor.py`) is an
+        explicit capability the job service checks; an executor without it is refused
+        with a `TypeError` naming the route. It moves into the VM codec in slice B.
+      - Validation: `provisioning/compute` 198; the distribution 24; provisioning service
+        935; bare-metal adapter 8; the VM adapter's `make test` file 39; e2e unit 236 with
+        the known pre-existing failure, and every e2e and smoke module collects (167);
+        comment hygiene passes.
 - [ ] 5B.7 Domain codecs. Behaviour-neutral on the wire.
       `vm_provisioning_adapter/codec.py` (VM vars, golden-image credentials, VM facts,
       VM failure classification, credential meaning, VM parameter building) and

@@ -307,6 +307,6 @@ class TestDispatchRequiresARegisteredHost:
         (rendered_hosts,), _ = fake_ansible.write_inventory.call_args
         assert [host.host_id for host in rendered_hosts] == ["registered-kvm"]
         start = fake_ansible.start_playbook.call_args.kwargs
-        assert start["inventory_path"] == fake_ansible.write_inventory.return_value
+        assert start["inventory_path"] == fake_ansible.write_inventory.return_value.path
         # No public address is configured, so tenants get the connection address.
         assert final.result.value["host_ip"] == "192.0.2.10"
