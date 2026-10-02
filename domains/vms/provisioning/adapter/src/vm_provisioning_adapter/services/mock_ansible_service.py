@@ -31,14 +31,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 from unittest.mock import MagicMock
 
-from compute_provisioning.executor_mock import MockRule, MockRuleSet
-from vm_provisioning_adapter.models.ansible import ConnectivityResult
+from compute_provisioning.jobs.executor_mock import MockRule, MockRuleSet
+from compute_provisioning_ansible.runner import ConnectivityResult
 from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams, AnsibleRunResult
-from vm_provisioning_adapter.services.ansible_service import (
-    AnsibleError,
-    AnsibleResult,
-    AnsibleRun,
-)
+from compute_provisioning_ansible.runner import AnsibleError, AnsibleResult, AnsibleRun
 
 if TYPE_CHECKING:
     from vm_provisioning_adapter.models.system_model import EvaluateJobResponse
@@ -220,7 +216,7 @@ class ProgrammableMockAnsibleService(MockAnsibleService):
     """``MockAnsibleService`` with when→then rules.
 
     Rules, gates, and job-done notification come from the compute mock mechanism
-    (``compute_provisioning.executor_mock``); this class supplies the Ansible
+    (``compute_provisioning.jobs.executor_mock``); this class supplies the Ansible
     surface the job service calls and the adapter's default output. Each adapter
     constructs its own instance, so a rule installed for one adapter never matches
     another adapter's jobs.
@@ -248,13 +244,6 @@ class ProgrammableMockAnsibleService(MockAnsibleService):
 
     def resume_rule(self, rule_id: str) -> bool:
         return self.rules.resume(rule_id)
-
-    def notify_job_done(self, job_id: str) -> None:
-        """Called by the job service when a job reaches a terminal state."""
-        self.rules.notify_job_done(job_id)
-
-    def get_or_create_job_event(self, job_id: str) -> asyncio.Event:
-        return self.rules.job_done_event(job_id)
 
     def evaluate_job(
         self,

@@ -5,6 +5,7 @@ transitional provisioner still lives under ``domains/vms``.
 """
 
 from __future__ import annotations
+from compute_provisioning_ansible import ssh_connection
 
 import asyncio
 from datetime import datetime, timedelta, timezone
@@ -21,10 +22,10 @@ from arkhai_bare_metal import (
 )
 from compute_provisioning import ComputeProvisioningError
 from market_site.ledger import ALLOCATION_MODE_EXCLUSIVE
-from compute_provisioning_service.db.models import AnsibleJob
-from vm_provisioning_adapter.services.ansible_service import AnsibleResult
-from compute_provisioning_service.services.async_job_queue import AsyncJobQueue
-from vm_provisioning_operator.models import HostCreate
+from compute_provisioning_service.db.models import JobRecord
+from compute_provisioning_ansible.runner import AnsibleResult
+from compute_provisioning.jobs.queue import AsyncJobQueue
+from compute_provisioning.hosts import HostCreate
 
 
 GRANT_STDOUT = """\
@@ -70,10 +71,7 @@ def _ensure_bare_metal_host(name: str = "bm-node-1", *, enabled: bool = True) ->
         host_service.register_host(
             HostCreate(
                 host_id=name,
-                ssh_host="192.0.2.10",
-                ssh_user="root",
-                ssh_key_type="path",
-                ssh_key_value="/fake/id_ed25519",
+                connection=ssh_connection(ssh_host="192.0.2.10", ssh_user="root", key_path="/fake/id_ed25519"),
                 gpu_count=0,
                 enabled=enabled,
             ),
@@ -159,7 +157,7 @@ async def test_register_bare_metal_lease_uses_bare_metal_endpoint_and_view(
 
     session_factory = _container_module.resolved_session_factory
     with session_factory() as db:
-        job = db.get(AnsibleJob, reservation["create_job_id"])
+        job = db.get(JobRecord, reservation["create_job_id"])
         assert job is not None
         assert job.params["vm_action"] == NODE_GRANT_ACCESS_ACTION
         assert job.params["host_id"] == "bm-node-1"
@@ -238,7 +236,7 @@ async def test_generic_market_lease_terminate_dispatches_bare_metal_reclaim(
 
     session_factory = _container_module.resolved_session_factory
     with session_factory() as db:
-        job = db.get(AnsibleJob, reservation["release_job_id"])
+        job = db.get(JobRecord, reservation["release_job_id"])
         assert job is not None
         assert job.params["vm_action"] == NODE_RECLAIM_ACCESS_ACTION
         assert job.params["host_id"] == "bm-node-1"
@@ -286,9 +284,10 @@ async def test_bare_metal_grant_and_reclaim_jobs_succeed_with_executor_playbook(
     )
 
     assert grant_job.status == "succeeded"
-    assert grant_job.result["action"] == NODE_GRANT_ACCESS_ACTION
-    assert grant_job.result["status"] == "granted"
-    assert grant_job.result["host"] == "bm-node-1"
+    assert grant_job.result.result_kind == "bare_metal_access"
+    assert grant_job.result.value["action"] == NODE_GRANT_ACCESS_ACTION
+    assert grant_job.result.value["status"] == "granted"
+    assert grant_job.result.value["host"] == "bm-node-1"
     first_playbook = fake_ansible.start_playbook.call_args_list[0].kwargs
     assert first_playbook["playbook_path"].name == "bare-metal-node-access.yml"
     assert first_playbook["limit"] == "bm-node-1"
@@ -305,9 +304,9 @@ async def test_bare_metal_grant_and_reclaim_jobs_succeed_with_executor_playbook(
     )
 
     assert reclaim_job.status == "succeeded"
-    assert reclaim_job.result["action"] == NODE_RECLAIM_ACCESS_ACTION
-    assert reclaim_job.result["status"] == "reclaimed"
-    assert reclaim_job.result["host"] == "bm-node-1"
+    assert reclaim_job.result.value["action"] == NODE_RECLAIM_ACCESS_ACTION
+    assert reclaim_job.result.value["status"] == "reclaimed"
+    assert reclaim_job.result.value["host"] == "bm-node-1"
     second_playbook = fake_ansible.start_playbook.call_args_list[1].kwargs
     assert second_playbook["playbook_path"].name == "bare-metal-node-access.yml"
     assert second_playbook["limit"] == "bm-node-1"
@@ -324,7 +323,7 @@ async def test_register_bare_metal_lease_for_unknown_machine_does_not_queue_job(
     reserved = _reserve_bare_metal("escrow-bm-api-unknown")
     session_factory = _container_module.resolved_session_factory
     with session_factory() as db:
-        job_count_before = db.query(AnsibleJob).count()
+        job_count_before = db.query(JobRecord).count()
 
     with pytest.raises(ComputeProvisioningError) as exc_info:
         await bare_metal_leases.register_lease(
@@ -339,4 +338,4 @@ async def test_register_bare_metal_lease_for_unknown_machine_does_not_queue_job(
 
     assert exc_info.value.status_code == 404
     with session_factory() as db:
-        assert db.query(AnsibleJob).count() == job_count_before
+        assert db.query(JobRecord).count() == job_count_before

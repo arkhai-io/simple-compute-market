@@ -3,24 +3,35 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from compute_provisioning.hosts import ConnectionEnvelope, ExecutionHost
+from compute_provisioning.hosts.service import HostNotFoundError
 from compute_provisioning_service.db.models import Host
-from vm_provisioning_adapter.models.ansible import ConnectivityResult
-from vm_provisioning_operator.models import JobSubmitResponse, VmActionRequest
+from compute_provisioning_ansible.runner import ConnectivityResult
+from vm_provisioning_operator.models import VmActionRequest
+from compute_provisioning.jobs import JobSubmitResponse
 from vm_provisioning_adapter.services.host_operations_service import HostOperationsService
-from vm_provisioning_adapter.services.host_service import HostNotFoundError
+
+_CONNECTION = ConnectionEnvelope(
+    kind="ssh",
+    version=1,
+    public={
+        "ssh_host": "10.0.0.1",
+        "public_host": "host.example",
+        "ssh_port": 22,
+        "ssh_user": "ubuntu",
+        "key_path": "/tmp/key",
+    },
+)
 
 
 def _host() -> Host:
-    return Host(
-        host_id="kvm1",
-        ssh_host="10.0.0.1",
-        public_host="host.example",
-        ssh_user="ubuntu",
-        ssh_key_type="path",
-        ssh_key_value="/tmp/key",
-        gpu_count=1,
-        enabled=True,
-    )
+    host = Host(host_id="kvm1", gpu_count=1, enabled=True)
+    host.set_connection(_CONNECTION)
+    return host
+
+
+def _execution_host() -> ExecutionHost:
+    return ExecutionHost(host_id="kvm1", pool_id="default", connection=_CONNECTION)
 
 
 @pytest.mark.asyncio
@@ -73,7 +84,7 @@ async def test_check_connectivity_renders_temp_inventory_and_cleans_it_up(tmp_pa
         return_value=ConnectivityResult(host="kvm1", reachable=True, detail="pong")
     )
     host_service = MagicMock()
-    host_service.get_host.return_value = _host()
+    host_service.lookup.return_value = _execution_host()
     service = HostOperationsService(
         ansible_service=ansible_service,
         host_service=host_service,
@@ -84,6 +95,8 @@ async def test_check_connectivity_renders_temp_inventory_and_cleans_it_up(tmp_pa
     result = await service.check_connectivity(host="kvm1")
 
     assert result.reachable is True
-    ansible_service.write_inventory.assert_called_once()
+    (target,) = ansible_service.write_inventory.call_args.args[0]
+    assert (target.host_id, target.ssh_host, target.ssh_user) == ("kvm1", "10.0.0.1", "ubuntu")
+    assert (target.ssh_key_type, target.ssh_key_value) == ("path", "/tmp/key")
     ansible_service.check_connectivity_with_inventory.assert_awaited_once_with("kvm1", inv_path)
     assert not inv_path.exists()

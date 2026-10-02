@@ -21,7 +21,8 @@ from arkhai_bare_metal import (
     NODE_RECLAIM_ACCESS_ACTION,
 )
 from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
-from vm_provisioning_adapter.services.ansible_service import AnsibleResult, AnsibleService
+from vm_provisioning_adapter.services.ansible_service import AnsibleService
+from compute_provisioning_ansible.runner import AnsibleResult
 
 
 # ---------------------------------------------------------------------------
@@ -516,7 +517,7 @@ class TestTenantAddress:
 
 class TestRedactAnsibleOutput:
     def test_redacts_json_password_field(self):
-        from vm_provisioning_adapter.services.ansible_service import redact_ansible_output
+        from compute_provisioning_ansible.runner import redact_ansible_output
 
         result = redact_ansible_output('"password": "supersecret"')
         assert "supersecret" not in result
@@ -526,20 +527,20 @@ class TestRedactAnsibleOutput:
         _extract_ansible_json parses -- see json_service.py's
         TestRedactLogs for the full rationale) can render its JSON string
         value backslash-escaped inside the outer task result."""
-        from vm_provisioning_adapter.services.ansible_service import redact_ansible_output
+        from compute_provisioning_ansible.runner import redact_ansible_output
 
         text = 'ok: [h] => {"msg": "{\\n    \\"password\\": \\"aB3xY9zQ1mK7pL2n\\"\\n}"}'
         result = redact_ansible_output(text)
         assert "aB3xY9zQ1mK7pL2n" not in result
 
     def test_redacts_yaml_password_line(self):
-        from vm_provisioning_adapter.services.ansible_service import redact_ansible_output
+        from compute_provisioning_ansible.runner import redact_ansible_output
 
         result = redact_ansible_output("password: mysecretpassword")
         assert "mysecretpassword" not in result
 
     def test_empty_and_none_returned_unchanged(self):
-        from vm_provisioning_adapter.services.ansible_service import redact_ansible_output
+        from compute_provisioning_ansible.runner import redact_ansible_output
 
         assert redact_ansible_output("") == ""
         assert redact_ansible_output(None) is None
@@ -570,7 +571,7 @@ class TestStreamingDebugLoggingIsRedacted:
         import sys as _sys
         from pathlib import Path
 
-        from vm_provisioning_adapter.services.ansible_service import AnsibleRun
+        from compute_provisioning_ansible.runner import AnsibleRun
 
         svc = _make_service()
         process = subprocess.Popen(
@@ -586,7 +587,7 @@ class TestStreamingDebugLoggingIsRedacted:
         )
 
         caplog.set_level(
-            logging.DEBUG, logger="vm_provisioning_adapter.services.ansible_service",
+            logging.DEBUG, logger="compute_provisioning_ansible.runner",
         )
 
         asyncio.run(svc.wait_for_playbook(run, timeout_seconds=5))

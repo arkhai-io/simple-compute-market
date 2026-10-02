@@ -11,9 +11,9 @@ from arkhai_bare_metal import (
     NODE_GRANT_ACCESS_ACTION,
     NODE_RECLAIM_ACCESS_ACTION,
 )
-from compute_provisioning.executor_mock import MockRule
+from compute_provisioning.jobs.executor_mock import MockRule
 from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
-from vm_provisioning_adapter.services.ansible_service import AnsibleError
+from compute_provisioning_ansible.runner import AnsibleError
 from vm_provisioning_adapter.services.ansible_job_executor import AnsibleJobExecutor
 from vm_provisioning_adapter.services.mock_ansible_service import (
     ProgrammableMockAnsibleService,

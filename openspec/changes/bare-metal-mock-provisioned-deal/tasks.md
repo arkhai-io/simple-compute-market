@@ -648,34 +648,43 @@ re-verifies them by grep before each move.
       first lock was created with `uv lock --find-links ../../../.dist`, since
       `scripts/uv_project.py lock` refreshes only an existing lock. Validation: the
       distribution 9; `provisioning/compute` 174; `make check-packaging` passes.
-      Found for 5B.4: embedded keys are encrypted by the caller today (`HostCreate`
-      documents Fernet-encrypted material) and decrypted by the runner. Settled with the
-      maintainer: they stay caller-encrypted (design: "The host authority is
-      connection-neutral, and connection secrets stay protected"); 5B.4 reshapes this
-      step's codec to public fields and protected values, replacing `secret_fields`.
-- [ ] 5B.4 Host authority. Changes the host wire format and schema.
+      Corrected for 5B.4: an embedded key is submitted in plaintext and encrypted by
+      `HostService` with the service's Fernet key (`HostCreate`'s description saying the
+      caller encrypts was stale; an earlier note here repeated it). Settled with the
+      maintainer (option A): submission stays as it is, and the codec protects and
+      decrypts (design: "The host authority is connection-neutral, and connection secrets
+      stay protected"); 5B.4 reshapes this step's codec to public fields, submitted
+      secrets, and protected values, replacing `secret_fields`.
+- [x] 5B.4 Host authority. Changes the host wire format and schema.
       `compute_provisioning/hosts/connection.py`: `ConnectionEnvelope` gains `public` and
       `protected` in place of `payload`; `ProtectedValue` (`scheme`, `ciphertext`, a
       representation that never shows the ciphertext); `ConnectionCodec` validates public
-      fields and protected values (names and schemes) in place of `secret_fields`.
+      fields, submitted secrets, and protected values (names and schemes) and protects
+      submitted secrets, in place of `secret_fields`.
       `compute_provisioning_ansible/connection.py`: the `ssh` codec reshaped to public
       fields (`ssh_host`, `public_host`, `ssh_port`, `ssh_user`, optional `key_path`) and
-      an optional `fernet-v1` `private_key`, exactly one naming the key; no decryption yet
-      (5B.6). `compute_provisioning/hosts/`: the host record; the service from the generic
+      an optional `fernet-v1` `private_key`, exactly one naming the key, protecting a
+      submitted `private_key` with the Fernet key composition gives it (the service's
+      `ssh_decryption_key`); decryption arrives in 5B.6. The distribution gains
+      `cryptography` (through `arkhai-kit-config`'s `encrypt_secret` and
+      `decrypt_secret`, if that keeps the dependency light, else directly). `compute_provisioning/hosts/`: the host record; the service from the generic
       parts of `vm_provisioning_adapter/services/host_service.py` (CRUD, enabled state,
       pool association, codec validation, the capacity-derivation port, the
       pre-execution lookup returning `ExecutionHost` with the protected envelope,
       applying an imported inventory with its pool-change and capacity effects, a
       pool-change hook); a framework-free host route service; the `hosts` table metadata
       on the hosts base. `hosts/models.py`: `HostCreate`, `HostUpdate`, `HostResponse`
-      carry `connection`; a response names protected values and schemes without
-      ciphertext. The Ansible distribution gains INI parsing and rendering between
+      carry `connection` with write-only `secrets` (an embedded key is submitted as
+      `secrets.private_key`, plaintext as today); a response names protected values and
+      schemes without ciphertext. The Ansible distribution gains INI parsing and rendering between
       inventory files and host records with `ssh` connections (from `host_service.py`;
-      an imported embedded key arrives as caller-encrypted ciphertext, as today).
+      importing with embedded keys reads each key file and submits it to the codec to
+      protect, as `seed_from_ini` does today).
       Migration in `compute_provisioning_service/db/migrations.py`: `connection_kind`,
       `connection_version`, JSON `connection_public` and `connection_protected` replace the
-      `ssh_*` columns; `path` keys become `key_path` and `embedded` ciphertext becomes a
-      `fernet-v1` `private_key` byte for byte, with no cryptography in the migration.
+      `ssh_*` columns; `path` keys become `key_path` and the service-encrypted `embedded`
+      ciphertext becomes a `fernet-v1` `private_key` byte for byte, with no cryptography
+      in the migration.
       The transitional `AnsibleJobExecutor` reads the envelope (a `private_key` is handed
       to the runner as today's embedded key, which the runner still decrypts until 5B.6).
       Callers: VM's host controller and operations, `vm_provisioning_operator/client.py`,
@@ -683,13 +692,67 @@ re-verifies them by grep before each move.
       `tests/e2e/roles/`), the development environment's host configuration (`dev-env/`,
       `e2e-tests/config/`), and the integration fixtures. Tests:
       `provisioning/compute/tests/unit/test_hosts.py` (envelope and `ProtectedValue`
-      never disclose ciphertext in representations or responses) and
+      never disclose ciphertext in representations or responses; submitted secrets are
+      never stored or returned) and
       `tests/integration/test_host_authority.py` (CRUD, codec refusal, lookup carrying
       the protected envelope, import application, pool-change hook, no protected value
       in any read); the codec's tests updated; migration tests (fresh database, upgrade
       with conversion, idempotent rerun, ciphertext preserved byte for byte); the
       service suites.
-- [ ] 5B.5 Job authority. Changes job wire formats and the schema, and fixes the
+      Done 2026-10-02:
+      - `compute_provisioning/hosts/`: `connection.py` (`ConnectionEnvelope` with
+        `public` and `protected`, `ProtectedValue` whose representation omits its
+        ciphertext, `ConnectionCodec` with `build` and `validate`, `ConnectionCodecs`),
+        `models.py` (`ConnectionSubmission` with write-only `secrets`, `ConnectionView`,
+        and `HostCreate`, `HostUpdate`, `HostResponse` carrying `connection`), `db.py`
+        (`Host` on the hosts declarative base), and `service.py` (`HostAuthority`:
+        CRUD through the codecs, `lookup` returning `ExecutionHost`, `apply_inventory`
+        with capacity derivation in its transaction, pool-change hooks; `InventoryHost`;
+        `host_response`). An update's `connection` replaces the whole connection, and a
+        stored secret the new connection still needs is kept unless resubmitted;
+        `HostUpdate.enabled`, accepted and ignored before, is applied.
+      - `compute_provisioning_ansible`: the `ssh` codec reshaped (public fields, an
+        optional `fernet-v1` `private_key` it protects through `market_config`'s
+        `encrypt_secret`, one copy of that code; `ssh_connection` validates its public
+        fields) and `inventory.py` (`parse_inventory_ini`, from `host_service.py`). The
+        distribution depends on `arkhai-kit-config` and `arkhai-kit-resource-pools`.
+      - VM adapter: `host_service.py` tombstoned; the runtime builds `HostAuthority` with
+        the `ssh` codec and VM's relay pool-change check as a hook; the hosts controller,
+        host operations, system diagnostics, and job service use it;
+        `ansible_job_executor.inventory_target` turns an `ExecutionHost` into the
+        runner's inventory input, an embedded key still protected (the runner decrypts it
+        until 5B.6). The adapter and the service depend on the distribution; both
+        adapters, the service, and the distribution were relocked.
+      - Service: `db/models.py` re-exports `Host`; `db/database.py` creates the hosts
+        metadata; startup seeding parses and applies the INI; migration
+        `20261002_001_host_connection_envelope`. `_drop_columns_via_table_rebuild` now
+        recreates outbound foreign keys and refuses to drop a column one uses (`hosts`
+        references `resource_pools`). The `ssh_decryption_key` comment in
+        `settings.toml` describes its role.
+      - Callers: the e2e smoke test and VM scenario host registrations build
+        `ConnectionSubmission` from `compute_provisioning.hosts`;
+        `docs/development/VALIDATION_RUNBOOK.md` and
+        `tools/issue-discovery/config/phases/local.yaml` show the new request body. The
+        INI files under `dev-env/` are unchanged: the import format is the same.
+      - Removed with no production caller: `render_inventory_ini` and
+        `get_decrypted_key_value`; the runner renders the only inventory.
+      - Tests: `provisioning/compute/tests/integration/test_host_authority.py` (10) and
+        the value tests in `test_job_contract_values.py`; the distribution's
+        `test_ssh_connection.py` and `test_inventory.py`; the service's
+        `tests/unit/test_host_connection_migration.py` (conversion with ciphertext byte for
+        byte, idempotent rerun, a fresh database keeping its pool foreign key);
+        `test_host_service.py` and `test_host_ssh_port.py` tombstoned (their cases moved
+        to those files); integration host registrations rewritten to `ssh_connection`;
+        `TestEmbeddedKey` in `test_hosts_api.py` (protected on registration, returned by
+        scheme only, decryptable only with the service's key). The integration suite's
+        Fernet key is a deterministic all-zero development value.
+      - `compute_provisioning` does not declare `sqlalchemy` directly: it arrives through
+        the resource-pool and site kits, and declaring it would change the VM storefront
+        lock, which needs its own environment to relock.
+      - Validation: `provisioning/compute` 187; the distribution 16; provisioning service
+        926 (unit and integration); bare-metal adapter 8; the VM adapter's `make test`
+        file 39; e2e unit 236 with the known pre-existing failure.
+- [x] 5B.5 Job authority. Changes job wire formats and the schema, and fixes the
       cancellation race. `compute_provisioning/jobs/`: the engine from the generic parts
       of `job_service.py` (submission and idempotency, `JobRetryPolicy` retry timing and
       counts, the retry scheduler, reads, cancellation through the executor with
@@ -712,6 +775,75 @@ re-verifies them by grep before each move.
       application, classification honoured); `provisioning/compute/tests/integration/test_job_authority.py`
       (idempotency, cancellation before and after a handle, a late outcome after
       cancellation leaves `cancelled`); migration tests; the service suites.
+      Done 2026-10-02, in three parts. Persistence and readers:
+      - `compute_provisioning/jobs/db.py`: `JobRecord` (`ansible_jobs`, with `host_id`,
+        JSON `execution_handle`, and `result` as a `ResultEnvelope`) and `JobCredential`
+        (`credentials`, one `CredentialEnvelope` per row) on the jobs base;
+        `JobStatus` and `TERMINAL_JOB_STATUSES`. The service's `db/models.py`
+        re-exports them for its own modules and `db/database.py` creates their tables.
+      - Migration `20261002_002_job_envelopes`: `host_id` from the parameters, then the
+        target, then `default_host_id` (passed through `run_migrations` and
+        `apply_schema_migrations`, read by `db/migrate.py` from settings); a bare
+        `process_id` becomes `{"pid": n}`; results and credentials become the envelopes
+        the contract route served (VM `vm_<action>`, bare metal `bare_metal_access`; a
+        job predating offering modes is a VM job); `process_id` and the SSH credential
+        columns are dropped.
+      - Each mode's executor names its result kind (`vm_result_kind`,
+        `bare_metal_result_kind` beside each runtime) and drops empty credential
+        fields; the contract route serves the stored envelopes, so `validate_result`
+        and `validate_credentials` left `ExecutorAdapter`, `FunctionalExecutorAdapter`,
+        composition's hook check, and both compute adapters.
+      - Wire: `JobStatusResponse` carries `host_id` and `result` as a `ResultEnvelope`;
+        `JobCredentialsResponse` serves `/api/v1/jobs/{id}/credentials`;
+        `CredentialResponse` and `CredentialListResponse` are deleted. Both fulfillment
+        providers and the shared test wait route read envelopes.
+      - Fixed a defect found here: `ansible_fulfillment_provider.py` logged through an
+        undefined `logger`, so an unreadable job result raised `NameError` instead of
+        being tolerated as documented.
+      - Tests: `tests/unit/test_job_envelope_migration.py` (conversion, kinds, handles,
+        host fallbacks, credential envelopes, dropped columns, the credentials foreign
+        key kept, idempotent rerun); integration and unit readers updated.
+      - Validation: provisioning service 930; `provisioning/compute` 187; bare-metal
+        adapter 8; the VM adapter's `make test` file 39; e2e unit 236 with the known
+        pre-existing failure.
+      Engine:
+      - `compute_provisioning/jobs/engine.py`: `JobEngine` (submission with operation
+        and contract deduplication, `JobRetryPolicy` timing and counts, the retry
+        scheduler, reads, `get_credentials`, `get_contract_job_record`, cancellation
+        through the executor's handle, `process_job`, `wait_for_terminal`, and
+        `add_terminal_observer`). It routes by the job's stored offering mode, action,
+        and `host_id`, never by its parameters; the job migration also fills
+        `offering_mode` and `action_kind` on rows that lacked them.
+      - Cancellation: every change is applied by `_transition`, which re-reads the job
+        and leaves a cancelled job alone; a job cancelled while queued never starts; a
+        cancellation before the executor reported its handle is sent to the executor
+        when the handle arrives; `cancel_job` commits before asking the executor.
+      - `wait_for_terminal` is signalled in-process when the engine finishes a job and
+        re-reads the job otherwise (a separate worker process may run it); the shared
+        `/test/jobs/{id}/wait` route uses it, answering 404 and 408 as before.
+      - `AsyncJobQueue` moved to `compute_provisioning/jobs/queue.py` and the rule and
+        gate mechanism to `compute_provisioning/jobs/executor_mock.py` (old modules
+        tombstoned); `MockRuleSet`'s job-done events, which nothing consumed, are gone
+        with the VM mock's `notify_job_done` and `get_or_create_job_event`.
+      - `vm_provisioning_adapter/services/job_service.py`: `AnsibleJobService` is a thin
+        front holding a `JobEngine` (built from `retry_policy_from(settings)` and the
+        host authority's `lookup`): it turns `AnsibleJobParams` into a submission and
+        answers `reserved_var_keys`; the rest delegates. The lifespan runs
+        `process_job`. Building the engine at the composition root moves with the
+        routes (5B.8), as do the shared test drain and summary routes.
+      Compatibility models: the VM operator client no longer re-exports the host, job,
+      health, and version models; every caller imports them from `compute_provisioning`
+      (the `Pool*` re-exports in its package root predate this change and are left).
+      Tests: `provisioning/compute/tests/integration/test_job_authority.py` (8:
+      envelopes stored and completion signalled, retry classification honoured, a late
+      outcome after cancellation leaves `cancelled` and stores nothing, a cancellation
+      before the handle reaches the executor, a cancelled queued job never runs, an
+      unregistered host fails first, deduplication, waiting times out);
+      `test_job_service.py` covers submissions and `retry_policy_from`;
+      `test_retry_scheduler.py` drives the engine. Validation: `provisioning/compute`
+      194; provisioning service 928; bare-metal adapter 8; the VM adapter's `make test`
+      file 39; e2e unit 236 with the known pre-existing failure, and every e2e and smoke
+      module collects (167); `make check-packaging` and comment hygiene pass.
 - [ ] 5B.6 The rest of the Ansible distribution. Behaviour-neutral.
       `compute_provisioning_ansible`: the runner and redaction from `ansible_service.py`,
       transport and Ansible failure classification, the codec protocol,
@@ -726,6 +858,29 @@ re-verifies them by grep before each move.
       gate mechanism with a contributed default-output hook (replacing
       `mock_ansible_service.py`). It depends on `compute_provisioning`; nothing in
       `compute_provisioning` depends on it.
+      Progress, 2026-10-02 — slice A of three (the runner); slice B (the codec
+      protocol, `AnsibleJobExecutor` in the distribution, and the VM and bare-metal
+      codecs, absorbing 5B.7) and slice C (the mocks over the gate mechanism with a
+      contributed default output, readiness, and connectivity probes) remain:
+      - `compute_provisioning_ansible/runner.py`: `AnsibleRunner` (`start_playbook`,
+        `wait_for_playbook`, `write_inventory`, `check_connectivity_with_inventory`,
+        `extract_json_block`), `AnsibleRun`, `AnsibleResult`, `AnsibleError`,
+        `ConnectivityResult`, `InventoryTarget`, `inventory_target`, and
+        `redact_ansible_output`, moved from `ansible_service.py`,
+        `models/ansible.py` (tombstoned), and `ansible_job_executor.py`.
+      - `write_inventory` decrypts an embedded key through
+        `SshConnectionCodec.decrypt_private_key`, just in time into an owner-only
+        file; the runner holds no cryptography of its own.
+      - VM's `AnsibleService` subclasses `AnsibleRunner` and keeps only the VM and
+        bare-metal vars and result parsing; every import of the moved names now names
+        `compute_provisioning_ansible.runner`.
+      - `redact_ansible_output` still matches VM's relay token (`frp_auth_token`):
+        slice B decides whether codecs contribute redaction patterns.
+      - Tests: `provisioning/compute/ansible/tests/unit/test_runner.py` (decryption
+        into an owner-only file, a key path referenced not read, only ssh connections
+        reach an inventory, JSON extraction, redaction); the streaming-redaction test
+        listens on the runner's logger. Validation: the distribution 21; provisioning
+        service 928; bare-metal adapter 8; the VM adapter's `make test` file 39.
 - [ ] 5B.7 Domain codecs. Behaviour-neutral on the wire.
       `vm_provisioning_adapter/codec.py` (VM vars, golden-image credentials, VM facts,
       VM failure classification, credential meaning, VM parameter building) and

@@ -1,37 +1,23 @@
-"""Single subprocess boundary for all Ansible invocations.
+"""The Ansible runner, specialised for VM and bare-metal jobs.
 
-Responsibilities
-----------------
-* Spawn and stream ``ansible-playbook`` processes (``start_playbook`` /
-  ``wait_for_playbook``).
-* Build the extra-vars YAML file consumed by the VM-operations playbook
-  (``build_vars_file``).
-* Parse structured JSON output from playbook stdout (``parse_playbook_result``).
-* Render a one-host inventory from registered host records
-  (``write_inventory``); no inventory file is ever read as an execution source.
-* Run ``ansible -m ping`` connectivity checks against a rendered inventory
-  (``check_connectivity_with_inventory``).
+``AnsibleService`` adds to ``compute_provisioning_ansible.AnsibleRunner`` what
+VM and bare-metal jobs mean to Ansible:
 
-This is the only class in the codebase that spawns ansible / ansible-playbook
-subprocesses.  All other services depend on this class and work with
-``AnsibleRun`` / ``AnsibleRunResult`` — they never touch subprocess directly.
-Mocking ``AnsibleService`` in tests is sufficient to isolate all external
-Ansible I/O.
+* the extra-vars YAML file a job's playbook reads (``build_vars_file``), and the
+  built-in variable names it reserves (``reserved_var_keys``);
+* parsing a playbook's output into a structured ``AnsibleRunResult``
+  (``parse_playbook_result``).
+
+Spawning processes, inventory rendering, redaction, and connectivity checks are
+the runner's.
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import re
-import select
-import subprocess
-import sys
-import time
 import uuid
-from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
@@ -39,360 +25,17 @@ from arkhai_bare_metal import (
     NODE_GRANT_ACCESS_ACTION,
     NODE_RECLAIM_ACCESS_ACTION,
 )
-from compute_provisioning_service.config import Settings
-from vm_provisioning_adapter.models.ansible import ConnectivityResult
+from compute_provisioning_ansible.runner import AnsibleResult, AnsibleRunner
 from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams, AnsibleRunResult
-from market_config import decrypt_secret
 
 logger = logging.getLogger(__name__)
 
 
-def redact_ansible_output(text: str) -> str:
-    """Scrub credential-shaped content out of raw Ansible stdout/stderr.
+class AnsibleService(AnsibleRunner):
+    """The Ansible runner with VM and bare-metal job variables and results.
 
-    Shared by every consumer of Ansible subprocess output — this module's
-    own real-time debug logging, and ``job_service.py``'s persisted
-    ``job.logs`` — so there is exactly one place that defines what
-    "credential-shaped" means. Ansible's default behavior echoes a
-    ``set_fact``/``debug`` task's rendered value in its own "ok" output;
-    without ``no_log: true`` on the task itself (the primary defense, kept
-    current in ``vm-create.yml``/``vm-reset-password.yml``), that value
-    reaches this function's input. This is defense in depth, not a
-    substitute for ``no_log`` on the playbook side.
-
-    ``vm-management/tasks/json-output.yml``'s ``debug: var:``/``debug:
-    msg:`` tasks are a deliberate exception that MUST NOT gain `no_log`:
-    they are the literal transport `_extract_ansible_json` parses by
-    searching raw stdout for a `"<fact_name>":` marker, so credentials
-    reach this function's input by design on every VM create. Ansible can
-    render that debug-msg'd JSON string either as literal text or as a
-    backslash-escaped string nested inside its own outer result dict
-    (depends on ``stdout_callback``/``callback_result_format`` and the
-    installed Ansible version) as well as the bare YAML `password: value`
-    shape `debug: var:` produces — the JSON-shaped pattern below matches
-    both the escaped and unescaped forms.
+    See the module docstring for what this adds to ``AnsibleRunner``.
     """
-    if not text:
-        return text
-    redacted = re.sub(
-        r'(\\?"(?:password|ssh_key_path_host|frp_auth_token)\\?":\s*)\\?"[^"\\]*\\?"',
-        r'\1"[REDACTED]"',
-        text,
-    )
-    redacted = re.sub(
-        r"(password:\s*)(?!\[REDACTED\]).+",
-        r"\1[REDACTED]",
-        redacted,
-    )
-    # A relay's admission token is a credential of the same class as the two
-    # above. It reaches this function through the same route: the extra-vars
-    # file is rendered into a command line, and json-output.yml echoes facts by
-    # design. Matching the bare YAML form as well, since that is what a
-    # ``debug: var:`` task produces.
-    redacted = re.sub(
-        r"(frp_auth_token:\s*)(?!\[REDACTED\]).+",
-        r"\1[REDACTED]",
-        redacted,
-    )
-    redacted = re.sub(r"-i\s+\S+\.ssh/\S+", "-i [REDACTED]", redacted)
-    redacted = re.sub(r"sshpass\s+-p\s+\S+", "sshpass -p [REDACTED]", redacted)
-    return redacted
-
-
-# ---------------------------------------------------------------------------
-# Process handle types — owned by AnsibleService, consumed by callers
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class AnsibleRun:
-    """Handle to a running ansible-playbook process."""
-
-    process: subprocess.Popen
-    process_id: int
-    vars_path: Path
-
-
-@dataclass
-class AnsibleResult:
-    """Captured output from a completed ansible-playbook invocation."""
-
-    stdout: str
-    stderr: str
-    process_id: int
-
-
-class AnsibleError(RuntimeError):
-    """Raised when ansible-playbook exits non-zero or times out."""
-
-    def __init__(self, message: str, stdout: str, stderr: str):
-        super().__init__(message)
-        self.stdout = stdout
-        self.stderr = stderr
-
-
-# ---------------------------------------------------------------------------
-# Service
-# ---------------------------------------------------------------------------
-
-
-class AnsibleService:
-    """Single subprocess boundary + Ansible support layer.
-
-    See module docstring for the full list of responsibilities.
-    """
-
-    def __init__(self, settings: Settings) -> None:
-        self._settings = settings
-
-    # ------------------------------------------------------------------
-    # Playbook execution — async streaming interface
-    # ------------------------------------------------------------------
-
-    def start_playbook(
-        self,
-        playbook_path: Path,
-        inventory_path: Path,
-        extra_vars_path: Path,
-        limit: str,
-        extra_cli_vars: dict[str, str] | None = None,
-    ) -> AnsibleRun:
-        """Spawn ansible-playbook and return immediately with a process handle.
-
-        The caller must pass the returned handle to ``await wait_for_playbook``
-        to collect the result.  ``extra_vars_path`` is cleaned up inside
-        ``wait_for_playbook``.
-        """
-        cmd = [
-            "ansible-playbook",
-            "-i", str(inventory_path),
-            str(playbook_path),
-            "--extra-vars", f"@{extra_vars_path}",
-            "--limit", limit,
-        ]
-        for k, v in (extra_cli_vars or {}).items():
-            cmd += ["-e", f"{k}={v}"]
-
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-
-        logger.info(
-            "Started ansible-playbook: PID=%d cmd=%s", process.pid, " ".join(cmd)
-        )
-
-        return AnsibleRun(
-            process=process,
-            process_id=process.pid,
-            vars_path=extra_vars_path,
-        )
-
-    async def wait_for_playbook(
-        self,
-        run: AnsibleRun,
-        timeout_seconds: int,
-        log_callback: Optional[Callable[[str, str], None]] = None,
-    ) -> AnsibleResult:
-        """Wait for a running playbook to finish, streaming output to log_callback.
-
-        Cleans up ``run.vars_path`` on exit regardless of success or failure.
-        Raises ``AnsibleError`` on non-zero exit or timeout.
-        """
-        stdout_lines: list[str] = []
-        stderr_lines: list[str] = []
-
-        async def _stream() -> None:
-            last_callback = time.time()
-            while True:
-                if run.process.poll() is not None:
-                    if run.process.stdout:
-                        tail = run.process.stdout.read()
-                        if tail:
-                            stdout_lines.append(tail)
-                    if run.process.stderr:
-                        tail = run.process.stderr.read()
-                        if tail:
-                            stderr_lines.append(tail)
-                    break
-
-                if run.process.stdout:
-                    try:
-                        if sys.platform != "win32":
-                            readable, _, _ = select.select(
-                                [run.process.stdout], [], [], 0.1
-                            )
-                            if readable:
-                                line = run.process.stdout.readline()
-                                if line:
-                                    stdout_lines.append(line)
-                                    logger.debug(
-                                        "ansible stdout: %s",
-                                        redact_ansible_output(line.rstrip()),
-                                    )
-                        else:
-                            line = run.process.stdout.readline()
-                            if line:
-                                stdout_lines.append(line)
-                    except Exception:
-                        pass
-
-                if run.process.stderr:
-                    try:
-                        if sys.platform != "win32":
-                            readable, _, _ = select.select(
-                                [run.process.stderr], [], [], 0.1
-                            )
-                            if readable:
-                                line = run.process.stderr.readline()
-                                if line:
-                                    stderr_lines.append(line)
-                                    logger.debug(
-                                        "ansible stderr: %s",
-                                        redact_ansible_output(line.rstrip()),
-                                    )
-                        else:
-                            line = run.process.stderr.readline()
-                            if line:
-                                stderr_lines.append(line)
-                    except Exception:
-                        pass
-
-                now = time.time()
-                if log_callback and (now - last_callback) >= 2.0:
-                    try:
-                        await asyncio.to_thread(
-                            log_callback,
-                            "".join(stdout_lines),
-                            "".join(stderr_lines),
-                        )
-                    except Exception as exc:
-                        logger.warning("Log callback failed: %s", exc)
-                    last_callback = now
-
-                await asyncio.sleep(0.1)
-
-        try:
-            await asyncio.wait_for(_stream(), timeout=timeout_seconds)
-
-            stdout = "".join(stdout_lines)
-            stderr = "".join(stderr_lines)
-
-            if log_callback:
-                try:
-                    await asyncio.to_thread(log_callback, stdout, stderr)
-                except Exception as exc:
-                    logger.warning("Final log callback failed: %s", exc)
-
-            if run.process.returncode != 0:
-                raise AnsibleError("Playbook failed", stdout, stderr)
-
-        except asyncio.TimeoutError:
-            run.process.kill()
-            run.process.wait()
-            stdout = "".join(stdout_lines)
-            stderr = "".join(stderr_lines)
-            raise AnsibleError("Playbook timed out", stdout, stderr)
-        except AnsibleError:
-            raise
-        except Exception as exc:
-            try:
-                run.process.kill()
-                run.process.wait()
-            except Exception:
-                pass
-            stdout = "".join(stdout_lines)
-            stderr = "".join(stderr_lines)
-            raise AnsibleError(
-                f"Playbook error: {exc}", stdout, stderr or str(exc)
-            ) from exc
-        finally:
-            try:
-                run.vars_path.unlink(missing_ok=True)
-            except Exception:
-                logger.warning(
-                    "Failed to delete temp vars file: %s", run.vars_path
-                )
-
-        return AnsibleResult(
-            stdout="".join(stdout_lines),
-            stderr="".join(stderr_lines),
-            process_id=run.process_id,
-        )
-
-    # ------------------------------------------------------------------
-    # Inventory rendering
-    # ------------------------------------------------------------------
-
-    def write_inventory(self, hosts: list) -> Path:
-        """Write a temporary Ansible INI inventory file from DB host rows.
-
-        Accepts a list of ``Host`` ORM objects (from ``HostService``).
-        ``embedded``-key hosts have their key material decrypted and written
-        to additional temp files; the INI references those temp paths.
-
-        The returned ``Path`` is a temp file that the caller must delete in
-        a ``finally`` block — identical contract to ``build_vars_file``.
-
-        For ``embedded`` hosts, companion key files are written alongside
-        the inventory file (same temp directory, named
-        ``<host_id>_key``).  They are also deleted when the caller deletes
-        the inventory file's parent directory, or the caller may choose to
-        clean them up individually.
-        """
-        import tempfile
-        from pathlib import Path as _Path
-
-        nonce = uuid.uuid4().hex
-        inv_path = _Path(tempfile.gettempdir()) / f"inventory_{nonce}.ini"
-
-        lines = ["[kvm_hosts]"]
-        companion_key_paths: list[_Path] = []
-
-        for host in hosts:
-            if host.ssh_key_type == "path":
-                key_ref = host.ssh_key_value
-            else:
-                # Decrypt and write a companion temp key file
-                secret = getattr(self._settings, "ssh_decryption_key", "")
-                plaintext = decrypt_secret(host.ssh_key_value, secret)
-                key_file = _Path(tempfile.gettempdir()) / f"{host.host_id}_key_{nonce}"
-                key_file.write_text(plaintext, encoding="utf-8")
-                key_file.chmod(0o400)
-                companion_key_paths.append(key_file)
-                key_ref = str(key_file)
-
-            # public_host is the tenant-facing address; emit it as a host var
-            # so the playbook can use it for the connection strings it returns.
-            public_seg = (
-                f"  public_host={host.public_host}"
-                if getattr(host, "public_host", None)
-                else ""
-            )
-            # ansible_port is emitted for every host, matching
-            # HostService.render_inventory_ini. These are two renderings of
-            # the same registry row and must not drift: a host that connects
-            # differently depending on which path built its inventory is a
-            # defect that only appears on one code path.
-            lines.append(
-                f"{host.host_id}"
-                f"  ansible_host={host.ssh_host}"
-                f"{public_seg}"
-                f"  ansible_port={host.ssh_port}"
-                f"  ansible_user={host.ssh_user}"
-                f"  ansible_ssh_private_key_file={key_ref}"
-            )
-
-        inv_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        logger.debug(
-            "Wrote inventory to %s (%d host(s), %d companion key file(s))",
-            inv_path,
-            len(hosts),
-            len(companion_key_paths),
-        )
-        return inv_path
 
     # ------------------------------------------------------------------
     # Vars file construction
@@ -628,39 +271,6 @@ class AnsibleService:
                 return match.group("user")
         return None
 
-    def _extract_json_block(self, text: str, search_start: int) -> Optional[dict]:
-        brace_start = text.find("{", search_start)
-        if brace_start == -1:
-            return None
-        depth = 0
-        in_string = False
-        escape_next = False
-        for i in range(brace_start, len(text)):
-            ch = text[i]
-            if escape_next:
-                escape_next = False
-                continue
-            if ch == "\\":
-                if in_string:
-                    escape_next = True
-                continue
-            if ch == '"':
-                in_string = not in_string
-                continue
-            if in_string:
-                continue
-            if ch == "{":
-                depth += 1
-            elif ch == "}":
-                depth -= 1
-                if depth == 0:
-                    json_str = text[brace_start: i + 1]
-                    try:
-                        return json.loads(json_str)
-                    except json.JSONDecodeError:
-                        return None
-        return None
-
     def _extract_ansible_json(self, stdout: str, action: str) -> Optional[dict]:
         fact_names = {
             "create": "vm_creation_data",
@@ -684,13 +294,13 @@ class AnsibleService:
         marker = f'"{fact_name}":'
         idx = stdout.find(marker)
         if idx != -1:
-            result = self._extract_json_block(stdout, idx + len(marker))
+            result = self.extract_json_block(stdout, idx + len(marker))
             if result is not None:
                 return result
 
         last_result = None
         for m in re.finditer(r"msg:\s*\|[-]?\s*\n", stdout):
-            result = self._extract_json_block(stdout, m.end())
+            result = self.extract_json_block(stdout, m.end())
             if result is not None and "action" in result:
                 last_result = result
         return last_result
@@ -698,48 +308,3 @@ class AnsibleService:
     # ------------------------------------------------------------------
     # Connectivity check
     # ------------------------------------------------------------------
-
-    async def check_connectivity_with_inventory(
-        self, host: str, inventory_path: Path
-    ) -> ConnectivityResult:
-        """Run ``ansible -m ping`` using the supplied *inventory_path*.
-
-        Used by ``HostController`` after rendering a temp inventory from DB rows.
-        The caller is responsible for cleaning up any temp file.
-        """
-        cmd = [
-            "ansible",
-            "-i", str(inventory_path),
-            host,
-            "-m", "ping",
-        ]
-
-        logger.info("Running connectivity check: %s", " ".join(cmd))
-
-        def _run() -> tuple[int, str, str]:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=self._settings.ansible_timeout_seconds,
-            )
-            return result.returncode, result.stdout, result.stderr
-
-        try:
-            returncode, stdout, stderr = await asyncio.wait_for(
-                asyncio.to_thread(_run),
-                timeout=self._settings.ansible_timeout_seconds + 5,
-            )
-        except asyncio.TimeoutError:
-            return ConnectivityResult(
-                host=host, reachable=False, detail="Connectivity check timed out"
-            )
-        except Exception as exc:
-            return ConnectivityResult(
-                host=host, reachable=False, detail=f"Failed to run ansible ping: {exc}"
-            )
-
-        reachable = returncode == 0
-        detail = stdout.strip() if reachable else (stderr.strip() or stdout.strip())
-        logger.info("Connectivity check for %s: reachable=%s", host, reachable)
-        return ConnectivityResult(host=host, reachable=reachable, detail=detail)

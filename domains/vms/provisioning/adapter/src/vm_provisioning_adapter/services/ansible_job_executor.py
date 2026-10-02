@@ -8,8 +8,9 @@ inventory, process ids, the facts a playbook prints, which errors are worth
 retrying, and redaction of what is reported.
 
 The host arrives as an ``ExecutionHost`` whose connection is an ``ssh``
-envelope; the runner renders its inventory from that connection alone, so a job
-runs only against the registered host record it names.
+envelope from the host authority's lookup; the runner renders its inventory
+from that connection alone, so a job runs only against the registered host it
+names.
 """
 
 from __future__ import annotations
@@ -18,8 +19,8 @@ import copy
 import logging
 import os
 import signal
-from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from collections.abc import Callable, Iterable, Mapping
+
 from pathlib import Path
 from typing import Any
 
@@ -28,77 +29,29 @@ from compute_provisioning.contracts import (
     ProvisioningErrorEnvelope,
     ResultEnvelope,
 )
-from compute_provisioning.hosts import ConnectionEnvelope, ExecutionHost
 from compute_provisioning.jobs import JobFailure, JobOutcome, JobRun, JobSuccess
 
 from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams, AnsibleRunResult
-from vm_provisioning_adapter.services.ansible_service import (
+from compute_provisioning_ansible.runner import (
     AnsibleError,
+    inventory_target,
     redact_ansible_output,
 )
 
 logger = logging.getLogger(__name__)
 
-SSH_CONNECTION_KIND = "ssh"
-SSH_CONNECTION_VERSION = 1
-_SSH_CONNECTION_FIELDS = (
-    "ssh_host",
-    "public_host",
-    "ssh_port",
-    "ssh_user",
-    "ssh_key_type",
-    "ssh_key_value",
-)
 # The roles a playbook's ``authentication`` fact may carry, in the order their
 # credentials are reported.
 _CREDENTIAL_ROLES = ("root", "tenant")
 _CREDENTIAL_FIELDS = ("password", "ssh_commands", "ssh_key_path_host", "key_type")
 
 
-def execution_host_from_record(host: Any) -> ExecutionHost:
-    """The execution host for a registered host record with an SSH connection."""
-
-    return ExecutionHost(
-        host_id=str(host.host_id),
-        pool_id=getattr(host, "pool_id", None),
-        connection=ConnectionEnvelope(
-            kind=SSH_CONNECTION_KIND,
-            version=SSH_CONNECTION_VERSION,
-            payload={name: getattr(host, name, None) for name in _SSH_CONNECTION_FIELDS},
-        ),
-    )
-
-
-@dataclass(frozen=True)
-class _InventoryHost:
-    """The host attributes the runner renders one inventory line from."""
-
-    host_id: str
-    ssh_host: str
-    public_host: str | None
-    ssh_port: int
-    ssh_user: str
-    ssh_key_type: str
-    ssh_key_value: str
-
-    @classmethod
-    def from_execution_host(cls, host: ExecutionHost) -> "_InventoryHost":
-        connection = host.connection
-        if connection.kind != SSH_CONNECTION_KIND:
-            raise ValueError(
-                f"host {host.host_id!r} has a {connection.kind!r} connection; "
-                "an Ansible job reaches its host over ssh"
-            )
-        return cls(host_id=host.host_id, **{
-            name: connection.payload.get(name) for name in _SSH_CONNECTION_FIELDS
-        })
-
-
 class AnsibleJobExecutor:
     """One Ansible runner and the playbook it runs for the actions it is registered for.
 
     ``non_retryable_errors`` are operator-configured substrings: a failure whose
-    message contains one is reported as not retryable. ``relay_resolver``, when
+    message contains one is reported as not retryable. ``result_kind`` names the
+    kind of the result an action produces, which the offering mode's domain owns. ``relay_resolver``, when
     given, fills a referenced relay's address and token into the parameters
     immediately before the variables file is written, so the token never enters
     the job's stored parameters and a rotation takes effect on a retry.
@@ -110,11 +63,13 @@ class AnsibleJobExecutor:
         playbook_path: Any,
         *,
         settings: Any,
+        result_kind: Callable[[str], str],
         relay_resolver: Any = None,
     ) -> None:
         self._runner = runner
         self._playbook_path = playbook_path
         self._settings = settings
+        self._result_kind = result_kind
         self._relay_resolver = relay_resolver
 
     @property
@@ -134,7 +89,7 @@ class AnsibleJobExecutor:
         params = self.build_params(run.parameters)
         if self._relay_resolver is not None:
             params = self._relay_resolver.resolve_into(params)
-        host = _InventoryHost.from_execution_host(run.host)
+        host = inventory_target(run.host)
         runner = self._runner
         vars_path = runner.build_vars_file(params)
         inventory_path = runner.write_inventory([host])
@@ -182,7 +137,7 @@ class AnsibleJobExecutor:
             return JobSuccess(
                 result=ResultEnvelope(
                     offering_mode=run.offering_mode,
-                    result_kind=run.action,
+                    result_kind=self._result_kind(run.action),
                     value=value,
                 ),
                 credentials=credentials,
@@ -286,7 +241,11 @@ class AnsibleJobExecutor:
             CredentialEnvelope(
                 offering_mode=offering_mode,
                 credential_kind=role,
-                value={name: role_data.get(name) for name in _CREDENTIAL_FIELDS},
+                value={
+                    name: role_data[name]
+                    for name in _CREDENTIAL_FIELDS
+                    if role_data.get(name) is not None
+                },
             )
             for role, role_data in _roles(auth)
         )
@@ -392,8 +351,4 @@ def _roles(auth: Mapping[str, Any]) -> Iterable[tuple[str, Mapping[str, Any]]]:
             yield role, role_data
 
 
-__all__ = [
-    "AnsibleJobExecutor",
-    "SSH_CONNECTION_KIND",
-    "execution_host_from_record",
-]
+__all__ = ["AnsibleJobExecutor"]

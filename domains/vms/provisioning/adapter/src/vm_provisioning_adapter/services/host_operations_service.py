@@ -10,15 +10,17 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from vm_provisioning_operator.models import JobSubmitResponse, VmActionRequest
-from vm_provisioning_adapter.models.ansible import ConnectivityResult
+from vm_provisioning_operator.models import VmActionRequest
+from compute_provisioning.jobs import JobSubmitResponse
+from compute_provisioning_ansible.runner import ConnectivityResult
 from vm_provisioning_adapter.models.vm_request_model import build_simple_params
-from compute_provisioning_service.services.async_job_queue import AsyncJobQueue
-from vm_provisioning_adapter.services.host_service import HostNotFoundError
+from compute_provisioning.jobs.queue import AsyncJobQueue
+from compute_provisioning.hosts.service import HostNotFoundError
+from compute_provisioning_ansible.runner import inventory_target
 
 if TYPE_CHECKING:
     from vm_provisioning_adapter.services.ansible_service import AnsibleService
-    from vm_provisioning_adapter.services.host_service import HostService
+    from compute_provisioning.hosts.service import HostAuthority
     from vm_provisioning_adapter.services.job_service import AnsibleJobService
 
 
@@ -29,7 +31,7 @@ class HostOperationsService:
         self,
         *,
         ansible_service: "AnsibleService",
-        host_service: "HostService",
+        host_service: "HostAuthority",
         job_service: "AnsibleJobService",
         job_queue_provider: Callable[[], AsyncJobQueue],
     ) -> None:
@@ -52,11 +54,11 @@ class HostOperationsService:
 
     async def check_connectivity(self, *, host: str) -> ConnectivityResult:
         """Run an Ansible connectivity check for a registered host."""
-        host_row = self._host_service.get_host(host)
-        if host_row is None:
+        execution_host = self._host_service.lookup(host)
+        if execution_host is None:
             raise HostNotFoundError(f"Host '{host}' not found")
 
-        inv_path = self._ansible_service.write_inventory([host_row])
+        inv_path = self._ansible_service.write_inventory([inventory_target(execution_host)])
         try:
             return await self._ansible_service.check_connectivity_with_inventory(
                 host,

@@ -1,8 +1,8 @@
-"""KVM host controller.
+"""Host controller.
 
 Handles all host-level operations:
 
-    GET    /api/v1/hosts/                      List registered KVM hosts
+    GET    /api/v1/hosts/                      List registered hosts
     POST   /api/v1/hosts/                      Register a new host
     POST   /api/v1/hosts/import                Bulk-import hosts from an Ansible INI block
     GET    /api/v1/hosts/{host}                Host details
@@ -22,17 +22,22 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, s
 from fastapi_utils.cbv import cbv
 
 from compute_provisioning_service import container as _container_module
-from vm_provisioning_operator.models import (
+from compute_provisioning.hosts import (
     HostCreate,
     HostListResponse,
     HostResponse,
     HostUpdate,
-    JobSubmitResponse,
-    VmActionRequest,
 )
-from vm_provisioning_adapter.models.ansible import ConnectivityResult
+from compute_provisioning.hosts.service import (
+    HostAuthority,
+    HostNotFoundError,
+    host_response,
+)
+from compute_provisioning_ansible import parse_inventory_ini
+from vm_provisioning_operator.models import VmActionRequest
+from compute_provisioning.jobs import JobSubmitResponse
+from compute_provisioning_ansible.runner import ConnectivityResult
 from vm_provisioning_adapter.services.host_operations_service import HostOperationsService
-from vm_provisioning_adapter.services.host_service import HostNotFoundError, HostService
 
 router = APIRouter(prefix="/hosts", tags=["hosts"])
 
@@ -46,7 +51,7 @@ _POLL_NOTE = (
 class HostController:
     def __init__(
         self,
-        host_service: HostService = Depends(
+        host_service: HostAuthority = Depends(
             lambda: _container_module.resolved_host_service
         ),
         host_operations: HostOperationsService = Depends(
@@ -79,7 +84,7 @@ class HostController:
             search=search,
             enabled_only=not include_disabled,
         )
-        host_models = [HostResponse.model_validate(h) for h in hosts]
+        host_models = [host_response(h) for h in hosts]
         return HostListResponse(hosts=host_models, total=len(host_models))
 
     # ------------------------------------------------------------------
@@ -90,17 +95,14 @@ class HostController:
         "/",
         response_model=HostResponse,
         status_code=status.HTTP_201_CREATED,
-        summary="Register a new KVM host",
+        summary="Register a new host",
     )
     def register_host(self, body: HostCreate) -> HostResponse:
-        """Register a new KVM host in the host registry.
+        """Register a new host in the host registry.
 
-        ``ssh_key_type='path'``: ``ssh_key_value`` is stored as-is (a
-        filesystem path to the private key file).
-
-        ``ssh_key_type='embedded'``: ``ssh_key_value`` must be the raw PEM
-        private key content; it is encrypted with ``SSH_DECRYPTION_KEY``
-        before storage. ``SSH_DECRYPTION_KEY`` must be set.
+        The connection is validated by its kind's codec, and any submitted
+        secret is protected by that codec before storage; the response names
+        the protected value's scheme, never its content.
         """
         try:
             host = self._host_service.register_host(body)
@@ -116,7 +118,7 @@ class HostController:
                     detail=f"Host '{body.name}' already exists. Use PUT /hosts/{body.name} to update or POST /hosts/{body.name}/enable to re-enable.",
                 )
             raise
-        return HostResponse.model_validate(host)
+        return host_response(host)
 
     # ------------------------------------------------------------------
     # INI import
@@ -156,10 +158,12 @@ class HostController:
         except Exception as exc:
             raise HTTPException(status_code=400, detail=f"Could not read uploaded file: {exc}")
         try:
-            hosts = self._host_service.seed_from_ini(ini_text, ssh_key_type=ssh_key_type)
+            hosts = self._host_service.apply_inventory(
+                parse_inventory_ini(ini_text, key_material=ssh_key_type)
+            )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
-        host_models = [HostResponse.model_validate(h) for h in hosts]
+        host_models = [host_response(h) for h in hosts]
         return HostListResponse(hosts=host_models, total=len(host_models))
 
     # ------------------------------------------------------------------
@@ -179,7 +183,7 @@ class HostController:
         h = self._host_service.get_host(host)
         if h is None:
             raise HTTPException(status_code=404, detail=f"Host '{host}' not found")
-        return HostResponse.model_validate(h)
+        return host_response(h)
 
     @router.put(
         "/{host}",
@@ -198,7 +202,7 @@ class HostController:
             raise HTTPException(status_code=404, detail=f"Host '{host}' not found")
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
-        return HostResponse.model_validate(h)
+        return host_response(h)
 
     @router.post(
         "/{host}/enable",
@@ -211,7 +215,7 @@ class HostController:
             h = self._host_service.enable_host(host)
         except HostNotFoundError:
             raise HTTPException(status_code=404, detail=f"Host '{host}' not found")
-        return HostResponse.model_validate(h)
+        return host_response(h)
 
     @router.post(
         "/{host}/disable",
@@ -229,7 +233,7 @@ class HostController:
             h = self._host_service.disable_host(host)
         except HostNotFoundError:
             raise HTTPException(status_code=404, detail=f"Host '{host}' not found")
-        return HostResponse.model_validate(h)
+        return host_response(h)
 
     # ------------------------------------------------------------------
     # Capacity

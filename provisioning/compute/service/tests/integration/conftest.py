@@ -84,6 +84,9 @@ from compute_provisioning_service.services.principal_authority import (
 )
 
 
+# A deterministic development Fernet key (32 zero bytes) for this test suite
+# only; it protects nothing and must never be used on any real deployment.
+TEST_CONNECTION_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 SERVICE_SIGNER = Ed25519Signer(b"\x11" * 32)
 STOREFRONT_SIGNER = Ed25519Signer(b"\x12" * 32)
 ADMIN_SIGNER = Ed25519Signer(b"\x13" * 32)
@@ -313,9 +316,12 @@ class AsyncProvisioningTestClient:
             body["ssh_pubkey"] = ssh_pubkey
         return await self._post("/test/evaluate-job", body)
 from compute_provisioning_service.main import app, provisioning_route_table
-from vm_provisioning_adapter.services.ansible_service import AnsibleResult, AnsibleRun, AnsibleService
-from compute_provisioning_service.services.async_job_queue import AsyncJobQueue
-from vm_provisioning_adapter.services.host_service import HostService
+from vm_provisioning_adapter.services.ansible_service import AnsibleService
+from compute_provisioning_ansible.runner import AnsibleResult, AnsibleRun
+from compute_provisioning.jobs.queue import AsyncJobQueue
+from compute_provisioning.hosts import ConnectionCodecs
+from compute_provisioning.hosts.service import HostAuthority
+from compute_provisioning_ansible import SshConnectionCodec
 from compute_provisioning_service.services.capacity_derivation import (
     LegacyHostCapacityDerivation,
 )
@@ -374,6 +380,12 @@ def _initialize_test_database(engine):
     # resource_pools must exist before Base's ansible_pool_configs FK resolves.
     from market_resource_pools.db import Base as PoolsBase
     PoolsBase.metadata.create_all(bind=engine)
+    # The host registry rides the host authority's own metadata.
+    from compute_provisioning.hosts.db import Base as HostsBase
+    HostsBase.metadata.create_all(bind=engine)
+    # So do the job authority's tables.
+    from compute_provisioning.jobs.db import Base as JobsBase
+    JobsBase.metadata.create_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     # Site-ledger tables ride market_site's own metadata.
     from market_site.db import Base as SiteBase
@@ -382,7 +394,7 @@ def _initialize_test_database(engine):
     # scheduling_cursors) ride market_fulfillment's own metadata.
     from market_fulfillment.db import Base as FulfillmentBase
     FulfillmentBase.metadata.create_all(bind=engine)
-    # HostService requires pool_id to reference an existing pool. The real
+    # The host authority requires pool_id to reference an existing pool. The real
     # migration always seeds "default" before hosts.pool_id can be NOT
     # NULL (see db/migrations.py); mirror that guarantee here since this
     # fixture builds schema directly rather than through the migration.
@@ -448,15 +460,23 @@ def _job_executor_table(runner, settings, bare_metal_runner=None):
     from arkhai_bare_metal import BARE_METAL_ACCESS_ACTIONS
     from compute_provisioning import JobExecutorTable
     from vm_provisioning_adapter.bundle import VM_JOB_ACTIONS
+    from bare_metal_provisioning_adapter.runtime import bare_metal_result_kind
+    from vm_provisioning_adapter.runtime import vm_result_kind
     from vm_provisioning_adapter.services.ansible_job_executor import (
         AnsibleJobExecutor,
     )
 
-    vm = AnsibleJobExecutor(runner, settings.resolved_playbook_path, settings=settings)
+    vm = AnsibleJobExecutor(
+        runner,
+        settings.resolved_playbook_path,
+        settings=settings,
+        result_kind=vm_result_kind,
+    )
     bare_metal = AnsibleJobExecutor(
         bare_metal_runner if bare_metal_runner is not None else runner,
         settings.resolved_bare_metal_playbook_path,
         settings=settings,
+        result_kind=bare_metal_result_kind,
     )
     table = JobExecutorTable()
     for action in VM_JOB_ACTIONS:
@@ -497,7 +517,7 @@ def fake_ansible() -> MagicMock:
     mock.write_inventory.return_value = fake_inv_tmp
 
     # check_connectivity_with_inventory — synchronous mock returning reachable
-    from vm_provisioning_adapter.models.ansible import ConnectivityResult
+    from compute_provisioning_ansible.runner import ConnectivityResult
     from unittest.mock import AsyncMock as _AsyncMock
     mock.check_connectivity_with_inventory = _AsyncMock(
         return_value=ConnectivityResult(host="kvm1", reachable=True, detail="mock ping ok")
@@ -569,9 +589,9 @@ async def client_and_queue(
         host_requirement=host_requirement,
     )
 
-    host_service = HostService(
-        session_factory=session_factory,
-        settings=mock_settings,
+    host_service = HostAuthority(
+        session_factory,
+        codecs=ConnectionCodecs([SshConnectionCodec(TEST_CONNECTION_KEY)]),
         capacity_derivation=LegacyHostCapacityDerivation(capacity_ledger_service),
     )
 
@@ -825,7 +845,7 @@ async def client_and_queue(
     _container_module.resolved_host_operations_service = app.container.host_operations_service()
 
     processing_task = asyncio.create_task(
-        job_queue.start(job_service._process_job),
+        job_queue.start(job_service.process_job),
         name="test-job-processing-loop",
     )
 

@@ -1,3 +1,4 @@
+from compute_provisioning_ansible import ssh_connection
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -13,9 +14,9 @@ from arkhai_bare_metal import NODE_GRANT_ACCESS_ACTION
 from market_site.ledger import ALLOCATION_MODE_EXCLUSIVE
 
 from compute_provisioning_service.main import app
-from vm_provisioning_adapter.services.ansible_service import AnsibleError
+from compute_provisioning_ansible.runner import AnsibleError
 
-from vm_provisioning_operator.models import HostCreate
+from compute_provisioning.hosts import HostCreate
 from .conftest import SERVICE_AUTHORITIES, STOREFRONT_SIGNER
 
 
@@ -102,10 +103,7 @@ async def test_contract_submission_is_idempotent_and_correlated(client_and_queue
     legacy_client, _ = client_and_queue
     await legacy_client.register_host(HostCreate(
         host_id="kvm1",
-        ssh_host="127.0.0.1",
-        ssh_user="ubuntu",
-        ssh_key_type="path",
-        ssh_key_value="/tmp/test-key",
+        connection=ssh_connection(ssh_host="127.0.0.1", ssh_user="ubuntu", key_path="/tmp/test-key"),
     ))
     reservation = _leased_vm_reservation()
 
@@ -129,10 +127,7 @@ async def test_bare_metal_uses_same_offering_mode_neutral_client(client_and_queu
     legacy_client, _ = client_and_queue
     await legacy_client.register_host(HostCreate(
         host_id="bm-contract-1",
-        ssh_host="192.0.2.10",
-        ssh_user="root",
-        ssh_key_type="path",
-        ssh_key_value="/tmp/test-key",
+        connection=ssh_connection(ssh_host="192.0.2.10", ssh_user="root", key_path="/tmp/test-key"),
     ))
     reservation = _leased_bare_metal_reservation()
     action = ExecutorActionEnvelope(
@@ -174,10 +169,7 @@ async def test_terminal_executor_error_uses_structured_contract_envelope(
     legacy_client, _ = client_and_queue
     await legacy_client.register_host(HostCreate(
         host_id="kvm1",
-        ssh_host="127.0.0.1",
-        ssh_user="ubuntu",
-        ssh_key_type="path",
-        ssh_key_value="/tmp/test-key",
+        connection=ssh_connection(ssh_host="127.0.0.1", ssh_user="ubuntu", key_path="/tmp/test-key"),
     ))
     fake_ansible.wait_for_playbook.side_effect = AnsibleError(
         "executor exploded", "", ""
@@ -217,10 +209,7 @@ async def test_adapter_is_selected_by_the_offering_mode(client_and_queue):
     # registered host record, so that is the host registered here.
     await legacy_client.register_host(HostCreate(
         host_id="kvm1",
-        ssh_host="127.0.0.1",
-        ssh_user="ubuntu",
-        ssh_key_type="path",
-        ssh_key_value="/tmp/test-key",
+        connection=ssh_connection(ssh_host="127.0.0.1", ssh_user="ubuntu", key_path="/tmp/test-key"),
     ))
     vm_reservation = _leased_vm_reservation()
 

@@ -15,15 +15,13 @@ from unittest.mock import MagicMock
 
 import pytest
 from arkhai_bare_metal import NODE_GRANT_ACCESS_ACTION
-from compute_provisioning.hosts import ConnectionEnvelope, ExecutionHost
+from compute_provisioning.hosts import ConnectionEnvelope, ExecutionHost, ProtectedValue
 from compute_provisioning.jobs import JobFailure, JobRun, JobSuccess
 
 from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams, AnsibleRunResult
-from vm_provisioning_adapter.services.ansible_job_executor import (
-    AnsibleJobExecutor,
-    execution_host_from_record,
-)
-from vm_provisioning_adapter.services.ansible_service import AnsibleError, AnsibleResult
+from vm_provisioning_adapter.services.ansible_job_executor import AnsibleJobExecutor
+from compute_provisioning_ansible.runner import inventory_target
+from compute_provisioning_ansible.runner import AnsibleError, AnsibleResult
 
 
 def _make_executor(**settings_overrides) -> AnsibleJobExecutor:
@@ -40,7 +38,10 @@ def _make_executor(**settings_overrides) -> AnsibleJobExecutor:
     for k, v in settings_overrides.items():
         setattr(settings, k, v)
     return AnsibleJobExecutor(
-        MagicMock(), Path("/playbooks/vm-operations.yaml"), settings=settings
+        MagicMock(),
+        Path("/playbooks/vm-operations.yaml"),
+        settings=settings,
+        result_kind=lambda action: f"vm_{action}",
     )
 
 
@@ -477,15 +478,20 @@ class TestBuildResultPayload:
 # execute and cancel
 # ---------------------------------------------------------------------------
 
-_HOST = SimpleNamespace(
+_HOST = ExecutionHost(
     host_id="kvm1",
     pool_id="default",
-    ssh_host="10.0.0.1",
-    public_host="203.0.113.1",
-    ssh_port=22,
-    ssh_user="root",
-    ssh_key_type="path",
-    ssh_key_value="/keys/id_ed25519",
+    connection=ConnectionEnvelope(
+        kind="ssh",
+        version=1,
+        public={
+            "ssh_host": "10.0.0.1",
+            "public_host": "203.0.113.1",
+            "ssh_port": 22,
+            "ssh_user": "root",
+            "key_path": "/keys/id_ed25519",
+        },
+    ),
 )
 _CREATE_OUTPUT = AnsibleRunResult(
     stdout="password: hunter2",
@@ -529,7 +535,7 @@ def _run(**overrides) -> tuple[JobRun, list, list]:
         job_id="job-1",
         offering_mode="vm",
         action="create",
-        host=execution_host_from_record(_HOST),
+        host=_HOST,
         parameters={"offering_mode": "vm", "vm_action": "create", "host_id": "kvm1"},
         report_handle=handles.append,
         report_logs=logs.append,
@@ -541,7 +547,12 @@ def _run(**overrides) -> tuple[JobRun, list, list]:
 def _executor_over(runner) -> AnsibleJobExecutor:
     settings = MagicMock(ansible_timeout_seconds=30, default_host_id="kvm1")
     settings.non_retryable_errors = ["UNREACHABLE"]
-    return AnsibleJobExecutor(runner, Path("/playbooks/vm.yaml"), settings=settings)
+    return AnsibleJobExecutor(
+        runner,
+        Path("/playbooks/vm.yaml"),
+        settings=settings,
+        result_kind=lambda action: f"vm_{action}",
+    )
 
 
 def test_a_successful_run_reports_its_handle_result_and_credentials() -> None:
@@ -555,7 +566,7 @@ def test_a_successful_run_reports_its_handle_result_and_credentials() -> None:
     assert logs and "hunter2" not in logs[0]
     assert "hunter2" not in outcome.logs
     assert outcome.result.offering_mode == "vm"
-    assert outcome.result.result_kind == "create"
+    assert outcome.result.result_kind == "vm_create"
     assert "authentication" not in outcome.result.value
     assert "authentication" not in outcome.result.value["ansible_result"]
     assert [c.credential_kind for c in outcome.credentials] == ["root", "tenant"]
@@ -610,3 +621,25 @@ def test_cancelling_a_process_that_already_ended_is_not_an_error() -> None:
     process.wait(timeout=10)
 
     asyncio.run(_executor_over(_runner()).cancel({"pid": process.pid}))
+
+
+def test_an_embedded_key_reaches_the_runner_still_protected() -> None:
+    host = ExecutionHost(
+        host_id="bm1",
+        pool_id="default",
+        connection=ConnectionEnvelope(
+            kind="ssh",
+            version=1,
+            public={"ssh_host": "10.0.1.1", "ssh_port": 2201, "ssh_user": "ops", "key_path": None},
+            protected={"private_key": ProtectedValue("fernet-v1", "gAAAA-token")},
+        ),
+    )
+
+    target = inventory_target(host)
+
+    assert (target.ssh_key_type, target.ssh_key_value, target.ssh_port) == (
+        "embedded",
+        "gAAAA-token",
+        2201,
+    )
+    assert "gAAAA-token" not in repr(target)

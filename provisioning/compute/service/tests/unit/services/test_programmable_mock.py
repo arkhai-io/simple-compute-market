@@ -20,7 +20,7 @@ from vm_provisioning_adapter.services.mock_ansible_service import (
     MockRule,
     ProgrammableMockAnsibleService,
 )
-from vm_provisioning_adapter.services.ansible_service import AnsibleError, AnsibleRun
+from compute_provisioning_ansible.runner import AnsibleError, AnsibleRun
 from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
 
 
