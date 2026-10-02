@@ -49,6 +49,11 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
+from compute_provisioning.executor_mock import (
+    MockRouteError,
+    MockRuleRouteService,
+    MockRuleSet,
+)
 from compute_provisioning_service import container as _container_module
 from vm_provisioning_adapter.models.system_model import EvaluateJobRequest, EvaluateJobResponse  # server-only test controller models
 from vm_provisioning_adapter.services.job_service import AnsibleJobService
@@ -78,21 +83,26 @@ class MockRuleRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _get_programmable_mock():
-    """Resolve the ProgrammableMockAnsibleService from the container.
+def _vm_mock_rules() -> MockRuleSet | None:
+    """The VM mock's rules, or ``None`` when the mock profile is not active."""
+    from vm_provisioning_adapter.services.mock_ansible_service import (
+        ProgrammableMockAnsibleService,
+    )
 
-    Raises HTTP 503 if the service is not the programmable mock (e.g.,
-    because the 'mock' profile is not active — should not happen since
-    this router is only mounted under that condition, but defensive).
-    """
     svc = _container_module.resolved_ansible_service
-    from vm_provisioning_adapter.services.mock_ansible_service import ProgrammableMockAnsibleService
     if not isinstance(svc, ProgrammableMockAnsibleService):
-        raise HTTPException(
-            status_code=503,
-            detail="ProgrammableMockAnsibleService is not active (ACTIVE_PROFILES != mock)",
-        )
-    return svc
+        return None
+    return svc.rules
+
+
+_rule_routes = MockRuleRouteService(_vm_mock_rules)
+
+
+def _routed(call):
+    try:
+        return call()
+    except MockRouteError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
 def _get_job_service() -> AnsibleJobService:
@@ -106,51 +116,34 @@ def _get_job_service() -> AnsibleJobService:
 
 @router.post("/mock-rules", summary="Add a mock rule")
 def add_mock_rule(body: MockRuleRequest) -> dict:
-    """Add a when→then mock rule.
+    """Add a when→then mock rule for VM jobs.
 
     Rules are evaluated in insertion order.  The first rule whose ``match``
     dict is a subset of the incoming job params wins.
     """
-    mock = _get_programmable_mock()
-    from vm_provisioning_adapter.services.mock_ansible_service import MockRule
-    rule = MockRule(
-        rule_id=body.rule_id,
-        match=body.match,
-        pause_before_result=body.pause_before_result,
-        result_stdout=body.result_stdout,
-        fail_with=body.fail_with,
-    )
-    mock.add_rule(rule)
-    return {"rule_id": rule.rule_id, "status": "added"}
+    return _routed(lambda: _rule_routes.add(body.model_dump()))
 
 
 @router.get("/mock-rules", summary="List active mock rules")
 def list_mock_rules() -> list[dict]:
-    """Return the current set of mock rules in evaluation order."""
-    return _get_programmable_mock().list_rules()
+    """Return the current set of VM mock rules in evaluation order."""
+    return _routed(_rule_routes.list)
 
 
 @router.delete("/mock-rules/{rule_id}", summary="Remove a mock rule")
 def delete_mock_rule(rule_id: str) -> dict:
     """Remove a rule by ID.  No-op if the rule does not exist."""
-    deleted = _get_programmable_mock().delete_rule(rule_id)
-    return {"rule_id": rule_id, "deleted": deleted}
+    return _routed(lambda: _rule_routes.delete(rule_id))
 
 
 @router.post("/mock-rules/{rule_id}/resume", summary="Release a paused job gate")
 def resume_mock_rule(rule_id: str) -> dict:
-    """Release the asyncio gate for a rule with ``pause_before_result=true``.
+    """Release the gate of a rule with ``pause_before_result=true``.
 
-    The job blocked on this rule's gate will proceed to its result or failure
+    The job held by this rule's gate proceeds to its result or failure
     immediately after this call returns.
     """
-    resumed = _get_programmable_mock().resume_rule(rule_id)
-    if not resumed:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Rule {rule_id!r} not found or not paused",
-        )
-    return {"rule_id": rule_id, "resumed": True}
+    return _routed(lambda: _rule_routes.resume(rule_id))
 
 
 # ---------------------------------------------------------------------------

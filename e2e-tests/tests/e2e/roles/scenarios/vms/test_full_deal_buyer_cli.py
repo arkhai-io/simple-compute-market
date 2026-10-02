@@ -759,7 +759,14 @@ class TestStage05a_EvaluateNegotiate:
                 },
                 "expiration_unix": 2_000_000_000,
             },
-            requested_duration_seconds=DURATION_HOURS * 3600,
+            provision_terms={
+                "kind": "compute.v1",
+                "version": 1,
+                "payload": {
+                    "duration_seconds": DURATION_HOURS * 3600,
+                    "ssh_public_key": buyer_config["ssh_public_key"],
+                },
+            },
             buyer_principal=_signer(
                 "eip191",
                 settings.BUYER.MARKETPLACE_CREDENTIAL,

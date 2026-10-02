@@ -7,6 +7,7 @@ pinned seller trust, and signed seller responses.
 
 from __future__ import annotations
 
+
 from datetime import datetime
 from pathlib import Path
 
@@ -16,12 +17,10 @@ import pytest_asyncio
 from fastapi import FastAPI
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from market_capacity_publication import publication_binding
-from market_core.schemas import EscrowProposal, SettlementSelection
 
 import market_storefront.container as _container
 from market_storefront.publication_binding import prepare_vm_listing_binding
 from market_storefront.controllers.negotiate_controller import (
-    _proposal_payload,
     router as negotiate_router,
 )
 from market_storefront.middleware.seller_auth import listing_lifecycle_middleware
@@ -50,25 +49,6 @@ def _vm_provision(duration_seconds: int = 3600) -> dict:
 def _assert_canonical_owners(result: dict) -> None:
     assert result["buyer_principal"] == _BUYER_SIGNER.identity.model_dump(mode="json")
     assert result["seller_principal"] == _SELLER_SIGNER.identity.model_dump(mode="json")
-
-
-def test_proposal_payload_preserves_settlement_selection() -> None:
-    proposal = EscrowProposal(
-        chain_name="anvil",
-        escrow_address="0x" + "00" * 20,
-        fields={"amount": "2000"},
-        expiration_unix=1_800_000_000,
-    )
-    selection = SettlementSelection(
-        mechanism="fiat.stripe.v1",
-        option_id="1" * 64,
-        expiration_unix=1_800_000_000,
-    )
-
-    payload = _proposal_payload(proposal, selection)
-
-    assert payload["fields"] == {"amount": "2000"}
-    assert payload["settlement_selection"] == selection.model_dump(mode="json")
 
 
 @pytest_asyncio.fixture
@@ -750,3 +730,48 @@ class TestUnbackedListingNegotiation:
 
         assert "no_matching_declaration" in str(exc_info.value)
         assert site_requests == []
+
+
+class TestAdministrativeAcceptance:
+    """Force-accept goes through the runtime's acceptance, so the domain's hold
+    is attempted and its accepted settlement artifacts recorded exactly as
+    after a negotiated acceptance."""
+
+    async def test_force_accept_records_the_hold_and_settlement_plan(
+        self, client, db
+    ):
+        c, db = client
+        await _seed_listing(db, "neg-listing-force", demand_amount=5000)
+        with settings_overrides(**{"capacity.hold_ttl_seconds": 900}):
+            opened = await c.negotiate_new(
+                listing_id="neg-listing-force",
+                initial_amount=4500,
+                provision_terms=_vm_provision(),
+                token=_TOKEN,
+                chain_name="anvil",
+                escrow_address="0x" + "11" * 20,
+                escrow_expiration_unix=1_800_000_000,
+            )
+            assert opened["action"] == "counter"
+            negotiation_id = opened["negotiation_id"]
+            (site_requests,) = _SITE_REQUESTS
+            site_requests.clear()
+
+            accepted = await _container.resolved_negotiation_runtime.accept_administratively(
+                repository=db,
+                listing_id="neg-listing-force",
+                negotiation_id=negotiation_id,
+                amount=5000,
+                actor_principal=Ed25519Signer(b"\x31" * 32).identity,
+            )
+
+        assert accepted["action"] == "accept"
+        assert accepted["amount"] == 5000
+        plan = accepted["settlement_plan"]
+        assert plan["obligations"][0]["mechanism"] == "alkahest.v1"
+        thread = await db.load_negotiation_thread_row(negotiation_id=negotiation_id)
+        assert thread["terminal_state"] == "success"
+        assert int(thread["agreed_price"]) == 5000
+        # The acceptance hold reserves at the listing's site, as it does after
+        # a negotiated acceptance.
+        assert any("reserv" in request for request in site_requests), site_requests

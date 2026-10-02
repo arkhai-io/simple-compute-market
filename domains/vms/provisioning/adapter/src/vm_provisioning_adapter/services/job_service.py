@@ -26,8 +26,8 @@ from datetime import datetime, timedelta
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
+from compute_provisioning import JobExecutorResolver, UnsupportedExecutorActionError
 from compute_provisioning.contracts import ExecutorActionEnvelope
-from arkhai_bare_metal import BARE_METAL_ACCESS_ACTIONS
 from compute_provisioning_service.config import Settings
 from compute_provisioning_service.db.models import (
     AnsibleJob,
@@ -49,13 +49,10 @@ from vm_provisioning_operator.models import (
 )
 from vm_provisioning_adapter.services.ansible_service import (
     AnsibleError,
-    AnsibleService,
     redact_ansible_output,
 )
 
 logger = logging.getLogger(__name__)
-
-_BARE_METAL_ACTIONS = set(BARE_METAL_ACCESS_ACTIONS)
 
 
 class AnsibleJobService:
@@ -74,7 +71,7 @@ class AnsibleJobService:
         self,
         settings: Settings,
         session_factory: sessionmaker[Session],
-        ansible_service: AnsibleService,
+        executors: JobExecutorResolver,
         host_service,  # services.host_service.HostService
         relay_resolver=None,  # services.relay_execution.RelayExecutionResolver | None
     ) -> None:
@@ -82,7 +79,10 @@ class AnsibleJobService:
         # inventory a job runs against. See _process_job.
         self._settings = settings
         self._session_factory = session_factory
-        self._ansible = ansible_service
+        # Which runner executes a job, and with which playbook, is decided by
+        # compute-provisioning composition from the job's offering mode and
+        # action; this service persists and drives the job but routes nothing.
+        self._executors = executors
         self._host_service = host_service
         # Optional: a deployment with no relay uses the direct-NAT path and
         # resolves nothing. A job that does reference a relay and finds no
@@ -280,12 +280,12 @@ class AnsibleJobService:
     def reserved_var_keys(self, params: AnsibleJobParams) -> frozenset[str]:
         """Built-in variable keys that would be emitted for these params.
 
-        Thin passthrough to AnsibleService — see its docstring. Lets
-        callers (AnsibleFulfillmentProvider) validate proposed pool
-        extra-vars synchronously, before submit(), without depending on
-        AnsibleService directly.
+        Thin passthrough to the runner that would execute these params — see
+        AnsibleService's docstring. Lets callers (AnsibleFulfillmentProvider)
+        validate proposed pool extra-vars synchronously, before submit(),
+        without depending on the runner directly.
         """
-        return self._ansible.reserved_var_keys(params)
+        return self._execution_for(params).runner.reserved_var_keys(params)
 
     def get_contract_job_record(self, job_id: str) -> dict:
         """Return persisted contract correlation and executor-owned payloads."""
@@ -452,6 +452,7 @@ class AnsibleJobService:
         """
         db = self._session_factory()
         rendered_inv_path = None
+        runner = None
         try:
             job = (
                 db.query(AnsibleJob)
@@ -501,18 +502,27 @@ class AnsibleJobService:
             # persists and returns.
             if self._relay_resolver is not None:
                 params = self._relay_resolver.resolve_into(params)
-            vars_path = self._ansible.build_vars_file(params)
+            try:
+                execution = self._execution_for(params)
+            except UnsupportedExecutorActionError as exc:
+                self._update_job(
+                    db, job, status=JobStatus.failed.value, error=str(exc)
+                )
+                logger.error("Job %s refused: %s", job_id, exc)
+                return
+            runner = execution.runner
+            vars_path = runner.build_vars_file(params)
 
             # rendered_inv_path is initialised before the try block so the
             # outer finally block can always clean it up.
-            rendered_inv_path = self._ansible.write_inventory([host])
+            rendered_inv_path = runner.write_inventory([host])
             # Buyers may reach the host on a different network than the
             # provisioner does; with no public address configured, the
             # connection address is the one there is.
             tenant_address = host.public_host or host.ssh_host
 
-            run = self._ansible.start_playbook(
-                playbook_path=self._playbook_path_for_params(params),
+            run = runner.start_playbook(
+                playbook_path=params.playbook_path or execution.playbook_path,
                 inventory_path=rendered_inv_path,
                 extra_vars_path=vars_path,
                 limit=params.host_id,
@@ -546,12 +556,12 @@ class AnsibleJobService:
                     logger.warning("Failed to update logs for job %s: %s", job_id, e)
 
             try:
-                ansible_result = await self._ansible.wait_for_playbook(
+                ansible_result = await runner.wait_for_playbook(
                     run,
                     timeout_seconds=self._settings.ansible_timeout_seconds,
                     log_callback=log_callback,
                 )
-                run_result: AnsibleRunResult = self._ansible.parse_playbook_result(
+                run_result: AnsibleRunResult = runner.parse_playbook_result(
                     ansible_result, params, tenant_address=tenant_address
                 )
                 logs = run_result.stdout + (
@@ -656,10 +666,10 @@ class AnsibleJobService:
                 except Exception as _exc:
                     logger.warning("Failed to remove temp inventory %s: %s", rendered_inv_path, _exc)
             db.close()
-            # Notify ProgrammableMockAnsibleService that this job has reached a
-            # terminal state so wait_for_job can fire an event instead of polling.
-            # No-op on the real AnsibleService which does not have this method.
-            notify = getattr(self._ansible, "notify_job_done", None)
+            # Tell the runner that executed this job it has reached a terminal
+            # state; mock runners release waiters on it, the real AnsibleService
+            # has no such method.
+            notify = getattr(runner, "notify_job_done", None)
             if notify is not None:
                 notify(job_id)
 
@@ -756,15 +766,10 @@ class AnsibleJobService:
             provider_extra_vars=params.get("provider_extra_vars") or {},
         )
 
-    def _playbook_path_for_params(self, params: AnsibleJobParams):
-        if params.playbook_path:
-            return params.playbook_path
-        if (
-            params.offering_mode == "bare_metal"
-            or params.executor_action in _BARE_METAL_ACTIONS
-        ):
-            return self._settings.resolved_bare_metal_playbook_path
-        return self._settings.resolved_playbook_path
+    def _execution_for(self, params: AnsibleJobParams):
+        return self._executors.resolve(
+            params.offering_mode, params.executor_action or params.vm_action
+        )
 
     def _redact_logs(self, logs: str) -> str:
         """Delegate to the shared scrubber both this module's persisted

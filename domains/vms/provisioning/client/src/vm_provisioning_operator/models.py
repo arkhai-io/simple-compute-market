@@ -671,6 +671,13 @@ class AnsibleReadinessResponse(BaseModel):
             "'real' otherwise (AnsibleService). Used by e2e tests to gate on mock mode."
         ),
     )
+    executor_modes: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "'mock' or 'real' per offering mode, from the job executors compute "
+            "provisioning composed. Empty before composition."
+        ),
+    )
     inventory: InventoryInfo
     playbook: FileInfo
     ssh_keys: list[SshKeyInfo] = Field(

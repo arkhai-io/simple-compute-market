@@ -99,6 +99,7 @@ async def client_and_queue(
     session_factory,
     programmable_mock,
     monkeypatch,
+    job_executor_table_for,
 ) -> AsyncIterator[tuple[ProvisioningClient, AsyncJobQueue, ProgrammableMockAnsibleService, AsyncProvisioningTestClient]]:
     _install_signed_asgi_transport(monkeypatch)
     mock_settings = MagicMock(
@@ -156,7 +157,7 @@ async def client_and_queue(
     job_service = AnsibleJobService(
         settings=mock_settings,
         session_factory=session_factory,
-        ansible_service=programmable_mock,
+        executors=job_executor_table_for(programmable_mock, mock_settings),
         host_service=host_service,
     )
     system_service = SystemService(

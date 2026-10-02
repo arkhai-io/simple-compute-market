@@ -237,6 +237,45 @@ class AsyncProvisioningTestClient:
         """POST /test/mock-rules/{rule_id}/resume"""
         return await self._post(f"/test/mock-rules/{rule_id}/resume")
 
+    async def add_bare_metal_mock_rule(
+        self,
+        *,
+        rule_id: str = "",
+        match: dict | None = None,
+        pause_before_result: bool = False,
+        result_stdout: str | None = None,
+        fail_with: str | None = None,
+    ) -> dict:
+        """POST /test/bare-metal/mock-rules"""
+        body: dict = {
+            "rule_id": rule_id,
+            "match": match or {},
+            "pause_before_result": pause_before_result,
+        }
+        if result_stdout is not None:
+            body["result_stdout"] = result_stdout
+        if fail_with is not None:
+            body["fail_with"] = fail_with
+        return await self._post("/test/bare-metal/mock-rules", body)
+
+    async def list_bare_metal_mock_rules(self) -> list[dict]:
+        """GET /test/bare-metal/mock-rules"""
+        return await self._get("/test/bare-metal/mock-rules")  # type: ignore[return-value]
+
+    async def delete_bare_metal_mock_rule(self, rule_id: str) -> dict:
+        """DELETE /test/bare-metal/mock-rules/{rule_id}"""
+        return await self._delete(f"/test/bare-metal/mock-rules/{rule_id}")
+
+    async def resume_bare_metal_rule(self, rule_id: str) -> dict:
+        """POST /test/bare-metal/mock-rules/{rule_id}/resume"""
+        return await self._post(f"/test/bare-metal/mock-rules/{rule_id}/resume")
+
+    async def evaluate_bare_metal_job(self, host: str, *, action: str) -> dict:
+        """POST /test/bare-metal/evaluate-job"""
+        return await self._post(
+            "/test/bare-metal/evaluate-job", {"host": host, "action": action}
+        )
+
     async def job_summary(self) -> dict:
         """GET /test/jobs/summary"""
         return await self._get("/test/jobs/summary")
@@ -385,6 +424,42 @@ def session_factory(db_engine):
 # ---------------------------------------------------------------------------
 
 
+
+@pytest.fixture
+def bare_metal_runner(fake_ansible):
+    """What runs bare-metal jobs; a module overrides it to use the real mock."""
+    return fake_ansible
+
+
+@pytest.fixture
+def job_executor_table_for():
+    """Build a frozen job executor table routing every action to one runner."""
+    return _job_executor_table
+
+
+def _job_executor_table(runner, settings, bare_metal_runner=None):
+    """Every VM job action runs through ``runner`` and every bare-metal one
+    through ``bare_metal_runner`` (``runner`` when absent), each with its mode's
+    playbook, as composition registers them in the service."""
+    from arkhai_bare_metal import BARE_METAL_ACCESS_ACTIONS
+    from compute_provisioning import JobExecution, JobExecutorTable
+    from vm_provisioning_adapter.bundle import VM_JOB_ACTIONS
+
+    table = JobExecutorTable()
+    for action in VM_JOB_ACTIONS:
+        table.register("vm", action, JobExecution(runner, settings.resolved_playbook_path))
+    for action in BARE_METAL_ACCESS_ACTIONS:
+        table.register(
+            "bare_metal",
+            action,
+            JobExecution(
+                bare_metal_runner if bare_metal_runner is not None else runner,
+                settings.resolved_bare_metal_playbook_path,
+            ),
+        )
+    table.freeze()
+    return table
+
 @pytest.fixture
 def fake_ansible() -> MagicMock:
     """AnsibleService mock with a successful create playbook response."""
@@ -432,6 +507,7 @@ def fake_ansible() -> MagicMock:
 async def client_and_queue(
     session_factory,
     fake_ansible,
+    bare_metal_runner,
     monkeypatch,
 ) -> AsyncIterator[tuple[ProvisioningClient, AsyncJobQueue]]:
     """Yield an authenticated provisioning client and fresh async job queue."""
@@ -510,7 +586,9 @@ async def client_and_queue(
     job_service = AnsibleJobService(
         settings=mock_settings,
         session_factory=session_factory,
-        ansible_service=fake_ansible,
+        executors=_job_executor_table(
+            fake_ansible, mock_settings, bare_metal_runner=bare_metal_runner
+        ),
         host_service=host_service,
     )
 
@@ -683,6 +761,15 @@ async def client_and_queue(
     _container_module.resolved_host_service = host_service
     _container_module.resolved_bare_metal_lease_service = bare_metal_lease_service
     _container_module.resolved_bare_metal_operations_service = bare_metal_operations_service
+    from bare_metal_provisioning_adapter.services.bare_metal_mock_executor import (
+        BareMetalMockAnsibleService,
+    )
+
+    _container_module.resolved_bare_metal_mock_executor = (
+        bare_metal_runner
+        if isinstance(bare_metal_runner, BareMetalMockAnsibleService)
+        else None
+    )
     _container_module.resolved_lease_lifecycle_service = lease_lifecycle_service
     _container_module.resolved_capacity_ledger_service = capacity_ledger_service
     _container_module.resolved_resource_pool_service = resource_pool_service

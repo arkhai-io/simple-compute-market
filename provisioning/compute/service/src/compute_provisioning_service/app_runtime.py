@@ -75,6 +75,9 @@ def resolve_request_path_services() -> None:
     _container_module.resolved_bare_metal_operations_service = (
         container.bare_metal_operations_service()
     )
+    _container_module.resolved_bare_metal_mock_executor = (
+        container.bare_metal_mock_executor()
+    )
     _container_module.resolved_executor_lease_service = container.executor_lease_service()
     _container_module.resolved_compute_contract_service = container.compute_contract_service()
     _container_module.resolved_resource_pool_service = container.resource_pool_service()

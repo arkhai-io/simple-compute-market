@@ -6,7 +6,12 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from compute_provisioning import ExecutorAdapter, ExecutorAdapterRegistry
+from compute_provisioning import (
+    ExecutorAdapter,
+    ExecutorAdapterRegistry,
+    JobExecution,
+    JobExecutorTable,
+)
 from compute_provisioning.app import ComputeProvisioningRouterMount
 from compute_provisioning.release import ExecutorReleaseDispatcher, ExecutorReleasePort
 from market_fulfillment import FulfillmentProvider, ProviderRegistry, provider_needs_host
@@ -19,6 +24,10 @@ class ExecutorAdapterContribution:
     adapter: ExecutorAdapter
     action_kinds: frozenset[str]
     release_executor: ExecutorReleasePort
+    # What runs each job action of this offering mode, keyed by action. Wider
+    # than ``action_kinds``, which names only what callers may submit through
+    # the compute contract; a job may run an action no contract call submits.
+    job_executions: Mapping[str, JobExecution] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -41,6 +50,7 @@ class ComposedComputeAdapters:
     pool_config_handlers: Mapping[str, Any]
     router_mounts: tuple[ComputeProvisioningRouterMount, ...]
     readiness_checks: Mapping[str, Callable[[], Any]]
+    job_executors: JobExecutorTable | None = None
 
 
 def _validate_executor(bundle_name: str, contribution: ExecutorAdapterContribution) -> str:
@@ -177,11 +187,15 @@ def compose_adapter_bundles(
     bundles: tuple[ExecutorAdapterBundle, ...] | list[ExecutorAdapterBundle],
     *,
     host_requirement: Mapping[str, bool],
+    job_executors: JobExecutorTable | None = None,
 ) -> ComposedComputeAdapters:
     """Compose bundles and reject ambiguous registrations before startup.
 
     ``host_requirement`` is the per-provider host need already handed to the
     site ledger and scheduler; it must match the registered providers exactly.
+    ``job_executors`` is the table the job service was built with; every
+    bundle's job executions are registered into it under the same duplicate
+    refusal as contract actions, and it is frozen before composition returns.
     """
 
     executor_owners: dict[str, str] = {}
@@ -226,6 +240,16 @@ def compose_adapter_bundles(
                 action_owners[key] = bundle_name
             adapters.append(contribution.adapter)
             release_executors[offering_mode] = contribution.release_executor
+            if contribution.job_executions and job_executors is None:
+                raise ValueError(
+                    f"adapter bundle {bundle_name!r} contributes job executors "
+                    "but composition was given no job executor table"
+                )
+            for action, execution in contribution.job_executions.items():
+                try:
+                    job_executors.register(offering_mode, action, execution)
+                except ValueError as exc:
+                    raise ValueError(f"adapter bundle {bundle_name!r}: {exc}") from exc
 
         for provider_name, provider in bundle.fulfillment_providers.items():
             name = provider_name.strip()
@@ -280,6 +304,8 @@ def compose_adapter_bundles(
         routers.extend(bundle.router_mounts)
 
     _validate_host_requirement(providers, host_requirement)
+    if job_executors is not None:
+        job_executors.freeze()
 
     return ComposedComputeAdapters(
         executor_registry=ExecutorAdapterRegistry(adapters),
@@ -288,4 +314,5 @@ def compose_adapter_bundles(
         pool_config_handlers=pool_config_handlers,
         router_mounts=tuple(routers),
         readiness_checks=readiness_checks,
+        job_executors=job_executors,
     )

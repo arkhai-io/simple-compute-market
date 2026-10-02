@@ -381,6 +381,63 @@ class ProvisioningTestClient:
         return self._post("/test/evaluate-job", body)
 
     # ------------------------------------------------------------------
+    # Bare-metal mock rules — match bare-metal access jobs only
+    # ------------------------------------------------------------------
+
+    def add_bare_metal_mock_rule(
+        self,
+        *,
+        rule_id: str = "",
+        match: dict[str, Any] | None = None,
+        pause_before_result: bool = False,
+        result_stdout: Optional[str] = None,
+        fail_with: Optional[str] = None,
+    ) -> dict:
+        """POST /test/bare-metal/mock-rules — add a rule for bare-metal jobs.
+
+        Same rule semantics as ``add_mock_rule``; the bare-metal adapter's mock
+        evaluates these and never the VM rules.
+        """
+        body: dict[str, Any] = {
+            "rule_id": rule_id,
+            "match": match or {},
+            "pause_before_result": pause_before_result,
+        }
+        if result_stdout is not None:
+            body["result_stdout"] = result_stdout
+        if fail_with is not None:
+            body["fail_with"] = fail_with
+        return self._post("/test/bare-metal/mock-rules", body)
+
+    def list_bare_metal_mock_rules(self) -> list[dict]:
+        """GET /test/bare-metal/mock-rules"""
+        return self._get("/test/bare-metal/mock-rules")  # type: ignore[return-value]
+
+    def delete_bare_metal_mock_rule(self, rule_id: str) -> dict:
+        """DELETE /test/bare-metal/mock-rules/{rule_id}"""
+        return self._delete(f"/test/bare-metal/mock-rules/{rule_id}")
+
+    def resume_bare_metal_rule(self, rule_id: str) -> dict:
+        """POST /test/bare-metal/mock-rules/{rule_id}/resume"""
+        return self._post(f"/test/bare-metal/mock-rules/{rule_id}/resume")
+
+    def evaluate_bare_metal_job(
+        self,
+        host: str,
+        *,
+        action: str,
+        physical_host_id: str | None = None,
+        escrow_uid: str | None = None,
+    ) -> dict:
+        """POST /test/bare-metal/evaluate-job — dry-run a bare-metal access job."""
+        body: dict[str, Any] = {"host": host, "action": action}
+        if physical_host_id is not None:
+            body["physical_host_id"] = physical_host_id
+        if escrow_uid is not None:
+            body["escrow_uid"] = escrow_uid
+        return self._post("/test/bare-metal/evaluate-job", body)
+
+    # ------------------------------------------------------------------
     # Job observation
     # ------------------------------------------------------------------
 

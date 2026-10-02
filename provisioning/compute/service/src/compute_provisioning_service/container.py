@@ -7,6 +7,7 @@ from typing import Any
 from dependency_injector import containers, providers
 from compute_provisioning.lease_lifecycle import LeaseLifecycleService
 from compute_provisioning.executor_leases import ExecutorLeaseService
+from compute_provisioning import JobExecutorTable
 from compute_provisioning.release import ReleaseJobDispatcher
 from market_resource_pools import ResourcePoolService
 from market_site.authority import LedgerSiteAuthority
@@ -131,10 +132,11 @@ def _merge_host_requirements(*requirements: Mapping[str, bool]) -> Mapping[str, 
     return MappingProxyType(merged)
 
 
-def _compose_adapters(vm_bundle, bare_metal_bundle, host_requirement):
+def _compose_adapters(vm_bundle, bare_metal_bundle, host_requirement, job_executors):
     return compose_adapter_bundles(
         [vm_bundle, bare_metal_bundle],
         host_requirement=host_requirement,
+        job_executors=job_executors,
     )
 
 
@@ -278,6 +280,10 @@ class Container(containers.DeclarativeContainer):
         ledger=capacity_ledger_service,
     )
 
+    # Filled and frozen by adapter composition; the job service resolves each
+    # job's runner and playbook through it.
+    job_executor_table = providers.Singleton(JobExecutorTable)
+
     vm_runtime = providers.Singleton(
         build_vm_runtime,
         config=config,
@@ -286,6 +292,7 @@ class Container(containers.DeclarativeContainer):
         settlement_repository=settlement_repository,
         teardown_port=fulfillment_teardown_port,
         capacity_derivation=capacity_derivation,
+        job_executors=job_executor_table,
     )
 
     ansible_service = providers.Callable(
@@ -342,6 +349,11 @@ class Container(containers.DeclarativeContainer):
         runtime=bare_metal_runtime,
         name=providers.Object("operations_service"),
     )
+    bare_metal_mock_executor = providers.Callable(
+        _runtime_value,
+        runtime=bare_metal_runtime,
+        name=providers.Object("mock_executor"),
+    )
 
     vm_adapter_bundle = providers.Singleton(
         _vm_bundle,
@@ -360,6 +372,7 @@ class Container(containers.DeclarativeContainer):
         vm_bundle=vm_adapter_bundle,
         bare_metal_bundle=bare_metal_adapter_bundle,
         host_requirement=host_requirement,
+        job_executors=job_executor_table,
     )
 
     composed_pool_config_handlers = providers.Singleton(
@@ -539,6 +552,7 @@ resolved_fulfillment_convergence_watchdog: "FulfillmentConvergenceWatchdog | Non
 resolved_capacity_ledger_service: "CapacityLedgerService | None" = None
 resolved_bare_metal_lease_service: Any | None = None
 resolved_bare_metal_operations_service: Any | None = None
+resolved_bare_metal_mock_executor: Any | None = None
 resolved_executor_lease_service: "ExecutorLeaseService | None" = None
 resolved_compute_contract_service = None
 resolved_resource_pool_service: "ResourcePoolService | None" = None

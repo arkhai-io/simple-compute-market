@@ -6,6 +6,7 @@ import os
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
+from compute_provisioning import JobExecution, JobExecutorResolver
 from vm_provisioning_adapter.bundle import HOST_REQUIREMENT, build_vm_adapter_bundle
 from vm_provisioning_adapter.compute_adapter import VmComputeAdapter
 from vm_provisioning_adapter.release import VmFulfillmentReleaseJobPort, VmReleaseExecutor
@@ -43,6 +44,7 @@ class VmProvisioningRuntime:
     host_operations_service: HostOperationsService
     settlement_repository: Any
     teardown_port: Any
+    job_executors: Any = None
 
     def fulfillment_provider(self):
         return AnsibleFulfillmentProvider(
@@ -67,6 +69,10 @@ class VmProvisioningRuntime:
             ),
             fulfillment_provider=self.fulfillment_provider(),
             pool_config_handler=self.pool_config_handler,
+            job_execution=JobExecution(
+                runner=self.ansible_service,
+                playbook_path=self.config.resolved_playbook_path,
+            ),
             readiness_check=self.readiness,
         )
 
@@ -89,6 +95,7 @@ class VmProvisioningRuntime:
             job_queue_provider=self.job_queue_provider,
             lease_lifecycle_service=lease_lifecycle_service,
             fulfillment_convergence_watchdog=fulfillment_convergence_watchdog,
+            job_executors=self.job_executors,
         )
 
 
@@ -121,6 +128,7 @@ def build_vm_runtime(
     settlement_repository,
     teardown_port: Any,
     capacity_derivation: Any,
+    job_executors: JobExecutorResolver,
 ) -> VmProvisioningRuntime:
     active = [
         profile.strip()
@@ -144,7 +152,7 @@ def build_vm_runtime(
     job_service = AnsibleJobService(
         settings=config,
         session_factory=session_factory,
-        ansible_service=ansible_service,
+        executors=job_executors,
         host_service=host_service,
         relay_resolver=RelayExecutionResolver(
             session_factory=session_factory, settings=config
@@ -171,4 +179,5 @@ def build_vm_runtime(
         ),
         settlement_repository=settlement_repository,
         teardown_port=teardown_port,
+        job_executors=job_executors,
     )

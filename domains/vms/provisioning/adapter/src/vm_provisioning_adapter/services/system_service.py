@@ -188,6 +188,7 @@ class SystemService:
         job_queue_provider: "Optional[Callable[[], AsyncJobQueue]]" = None,
         lease_lifecycle_service: "Optional[LeaseLifecycleService]" = None,
         fulfillment_convergence_watchdog: Any | None = None,
+        job_executors: Any | None = None,
     ) -> None:
         self._ansible = ansible_service
         self._settings = settings
@@ -196,6 +197,7 @@ class SystemService:
         self._job_queue_provider = job_queue_provider
         self._lease_lifecycle_service = lease_lifecycle_service
         self._fulfillment_convergence_watchdog = fulfillment_convergence_watchdog
+        self._job_executors = job_executors
 
     def get_version(self) -> str:
         """Return the service version string."""
@@ -286,6 +288,11 @@ class SystemService:
             ansible_version=ansible_version(),
             ansible_mode=(
                 "mock" if "mock" in os.environ.get("ACTIVE_PROFILES", "") else "real"
+            ),
+            executor_modes=(
+                self._job_executors.executor_modes()
+                if self._job_executors is not None and self._job_executors.frozen
+                else {}
             ),
             inventory=inventory_info,
             playbook=FileInfo(

@@ -39,6 +39,7 @@ logger = logging.getLogger(__name__)
 # Adapter router imports come AFTER container.py so controller decorators can
 # resolve the shared composition module without creating an import cycle.
 from vm_provisioning_adapter.routers import vm_mock_router, vm_router_mounts  # noqa: E402
+from bare_metal_provisioning_adapter.routers import bare_metal_mock_router  # noqa: E402
 from bare_metal_provisioning_adapter.routers import bare_metal_router_mounts  # noqa: E402
 from compute_provisioning_service.controllers.compute_contract_controller import ComputeContractController  # noqa: E402
 from compute_provisioning_service.controllers.capacity_definitions_controller import CapacityDefinitionsController  # noqa: E402
@@ -255,7 +256,8 @@ import os as _os
 _active_profiles = [p.strip() for p in _os.environ.get("ACTIVE_PROFILES", "").split(",") if p.strip()]
 if "mock" in _active_profiles:
     app.include_router(vm_mock_router())                                             # /test/*
-    logger.info("Test controller mounted at /test/* (mock profile active)")
+    app.include_router(bare_metal_mock_router())                                     # /test/bare-metal/*
+    logger.info("Test controllers mounted at /test/* (mock profile active)")
 
 # Expose the container on the app instance for integration test overrides.
 app.container = container  # type: ignore[attr-defined]

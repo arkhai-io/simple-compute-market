@@ -151,6 +151,11 @@ storefront behind its own authentication:
 | Admin reserve | `kit/capacity-publication` | a listing's capacity binding | VM, bare metal |
 | Capacity-released callback | `kit/capacity-publication` | a domain release hook | VM, bare metal |
 
+Settle verify, evaluate-settle, admin reserve, and the capacity-released callback carry
+domain-shaped requests and effects, so their kit route services own validation,
+refusals, waiting, and response shape over per-domain hooks; a storefront that offers
+no settle dry run binds only wait.
+
 Wire paths and canonical client methods are unchanged except evaluate-negotiate's body
 (below). Per "An extracted concern leaves no domain-local implementation", every domain
 that carries a copy rebinds in this change and its copy is removed; a domain that lacked
@@ -204,6 +209,12 @@ one obligation today, so the kit gains `service_obligation`, the same per-record
 operation leases already make a concurrent loop pass see the obligation as busy. The domain supplies what fulfillment
 means; the kit worker alone decides when an unstarted ready obligation is retried, so no
 second retry path exists in the domain.
+
+Implementation found that the kit's due-obligation query listed only obligations that
+already had a fulfillment, so no domain's `on_ready` hook was reachable from the
+worker's loop. Decided with the maintainer (option A): a ready obligation whose
+fulfillment never started is due through its `fulfill` operation, so the worker starts
+it and its retry schedule governs every later attempt, for every domain.
 
 Settle status stops asserting that no fulfillment is bound.
 `POST /api/v1/fulfillments/begin` and `BareMetalFulfillmentTransport.begin()` are

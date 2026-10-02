@@ -213,14 +213,18 @@ async def _seed_thread(
     assert thread_binding.site_id == listing_binding.site_id
 
 
-def _make_negotiation_service(db: SQLiteClient) -> NegotiationService:
+def _make_runtime(db: SQLiteClient):
     registration = db.domain_registry.resolve_mode("vm")
-    runtime = build_vm_negotiation_runtime(
+    return build_vm_negotiation_runtime(
         registration.contract,
         registry=db.domain_registry,
         binding=registration.binding,
         capacity_runtime=_capacity_runtime(),
     )
+
+
+def _make_negotiation_service(db: SQLiteClient, runtime=None) -> NegotiationService:
+    runtime = runtime if runtime is not None else _make_runtime(db)
     return NegotiationService(
         sqlite_client=db,
         continue_negotiation=runtime.continue_negotiation,
@@ -255,7 +259,9 @@ async def api(db, monkeypatch) -> AsyncIterator[tuple[FastAPI, SQLiteClient]]:
     )
 
     _container.resolved_sqlite_client = db
-    _container.resolved_negotiation_service = _make_negotiation_service(db)
+    runtime = _make_runtime(db)
+    _container.resolved_negotiation_runtime = runtime
+    _container.resolved_negotiation_service = _make_negotiation_service(db, runtime)
     _container.resolved_marketplace_signer = _SELLER_SIGNER
     monkeypatch.setattr(
         _admin_identity,
@@ -272,6 +278,7 @@ async def api(db, monkeypatch) -> AsyncIterator[tuple[FastAPI, SQLiteClient]]:
     _nt_module._thread_store = None
     _container.resolved_sqlite_client = None
     _container.resolved_negotiation_service = None
+    _container.resolved_negotiation_runtime = None
     _container.resolved_marketplace_signer = None
 
 
@@ -451,20 +458,6 @@ class TestForceAccept:
             json={"amount": 8500},
         )
         assert response.status_code == 401
-
-    async def test_force_accept_commits_terminal_success(self, client):
-        c, db = client
-        await _seed_order(db, "ord-fa2")
-        await _seed_thread(db, "neg-fa2", "ord-fa2")
-        result = await c.force_accept_negotiation("ord-fa2", "neg-fa2", amount=8500)
-        assert result.action == "accept"
-        assert result.amount == 8500
-        assert result.source == "admin_force_accept"
-        detail = await c.get_negotiation("ord-fa2", "neg-fa2")
-        assert detail.terminal_state == "success"
-        assert detail.agreed_amount == 8500
-        assert detail.messages[-1].sender_role == "admin"
-        assert detail.messages[-1].sender_principal == _ADMIN_SIGNER.identity
 
     async def test_force_accept_missing_price_raises(self, client):
         c, db = client

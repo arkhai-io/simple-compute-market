@@ -102,3 +102,91 @@ class ExecutorAdapterRegistry:
             raise UnsupportedExecutorActionError(
                 f"unsupported offering mode: {offering_mode!r}"
             ) from exc
+
+
+@dataclass(frozen=True)
+class JobExecution:
+    """What runs one executor action: the runner and the playbook it runs.
+
+    ``runner`` is opaque here; the job service that persists the job defines the
+    interface it calls. ``playbook_path`` is the runner's default playbook for the
+    action, used when the job itself names none.
+    """
+
+    runner: Any
+    playbook_path: Any = None
+
+
+class JobExecutorResolver(Protocol):
+    def resolve(self, offering_mode: str, action: str) -> JobExecution:
+        """Return what runs ``action`` for ``offering_mode``, or raise
+        ``UnsupportedExecutorActionError``."""
+
+
+class JobExecutorTable:
+    """The job executors adapter bundles contribute, keyed by offering mode and action.
+
+    Service composition fills the table once and freezes it before the service
+    accepts traffic; a job service holds the table from construction and resolves
+    through it at execution time. A key registered twice is a composition error,
+    and nothing resolves until the table is frozen, so a job can never run against
+    a partially composed set of executors.
+    """
+
+    def __init__(self) -> None:
+        self._executions: dict[tuple[str, str], JobExecution] = {}
+        self._frozen = False
+
+    def register(self, offering_mode: str, action: str, execution: JobExecution) -> None:
+        if self._frozen:
+            raise RuntimeError("job executor table is frozen")
+        key = (offering_mode, action)
+        if key in self._executions:
+            raise ValueError(
+                f"duplicate job executor for {offering_mode!r}/{action!r}"
+            )
+        self._executions[key] = execution
+
+    def freeze(self) -> None:
+        self._frozen = True
+
+    @property
+    def frozen(self) -> bool:
+        return self._frozen
+
+    def resolve(self, offering_mode: str, action: str) -> JobExecution:
+        if not self._frozen:
+            raise RuntimeError("job executor table has not been composed")
+        try:
+            return self._executions[(offering_mode, action)]
+        except KeyError as exc:
+            raise UnsupportedExecutorActionError(
+                f"no job executor for offering mode {offering_mode!r} "
+                f"and action {action!r}"
+            ) from exc
+
+    def executor_modes(self) -> dict[str, str]:
+        """``mock`` or ``real`` per offering mode, from the runners it registered.
+
+        A mode is ``mock`` only when every runner registered for it carries the
+        compute mock mechanism's rules.
+        """
+        from .executor_mock import MockRuleSet
+
+        modes: dict[str, str] = {}
+        for (offering_mode, _action), execution in self._executions.items():
+            is_mock = isinstance(getattr(execution.runner, "rules", None), MockRuleSet)
+            current = modes.get(offering_mode)
+            modes[offering_mode] = (
+                "mock" if is_mock and current in (None, "mock") else "real"
+            )
+        return modes
+
+    def runners(self) -> tuple[Any, ...]:
+        """Each distinct runner once, in registration order."""
+
+        seen: list[Any] = []
+        for execution in self._executions.values():
+            if not any(execution.runner is runner for runner in seen):
+                seen.append(execution.runner)
+        return tuple(seen)

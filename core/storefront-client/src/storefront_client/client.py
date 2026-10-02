@@ -1458,29 +1458,29 @@ class StorefrontClient(_StorefrontClientBase):
         self,
         listing_id: str,
         *,
-        proposal: dict[str, Any],
         buyer_principal: Identity,
-        requested_duration_seconds: int | None = None,
+        provision_terms: dict[str, Any],
+        proposal: dict[str, Any] | None = None,
+        settlement_selection: dict[str, Any] | None = None,
         request_id: str | None = None,
     ) -> EvaluateNegotiateResponse:
         """POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate.
 
-        Runs the configured negotiation strategy against a synthetic buyer
-        proposal without creating a negotiation thread or writing to the
-        database. ``proposal`` is the full EscrowProposal-shaped dict;
-        scalar payment escrows carry the absolute opening amount in
-        ``fields["amount"]``. Returns
-        ``EvaluateNegotiateResponse.would_negotiate=False`` when the
-        strategy would exit immediately.
+        Previews the opening ``negotiate_new`` would send — the same buyer
+        principal, provision terms, proposal, and settlement selection —
+        through the storefront's negotiation runtime, creating no thread,
+        hold, or artifact. ``refused`` is true when the opening would be
+        refused; ``would_negotiate`` is false when it would not proceed past
+        round zero.
         """
         if not isinstance(buyer_principal, Identity):
             raise TypeError("buyer_principal must be a market_identity.Identity")
         body: dict[str, Any] = {
-            "proposal": proposal,
             "buyer_principal": buyer_principal.model_dump(mode="json"),
+            "provision_terms": _validate_provision_terms_envelope(provision_terms),
+            "proposal": proposal,
+            "settlement_selection": settlement_selection,
         }
-        if requested_duration_seconds is not None:
-            body["requested_duration_seconds"] = int(requested_duration_seconds)
         return EvaluateNegotiateResponse.from_dict(
             await self._authenticated_post(
                 f"/api/v1/admin/listings/{listing_id}/evaluate-negotiate",
@@ -2872,29 +2872,29 @@ class SyncStorefrontClient(_StorefrontClientBase):
         self,
         listing_id: str,
         *,
-        proposal: dict[str, Any],
         buyer_principal: Identity,
-        requested_duration_seconds: int | None = None,
+        provision_terms: dict[str, Any],
+        proposal: dict[str, Any] | None = None,
+        settlement_selection: dict[str, Any] | None = None,
         request_id: str | None = None,
     ) -> EvaluateNegotiateResponse:
         """POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate.
 
-        Runs the configured negotiation strategy against a synthetic buyer
-        proposal without creating a negotiation thread or writing to the
-        database. ``proposal`` is the full EscrowProposal-shaped dict;
-        scalar payment escrows carry the absolute opening amount in
-        ``fields["amount"]``. Returns
-        ``EvaluateNegotiateResponse.would_negotiate=False`` when the
-        strategy would exit immediately.
+        Previews the opening ``negotiate_new`` would send — the same buyer
+        principal, provision terms, proposal, and settlement selection —
+        through the storefront's negotiation runtime, creating no thread,
+        hold, or artifact. ``refused`` is true when the opening would be
+        refused; ``would_negotiate`` is false when it would not proceed past
+        round zero.
         """
         if not isinstance(buyer_principal, Identity):
             raise TypeError("buyer_principal must be a market_identity.Identity")
         body: dict[str, Any] = {
-            "proposal": proposal,
             "buyer_principal": buyer_principal.model_dump(mode="json"),
+            "provision_terms": _validate_provision_terms_envelope(provision_terms),
+            "proposal": proposal,
+            "settlement_selection": settlement_selection,
         }
-        if requested_duration_seconds is not None:
-            body["requested_duration_seconds"] = int(requested_duration_seconds)
         return EvaluateNegotiateResponse.from_dict(
             self._authenticated_post(
                 f"/api/v1/admin/listings/{listing_id}/evaluate-negotiate",

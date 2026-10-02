@@ -18,6 +18,7 @@ from core_storefront.models.negotiation_models import (
 )
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi_utils.cbv import cbv
+from market_storefront_kit import opening_proposal
 from market_negotiation_runtime import (
     NegotiationRuntime,
     OfferUnfulfillableError,
@@ -33,20 +34,6 @@ from market_storefront.utils.config import BASE_URL_OVERRIDE
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/negotiate", tags=["negotiate"])
-
-
-def _proposal_payload(proposal: Any, settlement_selection: Any) -> Any:
-    if settlement_selection is None:
-        return proposal
-    selection_payload = settlement_selection.model_dump(mode="json")
-    if proposal is None:
-        return {"settlement_selection": selection_payload}
-    if isinstance(proposal, dict):
-        payload = dict(proposal)
-    else:
-        payload = proposal.model_dump(mode="json")
-    payload["settlement_selection"] = selection_payload
-    return payload
 
 
 @cbv(router)
@@ -109,7 +96,7 @@ class NegotiateController:
                 seller_principal=signer.identity,
                 actor_principal=auth.principal,
                 terms=body.provision_terms,
-                proposal=_proposal_payload(
+                proposal=opening_proposal(
                     body.proposal,
                     body.settlement_selection,
                 ),
@@ -213,7 +200,7 @@ class NegotiateController:
                 repository=self._db,
                 negotiation_id=neg_id,
                 buyer_action=body.action,
-                buyer_proposal=_proposal_payload(
+                buyer_proposal=opening_proposal(
                     body.proposal,
                     body.settlement_selection,
                 ),

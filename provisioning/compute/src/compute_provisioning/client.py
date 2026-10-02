@@ -332,6 +332,11 @@ PROVISIONING_ROUTE_CONTRACTS = (
     ProvisioningRouteContract("GET", re.compile(r"/test/jobs/drain"), "provisioning_test_jobs_drain"),
     ProvisioningRouteContract("GET", re.compile(r"/test/jobs/(?P<job_id>[^/]+)/wait"), "provisioning_test_job_wait", path_resource="job_id"),
     ProvisioningRouteContract("POST", re.compile(r"/test/evaluate-job"), "provisioning_test_job_evaluate"),
+    ProvisioningRouteContract("POST", re.compile(r"/test/bare-metal/mock-rules"), "provisioning_test_bare_metal_rule_add"),
+    ProvisioningRouteContract("GET", re.compile(r"/test/bare-metal/mock-rules"), "provisioning_test_bare_metal_rules_list"),
+    ProvisioningRouteContract("DELETE", re.compile(r"/test/bare-metal/mock-rules/(?P<rule_id>[^/]+)"), "provisioning_test_bare_metal_rule_delete", path_resource="rule_id"),
+    ProvisioningRouteContract("POST", re.compile(r"/test/bare-metal/mock-rules/(?P<rule_id>[^/]+)/resume"), "provisioning_test_bare_metal_rule_resume", path_resource="rule_id"),
+    ProvisioningRouteContract("POST", re.compile(r"/test/bare-metal/evaluate-job"), "provisioning_test_bare_metal_job_evaluate"),
 )
 
 DUAL_ROLE_PROVISIONING_OPERATIONS = frozenset(
@@ -422,6 +427,11 @@ ADMIN_PROVISIONING_OPERATIONS = frozenset(
         "provisioning_test_jobs_drain",
         "provisioning_test_job_wait",
         "provisioning_test_job_evaluate",
+        "provisioning_test_bare_metal_rule_add",
+        "provisioning_test_bare_metal_rules_list",
+        "provisioning_test_bare_metal_rule_delete",
+        "provisioning_test_bare_metal_rule_resume",
+        "provisioning_test_bare_metal_job_evaluate",
     }
 )
 

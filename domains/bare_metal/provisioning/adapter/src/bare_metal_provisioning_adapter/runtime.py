@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
 from arkhai_bare_metal import BareMetalResourceProjection
+from compute_provisioning import JobExecution
 
 from bare_metal_provisioning_adapter.bundle import (
     HOST_REQUIREMENT,
@@ -33,9 +35,24 @@ class BareMetalProvisioningRuntime:
     operations_service: BareMetalOperationsService
     fulfillment_provider: BareMetalFulfillmentProvider
     pool_config_handler: BareMetalPoolConfigHandler
+    # Runs the bare-metal access playbook: the real Ansible service, or under
+    # the mock profile this adapter's own mock.
+    ansible_service: Any
+    playbook_path: Any
 
     def readiness(self) -> dict[str, bool]:
         return {"operations_service": self.operations_service is not None}
+
+    @property
+    def mock_executor(self):
+        """This adapter's mock runner, or ``None`` outside the mock profile."""
+        from bare_metal_provisioning_adapter.services.bare_metal_mock_executor import (
+            BareMetalMockAnsibleService,
+        )
+
+        if isinstance(self.ansible_service, BareMetalMockAnsibleService):
+            return self.ansible_service
+        return None
 
     def adapter_bundle(self, site_authority):
         return build_bare_metal_adapter_bundle(
@@ -50,6 +67,10 @@ class BareMetalProvisioningRuntime:
             ),
             fulfillment_provider=self.fulfillment_provider,
             pool_config_handler=self.pool_config_handler,
+            job_execution=JobExecution(
+                runner=self.ansible_service,
+                playbook_path=self.playbook_path,
+            ),
             readiness_check=self.readiness,
         )
 
@@ -67,6 +88,21 @@ def build_bare_metal_runtime(
     config,
     host_service,
 ) -> BareMetalProvisioningRuntime:
+    active = [
+        profile.strip()
+        for profile in os.environ.get("ACTIVE_PROFILES", "").split(",")
+        if profile.strip()
+    ]
+    if "mock" in active:
+        from bare_metal_provisioning_adapter.services.bare_metal_mock_executor import (
+            BareMetalMockAnsibleService,
+        )
+
+        ansible_service = BareMetalMockAnsibleService(config)
+    else:
+        from vm_provisioning_adapter.services.ansible_service import AnsibleService
+
+        ansible_service = AnsibleService(config)
     operations_service = BareMetalOperationsService(
         job_service=job_service,
         job_queue_provider=job_queue_provider,
@@ -81,4 +117,6 @@ def build_bare_metal_runtime(
             job_service=job_service,
         ),
         pool_config_handler=BareMetalPoolConfigHandler(),
+        ansible_service=ansible_service,
+        playbook_path=config.resolved_bare_metal_playbook_path,
     )

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from types import MappingProxyType
 
+from compute_provisioning import JobExecution
 from compute_provisioning_service import (
     ExecutorAdapterBundle,
     ExecutorAdapterContribution,
@@ -31,6 +32,24 @@ HOST_REQUIREMENT = MappingProxyType(
     {ANSIBLE_PROVIDER: AnsibleFulfillmentProvider.needs_host}
 )
 
+#: Every action a VM job runs, whether submitted through the compute contract,
+#: the operator VM and host routes, or fulfillment create and teardown.
+VM_JOB_ACTIONS = frozenset(
+    {
+        "create",
+        "list",
+        "start",
+        "shutdown",
+        "destroy",
+        "reboot",
+        "undefine",
+        "monitor",
+        "reset_password",
+        "vm_remove",
+        "check",
+    }
+)
+
 
 def build_vm_adapter_bundle(
     *,
@@ -38,6 +57,7 @@ def build_vm_adapter_bundle(
     release_executor: VmReleaseExecutor,
     fulfillment_provider: AnsibleFulfillmentProvider,
     pool_config_handler: AnsiblePoolConfigHandler,
+    job_execution: JobExecution,
     readiness_check=None,
 ) -> ExecutorAdapterBundle:
     checks = {"ansible": readiness_check} if readiness_check is not None else {}
@@ -48,6 +68,7 @@ def build_vm_adapter_bundle(
                 adapter=compute_adapter,
                 action_kinds=frozenset({"create"}),
                 release_executor=release_executor,
+                job_executions={action: job_execution for action in VM_JOB_ACTIONS},
             ),
         ),
         fulfillment_providers={ANSIBLE_PROVIDER: fulfillment_provider},

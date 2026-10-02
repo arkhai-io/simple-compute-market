@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from types import MappingProxyType
 
-from arkhai_bare_metal import NODE_GRANT_ACCESS_ACTION
+from arkhai_bare_metal import NODE_GRANT_ACCESS_ACTION, NODE_RECLAIM_ACCESS_ACTION
+from compute_provisioning import JobExecution
 from compute_provisioning_service import (
     ExecutorAdapterBundle,
     ExecutorAdapterContribution,
@@ -39,6 +40,7 @@ def build_bare_metal_adapter_bundle(
     release_executor: BareMetalReleaseExecutor,
     fulfillment_provider: BareMetalFulfillmentProvider,
     pool_config_handler: BareMetalPoolConfigHandler,
+    job_execution: JobExecution,
     readiness_check=None,
 ) -> ExecutorAdapterBundle:
     checks = (
@@ -53,6 +55,10 @@ def build_bare_metal_adapter_bundle(
                 adapter=compute_adapter,
                 action_kinds=frozenset({NODE_GRANT_ACCESS_ACTION}),
                 release_executor=release_executor,
+                job_executions={
+                    NODE_GRANT_ACCESS_ACTION: job_execution,
+                    NODE_RECLAIM_ACCESS_ACTION: job_execution,
+                },
             ),
         ),
         fulfillment_providers={BARE_METAL_PROVIDER: fulfillment_provider},

@@ -595,3 +595,42 @@ def test_accepted_artifacts_stamp_the_seller_recipient(monkeypatch):
         agreed_amount=300,
     )
     assert captured["seller_wallet_address"] == "0xSeLLeR0000"
+
+
+async def test_force_accept_records_what_a_negotiated_acceptance_records(
+    db, fake_capacity, key_records
+):
+    """Administrative acceptance runs the domain's acceptance hooks: the credit
+    terms and agreed price are recorded, and no unfunded quota hold is granted,
+    exactly as after a negotiated acceptance."""
+    from market_identity import Ed25519Signer
+    from tests._settings_overrides import settings_overrides
+
+    with settings_overrides(**{"negotiation.policies": ["bisection"]}):
+        opening = await _start(db, amount=250, quantity=3)
+        assert opening["action"] == "counter"
+        neg_id = opening["negotiation_id"]
+
+        response = await build_api_credit_negotiation_runtime(
+            _DOMAIN
+        ).accept_administratively(
+            repository=db,
+            listing_id="L-tok",
+            negotiation_id=neg_id,
+            amount=290,
+            actor_principal=Ed25519Signer(b"\x41" * 32).identity,
+        )
+
+    assert response["action"] == "accept"
+    assert response["amount"] == 290
+    thread = await db.load_negotiation_thread_row(negotiation_id=neg_id)
+    assert thread["terminal_state"] == "success"
+    assert int(thread["agreed_price"]) == 290
+    assert await db.load_credit_terms(negotiation_id=neg_id) == {
+        "negotiation_id": neg_id,
+        "quantity": 3,
+        "key_mode": "new",
+        "key_id": None,
+    }
+    assert fake_capacity.reserved == []
+    assert await db.load_capacity_hold(negotiation_id=neg_id) is None

@@ -5,6 +5,12 @@ from __future__ import annotations
 from compute_provisioning import ComputeProvisioningRouterMount
 
 
+def bare_metal_mock_router():
+    from bare_metal_provisioning_adapter.controllers.test_controller import make_router
+
+    return make_router()
+
+
 def bare_metal_router_mounts() -> tuple[ComputeProvisioningRouterMount, ...]:
     from bare_metal_provisioning_adapter.controllers.bare_metal_leases_controller import (
         BareMetalLeasesController,

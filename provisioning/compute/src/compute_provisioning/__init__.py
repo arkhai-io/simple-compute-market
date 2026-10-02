@@ -5,6 +5,9 @@ from .adapters import (
     ExecutorAdapterRegistry,
     ExecutorMismatchError,
     FunctionalExecutorAdapter,
+    JobExecution,
+    JobExecutorResolver,
+    JobExecutorTable,
     UnsupportedExecutorActionError,
 )
 from .client import (
@@ -114,6 +117,9 @@ __all__ = [
     "ExecutorAdapter",
     "ExecutorAdapterRegistry",
     "ExecutorMismatchError",
+    "JobExecution",
+    "JobExecutorResolver",
+    "JobExecutorTable",
     "FulfillmentAcceptanceResponse",
     "FulfillmentRequestBody",
     "FulfillmentScheduleRequest",

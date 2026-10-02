@@ -399,3 +399,160 @@ async def test_a_gated_loop_without_an_interruptible_wait_is_refused():
     worker = _CountingWorker(interval_seconds=3600)
     with pytest.raises(TypeError):
         await worker.run(paused=lambda: False)
+
+
+async def _adopted_without_fulfillment(tmp_path, client):
+    repository = SettlementSQLiteRepository(str(tmp_path / "one.db"))
+    runtime = SettlementRuntime(repository, {"test.v1": client})
+    record = (
+        await runtime.register_plan(
+            agreement_ref="agreement-one",
+            obligations=[
+                {
+                    "payer": "buyer",
+                    "claimant": "seller",
+                    "payer_principal": BUYER.model_dump(mode="json"),
+                    "claimant_principal": SELLER.model_dump(mode="json"),
+                    "mechanism": "test.v1",
+                    "expiration_unix": 4_102_444_800,
+                }
+            ],
+        )
+    )[0]
+    await runtime.adopt(
+        record.obligation_ref,
+        local_principal=SELLER,
+        mechanism_ref="escrow",
+    )
+    return repository, runtime, record
+
+
+async def test_service_obligation_starts_fulfillment_through_the_ready_hook(
+    tmp_path,
+) -> None:
+    repository, runtime, record = await _adopted_without_fulfillment(
+        tmp_path, PollingClient()
+    )
+    started: list[str] = []
+
+    async def on_ready(ready, _worker_id):
+        started.append(ready.obligation_ref)
+        await runtime.bind_fulfillment(
+            ready.obligation_ref, "fulfillment-1", local_principal=SELLER
+        )
+
+    worker = SettlementServicingWorker(
+        runtime, repository, worker_id="w", interval_seconds=1, on_ready=on_ready
+    )
+
+    await worker.service_obligation(record.obligation_ref)
+
+    assert started == [record.obligation_ref]
+    stored = await repository.load_settlement_obligation(record.obligation_ref)
+    assert stored["fulfillment_ref"] == "fulfillment-1"
+
+
+async def test_a_failed_start_is_left_to_the_workers_retry(tmp_path) -> None:
+    repository, runtime, record = await _adopted_without_fulfillment(
+        tmp_path, PollingClient()
+    )
+    attempts: list[int] = []
+    events: list[str] = []
+
+    async def on_ready(_ready, _worker_id):
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise RuntimeError("site unavailable")
+        await runtime.bind_fulfillment(
+            record.obligation_ref, "fulfillment-1", local_principal=SELLER
+        )
+
+    worker = SettlementServicingWorker(
+        runtime,
+        repository,
+        worker_id="w",
+        interval_seconds=1,
+        on_ready=on_ready,
+        on_event=lambda event, _fields: events.append(event),
+    )
+
+    await worker.service_obligation(record.obligation_ref)
+    stored = await repository.load_settlement_obligation(record.obligation_ref)
+    assert stored["fulfillment_ref"] is None
+    assert "settlement_retry" in events
+
+    await worker.wake(record.obligation_ref)
+    assert await worker.run_once() == 1
+    stored = await repository.load_settlement_obligation(record.obligation_ref)
+    assert stored["fulfillment_ref"] == "fulfillment-1"
+    assert len(attempts) == 2
+
+
+async def test_service_obligation_refuses_an_unknown_obligation(tmp_path) -> None:
+    repository = SettlementSQLiteRepository(str(tmp_path / "none.db"))
+    worker = SettlementServicingWorker(
+        SettlementRuntime(repository, {"test.v1": PollingClient()}),
+        repository,
+        worker_id="w",
+        interval_seconds=1,
+    )
+
+    with pytest.raises(KeyError):
+        await worker.service_obligation("missing")
+
+
+async def test_an_unstarted_ready_obligation_is_due_until_an_attempt_holds_it(
+    tmp_path,
+) -> None:
+    repository, runtime, record = await _adopted_without_fulfillment(
+        tmp_path, PollingClient()
+    )
+
+    due = await repository.list_due_settlement_obligations(now_unix=10**10)
+    assert [row["obligation_ref"] for row in due] == [record.obligation_ref]
+
+    reserved = await runtime.reserve_fulfillment(
+        record.obligation_ref, local_principal=SELLER, worker_id="w"
+    )
+    assert reserved.status == "pending"
+    leased = await repository.list_due_settlement_obligations(now_unix=0)
+    assert leased == []
+
+    await runtime.retry_fulfillment(
+        record.obligation_ref,
+        RuntimeError("site unavailable"),
+        local_principal=SELLER,
+        worker_id="w",
+    )
+    operation = await repository.load_settlement_operation(
+        record.obligation_ref, "fulfill"
+    )
+    assert operation["state"] == "pending"
+    if operation["next_attempt_unix"] is not None:
+        assert await repository.list_due_settlement_obligations(
+            now_unix=operation["next_attempt_unix"] - 1
+        ) == []
+    retry_due = await repository.list_due_settlement_obligations(now_unix=10**10)
+    assert [row["obligation_ref"] for row in retry_due] == [record.obligation_ref]
+
+
+async def test_an_obligation_that_is_not_ready_is_not_due_for_fulfillment(
+    tmp_path,
+) -> None:
+    repository = SettlementSQLiteRepository(str(tmp_path / "pending.db"))
+    runtime = SettlementRuntime(repository, {"test.v1": PollingClient()})
+    await runtime.register_plan(
+        agreement_ref="agreement-pending",
+        obligations=[
+            {
+                "payer": "buyer",
+                "claimant": "seller",
+                "payer_principal": BUYER.model_dump(mode="json"),
+                "claimant_principal": SELLER.model_dump(mode="json"),
+                "mechanism": "test.v1",
+                "expiration_unix": 4_102_444_800,
+            }
+        ],
+    )
+
+    assert await repository.list_due_settlement_obligations(now_unix=10**10) == []

@@ -15,9 +15,16 @@ from unittest.mock import MagicMock
 import pytest
 
 from arkhai_bare_metal import (
+    BARE_METAL_ACCESS_ACTIONS,
     NODE_GRANT_ACCESS_ACTION,
     NODE_RECLAIM_ACCESS_ACTION,
 )
+from compute_provisioning import (
+    JobExecution,
+    JobExecutorTable,
+    UnsupportedExecutorActionError,
+)
+from vm_provisioning_adapter.bundle import VM_JOB_ACTIONS
 from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams, AnsibleRunResult
 from vm_provisioning_adapter.services.job_service import AnsibleJobService
 
@@ -50,9 +57,24 @@ def _make_service(*, host_service=None, **settings_overrides) -> AnsibleJobServi
     return AnsibleJobService(
         settings=settings,
         session_factory=MagicMock(),
-        ansible_service=MagicMock(),
+        executors=_executors(settings),
         host_service=host_service if host_service is not None else MagicMock(),
     )
+
+
+def _executors(settings, runner=None):
+    runner = runner if runner is not None else MagicMock()
+    table = JobExecutorTable()
+    for action in VM_JOB_ACTIONS:
+        table.register("vm", action, JobExecution(runner, settings.resolved_playbook_path))
+    for action in BARE_METAL_ACCESS_ACTIONS:
+        table.register(
+            "bare_metal",
+            action,
+            JobExecution(runner, settings.resolved_bare_metal_playbook_path),
+        )
+    table.freeze()
+    return table
 
 
 # ---------------------------------------------------------------------------
@@ -228,16 +250,18 @@ class TestBuildParams:
         assert params.executor_target == "kvm1"
 
 
-class TestPlaybookSelection:
-    def test_vm_actions_use_vm_playbook(self):
+class TestExecutorSelection:
+    def test_vm_actions_use_the_vm_registration(self):
         svc = _make_service()
         params = AnsibleJobParams(
             host_id="kvm1", vm_action="create", offering_mode="vm"
         )
 
-        assert svc._playbook_path_for_params(params) == Path("/playbooks/vm-operations.yaml")
+        assert svc._execution_for(params).playbook_path == Path(
+            "/playbooks/vm-operations.yaml"
+        )
 
-    def test_bare_metal_actions_use_bare_metal_playbook(self):
+    def test_bare_metal_actions_use_the_bare_metal_registration(self):
         svc = _make_service()
         params = AnsibleJobParams(
             host_id="bm-node-1",
@@ -245,18 +269,33 @@ class TestPlaybookSelection:
             offering_mode="bare_metal",
         )
 
-        assert svc._playbook_path_for_params(params) == Path("/playbooks/node-access.yaml")
+        assert svc._execution_for(params).playbook_path == Path(
+            "/playbooks/node-access.yaml"
+        )
 
-    def test_bare_metal_offering_mode_uses_bare_metal_playbook(self):
+    def test_executor_action_takes_precedence_over_vm_action(self):
         svc = _make_service()
         params = AnsibleJobParams(
             host_id="bm-node-1",
-            vm_action="grant_access",
+            vm_action="create",
             offering_mode="bare_metal",
-            executor_action="grant_access",
+            executor_action=NODE_GRANT_ACCESS_ACTION,
         )
 
-        assert svc._playbook_path_for_params(params) == Path("/playbooks/node-access.yaml")
+        assert svc._execution_for(params).playbook_path == Path(
+            "/playbooks/node-access.yaml"
+        )
+
+    def test_an_unregistered_mode_and_action_is_refused(self):
+        svc = _make_service()
+        params = AnsibleJobParams(
+            host_id="bm-node-1",
+            vm_action="create",
+            offering_mode="bare_metal",
+        )
+
+        with pytest.raises(UnsupportedExecutorActionError):
+            svc._execution_for(params)
 
 
 # ---------------------------------------------------------------------------
@@ -552,5 +591,5 @@ def test_the_host_registry_is_required():
         AnsibleJobService(
             settings=MagicMock(),
             session_factory=MagicMock(),
-            ansible_service=MagicMock(),
+            executors=MagicMock(),
         )

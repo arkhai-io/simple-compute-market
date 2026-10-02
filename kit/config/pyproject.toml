@@ -8,7 +8,7 @@ dependencies = [
     "cryptography>=42.0",
     "dynaconf>=3.0.0",
     "eth-account>=0.13.0",
-    "arkhai-kit-settlement-runtime==0.1.2",
+    "arkhai-kit-settlement-runtime==0.1.3",
     "pydantic>=2.7",
     "tomlkit>=0.13,<1",
 ]

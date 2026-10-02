@@ -347,7 +347,14 @@ def test_scalar_non_erc20_settlement_reaches_ready(
     eval_result = storefront_admin_client.evaluate_negotiate(
         listing_id,
         proposal=_proposal(case, _BUYER_INITIAL_AMOUNT),
-        requested_duration_seconds=_DURATION_SECONDS,
+        provision_terms={
+            "kind": "compute.v1",
+            "version": 1,
+            "payload": {
+                "duration_seconds": _DURATION_SECONDS,
+                "ssh_public_key": buyer_config["ssh_public_key"],
+            },
+        },
         buyer_principal=_signer(
             "eip191",
             settings.BUYER.MARKETPLACE_CREDENTIAL,

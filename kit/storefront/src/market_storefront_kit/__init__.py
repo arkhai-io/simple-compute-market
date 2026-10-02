@@ -22,6 +22,12 @@ from .lifecycle import (
     QUIESCENCE_TIMEOUT_SECONDS,
     StorefrontLoopController,
 )
+from .deal_control_routes import (
+    DealControlRouteError,
+    NegotiationControlRouteService,
+    StageEventRouteService,
+    opening_proposal,
+)
 from .lifecycle_routes import LifecycleRouteError, StorefrontLifecycleRouteService
 from .negotiation_watchdog import (
     NegotiationRepository,
@@ -33,6 +39,10 @@ from .negotiation_watchdog import (
 )
 
 __all__ = [
+    "DealControlRouteError",
+    "NegotiationControlRouteService",
+    "StageEventRouteService",
+    "opening_proposal",
     "AlkahestChain",
     "AlkahestClientPolicy",
     "HELD_POLL_SECONDS",

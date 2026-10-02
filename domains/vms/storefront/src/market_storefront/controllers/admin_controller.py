@@ -80,6 +80,8 @@ from market_pool_overrides import (
     PoolOverrideWriteResponse,
 )
 from market_capacity_publication import (
+    CapacityAdminRouteError,
+    CapacityAdminRouteService,
     CapacityBinding,
     CapacityBindingError,
     remote_site_clients,
@@ -1177,18 +1179,29 @@ class AdminController:
         self,
         body: CapacityReleasedEventRequest,
     ) -> FulfillmentEventResponse:
-        return await self._apply_fulfillment_event(
-            capacity_reservation_id=body.capacity_reservation_id,
-            site_id=body.site_id,
+        try:
+            recorded = await CapacityAdminRouteService(
+                reserve=None, released=self._record_capacity_released
+            ).capacity_released(body.model_dump(mode="python"))
+        except CapacityAdminRouteError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+        return FulfillmentEventResponse(**recorded)
+
+    async def _record_capacity_released(self, event) -> dict:
+        """Apply a site's capacity-released callback to this storefront's state."""
+        applied = await self._apply_fulfillment_event(
+            capacity_reservation_id=event["capacity_reservation_id"],
+            site_id=event["site_id"],
             event_name="capacity_released",
             state="released",
             close_oversized=False,
             reopen_available=True,
             release_reservation=True,
-            provider_lease_id=body.provider_lease_id,
-            provider_resource_id=body.resource_id,
-            released_at=body.released_at,
+            provider_lease_id=event.get("provider_lease_id"),
+            provider_resource_id=event.get("resource_id"),
+            released_at=event.get("released_at"),
         )
+        return applied.model_dump(mode="python")
 
     @router.post(
         "/fulfillment/events/failed",
@@ -1290,88 +1303,84 @@ class AdminController:
             capacity_binding_for_listing,
         )
 
-        if not body.listing_id:
-            raise HTTPException(
-                status_code=400,
-                detail="A durable VM listing binding is required",
+        async def reserve(listing_id, claim, deal_ref):
+            open_listing_ids = await self._open_bound_vm_listing_ids()
+            try:
+                binding = await capacity_binding_for_listing(self._db, listing_id)
+            except RuntimeError as exc:
+                raise CapacityBindingError(str(exc)) from exc
+            claim = {**claim, "offering_mode": binding.offering_mode}
+            try:
+                reserved = await self._runtime().reserve(
+                    binding, claim=claim, deal_ref=deal_ref
+                )
+            except CapacityBindingError as exc:
+                raise CapacityBindingError(
+                    f"Listing {listing_id!r} is mapped to site "
+                    f"{binding.site_id!r}, which is not currently configured"
+                ) from exc
+            except Exception as exc:
+                raise ConnectionError(
+                    f"site {binding.site_id!r}: {exc}"
+                ) from exc
+            if not reserved:
+                return None
+            closed_listing_ids = await self._close_oversized_compute_listings(
+                binding.site_id
             )
-        open_listing_ids = await self._open_bound_vm_listing_ids()
+            # The capacity-delta subscriber can race this inline
+            # reconciliation. Include listings that were open when reservation
+            # began but that the subscriber closed first, so the response
+            # reports the full effect of this reservation rather than only the
+            # inline worker's share.
+            closed_listing_ids = sorted(
+                set(closed_listing_ids)
+                | await self._closed_since_snapshot(open_listing_ids)
+            )
+            stage_event(
+                "portfolio",
+                "capacity_reserved_by_admin",
+                capacity_reservation_id=reserved.get("capacity_reservation_id"),
+                pool_id=reserved.get("pool_id"),
+                member_id=reserved.get("member_id"),
+                resource_id=reserved.get("resource_id"),
+                gpu_count=reserved.get("allocated_gpu_count"),
+                resource_state=reserved.get("state"),
+                listing_id=listing_id,
+                escrow_uid=deal_ref.get("escrow_uid"),
+                closed_listing_ids=closed_listing_ids,
+            )
+            # Pools are the aggregator's concept, not the ledger's. The
+            # reservation payload carries neither a `pool_id` nor pool-bearing
+            # resource attributes -- the capacity boundary reports the hold and
+            # withholds the topology the storefront published from -- so read
+            # the membership from the durable listing binding, which is where
+            # this storefront recorded it at publication time.
+            durable = await self._db.load_listing_binding(listing_id=listing_id)
+            pool_id = (
+                reserved.get("pool_id")
+                or (reserved.get("attributes") or {}).get("pool_id")
+                or (durable.pool_id if durable is not None else None)
+            )
+            require_reservation_fields(reserved, site_id=binding.site_id)
+            return {
+                "capacity_reservation_id": str(reserved["capacity_reservation_id"]),
+                "pool_id": str(pool_id) if pool_id else None,
+                "member_id": (
+                    str(reserved["member_id"]) if reserved.get("member_id") else None
+                ),
+                "gpu_count": int(reserved.get("allocated_gpu_count") or 1),
+                "resource_state": reserved.get("state") or "available",
+                "closed_listing_ids": closed_listing_ids,
+            }
+
         try:
-            binding = await capacity_binding_for_listing(self._db, body.listing_id)
-        except RuntimeError as exc:
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
-        claim = dict(body.required_attributes or {})
-        claim["offering_mode"] = binding.offering_mode
-        try:
-            reserved = await self._runtime().reserve(
-                binding,
-                claim=claim,
-                deal_ref={
-                    "listing_id": body.listing_id,
-                    "escrow_uid": body.escrow_uid,
-                    "reserved_by": "admin",
-                },
-            )
-        except CapacityBindingError as exc:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Listing {body.listing_id!r} is mapped to site "
-                f"{binding.site_id!r}, which is not currently configured",
-            ) from exc
-        except Exception as exc:
-            raise HTTPException(
-                status_code=502,
-                detail=f"Could not reach site {binding.site_id!r} for listing "
-                f"{body.listing_id!r}: {exc}",
-            ) from exc
-        if not reserved:
-            raise HTTPException(
-                status_code=409,
-                detail="No available compute VM matched required attributes",
-            )
-        closed_listing_ids = await self._close_oversized_compute_listings(binding.site_id)
-        # The capacity-delta subscriber can race this inline reconciliation.
-        # Include listings that were open when reservation began but that the
-        # subscriber closed first, so the response reports the full effect of
-        # this reservation rather than only the inline worker's share.
-        closed_listing_ids = sorted(
-            set(closed_listing_ids)
-            | await self._closed_since_snapshot(open_listing_ids)
-        )
-        stage_event(
-            "portfolio",
-            "capacity_reserved_by_admin",
-            capacity_reservation_id=reserved.get("capacity_reservation_id"),
-            pool_id=reserved.get("pool_id"),
-            member_id=reserved.get("member_id"),
-            resource_id=reserved.get("resource_id"),
-            gpu_count=reserved.get("allocated_gpu_count"),
-            resource_state=reserved.get("state"),
-            listing_id=body.listing_id,
-            escrow_uid=body.escrow_uid,
-            closed_listing_ids=closed_listing_ids,
-        )
-        # Pools are the aggregator's concept, not the ledger's. The
-        # reservation payload carries neither a `pool_id` nor pool-bearing
-        # resource attributes -- the capacity boundary reports the hold and
-        # withholds the topology the storefront published from -- so read the
-        # membership from the durable listing binding, which is where this
-        # storefront recorded it at publication time.
-        durable = await self._db.load_listing_binding(listing_id=body.listing_id)
-        pool_id = (
-            reserved.get("pool_id")
-            or (reserved.get("attributes") or {}).get("pool_id")
-            or (durable.pool_id if durable is not None else None)
-        )
-        require_reservation_fields(reserved, site_id=binding.site_id)
-        return ReserveCapacityResponse(
-            capacity_reservation_id=str(reserved["capacity_reservation_id"]),
-            pool_id=str(pool_id) if pool_id else None,
-            member_id=str(reserved["member_id"]) if reserved.get("member_id") else None,
-            gpu_count=int(reserved.get("allocated_gpu_count") or 1),
-            resource_state=reserved.get("state") or "available",
-            closed_listing_ids=closed_listing_ids,
-        )
+            result = await CapacityAdminRouteService(
+                reserve=reserve, released=self._record_capacity_released
+            ).reserve(body.model_dump(mode="python"))
+        except CapacityAdminRouteError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+        return ReserveCapacityResponse(**result)
 
     @router.post(
         "/portfolio/release-reservations",

@@ -827,7 +827,14 @@ class TestStage05a_EvaluateNegotiate:
                 },
                 "expiration_unix": 2_000_000_000,
             },
-            requested_duration_seconds=DURATION_HOURS * 3600,
+            provision_terms={
+                "kind": "compute.v1",
+                "version": 1,
+                "payload": {
+                    "duration_seconds": DURATION_HOURS * 3600,
+                    "ssh_public_key": buyer_config["ssh_public_key"],
+                },
+            },
             # The evaluation identifies the buyer by marketplace principal, not
             # by EVM wallet: the strategy is asked what it would do for this
             # caller, and the caller is the signing identity.

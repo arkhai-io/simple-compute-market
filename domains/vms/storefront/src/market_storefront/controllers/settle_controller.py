@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
-import time
 from typing import Any
 
 from arkhai_vms import normalize_vm_provision_terms
@@ -20,6 +18,10 @@ from core_storefront.models.settle_models import (
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from fastapi_utils.cbv import cbv
+from market_settlement_runtime import (
+    SettlementAdminRouteError,
+    SettlementAdminRouteService,
+)
 from market_identity import EMPTY_BODY, Identity
 from market_settlement_runtime import (
     HostedSettlementRouteError,
@@ -342,10 +344,42 @@ class AdminSettleController:
     ) -> None:
 
         self._db = db
-        self._svc = AdminSettleService(
+        checks = AdminSettleService(
             sqlite_client=db,
             alkahest_clients=_container.resolved_alkahest_clients,
         )
+
+        async def verify(escrow_uid: str, request):
+            try:
+                return await checks.verify_escrow_dry_run(
+                    escrow_uid=escrow_uid, **dict(request)
+                )
+            except ValueError as exc:
+                raise LookupError(str(exc)) from exc
+
+        async def preview(escrow_uid: str, request):
+            try:
+                return await checks.evaluate_settle_dry_run(
+                    escrow_uid=escrow_uid, **dict(request)
+                )
+            except ValueError as exc:
+                raise LookupError(str(exc)) from exc
+
+        async def settle_status(escrow_uid: str):
+            return await db.load_escrow(escrow_uid=escrow_uid)
+
+        self._routes = SettlementAdminRouteService(
+            verify=verify,
+            preview_fulfillment=preview,
+            settle_status=settle_status,
+            is_terminal=lambda status: status.get("status") in {"ready", "failed"},
+        )
+
+    async def _routed(self, call):
+        try:
+            return await call
+        except SettlementAdminRouteError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
     @admin_settle_router.post(
         "/{escrow_uid}/verify",
@@ -357,22 +391,11 @@ class AdminSettleController:
     ) -> VerifyEscrowResponse:
         """Read the escrow from chain and confirm it matches caller-supplied terms.
 
-        No DB writes. Returns valid=True/False. Used by e2e stage 07b.
+        No DB writes. Returns valid=True/False.
         """
-        try:
-            result = await self._svc.verify_escrow_dry_run(
-                escrow_uid=escrow_uid,
-                listing_id=body.listing_id,
-                seller_wallet=body.seller_wallet,
-                agreed_price=body.agreed_price,
-                agreed_duration_seconds=body.agreed_duration_seconds,
-                chain_name=body.chain_name,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except Exception as exc:
-            logger.error("[ADMIN SETTLE] verify_escrow failed: %s", exc, exc_info=True)
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        result = await self._routed(
+            self._routes.verify(escrow_uid, body.model_dump(mode="python"))
+        )
         return VerifyEscrowResponse(**result)
 
     @admin_settle_router.post(
@@ -385,22 +408,11 @@ class AdminSettleController:
     ) -> EvaluateSettleResponse:
         """Resolve a host from inventory and build the provisioning job spec.
 
-        No chain reads, no DB writes. Used by e2e stage 08a.
+        No chain reads, no DB writes.
         """
-        try:
-            result = await self._svc.evaluate_settle_dry_run(
-                escrow_uid=escrow_uid,
-                listing_id=body.listing_id,
-                ssh_public_key=body.ssh_public_key,
-                duration_seconds=body.duration_seconds,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except Exception as exc:
-            logger.error(
-                "[ADMIN SETTLE] evaluate_settle failed: %s", exc, exc_info=True
-            )
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        result = await self._routed(
+            self._routes.evaluate(escrow_uid, body.model_dump(mode="python"))
+        )
         return EvaluateSettleResponse(**result)
 
     @admin_settle_router.get(
@@ -410,9 +422,7 @@ class AdminSettleController:
         description=(
             "Blocks server-side until the settlement job for *escrow_uid* reaches "
             "``ready`` or ``failed``, or until *timeout* seconds elapse. "
-            "Polls the settlement job row every second internally — no client-side "
-            "polling loop needed. Returns immediately if the job is already terminal. "
-            "Intended for the e2e test suite's stage 09b gate."
+            "Returns immediately if the job is already terminal."
         ),
     )
     async def wait_for_settlement(
@@ -426,40 +436,11 @@ class AdminSettleController:
         ),
     ) -> SettleWaitResponse:
         """Server-side long-poll: block until settlement is terminal or timeout elapses."""
-        _terminal = {"ready", "failed"}
-        start = time.monotonic()
-        deadline = start + timeout
-
-        while True:
-            job = await self._db.load_escrow(escrow_uid=escrow_uid)
-            elapsed_ms = int((time.monotonic() - start) * 1000)
-            status = (job or {}).get("status", "")
-            job_id = (job or {}).get("provisioning_job_id")
-            fulfillment_id = (job or {}).get("fulfillment_id")
-
-            if status in _terminal:
-                return SettleWaitResponse(
-                    ready=True,
-                    status=status,
-                    provisioning_job_id=job_id,
-                    fulfillment_id=fulfillment_id,
-                    elapsed_ms=elapsed_ms,
-                )
-
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                break
-            await asyncio.sleep(min(1.0, remaining))
-
-        elapsed_ms = int((time.monotonic() - start) * 1000)
-        job = await self._db.load_escrow(escrow_uid=escrow_uid)
-        status = (job or {}).get("status", "unknown")
-        job_id = (job or {}).get("provisioning_job_id")
-        fulfillment_id = (job or {}).get("fulfillment_id")
+        waited = await self._routes.wait(escrow_uid, timeout=timeout)
         return SettleWaitResponse(
-            ready=False,
-            status=status,
-            provisioning_job_id=job_id,
-            fulfillment_id=fulfillment_id,
-            elapsed_ms=elapsed_ms,
+            ready=waited["ready"],
+            status=waited["status"],
+            provisioning_job_id=waited.get("provisioning_job_id"),
+            fulfillment_id=waited.get("fulfillment_id"),
+            elapsed_ms=waited["elapsed_ms"],
         )

@@ -294,3 +294,69 @@ def test_a_provider_that_declares_no_host_need_is_refused():
             [_one_provider_bundle(UndeclaredProvider())],
             host_requirement=ANSIBLE_NEEDS_HOST,
         )
+
+
+def _with_jobs(kind: str, actions: tuple[str, ...], runner, playbook):
+    from compute_provisioning import JobExecution
+
+    return ExecutorAdapterContribution(
+        adapter=FakeAdapter(kind),
+        action_kinds=frozenset(actions[:1]),
+        release_executor=FakeReleaseExecutor(),
+        job_executions={
+            action: JobExecution(runner, playbook) for action in actions
+        },
+    )
+
+
+def test_composition_registers_job_executors_by_mode_and_action_and_freezes():
+    from compute_provisioning import JobExecutorTable
+
+    vm_runner, bm_runner = object(), object()
+    table = JobExecutorTable()
+    composed = compose_adapter_bundles([
+        ExecutorAdapterBundle(
+            name="vm",
+            executors=(_with_jobs("vm", ("create", "destroy"), vm_runner, "vm.yaml"),),
+        ),
+        ExecutorAdapterBundle(
+            name="bare-metal",
+            executors=(
+                _with_jobs(
+                    "bare_metal",
+                    ("node_grant_access", "node_reclaim_access"),
+                    bm_runner,
+                    "bm.yaml",
+                ),
+            ),
+        ),
+    ], host_requirement={}, job_executors=table)
+
+    assert composed.job_executors is table
+    assert table.frozen
+    assert table.resolve("vm", "destroy").runner is vm_runner
+    assert table.resolve("bare_metal", "node_reclaim_access").playbook_path == "bm.yaml"
+
+
+def test_job_executors_without_a_table_are_refused():
+    with pytest.raises(ValueError, match="no job executor table"):
+        compose_adapter_bundles([
+            ExecutorAdapterBundle(
+                name="vm",
+                executors=(_with_jobs("vm", ("create",), object(), None),),
+            ),
+        ], host_requirement={})
+
+
+def test_a_duplicate_job_executor_names_the_bundle():
+    from compute_provisioning import JobExecution, JobExecutorTable
+
+    table = JobExecutorTable()
+    table.register("vm", "create", JobExecution(object()))
+    with pytest.raises(ValueError, match="adapter bundle 'vm'.*duplicate job executor"):
+        compose_adapter_bundles([
+            ExecutorAdapterBundle(
+                name="vm",
+                executors=(_with_jobs("vm", ("create",), object(), None),),
+            ),
+        ], host_requirement={}, job_executors=table)
