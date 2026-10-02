@@ -218,13 +218,25 @@ else the internal registry's.
 {{- end }}
 
 {{/*
+`storefront.foldedValue`: the scalar `doc` holds under `name`, matched in any
+spelling, as a string, or "" when absent.
+*/}}
+{{- define "storefront.foldedValue" -}}
+{{- $key := include "storefront.foldedKey" . -}}
+{{- if $key -}}{{- index .doc $key | toString -}}{{- end -}}
+{{- end }}
+
+{{/*
 Whether `principals` (a list of scheme-tagged identities) includes `principal`.
-Returns "true" or "".
+An entry's `scheme` and `identifier` are matched in any spelling, as the
+storefront's loader reads them. Returns "true" or "".
 */}}
 {{- define "storefront.includesPrincipal" -}}
 {{- $found := false -}}
 {{- range $candidate := (.principals | default list) -}}
-{{- if and (eq ($candidate.scheme | default "") $.principal.scheme) (eq ($candidate.identifier | default "") $.principal.identifier) -}}
+{{- $scheme := include "storefront.foldedValue" (dict "doc" $candidate "name" "scheme") -}}
+{{- $identifier := include "storefront.foldedValue" (dict "doc" $candidate "name" "identifier") -}}
+{{- if and (eq $scheme $.principal.scheme) (eq $identifier $.principal.identifier) -}}
 {{- $found = true -}}
 {{- end -}}
 {{- end -}}
@@ -246,9 +258,8 @@ service configuration through".
 
 Keys are matched case-insensitively at every level, as the storefront's loader
 matches them, so a check cannot be bypassed by spelling a key differently, and
-a configuration stating one key in two spellings is refused. Peer and principal
-fields under `Identity` need no folding: the values schema closes that section
-to their exact names.
+a configuration stating one key in two spellings is refused. The values schema
+accepts every typed field in any spelling too, so no read here may assume one.
 
 Argument: dict with `root` (chart root) and `agent`.
 */}}
@@ -349,7 +360,12 @@ Argument: dict with `root` (chart root) and `agent`.
     {{- $peers := include "storefront.foldedMap" (dict "doc" $identity "name" "service_peers") | fromJson -}}
     {{- $peerTrusted := false -}}
     {{- range $peerID, $peer := $peers -}}
-      {{- if and (eq ($peer.role | default "") "service") (has ($peer.site_id | default "") $internalSites) (include "storefront.includesPrincipal" (dict "principals" $peer.principals "principal" $active)) -}}
+      {{- $role := include "storefront.foldedValue" (dict "doc" $peer "name" "role") -}}
+      {{- $siteID := include "storefront.foldedValue" (dict "doc" $peer "name" "site_id") -}}
+      {{- $peerPrincipalsKey := include "storefront.foldedKey" (dict "doc" $peer "name" "principals") -}}
+      {{- $peerPrincipals := list -}}
+      {{- if $peerPrincipalsKey -}}{{- $peerPrincipals = index $peer $peerPrincipalsKey -}}{{- end -}}
+      {{- if and (eq $role "service") (has $siteID $internalSites) (include "storefront.includesPrincipal" (dict "principals" $peerPrincipals "principal" $active)) -}}
         {{- $peerTrusted = true -}}
       {{- end -}}
     {{- end -}}

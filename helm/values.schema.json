@@ -520,14 +520,14 @@
             },
             {
               "type": "object",
-              "properties": {
-                "seller": false,
-                "registryAuthority": false,
-                "registryUrl": false,
-                "storefrontDomains": false,
-                "configMapName": false,
-                "hostedSettlement": false,
-                "chain": false
+              "patternProperties": {
+                "^[sS][eE][lL][lL][eE][rR]$": false,
+                "^[rR][eE][gG][iI][sS][tT][rR][yY][aA][uU][tT][hH][oO][rR][iI][tT][yY]$": false,
+                "^[rR][eE][gG][iI][sS][tT][rR][yY][uU][rR][lL]$": false,
+                "^[sS][tT][oO][rR][eE][fF][rR][oO][nN][tT][dD][oO][mM][aA][iI][nN][sS]$": false,
+                "^[cC][oO][nN][fF][iI][gG][mM][aA][pP][nN][aA][mM][eE]$": false,
+                "^[hH][oO][sS][tT][eE][dD][sS][eE][tT][tT][lL][eE][mM][eE][nN][tT]$": false,
+                "^[cC][hH][aA][iI][nN]$": false
               }
             }
           ]
@@ -573,114 +573,101 @@
       "patternProperties": {
         "^[iI][dD][eE][nN][tT][iI][tT][yY]$": {
           "additionalProperties": false,
-          "properties": {
-            "principal": {
+          "type": "object",
+          "patternProperties": {
+            "^[pP][rR][iI][nN][cC][iI][pP][aA][lL]$": {
               "anyOf": [
                 {
                   "additionalProperties": false,
-                  "properties": {
-                    "scheme": {
+                  "type": "object",
+                  "patternProperties": {
+                    "^[sS][cC][hH][eE][mM][eE]$": {
                       "enum": [
                         "eip191",
                         "ed25519"
                       ],
                       "type": "string"
                     },
-                    "identifier": {
+                    "^[iI][dD][eE][nN][tT][iI][fF][iI][eE][rR]$": {
                       "type": "string"
                     }
-                  },
-                  "required": [
-                    "scheme",
-                    "identifier"
-                  ],
-                  "type": "object"
+                  }
                 },
                 {
                   "type": "null"
                 }
               ]
             },
-            "administrators": {
+            "^[aA][dD][mM][iI][nN][iI][sS][tT][rR][aA][tT][oO][rR][sS]$": {
               "additionalProperties": {
                 "additionalProperties": false,
-                "properties": {
-                  "principals": {
+                "type": "object",
+                "patternProperties": {
+                  "^[pP][rR][iI][nN][cC][iI][pP][aA][lL][sS]$": {
                     "items": {
                       "additionalProperties": false,
-                      "properties": {
-                        "scheme": {
+                      "type": "object",
+                      "patternProperties": {
+                        "^[sS][cC][hH][eE][mM][eE]$": {
                           "enum": [
                             "eip191",
                             "ed25519"
                           ],
                           "type": "string"
                         },
-                        "identifier": {
+                        "^[iI][dD][eE][nN][tT][iI][fF][iI][eE][rR]$": {
                           "maxLength": 128,
                           "minLength": 1,
                           "type": "string"
                         }
-                      },
-                      "required": [
-                        "scheme",
-                        "identifier"
-                      ],
-                      "type": "object"
+                      }
                     },
                     "type": "array"
                   }
-                },
-                "type": "object"
+                }
               },
               "type": "object"
             },
-            "service_peers": {
+            "^[sS][eE][rR][vV][iI][cC][eE]_[pP][eE][eE][rR][sS]$": {
               "additionalProperties": {
                 "additionalProperties": false,
-                "properties": {
-                  "role": {
+                "type": "object",
+                "patternProperties": {
+                  "^[rR][oO][lL][eE]$": {
                     "type": "string"
                   },
-                  "site_id": {
+                  "^[sS][iI][tT][eE]_[iI][dD]$": {
                     "type": "string"
                   },
-                  "principals": {
+                  "^[pP][rR][iI][nN][cC][iI][pP][aA][lL][sS]$": {
                     "items": {
                       "additionalProperties": false,
-                      "properties": {
-                        "scheme": {
+                      "type": "object",
+                      "patternProperties": {
+                        "^[sS][cC][hH][eE][mM][eE]$": {
                           "enum": [
                             "eip191",
                             "ed25519"
                           ],
                           "type": "string"
                         },
-                        "identifier": {
+                        "^[iI][dD][eE][nN][tT][iI][fF][iI][eE][rR]$": {
                           "maxLength": 128,
                           "minLength": 1,
                           "type": "string"
                         }
-                      },
-                      "required": [
-                        "scheme",
-                        "identifier"
-                      ],
-                      "type": "object"
+                      }
                     },
                     "type": "array"
                   }
-                },
-                "type": "object"
+                }
               },
               "type": "object"
             }
-          },
-          "type": "object"
+          }
         },
         "^[rR][eE][gG][iI][sS][tT][rR][yY]$": {
           "additionalProperties": true,
-          "properties": {},
           "type": "object",
           "patternProperties": {
             "^[aA][uU][tT][hH]$": false
@@ -689,23 +676,24 @@
         "^[sS][eE][tT][tT][lL][eE][mM][eE][nN][tT]$": {
           "type": "object",
           "additionalProperties": false,
-          "properties": {
-            "schema_version": {
+          "patternProperties": {
+            "^[sS][cC][hH][eE][mM][aA]_[vV][eE][rR][sS][iI][oO][nN]$": {
               "type": "integer"
             },
-            "priority": {
+            "^[pP][rR][iI][oO][rR][iI][tT][yY]$": {
               "type": "array",
               "items": {
                 "type": "string"
               }
             },
-            "alkahest": {
+            "^[aA][lL][kK][aA][hH][eE][sS][tT]$": {
               "additionalProperties": false,
-              "properties": {
-                "enabled": {
+              "type": "object",
+              "patternProperties": {
+                "^[eE][nN][aA][bB][lL][eE][dD]$": {
                   "type": "boolean"
                 },
-                "address_config_path": {
+                "^[aA][dD][dD][rR][eE][sS][sS]_[cC][oO][nN][fF][iI][gG]_[pP][aA][tT][hH]$": {
                   "anyOf": [
                     {
                       "type": "string"
@@ -715,34 +703,34 @@
                     }
                   ]
                 },
-                "oracle_gated": {
+                "^[oO][rR][aA][cC][lL][eE]_[gG][aA][tT][eE][dD]$": {
                   "type": "boolean"
                 },
-                "trusted_oracle_addresses": {
+                "^[tT][rR][uU][sS][tT][eE][dD]_[oO][rR][aA][cC][lL][eE]_[aA][dD][dD][rR][eE][sS][sS][eE][sS]$": {
                   "items": {
                     "type": "string"
                   },
                   "type": "array"
                 },
-                "interruptible": {
+                "^[iI][nN][tT][eE][rR][rR][uU][pP][tT][iI][bB][lL][eE]$": {
                   "type": "boolean"
                 },
-                "interruptible_oracle_addresses": {
+                "^[iI][nN][tT][eE][rR][rR][uU][pP][tT][iI][bB][lL][eE]_[oO][rR][aA][cC][lL][eE]_[aA][dD][dD][rR][eE][sS][sS][eE][sS]$": {
                   "items": {
                     "type": "string"
                   },
                   "type": "array"
                 }
-              },
-              "type": "object"
+              }
             },
-            "stripe": {
+            "^[sS][tT][rR][iI][pP][eE]$": {
               "additionalProperties": false,
-              "properties": {
-                "enabled": {
+              "type": "object",
+              "patternProperties": {
+                "^[eE][nN][aA][bB][lL][eE][dD]$": {
                   "type": "boolean"
                 },
-                "base_url": {
+                "^[bB][aA][sS][eE]_[uU][rR][lL]$": {
                   "anyOf": [
                     {
                       "type": "string"
@@ -752,7 +740,7 @@
                     }
                   ]
                 },
-                "authority_id": {
+                "^[aA][uU][tT][hH][oO][rR][iI][tT][yY]_[iI][dD]$": {
                   "anyOf": [
                     {
                       "type": "string"
@@ -762,7 +750,7 @@
                     }
                   ]
                 },
-                "environment": {
+                "^[eE][nN][vV][iI][rR][oO][nN][mM][eE][nN][tT]$": {
                   "anyOf": [
                     {
                       "type": "string"
@@ -772,50 +760,43 @@
                     }
                   ]
                 },
-                "authority": {
+                "^[aA][uU][tT][hH][oO][rR][iI][tT][yY]$": {
                   "anyOf": [
                     {
                       "additionalProperties": false,
-                      "properties": {
-                        "principals": {
+                      "type": "object",
+                      "patternProperties": {
+                        "^[pP][rR][iI][nN][cC][iI][pP][aA][lL][sS]$": {
                           "items": {
                             "additionalProperties": false,
-                            "properties": {
-                              "scheme": {
+                            "type": "object",
+                            "patternProperties": {
+                              "^[sS][cC][hH][eE][mM][eE]$": {
                                 "enum": [
                                   "eip191",
                                   "ed25519"
                                 ],
                                 "type": "string"
                               },
-                              "identifier": {
+                              "^[iI][dD][eE][nN][tT][iI][fF][iI][eE][rR]$": {
                                 "maxLength": 128,
                                 "minLength": 1,
                                 "type": "string"
                               }
-                            },
-                            "required": [
-                              "scheme",
-                              "identifier"
-                            ],
-                            "type": "object"
+                            }
                           },
                           "maxItems": 2,
                           "minItems": 1,
                           "type": "array"
                         }
-                      },
-                      "required": [
-                        "principals"
-                      ],
-                      "type": "object"
+                      }
                     },
                     {
                       "type": "null"
                     }
                   ]
                 },
-                "expected_manifest_digest": {
+                "^[eE][xX][pP][eE][cC][tT][eE][dD]_[mM][aA][nN][iI][fF][eE][sS][tT]_[dD][iI][gG][eE][sS][tT]$": {
                   "anyOf": [
                     {
                       "type": "string"
@@ -825,7 +806,7 @@
                     }
                   ]
                 },
-                "expected_api_version": {
+                "^[eE][xX][pP][eE][cC][tT][eE][dD]_[aA][pP][iI]_[vV][eE][rR][sS][iI][oO][nN]$": {
                   "anyOf": [
                     {
                       "type": "string"
@@ -835,7 +816,7 @@
                     }
                   ]
                 },
-                "expected_schema_version": {
+                "^[eE][xX][pP][eE][cC][tT][eE][dD]_[sS][cC][hH][eE][mM][aA]_[vV][eE][rR][sS][iI][oO][nN]$": {
                   "anyOf": [
                     {
                       "type": "integer"
@@ -845,13 +826,13 @@
                     }
                   ]
                 },
-                "required_capabilities": {
+                "^[rR][eE][qQ][uU][iI][rR][eE][dD]_[cC][aA][pP][aA][bB][iI][lL][iI][tT][iI][eE][sS]$": {
                   "items": {
                     "type": "string"
                   },
                   "type": "array"
                 },
-                "account_ref": {
+                "^[aA][cC][cC][oO][uU][nN][tT]_[rR][eE][fF]$": {
                   "anyOf": [
                     {
                       "type": "string"
@@ -861,15 +842,15 @@
                     }
                   ]
                 },
-                "currency": {
+                "^[cC][uU][rR][rR][eE][nN][cC][yY]$": {
                   "const": "usd",
                   "type": "string"
                 },
-                "country": {
+                "^[cC][oO][uU][nN][tT][rR][yY]$": {
                   "const": "US",
                   "type": "string"
                 },
-                "condition_profile": {
+                "^[cC][oO][nN][dD][iI][tT][iI][oO][nN]_[pP][rR][oO][fF][iI][lL][eE]$": {
                   "anyOf": [
                     {
                       "type": "string"
@@ -879,23 +860,25 @@
                     }
                   ]
                 },
-                "condition_profiles": {
+                "^[cC][oO][nN][dD][iI][tT][iI][oO][nN]_[pP][rR][oO][fF][iI][lL][eE][sS]$": {
                   "additionalProperties": {
                     "additionalProperties": false,
-                    "properties": {
-                      "protocol": {
+                    "type": "object",
+                    "patternProperties": {
+                      "^[pP][rR][oO][tT][oO][cC][oO][lL]$": {
                         "const": "arkhai.condition.v1",
                         "type": "string"
                       },
-                      "condition_id": {
+                      "^[cC][oO][nN][dD][iI][tT][iI][oO][nN]_[iI][dD]$": {
                         "maxLength": 128,
                         "minLength": 1,
                         "type": "string"
                       },
-                      "evaluator": {
+                      "^[eE][vV][aA][lL][uU][aA][tT][oO][rR]$": {
                         "additionalProperties": false,
-                        "properties": {
-                          "kind": {
+                        "type": "object",
+                        "patternProperties": {
+                          "^[kK][iI][nN][dD]$": {
                             "enum": [
                               "alkahest.evm-arbiter.v1",
                               "external-http.v1",
@@ -903,12 +886,12 @@
                             ],
                             "type": "string"
                           },
-                          "version": {
+                          "^[vV][eE][rR][sS][iI][oO][nN]$": {
                             "maxLength": 64,
                             "minLength": 1,
                             "type": "string"
                           },
-                          "resolver_id": {
+                          "^[rR][eE][sS][oO][lL][vV][eE][rR]_[iI][dD]$": {
                             "anyOf": [
                               {
                                 "maxLength": 128,
@@ -920,7 +903,7 @@
                               }
                             ]
                           },
-                          "arbiter_id": {
+                          "^[aA][rR][bB][iI][tT][eE][rR]_[iI][dD]$": {
                             "anyOf": [
                               {
                                 "maxLength": 128,
@@ -932,7 +915,7 @@
                               }
                             ]
                           },
-                          "params": {
+                          "^[pP][aA][rR][aA][mM][sS]$": {
                             "additionalProperties": {
                               "anyOf": [
                                 {
@@ -959,24 +942,20 @@
                             },
                             "type": "object"
                           }
-                        },
-                        "required": [
-                          "kind",
-                          "version"
-                        ],
-                        "type": "object"
+                        }
                       },
-                      "demand": {
+                      "^[dD][eE][mM][aA][nN][dD]$": {
                         "additionalProperties": false,
-                        "properties": {
-                          "encoding": {
+                        "type": "object",
+                        "patternProperties": {
+                          "^[eE][nN][cC][oO][dD][iI][nN][gG]$": {
                             "enum": [
                               "evm-abi",
                               "application/jcs+json"
                             ],
                             "type": "string"
                           },
-                          "value": {
+                          "^[vV][aA][lL][uU][eE]$": {
                             "anyOf": [
                               {
                                 "type": "string"
@@ -1007,81 +986,60 @@
                               }
                             ]
                           }
-                        },
-                        "required": [
-                          "encoding",
-                          "value"
-                        ],
-                        "type": "object"
+                        }
                       },
-                      "evm_subject": {
+                      "^[eE][vV][mM]_[sS][uU][bB][jJ][eE][cC][tT]$": {
                         "anyOf": [
                           {
                             "additionalProperties": false,
-                            "properties": {
-                              "address": {
+                            "type": "object",
+                            "patternProperties": {
+                              "^[aA][dD][dD][rR][eE][sS][sS]$": {
                                 "type": "string"
                               }
-                            },
-                            "required": [
-                              "address"
-                            ],
-                            "type": "object"
+                            }
                           },
                           {
                             "type": "null"
                           }
                         ]
                       }
-                    },
-                    "required": [
-                      "condition_id",
-                      "evaluator",
-                      "demand"
-                    ],
-                    "type": "object"
+                    }
                   },
                   "type": "object"
                 },
-                "resolvers": {
+                "^[rR][eE][sS][oO][lL][vV][eE][rR][sS]$": {
                   "additionalProperties": {
                     "additionalProperties": false,
-                    "properties": {
-                      "chain_name": {
+                    "type": "object",
+                    "patternProperties": {
+                      "^[cC][hH][aA][iI][nN]_[nN][aA][mM][eE]$": {
                         "maxLength": 128,
                         "minLength": 1,
                         "type": "string"
                       },
-                      "evidence_mode": {
+                      "^[eE][vV][iI][dD][eE][nN][cC][eE]_[mM][oO][dD][eE]$": {
                         "enum": [
                           "eas.v1",
                           "portable-remote.v1"
                         ],
                         "type": "string"
                       }
-                    },
-                    "required": [
-                      "chain_name",
-                      "evidence_mode"
-                    ],
-                    "type": "object"
+                    }
                   },
                   "type": "object"
                 },
-                "request_timeout_seconds": {
+                "^[rR][eE][qQ][uU][eE][sS][tT]_[tT][iI][mM][eE][oO][uU][tT]_[sS][eE][cC][oO][nN][dD][sS]$": {
                   "exclusiveMinimum": 0,
                   "type": "number"
                 },
-                "preflight_timeout_seconds": {
+                "^[pP][rR][eE][fF][lL][iI][gG][hH][tT]_[tT][iI][mM][eE][oO][uU][tT]_[sS][eE][cC][oO][nN][dD][sS]$": {
                   "exclusiveMinimum": 0,
                   "type": "number"
                 },
-                "allow_insecure_loopback": {
+                "^[aA][lL][lL][oO][wW]_[iI][nN][sS][eE][cC][uU][rR][eE]_[lL][oO][oO][pP][bB][aA][cC][kK]$": {
                   "type": "boolean"
-                }
-              },
-              "type": "object",
-              "patternProperties": {
+                },
                 "^[oO][fF][fF]_[sS][eE][sS][sS][iI][oO][nN]_[pP][oO][lL][iI][cC][yY]$": false,
                 "^[aA][uU][tT][hH][oO][rR][iI][zZ][aA][tT][iI][oO][nN]_[jJ][oO][uU][rR][nN][aA][lL]_[pP][aA][tT][hH]$": false
               }
@@ -1090,16 +1048,14 @@
         },
         "^[wW][aA][lL][lL][eE][tT]$": {
           "additionalProperties": false,
-          "properties": {
-            "address": {
-              "type": "string"
-            },
-            "ssh_public_key": {
-              "type": "string"
-            }
-          },
           "type": "object",
           "patternProperties": {
+            "^[aA][dD][dD][rR][eE][sS][sS]$": {
+              "type": "string"
+            },
+            "^[sS][sS][hH]_[pP][uU][bB][lL][iI][cC]_[kK][eE][yY]$": {
+              "type": "string"
+            },
             "^[pP][rR][iI][vV][aA][tT][eE]_[kK][eE][yY]$": false
           }
         }

@@ -310,6 +310,43 @@ def test_release_owned_keys_are_matched_in_any_spelling() -> None:
     assert "wait-for-rpc" in _source(_ok(_render(agent=agent)), "deployment.yaml")
 
 
+def test_typed_fields_are_accepted_in_any_spelling() -> None:
+    """The values schema accepts what the loader reads; the release checks
+    still find principals and peers however their fields are spelled."""
+    agent = _agent()
+    identity = agent["config"]["Identity"]
+    identity["Principal"] = identity.pop("principal")
+    peer = identity["service_peers"]["provisioning_default"]
+    identity["Service_Peers"] = {
+        "provisioning_default": {
+            "Role": peer["role"],
+            "SITE_ID": peer["site_id"],
+            "Principals": [
+                {"Scheme": p["scheme"], "Identifier": p["identifier"]} for p in peer["principals"]
+            ],
+        }
+    }
+    del identity["service_peers"]
+    agent["config"]["Settlement"] = {"Priority": [], "Stripe": {"Enabled": False}}
+    config = _config(_ok(_render(agent=agent)))
+
+    assert config["Identity"]["Principal"] == BASE_AGENT["config"]["Identity"]["principal"]
+    assert config["Settlement"] == {"Priority": [], "Stripe": {"Enabled": False}}
+
+    wrong = copy.deepcopy(agent)
+    wrong["config"]["Identity"]["Service_Peers"]["provisioning_default"]["Principals"] = [
+        {"Scheme": "eip191", "Identifier": ACTIVE_REGISTRY["identifier"]}
+    ]
+    _refused(_render(agent=wrong), "Identity.service_peers")
+
+
+def test_retired_and_secret_keys_are_refused_in_any_spelling() -> None:
+    for key in ("Seller", "RegistryUrl", "STOREFRONTDOMAINS", "Chain"):
+        _refused(_render(agent=_with_config(**{key: {}})), key)
+    _refused(_render(agent=_with_config(Wallet={"Private_Key": "0xabc"})), "Private_Key")
+    _refused(_render(agent=_with_config(registry={"AUTH": {"http://x": "t"}})), "AUTH")
+
+
 def test_a_stated_port_must_be_a_number_equal_to_the_agents() -> None:
     _refused(_render(agent=_with_config(port="8001")), "must be a number")
     _refused(_render(agent=_with_config(port=8001.5)), "differs from the agent's port")

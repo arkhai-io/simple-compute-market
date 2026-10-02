@@ -257,9 +257,10 @@ sections both ways — `[Settlement]` and `[settlement]`, `[Identity.…]` and
 spelling the configuration already uses. Otherwise `Port: 9000` would pass the port
 check and render beside the `port: 8001` the chart writes. A configuration that
 states one key in two spellings, at any depth, is refused: the loader would merge
-them in an order nobody chose. Peer and principal fields under `Identity` need no
-folding, because the values schema closes that section to their exact names
-(decision 8).
+them in an order nobody chose. Peer and principal fields under `Identity` are read
+the same way — each principal's `scheme` and `identifier`, each peer's `role`,
+`site_id`, and `principals` — because the generated values schema accepts every typed
+field in any spelling (decision 8), so no chart read may assume one.
 
 The port check compares exactly: a stated port must be a number and equal the
 agent's, with no conversion deciding whether two values disagree.
@@ -361,7 +362,13 @@ field metadata, including `"secret": true` and `"roles"`, into the schema it emi
 2. emits each model's JSON Schema with references inlined, so the fragment uses no
    draft-specific `$defs` keyword;
 3. replaces every property marked `"secret": true`, or whose `"roles"` exclude
-   `seller`, with `false`, a schema nothing satisfies;
+   `seller`, with `false`, a schema nothing satisfies, and keys every property —
+   allowed or refused — by an any-case name pattern rather than its exact name, so
+   the schema accepts a field in every spelling the storefront's loader reads and
+   refuses a withheld one in every spelling; two fields differing only by case are
+   refused at generation, since no pattern could tell them apart. `required` is
+   dropped: whether a field is present is the storefront's startup check, and an
+   exact-name requirement would refuse a field spelled differently;
 4. nests each fragment at its section's path under an agent's `config` — top-level
    sections under both spellings (decision 4) — closes `Settlement` to the root keys
    and the mechanisms the storefront registers, as the settlement runtime does, and
@@ -375,8 +382,8 @@ and `lint`, before anything renders. A demonstration chart built this way with H
 refused `config.Settlement.contact.contact_payload` naming it, and refused a misspelled
 `retention_secnds` naming it.
 
-**Coverage.** Each typed section gets refusal of secret-marked and role-inapplicable
-fields, of fields its model does not have — which is what keeps hosted payer and
+**Coverage.** Each typed section accepts its fields in any spelling and gets
+refusal of secret-marked and role-inapplicable fields, of fields its model does not have — which is what keeps hosted payer and
 instrument data out before render — and of wrong types and bounds the model states.
 Cross-field and semantic rules stay with the storefront at startup. Untyped sections
 stay open. A mechanism or sink installed from outside this repository is not known at
@@ -528,10 +535,10 @@ Found while implementing; recorded for review, not fixed here unless noted.
    loads one rendered `storefront.json` with the storefront's own loader when the
    storefront environment exists, and reports a skip otherwise. CI's
    `release-deployment` job has Helm but not that environment, and `tests.yml` runs
-   only for pushes and pull requests to `staging` and `dev`. A job that runs
-   `make test`, `make build-dev`, and Helm validation together — with make targets to
-   drive it — would protect this boundary; it is a CI-design change and out of scope
-   here. Until then the check is local evidence, run by `make -C helm test-render`.
+   only for pushes and pull requests to `staging` and `dev`. Out of scope here;
+   `add-full-stack-ci-job` owns a job that runs `make test`, `make build-dev`, and
+   Helm validation together. Promotion states the gap as current state in
+   `docs/development/TESTING.md`, so it outlives this change's archival.
 
 ## Open questions
 

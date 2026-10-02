@@ -193,12 +193,13 @@ def config_get(
         ..., help="Dotted config key, e.g. 'port' or 'pricing.default_min_price'."
     ),
 ) -> None:
-    """Print the value of a single config key from the storefront's storefront.toml."""
+    """Print the value of a single key from the storefront's merged config files."""
     doc = load_storefront_config()
     val = get_dotted(doc, key)
     if val is None:
         typer.secho(
-            f"Key {key!r} not set in {storefront_config_file()}.",
+            f"Key {key!r} not set in the storefront config files in "
+            f"{storefront_config_file().parent}.",
             fg=typer.colors.YELLOW,
         )
         raise typer.Exit(1)

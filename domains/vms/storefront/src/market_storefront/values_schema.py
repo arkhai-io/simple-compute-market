@@ -8,9 +8,11 @@ ConfigMap. The typed configuration models already say which fields are secret
 
 * refuses every secret-marked field, and every field that does not apply to the
   seller role, in any spelling of its name;
+* accepts every other field in any spelling, as the storefront's loader does;
 * closes each typed section, so a field its model does not have — hosted payer
   data, say — is refused too;
-* carries no defaults, and leaves ``config`` and every untyped section open.
+* carries no defaults and no required fields, and leaves ``config`` and every
+  untyped section open.
 
 The definition is written into the umbrella and storefront chart schemas under
 :data:`DEFINITION`. See openspec/specs/deployment-state/spec.md, "Generated
@@ -92,31 +94,50 @@ def _is_withheld(field: Any, role: str) -> bool:
     return isinstance(roles, list) and role not in roles
 
 
+def _any_case_fields(fields: Mapping[str, Any]) -> dict[str, Any]:
+    """Key ``fields`` by :func:`any_case` patterns, refusing case-only collisions."""
+    patterns: dict[str, Any] = {}
+    seen: dict[str, str] = {}
+    for name, schema in fields.items():
+        folded = name.lower()
+        if folded in seen:
+            raise ValueError(
+                f"fields {seen[folded]!r} and {name!r} differ only by case; "
+                "the storefront's loader cannot tell them apart"
+            )
+        seen[folded] = name
+        patterns[any_case(name)] = schema
+    return patterns
+
+
 def _publicize(node: Any, role: str) -> Any:
-    """Refuse withheld fields and drop annotations, recursively."""
+    """Refuse withheld fields, match the rest in any spelling, recursively.
+
+    Every field becomes an :func:`any_case` pattern, allowed or refused, because
+    the storefront's loader reads ``Priority`` as ``priority``; a closed section
+    keeps ``additionalProperties: false``, so a field the model lacks is still
+    refused in any spelling. ``required`` is dropped: whether a field is present
+    is the storefront's startup check, and an exact-name requirement would
+    refuse a correctly spelled-differently key.
+    """
     if isinstance(node, list):
         return [_publicize(item, role) for item in node]
     if not isinstance(node, Mapping):
         return node
     result: dict[str, Any] = {}
-    withheld: dict[str, Any] = {}
+    fields: dict[str, Any] = {}
     for key, value in node.items():
-        if key in _ANNOTATIONS:
+        if key in _ANNOTATIONS or key == "required":
             continue
         if key == "properties" and isinstance(value, Mapping):
-            kept: dict[str, Any] = {}
             for name, field in value.items():
-                if _is_withheld(field, role):
-                    withheld[any_case(name)] = False
-                else:
-                    kept[name] = _publicize(field, role)
-            result[key] = kept
+                fields[name] = False if _is_withheld(field, role) else _publicize(field, role)
         else:
             result[key] = _publicize(value, role)
-    if withheld:
+    if fields:
         result["patternProperties"] = {
             **dict(result.get("patternProperties", {})),
-            **withheld,
+            **_any_case_fields(fields),
         }
     return result
 
@@ -134,26 +155,21 @@ def _settlement_fragment(role: str) -> dict[str, Any]:
     The settlement runtime refuses any other root key, so closing it here
     refuses nothing the storefront would accept.
     """
-    properties: dict[str, Any] = {
+    fields: dict[str, Any] = {
         "schema_version": {"type": "integer"},
         "priority": {"type": "array", "items": {"type": "string"}},
     }
-    withheld: dict[str, Any] = {}
     for registration in build_storefront_settlement_registry().registrations:
-        if role in registration.roles:
-            properties[registration.config_key] = model_fragment(
-                registration.config_model, role=role
-            )
-        else:
-            withheld[any_case(registration.config_key)] = False
-    fragment: dict[str, Any] = {
+        fields[registration.config_key] = (
+            model_fragment(registration.config_model, role=role)
+            if role in registration.roles
+            else False
+        )
+    return {
         "type": "object",
         "additionalProperties": False,
-        "properties": properties,
+        "patternProperties": _any_case_fields(fields),
     }
-    if withheld:
-        fragment["patternProperties"] = withheld
-    return fragment
 
 
 def storefront_config_definition(role: str = ROLE) -> dict[str, Any]:

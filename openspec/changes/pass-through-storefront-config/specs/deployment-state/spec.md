@@ -136,8 +136,10 @@ applicable to the role.
 A chart that passes a service's configuration through MUST carry a values-schema
 fragment generated from that service's typed configuration models, refusing under the
 pass-through configuration every field the models mark secret or not applicable to the
-role, and every field a typed section's model does not have. The fragment MUST NOT
-carry defaults and MUST NOT constrain settings the service reads untyped. A secret the
+role, and every field a typed section's model does not have, each in every spelling
+the service's loader reads, and MUST accept every other typed field in every such
+spelling. The fragment MUST NOT carry defaults, MUST NOT require a field's presence,
+and MUST NOT constrain settings the service reads untyped. A secret the
 service reads without a typed model MUST be declared by the service with the same
 secret marker, so the generated fragment refuses it. A section that carries public
 identity MUST be declared closed to its public keys, so the generated fragment admits
@@ -169,6 +171,14 @@ those keys and refuses every other.
   instrument, Customer, PaymentMethod, mandate, bank detail, or action URL in a
   settlement section
 - **THEN** values-schema validation fails before render, naming the field
+
+#### Scenario: A typed field is spelled differently
+
+- **WHEN** a storefront agent's configuration values spell a typed field
+  differently from its model, such as `Settlement.Priority`
+- **THEN** values-schema validation accepts it, as the storefront's loader does
+- **AND** a secret-marked or retired key spelled differently is still refused,
+  naming the key
 
 #### Scenario: A typed section gains a field
 

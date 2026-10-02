@@ -245,6 +245,15 @@ storefront's loader matches keys case-insensitively, so these reads do too.
 {{- end }}
 
 {{/*
+The scalar a storefront agent's pass-through config mapping `doc` holds under
+`name`, matched case-insensitively, as a string, or "" when absent.
+*/}}
+{{- define "arkhai.storefrontConfigValue" -}}
+{{- $key := include "arkhai.storefrontConfigKey" . -}}
+{{- if $key -}}{{- index .doc $key | toString -}}{{- end -}}
+{{- end }}
+
+{{/*
 The mapping a storefront agent's pass-through config mapping `doc` holds under
 `name`, matched case-insensitively, as JSON for fromJson, or {} when absent.
 */}}

@@ -162,7 +162,7 @@ None.
   mechanism more widely multiplies the deployments holding contact payloads, so
   retention had to exist first. That change implemented retention in the kit and
   composed it into bare metal; this change composes it into VM with the mechanism.
-- **Blocked on `pass-through-storefront-config`**, which makes the VM storefront chart
+- **Depended on `pass-through-storefront-config`**, now complete, which makes the VM storefront chart
   pass service configuration through instead of enumerating each mechanism. On its
   baseline this change's settlement and delivery sections deploy by Helm values once
   the contact mechanism is registered and the generated values schema regenerated,

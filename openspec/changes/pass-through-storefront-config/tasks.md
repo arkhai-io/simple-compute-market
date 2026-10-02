@@ -40,9 +40,11 @@ the planning pass names every file and suite.
       `IdentityConfigDeclaration` (public keys only, closed at every level) beside
       their readers.
 - [x] 3.2 `domains/vms/storefront/src/market_storefront/values_schema.py`: the
-      generator. Secret-marked and non-seller fields become `false` under an any-case
-      name pattern; references are inlined, a recursive one becoming `{}`; `Settlement`
-      is closed to the registered mechanisms.
+      generator. Every field is keyed by an any-case name pattern — secret-marked and
+      non-seller fields as `false`, the rest with their schema; `required` is dropped;
+      case-only name collisions are refused; references are inlined, a recursive one
+      becoming `{}`; `Settlement` is closed to the registered mechanisms. Both values
+      schemas refuse the retired `config` keys in any spelling.
 - [x] 3.3 `Makefile`: `make helm-values-schema` regenerates both schemas in the
       storefront environment.
 - [x] 3.4 `domains/vms/storefront/tests/unit/test_values_schema.py`: drift against both
@@ -91,12 +93,12 @@ the planning pass names every file and suite.
 ## 6. Validation
 
 - [x] 6.1 **Render tests** (static, not integration).
-      `helm/charts/storefront/tests/test_render.py`, 17 tests, each seen to fail
+      `helm/charts/storefront/tests/test_render.py`, 19 tests, each seen to fail
       against a broken template line it guards, and `helm/scripts/test-render.sh`,
       now passing in full (`design.md` findings 2 and 4). The loader-backed test runs
       only where the storefront environment exists; no CI job runs it (finding 9,
       out of scope).
-- [x] 6.2 **Service tests.** kit/config 140; VM storefront unit 1078 (1 skipped),
+- [x] 6.2 **Service tests.** kit/config 140; VM storefront unit 1079 (1 skipped),
       including `_build_settings()` over a rendered `storefront.json` and the
       overlay; VM storefront integration 338 (CI's two deselections); API-credits
       storefront 96, unit and integration together.
@@ -113,29 +115,33 @@ the planning pass names every file and suite.
 
 ## 7. Documentation
 
-- [ ] 7.1 Add the pass-through and configuration-layer requirements and narrow
-      "Generated configuration has one source of truth" in
-      `openspec/specs/deployment-state/spec.md`.
-- [ ] 7.2 Update `docs/development/DEPLOYMENT_AND_CONFIG.md`'s Kubernetes section with
-      how the storefront chart applies the pattern, what it derives, the
-      `storefront.json` layer, large integers as strings, and the generated schema's
-      refusal of secret-marked settings, which belong in the Secret overlay; update its
-      combined-storefront section for the new values shape and remove the
-      image/configuration schema check from its cutover sequence.
-- [ ] 7.3 Replace the Helm-fragment claim in `docs/development/ARCHITECTURE.md`'s
-      settlement-configuration paragraph, `openspec/specs/deployment-state/architecture.md`,
-      and `openspec/specs/settlement-configuration/architecture.md` with what the
-      generated fragment covers.
-- [ ] 7.4 Name the generated-schema drift test in `docs/development/TESTING.md`'s chart
-      render test section.
-- [ ] 7.5 Move `docs/development/VALIDATION_RUNBOOK.md`'s storefront values to the new
-      shape.
+- [x] 7.1 `openspec/specs/deployment-state/spec.md`: "A storefront chart passes service
+      configuration through" and "A storefront reads chart-rendered configuration
+      between its file and its overlay" added; "Generated configuration has one
+      source of truth" narrowed to the generated values-schema definition.
+- [x] 7.2 `docs/development/DEPLOYMENT_AND_CONFIG.md`: a "Storefront agents:
+      pass-through configuration" subsection of the Kubernetes section (layers,
+      derived settings, release checks, the generated schema's refusals, retired
+      keys, JSON rendering, large integers as strings); the combined-storefront
+      section points at it; the cutover sequence drops the image/configuration
+      schema check; the provisioning and smoke-test JSON encoding is stated.
+- [x] 7.3 `docs/development/ARCHITECTURE.md`'s settlement-configuration paragraph,
+      `openspec/specs/deployment-state/architecture.md`, and
+      `openspec/specs/settlement-configuration/architecture.md` describe the
+      generated definition instead of Helm schema fragments.
+- [x] 7.4 `docs/development/TESTING.md`'s chart render test section names the
+      drift test, the loader-backed check and its environment, and that no CI job
+      runs that check.
+- [x] 7.5 `docs/development/VALIDATION_RUNBOOK.md`: the real-provisioning upgrade
+      sets `config.provisioning.mode`; the storefront overlay step writes
+      `storefront.secrets.toml` directly, replacing a step that rendered the
+      chart's Secret with keys the schema already refused.
 
 ## 8. Closeout
 
-- [x] 8.1 **Comment hygiene.** `make check-comment-hygiene` passes. Two production
-      comments cite `openspec/specs/deployment-state/spec.md` headings that promotion
-      (8.10) creates or narrows; they resolve once it lands.
+- [x] 8.1 **Comment hygiene.** `make check-comment-hygiene` passes; the two
+      production comments citing `openspec/specs/deployment-state/spec.md` headings
+      resolve after promotion.
 - [x] 8.2 **Import placement.** Every import this change added is at module level.
 - [x] 8.3 **Documentation compliance.** Change history, alternatives, gate evidence,
       and findings live in `design.md`; current-state behaviour is pending promotion
@@ -146,21 +152,27 @@ the planning pass names every file and suite.
       defaults comparison, and findings stay in `design.md`.
 - [x] 8.5 **Roadmap currency.** No roadmap goal owns this change, and
       `docs/development/ROADMAP.md` does not describe the chart; nothing is owed.
-- [x] 8.6 **Campaign index currency.** This change's row reads "implemented; in
-      review"; the Goal 6 graph is unchanged until archival.
+- [x] 8.6 **Campaign index currency.** This change's row reads "complete …
+      closeout review pending, not archived"; `compose-contact-exchange-across-compute`'s
+      row, tasks, and proposal no longer call it blocked on this change; the Goal 6
+      graph is unchanged.
       `compose-contact-exchange-across-compute`'s design and proposal now say what
       this baseline gives it: `[Delivery]` by values alone, `[Settlement.contact]`
       once the mechanism is registered and the values schema regenerated, with the
-      generator extended for `kind`-dependent sinks.
+      generator extended for `kind`-dependent sinks. `add-full-stack-ci-job` is
+      indexed as the owner of finding 9.
 - [x] 8.7 **Documentation citations.**
       `make check-doc-citations CHANGE=pass-through-storefront-config` passes.
-- [ ] 8.8 **End-to-end pipeline.** Evidence so far: Actions run 37015527919 on
-      `feat/pass-through-storefront-config`, Compose VM lane 129 and bare-metal 16;
-      the Helm E2E module, 32 (6.3). Both predate the `Identity` closure, key
-      folding, and the smoke-test profile fix. Owed: both lanes and the Helm module
-      on the final commit.
+- [x] 8.8 **End-to-end pipeline.** Actions run 37040193730 on
+      `feat/pass-through-storefront-config` at `d8a6c8d2`: Compose VM lane 129
+      passed, bare-metal lane 16 passed; both lanes run the storefront's new
+      configuration discovery. Earlier: run 37015527919 (129 and 16), and the Helm
+      E2E module, 32 (6.3). The Compose lanes do not render the chart; the Helm
+      module run predates the `Identity` closure, key folding, and the any-case
+      schema, which the render tests cover.
 - [x] 8.9 **Packaging.** `make check-packaging` passes.
-- [ ] 8.10 **Promotion.** Complete the design-promotion record below.
+- [x] 8.10 **Promotion.** Record below; the two production comments that cite
+      `openspec/specs/deployment-state/spec.md` headings resolve.
 
 ## Design promotion record
 
@@ -173,6 +185,10 @@ the planning pass names every file and suite.
 | Generated-schema drift is a storefront unit test | `docs/development/TESTING.md` |
 | The storefront reads `storefront.toml`, `storefront.json`, then `storefront.secrets.toml`, and reports what it loads | `openspec/specs/deployment-state/spec.md`; `docs/development/DEPLOYMENT_AND_CONFIG.md` |
 | The storefront stays on its own loader | Not promoted; change history in `design.md` decision 10 |
-| Provisioning's YAML profile preserves EIP-191 principal strings through JSON syntax | `docs/development/DEPLOYMENT_AND_CONFIG.md#kubernetes-configmap-and-secret-mounting` |
+| Keys match in any spelling, as the loader reads them, in chart reads and the generated schema; one key in two spellings is refused | `openspec/specs/deployment-state/spec.md`; `docs/development/DEPLOYMENT_AND_CONFIG.md` |
+| `Identity` is declared closed to its public keys, so private identity material is refused before render | `openspec/specs/deployment-state/spec.md`; `docs/development/DEPLOYMENT_AND_CONFIG.md`; `docs/development/ARCHITECTURE.md` |
+| The retired values shape is refused at render, naming the key | `openspec/specs/deployment-state/spec.md`; `docs/development/DEPLOYMENT_AND_CONFIG.md` |
+| Provisioning's YAML profile and the umbrella's generated smoke-test profile preserve EIP-191 principal strings through JSON syntax | `docs/development/DEPLOYMENT_AND_CONFIG.md#kubernetes-configmap-and-secret-mounting` |
+| No CI job runs the chart-to-loader check (finding 9) | `docs/development/TESTING.md`; owned by `add-full-stack-ci-job`, indexed in `openspec/changes/README.md` |
 | Roadmap currency | None owed |
 | Campaign index currency | `openspec/changes/README.md` |

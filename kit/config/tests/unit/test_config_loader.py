@@ -198,8 +198,8 @@ def test_storefront_config_file_honors_override(tmp_path):
 
 
 def test_load_storefront_config_walks_storefront_files(monkeypatch, tmp_path):
-    """`load_storefront_config` reads `storefront.toml` + `storefront.secrets.toml`
-    and ignores the buyer's `buyer.toml` even when both pairs exist side by side."""
+    """`load_storefront_config` reads the storefront's own layers and ignores the
+    buyer's `buyer.toml` even when both sets of files exist side by side."""
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     cfg_dir = tmp_path / "arkhai"
     cfg_dir.mkdir(parents=True)
@@ -218,7 +218,7 @@ def test_load_storefront_config_returns_empty_when_neither_file_present(monkeypa
     assert config_loader.load_storefront_config() == {}
 
 
-def test_storefront_config_files_place_rendered_yaml_before_the_overlay(monkeypatch, tmp_path):
+def test_storefront_config_files_place_rendered_json_before_the_overlay(monkeypatch, tmp_path):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     base = tmp_path / "arkhai"
     assert config_loader.storefront_config_files() == [

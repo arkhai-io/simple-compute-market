@@ -32,8 +32,22 @@ def definition() -> dict:
     return values_schema.storefront_config_definition()
 
 
+def _field(node: dict, name: str):
+    """A field's schema, keyed by the any-case pattern for ``name``."""
+    return node["patternProperties"][values_schema.any_case(name)]
+
+
 def _section(definition: dict, name: str) -> dict:
-    return definition["patternProperties"][values_schema.any_case(name)]
+    return _field(definition, name)
+
+
+def _allowed(node: dict, *names: str) -> bool:
+    patterns = {p for p, schema in node["patternProperties"].items() if schema is not False}
+    return patterns == {values_schema.any_case(n) for n in names}
+
+
+def _withheld(node: dict, *names: str) -> bool:
+    return all(_field(node, n) is False for n in names)
 
 
 def _walk(node):
@@ -64,8 +78,8 @@ def test_any_case_matches_every_spelling_and_nothing_else() -> None:
 def test_wallet_private_key_is_refused_and_the_section_closed(definition) -> None:
     wallet = _section(definition, "Wallet")
     assert wallet["additionalProperties"] is False
-    assert set(wallet["properties"]) == {"address", "ssh_public_key"}
-    assert wallet["patternProperties"] == {values_schema.any_case("private_key"): False}
+    assert _allowed(wallet, "address", "ssh_public_key")
+    assert _withheld(wallet, "private_key")
 
 
 def test_identity_is_closed_to_its_public_keys_at_every_level(definition) -> None:
@@ -73,19 +87,19 @@ def test_identity_is_closed_to_its_public_keys_at_every_level(definition) -> Non
     so every key the declaration does not name is refused, in any spelling."""
     identity = _section(definition, "Identity")
     assert identity["additionalProperties"] is False
-    assert set(identity["properties"]) == {"principal", "administrators", "service_peers"}
-    administrator = identity["properties"]["administrators"]["additionalProperties"]
-    peer = identity["properties"]["service_peers"]["additionalProperties"]
+    assert _allowed(identity, "principal", "administrators", "service_peers")
+    administrator = _field(identity, "administrators")["additionalProperties"]
+    peer = _field(identity, "service_peers")["additionalProperties"]
     assert administrator["additionalProperties"] is False
-    assert set(administrator["properties"]) == {"principals"}
+    assert _allowed(administrator, "principals")
     assert peer["additionalProperties"] is False
-    assert set(peer["properties"]) == {"role", "site_id", "principals"}
+    assert _allowed(peer, "role", "site_id", "principals")
     for principal in (
-        administrator["properties"]["principals"]["items"],
-        peer["properties"]["principals"]["items"],
+        _field(administrator, "principals")["items"],
+        _field(peer, "principals")["items"],
     ):
         assert principal["additionalProperties"] is False
-        assert set(principal["properties"]) == {"scheme", "identifier"}
+        assert _allowed(principal, "scheme", "identifier")
 
 
 def _shipped_identity_tables():
@@ -142,30 +156,32 @@ def test_registry_auth_is_refused_and_the_section_left_open(definition) -> None:
 def test_settlement_is_closed_to_registered_mechanisms(definition) -> None:
     settlement = _section(definition, "Settlement")
     assert settlement["additionalProperties"] is False
-    assert set(settlement["properties"]) == {
-        "schema_version",
-        "priority",
-        "alkahest",
-        "stripe",
-    }
+    assert _allowed(settlement, "schema_version", "priority", "alkahest", "stripe")
 
 
 def test_buyer_only_stripe_fields_are_refused_for_the_seller(definition) -> None:
-    stripe = _section(definition, "Settlement")["properties"]["stripe"]
+    stripe = _field(_section(definition, "Settlement"), "stripe")
     assert stripe["additionalProperties"] is False
-    assert "off_session_policy" not in stripe["properties"]
-    assert stripe["patternProperties"][values_schema.any_case("off_session_policy")] is False
-    assert (
-        stripe["patternProperties"][values_schema.any_case("authorization_journal_path")]
-        is False
-    )
-    assert "account_ref" in stripe["properties"]
+    assert _withheld(stripe, "off_session_policy", "authorization_journal_path")
+    assert _field(stripe, "account_ref") is not False
 
 
-def test_definition_carries_no_defaults_references_or_markers(definition) -> None:
+def test_definition_carries_no_defaults_references_markers_or_exact_names(definition) -> None:
+    """Every field is an any-case pattern and nothing is required: the loader
+    reads keys in any spelling, and presence is the storefront's startup check."""
+    forbidden = {"default", "$ref", "$defs", "secret", "roles", "properties", "required"}
     for node in _walk(definition):
         if isinstance(node, dict):
-            assert not {"default", "$ref", "$defs", "secret", "roles"} & set(node), node
+            assert not forbidden & set(node), node
+
+
+def test_fields_differing_only_by_case_are_refused_at_generation() -> None:
+    class Ambiguous(BaseModel):
+        name: str = ""
+        Name: str = ""
+
+    with pytest.raises(ValueError, match="differ only by case"):
+        values_schema.model_fragment(Ambiguous)
 
 
 def test_a_secret_marked_field_is_refused_wherever_it_nests() -> None:
@@ -181,10 +197,10 @@ def test_a_secret_marked_field_is_refused_wherever_it_nests() -> None:
 
     fragment = values_schema.model_fragment(Outer)
 
-    assert fragment["patternProperties"] == {values_schema.any_case("buyer_only"): False}
-    inner = fragment["properties"]["sinks"]["additionalProperties"]
-    assert inner["properties"] == {"label": {"type": "string"}}
-    assert inner["patternProperties"] == {values_schema.any_case("token"): False}
+    assert _withheld(fragment, "buyer_only")
+    inner = _field(fragment, "sinks")["additionalProperties"]
+    assert _field(inner, "label") == {"type": "string"}
+    assert _withheld(inner, "token")
 
 
 def test_recursive_references_become_unconstrained() -> None:
@@ -193,7 +209,7 @@ def test_recursive_references_become_unconstrained() -> None:
 
     fragment = values_schema.model_fragment(Node)
 
-    assert fragment["properties"]["children"]["items"] == {}
+    assert _field(fragment, "children")["items"] == {}
 
 
 def test_check_reports_a_stale_schema(tmp_path, definition) -> None:
