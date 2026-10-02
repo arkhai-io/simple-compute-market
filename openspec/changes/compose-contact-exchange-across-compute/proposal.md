@@ -62,10 +62,18 @@ multi-seller introductions depend on.
   domain, with retention, introduction routes, and delivery. Bare metal already
   composes it; API credits is a separate market family with its own registry
   schema identity and is out of scope.
-- Promote the buyer's `introduce` and `introduction [--deliver]` command bodies
-  into `core_buyer` as a group each domain buyer mounts, and give the VM buyer
-  `request-introduction`, `introduce`, and `introduction`, matching the typed
-  clients bare metal's buyer already uses.
+- Give the mechanism its buyer command group, as `kit/hosted-settlement` does for
+  Stripe: `market <domain> settlement contact introduce` and
+  `… introduction [--deliver]`, with transport, run recovery, and buyer sinks injected
+  by the domain buyer. Bare metal's copies are removed; the VM buyer mounts the group
+  and gains `request-introduction`.
+- Let seller-side delivery reach the seller's own systems: the webhook sink can sign
+  its request with the storefront's marketplace signer, and an installable Apprise
+  sink plugin, `kit/delivery-apprise`, reaches the services Apprise supports.
+- Make the VM storefront deployable by Helm with contact exchange and delivery: the
+  contact fields become public configuration that is never published, `[Delivery]` is
+  typed in the generated values schema so sink secrets stay out of the ConfigMap, and
+  a values overlay and verification command ship with the change.
 - State normatively that accepted-state interpretation, seller-side delivery
   dispatch, and the buyer's introduction commands each have one implementation,
   and that a composing domain supplies persistence, configuration, and route
@@ -82,8 +90,9 @@ multi-seller introductions depend on.
 - `introduction-delivery`: delivery is available to every composing domain through
   one seller-side dispatch; sinks are named instances; seller-side delivery routes
   by the listing's origin.
-- `buyer-orchestration`: the buyer's introduction commands have one core-owned
-  implementation every domain buyer mounts.
+- `introduction-delivery` also gains webhook request signing.
+- `contact-exchange-settlement` also gains the mechanism-owned buyer introduction
+  commands.
 
 ### New Capabilities
 
@@ -123,21 +132,25 @@ None.
     service's per-agreement contact resolution, and one boundary-test line.
   - `kit/delivery`: named instances, the origin routing table, and the seller-side
     background dispatcher and re-delivery.
-  - `core/buyer`: the introduction command group.
+  - `kit/delivery-apprise`: a new sink plugin distribution.
+  - `kit/settlement-runtime`: the readiness leak check honours the never-published
+    marker.
+  - `core/storefront`: `HealthResponse` gains `disclosures`.
   - The bare-metal storefront: its introduction glue and delivery module reduce to
     persistence, configuration carrier, and route bindings; its publication passes
     the listing origin.
-  - The bare-metal buyer: mounts the core introduction commands.
+  - The bare-metal buyer: mounts the mechanism's introduction commands.
   - The VM storefront: settlement composition, introduction persistence, migration
     tuple, introduction routes, delivery wiring, retention wiring (the sweep loop,
     the admin deletion routes, and the readiness disclosure
     `contact-payload-retention` requires of every composing storefront), and the
     listing origin passed to publication.
-  - The VM buyer: `request-introduction`, plus the mounted core commands.
-  - `e2e-tests`: new scenario modules and, where named, lane configuration.
+  - The VM buyer: `request-introduction`, plus the mounted mechanism commands.
+  - `helm/`: the regenerated values schemas, a contact-exchange values overlay, and
+    Mailpit in the `dev-env` subchart.
+  - `e2e-tests`: a new scenario module and, where named, lane configuration.
 - Affected specification: `openspec/specs/contact-exchange-settlement/spec.md`,
-  `openspec/specs/introduction-delivery/spec.md`,
-  `openspec/specs/buyer-orchestration/spec.md`.
+  `openspec/specs/introduction-delivery/spec.md`.
 - Affected documentation: `docs/development/DEPLOYMENT_AND_CONFIG.md`'s
   contact-exchange section, for the origin-keyed form and delivery routing.
 - Not affected: the mechanism kit's registration identity, option shape,
@@ -162,11 +175,10 @@ None.
   mechanism more widely multiplies the deployments holding contact payloads, so
   retention had to exist first. That change implemented retention in the kit and
   composed it into bare metal; this change composes it into VM with the mechanism.
-- **Depended on `pass-through-storefront-config`**, now complete, which makes the VM storefront chart
-  pass service configuration through instead of enumerating each mechanism. On its
-  baseline this change's settlement and delivery sections deploy by Helm values once
-  the contact mechanism is registered and the generated values schema regenerated,
-  with the generator extended for `kind`-dependent delivery sinks.
+- **Depended on `pass-through-storefront-config`**, now complete and archived. On its
+  baseline the VM storefront chart passes configuration through and generates its
+  values schema from the storefront's typed models; this change registers the contact
+  mechanism, types `[Delivery]` in that generator, and regenerates the schema.
 - **Task 6.5 is blocked on `bare-metal-mock-provisioned-deal`**'s two-storefront,
   two-site topology and is redesigned from it.
 - **Runs alongside `bare-metal-mock-provisioned-deal`**, which is moving bare-metal
@@ -201,15 +213,16 @@ None.
       routing and the per-origin contact. Re-confirm the composition-from-kit
       principle needs no change.
 - [x] Existing subsystem specification —
-      `openspec/specs/contact-exchange-settlement/spec.md`,
-      `openspec/specs/introduction-delivery/spec.md`, and
-      `openspec/specs/buyer-orchestration/spec.md`.
+      `openspec/specs/contact-exchange-settlement/spec.md` and
+      `openspec/specs/introduction-delivery/spec.md`.
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 
 `docs/development/DEPLOYMENT_AND_CONFIG.md` also changes: its contact-exchange
-section documents the origin-keyed form and its startup refusals, and delivery
-routing.
+section documents the origin-keyed form and its startup refusals, delivery instances,
+routing, webhook signing, and the Apprise plugin; its Kubernetes section documents the
+contact-exchange values overlay. `docs/development/VALIDATION_RUNBOOK.md` gains the
+Helm verification command.
 
 ### Knowledge to promote
 
@@ -222,5 +235,8 @@ routing.
 - Seller-side delivery has one implementation, sinks are named instances, and
   delivery routes per origin — `openspec/specs/introduction-delivery/spec.md`;
   `docs/development/ARCHITECTURE.md`'s settlement configuration section.
-- The buyer's introduction commands are core-owned and domain-mounted —
-  `openspec/specs/buyer-orchestration/spec.md`.
+- The buyer's introduction commands are mechanism-owned and domain-mounted —
+  `openspec/specs/contact-exchange-settlement/spec.md`.
+- A webhook sink can sign its request; the Apprise sink is an installable plugin —
+  `openspec/specs/introduction-delivery/spec.md`;
+  `docs/development/DEPLOYMENT_AND_CONFIG.md`.

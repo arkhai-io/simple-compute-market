@@ -154,3 +154,48 @@ listing-level field may name a settlement mechanism.
   contact-exchange option
 - **THEN** the deal settles by introduction without requiring the listing to be
   unbacked
+
+### Requirement: The mechanism owns the buyer's introduction commands
+
+Starting an introduction from an accepted run, re-reading it, and re-delivering it to
+the buyer's own sinks MUST have one implementation, owned by the mechanism as a buyer
+command group that every domain buyer whose listings can settle by introduction
+mounts. A domain buyer MUST supply only the transport, its run-recovery hook — how a
+recorded run is reloaded under that domain's configuration and registry trust — and
+its buyer sinks, and MUST NOT carry a copy of the start, read, deleted-outcome, or
+delivery handling. The mechanism MUST NOT depend on a core role package or the
+delivery capability to provide these commands; both arrive injected.
+
+Negotiating an introduction option opens a negotiation in the domain's own terms, so
+each such domain buyer MUST also expose a command that negotiates exactly one
+advertised rateless introduction option and records the accepted run in the shared
+run log, from which the mechanism's commands recover it.
+
+#### Scenario: A domain buyer mounts the introduction commands
+
+- **WHEN** a domain buyer whose listings can settle by introduction is installed
+- **THEN** its command surface offers negotiating an introduction option, starting
+  the introduction, and re-reading it with optional re-delivery
+- **AND** the start, read, and re-delivery behaviour is the mechanism's implementation
+
+#### Scenario: The storefront deleted the introduction's payloads
+
+- **WHEN** a buyer starts or re-reads an introduction whose payloads the storefront
+  deleted, through any domain buyer
+- **THEN** the command reports the deleted outcome and exits successfully
+- **AND** nothing is delivered
+
+### Requirement: Contact details are public configuration that is never published
+
+A seller's contact payload, in either configuration form, MUST be accepted from any
+configuration layer, including a deployment's public configuration, and MUST NOT be
+required to arrive through a secret channel. It MUST nonetheless never appear in a
+listing, a settlement option, a readiness projection, an obligation, or a log.
+
+#### Scenario: A contact is configured publicly
+
+- **WHEN** an operator configures a seller contact in the storefront's public
+  configuration
+- **THEN** the storefront accepts it and reveals it only through an authorized
+  introduction read
+- **AND** no published or public surface contains it

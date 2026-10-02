@@ -34,6 +34,38 @@ agreement by shape, and the mechanism receives dispatch as an injected callable.
 - **THEN** the sinks receive the material read from the durable reveal
 - **AND** no contact data absent from that reveal is delivered
 
+### Requirement: A webhook delivery can be authenticated by its receiver
+
+A seller-side webhook instance MAY be configured to sign each request with the
+storefront's marketplace signer, so the receiving API can verify the sender against
+the storefront principal it already trusts rather than relying on the secrecy of its
+URL. Signing material MUST reach the sink from the storefront's composition, never
+through sink settings, and a signing instance MUST be refused when constructed in a
+process that has no marketplace signer.
+
+#### Scenario: A seller's API verifies a delivery
+
+- **WHEN** a signing webhook instance delivers a revealed introduction
+- **THEN** the request carries a signature the receiver can verify against the
+  storefront's public principal
+- **AND** the request body is the same delivery event an unsigned instance sends
+
+#### Scenario: A buyer configures signing
+
+- **WHEN** a buyer-side webhook instance is configured to sign
+- **THEN** construction fails naming the instance, because the buyer process holds no
+  storefront signer
+
+### Requirement: An instance's name does not misname its sink
+
+A sink instance whose name is an installed sink's name MUST instantiate that sink. An
+instance naming one sink and stating another MUST be refused when constructed.
+
+#### Scenario: A table named for one sink states another
+
+- **WHEN** an instance named `webhook` states `sink = "file"`
+- **THEN** construction fails naming the instance
+
 ## MODIFIED Requirements
 
 ### Requirement: Delivery is local, self-addressed, and recipient-side

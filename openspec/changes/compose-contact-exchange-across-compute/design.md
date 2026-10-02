@@ -396,37 +396,52 @@ storefront for the multi-seller scenario — and each such edit is named in its 
 ### 13. Decisions settled during planning review
 
 **Deployable by Helm, on the pass-through baseline.** VM contact exchange must deploy
-through the umbrella chart in this change. The VM storefront chart currently
-enumerates each settlement mechanism, its defaults, and its validation, so a further
-mechanism needs chart edits. `pass-through-storefront-config` removes that first and
-is this change's prerequisite. On its baseline `[Delivery]` reaches the storefront
-through values alone. `[Settlement.contact]` does once the VM storefront registers the
-contact mechanism: the chart's values schema is generated from the storefront's typed
-models and closes `Settlement` to the registered mechanisms, so registering it and
-running `make helm-values-schema` admits the section with no template edit. Delivery
-sinks' settings depend on each sink's `kind`, so this change also extends that
-generator to express the built-in sinks. Beyond that it owes example values, a render
-test, and the Helm verification command.
+through the umbrella chart in this change. `pass-through-storefront-config` made the
+VM storefront chart pass each agent's configuration through as `storefront.json`, and
+generated the values schema's `storefrontServiceConfig` definition from the
+storefront's typed models (`market_storefront/values_schema.py`,
+`make helm-values-schema`). That schema closes `Settlement` to the mechanisms the
+storefront registers and refuses every field marked `"secret": true`. So
+`[Settlement.contact]` reaches the storefront once VM registers the mechanism and the
+schema is regenerated, with no template edit.
+
+`[Delivery]` is an untyped section in that schema today, so it passes through open —
+including the webhook sink's secret-marked `url` and `headers` and the SMTP sink's
+`password`, which would then render into the ConfigMap. This change therefore types
+the section in the generator: `enabled`, `timeout_seconds`, and `origins` at the root;
+each instance table typed by the sink it instantiates — its `sink` value, or its own
+name when it states none — using that sink's settings model, so the secret-marked
+fields are refused like any other; and a table naming a sink the generator does not
+know left open, as the pass-through design already accepts for externally installed
+plugins. The built-in sinks and the Apprise sink are known. An instance whose name is
+a known sink's name and whose `sink` names a different one is refused, by the
+delivery kit at startup and by the schema at render, so a table's name never
+misleads about what it delivers through.
 
 **Contact details are ordinary configuration.** A seller's onboarding contact is not
 the class of secret the Secret overlay carries, and placing it there would force
 secret management on every operator. `contact_payload` and per-origin contacts are
-public-layer configuration. The `"secret": True` marker they carry today does two
-jobs — it forbids the value from a public configuration layer, and it feeds the
-settlement runtime's readiness leak check — so it is replaced by a marker meaning
-"never published, any layer": the value may come from any configuration layer and
-must still never appear in a listing, option, readiness projection, or obligation.
-Sink credentials such as a webhook token may still sit in the Secret overlay when an
-operator wants that.
+public-layer configuration. The `"secret": true` marker they carry today now does
+three jobs: the generated values schema refuses the field, `kit/config`'s layered
+resolution forbids it from a public layer, and the settlement runtime's readiness
+leak check refuses it in public output. The contact fields take a new marker,
+`"never_published": true`, in place of `"secret"`: the values schema and layered
+resolution accept it, and the settlement runtime's leak check treats it exactly as a
+secret, so the value may come from any configuration layer and still never appears in
+a listing, option, readiness projection, or obligation. Sink credentials keep
+`"secret": true` and arrive through the Secret overlay.
 
 **Seller delivery reaches the seller's own systems.** The built-in `webhook` sink
 already POSTs the delivery event to any REST endpoint; with origin routing, each
 origin's reveals go to that seller's own API. It gains optional request signing with
-the storefront's marketplace signer, so the receiving API can verify the sender
-against the storefront principal it already pins. For the wider range of
+the storefront's marketplace signer (`sign = true`), so the receiving API can verify
+the sender against the storefront principal it already pins. The signer reaches the
+sink through the sink-set builder rather than its settings, since signing material
+never travels through configuration. For the wider range of
 integrations, an installable `apprise` sink plugin, `kit/delivery-apprise`, wraps the
 Apprise library, which reaches over a hundred services from one URL each, rather than
-this repository writing them; both storefront images install it. Alertmanager was
+this repository writing them; both storefront images install it. Its `urls` are
+marked secret, since Apprise URLs routinely embed service tokens. Alertmanager was
 considered and rejected as the carrier: buyer contact details would rest in its alert
 state and interface. A site-owned path, where the storefront hands the contact to the
 site authority and the site runs its own sinks, is a larger cross-service contract
@@ -461,8 +476,12 @@ storefronts is taken rather than a VM-local response model.
 
 **System evidence.** Mailpit, an off-the-shelf SMTP server with a query API, joins the
 VM lane and, optionally, the Helm `dev-env` subchart. The VM introduction scenario
-routes its origin to an Apprise `mailto://` instance pointed at Mailpit and reads the
-result back, proving seller-side delivery without a bespoke receiver. The two-seller
+routes its origin to a built-in SMTP sink instance pointed at Mailpit and reads the
+message back, proving seller-side delivery without a bespoke receiver. The SMTP sink's
+host, port, sender, and recipients are public settings, so the lane and a Helm
+deployment configure it without a Secret; Apprise URLs are secret-marked and would
+not be. The Apprise plugin is proven at integration level against a loopback
+receiver. The two-seller
 scenario (6.5) is blocked until `bare-metal-mock-provisioned-deal` lands its
 two-storefront, two-site topology, and is redesigned from that baseline.
 
