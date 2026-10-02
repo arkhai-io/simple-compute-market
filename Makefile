@@ -60,7 +60,7 @@ HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT ?=
 HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE ?=
 HOSTED_STRIPE_TEST_EVIDENCE ?= $(DIST_DIR)/hosted-stripe-test-evidence.json
 
-.PHONY: e2e-dev-identities e2e-dev-identities-env e2e-bare-metal-dev-env check-hosted-client-pin fix-hosted-client-pin review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-compute-provisioning test-provisioning test-provisioning-iac test-registry test-storefront test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning dist-compute-provisioning-service dist-kits verify-hosted-release dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-packaging check-uv-setup check-locks check-python-version check-project-layout lock
+.PHONY: helm-values-schema e2e-dev-identities e2e-dev-identities-env e2e-bare-metal-dev-env check-hosted-client-pin fix-hosted-client-pin review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-compute-provisioning test-provisioning test-provisioning-iac test-registry test-storefront test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning dist-compute-provisioning-service dist-kits verify-hosted-release dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-packaging check-uv-setup check-locks check-python-version check-project-layout lock
 .PHONY: build-hosted-producer
 .PHONY: test-release-tooling test-deployment-packaging prepare-hosted-compose prepare-hosted-compose-local hosted-preflight hosted-preflight-local hosted-stripe-test-local hosted-compose-up hosted-compose-restart hosted-compose-clean hosted-stripe-test hosted-stripe-test-stop
 .PHONY: dist-arkhai-core-registry
@@ -933,6 +933,15 @@ check-comment-hygiene: ## Fail if change-ID/task-number references leak outside 
 # runbook block everyone else's archival.
 check-doc-citations: ## Fail if a document cites a path that is absent or tombstoned (CHANGE=<name> to scope)
 	@python3 scripts/check_doc_citations.py "$(CHANGE)"
+
+# The Helm values schemas carry one definition generated from the storefront's
+# typed configuration models; it keeps secret-marked fields out of an agent's
+# pass-through config. It runs in the storefront's own environment (make
+# init-storefront), and the storefront's unit suite fails when it is stale.
+STOREFRONT_VALUES_SCHEMAS := ../../../helm/values.schema.json ../../../helm/charts/storefront/values.schema.json
+
+helm-values-schema: ## Regenerate the storefront config definition in the Helm values schemas
+	cd domains/vms/storefront && uv run --frozen --no-sync python -m market_storefront.values_schema write $(STOREFRONT_VALUES_SCHEMAS)
 
 lock: dist ## Relock projects against current wheels without installing anything (PROJECTS="dir ..." narrows it)
 	python3 scripts/uv_project.py lock $(PROJECTS)

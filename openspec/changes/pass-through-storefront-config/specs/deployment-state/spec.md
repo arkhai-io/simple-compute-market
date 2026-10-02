@@ -43,12 +43,12 @@ retired key, rather than passed through as keys the storefront ignores.
   written
 - **AND** no chart template or hand-written values schema changed
 
-#### Scenario: Numbers keep their type
+#### Scenario: Numbers and strings keep their type
 
 - **WHEN** an agent's configuration carries integers, including ones above a million,
-  and fractional numbers
-- **THEN** the rendered configuration carries each integer as an integer and each
-  fractional number as a number
+  fractional numbers, and an EVM address
+- **THEN** the storefront reads each integer as an integer, each fractional number as
+  a number, and the address as a string
 
 #### Scenario: An operator omits a mechanism setting
 
@@ -90,15 +90,17 @@ retired key, rather than passed through as keys the storefront ignores.
 ### Requirement: A storefront reads chart-rendered configuration between its file and its overlay
 
 A storefront MUST read its public configuration from `storefront.toml`, then
-`storefront.yaml`, then its Secret overlay `storefront.secrets.toml`, under its
-configuration directory, with a later file winning on a conflicting key. Its
+`storefront.json`, then its Secret overlay `storefront.secrets.toml`, under its
+configuration directory, with a later file winning on a conflicting key. The rendered
+layer is JSON so that every string, including a 160-bit EVM address, is read back as a
+string. Its
 configuration-reporting commands MUST report the configuration the server loads,
 merged by the same rules, including when only the rendered files are present, and
 MUST NOT print the Secret overlay verbatim.
 
 #### Scenario: A chart-deployed storefront starts
 
-- **WHEN** the configuration directory holds a rendered `storefront.yaml` and a
+- **WHEN** the configuration directory holds a rendered `storefront.json` and a
   `storefront.secrets.toml`, and no `storefront.toml`
 - **THEN** the storefront loads both, with the overlay's values winning
 - **AND** `market-storefront config show` reports the merged configuration

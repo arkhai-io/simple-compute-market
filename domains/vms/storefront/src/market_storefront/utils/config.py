@@ -31,6 +31,7 @@ from market_config.config_loader import (  # type: ignore[import-not-found]
 )
 from market_config.registry_url import normalize_registry_url
 from market_identity import Identity, IdentityScheme, Signer, TrustedIdentitySet
+from pydantic import BaseModel, ConfigDict, Field
 
 from .zerotier import BaseUrlResolutionError, resolve_base_url_best_effort
 
@@ -231,6 +232,37 @@ def get_evm_wallet_private_key(source: Dynaconf | None = None) -> str:
 
     active = settings if source is None else source
     return str(active.get("wallet.private_key", "") or "").strip()
+
+
+class WalletConfigDeclaration(BaseModel):
+    """The public and secret shape of ``[Wallet]``, read above through Dynaconf.
+
+    Not used to parse the section at runtime. It declares which of its keys
+    are secret so a chart's generated values schema can keep them out of a
+    ConfigMap; see docs/development/DEPLOYMENT_AND_CONFIG.md. The section is
+    closed: these are the only keys any reader uses.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    address: str = ""
+    ssh_public_key: str = ""
+    private_key: str = Field(default="", json_schema_extra={"secret": True})
+
+
+class RegistryConfigDeclaration(BaseModel):
+    """The secret part of ``[registry]``, whose other keys stay untyped.
+
+    ``auth`` maps a registry URL to its write token and is read through
+    Dynaconf by publication and status. Declared here only so a chart's
+    generated values schema refuses it outside the Secret overlay.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    auth: dict[str, str] = Field(
+        default_factory=dict, json_schema_extra={"secret": True}
+    )
 
 
 def _trusted_identity_set(raw: Any, *, field: str) -> TrustedIdentitySet:

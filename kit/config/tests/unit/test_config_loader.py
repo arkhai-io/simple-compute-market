@@ -218,6 +218,96 @@ def test_load_storefront_config_returns_empty_when_neither_file_present(monkeypa
     assert config_loader.load_storefront_config() == {}
 
 
+def test_storefront_config_files_place_rendered_yaml_before_the_overlay(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    base = tmp_path / "arkhai"
+    assert config_loader.storefront_config_files() == [
+        base / "storefront.toml",
+        base / "storefront.json",
+        base / "storefront.secrets.toml",
+    ]
+    assert config_loader.storefront_public_config_files() == [
+        base / "storefront.toml",
+        base / "storefront.json",
+    ]
+
+
+def test_load_storefront_config_merges_toml_json_then_overlay(monkeypatch, tmp_path):
+    """A later layer wins: the overlay over the rendered JSON over the TOML."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    cfg_dir = tmp_path / "arkhai"
+    cfg_dir.mkdir(parents=True)
+    (cfg_dir / "storefront.toml").write_text('port = 8000\nlog_level = "DEBUG"\n')
+    (cfg_dir / "storefront.json").write_text(
+        '{"port": 8001, "registry": {"urls": ["http://registry:8080"]}}'
+    )
+    (cfg_dir / "storefront.secrets.toml").write_text(
+        '[registry.auth]\n"http://registry:8080" = "token"\n'
+    )
+
+    cfg = config_loader.load_storefront_config()
+
+    assert cfg["port"] == 8001
+    assert cfg["log_level"] == "DEBUG"
+    assert cfg["registry"] == {
+        "urls": ["http://registry:8080"],
+        "auth": {"http://registry:8080": "token"},
+    }
+
+
+def test_load_storefront_config_reads_rendered_json_without_a_toml(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    cfg_dir = tmp_path / "arkhai"
+    cfg_dir.mkdir(parents=True)
+    (cfg_dir / "storefront.json").write_text('{"agent_id": "bob", "port": 8001}')
+
+    assert config_loader.load_storefront_config() == {"agent_id": "bob", "port": 8001}
+
+
+def test_rendered_json_keeps_a_160_bit_address_a_string(monkeypatch, tmp_path):
+    """The reason the rendered layer is JSON: a YAML loader reads a bare
+    0x-prefixed 40-digit address as an integer, and Helm's YAML encoder leaves
+    one bare."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    cfg_dir = tmp_path / "arkhai"
+    cfg_dir.mkdir(parents=True)
+    address = "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
+    (cfg_dir / "storefront.json").write_text(
+        '{"Wallet": {"address": "%s"}, "retention_seconds": 2592000}' % address
+    )
+
+    cfg = config_loader.load_storefront_config()
+
+    assert cfg["wallet"]["address"] == address
+    assert cfg["retention_seconds"] == 2592000
+
+
+def test_load_storefront_config_merges_differently_spelled_sections(monkeypatch, tmp_path):
+    """The server matches section names case-insensitively, so the report does too."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    cfg_dir = tmp_path / "arkhai"
+    cfg_dir.mkdir(parents=True)
+    (cfg_dir / "storefront.json").write_text('{"Chains": {"anvil": {"chain_id": 31337}}}')
+    (cfg_dir / "storefront.secrets.toml").write_text(
+        '[chains.anvil]\nrpc_url = "http://anvil:8545"\n'
+    )
+
+    cfg = config_loader.load_storefront_config()
+
+    assert cfg == {"chains": {"anvil": {"chain_id": 31337, "rpc_url": "http://anvil:8545"}}}
+
+
+def test_load_storefront_config_ignores_environment_overrides(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.setenv("STOREFRONT_PORT", "9999")
+    monkeypatch.setenv("DYNACONF_PORT", "9999")
+    cfg_dir = tmp_path / "arkhai"
+    cfg_dir.mkdir(parents=True)
+    (cfg_dir / "storefront.toml").write_text("port = 8000\n")
+
+    assert config_loader.load_storefront_config() == {"port": 8000}
+
+
 # ---------------------------------------------------------------------------
 # chains_from_config — the [chains.<name>] tables become ChainConfig
 # entries keyed by chain name. Each entry inherits per-chain defaults

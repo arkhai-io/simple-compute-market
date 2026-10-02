@@ -1,9 +1,10 @@
-"""Buyer- and storefront-side TOML config, XDG-aware.
+"""Buyer- and storefront-side config files, XDG-aware.
 
 Canonical locations:
 
 * buyer:      ``$XDG_CONFIG_HOME/arkhai/buyer.toml``
-* storefront: ``$XDG_CONFIG_HOME/arkhai/storefront.toml``
+* storefront: ``$XDG_CONFIG_HOME/arkhai/storefront.toml``, with a rendered
+  ``storefront.json`` and a ``storefront.secrets.toml`` overlay beside it
 
 Both default to ``~/.config/arkhai/`` when XDG is unset.
 
@@ -52,6 +53,8 @@ from pathlib import Path
 from typing import Any, Callable, Optional, TypeVar
 
 import tomllib
+
+from dynaconf import Dynaconf
 
 
 T = TypeVar("T")
@@ -172,13 +175,13 @@ def storefront_config_file() -> Path:
 
 
 def storefront_config_files() -> list[Path]:
-    """Return the ordered list of TOML files the storefront loader merges.
+    """Return the ordered list of files the storefront loader merges.
 
-    Mirrors :func:`user_config_files` but for the storefront's own files
-    (``storefront.toml`` + ``storefront.secrets.toml``) instead of the buyer's
-    shared ``config.toml``. The storefront has a separate identity and
-    role-scoped knobs, so it gets its own file pair rather than reusing the
-    buyer's. See ARCHITECTURE.md "Storefront chart layout".
+    ``storefront.toml`` (an operator's own file), then ``storefront.json``
+    (the public document a chart renders), then ``storefront.secrets.toml``
+    (the Secret overlay, which wins on conflict). The storefront has a
+    separate identity and role-scoped knobs, so it gets its own files rather
+    than reusing the buyer's. See docs/development/DEPLOYMENT_AND_CONFIG.md.
 
     Pytest guard mirrors :func:`user_config_files` — when XDG hasn't been
     pointed at a tmp dir, returns ``[]`` so the developer's ambient
@@ -192,22 +195,64 @@ def storefront_config_files() -> list[Path]:
                 return []
         except (OSError, RuntimeError):
             return []
-    return [base / "storefront.toml", base / "storefront.secrets.toml"]
+    return [
+        base / "storefront.toml",
+        base / "storefront.json",
+        base / "storefront.secrets.toml",
+    ]
+
+
+def storefront_public_config_files() -> list[Path]:
+    """Return the storefront's public layers, in load order, excluding the overlay."""
+    return [
+        path
+        for path in storefront_config_files()
+        if path.name != "storefront.secrets.toml"
+    ]
 
 
 def load_storefront_config() -> dict[str, Any]:
-    """Read the storefront's layered TOML config as a single merged dict.
+    """Read the storefront's layered config as one merged mapping.
 
-    Mirrors :func:`load_user_config` (no-path form) but walks
-    :func:`storefront_config_files` instead of :func:`user_config_files`.
-    Use this from the storefront's ``config show`` / ``config get`` CLI
-    commands so they reflect what the storefront server actually reads,
-    not the buyer's layered files.
+    The merge is Dynaconf's, over the same files the server includes, because
+    Dynaconf matches keys case-insensitively at every level: ``[Chains.anvil]``
+    in one layer and ``[chains.anvil]`` in another are one table to the server,
+    and a plain dictionary merge would report them as two. Environment
+    variables and packaged defaults are not layers here, so the result is what
+    the files say. Top-level keys are returned in lowercase.
     """
-    merged: dict[str, Any] = {}
-    for p in storefront_config_files():
-        _deep_merge(merged, _read_one(p))
-    return merged
+    present = [path for path in storefront_config_files() if path.exists()]
+    if not present:
+        return {}
+    try:
+        merged = _file_only_dynaconf(present)
+        own_keys = set(merged.store) - set(_file_only_dynaconf([]).store)
+    except Exception as exc:  # noqa: BLE001 - any unreadable layer is reported, not raised
+        print(f"[config] could not read storefront layers: {exc}", file=sys.stderr)
+        return {}
+    return {key.lower(): _plain(merged.get(key)) for key in sorted(own_keys)}
+
+
+def _file_only_dynaconf(paths: list[Path]) -> Dynaconf:
+    """Merge ``paths`` as the server does, with no environment layer."""
+    settings = Dynaconf(
+        settings_files=[],
+        includes=[str(path) for path in paths],
+        environments=False,
+        merge_enabled=True,
+        load_dotenv=False,
+        loaders=[],
+    )
+    return settings
+
+
+def _plain(value: Any) -> Any:
+    """Detach Dynaconf containers into plain dicts and lists."""
+    if hasattr(value, "items"):
+        return {str(key): _plain(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_plain(item) for item in value]
+    return value
 
 
 # Set by ``set_user_config_path`` from a CLI ``--config`` callback so

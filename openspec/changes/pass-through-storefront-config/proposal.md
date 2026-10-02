@@ -36,7 +36,7 @@ blocked on exactly this.
 - The storefront chart passes each agent's service configuration through to the
   storefront unchanged: values carry the service's own keys (`Settlement`,
   `Delivery`, `pricing`, `capacity`, `Identity`, and so on), and the chart serializes
-  the block with `toYaml` into a `storefront.yaml` ConfigMap entry rather than
+  the block with `toPrettyJson` into a `storefront.json` ConfigMap entry rather than
   enumerating it.
 - The chart adds only what the Kubernetes layer knows and the service cannot — the
   agent's port and its Service's public URL, the internal registry's and
@@ -59,7 +59,7 @@ blocked on exactly this.
   storefront declares the secrets it reads untyped. A storefront test fails when the
   committed fragment is stale. The schema refuses the retired values shape, naming
   the key.
-- The storefront's file discovery reads `storefront.yaml` between `storefront.toml`
+- The storefront's file discovery reads `storefront.json` between `storefront.toml`
   and `storefront.secrets.toml`, and its configuration commands report what the
   server loads, merged as Dynaconf merges, when only the rendered files are present.
 - Every committed values file, fixture, and the umbrella's smoke-test configuration
@@ -143,7 +143,7 @@ None.
 
 `docs/development/DEPLOYMENT_AND_CONFIG.md` also changes: its Kubernetes section
 gains how the storefront chart applies the pass-through pattern, what it derives, the
-`storefront.yaml` layer, that large integers are written as strings, and that the
+`storefront.json` layer, that large integers are written as strings, and that the
 generated schema refuses secret-marked settings, which belong in the Secret overlay;
 its combined-storefront section points at the new values shape; its cutover sequence
 loses the image/configuration schema check. `docs/development/VALIDATION_RUNBOOK.md`
@@ -167,7 +167,7 @@ section names the generated-schema drift test.
   `openspec/specs/deployment-state/architecture.md`;
   `openspec/specs/settlement-configuration/architecture.md`;
   `docs/development/DEPLOYMENT_AND_CONFIG.md`.
-- The storefront reads `storefront.toml`, `storefront.yaml`, then
+- The storefront reads `storefront.toml`, `storefront.json`, then
   `storefront.secrets.toml`, and its reporting commands merge as the server does —
   `openspec/specs/deployment-state/spec.md`;
   `docs/development/DEPLOYMENT_AND_CONFIG.md`.

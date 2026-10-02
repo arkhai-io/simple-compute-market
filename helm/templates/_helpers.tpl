@@ -230,3 +230,16 @@ runtime Deployments keep their chart-specific config mechanisms.
     secretName: {{ include "arkhai.smokeTestSecretName" . }}
 {{- end -}}
 {{- end }}
+
+{{/*
+A section of a storefront agent's pass-through config by case-insensitive name,
+as the storefront's loader reads it, or an empty dict. Returns YAML; read it
+with fromYaml. Argument: dict with `doc` (a mapping) and `name` (lowercase).
+*/}}
+{{- define "arkhai.storefrontConfigSection" -}}
+{{- $found := dict -}}
+{{- range $key, $value := .doc -}}
+{{- if eq (lower $key) $.name -}}{{- $found = $value -}}{{- end -}}
+{{- end -}}
+{{- toYaml $found -}}
+{{- end }}

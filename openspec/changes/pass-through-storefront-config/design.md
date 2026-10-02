@@ -63,52 +63,64 @@ later reads.
 service peers are public configuration. The agent's `identity` value keeps only what
 is Kubernetes-shaped, the credential Secret reference.
 
-### 2. The document renders as YAML into `storefront.yaml`
+### 2. The document renders as JSON into `storefront.json`
 
-Two encoders were available without hand-writing one: `toToml` into the existing
-`storefront.toml`, or `toYaml` into a new `storefront.yaml` the loader also reads. A
-verification gate chose between them.
+Helm offers three encoders without hand-writing one — `toToml`, `toYaml`, and
+`toJson` — and the rendered file must reach the storefront with every type intact. A
+verification gate compared them, and implementation found a defect the gate missed.
 
-**Gate evidence.** One chart rendered the same values through both encoders with
-`helm template` (Helm 3.10.1, an unverified npm redistribution, so local evidence
-only; the render tests re-assert the YAML column under whichever Helm CI runs):
+**Gate evidence.** The same values rendered through each encoder with `helm template`
+(Helm 3.10.1, an unverified npm redistribution, so local evidence only; the render
+tests re-assert the JSON column under whichever Helm CI runs), then read back with the
+storefront's pinned Dynaconf:
 
-| Value | `toToml` | `toYaml` |
-|---|---|---|
-| `port: 8000` | `8000.0` | `8000` |
-| `schema_version: 1` | `1.0` | `1` |
-| `retention_seconds: 2592000` | `2592000.0` | `2592000` |
-| `request_timeout_seconds: 10.0` | `10.0` | `10` |
-| `frac: 2.5` | `2.5` | `2.5` |
-| `9007199254740993` | `9007199254740992.0` | `9007199254740992` |
-| `1000000000000000000000` | `1000000000000000000000.0` | `1e+21` |
-| booleans, `"0x…"` and `"on"` strings, nested tables, arrays of tables | preserved | preserved, ambiguous strings quoted |
-| any integer set with `--set` | integer | integer |
+| Value | `toToml` | `toYaml` | `toPrettyJson` |
+|---|---|---|---|
+| `port: 8000` | `8000.0` | `8000` | `8000` |
+| `schema_version: 1` | `1.0` | `1` | `1` |
+| `retention_seconds: 2592000` | `2592000.0` | `2592000` | `2592000` |
+| `request_timeout_seconds: 10.0` | `10.0` | `10` | `10` |
+| `frac: 2.5` | `2.5` | `2.5` | `2.5` |
+| `9007199254740993` | `9007199254740992.0` | `9007199254740992` | `9007199254740992` |
+| `1000000000000000000000` | `…0.0` | `1e+21` | `1e+21` |
+| `"0x0000000000000000000000000000000000000001"` | string | quoted string | string |
+| `"0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"` | string | **bare; read back as `int`** | string |
+| booleans, nested tables, arrays of tables | preserved | preserved | preserved |
 
 Helm decodes every number in a values file as `float64`. The TOML encoder writes a
 whole `float64` with a fraction, and the storefront's settlement models are strict:
 pydantic 2 in strict mode refuses `1.0` for an `int` field (checked), so `toToml`
-fails the gate. YAML writes whole numbers as integers; a whole float becomes an
-integer, which strict `float` fields accept (checked). Dynaconf 3 merges a YAML
-include between the two TOML layers as expected (checked).
+fails. YAML and JSON both write whole numbers as integers; a whole float becomes an
+integer, which strict `float` fields accept (checked).
+
+YAML fails on strings. Helm's YAML encoder quotes a string only when it would read
+back as a number Go can represent, so the 64-bit-sized address above was quoted and
+the gate passed; a 160-bit EVM address is not representable, is emitted bare, and the
+storefront's Dynaconf YAML loader reads it as an integer
+(`344073830386746567427978432078835137280280269756`). Every EIP-191 principal, wallet
+address, oracle address, and token asset would be corrupted. JSON quotes every string,
+and Dynaconf reads a `.json` include with Python's `json` module, with no type
+inference.
 
 CI installs Helm with `azure/setup-helm@v4` and no pinned version, so the number
-decoding of whichever Helm runs is not a contract this change can rely on. YAML
-renders correctly whether a Helm version decodes whole numbers as integers or floats.
+decoding of whichever Helm runs is not a contract this change can rely on. JSON renders
+correctly whether a Helm version decodes whole numbers as integers or floats.
 
 **Consequence: large integers are strings.** Every number in a values file passes
-through `float64`, so an integer above 2^53 loses precision with either encoder, and
-one of 1e21 or more renders in exponent form. A value that large must be written as a
+through `float64`, so an integer above 2^53 loses precision with any encoder, and one
+of 1e21 or more renders in exponent form. A value that large must be written as a
 string. Storefront amounts are already decimal text.
 
-**Decision: YAML.** The ConfigMap carries `storefront.yaml`, mounted at
-`/etc/arkhai/storefront.yaml`.
+**Decision: JSON.** The ConfigMap carries `storefront.json`, rendered with
+`toPrettyJson` and mounted at `/etc/arkhai/storefront.json`. A side benefit: chart
+render tests read the rendered document with the standard library's `json`, so they
+assert on structure rather than on text.
 
 **Loader.** `kit/config`'s storefront discovery reads `storefront.toml`, then
-`storefront.yaml`, then `storefront.secrets.toml`, so the Secret overlay still has the
+`storefront.json`, then `storefront.secrets.toml`, so the Secret overlay still has the
 final word. The same three-place discovery under `XDG_CONFIG_HOME`; no profiles, no
 `ACTIVE_PROFILES`. The server loads the list through Dynaconf `includes`, which reads
-YAML already.
+JSON already.
 
 **The reporting commands merge as Dynaconf does.** `load_storefront_config()` backs
 `config show`, `config get`, and the CLI's `base_url` and `db_path` lookups. It reads
@@ -124,16 +136,16 @@ it rather than adding a third file to it.
 **`config show` with no `storefront.toml`.** It refuses to run when `storefront.toml`
 is absent, which in the pod it is. It reports the merged layers when any layer exists.
 `config show --raw` prints each public layer present — `storefront.toml`, then
-`storefront.yaml` — verbatim under a header naming its path, and never the Secret
+`storefront.json` — verbatim under a header naming its path, and never the Secret
 overlay. The merged `config show` already includes the overlay's values; that is
 unchanged here.
 
 The editing commands — `config set`, `config init-user`, `config migrate` — operate on
 `storefront.toml` and stay TOML-only: they edit a user's file, and a rendered
-`storefront.yaml` is regenerated from values, never edited in place.
+`storefront.json` is regenerated from values, never edited in place.
 
 The API-credits storefront shares this discovery and so also reads a
-`storefront.yaml` if present. Nothing renders one for it; the effect is a file name
+`storefront.json` if present. Nothing renders one for it; the effect is a file name
 it now tolerates.
 
 Rejected: keeping a hand-written recursive TOML encoder in the templates. The chart
@@ -412,14 +424,14 @@ check for chart values: it reads one TOML file, and a chart operator has values.
 Moving the storefront to `CONFIG_DIRECTORY` and `ACTIVE_PROFILES` would make
 `DEPLOYMENT_AND_CONFIG.md`'s "every service uses the same configuration shape" true
 and share `market_config.dynaconf_bootstrap`. It would not simplify this change: the
-chart's work — copy, derive, check, `toYaml` — is the same either way, and differs
+chart's work — copy, derive, check, `toPrettyJson` — is the same either way, and differs
 only in the ConfigMap key and mount name. It would cost a format change to every
 operator-managed `storefront.secrets.toml` Secret, a redesign of the CLI's
 single-file editing commands and the tomlkit-based migration engine shared with the
 buyer, the API-credits storefront's discovery, and about 190 references across
 Compose stacks, the e2e harness, workflows, scripts, and user documentation.
 
-A rendered `storefront.yaml` carries exactly what a future `config-<profile>.yml`
+A rendered `storefront.json` carries exactly what a future `config-<profile>.yml`
 would, so nothing here is lost if that move is made. Proposing it is deferred until
 after this change is implemented.
 
@@ -449,18 +461,52 @@ after this change is implemented.
   longer rendered. These and planning's default comparison are the expected
   differences in the before/after comparison.
 
+## Findings outside this change
+
+Found while implementing; recorded for review, not fixed here unless noted.
+
+1. **The provisioning chart's pass-through has decision 2's YAML defect.** It renders
+   `.Values.config` with `toYaml`, and its rendered `config-production.yml` carries
+   `identifier: 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266` unquoted for the release's
+   EIP-191 principals (`storefront_identity`, `admin_identity`, `identity`). Whether
+   the provisioning service turns the integer its YAML loader produces back into the
+   address was not checked; if it does not, EIP-191 identities in that chart are read
+   as integers today. Ed25519 identifiers are unaffected.
+2. **The umbrella's smoke-test configuration has the same defect.**
+   `helm/templates/tests/test-config.yaml` renders registry trust principals with
+   `toYaml` into the profile the smoke tests load.
+3. **The committed fixtures named invalid agent IDs.** `eip191-evm-values.yaml` and
+   `fiat-ed25519-values.yaml` set `agent_id` to `evm-bob` and `fiat-bob`, which the
+   storefront refuses at startup (identifiers may not contain `-`); the old chart
+   rendered the same values. Found by the render test that loads a rendered document
+   with the storefront's loader, and fixed here (`evm_bob`, `fiat_bob`).
+4. **A render assertion is stale.** `helm/scripts/test-render.sh` expects
+   `core/registry/filter-spec.yaml` to declare `id: vms.compute`; it declares
+   `id: compute.market`. This was the one failing assertion before this change and
+   remains the only one after it.
+5. **A packaged comment is stale.** `domains/vms/storefront/src/market_storefront/settings.toml`
+   says that with no `[capacity.sites]` table the storefront uses a single `default`
+   site; the capacity client refuses to start without the table.
+6. **The storefront subchart does not render on its own.** Its templates read
+   `global.registry` and `global.provisioning`, which only the umbrella supplies. This
+   predates the change; the chart's render tests render through the umbrella.
+7. **The chart-generated Secret overlay is unreachable.** Both values schemas fix
+   `secret.createSecret` to `false`, so `storefront.agentSecretsToml` never renders
+   under schema validation. It was updated for the new shape (decision 7) but cannot
+   be exercised by a render test.
+
 ## Open questions
 
 None.
 
 ## Migration Plan
 
-1. Add `storefront.yaml` to the storefront discovery and build the reporting view with
+1. Add `storefront.json` to the storefront discovery and build the reporting view with
    Dynaconf.
 2. Add the storefront's secret declarations, the schema generator, its make target,
    and its drift test; generate the fragment into both values schemas.
 3. Replace `storefront.agentConfigToml` with the pass-through, derivation, and checks;
-   render `storefront.yaml`; update the overlay helper, init containers, and the
+   render `storefront.json`; update the overlay helper, init containers, and the
    umbrella's smoke-test configuration.
 4. Move `helm/values.yaml`, the subchart's `values.yaml`, and every fixture to the new
    shape; replace the schemas' hand-written service definitions with the open object,
