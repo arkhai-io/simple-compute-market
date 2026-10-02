@@ -496,9 +496,11 @@ Found while implementing; recorded for review, not fixed here unless noted.
    EIP-191 identifiers. Deployed verification showed the provisioning service
    rejected `identity.identifier` as invalid. The chart now writes JSON syntax
    into the YAML profile, which Dynaconf reads with the identifiers intact.
-2. **The umbrella's smoke-test configuration has the same defect.**
-   `helm/templates/tests/test-config.yaml` renders registry trust principals with
-   `toYaml` into the profile the smoke tests load.
+2. **The umbrella's smoke-test configuration had the same defect.**
+   `helm/templates/tests/test-config.yaml` rendered its generated profile with
+   `toYaml`, leaving the registry trust principal `0x90f79bf6…` bare. It now renders
+   JSON syntax into the YAML profile, as the provisioning chart does, and a render
+   assertion checks the identifier stays a quoted string.
 3. **The committed fixtures named invalid agent IDs.** `eip191-evm-values.yaml` and
    `fiat-ed25519-values.yaml` set `agent_id` to `evm-bob` and `fiat-bob`, which the
    storefront refuses at startup (identifiers may not contain `-`); the old chart

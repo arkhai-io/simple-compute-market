@@ -116,8 +116,10 @@ None.
   names an image/configuration schema check.
 - Operators' own values files: the agent `config` block changes shape. `design.md`
   decision 6 maps every retired key to its new location.
-- Deployed verification: `helm/charts/provisioning/templates/configmap.yaml`, its render
-  assertions, and the E2E deal scenario's registry URL selection.
+- Deployed verification: `helm/charts/provisioning/templates/configmap.yaml` and the
+  umbrella's generated smoke-test profile, which now render JSON syntax so EIP-191
+  principals stay strings; their render assertions; and the E2E deal scenario's
+  registry URL selection.
 
 ## Dependencies and Related Changes
 

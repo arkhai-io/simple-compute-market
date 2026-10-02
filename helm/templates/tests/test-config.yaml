@@ -120,5 +120,8 @@ data:
   {{- end }}
   {{- if and $config.profile (not (hasKey ($config.profileFiles | default dict) $config.profile)) }}
   config-{{ $config.profile }}.yml: |
-    {{- toYaml $rendered | nindent 4 }}
+    {{- /* JSON is valid YAML and keeps 0x-prefixed principals as strings;
+    Helm's YAML encoder leaves a 160-bit address bare, which a YAML loader
+    reads as an integer. */}}
+    {{- toPrettyJson $rendered | nindent 4 }}
   {{- end }}

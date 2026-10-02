@@ -70,8 +70,9 @@ the planning pass names every file and suite.
 - [x] 4.6 `storefront.agentSecretsToml` keys `[registry.auth]` by the effective first
       registry URL and renders no `[integrations]`.
 - [x] 4.7 `helm/templates/tests/test-config.yaml` reads the new shape through
-      `arkhai.storefrontConfigSection` (`helm/templates/_helpers.tpl`) and follows the
-      agent's registry.
+      `arkhai.storefrontConfigSection` (`helm/templates/_helpers.tpl`), follows the
+      agent's registry, and renders its generated profile as JSON syntax so EIP-191
+      principals stay strings (`design.md` finding 2).
 
 ## 5. Schema and values
 
@@ -89,36 +90,26 @@ the planning pass names every file and suite.
 
 ## 6. Validation
 
-- [x] 6.1 **Render tests.** `helm/charts/storefront/tests/test_render.py` (17 tests,
-      each seen to fail against a broken template where it guards a template line) and
-      the reworked `helm/scripts/test-render.sh`. These are static render checks, not
-      integration tests. The stale compute filter ID assertion in `design.md`
-      finding 4 was corrected during deployed validation. The loader-backed test runs
-      when the storefront environment exists and reports a skip otherwise, so no CI
-      job runs it; a CI job that runs `make test`, `make build-dev`, and Helm
-      validation together is out of scope (`design.md` finding 9).
-- [x] 6.2 **Service tests.** `_build_settings()` reads a rendered `storefront.json`
-      under the Secret overlay (`tests/unit/test_config_loader.py`). kit/config 140
-      passed; VM storefront unit 1078 passed,
-      1 skipped; VM storefront integration 338 passed (CI's two deselections);
-      API-credits storefront 96 passed (its unit and integration tests together).
-- [x] 6.3 **Deployed.** On a local Docker Desktop Kubernetes cluster,
-      `make -C helm deploy` brought up the default release with rebuilt images.
-      The deployed `market-storefront config show` agreed with the mounted
-      `storefront.json` for agent ID, port, base URL, registry URL, identity,
-      settlement, and chain settings. A clean release with an Alkahest local
-      values overlay passed `make -C helm test-module MODULE=e2e-tests`:
-      32 passed, 377 deselected (evidence bundle `helm-local-20261002-183115`).
-      The E2E image was rebuilt with `make -C e2e-tests build`. The default
-      deployment exposed bare EIP-191 identifiers in provisioning's YAML profile;
-      its ConfigMap now uses JSON syntax to preserve string types (`design.md`
-      finding 1). The E2E scenario now reads the active profile's registry URL,
-      allowing the same suite to run in Kubernetes (finding 8). Earlier offline
-      comparison evidence: the default release and the fiat and EVM fixtures,
-      rendered by the original and the new chart and loaded with the storefront's
-      Dynaconf settings, differ only in `auto_register` (no longer rendered),
-      `db_path` (`./agent.db` → `/var/lib/arkhai/agent.db`), and the fixtures'
-      corrected `agent_id`.
+- [x] 6.1 **Render tests** (static, not integration).
+      `helm/charts/storefront/tests/test_render.py`, 17 tests, each seen to fail
+      against a broken template line it guards, and `helm/scripts/test-render.sh`,
+      now passing in full (`design.md` findings 2 and 4). The loader-backed test runs
+      only where the storefront environment exists; no CI job runs it (finding 9,
+      out of scope).
+- [x] 6.2 **Service tests.** kit/config 140; VM storefront unit 1078 (1 skipped),
+      including `_build_settings()` over a rendered `storefront.json` and the
+      overlay; VM storefront integration 338 (CI's two deselections); API-credits
+      storefront 96, unit and integration together.
+- [x] 6.3 **Deployed.** Local Docker Desktop Kubernetes, default release via
+      `make -C helm deploy`: the deployed `market-storefront config show` agreed with
+      the mounted `storefront.json` (agent ID, port, base URL, registry, identity,
+      settlement, chains). With an Alkahest local overlay,
+      `make -C helm test-module MODULE=e2e-tests` passed 32, 377 deselected (bundle
+      `helm-local-20261002-183115`). That run exposed findings 1 and 8, both fixed. It
+      predates the `Identity` closure, key folding, and finding 2's fix; re-verify
+      with 8.8. Offline before/after comparison of rendered documents: only
+      `auto_register` (dropped), `db_path` (now under the persistence mount), and the
+      fixtures' corrected `agent_id` differ.
 
 ## 7. Documentation
 
@@ -146,23 +137,28 @@ the planning pass names every file and suite.
       comments cite `openspec/specs/deployment-state/spec.md` headings that promotion
       (8.10) creates or narrows; they resolve once it lands.
 - [x] 8.2 **Import placement.** Every import this change added is at module level.
-- [ ] 8.3 **Documentation compliance.** Re-check accepted decisions against
-      `openspec/README.md`'s placement table.
-- [ ] 8.4 **Narrative compression.** Shorten completed-task notes to final behaviour;
-      the gate's evidence and the defaults comparison stay in `design.md`.
-- [ ] 8.5 **Roadmap currency.** No roadmap goal owns this change; record that
-      disposition. The roadmap is unaffected.
-- [ ] 8.6 **Campaign index currency.** Update this change's row and the Goal 6
-      campaign graph in `openspec/changes/README.md`, and
-      `compose-contact-exchange-across-compute`'s blocker.
-- [ ] 8.7 **Documentation citations.** Run
-      `make check-doc-citations CHANGE=pass-through-storefront-config` and resolve every
-      match.
-- [x] 8.8 **End-to-end pipeline.** GitHub Actions run 37015527919 on
-      `feat/pass-through-storefront-config`: the Compose VM lane passed 129 and the
-      bare-metal lane 16. Recorded separately, the Helm deployment from 6.3 passed the
-      E2E module with 32 tests. Re-run the pipeline on the final commit before
-      archiving if code changes after these runs.
+- [x] 8.3 **Documentation compliance.** Change history, alternatives, gate evidence,
+      and findings live in `design.md`; current-state behaviour is pending promotion
+      to the destinations in the record below; production comments cite only
+      permanent documents. Codex's provisioning-encoding sentence is already in
+      `docs/development/DEPLOYMENT_AND_CONFIG.md` as current state.
+- [x] 8.4 **Narrative compression.** Section 6 states results; the encoder gate,
+      defaults comparison, and findings stay in `design.md`.
+- [x] 8.5 **Roadmap currency.** No roadmap goal owns this change, and
+      `docs/development/ROADMAP.md` does not describe the chart; nothing is owed.
+- [x] 8.6 **Campaign index currency.** This change's row reads "implemented; in
+      review"; the Goal 6 graph is unchanged until archival.
+      `compose-contact-exchange-across-compute`'s design and proposal now say what
+      this baseline gives it: `[Delivery]` by values alone, `[Settlement.contact]`
+      once the mechanism is registered and the values schema regenerated, with the
+      generator extended for `kind`-dependent sinks.
+- [x] 8.7 **Documentation citations.**
+      `make check-doc-citations CHANGE=pass-through-storefront-config` passes.
+- [ ] 8.8 **End-to-end pipeline.** Evidence so far: Actions run 37015527919 on
+      `feat/pass-through-storefront-config`, Compose VM lane 129 and bare-metal 16;
+      the Helm E2E module, 32 (6.3). Both predate the `Identity` closure, key
+      folding, and the smoke-test profile fix. Owed: both lanes and the Helm module
+      on the final commit.
 - [x] 8.9 **Packaging.** `make check-packaging` passes.
 - [ ] 8.10 **Promotion.** Complete the design-promotion record below.
 
