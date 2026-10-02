@@ -142,7 +142,8 @@ agent uses the release's provisioning service, `config.provisioning.identity`
 and an `Identity.service_peers` entry for the site bound to it must include
 `global.provisioningIdentity`. Those checks relate the release's parts; the
 chart supplies no service default and does not validate the storefront's own
-settings, which the storefront does at startup. Because the Deployment uses
+settings. The storefront validates its typed sections at startup; untyped
+sections are not checked key by key (see below). Because the Deployment uses
 the `Recreate` strategy, a configuration the storefront refuses leaves no
 running pod; recover with `helm rollback`.
 
@@ -714,9 +715,10 @@ sequence:
 4. Repeat `--check` for every file and render the Helm or Compose deployment.
    Do not proceed if a migration, typed configuration validation, generated
    schema check, or hosted manifest check fails. Helm values are not a file
-   `config migrate` reads: rendering applies the values schema, and the
-   storefront validates the rest at startup, refusing a settlement schema
-   version other than its own.
+   `config migrate` reads: rendering applies the values schema, and at startup
+   the storefront applies its typed validation — refusing, for example, a
+   settlement schema version other than its own. Untyped settings are not
+   checked key by key.
 5. Quiesce publication, negotiation, settlement, and recovery automation.
    Deploy the coordinated marketplace configuration, wheels, image, Secret,
    and ConfigMap set. Keep automation quiesced while every storefront reports

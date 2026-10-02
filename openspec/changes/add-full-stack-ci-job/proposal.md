@@ -50,7 +50,8 @@ requirements change, and adds a delta and clears `skip_specs` if they do.
 
 ## Dependencies and Related Changes
 
-- Follows `pass-through-storefront-config`, whose finding 9 this owns.
+- Follows `pass-through-storefront-config` (archived), whose finding 9 this owns:
+  `openspec/changes/archive/2026-10-02-pass-through-storefront-config/design.md`.
 
 ## Impact
 
