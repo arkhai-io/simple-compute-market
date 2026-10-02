@@ -572,29 +572,111 @@
       "type": "object",
       "patternProperties": {
         "^[iI][dD][eE][nN][tT][iI][tT][yY]$": {
-          "type": "object",
+          "additionalProperties": false,
           "properties": {
             "principal": {
-              "additionalProperties": false,
-              "properties": {
-                "scheme": {
-                  "enum": [
-                    "eip191",
-                    "ed25519"
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "scheme": {
+                      "enum": [
+                        "eip191",
+                        "ed25519"
+                      ],
+                      "type": "string"
+                    },
+                    "identifier": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "scheme",
+                    "identifier"
                   ],
-                  "type": "string"
+                  "type": "object"
                 },
-                "identifier": {
-                  "type": "string"
+                {
+                  "type": "null"
                 }
+              ]
+            },
+            "administrators": {
+              "additionalProperties": {
+                "additionalProperties": false,
+                "properties": {
+                  "principals": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "scheme": {
+                          "enum": [
+                            "eip191",
+                            "ed25519"
+                          ],
+                          "type": "string"
+                        },
+                        "identifier": {
+                          "maxLength": 128,
+                          "minLength": 1,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "scheme",
+                        "identifier"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  }
+                },
+                "type": "object"
               },
-              "required": [
-                "scheme",
-                "identifier"
-              ],
+              "type": "object"
+            },
+            "service_peers": {
+              "additionalProperties": {
+                "additionalProperties": false,
+                "properties": {
+                  "role": {
+                    "type": "string"
+                  },
+                  "site_id": {
+                    "type": "string"
+                  },
+                  "principals": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "scheme": {
+                          "enum": [
+                            "eip191",
+                            "ed25519"
+                          ],
+                          "type": "string"
+                        },
+                        "identifier": {
+                          "maxLength": 128,
+                          "minLength": 1,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "scheme",
+                        "identifier"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  }
+                },
+                "type": "object"
+              },
               "type": "object"
             }
-          }
+          },
+          "type": "object"
         },
         "^[rR][eE][gG][iI][sS][tT][rR][yY]$": {
           "additionalProperties": true,

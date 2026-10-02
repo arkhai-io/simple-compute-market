@@ -1,8 +1,9 @@
 """Storefront configuration via dynaconf.
 
-Public profile values come from ``storefront.toml`` and environment-specific
-secrets come from ``storefront.secrets.toml`` or an approved environment
-Secret. Marketplace signing material is never loaded into Dynaconf:
+Public values come from an operator's ``storefront.toml`` and, under Helm, the
+chart-rendered ``storefront.json``; environment-specific secrets come from
+``storefront.secrets.toml`` or an approved environment Secret, which win over
+both. Marketplace signing material is never loaded into Dynaconf:
 ``ARKHAI_IDENTITY_CREDENTIAL`` is resolved at the composition root and passed
 directly to the identity signer factory.
 
@@ -232,6 +233,43 @@ def get_evm_wallet_private_key(source: Dynaconf | None = None) -> str:
 
     active = settings if source is None else source
     return str(active.get("wallet.private_key", "") or "").strip()
+
+
+class AdministratorDeclaration(BaseModel):
+    """One ``[Identity.administrators.<subject>]`` entry."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    principals: list[Identity] = Field(default_factory=list)
+
+
+class ServicePeerDeclaration(BaseModel):
+    """One ``[Identity.service_peers.<peer_id>]`` entry."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    role: str = ""
+    site_id: str = ""
+    principals: list[Identity] = Field(default_factory=list)
+
+
+class IdentityConfigDeclaration(BaseModel):
+    """The public shape of ``[Identity]``, read above through Dynaconf.
+
+    Not used to parse the section at runtime; the parsers above do that and
+    use the same identity models for each principal. It declares the keys the
+    section may hold, all public, so a chart's generated values schema refuses
+    anything else under ``Identity`` — private identity material arrives only
+    through ``ARKHAI_IDENTITY_CREDENTIAL``. A key the parsers gain must be
+    added here, or the values schema refuses it; see
+    docs/development/DEPLOYMENT_AND_CONFIG.md.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    principal: IdentityConfig | None = None
+    administrators: dict[str, AdministratorDeclaration] = Field(default_factory=dict)
+    service_peers: dict[str, ServicePeerDeclaration] = Field(default_factory=dict)
 
 
 class WalletConfigDeclaration(BaseModel):

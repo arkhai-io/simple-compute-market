@@ -158,10 +158,10 @@ def user_config_files() -> list[Path]:
 def storefront_config_file() -> Path:
     """Return the path to the storefront's primary ``storefront.toml``.
 
-    Mirrors :func:`user_config_file` for the storefront's own file pair
-    (``storefront.toml`` + ``storefront.secrets.toml``). The storefront has
-    a separate identity and role-scoped knobs, so it gets its own file
-    rather than reusing the buyer's ``config.toml``. On a host that runs
+    Mirrors :func:`user_config_file` for the storefront's own operator file,
+    the first of the layers :func:`storefront_config_files` lists. The
+    storefront has a separate identity and role-scoped knobs, so it gets its
+    own file rather than reusing the buyer's ``config.toml``. On a host that runs
     both buyer and seller, this prevents one role's CLI scaffold from
     clobbering the other's.
 

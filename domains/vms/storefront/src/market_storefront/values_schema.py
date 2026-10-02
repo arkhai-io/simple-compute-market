@@ -27,13 +27,13 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from core_storefront.identity_config import IdentityConfig
 from pydantic import BaseModel
 
 from market_storefront.settlement_composition import (
     build_storefront_settlement_registry,
 )
 from market_storefront.utils.config import (
+    IdentityConfigDeclaration,
     RegistryConfigDeclaration,
     WalletConfigDeclaration,
 )
@@ -159,10 +159,7 @@ def _settlement_fragment(role: str) -> dict[str, Any]:
 def storefront_config_definition(role: str = ROLE) -> dict[str, Any]:
     """Return the generated definition for an agent's ``config``."""
     sections: dict[str, Any] = {
-        "identity": {
-            "type": "object",
-            "properties": {"principal": model_fragment(IdentityConfig, role=role)},
-        },
+        "identity": model_fragment(IdentityConfigDeclaration, role=role),
         "registry": model_fragment(RegistryConfigDeclaration, role=role),
         "settlement": _settlement_fragment(role),
         "wallet": model_fragment(WalletConfigDeclaration, role=role),

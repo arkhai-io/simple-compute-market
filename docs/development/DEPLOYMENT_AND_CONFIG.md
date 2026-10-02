@@ -82,6 +82,8 @@ application Deployment and to Helm test pods.
   a ConfigMap, mounted at `CONFIG_DIRECTORY` as a `config-<profile>.yml`
   file. Adding a new non-secret key requires only a `values.yaml`
   change — no Deployment template change.
+  The provisioning chart writes JSON syntax into that YAML profile so
+  0x-prefixed EIP-191 identifiers remain strings when Dynaconf reads it.
 - Secret material (key material, credentials) that cannot go in a
   ConfigMap renders into a Kubernetes Secret whose data contains its own
   `config-<profile>.yml` key, mounted at the same `CONFIG_DIRECTORY`.

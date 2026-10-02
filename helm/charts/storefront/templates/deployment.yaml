@@ -62,13 +62,16 @@ spec:
         {{- /* Waiting for a dependency is the Kubernetes layer's concern; reading
         the passed-through configuration to decide it validates nothing. */}}
         {{- $config := $agent.config | default dict }}
-        {{- $settlement := include "storefront.section" (dict "doc" $config "name" "settlement") | fromYaml }}
-        {{- $alkahest := include "storefront.section" (dict "doc" $settlement "name" "alkahest") | fromYaml }}
-        {{- $chains := include "storefront.section" (dict "doc" $config "name" "chains") | fromYaml }}
-        {{- if and ($alkahest.enabled | default false) (gt (len $chains) 0) }}
+        {{- $settlement := include "storefront.foldedMap" (dict "doc" $config "name" "settlement") | fromJson }}
+        {{- $alkahest := include "storefront.foldedMap" (dict "doc" $settlement "name" "alkahest") | fromJson }}
+        {{- $alkahestEnabledKey := include "storefront.foldedKey" (dict "doc" $alkahest "name" "enabled") }}
+        {{- $chains := include "storefront.foldedMap" (dict "doc" $config "name" "chains") | fromJson }}
+        {{- if and $alkahestEnabledKey (index $alkahest $alkahestEnabledKey) (gt (len $chains) 0) }}
         {{- $chainName := first (keys $chains | sortAlpha) }}
         {{- $chain := index $chains $chainName }}
-        {{- if $chain.rpc_url }}
+        {{- $rpcUrlKey := include "storefront.foldedKey" (dict "doc" $chain "name" "rpc_url") }}
+        {{- if and $rpcUrlKey (index $chain $rpcUrlKey) }}
+        {{- $rpcUrl := index $chain $rpcUrlKey }}
         - name: wait-for-rpc
           image: busybox:1.36
           {{- /* Probe only a public RPC URL rendered into the ConfigMap. */}}
@@ -79,7 +82,7 @@ spec:
               echo "Waiting for RPC..."
               until wget -qO- --post-data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
                 --header 'Content-Type: application/json' \
-                {{ $chain.rpc_url | quote }} > /dev/null 2>&1; do
+                {{ $rpcUrl | quote }} > /dev/null 2>&1; do
                 echo "RPC not ready, retrying in 5s..."; sleep 5
               done
               echo "RPC ready."

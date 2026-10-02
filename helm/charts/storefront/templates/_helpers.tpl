@@ -141,11 +141,15 @@ the agent fullname.
 {{- end }}
 
 {{/*
-The key under which a mapping holds a section, matched case-insensitively as
-the storefront's loader matches it, or "" when absent.
-Argument: dict with `doc` (a mapping) and `name` (the lowercase section name).
+Key lookup as the storefront's loader does it. Dynaconf matches configuration
+keys case-insensitively at every level, so every key the chart reads or writes
+is matched the same way; otherwise `Port` or `registry.URLS` would slip past a
+check and sit beside the value the chart writes.
+
+`storefront.foldedKey`: the key under which `doc` holds `name` (lowercase),
+in whatever spelling it was written, or "".
 */}}
-{{- define "storefront.sectionKey" -}}
+{{- define "storefront.foldedKey" -}}
 {{- $found := "" -}}
 {{- range $key, $_ := .doc -}}
 {{- if eq (lower $key) $.name -}}{{- $found = $key -}}{{- end -}}
@@ -154,15 +158,39 @@ Argument: dict with `doc` (a mapping) and `name` (the lowercase section name).
 {{- end }}
 
 {{/*
-A section of a mapping by case-insensitive name, or an empty dict.
-Argument: dict with `doc` and `name`. Returns YAML; read it with fromYaml.
+`storefront.foldedMap`: the mapping `doc` holds under `name`, as JSON for
+fromJson, or {} when absent. JSON keeps every value's type through the round
+trip.
 */}}
-{{- define "storefront.section" -}}
-{{- $key := include "storefront.sectionKey" . -}}
-{{- if $key -}}
-{{- toYaml (index .doc $key) -}}
-{{- else -}}
-{{- toYaml dict -}}
+{{- define "storefront.foldedMap" -}}
+{{- $key := include "storefront.foldedKey" . -}}
+{{- $value := dict -}}
+{{- if $key -}}{{- $value = index .doc $key | default dict -}}{{- end -}}
+{{- toJson $value -}}
+{{- end }}
+
+{{/*
+Refuse a mapping, at any depth, that states one key in two spellings: the
+loader would merge them in an order nobody chose.
+Argument: dict with `agent` (name), `path` (dotted, for the message), `value`.
+*/}}
+{{- define "storefront.refuseFoldedDuplicates" -}}
+{{- $agent := .agent -}}
+{{- $path := .path -}}
+{{- if kindIs "map" .value -}}
+  {{- $seen := dict -}}
+  {{- range $key, $item := .value -}}
+    {{- $folded := lower $key -}}
+    {{- if hasKey $seen $folded -}}
+      {{- fail (printf "storefront agent %s %s states both %q and %q; state one" $agent $path (index $seen $folded) $key) -}}
+    {{- end -}}
+    {{- $_ := set $seen $folded $key -}}
+    {{- include "storefront.refuseFoldedDuplicates" (dict "agent" $agent "path" (printf "%s.%s" $path $key) "value" $item) -}}
+  {{- end -}}
+{{- else if kindIs "slice" .value -}}
+  {{- range $index, $item := .value -}}
+    {{- include "storefront.refuseFoldedDuplicates" (dict "agent" $agent "path" (printf "%s[%d]" $path $index) "value" $item) -}}
+  {{- end -}}
 {{- end -}}
 {{- end }}
 
@@ -171,8 +199,8 @@ Whether the agent uses the release's internal registry: its configuration
 names no registry URLs. Returns "true" or "".
 */}}
 {{- define "storefront.usesInternalRegistry" -}}
-{{- $registry := include "storefront.section" (dict "doc" (.agent.config | default dict) "name" "registry") | fromYaml -}}
-{{- if not (hasKey $registry "urls") -}}true{{- end -}}
+{{- $registry := include "storefront.foldedMap" (dict "doc" (.agent.config | default dict) "name" "registry") | fromJson -}}
+{{- if not (include "storefront.foldedKey" (dict "doc" $registry "name" "urls")) -}}true{{- end -}}
 {{- end }}
 
 {{/*
@@ -180,9 +208,10 @@ The first registry URL the agent's storefront uses: the first configured URL,
 else the internal registry's.
 */}}
 {{- define "storefront.effectiveRegistryUrl" -}}
-{{- $registry := include "storefront.section" (dict "doc" (.agent.config | default dict) "name" "registry") | fromYaml -}}
-{{- if hasKey $registry "urls" -}}
-{{- first $registry.urls -}}
+{{- $registry := include "storefront.foldedMap" (dict "doc" (.agent.config | default dict) "name" "registry") | fromJson -}}
+{{- $urlsKey := include "storefront.foldedKey" (dict "doc" $registry "name" "urls") -}}
+{{- if $urlsKey -}}
+{{- first (index $registry $urlsKey) -}}
 {{- else -}}
 {{- include "storefront.registryUrl" .root -}}
 {{- end -}}
@@ -215,10 +244,11 @@ configuration does not state it. It refuses a release whose parts disagree.
 See openspec/specs/deployment-state/spec.md, "A storefront chart passes
 service configuration through".
 
-Section names are matched case-insensitively, as the storefront's loader
-matches them, so a check cannot be bypassed by spelling a section differently;
-a configuration stating two spellings of one key is refused because the loader
-would merge them in an order nobody chose.
+Keys are matched case-insensitively at every level, as the storefront's loader
+matches them, so a check cannot be bypassed by spelling a key differently, and
+a configuration stating one key in two spellings is refused. Peer and principal
+fields under `Identity` need no folding: the values schema closes that section
+to their exact names.
 
 Argument: dict with `root` (chart root) and `agent`.
 */}}
@@ -226,32 +256,32 @@ Argument: dict with `root` (chart root) and `agent`.
 {{- $root := .root -}}
 {{- $agent := .agent -}}
 {{- $cfg := deepCopy ($agent.config | default dict) -}}
-{{- $seen := dict -}}
-{{- range $key, $_ := $cfg -}}
-  {{- $folded := lower $key -}}
-  {{- if hasKey $seen $folded -}}
-    {{- fail (printf "storefront agent %s config states both %q and %q; state one" $agent.name (index $seen $folded) $key) -}}
-  {{- end -}}
-  {{- $_ := set $seen $folded $key -}}
-{{- end -}}
+{{- include "storefront.refuseFoldedDuplicates" (dict "agent" $agent.name "path" "config" "value" $cfg) -}}
 
 {{- /* The port names the container port, probes, and Service port. */ -}}
-{{- if and (hasKey $cfg "port") (ne (int (index $cfg "port")) (int $agent.port)) -}}
-  {{- fail (printf "storefront agent %s config.port %v differs from the agent's port %v" $agent.name (index $cfg "port") $agent.port) -}}
+{{- $portKey := include "storefront.foldedKey" (dict "doc" $cfg "name" "port") -}}
+{{- if $portKey -}}
+  {{- $stated := index $cfg $portKey -}}
+  {{- if not (or (kindIs "float64" $stated) (kindIs "int64" $stated) (kindIs "int" $stated)) -}}
+    {{- fail (printf "storefront agent %s config.%s must be a number" $agent.name $portKey) -}}
+  {{- end -}}
+  {{- if ne (float64 $stated) (float64 $agent.port) -}}
+    {{- fail (printf "storefront agent %s config.%s %v differs from the agent's port %v" $agent.name $portKey $stated $agent.port) -}}
+  {{- end -}}
 {{- end -}}
-{{- $_ := set $cfg "port" (int $agent.port) -}}
-{{- if not (hasKey $cfg "base_url") -}}
+{{- $_ := set $cfg ($portKey | default "port") (int $agent.port) -}}
+{{- if not (include "storefront.foldedKey" (dict "doc" $cfg "name" "base_url")) -}}
   {{- $_ := set $cfg "base_url" (include "storefront.agentBaseUrl" .) -}}
 {{- end -}}
-{{- if not (hasKey $cfg "db_path") -}}
+{{- if not (include "storefront.foldedKey" (dict "doc" $cfg "name" "db_path")) -}}
   {{- $_ := set $cfg "db_path" (printf "%s/agent.db" (trimSuffix "/" $root.Values.persistence.mountPath)) -}}
 {{- end -}}
 
 {{- /* Registry: the internal registry's URL, keyed trust stated outside config. */ -}}
-{{- $registryKey := include "storefront.sectionKey" (dict "doc" $cfg "name" "registry") | default "registry" -}}
+{{- $registryKey := include "storefront.foldedKey" (dict "doc" $cfg "name" "registry") | default "registry" -}}
 {{- $registry := index $cfg $registryKey | default dict -}}
 {{- $trust := $agent.internalRegistryTrust -}}
-{{- if hasKey $registry "urls" -}}
+{{- if include "storefront.foldedKey" (dict "doc" $registry "name" "urls") -}}
   {{- if $trust -}}
     {{- fail (printf "storefront agent %s states internalRegistryTrust and config registry.urls; internalRegistryTrust applies only to the internal registry" $agent.name) -}}
   {{- end -}}
@@ -267,9 +297,9 @@ Argument: dict with `root` (chart root) and `agent`.
     {{- fail (printf "storefront agent %s internalRegistryTrust.principals must include the release's registry principal" $agent.name) -}}
   {{- end -}}
   {{- $url := include "storefront.registryUrl" $root -}}
-  {{- $authoritiesKey := include "storefront.sectionKey" (dict "doc" $registry "name" "authorities") | default "authorities" -}}
+  {{- $authoritiesKey := include "storefront.foldedKey" (dict "doc" $registry "name" "authorities") | default "authorities" -}}
   {{- $authorities := index $registry $authoritiesKey | default dict -}}
-  {{- if hasKey $authorities $url -}}
+  {{- if include "storefront.foldedKey" (dict "doc" $authorities "name" (lower $url)) -}}
     {{- fail (printf "storefront agent %s states internalRegistryTrust and config registry.authorities[%q]; state one" $agent.name $url) -}}
   {{- end -}}
   {{- $_ := set $authorities $url (dict "authority" $trust.authority "principals" $trust.principals) -}}
@@ -280,37 +310,45 @@ Argument: dict with `root` (chart root) and `agent`.
 
 {{- /* Provisioning and the capacity site bound to it. */ -}}
 {{- $internalProvisioningURL := include "provisioning.url" $root -}}
-{{- $provisioningKey := include "storefront.sectionKey" (dict "doc" $cfg "name" "provisioning") | default "provisioning" -}}
+{{- $provisioningKey := include "storefront.foldedKey" (dict "doc" $cfg "name" "provisioning") | default "provisioning" -}}
 {{- $provisioning := index $cfg $provisioningKey | default dict -}}
-{{- if not (hasKey $provisioning "service_url") -}}
-  {{- $_ := set $provisioning "service_url" $internalProvisioningURL -}}
+{{- $serviceUrlKey := include "storefront.foldedKey" (dict "doc" $provisioning "name" "service_url") -}}
+{{- if not $serviceUrlKey -}}
+  {{- $serviceUrlKey = "service_url" -}}
+  {{- $_ := set $provisioning $serviceUrlKey $internalProvisioningURL -}}
   {{- $_ := set $cfg $provisioningKey $provisioning -}}
 {{- end -}}
-{{- $provisioningURL := trimSuffix "/" (toString $provisioning.service_url) -}}
-{{- $capacityKey := include "storefront.sectionKey" (dict "doc" $cfg "name" "capacity") | default "capacity" -}}
+{{- $provisioningURL := trimSuffix "/" (toString (index $provisioning $serviceUrlKey)) -}}
+{{- $capacityKey := include "storefront.foldedKey" (dict "doc" $cfg "name" "capacity") | default "capacity" -}}
 {{- $capacity := index $cfg $capacityKey | default dict -}}
-{{- if not (hasKey $capacity "sites") -}}
-  {{- $_ := set $capacity "sites" (dict "default" $provisioningURL) -}}
+{{- $sitesKey := include "storefront.foldedKey" (dict "doc" $capacity "name" "sites") -}}
+{{- if not $sitesKey -}}
+  {{- $sitesKey = "sites" -}}
+  {{- $_ := set $capacity $sitesKey (dict "default" $provisioningURL) -}}
   {{- $_ := set $cfg $capacityKey $capacity -}}
 {{- end -}}
 
 {{- /* Trust in the release's provisioning service is stated, then checked. */ -}}
 {{- if eq $provisioningURL (trimSuffix "/" $internalProvisioningURL) -}}
   {{- $active := $root.Values.global.provisioningIdentity -}}
-  {{- $provisioningIdentity := include "storefront.section" (dict "doc" $provisioning "name" "identity") | fromYaml -}}
-  {{- if not (include "storefront.includesPrincipal" (dict "principals" $provisioningIdentity.principals "principal" $active)) -}}
+  {{- $provisioningIdentity := include "storefront.foldedMap" (dict "doc" $provisioning "name" "identity") | fromJson -}}
+  {{- $principalsKey := include "storefront.foldedKey" (dict "doc" $provisioningIdentity "name" "principals") -}}
+  {{- $provisioningPrincipals := list -}}
+  {{- if $principalsKey -}}{{- $provisioningPrincipals = index $provisioningIdentity $principalsKey -}}{{- end -}}
+  {{- if not (include "storefront.includesPrincipal" (dict "principals" $provisioningPrincipals "principal" $active)) -}}
     {{- fail (printf "storefront agent %s config provisioning.identity.principals must include the release's provisioning principal" $agent.name) -}}
   {{- end -}}
   {{- $internalSites := list -}}
-  {{- range $siteID, $siteURL := $capacity.sites -}}
+  {{- range $siteID, $siteURL := (index $capacity $sitesKey) -}}
     {{- if eq (trimSuffix "/" (toString $siteURL)) $provisioningURL -}}
       {{- $internalSites = append $internalSites $siteID -}}
     {{- end -}}
   {{- end -}}
   {{- if $internalSites -}}
-    {{- $identity := include "storefront.section" (dict "doc" $cfg "name" "identity") | fromYaml -}}
+    {{- $identity := include "storefront.foldedMap" (dict "doc" $cfg "name" "identity") | fromJson -}}
+    {{- $peers := include "storefront.foldedMap" (dict "doc" $identity "name" "service_peers") | fromJson -}}
     {{- $peerTrusted := false -}}
-    {{- range $peerID, $peer := ($identity.service_peers | default dict) -}}
+    {{- range $peerID, $peer := $peers -}}
       {{- if and (eq ($peer.role | default "") "service") (has ($peer.site_id | default "") $internalSites) (include "storefront.includesPrincipal" (dict "principals" $peer.principals "principal" $active)) -}}
         {{- $peerTrusted = true -}}
       {{- end -}}

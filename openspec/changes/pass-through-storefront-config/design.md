@@ -244,17 +244,29 @@ unknown keys, types, secret fields — come from the generated values schema
 Trust is checked rather than injected: the chart never adds a principal to a trust
 list the operator wrote.
 
-**Section spelling.** The repository writes top-level sections both ways —
-`[Settlement]` and `[settlement]`, `[Identity.…]` and `[identity.…]`; `config
-init-user` writes `[identity.principal]`, `[wallet]`, and `[chains.…]`; the packaged
-`settings.toml` capitalizes — and Dynaconf accepts either. The chart's own lookups of
-`Settlement`, `Chains`, and `Identity` therefore accept either spelling of each
-top-level section, and the chart refuses a `config` that states both spellings of one
-section, which Dynaconf would merge in an order the operator did not choose. Nested
-keys are the model's field names; every surface already writes them in lowercase
-snake case. Making one spelling canonical would be a service-wide cutover — settings,
-`config init-user`, documentation, CLI paths, loader, tests, and values together — and
-is not this change.
+**Key spelling.** The storefront's loader matches keys case-insensitively at every
+level: tested with Dynaconf 3, `[Settlement.Stripe]` and `[settlement.stripe]` merge,
+and `Port` sets the same value as `port`. The repository also writes top-level
+sections both ways — `[Settlement]` and `[settlement]`, `[Identity.…]` and
+`[identity.…]`; `config init-user` writes `[identity.principal]`, `[wallet]`, and
+`[chains.…]`. So the chart matches every key it reads or writes the same way — root
+`port`, `base_url`, and `db_path`; `registry.urls` and `registry.authorities`;
+`provisioning.service_url` and `provisioning.identity.principals`;
+`capacity.sites`; the `Settlement`, `Chains`, and `Identity` sections and the chain
+`rpc_url` it reads for init containers — and writes a derived value under the
+spelling the configuration already uses. Otherwise `Port: 9000` would pass the port
+check and render beside the `port: 8001` the chart writes. A configuration that
+states one key in two spellings, at any depth, is refused: the loader would merge
+them in an order nobody chose. Peer and principal fields under `Identity` need no
+folding, because the values schema closes that section to their exact names
+(decision 8).
+
+The port check compares exactly: a stated port must be a number and equal the
+agent's, with no conversion deciding whether two values disagree.
+
+Making one spelling canonical would be a service-wide cutover — settings,
+`config init-user`, documentation, CLI paths, loader, tests, and values together —
+and is not this change.
 
 ### 5. The values schema stops hand-describing service configuration
 
@@ -345,8 +357,7 @@ field metadata, including `"secret": true` and `"roles"`, into the schema it emi
 (checked against `ContactSettlementConfig`). A generator in the VM storefront:
 
 1. builds the storefront's own settlement registry and takes each seller
-   registration's `config_model`, plus `Identity.principal` (`IdentityConfig`) and the
-   declarations below;
+   registration's `config_model`, plus the declarations below;
 2. emits each model's JSON Schema with references inlined, so the fragment uses no
    draft-specific `$defs` keyword;
 3. replaces every property marked `"secret": true`, or whose `"roles"` exclude
@@ -376,6 +387,21 @@ schema edit. Delivery sinks, whose settings depend on each sink's `kind`, are no
 composed into the VM storefront yet; `compose-contact-exchange-across-compute`, which
 composes them, owns extending the generator to express that dependency for the
 built-in sinks.
+
+**Identity is declared closed.** `[Identity]` holds only public material — its
+`principal`, `administrators.<subject>.principals`, and
+`service_peers.<id>.{role, site_id, principals}` — because the marketplace signing
+credential arrives only through `ARKHAI_IDENTITY_CREDENTIAL`, from the chart's
+credential Secret reference. A credential-like key placed under `Identity` would not
+be refused at startup, only ignored, after it had reached the ConfigMap. So the
+storefront declares the section's public surface in `IdentityConfigDeclaration`,
+beside the parsers and built from the same identity models they use for each
+principal, and the generated schema closes it at every level: any key the
+declaration does not name is refused, whatever it is called. That is an allowlist,
+not a list of forbidden names, so it needs no update when a new credential name
+appears; a public key the parsers gain must be added to the declaration, and a unit
+test proves the declaration accepts every operator-written `[Identity]` table the
+repository ships.
 
 **Untyped secrets are declared by the storefront.** `wallet.private_key` and the
 `registry.auth` tokens are read from Dynaconf with no model to carry the marker. The
@@ -465,13 +491,11 @@ after this change is implemented.
 
 Found while implementing; recorded for review, not fixed here unless noted.
 
-1. **The provisioning chart's pass-through has decision 2's YAML defect.** It renders
-   `.Values.config` with `toYaml`, and its rendered `config-production.yml` carries
-   `identifier: 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266` unquoted for the release's
-   EIP-191 principals (`storefront_identity`, `admin_identity`, `identity`). Whether
-   the provisioning service turns the integer its YAML loader produces back into the
-   address was not checked; if it does not, EIP-191 identities in that chart are read
-   as integers today. Ed25519 identifiers are unaffected.
+1. **The provisioning chart's pass-through had decision 2's YAML defect.** It rendered
+   `.Values.config` with `toYaml`, and its `config-production.yml` carried bare
+   EIP-191 identifiers. Deployed verification showed the provisioning service
+   rejected `identity.identifier` as invalid. The chart now writes JSON syntax
+   into the YAML profile, which Dynaconf reads with the identifiers intact.
 2. **The umbrella's smoke-test configuration has the same defect.**
    `helm/templates/tests/test-config.yaml` renders registry trust principals with
    `toYaml` into the profile the smoke tests load.
@@ -480,10 +504,9 @@ Found while implementing; recorded for review, not fixed here unless noted.
    storefront refuses at startup (identifiers may not contain `-`); the old chart
    rendered the same values. Found by the render test that loads a rendered document
    with the storefront's loader, and fixed here (`evm_bob`, `fiat_bob`).
-4. **A render assertion is stale.** `helm/scripts/test-render.sh` expects
+4. **A render assertion was stale.** `helm/scripts/test-render.sh` expected
    `core/registry/filter-spec.yaml` to declare `id: vms.compute`; it declares
-   `id: compute.market`. This was the one failing assertion before this change and
-   remains the only one after it.
+   `id: compute.market`. Deployed validation corrected the assertion.
 5. **A packaged comment is stale.** `domains/vms/storefront/src/market_storefront/settings.toml`
    says that with no `[capacity.sites]` table the storefront uses a single `default`
    site; the capacity client refuses to start without the table.
@@ -494,6 +517,19 @@ Found while implementing; recorded for review, not fixed here unless noted.
    `secret.createSecret` to `false`, so `storefront.agentSecretsToml` never renders
    under schema validation. It was updated for the new shape (decision 7) but cannot
    be exercised by a render test.
+8. **The deal scenario used a profile-name test to choose its registry URL.** The
+   Kubernetes hook's `helm` profile fell through to `localhost:8080`, although
+   its generated profile supplied the in-cluster URL. The scenario now reads
+   `settings.REGISTRY.API_URL`; the clean Helm run passed all 32 stages.
+
+9. **No CI job runs the chart-to-loader check.** `helm/charts/storefront/tests/test_render.py`
+   loads one rendered `storefront.json` with the storefront's own loader when the
+   storefront environment exists, and reports a skip otherwise. CI's
+   `release-deployment` job has Helm but not that environment, and `tests.yml` runs
+   only for pushes and pull requests to `staging` and `dev`. A job that runs
+   `make test`, `make build-dev`, and Helm validation together — with make targets to
+   drive it — would protect this boundary; it is a CI-design change and out of scope
+   here. Until then the check is local evidence, run by `make -C helm test-render`.
 
 ## Open questions
 

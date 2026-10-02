@@ -6,12 +6,13 @@
 # Override via (highest priority first):
 #   1. APICREDITS_STOREFRONT_* environment variables (separator __)
 #   2. $XDG_CONFIG_HOME/arkhai/storefront.secrets.toml  (Secret overlay)
-#   3. $XDG_CONFIG_HOME/arkhai/storefront.toml          (ConfigMap base)
-#   4. This file
+#   3. $XDG_CONFIG_HOME/arkhai/storefront.json          (a chart-rendered document)
+#   4. $XDG_CONFIG_HOME/arkhai/storefront.toml          (an operator's own file)
+#   5. This file
 #
 # The overlay files are shared with the VM storefront's loader on
 # purpose: a deployment runs one storefront per container, each with its
-# own mounted storefront.toml.
+# own mounted configuration.
 # ---------------------------------------------------------------------------
 
 # Public marketplace identity. The matching credential is supplied only through

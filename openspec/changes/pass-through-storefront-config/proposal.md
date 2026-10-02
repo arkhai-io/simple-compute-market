@@ -94,7 +94,7 @@ None.
 - Do not make one section spelling canonical; that is a service-wide cutover.
 - Do not change the bare-metal storefront chart, which receives its settlement
   configuration as JSON from an existing Secret; see `design.md`.
-- Do not change the provisioning, registry, dev-env, or e2e charts.
+- Do not change the provisioning, registry, dev-env, or e2e charts as part of the storefront pass-through. Deployed verification also corrects the provisioning chart's public identifier encoding, which otherwise prevents the default Helm release from starting.
 
 ## Impact
 
@@ -116,6 +116,8 @@ None.
   names an image/configuration schema check.
 - Operators' own values files: the agent `config` block changes shape. `design.md`
   decision 6 maps every retired key to its new location.
+- Deployed verification: `helm/charts/provisioning/templates/configmap.yaml`, its render
+  assertions, and the E2E deal scenario's registry URL selection.
 
 ## Dependencies and Related Changes
 

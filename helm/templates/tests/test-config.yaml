@@ -26,7 +26,7 @@ continue to work.
 {{- range $agent := $agents -}}
   {{- if eq $agent.name $provisioningTargetName -}}
     {{- $provisioningStorefrontFound = true -}}
-    {{- $agentIdentity := include "arkhai.storefrontConfigSection" (dict "doc" ($agent.config | default dict) "name" "identity") | fromYaml -}}
+    {{- $agentIdentity := include "arkhai.storefrontConfigSection" (dict "doc" ($agent.config | default dict) "name" "identity") | fromJson -}}
     {{- $agentPrincipal := $agentIdentity.principal | default dict -}}
     {{- range $principal := ($.Values.provisioning.storefrontIdentity.principals | default list) -}}
       {{- if and (eq $principal.scheme ($agentPrincipal.scheme | default "")) (eq $principal.identifier ($agentPrincipal.identifier | default "")) -}}
@@ -60,15 +60,17 @@ continue to work.
 {{- /* Smoke tests talk to the registry the target storefront uses: its first
 configured URL and that URL's trust entry, or the internal registry and the
 agent's internalRegistryTrust. */ -}}
-{{- $targetRegistry := include "arkhai.storefrontConfigSection" (dict "doc" $targetConfig "name" "registry") | fromYaml -}}
+{{- $targetRegistry := include "arkhai.storefrontConfigSection" (dict "doc" $targetConfig "name" "registry") | fromJson -}}
+{{- $targetUrlsKey := include "arkhai.storefrontConfigKey" (dict "doc" $targetRegistry "name" "urls") -}}
 {{- $registryURL := printf "http://%s-registry:%d" .Release.Name (int .Values.registry.service.port) -}}
 {{- $registryAuthority := $targetAgent.internalRegistryTrust | default dict -}}
-{{- if hasKey $targetRegistry "urls" -}}
-  {{- $registryURL = first $targetRegistry.urls -}}
-  {{- $registryAuthority = index ($targetRegistry.authorities | default dict) $registryURL | default dict -}}
+{{- if $targetUrlsKey -}}
+  {{- $registryURL = first (index $targetRegistry $targetUrlsKey) -}}
+  {{- $targetAuthorities := include "arkhai.storefrontConfigSection" (dict "doc" $targetRegistry "name" "authorities") | fromJson -}}
+  {{- $registryAuthority = index $targetAuthorities $registryURL | default dict -}}
 {{- end -}}
-{{- $settlementConfig := include "arkhai.storefrontConfigSection" (dict "doc" $targetConfig "name" "settlement") | fromYaml -}}
-{{- $alkahestConfig := include "arkhai.storefrontConfigSection" (dict "doc" $settlementConfig "name" "alkahest") | fromYaml -}}
+{{- $settlementConfig := include "arkhai.storefrontConfigSection" (dict "doc" $targetConfig "name" "settlement") | fromJson -}}
+{{- $alkahestConfig := include "arkhai.storefrontConfigSection" (dict "doc" $settlementConfig "name" "alkahest") | fromJson -}}
 {{- $component := $targetAgent.component | default $targetAgent.name -}}
 {{- $generated := dict -}}
 {{- $_ := set $generated "settlement" (dict
@@ -91,8 +93,8 @@ agent's internalRegistryTrust. */ -}}
 ) -}}
 {{- $_ := set $generated $component (dict
   "api_url" (printf "http://%s-storefront-%s:%d" .Release.Name $targetAgent.name (int $targetAgent.port))
-  "base_url_override" ((get $targetConfig "base_url") | default "")
-  "agent_id" ((get $targetConfig "agent_id") | default "")
+  "base_url_override" ((get $targetConfig (include "arkhai.storefrontConfigKey" (dict "doc" $targetConfig "name" "base_url") | default "base_url")) | default "")
+  "agent_id" ((get $targetConfig (include "arkhai.storefrontConfigKey" (dict "doc" $targetConfig "name" "agent_id") | default "agent_id")) | default "")
 ) -}}
 {{- if and ($alkahestConfig.enabled | default false) $rpc.enabled $rpc.host $rpc.port -}}
 {{- $_ := set $generated "buyer" (dict

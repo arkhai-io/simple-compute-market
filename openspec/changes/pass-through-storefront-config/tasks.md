@@ -35,8 +35,10 @@ the planning pass names every file and suite.
 ## 3. Generated values schema
 
 - [x] 3.1 `domains/vms/storefront/src/market_storefront/utils/config.py`:
-      `WalletConfigDeclaration` (`private_key` secret, section closed) and
-      `RegistryConfigDeclaration` (`auth` secret, section open) beside their readers.
+      `WalletConfigDeclaration` (`private_key` secret, section closed),
+      `RegistryConfigDeclaration` (`auth` secret, section open), and
+      `IdentityConfigDeclaration` (public keys only, closed at every level) beside
+      their readers.
 - [x] 3.2 `domains/vms/storefront/src/market_storefront/values_schema.py`: the
       generator. Secret-marked and non-seller fields become `false` under an any-case
       name pattern; references are inlined, a recursive one becoming `{}`; `Settlement`
@@ -44,7 +46,8 @@ the planning pass names every file and suite.
 - [x] 3.3 `Makefile`: `make helm-values-schema` regenerates both schemas in the
       storefront environment.
 - [x] 3.4 `domains/vms/storefront/tests/unit/test_values_schema.py`: drift against both
-      committed schemas, plus the generator's refusals.
+      committed schemas, the generator's refusals, `Identity`'s closure, and the
+      declaration accepting every operator-written `[Identity]` table shipped (nine).
 
 ## 4. Chart
 
@@ -54,9 +57,12 @@ the planning pass names every file and suite.
       `templates/configmap.yaml` carries `storefront.json`; `templates/deployment.yaml`
       mounts it.
 - [x] 4.2 `internalRegistryTrust` is written under the derived internal registry URL.
-- [x] 4.3 Release checks read top-level sections in any spelling and refuse two
-      spellings of one key; the schema-version check, single-service checks, and
-      service defaults are gone.
+- [x] 4.3 Every key the chart reads or writes is matched in any spelling, and one key
+      in two spellings is refused at any depth (`storefront.foldedKey`,
+      `storefront.foldedMap`, `storefront.refuseFoldedDuplicates`); a stated port
+      must be a number equal to the agent's. The schema-version check, single-service
+      checks, and service defaults are gone. The umbrella smoke-test configuration
+      reads keys the same way (`arkhai.storefrontConfigKey`).
 - [x] 4.4 The agent's `identity` carries only `credentialSecret`; `configMapName` is
       read from the agent.
 - [x] 4.5 `templates/deployment.yaml`: `wait-for-rpc` reads `Settlement` and `Chains`;
@@ -83,22 +89,36 @@ the planning pass names every file and suite.
 
 ## 6. Validation
 
-- [x] 6.1 **Render tests.** `helm/charts/storefront/tests/test_render.py` (14 tests,
+- [x] 6.1 **Render tests.** `helm/charts/storefront/tests/test_render.py` (17 tests,
       each seen to fail against a broken template where it guards a template line) and
-      the reworked `helm/scripts/test-render.sh`. `make -C helm test-render` fails only
-      on `design.md` finding 4, as it did before this change. The loader-backed test
-      runs when the storefront environment exists and reports a skip otherwise, so it
-      does not run in CI's render job.
-- [x] 6.2 **Service tests.** kit/config 140 passed; VM storefront unit 1075 passed,
+      the reworked `helm/scripts/test-render.sh`. These are static render checks, not
+      integration tests. The stale compute filter ID assertion in `design.md`
+      finding 4 was corrected during deployed validation. The loader-backed test runs
+      when the storefront environment exists and reports a skip otherwise, so no CI
+      job runs it; a CI job that runs `make test`, `make build-dev`, and Helm
+      validation together is out of scope (`design.md` finding 9).
+- [x] 6.2 **Service tests.** `_build_settings()` reads a rendered `storefront.json`
+      under the Secret overlay (`tests/unit/test_config_loader.py`). kit/config 140
+      passed; VM storefront unit 1078 passed,
       1 skipped; VM storefront integration 338 passed (CI's two deselections);
-      API-credits storefront 96 passed.
-- [ ] 6.3 **Deployed.** Not run: no cluster was available. Offline evidence: the
-      default release and the fiat and EVM fixtures were rendered by the original and
-      the new chart and each document loaded with the storefront's Dynaconf settings.
-      The default differs only in `auto_register` (no longer rendered) and `db_path`
-      (`./agent.db` → `/var/lib/arkhai/agent.db`); each fixture only in
-      `auto_register` and its corrected `agent_id`. A deployed comparison through
-      `market-storefront config show` remains owed.
+      API-credits storefront 96 passed (its unit and integration tests together).
+- [x] 6.3 **Deployed.** On a local Docker Desktop Kubernetes cluster,
+      `make -C helm deploy` brought up the default release with rebuilt images.
+      The deployed `market-storefront config show` agreed with the mounted
+      `storefront.json` for agent ID, port, base URL, registry URL, identity,
+      settlement, and chain settings. A clean release with an Alkahest local
+      values overlay passed `make -C helm test-module MODULE=e2e-tests`:
+      32 passed, 377 deselected (evidence bundle `helm-local-20261002-183115`).
+      The E2E image was rebuilt with `make -C e2e-tests build`. The default
+      deployment exposed bare EIP-191 identifiers in provisioning's YAML profile;
+      its ConfigMap now uses JSON syntax to preserve string types (`design.md`
+      finding 1). The E2E scenario now reads the active profile's registry URL,
+      allowing the same suite to run in Kubernetes (finding 8). Earlier offline
+      comparison evidence: the default release and the fiat and EVM fixtures,
+      rendered by the original and the new chart and loaded with the storefront's
+      Dynaconf settings, differ only in `auto_register` (no longer rendered),
+      `db_path` (`./agent.db` → `/var/lib/arkhai/agent.db`), and the fixtures'
+      corrected `agent_id`.
 
 ## 7. Documentation
 
@@ -138,9 +158,11 @@ the planning pass names every file and suite.
 - [ ] 8.7 **Documentation citations.** Run
       `make check-doc-citations CHANGE=pass-through-storefront-config` and resolve every
       match.
-- [ ] 8.8 **End-to-end pipeline.** Not run: the environment has no container runtime.
-      Owed, with the Helm deployment verification from 6.3 recorded separately, since
-      the pipeline lanes run on Compose.
+- [x] 8.8 **End-to-end pipeline.** GitHub Actions run 37015527919 on
+      `feat/pass-through-storefront-config`: the Compose VM lane passed 129 and the
+      bare-metal lane 16. Recorded separately, the Helm deployment from 6.3 passed the
+      E2E module with 32 tests. Re-run the pipeline on the final commit before
+      archiving if code changes after these runs.
 - [x] 8.9 **Packaging.** `make check-packaging` passes.
 - [ ] 8.10 **Promotion.** Complete the design-promotion record below.
 
@@ -155,5 +177,6 @@ the planning pass names every file and suite.
 | Generated-schema drift is a storefront unit test | `docs/development/TESTING.md` |
 | The storefront reads `storefront.toml`, `storefront.json`, then `storefront.secrets.toml`, and reports what it loads | `openspec/specs/deployment-state/spec.md`; `docs/development/DEPLOYMENT_AND_CONFIG.md` |
 | The storefront stays on its own loader | Not promoted; change history in `design.md` decision 10 |
+| Provisioning's YAML profile preserves EIP-191 principal strings through JSON syntax | `docs/development/DEPLOYMENT_AND_CONFIG.md#kubernetes-configmap-and-secret-mounting` |
 | Roadmap currency | None owed |
 | Campaign index currency | `openspec/changes/README.md` |

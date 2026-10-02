@@ -275,8 +275,44 @@ def test_release_disagreements_are_refused_naming_them() -> None:
         assert message in rendered.stderr, f"{label}: {rendered.stderr}"
 
 
-def test_two_spellings_of_one_section_are_refused_naming_both() -> None:
+def test_two_spellings_of_one_key_are_refused_at_any_depth() -> None:
     _refused(_render(agent=_with_config(settlement={"priority": []})), '"Settlement"', '"settlement"')
+    _refused(
+        _render(agent=_with_config(provisioning={"service_url": "http://a", "SERVICE_URL": "http://b"})),
+        "config.provisioning",
+        '"SERVICE_URL"',
+    )
+    domains = copy.deepcopy(BASE_AGENT["config"]["storefront_domains"])
+    domains[0]["Contribution"] = "vms"
+    _refused(_render(agent=_with_config(storefront_domains=domains)), "config.storefront_domains[0]")
+
+
+def test_release_owned_keys_are_matched_in_any_spelling() -> None:
+    """The loader reads keys case-insensitively; so does every chart check."""
+    _refused(_render(agent=_with_config(Port=9000)), "config.Port 9000 differs")
+    config = _config(_ok(_render(agent=_with_config(Port=8001, Base_URL="https://bob.example/", DB_Path="/data/x.db"))))
+    assert config["Port"] == 8001 and "port" not in config
+    assert config["Base_URL"] == "https://bob.example/" and "base_url" not in config
+    assert config["DB_Path"] == "/data/x.db" and "db_path" not in config
+
+    external = "http://registry.example:8080"
+    agent = _with_config(Registry={"URLS": [external], "authorities": {external: {"authority": "registry-x", "principals": [ACTIVE_REGISTRY]}}})
+    del agent["internalRegistryTrust"]
+    manifest = _ok(_render(agent=agent))
+    assert _config(manifest)["Registry"]["URLS"] == [external]
+    assert "urls" not in _config(manifest)["Registry"]
+    assert "wait-for-registry" not in _source(manifest, "deployment.yaml")
+
+    agent = _with_config(
+        Settlement={"priority": ["alkahest.v1"], "alkahest": {"enabled": True}},
+        CHAINS={"anvil": {"chain_id": 31337, "RPC_URL": "http://anvil:8545"}},
+    )
+    assert "wait-for-rpc" in _source(_ok(_render(agent=agent)), "deployment.yaml")
+
+
+def test_a_stated_port_must_be_a_number_equal_to_the_agents() -> None:
+    _refused(_render(agent=_with_config(port="8001")), "must be a number")
+    _refused(_render(agent=_with_config(port=8001.5)), "differs from the agent's port")
 
 
 # --- values schema ---------------------------------------------------------
@@ -319,6 +355,34 @@ def test_generated_schema_refuses_secret_buyer_and_unknown_typed_fields() -> Non
         ),
         "unregistered mechanism": (_with_config(Settlement={"priority": [], "teleport": {}}), "teleport"),
         "typed field type": (_with_config(Settlement={"priority": [], "schema_version": "one"}), "schema_version"),
+    }
+    for label, (agent, name) in cases.items():
+        rendered = _render(agent=agent)
+        assert rendered.returncode != 0, label
+        assert name in rendered.stderr, f"{label}: {rendered.stderr}"
+
+
+def test_identity_admits_only_its_public_keys() -> None:
+    """Private identity material arrives through the credential Secret; any key
+    Identity does not declare is refused at every level, whatever its name."""
+
+    def with_identity(edit) -> dict:
+        agent = _agent()
+        edit(agent["config"]["Identity"])
+        return agent
+
+    cases = {
+        "root": (with_identity(lambda i: i.update(private_key="x")), "private_key"),
+        "root, other name": (with_identity(lambda i: i.update(request_credential="x")), "request_credential"),
+        "principal": (with_identity(lambda i: i["principal"].update(credential="x")), "credential"),
+        "administrator": (
+            with_identity(lambda i: i.update(administrators={"operator": {"principals": [], "seed": "x"}})),
+            "seed",
+        ),
+        "service peer": (
+            with_identity(lambda i: i["service_peers"]["provisioning_default"].update(token="x")),
+            "token",
+        ),
     }
     for label, (agent, name) in cases.items():
         rendered = _render(agent=agent)

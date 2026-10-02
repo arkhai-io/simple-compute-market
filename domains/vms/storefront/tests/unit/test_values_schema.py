@@ -10,12 +10,15 @@ from __future__ import annotations
 
 import json
 import re
+import tomllib
 from pathlib import Path
 
 import pytest
+import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
 from market_storefront import values_schema
+from market_storefront.utils.config import IdentityConfigDeclaration
 
 REPO = Path(__file__).resolve().parents[5]
 SCHEMAS = (
@@ -63,6 +66,71 @@ def test_wallet_private_key_is_refused_and_the_section_closed(definition) -> Non
     assert wallet["additionalProperties"] is False
     assert set(wallet["properties"]) == {"address", "ssh_public_key"}
     assert wallet["patternProperties"] == {values_schema.any_case("private_key"): False}
+
+
+def test_identity_is_closed_to_its_public_keys_at_every_level(definition) -> None:
+    """Private identity material arrives only through the credential Secret,
+    so every key the declaration does not name is refused, in any spelling."""
+    identity = _section(definition, "Identity")
+    assert identity["additionalProperties"] is False
+    assert set(identity["properties"]) == {"principal", "administrators", "service_peers"}
+    administrator = identity["properties"]["administrators"]["additionalProperties"]
+    peer = identity["properties"]["service_peers"]["additionalProperties"]
+    assert administrator["additionalProperties"] is False
+    assert set(administrator["properties"]) == {"principals"}
+    assert peer["additionalProperties"] is False
+    assert set(peer["properties"]) == {"role", "site_id", "principals"}
+    for principal in (
+        administrator["properties"]["principals"]["items"],
+        peer["properties"]["principals"]["items"],
+    ):
+        assert principal["additionalProperties"] is False
+        assert set(principal["properties"]) == {"scheme", "identifier"}
+
+
+def _shipped_identity_tables():
+    """Every operator-written storefront ``[Identity]`` table this repository ships.
+
+    The packaged ``settings.toml`` is left out: its empty principal is a
+    placeholder the storefront refuses until an operator states one.
+    """
+    toml_files = (
+        "config.stripe-fiat-ed25519.toml",
+        "domains/vms/storefront/storefront.alice.toml",
+        "domains/vms/storefront/storefront.bob.toml",
+        "e2e-tests/config/hosted-storefront.toml",
+    )
+    for name in toml_files:
+        document = tomllib.loads((REPO / name).read_text())
+        for key, value in document.items():
+            if key.lower() == "identity":
+                yield name, value
+    values_files = [
+        REPO / "helm" / "values.yaml",
+        REPO / "helm" / "charts" / "storefront" / "values.yaml",
+        *sorted((REPO / "helm" / "fixtures").glob("*-values.yaml")),
+    ]
+    for path in values_files:
+        document = yaml.safe_load(path.read_text())
+        if not isinstance(document, dict):
+            continue
+        agents = (document.get("storefront") or {}).get("agents") or document.get("agents") or []
+        for agent in agents:
+            for key, value in (agent.get("config") or {}).items():
+                if key.lower() == "identity":
+                    yield f"{path.relative_to(REPO)}:{agent.get('name')}", value
+
+
+def test_identity_declaration_accepts_every_shipped_identity_table() -> None:
+    tables = list(_shipped_identity_tables())
+    assert len(tables) >= 8
+    for source, table in tables:
+        # Configuration is text, so validate as JSON: strict models take enum
+        # values as their string form there, as the storefront's parsers do.
+        try:
+            IdentityConfigDeclaration.model_validate_json(json.dumps(table))
+        except ValueError as exc:
+            pytest.fail(f"{source}: {exc}")
 
 
 def test_registry_auth_is_refused_and_the_section_left_open(definition) -> None:

@@ -232,14 +232,25 @@ runtime Deployments keep their chart-specific config mechanisms.
 {{- end }}
 
 {{/*
-A section of a storefront agent's pass-through config by case-insensitive name,
-as the storefront's loader reads it, or an empty dict. Returns YAML; read it
-with fromYaml. Argument: dict with `doc` (a mapping) and `name` (lowercase).
+The key under which a storefront agent's pass-through config mapping `doc`
+holds `name` (lowercase), in whatever spelling it was written, or "". The
+storefront's loader matches keys case-insensitively, so these reads do too.
+*/}}
+{{- define "arkhai.storefrontConfigKey" -}}
+{{- $found := "" -}}
+{{- range $key, $_ := .doc -}}
+{{- if eq (lower $key) $.name -}}{{- $found = $key -}}{{- end -}}
+{{- end -}}
+{{- $found -}}
+{{- end }}
+
+{{/*
+The mapping a storefront agent's pass-through config mapping `doc` holds under
+`name`, matched case-insensitively, as JSON for fromJson, or {} when absent.
 */}}
 {{- define "arkhai.storefrontConfigSection" -}}
-{{- $found := dict -}}
-{{- range $key, $value := .doc -}}
-{{- if eq (lower $key) $.name -}}{{- $found = $value -}}{{- end -}}
-{{- end -}}
-{{- toYaml $found -}}
+{{- $key := include "arkhai.storefrontConfigKey" . -}}
+{{- $value := dict -}}
+{{- if $key -}}{{- $value = index .doc $key | default dict -}}{{- end -}}
+{{- toJson $value -}}
 {{- end }}

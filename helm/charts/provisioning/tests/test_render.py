@@ -62,7 +62,7 @@ def _assert_document(manifest: str, key: str, *, present: bool) -> None:
     parts = {
         "document": f"  {filename}: |",
         "mount": f"mountPath: /app/config/{filename}",
-        "path": f"{setting}: /app/config/{filename}",
+        "path": f'"{setting}": "/app/config/{filename}"',
     }
     for part, text in parts.items():
         assert (text in manifest) is present, (

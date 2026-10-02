@@ -28,9 +28,9 @@ provisioning service, that does not include the release's provisioning principal
 stated port that differs from the agent's. The chart MAY read the passed-through
 configuration to make a Kubernetes decision, such as waiting for a configured chain's
 RPC endpoint, or for the internal registry when the agent uses it, before the
-storefront starts. Where it reads a top-level section the storefront accepts in more
-than one spelling, it MUST accept each and MUST refuse a configuration that states
-more than one.
+storefront starts. The chart MUST match every key it reads or writes as the
+storefront's loader matches it, without regard to case, and MUST refuse a
+configuration that states one key in two spellings at any depth.
 
 A values file using a retired values shape MUST be refused at render, naming the
 retired key, rather than passed through as keys the storefront ignores.
@@ -77,10 +77,17 @@ retired key, rather than passed through as keys the storefront ignores.
   release's principal, or its stated port differs from the agent's port
 - **THEN** rendering fails with a message naming the disagreement
 
-#### Scenario: A section is stated in two spellings
+#### Scenario: A key is stated in two spellings
 
-- **WHEN** an agent's configuration states both `Settlement` and `settlement`
+- **WHEN** an agent's configuration states both `Settlement` and `settlement`, or
+  one nested key in two spellings
 - **THEN** rendering fails naming both
+
+#### Scenario: A release-owned key is spelled differently
+
+- **WHEN** an agent's configuration states `Port` with a value other than the agent's
+  port
+- **THEN** rendering fails naming the disagreement
 
 #### Scenario: A values file uses the retired shape
 
@@ -132,7 +139,9 @@ pass-through configuration every field the models mark secret or not applicable 
 role, and every field a typed section's model does not have. The fragment MUST NOT
 carry defaults and MUST NOT constrain settings the service reads untyped. A secret the
 service reads without a typed model MUST be declared by the service with the same
-secret marker, so the generated fragment refuses it.
+secret marker, so the generated fragment refuses it. A section that carries public
+identity MUST be declared closed to its public keys, so the generated fragment admits
+those keys and refuses every other.
 
 #### Scenario: Mechanism field changes
 
@@ -145,6 +154,13 @@ secret marker, so the generated fragment refuses it.
 - **WHEN** a storefront agent's configuration values carry a secret-marked setting,
   such as a wallet private key or a registry write token
 - **THEN** values-schema validation fails before render, naming the setting
+- **AND** no ConfigMap is produced
+
+#### Scenario: Private identity material is placed in pass-through configuration
+
+- **WHEN** a storefront agent's configuration values carry a key under `Identity`,
+  at any level, that the public identity declaration does not name
+- **THEN** values-schema validation fails before render, naming the key
 - **AND** no ConfigMap is produced
 
 #### Scenario: Hosted payer data is placed in pass-through configuration
