@@ -28,6 +28,10 @@ VM's. What stands in the way:
 - **Release has two owners and bypasses the fulfillment aggregate**: lease expiry submits
   a raw reclaim job, and buyer teardown makes the storefront release site capacity itself.
 - **No scenario exists**, and stage definitions are VM's alone.
+- **Bare-metal execution lives in the VM adapter.** The VM adapter owns the
+  provisioning-wide job engine, Ansible runner, host registry, and service-wide routes,
+  knows bare-metal vars and facts, and hosts bare metal's playbook; both adapters import
+  the deployed service.
 
 The pipeline itself also needs restructuring: every lane rebuilds every image, and the
 API-credit deal runs inside the VM lane.
@@ -55,6 +59,15 @@ API-credit deal runs inside the VM lane.
   release delegates to durable fulfillment teardown, buyer teardown goes through lease
   termination, and the storefront's direct site release is removed.
 - Give bare-metal publication a dry run.
+- Move provisioning execution out of the VM adapter: the durable job engine and host
+  authority into `compute_provisioning`, defined as the compute family kit; shared
+  Ansible mechanics into a sibling family-kit distribution, `provisioning/compute/ansible`;
+  each domain contributes only its codec, playbooks, preparation, and result meaning.
+  Neither adapter imports the other or the deployed service. The job and host wire
+  models move to `compute_provisioning`, re-exported by `vm_provisioning_operator`.
+  Once that boundary is proven, the two job-backed fulfillment providers' shared shape
+  becomes a helper in `compute_provisioning`, leaving each domain its job preparation
+  and result mapping.
 - Share compute deal stages in `compute_deal_stages.py` with a per-domain driver, move
   VM's scenario onto them, and add the bare-metal mock-provisioned deal.
 - Prove bare-metal storefront restart recovery at integration level, as VM's is.
@@ -78,7 +91,10 @@ None.
 - `market-composition`: storefront deal controls are kit-owned route services;
   administrative acceptance and opening previews go through the negotiation runtime;
   compute mock executors share one compute-family mechanism.
-- `physical-provisioning`: lease release delegates to durable fulfillment teardown for
+- `physical-provisioning`: compute provisioning owns the job and host authorities;
+  adapters contribute preparation and meaning while shared execution technology invokes
+  it; job, host, and readiness wire models are compute-owned; no adapter imports another
+  adapter or the deployed service; lease release delegates to durable fulfillment teardown for
   every offering mode; storefront teardown goes through lease termination; job execution
   resolves its executor by offering mode and action from a compute-provisioning table.
 - `storefront-publication`: bare-metal fulfillment starts at settlement verification,
@@ -89,7 +105,6 @@ None.
 - Real SSH access or its revocation; that remains the protected lane's.
 - Hosted (Stripe) settlement in the lane; the lane has no hosted authority.
 - Moving bare metal onto the shell's shared routes, or the rest of the shell extraction.
-- Moving bare-metal execution or its job storage out of the VM adapter.
 - Moving `BareMetalFulfillmentTransport` into the bare-metal domain package; the shell
   decides where route clients live.
 - Holding and stepping API-credit loops in its lane, and API-credit production-application
@@ -98,8 +113,17 @@ None.
 
 ## Impact
 
-- The VM adapter's mock, test controller, and job service; the bare-metal provisioning
-  adapter's runtime, mock, routes, and release.
+- The VM provisioning adapter loses its job engine, Ansible runner, host registry, mock
+  runners, job and host models, and service-wide routes, keeping its codec, playbooks,
+  relays, pool configuration, operations, and routes; the bare-metal provisioning
+  adapter gains its codec, access parameters, and playbook and role, and loses every
+  import of the VM adapter and the deployed service.
+- New `provisioning/compute/ansible` distribution (Ansible mechanics, the Ansible job
+  executor, its mock, readiness).
+- `domains/vms/provisioning/client` (`vm_provisioning_operator`): job, host, and
+  readiness models become re-exports.
+- `provisioning/compute/service`: Dockerfile and settings copy each domain's `iac`; the
+  service composes contributed diagnostics and mounts the moved route services.
 - `provisioning/compute`: the `(offering_mode, action)` executor table, the
   compute-family mock mechanism, provider-neutral release executor and job port, release
   dispatcher composition, and the provisioning client's route contracts.
@@ -123,7 +147,8 @@ None.
 
 ## Permanent documentation impact
 
-- [x] `docs/development/ARCHITECTURE.md` — the deal-control route services in the kit
+- [x] `docs/development/ARCHITECTURE.md` — the definition of a family kit and its
+      layer, the compute family's packages, the deal-control route services in the kit
       layers, the compute-provisioning executor table and mock mechanism, release
       ownership, and the bare-metal fulfillment hook statement, which is stale today.
 - [x] `docs/development/TESTING.md` — three lanes on shared images, the loop table's
@@ -144,6 +169,12 @@ None.
   opening previews go through the negotiation runtime; compute mock executors share
   `compute_provisioning.executor_mock` — `openspec/specs/market-composition/spec.md`,
   `docs/development/ARCHITECTURE.md`.
+- A family kit is the family-level owner of mechanism, authority, and persistence;
+  `compute_provisioning` and the Ansible distribution are the compute family's —
+  `docs/development/ARCHITECTURE.md`.
+- Compute provisioning owns jobs and hosts; adapters contribute preparation and meaning;
+  no adapter imports another adapter or the deployed service —
+  `openspec/specs/physical-provisioning/spec.md`, `docs/development/ARCHITECTURE.md`.
 - Job execution resolves its executor by `(offering_mode, action)` from a
   compute-provisioning table — `openspec/specs/physical-provisioning/spec.md`,
   `docs/development/ARCHITECTURE.md`.

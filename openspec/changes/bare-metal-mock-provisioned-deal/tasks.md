@@ -76,6 +76,26 @@ migrated from three sibling changes; `design.md` records each decision.
       credits hold only at acceptance, so 5.6 proves the post-force-accept path rather
       than idempotency; `preview_opening` can stop before `start`'s first write; and
       evaluate-negotiate and force-accept have the callers 5.5, 5.7, and 5.9 name.
+- [x] 1.17 **Decision gate.** Resolve the 2026-10-02 implementation and layering reviews.
+      Decided with the maintainer: provisioning execution leaves the VM adapter into
+      `compute_provisioning` (jobs, hosts, executor table, rule and gate mechanism,
+      composition contract types, job and host wire models) and an Ansible family-kit
+      distribution, with domains contributing codecs, playbooks, preparation, and result
+      meaning; no adapter imports another adapter or the deployed service; the executor
+      table resolves complete `JobExecutor`s; `system_service.py` is split by owner and
+      diagnostics are contributed; relays and VM pool configuration stay VM's; the
+      fulfillment-provider helper is deferred. The review's Section 4–5 fixes are
+      accepted ("Implementation-review fixes for Sections 4–5"). Planned as Sections 5A
+      and 5B.
+- [x] 1.18 **Decision gate.** Define the layer `compute_provisioning` belongs to. Decided
+      with the maintainer: a family kit ("Compute provisioning is a family kit"),
+      promoted to `ARCHITECTURE.md` in 11.1.
+- [x] 1.19 **Decision gate.** Confirm the Ansible distribution and the fulfillment-provider
+      helper's timing. Decided with the maintainer: the Ansible mechanics are a sibling
+      family-kit distribution, `provisioning/compute/ansible`; the job-backed
+      fulfillment-provider helper lands in this change as 5B.10, after the boundary is
+      proven. The family-kit definition was refined after architectural review
+      ("Compute provisioning is a family kit").
 
 ## 3. Buyer-side deal requirements
 
@@ -156,6 +176,9 @@ mock". Reviewable alone: provisioning only, no storefront or scenario change.
       default output parses through the real result path into the credentials
       `BareMetalFulfillmentProvider.fetch_credentials` reads; a bare-metal rule never
       matches a VM job and the reverse.
+      Corrected 2026-10-02: the test parses through the real parser and the job service's
+      result payload; it does not call `fetch_credentials` (added by 5A.4). The mock is
+      replaced by 5B.5.
 - [x] 4.6 Compose it: `provisioning/compute/service/src/compute_provisioning_service/container.py`
       builds the table from both bundles and passes the resolver to the job service;
       `main.py` mounts the bare-metal test router under the mock profile beside VM's.
@@ -165,11 +188,18 @@ mock". Reviewable alone: provisioning only, no storefront or scenario change.
       `provisioning/compute/service/tests/integration/test_bare_metal_mock_profile.py`: a
       bare-metal grant under the mock profile reaches `active` through fulfillment
       convergence, held and released by a bare-metal rule.
+      Corrected 2026-10-02: the integration test registers a bare-metal lease and proves
+      its grant job runs through the bare-metal mock, held and released by a bare-metal
+      rule, failed by another, and that resuming an unknown rule is refused. It does not
+      exercise fulfillment convergence or reclaim; the Section 9 scenario does. Its raw
+      lease request and its sleep are replaced by 5A.2 and 5A.3.
 - [x] 4.7 Typed clients: `provisioning/compute/src/compute_provisioning/client.py` route
       contracts for `/test/bare-metal/mock-rules*`;
       `e2e-tests/src/e2e_harness/provisioning_test_client.py` gains the bare-metal rule
       methods; `provisioning/compute/service/tests/integration/test_provisioning_client_endpoint_coverage.py`
       covers them.
+      Corrected 2026-10-02: the endpoint-coverage file was not changed; 5A.4 adds the
+      coverage.
 - [ ] 4.8 **Gate.** Relock the changed projects (`make lock PROJECTS=...` for
       `provisioning/compute`, `provisioning/compute/service`, and both adapters); the
       provisioning, provisioning-service, and both adapters' suites pass; the VM lane
@@ -234,6 +264,9 @@ kits, core, and the VM and API-credit storefronts; bare metal binds in Sections 
       Unit tests in `kit/settlement-runtime/tests/unit/test_admin_routes.py` and
       `test_servicing.py` (`service_obligation` matches one `run_once` pass for that
       obligation; a concurrent pass sees it busy).
+      Corrected 2026-10-02: `test_servicing.py` proves immediate start, retry of a failed
+      start by the worker's schedule, and refusal of an unknown obligation; the
+      concurrent-pass case is added by 5A.5.
 - [x] 5.4 `kit/capacity-publication/src/market_capacity_publication/admin_routes.py`:
       admin reserve through a listing's capacity binding, and the capacity-released
       callback dispatching to an injected domain release hook. Unit tests in
@@ -251,6 +284,11 @@ kits, core, and the VM and API-credit storefronts; bare metal binds in Sections 
       `domains/vms/storefront/tests/integration/test_negotiations_api.py` and the
       API-credit negotiation suite: after force-accept the hold and settlement plan exist,
       and settlement consumes the hold exactly as after a negotiated acceptance.
+      Corrected 2026-10-02: VM's test proves the settlement plan, terminal state, and the
+      hold's reservation request at the site, invoking the runtime directly. API credits
+      deliberately grants no unfunded quota hold; its test proves force-accept records
+      what a negotiated acceptance records — credit terms, agreed price, and no hold.
+      The successful path through `StorefrontClient` is added by 5A.1.
 - [x] 5.7 Rebind VM: `controllers/system_controller.py` (events),
       `listings_controller.py` (evaluate-negotiate over the preview; remove
       `ListingService.evaluate_negotiate` and its round-zero helper's admin use),
@@ -333,6 +371,119 @@ kits, core, and the VM and API-credit storefronts; bare metal binds in Sections 
     expect publish or refresh). These could not be compared against a true baseline
     environment there; they exercise publication pricing, which this change does not
     touch.
+
+## 5A. Implementation-review fixes for Sections 4–5
+
+Decision: "Implementation-review fixes for Sections 4–5". Reviewable alone: tests, one
+client method, and the gate signal; no behaviour change. Lands before 5B so 5B moves
+code that is already correctly covered.
+
+- [ ] 5A.1 Typed force-accept: in `domains/vms/storefront/tests/integration/test_negotiations_api.py`
+      the fixture gains the chain configuration `test_negotiate_controller.py` uses, opens
+      a real negotiation that counters, and force-accepts it through
+      `StorefrontClient.force_accept_negotiation`, asserting the settlement plan, terminal
+      state at the forced amount, and the hold's reservation request at the site. Add an
+      API-credit equivalent through its application and `StorefrontClient` in
+      `domains/apicredits/storefront/tests/integration/test_force_accept_api.py`.
+- [ ] 5A.2 Typed lease registration: a bare-metal lease registration method on the
+      provisioning client in `provisioning/compute/src/compute_provisioning/client.py`
+      for the existing `/api/v1/bare-metal/leases/` route contract;
+      `test_bare_metal_mock_profile.py` uses it instead of a raw request. Extend the
+      integration and e2e test-route clients with any method the tests need.
+- [ ] 5A.3 Deterministic gates: `compute_provisioning/executor_mock.py`'s `MockRuleSet`
+      signals when a job reaches a rule's gate and reports how many jobs wait there;
+      `MockRuleRouteService.list` reports it. `test_bare_metal_mock_profile.py` waits on
+      `AsyncJobQueue.on_job_started` and the gate-reached signal, and
+      `test_bare_metal_mock_executor.py` on the gate-reached signal; both sleeps go. Unit
+      tests for the signal in `provisioning/compute/tests/unit/test_executor_mock.py`.
+- [ ] 5A.4 Coverage claimed but missing: the five bare-metal test routes in
+      `test_provisioning_client_endpoint_coverage.py`; a test in
+      `domains/bare_metal/provisioning/adapter/tests/test_bare_metal_fulfillment_provider.py`
+      feeding the mock's job result to `BareMetalFulfillmentProvider.fetch_credentials`.
+- [ ] 5A.5 `service_obligation` concurrency: a worker pass running while
+      `service_obligation` holds the fulfillment lease sees the obligation busy and
+      starts no second fulfillment.
+- [ ] 5A.6 Test placement: move `kit/settlement-runtime/tests/unit/test_servicing.py` to
+      `tests/integration/` and `domains/apicredits/storefront/tests/unit/test_sync_negotiation.py`
+      to `tests/integration/`, adding `tests/integration` to each project's test paths
+      where missing.
+- [ ] 5A.7 **Gate.** The touched suites pass; `make check-packaging` passes.
+
+## 5B. Provisioning execution boundary
+
+Decisions: "Compute provisioning is a family kit", "Provisioning execution leaves the VM
+adapter". Each step is behaviour-neutral unless it says otherwise and ends with the
+provisioning, provisioning-service, both adapters', and operator-client suites green;
+5B.9 is the lane gate. Planning names files; implementation re-verifies them by grep
+before each move.
+
+- [ ] 5B.1 Neutral contracts first: move `ExecutorAdapterBundle`,
+      `ExecutorAdapterContribution`, `ComposedComputeAdapters`, and
+      `compose_adapter_bundles` from
+      `provisioning/compute/service/src/compute_provisioning_service/composition.py` into
+      `provisioning/compute/src/compute_provisioning/composition.py`; move the job, host,
+      credential, and readiness wire models and their client operations from
+      `domains/vms/provisioning/client/src/vm_provisioning_operator/models.py` into
+      `compute_provisioning`, with `vm_provisioning_operator` re-exporting them.
+- [ ] 5B.2 Job authority: `compute_provisioning/jobs/` — the engine from the generic
+      parts of `vm_provisioning_adapter/services/job_service.py`; the `JobExecutor`
+      protocol and `JobExecutorTable` resolving it (replacing `JobExecution`); the
+      `ansible_jobs` and `credentials` table metadata from the service's `db/models.py`
+      (table names unchanged); the job queue from
+      `compute_provisioning_service/services/async_job_queue.py` and retry coordination;
+      framework-free job route services (read, logs, cancel, test drain, wait, summary);
+      the rule and gate mechanism from `executor_mock.py` beside it. The service's
+      `db/database.py` composes the metadata.
+- [ ] 5B.3 Host authority: `compute_provisioning/hosts/` — the `hosts` table metadata, the
+      generic parts of `host_service.py` (CRUD, enabled state, pool association,
+      protected key material, the capacity-derivation port, pre-execution lookup), a
+      pool-change hook, and a framework-free host route service.
+- [ ] 5B.4 Ansible distribution: `provisioning/compute/ansible`
+      (`compute_provisioning_ansible`) with `pyproject.toml`, `Makefile`, and tests — the
+      runner and redaction from `ansible_service.py`, transient inventory rendering with
+      contributed group names and INI import and export from `host_service.py`, the codec
+      protocol, `AnsibleJobExecutor`, connectivity probes and readiness from
+      `system_service.py`, and the mock executor over the gate mechanism with a
+      contributed default-output hook (replacing `mock_ansible_service.py`). Register in
+      the build and dist targets.
+- [ ] 5B.5 Domain codecs: `vm_provisioning_adapter/codec.py` (VM vars, golden-image
+      credentials, VM facts, tenant credentials, VM parameter building) and
+      `bare_metal_provisioning_adapter/codec.py` (access vars and facts, access
+      parameters); both bundles register `AnsibleJobExecutor`s; move
+      `iac/ansible/playbooks/bare-metal` and `roles/bare-metal-access` to
+      `domains/bare_metal/provisioning/iac`, with
+      `provisioning/compute/service/Dockerfile` and `settings.toml` following; delete
+      `bare_metal_mock_executor.py`, replaced by bare metal's contributed default output.
+      Behaviour change: none on the wire; each mode's jobs now run through its own codec.
+- [ ] 5B.6 Controls and routes: split `system_service.py` — aggregate health and status to
+      the service, which composes contributed diagnostics; Ansible readiness to the
+      Ansible distribution; convergence and lease-watchdog controls to their owners.
+      Generic job, host, and lease routes become `compute_provisioning` route services
+      the service mounts; VM keeps `/api/v1/vms`; adapter routes receive injected
+      collaborators instead of reading the service's `container` module.
+- [ ] 5B.7 Relays to VM: `relay_rebinding.py`, `relay_port_allocator.py`, and
+      `relay_execution.py` from the service's `services/` into the VM adapter; the relay,
+      relay-port-lease, and Ansible pool-configuration table metadata into VM-owned
+      metadata the service composes; VM's relay rebinding subscribes to the host
+      authority's pool-change hook.
+- [ ] 5B.8 Boundary check: remove `arkhai-compute-provisioning-service` from both
+      adapters' dependencies and `arkhai-vms-provisioning-adapter` from bare metal's; add
+      an import-boundary test asserting neither adapter imports
+      `compute_provisioning_service` or the other adapter (including under
+      `TYPE_CHECKING`), and no neutral provisioning module imports
+      `vm_provisioning_operator`.
+- [ ] 5B.9 **Gate.** All provisioning-family suites, `make check-packaging`, comment
+      hygiene; the VM lane and the bare-metal publication lane pass.
+- [ ] 5B.10 Job-backed fulfillment-provider helper: `compute_provisioning` gains the shared
+      provider shape — prepare a domain job from the settlement resource, submit, map job
+      status to fulfillment status, read result and credentials — implementing
+      `kit/fulfillment`'s provider protocol over the job authority.
+      `vm_provisioning_adapter/services/ansible_fulfillment_provider.py` and
+      `bare_metal_provisioning_adapter/services/bare_metal_fulfillment_provider.py` keep
+      only their job preparation and result mapping. Tests: the helper against fake
+      preparation and mapping in `provisioning/compute/tests/unit/`; both providers'
+      existing suites pass unchanged. Gate: the provisioning-family suites,
+      `make check-packaging`, the VM lane, and the bare-metal publication lane.
 
 ## 6. Bare metal on the kit negotiation runtime
 
@@ -524,7 +675,13 @@ service code.
 
 ## 11. Permanent documentation
 
-- [ ] 11.1 `docs/development/ARCHITECTURE.md`: kit layers gain the deal-control route
+- [ ] 11.1 `docs/development/ARCHITECTURE.md`: the definition of a family kit, its
+      placement tests, and the repository layers with family kits between domains and
+      family vocabulary; the compute family's packages (`domains/compute`,
+      `compute_provisioning`, the service as composition root) — promoted 2026-10-02 at
+      the maintainer's request, as "Family kits" under "Package and dependency layers";
+      when 5B.4 lands, name the Ansible distribution there as the compute family's second
+      family-kit distribution. Still to do: kit layers gain the deal-control route
       services and the negotiation runtime's administrative acceptance and opening
       preview; the compute provisioning description gains the `(offering_mode, action)`
       executor table and the compute-family mock mechanism; "Release" states that every offering mode
@@ -591,4 +748,6 @@ service code.
 | Lease release delegates to durable fulfillment teardown for every offering mode; storefront teardown goes through lease termination | `openspec/specs/physical-provisioning/spec.md` — "Lease release delegates to durable fulfillment teardown", "Storefront teardown goes through lease termination"; `docs/development/ARCHITECTURE.md` "Release" |
 | Settlement starts bare-metal fulfillment through the kit servicing worker, composed for every mechanism; the Alkahest path commits and registers its lease | `openspec/specs/storefront-publication/spec.md` — "Complete bare-metal seller lifecycle"; `docs/development/ARCHITECTURE.md` |
 | Lane composition files split per market | `docs/development/DEPLOYMENT_AND_CONFIG.md`; `docs/development/TESTING.md` |
+| A family kit is the family-level owner of mechanism, authority, and persistence | `docs/development/ARCHITECTURE.md` — "Repository layers" and "Family kits" (promoted 2026-10-02) |
+| Compute provisioning owns jobs and hosts; executors are complete; adapters contribute preparation and meaning and import neither each other nor the deployed service | `openspec/specs/physical-provisioning/spec.md` — "Adapter-owned compute execution", "Compute-owned caller contract", "Compute provisioning owns the job and host authorities", "Provisioning adapters import neither each other nor the deployed service"; `docs/development/ARCHITECTURE.md` |
 | Scope migrations, the real-host scenario's disposition, and why the scenario uses typed clients | This change's `design.md` |

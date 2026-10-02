@@ -84,9 +84,11 @@ composition roots / deployed services
         ↓
 domain packages and role implementations
         ↓
+family kits
+        ↓
 family vocabulary packages
         ↓
-kit capabilities
+repository-wide kit capabilities
         ↓
 core carrier and role contracts
 ```
@@ -95,9 +97,30 @@ Core carrier packages must not import domain vocabulary. Domain packages may imp
 
 A family vocabulary package holds what sibling domains of one market family share, so they bind one definition instead of importing each other. `domains/compute` (`arkhai_compute`) is the compute family's: the capability schema whose families, fields, and flat names both the VM and bare-metal domains publish, claim, and declare capacity in. It depends only on foundation kits, never on a domain, a role, or core. The vocabulary belongs to neither the market-neutral foundation kit, which knows no family, nor core, which carries no market's vocabulary. See the [market composition architecture](../../openspec/specs/market-composition/architecture.md#the-compute-family-vocabulary).
 
+### Family kits
+
+A family kit owns reusable mechanism, authority, and optionally persistence for concepts whose scope is one market family rather than every market or one concrete domain. It is the operational counterpart to a family vocabulary package. Unqualified "kit" in this document means a repository-wide kit capability, whose abstractions are family-neutral; a family kit is not one, because it speaks its family's vocabulary.
+
+A capability belongs in a family kit when it belongs intrinsically to the family: several sibling domains use it, or it is the family's single cross-domain authority. Code that merely looks similar across domains does not qualify. A family kit stays meaningful independently of any one domain, and a new sibling domain consumes it by contributing values, codecs, hooks, or registrations, never by adding domain-specific branches to it. It carries no concrete domain's listing schema, policy, result meaning, domain-specific infrastructure choices, or composition wiring, so it belongs to no sibling domain.
+
+A family kit may own durable state, workers, and authority lifecycles for its family. It may depend on its family's vocabulary package, repository-wide kit capabilities, and core contracts. It must not depend on a concrete domain, another family's packages, a concrete role implementation, or a deployed service; imports used only for typing obey the same rule. Domains compose a family kit by contributing to it; composition roots select those contributions, provide configuration and external resources, and wire the runtime. A family kit never discovers or imports its domains. A family may have more than one family-kit distribution, split where dependency weight differs, so a consumer that needs one capability does not install another's dependencies.
+
+Family vocabulary packages stay the lower and narrower layer: they define a family's shared names, schemas, identifiers, and value semantics, own no authority or persistence, and never depend on a family kit.
+
+Placement tests, applied in order:
+
+- **Outside the family.** A capability meaningful and family-neutral for every market belongs in a repository-wide kit. Behaviour invariant across marketplace roles may instead belong in core.
+- **Contribution or change.** If adding a sibling domain would mean registering a new contribution, the capability belongs in the family kit; if it would mean changing the capability's internal domain semantics, it belongs in the domain.
+- **Third domain.** A family kit passes only if a third domain of its family could use it without the kit learning that domain's schema or branching on its identity.
+- **Wiring.** Instance wiring, process lifecycle, route mounting, and aggregation of contributions belong in the composition root.
+
+Another market family needing apparently similar behaviour is a signal to evaluate extraction into a repository-wide kit, not an automatic promotion. Promotion is right only when the capability's vocabulary and authority semantics can be made family-neutral without depending on either family's identity or domain meaning; otherwise two family kits are correct.
+
+In the compute family, `domains/compute` (`arkhai_compute`) is the vocabulary and `provisioning/compute` (`compute_provisioning`) is the family kit for cross-domain physical provisioning: executor registration, provisioning jobs, the operational host registry, lease lifecycle, shared release, and job-backed fulfillment support. The VM and bare-metal provisioning adapters contribute their execution preparation, codecs, playbooks, result interpretation, credentials, and provider semantics, and neither imports the other or the deployed service. The compute provisioning service is the composition root that wires them.
+
 ### Kit layers
 
-Kit is not a flat peer group. It has an explicit one-way hierarchy:
+Repository-wide kit is not a flat peer group. It has an explicit one-way hierarchy:
 
 1. **Foundation capabilities** — identity, configuration, generic policy, `kit/negotiation-runtime`'s schema-opaque round lifecycle, settlement-mechanism primitives, `kit/settlement-runtime`'s domain-neutral obligation/operation lifecycle, `kit/capability-shape`'s family-grouped capability shapes, which import only the standard library so buyers, pool administration, sites, and domains can all depend on them, and `kit/capability-pricing`'s exact pricing of a shape from per-family rates behind a replaceable aggregator, which imports only the standard library and the shape kit so storefronts, buyers, and hold billing can all price a shape.
 2. **Authority capabilities** — `kit/site` and `kit/resource-pools`, which own capacity and pool administration and depend only on foundation capabilities.

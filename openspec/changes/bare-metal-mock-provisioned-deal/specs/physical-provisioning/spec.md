@@ -23,25 +23,95 @@ MUST learn that capacity was released only from the site's capacity-released cal
 
 Compute provisioning MUST own the table that selects the executor running a job, keyed by
 the job's `offering_mode` and action, populated by adapter bundles, and MUST reject a
-duplicate `(offering_mode, action)` registration at startup. A job service MUST resolve
-each job's executor through that table and MUST NOT hold its own routing for another
-adapter's actions. Job persistence, host validation, inventory rendering, and result
-parsing MUST be independent of which executor runs, and job-done notification MUST reach
-the executor that ran the job. Under the mock profile an adapter MUST register its mock
-executor for its own offering mode only.
+duplicate `(offering_mode, action)` registration at startup. Each entry MUST be one
+complete job executor that executes a job and returns a normalized outcome, cancels
+through its own handle, and receives job-done notification. The job engine MUST resolve
+each job's executor through that table and MUST NOT know how a job runs: no playbook,
+fact, inventory, process identifier, or SSH vocabulary, and no domain's parameter
+construction. Job persistence and the pre-execution host lookup MUST be independent of
+which executor runs. Under the mock profile an adapter MUST register a mock executor for
+its own offering mode only.
 
 #### Scenario: A bare-metal access job runs
 
 - **WHEN** a job with offering mode `bare_metal` and a grant or reclaim action runs
 - **THEN** it runs through the executor the bare-metal bundle registered, and its result
-  is parsed by the same bare-metal result path whether that executor is real or mock
+  is interpreted by bare metal's codec whether that executor is real or mock
 
 #### Scenario: Two bundles claim the same executor key
 
 - **WHEN** two adapter bundles register an executor for the same offering mode and action
 - **THEN** compute provisioning refuses to start
 
+### Requirement: Compute provisioning owns the job and host authorities
+
+Compute provisioning MUST own durable physical-execution jobs — their identity, state,
+retries, scheduling, cancellation through the executor, logs, and result and credential
+envelopes — and operational host registration — host identity, enabled state, pool
+association, connection information and protected connection material, and the lookup
+made immediately before execution. Shared execution technology MAY own the mechanics of
+invoking a prepared execution: process lifecycle, transient inventory rendering,
+redaction, and connectivity probes. The site authority MUST reference a host only by
+`host_id` and MUST NOT own provisioning connection information.
+
+#### Scenario: A host changes pool
+
+- **WHEN** an operator moves a registered host to another pool
+- **THEN** the host authority records it and notifies subscribers, and a domain's
+  dependent state (such as VM relay rebinding) reacts through that notification
+
+#### Scenario: A VM and a bare-metal job are in flight
+
+- **WHEN** both run at once
+- **THEN** one job engine and one host registry serve both, and neither domain's adapter
+  holds either
+
+### Requirement: Provisioning adapters import neither each other nor the deployed service
+
+A compute provisioning adapter MUST NOT depend on or import another provisioning
+adapter or the deployed provisioning service, including under `TYPE_CHECKING`. It
+receives its collaborators from composition. No neutral provisioning module MAY import a
+domain's operator client; compatibility flows from a domain client to the neutral
+contract.
+
+#### Scenario: Package boundaries are checked
+
+- **WHEN** the import-boundary check runs
+- **THEN** neither the VM nor the bare-metal provisioning adapter imports
+  `compute_provisioning_service` or the other adapter, and no `compute_provisioning`
+  module imports `vm_provisioning_operator`
+
 ## MODIFIED Requirements
+
+### Requirement: Adapter-owned compute execution
+VM and bare-metal execution MUST consume the common compute-provisioning envelope. Domain adapter contributions MUST own action-specific validation, execution preparation, codec and playbook selection, domain result interpretation, credential meaning, and release behavior; reusable execution technology MAY own the mechanics of invoking a prepared execution.
+
+#### Scenario: Generic provisioner dispatches VM work
+- **WHEN** a committed allocation identifies the VM executor and a supported action
+- **THEN** generic orchestration selects the registered VM adapter without importing or inspecting VM request fields
+
+#### Scenario: Generic provisioner dispatches bare-metal work
+- **WHEN** a committed allocation identifies the bare-metal executor and a supported action
+- **THEN** generic orchestration selects the registered bare-metal adapter without importing or inspecting access-grant fields
+
+#### Scenario: Shared Ansible mechanics run a domain's job
+- **WHEN** a VM or bare-metal job runs through the shared Ansible executor
+- **THEN** the domain's codec renders its variables and interprets its result, and the shared mechanics hold no VM or bare-metal meaning
+
+### Requirement: Compute-owned caller contract
+Shared storefront/provisioner DTOs, offering-mode-neutral resource-pool models, the job, host, credential, and readiness wire models, and generic client behavior MUST be owned by compute provisioning rather than the VM domain. Direct VM operator APIs MAY retain VM-owned VM action, relay, and VM pool-configuration models, and a VM operator client MAY re-export compute-owned models for compatibility.
+
+#### Scenario: Bare-metal storefront installs the shared client
+- **WHEN** a bare-metal caller installs the compute-provisioning client without VM execution extras
+- **THEN** it can submit and observe bare-metal lifecycle operations without importing VM request models
+
+#### Scenario: Provisioning service exposes resource-pool administration
+- **WHEN** the VM operator client or provisioning service creates, validates, imports, or returns a resource-pool model
+- **THEN** that offering-mode-neutral model resolves from `compute_provisioning` without depending on a VM-domain generic provisioning-client package
+
+#### Scenario: An existing VM operator import of a job model
+- **WHEN** a caller imports a job or host model from the VM operator client
+- **THEN** it receives the compute-owned model, and the wire shape is unchanged
 
 ### Requirement: Executor-dispatched lifecycle
 Market-managed release MUST dispatch by offering mode; direct VM host administration endpoints MAY remain separate operator surfaces.

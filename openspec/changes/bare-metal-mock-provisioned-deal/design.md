@@ -70,6 +70,23 @@ What the codebase does today, verified 2026-10-01:
 - **The real-host scenario is already unselected.** `e2e_bare_metal_deal` is in no lane's
   marker expression.
 
+Found at the 2026-10-02 implementation review and its follow-up layering review:
+
+- **The VM adapter is the false owner of provisioning-wide execution.** It holds the
+  durable job engine (`job_service.py`), the Ansible runner with both VM and bare-metal
+  vars and fact parsing (`ansible_service.py`, which imports `arkhai_bare_metal`), the
+  host registry rendering both `[kvm_hosts]` and `[bare_metal_nodes]`
+  (`host_service.py`), the mock runners, job parameters mixing VM and bare-metal fields,
+  the service-wide system, job, host, and lease routes, and bare metal's playbook and
+  role under `domains/vms/provisioning/iac`. The VM adapter imports the deployed service
+  at 24 sites (its `container` globals, `Settings`, DB models, job queue, relay
+  services), the bare-metal adapter at 6, and the bare-metal adapter imports VM's job
+  service, job models, host service, and, since Section 4, VM's mock and Ansible service.
+- **The job and host wire models live in `vm_provisioning_operator`**, so no neutral
+  route service can serve them without importing a VM package.
+- **`HostService` calls the service's relay rebinding** when a host changes pool; relays
+  are VM tunnel rendezvous and are VM behaviour.
+
 ## Decisions
 
 ### The scenario is VM's deal, stage for stage
@@ -248,6 +265,10 @@ blank for bare metal.
 
 ### Executors are selected by offering mode and action, and each adapter owns its mock
 
+*Refined by "Provisioning execution leaves the VM adapter": the table now resolves a
+complete `JobExecutor`, the job storage and Ansible mechanics leave the VM adapter, and
+the bare-metal mock no longer reuses VM's. What follows is the Section 4 state.*
+
 Decided with the maintainer; placement corrected after design review. Executor selection
 authority belongs to compute provisioning, keyed the way "Validated executor
 registration" requires:
@@ -287,6 +308,166 @@ executor mock would not live there. VM keeps its rule routes at `/test/mock-rule
 bare-metal adapter mounts its own under `/test/bare-metal/mock-rules`, with route
 contracts and test-client methods. The job routes (`/test/jobs/drain`,
 `/test/jobs/{id}/wait`) stay shared.
+
+### Compute provisioning is a family kit
+
+Decided with the maintainer, with the definition refined after architectural review.
+`ARCHITECTURE.md` defines a family vocabulary package but not its operational
+counterpart, which is what `compute_provisioning` already is; without the category it
+has been pulled between kit, domain, and service implementation. This change defines it;
+the definition, placement tests, layers, and compute example were promoted to
+`ARCHITECTURE.md` ("Family kits") on 2026-10-02, ahead of closeout, at the maintainer's
+request. The text below is the decision record. Unqualified "kit" there means
+a repository-wide, family-neutral kit capability.
+
+> A **family kit** owns reusable mechanism, authority, and optionally persistence for
+> concepts whose scope is one market family rather than every market or one concrete
+> domain. It is the operational counterpart to a family vocabulary package.
+>
+> A family kit is appropriate when a capability belongs intrinsically to the family:
+> either several sibling domains use it, or it is the family's single cross-domain
+> authority. Code that merely looks similar across domains does not qualify. A family
+> kit must remain meaningful independently of any one domain, and a new sibling domain
+> must be able to consume it by contributing values, codecs, hooks, or registrations,
+> never by adding domain-specific branches to it.
+>
+> Because a family kit uses family-specific vocabulary, it is not a repository-wide kit
+> capability, whose abstractions are family-neutral. Because it carries no concrete
+> domain's listing schema, policy, result meaning, domain-specific infrastructure
+> choices, or composition wiring, it belongs to no sibling domain.
+>
+> A family kit may own durable state, workers, and authority lifecycles for its family.
+> It may depend on its family's vocabulary package, repository-wide kit capabilities,
+> and core contracts. It must not depend on a concrete domain, another family's
+> packages, a concrete role implementation, or a deployed service; imports used only
+> for typing obey the same rule. Domains compose family kits by contributing values,
+> codecs, hooks, and registrations; composition roots select those contributions,
+> provide configuration and external resources, and wire the runtime. A family kit
+> never discovers or imports its domains. A family may have more than one family-kit
+> distribution, split where dependency weight differs, so a consumer that needs one
+> capability does not install another's dependencies.
+>
+> Family vocabulary packages stay a lower and narrower layer: they define a family's
+> shared names, schemas, identifiers, and value semantics, own no authority or
+> persistence, and never depend on a family kit.
+>
+> Another market family needing apparently similar behaviour is a signal to evaluate
+> extraction into a repository-wide kit, not an automatic promotion. Promotion is right
+> only when the capability's vocabulary and authority semantics can be made
+> family-neutral without depending on either family's identity or domain meaning.
+> Behaviour invariant across marketplace roles, rather than merely reusable across
+> families, may instead belong in core.
+
+Placement tests:
+
+- **Contribution or change.** If adding a sibling domain would mean registering a new
+  contribution, the capability belongs in the family kit; if it would mean changing the
+  capability's internal domain semantics, it belongs in the domain.
+- **Third domain.** Could a third domain of the family use the capability without the
+  family kit learning that domain's schema or branching on its identity?
+- **Outside the family.** If the capability is meaningful and family-neutral for every
+  market, it belongs in a repository-wide kit; instance wiring, process lifecycle, route
+  mounting, and aggregation of contributions belong in the composition root.
+
+Repository layers, top to bottom: composition roots and deployed services; domain
+packages and role implementations; family kits; family vocabulary packages;
+repository-wide kit capabilities; core carrier and role contracts.
+
+The compute family: `domains/compute` (`arkhai_compute`) is its vocabulary.
+`provisioning/compute` (`compute_provisioning`) is its family kit for cross-domain
+physical provisioning — executor registration, provisioning jobs, operational hosts,
+lease lifecycle, shared release, job-backed fulfillment support, and the mock gate
+mechanism. `provisioning/compute/ansible` is a second compute family-kit distribution
+holding the Ansible execution mechanics, split out so consumers of jobs or hosts do not
+install subprocess and Ansible dependencies. VM and bare-metal adapters contribute their
+preparation, codecs, playbooks, result interpretation, credentials, and provider
+semantics. `compute_provisioning_service` is the composition root. Applied to this
+change: the job state machine, executor registry, host authority, lease lifecycle, and
+job gates are family kit; the Ansible process mechanics are the Ansible family kit; VM
+vars and facts are VM's; bare-metal access vars and facts are bare metal's; service
+startup and router mounting are the composition root's.
+
+### Provisioning execution leaves the VM adapter
+
+Decided with the maintainer after the layering review, reversing the former non-goal.
+Bare-metal execution never belonged in the VM adapter, and neither did the
+provisioning-wide execution machinery around it. The postcondition is concrete:
+**neither provisioning adapter imports the other, and neither depends on or imports
+`compute_provisioning_service`, including under `TYPE_CHECKING`.** Placement:
+
+| Concern | Owner | What domains contribute |
+|---|---|---|
+| Durable job engine: identity, state, retries, scheduling, cancellation through the executor, logs, result and credential envelopes, the job queue and retry coordination, job routes | `compute_provisioning.jobs` | nothing |
+| Host authority: identity, enabled state, pool association, connection information and protected connection material, CRUD, the capacity-derivation port, the pre-execution lookup, host routes, a pool-change hook | `compute_provisioning.hosts` | VM subscribes its relay rebinding to the pool-change hook |
+| Executor table: `(offering_mode, action)` → one complete `JobExecutor` | `compute_provisioning` | each bundle's executors |
+| Rule and gate mechanism, with a deterministic gate-reached signal | `compute_provisioning` (beside the job engine) | each mode's rule routes and default outputs |
+| Job-backed fulfillment-provider shape (5B.10) | `compute_provisioning` | job preparation and result mapping |
+| Composition contract types (`ExecutorAdapterBundle`, `ExecutorAdapterContribution`, `compose_adapter_bundles`) | `compute_provisioning` | — |
+| Ansible mechanics: subprocess and run lifecycle, transient inventory rendering, INI import and export, group naming, redaction, fact extraction, connectivity probes, readiness, the `AnsibleJobExecutor` and its mock | `provisioning/compute/ansible` (`compute_provisioning_ansible`), the compute family's second family-kit distribution (confirmed by the maintainer) | codec, playbook, preparation |
+| VM vars, golden-image credentials, VM facts and credential meaning, VM playbooks and roles, relays, pool configuration with VM defaults, VM operations and routes | VM domain | — |
+| Bare-metal access vars and facts, the `node-access` playbook and `bare-metal-access` role, access parameters | bare-metal domain | — |
+| Aggregate health and diagnostics, instance wiring, table composition, route mounting | the provisioning service | domain diagnostics (Ansible readiness, host reachability) are contributed, not built in |
+
+**A job executor is one complete executable.** The table resolves
+`(offering_mode, action)` to a `JobExecutor` that executes a job and returns a
+normalized outcome, cancels through its own handle, and receives job-done notification.
+Composition builds, for example, `AnsibleJobExecutor(runner, codec, playbook)` per mode.
+The job engine knows job identity, state, opaque parameters, route key and action,
+retries, scheduling, outcomes, cancellation through the executor, logs, and generic
+result and credential envelopes; it never knows playbooks, facts, inventory, process
+IDs, SSH, or how a domain's parameters are built. The VM provider's extra-vars check
+calls the VM codec directly instead of the job service.
+
+**The job and host wire models move to `compute_provisioning`**, the provisioning client
+library, with the client operations; `vm_provisioning_operator` re-exports them so wire
+paths and existing imports keep working. No neutral provisioning module imports
+`vm_provisioning_operator`.
+
+**`system_service.py` is split by owner**: aggregate health and status go to the
+service, which composes contributed diagnostics; Ansible readiness goes to the Ansible
+distribution; convergence and lease controls go to their owning capabilities. Generic
+lease read, update, terminate, and admin routes move to `compute_provisioning`.
+
+**The job-backed fulfillment-provider helper lands last (5B.10).** Decided with the
+maintainer. VM's and bare metal's fulfillment providers share one shape: prepare a domain
+job from the settlement resource, submit it, map job status to fulfillment status, and
+read the result and credentials. Once the job boundary has landed and been checked, that
+shape becomes a helper in `compute_provisioning`, above both `kit/fulfillment` and the
+job authority, so `kit/fulfillment` stays provider-neutral and each domain keeps only its
+job preparation and result mapping. It is a separate step so the boundary is proven
+before the providers are restructured.
+
+Invariants this change must leave true:
+
+- `provisioning/compute` owns durable physical-execution jobs and operational host
+  registration.
+- The job engine has no Ansible, SSH, playbook, VM, or bare-metal vocabulary in its
+  interface.
+- `(offering_mode, action)` resolves to a complete job executor.
+- Shared Ansible machinery owns process, inventory, and redaction mechanics and no VM or
+  bare-metal result meaning.
+- VM and bare metal own their codecs, playbooks, action preparation, result meaning, and
+  credential semantics.
+- `kit/site` references `host_id` and never owns provisioning connection information.
+- No provisioning adapter imports another adapter or the deployed service.
+- No neutral provisioning module imports `vm_provisioning_operator`; compatibility flows
+  from the old client to the neutral contract.
+- Test gates are owned beside the job lifecycle and expose a gate-reached observation.
+- Provider-neutral fulfillment stays unaware that these providers are job-backed; the
+  job-backed shape lives in `compute_provisioning`.
+- Each domain's fulfillment provider supplies only job preparation and result mapping.
+
+### Implementation-review fixes for Sections 4–5
+
+Decided with the maintainer after the 2026-10-02 implementation review. The successful
+force-accept path is proven through `StorefrontClient` in VM and API credits. Bare-metal
+lease registration gets a typed client method, and both existing test-route clients
+gain what the tests need, rather than raw requests. Gated tests wait on the
+gate-reached signal and `AsyncJobQueue.on_job_started`, never on sleeps, in keeping with
+the pause, dry-run, advance convention. Checked task claims are corrected to what the
+tests prove, and the missing tests (endpoint coverage, the bare-metal credential
+consumer, the `service_obligation` concurrency case) are added. Touched tests running
+against real SQLite move to `integration/`.
 
 ### Bare-metal publication has a dry run
 
@@ -389,6 +570,16 @@ with `compose.local-identities.yml` removed and `docker-compose.yml` layering bo
 stack's two registries and stays in the VM lane.
 
 ## Superseded decisions
+
+Superseded after the 2026-10-02 layering review:
+
+- **`JobExecution(runner, playbook_path)` in the executor table** → "A job executor is
+  one complete executable", under "Provisioning execution leaves the VM adapter".
+- **The bare-metal mock as an instance of VM's Ansible-shaped mock**, reached through
+  the VM-adapter dependency → the Ansible distribution's mock executor with bare metal's
+  contributed default output.
+- **Job storage staying in the VM adapter behind a resolver port** → the job authority
+  in `compute_provisioning.jobs`.
 
 Superseded after the 2026-10-01 design review:
 
