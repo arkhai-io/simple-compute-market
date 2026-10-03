@@ -121,6 +121,14 @@ class ArkhaiPaymentsConfig(BaseModel):
 class ArkhaiPaymentsPublicationInput(PaymentsOptionParams):
     """Public payment parameters accepted by a seller publication clause."""
 
+    @field_validator("deposit_agreement", mode="before")
+    @classmethod
+    def parse_deposit_clause(cls, value: Any) -> Any:
+        # CLI publication terms arrive as text; wire option validation stays strict.
+        if isinstance(value, str) and value in {"true", "false"}:
+            return value == "true"
+        return value
+
 
 def payments_client_for_owner(
     config: ArkhaiPaymentsConfig,
