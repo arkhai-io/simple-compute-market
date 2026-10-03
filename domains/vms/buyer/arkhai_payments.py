@@ -86,7 +86,9 @@ class VmArkhaiPaymentsBuyer:
             fee_bps=self.config.fee_bps,
             dispute_authority=self.config.dispute_authority,
         )
-        raw_mandate = Mandate.model_validate(settlement_data)
+        raw_mandate = Mandate.model_validate(
+            settlement_data.get("mandate", settlement_data)
+        )
         mandate = check(raw_mandate, agreement_wire, policy)
         transaction = transaction_id(mandate)
         service_identity = self.config.service_identity
