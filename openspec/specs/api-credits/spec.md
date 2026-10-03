@@ -43,10 +43,10 @@ Negotiation-time quota and key checks MUST be advisory guards over captured view
 - **THEN** the credits service repeats authoritative quota and key checks before changing the balance
 
 ### Requirement: Idempotent credit issuance
-The credits service MUST own API-key hashes, balances, grants, and consumption records. A new key MUST be derived through the issuance operation, store only a hash of its bearer secret, and bind buyer identity when supplied. A credit grant MUST be unique by settlement `escrow_uid`; retrying the same issuance MUST NOT grant credits or reserve quota twice. A retry for an unused newly issued key MAY rotate and return a replacement secret, but a retry after use MUST NOT reveal a bearer secret.
+The credits service MUST own API-key hashes, balances, grants, and consumption records. A new key MUST be derived through the issuance operation, store only a hash of its bearer secret, and bind buyer identity when supplied. A credit grant MUST be unique by deterministic fulfillment identity derived from its accepted obligation reference (Alkahest `escrow_uid` or payment negotiation ID); retrying the same issuance MUST NOT grant credits or reserve quota twice. A retry for an unused newly issued key MAY rotate and return a replacement secret, but a retry after use MUST NOT reveal a bearer secret.
 
 #### Scenario: Issuance is retried
-- **WHEN** the same `escrow_uid` is issued more than once
+- **WHEN** the same deterministic fulfillment identity is issued more than once
 - **THEN** balance and quota change only once while any replacement secret follows the unused-key rule
 
 ### Requirement: Finite quota commitment
@@ -57,11 +57,11 @@ Issued credits MUST commit finite authoritative quota through an open-ended rese
 - **THEN** the key balance decreases while the committed quota remains unavailable for another sale
 
 ### Requirement: Verified settlement fulfillment
-The API-credits storefront MUST verify accepted settlement evidence before creating an issuance job. A successful job MUST persist the fulfillment reference and buyer credentials, while public fulfillment results MUST omit the bearer secret. If downstream on-chain fulfillment fails after issuance, the storefront MUST attempt compensating balance adjustment and MUST revoke a key newly created by that failed operation.
+The API-credits storefront MUST verify accepted settlement evidence before authorizing credit issuance. A pending payment progress row MAY precede receipt verification but MUST authorize no grant. A successful job MUST persist the fulfillment reference and buyer credentials, while public fulfillment results MUST omit the bearer secret. If downstream on-chain fulfillment fails after issuance, the storefront MUST attempt compensating balance adjustment and MUST revoke a key newly created by that failed operation.
 
 #### Scenario: Settlement evidence is invalid
 - **WHEN** accepted escrow evidence fails verification
-- **THEN** the storefront creates neither an issuance settlement row nor a credit grant
+- **THEN** the storefront authorizes no issuance and creates no credit grant
 
 #### Scenario: New-key issuance succeeds
 - **WHEN** verified settlement produces a successful issuance job
