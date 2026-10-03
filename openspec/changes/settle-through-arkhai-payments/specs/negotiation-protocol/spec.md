@@ -37,7 +37,7 @@ Listings and proposals MAY carry ordered `SettlementOption` envelopes containing
 - **WHEN** a listing has no settlement options or selection and represents an Alkahest-only negotiation
 - **THEN** model dumps and signed negotiation bodies remain byte-for-byte equal to the canonical Alkahest-only representation without copying escrow fields into a shared option carrier
 
-#### Scenario: Hosted option is advertised
+#### Scenario: Arkhai payment option is advertised
 
 - **WHEN** a listing supports hosted charge-first settlement through `arkhai.payments.v1`
 - **THEN** its option is carried in `settlement_options` and any Alkahest escrow parameters remain inside the Alkahest option rather than beside shared listing fields
@@ -71,7 +71,7 @@ Every negotiation MUST persist durable ownership by the exact canonical scheme-t
 - **WHEN** an authenticated administrator advances or force-accepts an existing thread
 - **THEN** the resulting message records that administrator's exact principal with the administrator role while the thread and any accepted Agreement retain their original buyer and seller principals
 
-#### Scenario: Ed25519 parties agree hosted terms
+#### Scenario: Ed25519 parties agree payment terms
 
 - **WHEN** Ed25519 buyer and seller principals complete deterministic rounds selecting `arkhai.payments.v1`
 - **THEN** the Agreement preserves both exact party principals and the settlement selection without requiring EVM addresses

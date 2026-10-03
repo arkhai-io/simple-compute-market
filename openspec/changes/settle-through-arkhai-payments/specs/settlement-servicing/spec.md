@@ -107,6 +107,11 @@ Core settlement carriers MUST retain only mechanism-neutral participant and valu
 - **WHEN** a composition registers a client for a new mechanism
 - **THEN** the shared carrier transports its opaque parameters without importing the mechanism kit or imposing escrow lifecycle fields
 
+#### Scenario: Charge-first settlement is selected
+
+- **WHEN** an Agreement selects `arkhai.payments.v1`
+- **THEN** settlement uses the mandate and transaction receipt without creating an escrow obligation
+
 ### Requirement: Durable idempotent servicing
 
 The Alkahest servicing path MUST bind one immutable fulfillment reference, persist each condition/effect attempt under a stable operation identity, retry transient or pending outcomes, and avoid duplicate successful collection across restarts.
@@ -176,7 +181,7 @@ The VM domain MUST encode only the versioned evidence allowed by the accepted me
 
 Mechanism configuration and readiness MAY govern new option publication and admission, but an accepted Agreement MUST retain its exact settlement mechanism, selected option, and parameters. Recovery MUST use the accepted Agreement and mechanism-owned operation identity even when that mechanism is no longer preferred or enabled for new deals.
 
-#### Scenario: Hosted mechanism is disabled after funding
+#### Scenario: Payment mechanism is disabled after acceptance
 
 - **WHEN** reconciliation resumes an existing Arkhai transaction after operators disable new Arkhai payment options
 - **THEN** the transaction continues under its accepted mechanism and exact ID rather than switching or being abandoned

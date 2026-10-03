@@ -89,7 +89,7 @@ Buyer, registry, storefront, provisioning, and domain composition roots MUST loa
 - **WHEN** buyer and storefront principals use different supported schemes
 - **THEN** the registry verifies both through the marketplace identity kit without selecting a shared secret, wallet, or hosted payer model
 
-#### Scenario: VM composition selects hosted fiat
+#### Scenario: VM composition selects Arkhai payments
 
 - **WHEN** the VM buyer and storefront select `arkhai.payments.v1` with their marketplace signers and owner-scoped payment credentials
 - **THEN** the payment calls use the Arkhai account credentials without loading an Alkahest wallet or chain configuration
@@ -99,7 +99,7 @@ Buyer, registry, storefront, provisioning, and domain composition roots MUST loa
 - **WHEN** a composition selects an Alkahest or other EVM effect
 - **THEN** its concrete mechanism resolves the required wallet, chain, and provider dependencies without exposing them to scheme-neutral core orchestration
 
-#### Scenario: Hosted fiat is published
+#### Scenario: Arkhai payments is published
 
 - **WHEN** a composition installs the Arkhai payments kit
 - **THEN** it uses the published HTTP and receipt contracts without duplicating their wire encoding, canonicalization, or signature verification
@@ -108,7 +108,7 @@ Buyer, registry, storefront, provisioning, and domain composition roots MUST loa
 
 Composition roots MUST register installed settlement mechanisms with canonical ID, typed config schema, preflight, client factory, option builder, buyer compatibility, and optional operator commands. Core role packages MUST consume only the shared registration/status contract and MUST NOT branch on mechanism IDs or import concrete mechanism configuration.
 
-#### Scenario: Composition omits hosted client
+#### Scenario: Composition omits payments client
 
 - **WHEN** a domain installs only the Alkahest registration and omits the Arkhai payments kit
 - **THEN** common status, publication, and buyer selection expose only the installed Alkahest registration without hosted placeholders or no-op hooks
@@ -118,7 +118,7 @@ Composition roots MUST register installed settlement mechanisms with canonical I
 Identity, wallet, and chain resources MUST be composed independently of settlement mechanism configuration and injected only into registrations that declare them. Installing a non-EVM mechanism MUST NOT require placeholder wallet or chain resources.
 
 
-#### Scenario: Fiat-only VM storefront starts
+#### Scenario: Payment-only VM storefront starts
 
 - **WHEN** VM composition installs only `arkhai.payments.v1` with its required payment-service credential
 - **THEN** startup, readiness, publication, and payment servicing succeed without constructing an Alkahest wallet or chain client
