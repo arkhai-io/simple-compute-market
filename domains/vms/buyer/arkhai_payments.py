@@ -26,6 +26,7 @@ from market_config.config_loader import load_user_config
 from market_core.schemas import Agreement
 from market_identity import Identity, Signer, TrustedIdentitySet
 
+from .buy_orchestrator import AgreedTerms
 from .run_log import read_run
 
 
@@ -271,8 +272,6 @@ def make_payment_settle_hook(
             or match.get("seller")
         )
         if confirm_settlement is not None:
-            from .buy_orchestrator import AgreedTerms
-
             terms = AgreedTerms(
                 seller_url,
                 "",

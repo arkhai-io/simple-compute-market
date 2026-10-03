@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import typer
 from arkhai_vms import normalize_vm_provision_terms
 from core_buyer.buyer_config import ResolvedBuyerIdentity
+from market_alkahest.alkahest import get_erc20_escrow_obligation_default
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -242,7 +243,6 @@ def run_settle_from_log(
         console.print("[dim]escrow.create[/dim]  approve + create on-chain…")
         import time as _time
 
-        from market_alkahest.alkahest import get_erc20_escrow_obligation_default
         from market_alkahest.schemas import EscrowProposal
 
         from .escrow_client import (

@@ -53,6 +53,7 @@ from .cli_helpers import (
 from .cli_helpers import (
     resolve_prices_from_matches as _resolve_prices_from_matches,
 )
+from . import common
 from .common import resolve_config_value
 from .deal_helpers import (
     is_negotiation_complete,
@@ -547,7 +548,6 @@ def register(app: typer.Typer) -> None:
         create_escrow = None
         from market_alkahest.schemas import accepted_token_address
 
-        from .common import chain_by_name
         from .escrow_client import (
             make_buyer_payment_escrow_terms_fn,
             make_create_escrow_fn,
@@ -584,7 +584,7 @@ def register(app: typer.Typer) -> None:
                 )
                 raise typer.Exit(2)
             selected_chain_name = available_chains[0]
-            chain_cfg = chain_by_name(selected_chain_name)
+            chain_cfg = common.chain_by_name(selected_chain_name)
             rpc = chain_cfg.rpc_url
             alkahest_section = settlement_policy.config.mechanism_config("alkahest")
             raw_addr_cfg = getattr(alkahest_section, "address_config_path", None)

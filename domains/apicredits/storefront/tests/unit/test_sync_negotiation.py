@@ -8,6 +8,7 @@ SQLite database.
 from __future__ import annotations
 
 from datetime import datetime
+from types import SimpleNamespace
 
 import pytest
 from apicredits_storefront.domain_runtime import get_market_domain_contract
@@ -237,9 +238,8 @@ async def test_listed_price_accept_persists_terms_without_unfunded_hold(
 
 
 async def test_payment_selection_places_quota_hold(db, monkeypatch):
-    from types import SimpleNamespace
-
     from apicredits_storefront import negotiation_runtime as runtime_module
+
     from tests._settings_overrides import settings_overrides
 
     class CapacityRuntime:

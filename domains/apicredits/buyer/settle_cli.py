@@ -18,9 +18,11 @@ from core_buyer.deal_helpers import open_run_log
 from core_buyer.orchestration import (
     DEFAULT_SETTLEMENT_POLL_INTERVAL,
     DEFAULT_SETTLEMENT_TIMEOUT,
+    make_publisher_trust_resolver,
     submit_settlement_request,
     wait_for_settlement,
 )
+from core_buyer.orchestrator import BuyConfig
 from core_buyer.run_log import read_run
 from market_identity import Signer
 from rich.console import Console
@@ -29,6 +31,8 @@ from rich.table import Table
 
 from .deal_helpers import load_deal_context
 from .escrow_client import looks_like_propagation_lag
+from .payments import settle_api_credit_payment
+from .settlement_composition import resolve_buyer_settlement_policy
 
 
 def _chain_name_from_run_log(run_id: str, *, signer: Signer) -> Optional[str]:
@@ -141,10 +145,6 @@ def run_settle_from_log(
                 fg=typer.colors.RED,
             )
             raise typer.Exit(2)
-        from core_buyer.orchestration import make_publisher_trust_resolver
-        from core_buyer.orchestrator import BuyConfig
-        from .payments import settle_api_credit_payment
-        from .settlement_composition import resolve_buyer_settlement_policy
 
         log = open_run_log(run_id, signer=signer, profile_id=identity.profile_id)
         log.event("settle_resumed")

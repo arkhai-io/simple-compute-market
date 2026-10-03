@@ -26,9 +26,11 @@ from core_buyer import (
 )
 from core_buyer.deal_helpers import is_negotiation_complete
 from core_buyer.orchestration import make_negotiate_hook, make_settle_hook
+from core_buyer.orchestrator import BuyResult
 from core_buyer.run_log import RunLog
 from market_alkahest.proposals import escrow_proposal_from_accepted_entry
 from market_alkahest.schemas import EscrowProposal, EscrowTerms
+from market_alkahest.token import TokenResolutionError, resolve_token
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -42,8 +44,8 @@ from domains.apicredits.negotiation import (
 from .buyer_client import load_buyer_chain
 from .cli_helpers import resolve_prices_from_matches
 from .common import resolve_config_value
-from .settle_cli import render_credentials, run_settle_from_log
 from .payments import payment_selection_for_listing, settle_api_credit_negotiation
+from .settle_cli import render_credentials, run_settle_from_log
 from .settlement_composition import resolve_buyer_settlement_policy
 
 
@@ -307,8 +309,8 @@ def register(credits_app: typer.Typer) -> None:
             raise typer.Exit(2)
         from .common import (
             APICREDITS_SCHEMA_ID,
-            resolve_buyer_wallet,
             buyer_chains,
+            resolve_buyer_wallet,
             resolve_discovery_timeout,
             resolve_indexer_urls,
             resolve_indexer_urls_for_schema,
@@ -385,7 +387,6 @@ def register(credits_app: typer.Typer) -> None:
             raise typer.Exit(2)
         if explicit_prices and alkahest_available:
             if token_decimals is None:
-                from market_alkahest.token import TokenResolutionError, resolve_token
 
                 try:
                     meta = resolve_token(tc, rpc_url=rpc, chain_id=chain_cfg.chain_id)
@@ -659,7 +660,6 @@ def register(credits_app: typer.Typer) -> None:
                     confirm_payment=payment_confirmation,
                 )
             if alkahest_settle_hook is None:
-                from core_buyer.orchestrator import BuyResult
 
                 return BuyResult(
                     status="exited", reason="no compatible settlement mechanism"

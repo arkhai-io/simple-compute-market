@@ -26,6 +26,10 @@ import market_storefront.container as _container
 from market_storefront.controllers.negotiate_controller import (
     router as negotiate_router,
 )
+from market_storefront.domain_runtime import (
+    build_vm_storefront_domain,
+    build_vm_storefront_registry,
+)
 from market_storefront.middleware.seller_auth import listing_lifecycle_middleware
 from tests._settings_overrides import settings_overrides
 
@@ -54,10 +58,6 @@ def _assert_canonical_owners(result: dict) -> None:
 
 @pytest_asyncio.fixture
 async def db(tmp_path):
-    from market_storefront.domain_runtime import (
-        build_vm_storefront_domain,
-        build_vm_storefront_registry,
-    )
     from market_storefront.utils.sqlite_client import SQLiteClient
 
     return SQLiteClient(

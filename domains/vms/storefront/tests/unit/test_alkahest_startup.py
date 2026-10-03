@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+import market_storefront.server as server
+import market_storefront.utils.config as config
+
 
 def test_vm_contributes_chain_values_to_shared_factory(monkeypatch):
-    from types import SimpleNamespace
-
-    import market_storefront.server as server
-    import market_storefront.utils.config as config
-
     captured = []
     monkeypatch.setattr(
         config,

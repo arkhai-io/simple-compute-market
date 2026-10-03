@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import typer
+from market_alkahest.alkahest import get_erc20_escrow_obligation_default
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -145,8 +146,6 @@ def publish_cmd(
             if chain_cfg is None:
                 typer.echo(f"chain {chain!r} is not configured", err=True)
                 raise typer.Exit(code=2)
-            from market_alkahest.alkahest import get_erc20_escrow_obligation_default
-
             resolved_escrow = get_erc20_escrow_obligation_default(
                 chain, config_path=chain_cfg.alkahest_address_config_path
             )
