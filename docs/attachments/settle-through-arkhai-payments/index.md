@@ -6,11 +6,12 @@ Starting revision: `b22b953f`. Storage convergence: `ad260371`. Import relocatio
 
 Real-ledger VM story: **held** for approve/poll/receipt gate, repeated settle, and a process restart before provider dispatch. Bare-metal and API-credit real-ledger stories: **unobservable** (not yet driven). Visual: false; screenshots: none.
 
-- VM and bare-metal mandates now load only from `negotiation_threads.settlement_data`. Ordered domain migrations transfer absent shared data and remove duplicate mandate columns. Receipt evidence remains domain-owned.
+- VM and bare-metal mandates now load only from `negotiation_threads.settlement_data`. The original payment-evidence schemas contain no mandate columns; both tables were introduced on the unmerged branch, so no transfer/drop migration is needed. Receipt evidence remains domain-owned.
 - VM storefront: 895 unit passed, one skipped; 152 integration passed after storage convergence and import relocation. Bare-metal storefront: 92 passed after convergence.
 - Focused checks before import relocation: core schemas 91, Alkahest 179, negotiation-runtime 7, payments kit 7, core buyer 111, core storefront 149 (two skipped), VM buyer 180, API-credit domain 35, service 32, storefront 70, buyer 17; release tooling 80 passed. `make dist` built portable wheels.
 - After import relocation: VM buyer 180, API-credit storefront 70 and buyer 17 passed. Hoisting `chain_by_name` by value broke the existing monkeypatch seam; importing its owning module at scope preserves late lookup and restored the suite. No import cycle was found.
 - `make -C core typecheck` passed (core 9 files; registry client 5). Payments kit's configured mypy, generated-model and upstream-vector checks passed.
+- After removing the unnecessary transfer migrations: `make dist && make -C domains/bare_metal/storefront reinit test && make -C domains/vms/storefront reinit test && make check-comment-hygiene` completed successfully. Ruff passed for all three changed Python files. Temporary fresh-database bootstrap/reopen checks confirmed VM evidence columns are `negotiation_id`, `agreement_sha256`, `transaction_id`, `receipt_json`; bare-metal evidence retains mechanism, digest, settlement reference, status, receipt and timestamps, without a mandate column. Neither history contains a transfer migration. Managed process logs were unavailable again, so per-suite counts for this rerun were not captured.
 - VM storefront configured mypy (`uv run --with mypy mypy src` from the package) reported 52 errors across 22 files, checked 67. Errors are chiefly missing annotations, plus existing Optional/Identity/Response typing. Baseline comparison and repair remain required; this is not a passing typing check.
 
 ## Real-ledger setup

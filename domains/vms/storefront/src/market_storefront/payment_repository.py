@@ -13,7 +13,6 @@ def add_vm_payment_records(conn: sqlite3.Connection) -> None:
         CREATE TABLE vm_payment_records (
             negotiation_id TEXT PRIMARY KEY,
             agreement_sha256 TEXT NOT NULL,
-            mandate_json TEXT NOT NULL,
             transaction_id TEXT UNIQUE,
             receipt_json TEXT
         )
