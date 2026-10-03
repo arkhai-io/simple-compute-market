@@ -3,7 +3,7 @@
 Only mounted when ``mock`` is in ``ACTIVE_PROFILES``.  Never present in
 production or staging deployments.
 
-Provides an HTTP API for configuring ``ProgrammableMockAnsibleService``
+Provides an HTTP API for configuring the VM mock runner's
 rules and synchronising test assertions against job lifecycle events
 without polling loops.
 
@@ -24,7 +24,7 @@ Rule schema (POST /test/mock-rules body)
 
     {
         "rule_id": "my-kvm1-create",     // optional; auto-assigned if absent
-        "match": {                       // subset of AnsibleJobParams fields
+        "match": {                       // subset of VmJobParams fields
             "vm_action": "create",
             "host_id": "kvm1"
         },
@@ -42,6 +42,8 @@ If no rule matches, the default ``_FAKE_STDOUT`` success path runs.
 
 from __future__ import annotations
 
+import dataclasses
+
 import asyncio
 import logging
 from typing import Any, Optional
@@ -54,6 +56,7 @@ from compute_provisioning.jobs.executor_mock import (
     MockRuleRouteService,
     MockRuleSet,
 )
+from compute_provisioning_ansible import MockAnsibleRunner
 from compute_provisioning_service import container as _container_module
 from vm_provisioning_adapter.models.system_model import EvaluateJobRequest, EvaluateJobResponse  # server-only test controller models
 from vm_provisioning_adapter.services.job_service import AnsibleJobService
@@ -85,12 +88,8 @@ class MockRuleRequest(BaseModel):
 
 def _vm_mock_rules() -> MockRuleSet | None:
     """The VM mock's rules, or ``None`` when the mock profile is not active."""
-    from vm_provisioning_adapter.services.mock_ansible_service import (
-        ProgrammableMockAnsibleService,
-    )
-
     svc = _container_module.resolved_ansible_service
-    if not isinstance(svc, ProgrammableMockAnsibleService):
+    if not isinstance(svc, MockAnsibleRunner):
         return None
     return svc.rules
 
@@ -244,17 +243,15 @@ async def wait_for_job(
 async def evaluate_job(body: EvaluateJobRequest) -> EvaluateJobResponse:
     """Evaluate a provisioning job spec without creating a job.
 
-    Delegates to ProgrammableMockAnsibleService.evaluate_job which checks
-    host existence and mock rule matching. Only available when the service
-    is running in mock mode. Used by e2e stage 08c.
+    Checks the host is registered and which of the VM mock's rules the job
+    would meet. Only available when the service is running in mock mode.
     """
-    from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
-    from vm_provisioning_adapter.services.mock_ansible_service import ProgrammableMockAnsibleService
+    from vm_provisioning_adapter.models.jobs_model import VmJobParams
 
     ansible_svc = _container_module.resolved_ansible_service
     host_svc = _container_module.resolved_host_service
 
-    if not isinstance(ansible_svc, ProgrammableMockAnsibleService):
+    if not isinstance(ansible_svc, MockAnsibleRunner):
         raise HTTPException(
             status_code=503,
             detail="evaluate-job is only available when ACTIVE_PROFILES=mock",
@@ -262,14 +259,20 @@ async def evaluate_job(body: EvaluateJobRequest) -> EvaluateJobResponse:
     if host_svc is None:
         raise HTTPException(status_code=503, detail="host registry not available")
 
-    params = AnsibleJobParams(
+    params = VmJobParams(
         host_id=body.host,
         vm_action=body.vm_action,
         offering_mode="vm",
         vm_target=body.vm_target,
         ssh_pubkey=body.ssh_pubkey,
     )
-    return ansible_svc.evaluate_job(params, host_svc)
+    report = ansible_svc.rules.evaluate(
+        dataclasses.asdict(params),
+        host_id=params.host_id,
+        host_lookup=host_svc.get_host,
+        required=("vm_action",),
+    )
+    return EvaluateJobResponse(**report)
 
 
 def make_router() -> APIRouter:

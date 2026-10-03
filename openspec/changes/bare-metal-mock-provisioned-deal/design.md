@@ -684,6 +684,150 @@ controls and routes (5B.8); relays (5B.9); the boundary check (5B.10); the gate 
 the job-backed fulfillment-provider helper (5B.12). Steps 5B.4, 5B.5, and 5B.8 change
 wire formats and schemas; the others are behaviour-neutral.
 
+### The Ansible job codec (5B.6 slice B, absorbing 5B.7)
+
+Approved by the maintainer to settle while implementing; the four questions below were
+decided with the maintainer and the reviewer when slice B began (2026-10-02).
+
+**The codec protocol.** `compute_provisioning_ansible` owns `AnsibleJobExecutor(runner,
+codec, playbook_path, timeout_seconds, non_retryable_errors)` and the `AnsibleJobCodec`
+protocol a domain contributes:
+
+- `inventory_group`: the group the domain's playbooks target. The runner lists every host
+  under the group it is given and is indifferent to its value.
+- `secret_fields`: field names the domain's playbooks print whose values are secret. The
+  runner always scrubs `password`, an SSH identity-file argument, and an `sshpass`
+  password; a codec adds its own names, which are scrubbed in both the JSON and the bare
+  YAML form.
+- `prepare(run) -> AnsibleJobPlan`: the job's own `variables`, operator-supplied
+  `extra_variables`, the run `limit`, and an optional per-job `playbook_path`. Called
+  immediately before the playbook starts, so a value resolved here (a relay token) is
+  current on every attempt. Raising is an unanticipated failure and is never retried.
+- `interpret(run, host, output) -> AnsibleJobInterpretation`: the `ResultEnvelope` (the
+  codec names its kind) and `CredentialEnvelope`s a successful run reports.
+- `is_retryable(message)`: the domain's own failures only.
+
+The executor renders the plan's variables (each value written as JSON, which is YAML, so
+a string stays a string), refuses an extra variable naming one of the job's own, writes
+the file owner-only, renders the inventory, runs the playbook, and removes both files on
+every ending. A failure is not retried if its message matches a transport pattern the
+distribution owns (`TRANSPORT_FAILURES`), an operator pattern
+(`non_retryable_errors`, now additional to the built-in ones), or the codec's own. The
+reserved variable names a caller may need before submission are not part of the
+protocol: they are the keys of a plan's variables, and a domain that lets operators
+supply extra variables before a job exists (VM's pool configuration) exposes its own
+check; the VM fulfillment provider calls the VM codec's `reserved_var_keys` directly.
+
+**Decisions.**
+
+1. **The bare-metal mock keeps its VM import until slice C.** `bare_metal_mock_executor.py`
+   still builds on VM's `ProgrammableMockAnsibleService`. After slice B the production
+   bare-metal submission and execution path no longer depends on the VM adapter; the
+   mock path still does, intentionally, and "neither adapter imports the other" is not
+   claimed until slice C and 5B.10. No temporary abstraction is introduced to remove the
+   import one slice earlier.
+2. **Bare metal's parameters and results are bare-metal-shaped.** Each domain owns its
+   parameter model: VM's is `VmJobParams` (the former `AnsibleJobParams`, without
+   bare-metal fields), bare metal's its own. A bare-metal access job's result value is the
+   access fact its playbook prints, not VM's payload; it carries no credentials. Stored
+   parameters (`JobStatusResponse.params`) and mock-rule matching follow. Readers were
+   audited first: the bare-metal fulfillment provider is the only production reader of a
+   bare-metal job result; no e2e scenario reads bare-metal job results or installs
+   bare-metal mock rules; integration tests asserting the old keys change with it.
+   Existing rows are converted by one forward migration rather than decoded in two forms.
+3. **The inventory group is the domain's.** VM keeps `kvm_hosts`; bare metal's relocated
+   playbook targets `bare_metal_nodes`, the name the inventory importer already uses for
+   bare-metal hosts.
+4. **Bare metal submits to the family job authority directly.** `BareMetalOperationsService`
+   submits through `JobEngine` with its own parameter model and owns the reclaim policy's
+   allowed values and default; it no longer imports VM's job service or parameter model.
+
+### Findings for review (5B.6 slice B)
+
+Found while implementing slice B. Recorded for the reviewer; none changes behaviour
+unless it says so.
+
+- **Retry classification reads only the exception message.** The executor classifies a
+  failure on `str(AnsibleError)`, which for a real run is "Playbook failed", "Playbook
+  timed out", or "Playbook error: …"; the patterns in `non_retryable_errors` (and now the
+  transport and VM ones) therefore never match a real failure, only a mock rule's
+  `fail_with` message. Preserved as found. Classifying on stderr and stdout too would make
+  the configured patterns effective, and is a behaviour change awaiting a ruling: a
+  pattern printed by a task whose failure Ansible ignored would then stop retries.
+- **The operator setting's meaning changes.** `non_retryable_errors` was the complete
+  list; the transport patterns now belong to the distribution and the VM ones to the VM
+  codec, and the setting adds to them (its default is empty). The default classification
+  is unchanged; an operator can no longer remove a built-in pattern.
+- **The inventory importer still names both domains' groups.**
+  `compute_provisioning_ansible/inventory.py` imports only hosts under `[kvm_hosts]` and
+  `[bare_metal_nodes]`. That is domain vocabulary in the distribution's import format; a
+  contributed set of groups would remove it. Not in slice B.
+- **The legacy VM backfill checks reserved variables with the real codec.** It used a
+  four-name stub; it now uses the VM codec, as runtime teardown preparation does. A legacy
+  pool whose extra variables collide with a job variable is refused there, as dispatch
+  already refuses it.
+- **The variables file changed form.** Values are written as JSON (strings always quoted,
+  which YAML reads as the same strings and which no longer lets an unquoted value such as
+  a password with a colon or a numeric-looking host name change type), and the file is
+  created owner-only; before, it was written with the process's default permissions
+  although it can hold golden-image root credentials and a relay token.
+- **The bare-metal playbook no longer receives VM variables.** It received `vm_action`,
+  `root_ssh_filename`, and `root_ssh_password` from the shared renderer and read none of
+  them; its `vm_action` fallback is removed with them.
+
+### The mock runner and the probes (5B.6 slice C)
+
+**The mock runner.** `compute_provisioning_ansible.mock.MockAnsibleRunner` replaces both
+domain mocks. It offers the runner's playbook, inventory, and connectivity surface over
+the compute mock mechanism's rules and gates, so the real `AnsibleJobExecutor` runs it
+unchanged: the codec still prepares the job (relay resolution included), the variables
+and inventory are still rendered from the registered host, and the codec still
+interprets the output. A domain contributes only `default_output(MockPlaybook)`, the
+output a run produces when no rule replaces it, rendered from the job's stored
+parameters and the registered host the run is limited to (VM: a successful create; bare
+metal: the access fact for the job and its host). Each runtime composes its own runner,
+so rules stay per domain. Rules keep matching the job's stored parameters (`vm_action`
+and `host_id` for VM, `action` and `host_id` for bare metal). The executor hands the
+runner those parameters through a declared `job_parameters` on `start_playbook` and the
+run handle, which the real runner records and never reads; it replaces the undeclared
+`_params` attribute. The mock's unused construction-time hooks (`provision_result`,
+`should_fail`, `fail_message`) are not carried over.
+
+**The probes.** `compute_provisioning_ansible.probes` owns `probe_connectivity` (the host
+listed under the probe's own inventory group, so connectivity no longer borrows VM's) and
+`ansible_readiness`, with its wire models `AnsibleReadinessResponse`, `InventoryInfo`,
+`FileInfo`, and `SshKeyInfo`. The connectivity route already served the distribution's
+`ConnectivityResult`; the operator client's identical `HostConnectivityResponse` is
+removed in its favour. Which route serves readiness, and from where, is 5B.8's; VM's
+system service still mounts it and supplies the mode, the executor modes, the host
+listing, and the playbook.
+
+### Findings for review (5B.6 slice C)
+
+- **Readiness reported `real` under the mock profile after slice B.** The family's
+  `JobExecutorTable.executor_modes()` reports a mode as mock when its executors carry the
+  mock mechanism's `rules`; the transitional executor exposed its runner's, the
+  distribution's executor did not. Fixed: `AnsibleJobExecutor.rules` returns the runner's
+  rules, and a distribution test asserts the modes the table reports for a mock and a real
+  runner. No test covered the modes before; e2e reads `ansible_mode`, which comes from
+  `ACTIVE_PROFILES`, so it did not notice.
+- **Cancelling a mocked job signalled the service's own process group.** A mocked run
+  reports process id 0 and the executor's `cancel` passed it to `os.kill`, which for 0
+  signals every process in the caller's group. The transitional executor and mock did the
+  same. Fixed: `cancel` refuses a process id of zero or less, which names a group and never
+  a playbook; tested.
+- **The VM operator client depends on the Ansible distribution.** It takes the readiness
+  and connectivity models from there, which brings the distribution's own dependencies
+  (`arkhai-kit-config`, `arkhai-kit-resource-pools`) into the client and its consumers'
+  locks (`e2e-tests` among them; `domains/vms/storefront` does not include the client).
+  If a lighter client is wanted, 5B.8, which decides where the readiness route and its
+  client method live, is the place to move them.
+- **Readiness reports one playbook.** `AnsibleReadinessResponse.playbook` is VM's; bare
+  metal's access playbook is not reported. Changing the response to report each domain's
+  playbook is a wire change left to 5B.8.
+- **Bare metal no longer imports the VM adapter.** Neither its source nor its tests do;
+  the declared dependency is removed with the import-boundary test in 5B.10.
+
 ### Implementation-review fixes for Sections 4–5
 
 Decided with the maintainer after the 2026-10-02 implementation review. The successful

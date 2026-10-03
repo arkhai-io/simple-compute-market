@@ -857,7 +857,7 @@ re-verifies them by grep before each move.
       194; provisioning service 928; bare-metal adapter 8; the VM adapter's `make test`
       file 39; e2e unit 236 with the known pre-existing failure, and every e2e and smoke
       module collects (167); `make check-packaging` and comment hygiene pass.
-- [ ] 5B.6 The rest of the Ansible distribution. Behaviour-neutral.
+- [x] 5B.6 The rest of the Ansible distribution. Behaviour-neutral.
       `compute_provisioning_ansible`: the runner and redaction from `ansible_service.py`,
       transport and Ansible failure classification, the codec protocol,
       `AnsibleJobExecutor` (moved from the VM adapter, consuming connections the `ssh`
@@ -948,15 +948,112 @@ re-verifies them by grep before each move.
         the VM lane passes in full (129, none skipped), with stage 08a previewing the
         held host and stage 08c and the teardown completion (11b) passing; no job-engine
         error or traceback in any service's logs.
-- [ ] 5B.7 Domain codecs. Behaviour-neutral on the wire.
+      Progress, 2026-10-02 — slice B (the codec protocol, `AnsibleJobExecutor` in the
+      distribution, and both domain codecs; absorbs 5B.7). The protocol's shape and the
+      four decisions taken with the maintainer and reviewer are in `design.md`, "The
+      Ansible job codec"; findings for review are under "Findings for review (5B.6
+      slice B)". Slice C remains.
+      - Distribution: `codec.py` (`AnsibleJobCodec`, `AnsibleJobPlan`,
+        `AnsibleJobInterpretation`, `matches_any`, `render_extra_vars`,
+        `write_extra_vars`); `executor.py` (`AnsibleJobExecutor`, `TRANSPORT_FAILURES`).
+        `runner.py`: redaction is generic plus caller-named fields; `wait_for_playbook`
+        takes the caller's redactor; `write_inventory(hosts, *, group)`;
+        `extract_json_block` and `extract_fact` are module functions; no VM name remains.
+      - VM adapter: `codec.py` (`VmAnsibleCodec`, `GoldenImageCredentials`,
+        `vm_job_params`, VM facts, `build_result_payload`, `split_credentials`,
+        `vm_result_kind`, VM failures, `kvm_hosts`, secret fields `ssh_key_path_host` and
+        `frp_auth_token`). `AnsibleJobParams` is `VmJobParams`, without bare-metal fields,
+        as is `AnsiblePreparedJobParameters`. `ansible_service.py` and
+        `ansible_job_executor.py` are deleted (tombstoned); `ReservesVariableKeys` and
+        the job service's `reserved_var_keys` are gone: the fulfillment provider and the
+        legacy backfill take the codec's `reserved_var_keys`. The runtime builds the
+        executor from the distribution and exposes `job_engine`. The VM mock keeps only
+        the runner surface and matches rules on the job's stored parameters. The adapter
+        no longer depends on `arkhai-bare-metal`.
+      - Bare-metal adapter: `codec.py` (`BareMetalAnsibleCodec`, `BareMetalJobParams`,
+        `bare_metal_nodes`, the reclaim policies and default, `reclaim_policy_from`);
+        `BareMetalOperationsService` submits through `JobEngine` and validates its reclaim
+        policy at composition; the fulfillment provider reads the access fact; the
+        runtime builds the executor from the distribution and no longer imports the VM
+        adapter's runner or executor. The mock still builds on VM's
+        `ProgrammableMockAnsibleService` — the one remaining VM import on bare metal's
+        path, intentionally, until slice C; "neither adapter imports the other" is not
+        claimed until 5B.10. The adapter depends on the distribution.
+      - Service: migration `20261002_003_bare_metal_job_shapes`; the reclaim-policy
+        constants and property leave `config.py`; the container passes `job_engine` to
+        bare metal; `non_retryable_errors` defaults to `[]` (additional patterns).
+      - Playbooks: `node-access.yaml` (targeting `bare_metal_nodes`, no `vm_action`
+        fallback) and `roles/bare-metal-access` are under
+        `domains/bare_metal/provisioning/iac/ansible`; the VM tree's copies are deleted.
+        `bare_metal_playbook_path` follows in `settings.toml`, `config-docker.yml`, and
+        Helm `values.yaml`; the Dockerfile and its `.dockerignore` copy the bare-metal
+        IaC; `domains/bare_metal/compose.yml` mounts it (and
+        `scripts/tests/test_bare_metal_compose.py` checks the mount); the service's
+        `serve` target sets the path.
+      - Tests: the distribution's `test_codec.py`, `test_executor.py`, and new
+        `test_runner.py` cases; the bare-metal adapter's `test_bare_metal_codec.py`
+        (including the playbook contract), `execution.py` helpers, and the mock and
+        provider tests driven through the real executor and codec; the service's
+        `test_vm_codec.py` (replacing `test_ansible_service.py` and
+        `test_ansible_job_executor.py`, both deleted) and
+        `test_bare_metal_job_shape_migration.py`; the bare-metal integration tests
+        assert the bare-metal shapes; `test_programmable_mock.py`'s gate test waits on
+        the held signal instead of `asyncio.sleep(0)`. The service suite shrinks from
+        935 to 915 because executor and bare-metal tests moved to the distribution
+        (24 to 51) and the bare-metal adapter (8 to 22).
+      - Validation: `provisioning/compute` 198; the distribution 51; provisioning
+        service 915; bare-metal adapter 22; the VM adapter's `make test` file 39; VM
+        IaC 65; e2e unit 236 with the known pre-existing failure, and every e2e and smoke
+        module collects (167); comment hygiene passes. Relocked: the distribution, both
+        adapters, the service; `domains/vms/storefront` is unaffected. Not run in the
+        implementing environment (no container runtime): the compose rendering test and
+        the e2e lanes.
+      Progress, 2026-10-02 — slice C (the mock runner and the probes); 5B.6 is complete.
+      Decisions and findings are in `design.md`, "The mock runner and the probes" and
+      "Findings for review (5B.6 slice C)".
+      - Distribution: `mock.py` (`MockAnsibleRunner`, `MockPlaybook`, `DefaultOutput`);
+        `probes.py` (`probe_connectivity`, `ansible_readiness`, `ansible_version`,
+        `collect_ssh_keys_from_hosts`, `sha256_file`, `PROBE_INVENTORY_GROUP`, and the
+        models `AnsibleReadinessResponse`, `InventoryInfo`, `FileInfo`, `SshKeyInfo`);
+        `runner.py`: `AnsibleRun.job_parameters` and `start_playbook(job_parameters=…)`;
+        `executor.py`: passes the job's parameters explicitly, exposes the runner's
+        `rules`, and refuses to signal a process id of zero or less.
+      - VM adapter: `services/mock_output.py` (`vm_mock_output`) replaces
+        `services/mock_ansible_service.py` (deleted); the runtime composes
+        `MockAnsibleRunner` under the mock profile; the test controller reads the mock's
+        rules and evaluates with `MockRuleSet.evaluate`; `system_service.py` delegates
+        readiness, and `host_operations_service.py` connectivity, to the probes.
+      - VM operator client: the readiness models and `ConnectivityResult` come from the
+        distribution, which it now depends on; `HostConnectivityResponse` and the moved
+        models are removed from `models.py` and the package's exports.
+      - Bare-metal adapter: `services/mock_output.py` (`bare_metal_mock_output`) replaces
+        `services/bare_metal_mock_executor.py` (deleted); the runtime composes
+        `MockAnsibleRunner`. Neither the adapter's source nor its tests import the VM
+        adapter; its declared dependency goes in 5B.10.
+      - Tests: the distribution's `test_mock.py` (rules, gates, failure, the default
+        output from the job and its registered host, the executor modes the family
+        reports, cancelling a mocked run) and `test_probes.py`; the service's
+        `test_programmable_mock.py` is deleted (moved); the bare-metal adapter's
+        `test_bare_metal_mock_executor.py` becomes `test_bare_metal_mock_output.py`; the
+        integration fixtures compose `MockAnsibleRunner` with each domain's output. The
+        distribution's dev group gains `pytest-asyncio`.
+      - Validation: `provisioning/compute` 198; the distribution 74; provisioning
+        service 894 (the 21 mock tests moved to the distribution); bare-metal adapter 22;
+        the VM adapter's `make test` file 39; VM IaC 65; e2e unit 236 with the known
+        pre-existing failure, and every e2e and smoke module collects (167). Relocked: the
+        distribution, the VM operator client, both adapters, the service, `e2e-tests`.
+- [x] 5B.7 Domain codecs. Behaviour-neutral on the wire. Absorbed into slice B of 5B.6,
+      with one amendment decided there: bare metal's stored parameters and results are
+      bare-metal-shaped (`design.md`, "The Ansible job codec", decision 2), which changes
+      what `JobStatusResponse` reports for bare-metal jobs; existing rows are migrated.
       `vm_provisioning_adapter/codec.py` (VM vars, golden-image credentials, VM facts,
       VM failure classification, credential meaning, VM parameter building) and
       `bare_metal_provisioning_adapter/codec.py` (access vars and facts, access
-      parameters); both bundles register the distribution's `AnsibleJobExecutor`s; move
+      parameters); both runtimes register the distribution's `AnsibleJobExecutor`s; move
       `iac/ansible/playbooks/bare-metal` and `roles/bare-metal-access` to
       `domains/bare_metal/provisioning/iac`, with `provisioning/compute/service/Dockerfile`
-      and `settings.toml` following; delete `bare_metal_mock_executor.py`, replaced by
-      bare metal's contributed default output.
+      and `settings.toml` following. Deleting `bare_metal_mock_executor.py`, replaced by
+      bare metal's contributed default output, moves to slice C of 5B.6.
 - [ ] 5B.8 Controls and routes. Changes the generic lease wire format. Split
       `system_service.py`: aggregate health and status to the service, which composes
       contributed diagnostics; Ansible readiness to the Ansible distribution; convergence

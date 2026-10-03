@@ -5,7 +5,7 @@ Verifies:
   - Mock rule add/list/delete/resume round-trip
   - drain and wait endpoints work correctly
   - Test controller is NOT mounted when the mock service is not active
-    (simulated by swapping in a real AnsibleService mock)
+    (simulated by swapping in a runner mock)
 
 All calls go through AsyncProvisioningTestClient — no raw HTTP calls in
 test bodies.  See AsyncProvisioningTestClient below for rationale.
@@ -50,13 +50,16 @@ from vm_provisioning_operator import ProvisioningClient, ProvisioningError
 from compute_provisioning_service.db.database import create_db_engine
 from compute_provisioning_service.main import app
 from vm_provisioning_operator.models import CreateVmRequest
-from vm_provisioning_adapter.services.ansible_service import AnsibleService
+from compute_provisioning_ansible.runner import AnsibleRunner
+from vm_provisioning_adapter.codec import VmAnsibleCodec
 from compute_provisioning.jobs.queue import AsyncJobQueue
 from compute_provisioning.hosts import ConnectionCodecs
 from compute_provisioning.hosts.service import HostAuthority
 from compute_provisioning_ansible import SshConnectionCodec
 from vm_provisioning_adapter.services.job_service import AnsibleJobService
-from vm_provisioning_adapter.services.mock_ansible_service import MockRule, ProgrammableMockAnsibleService
+from compute_provisioning.jobs.executor_mock import MockRule
+from compute_provisioning_ansible import MockAnsibleRunner
+from vm_provisioning_adapter.services.mock_output import vm_mock_output
 from vm_provisioning_adapter.services.system_service import SystemService
 
 HOST = "kvm1"
@@ -86,8 +89,8 @@ def db_engine(tmp_path):
 
 from .conftest import AsyncProvisioningTestClient, AsyncProvisioningTestClientError
 @pytest.fixture
-def programmable_mock() -> ProgrammableMockAnsibleService:
-    svc = ProgrammableMockAnsibleService(MagicMock())
+def programmable_mock() -> MockAnsibleRunner:
+    svc = MockAnsibleRunner(default_output=vm_mock_output)
     import tempfile
     fake_inv = Path(tempfile.gettempdir()) / "test_inv.ini"
     fake_inv.write_text("[kvm_hosts]\nkvm1  ansible_host=10.0.0.1  ansible_user=root\n")
@@ -104,7 +107,7 @@ async def client_and_queue(
     programmable_mock,
     monkeypatch,
     job_executor_table_for,
-) -> AsyncIterator[tuple[ProvisioningClient, AsyncJobQueue, ProgrammableMockAnsibleService, AsyncProvisioningTestClient]]:
+) -> AsyncIterator[tuple[ProvisioningClient, AsyncJobQueue, MockAnsibleRunner, AsyncProvisioningTestClient]]:
     _install_signed_asgi_transport(monkeypatch)
     mock_settings = MagicMock(
         default_host_id="kvm1",
@@ -191,6 +194,7 @@ async def client_and_queue(
         session_factory=session_factory,
         job_queue_provider=lambda: job_queue,
         ansible_service=programmable_mock,
+        codec=VmAnsibleCodec(),
         host_service=host_service,
         pool_config_handler=AnsiblePoolConfigHandler(),
         job_service=job_service,
@@ -417,7 +421,7 @@ class TestControllerGating:
         # /test/mock-rules to return 503. Asserts on status code only.
         _, _, _, test_client = client_and_queue
         original = _container_module.resolved_ansible_service
-        _container_module.resolved_ansible_service = MagicMock(spec=AnsibleService)
+        _container_module.resolved_ansible_service = MagicMock(spec=AnsibleRunner)
         try:
             with pytest.raises(AsyncProvisioningTestClientError) as exc_info:
                 await test_client.add_mock_rule(match={})

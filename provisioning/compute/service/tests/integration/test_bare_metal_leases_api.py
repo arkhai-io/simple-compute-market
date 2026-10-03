@@ -159,12 +159,13 @@ async def test_register_bare_metal_lease_uses_bare_metal_endpoint_and_view(
     with session_factory() as db:
         job = db.get(JobRecord, reservation["create_job_id"])
         assert job is not None
-        assert job.params["vm_action"] == NODE_GRANT_ACCESS_ACTION
+        # Bare metal's own parameter model, with no VM field.
+        assert job.offering_mode == "bare_metal"
+        assert job.executor_action == NODE_GRANT_ACCESS_ACTION
+        assert job.params["action"] == NODE_GRANT_ACCESS_ACTION
         assert job.params["host_id"] == "bm-node-1"
-        assert job.params["offering_mode"] == "bare_metal"
-        assert job.params["executor_action"] == NODE_GRANT_ACCESS_ACTION
-        assert job.params["executor_target"] == "bm-node-1"
         assert job.params["physical_host_id"] == "host-physical-1"
+        assert not any(name.startswith("vm_") for name in job.params)
 
 
 async def test_list_and_get_bare_metal_leases_exclude_vm_leases(
@@ -238,12 +239,11 @@ async def test_generic_market_lease_terminate_dispatches_bare_metal_reclaim(
     with session_factory() as db:
         job = db.get(JobRecord, reservation["release_job_id"])
         assert job is not None
-        assert job.params["vm_action"] == NODE_RECLAIM_ACCESS_ACTION
+        assert job.offering_mode == "bare_metal"
+        assert job.executor_action == NODE_RECLAIM_ACCESS_ACTION
+        assert job.params["action"] == NODE_RECLAIM_ACCESS_ACTION
         assert job.params["host_id"] == "bm-node-1"
-        assert job.params["offering_mode"] == "bare_metal"
-        assert job.params["executor_action"] == NODE_RECLAIM_ACCESS_ACTION
-        assert job.params["executor_target"] == "bm-node-1"
-        assert job.params["bare_metal_reclaim_policy"] == "remove_lease_key"
+        assert job.params["reclaim_policy"] == "remove_lease_key"
 
 
 async def test_bare_metal_grant_and_reclaim_jobs_succeed_with_executor_playbook(

@@ -25,11 +25,7 @@ from vm_provisioning_operator.client import (
 )
 from vm_provisioning_operator.routes import VM_PROVISIONING_ROUTES
 from vm_provisioning_operator.models import (
-    AnsibleReadinessResponse,
     CreateVmRequest,
-    FileInfo,
-    HostConnectivityResponse,
-    InventoryInfo,
     LeaseCreate,
     LeaseForceReleaseRequest,
     LeaseListResponse,
@@ -38,7 +34,6 @@ from vm_provisioning_operator.models import (
     LeaseRetryReleaseRequest,
     LeaseTerminateRequest,
     LeaseUpdate,
-    SshKeyInfo,
     VmActionRequest,
 )
 
@@ -52,7 +47,6 @@ __all__ = [
     "ProvisioningJobError",
     "ProvisioningTimeoutError",
     # Host models
-    "HostConnectivityResponse",
     # Job models
     # VM request models
     "CreateVmRequest",
@@ -78,8 +72,4 @@ __all__ = [
     "PoolValidateResponse",
     "PoolValidationProblem",
     # System models
-    "FileInfo",
-    "InventoryInfo",
-    "SshKeyInfo",
-    "AnsibleReadinessResponse",
 ]

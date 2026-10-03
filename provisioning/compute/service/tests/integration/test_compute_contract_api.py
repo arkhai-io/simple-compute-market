@@ -2,6 +2,7 @@ from compute_provisioning_ansible import ssh_connection
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from compute_provisioning_ansible.runner import AnsibleResult
 from httpx import ASGITransport
 
 from compute_provisioning_service import container as _container_module
@@ -123,8 +124,19 @@ async def test_contract_submission_is_idempotent_and_correlated(client_and_queue
 
 
 @pytest.mark.asyncio
-async def test_bare_metal_uses_same_offering_mode_neutral_client(client_and_queue):
+async def test_bare_metal_uses_same_offering_mode_neutral_client(client_and_queue, fake_ansible):
     legacy_client, _ = client_and_queue
+    # What the access role prints for a grant; the bare-metal codec reports it
+    # as the job's result.
+    fake_ansible.wait_for_playbook.return_value = AnsibleResult(
+        stdout=(
+            'ok: [bm-contract-1] => {\n    "node_grant_access_data": '
+            '{"action": "node_grant_access", "host": "192.0.2.10", "port": "22", '
+            '"ssh_user": "tenant", "status": "success"}\n}\n'
+        ),
+        stderr="",
+        process_id=99999,
+    )
     await legacy_client.register_host(HostCreate(
         host_id="bm-contract-1",
         connection=ssh_connection(ssh_host="192.0.2.10", ssh_user="root", key_path="/tmp/test-key"),
@@ -150,6 +162,9 @@ async def test_bare_metal_uses_same_offering_mode_neutral_client(client_and_queu
     assert job.action_kind == NODE_GRANT_ACCESS_ACTION
     assert job.result is not None
     assert job.result.result_kind == "bare_metal_access"
+    assert job.result.value["action"] == NODE_GRANT_ACCESS_ACTION
+    assert job.result.value["ssh_user"] == "tenant"
+    assert job.credentials == []
 
 
 @pytest.mark.asyncio

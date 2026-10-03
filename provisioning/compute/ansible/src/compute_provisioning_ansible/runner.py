@@ -24,7 +24,7 @@ import sys
 import tempfile
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
@@ -37,50 +37,39 @@ from .connection import PRIVATE_KEY, SSH_CONNECTION_KIND, SshConnectionCodec
 logger = logging.getLogger(__name__)
 
 
-def redact_ansible_output(text: str) -> str:
-    """Scrub credential-shaped content out of raw Ansible stdout/stderr.
+#: Variable names whose values are secret in any playbook's output.
+GENERIC_SECRET_FIELDS = frozenset({"password"})
 
-    Shared by every consumer of Ansible subprocess output — this module's
-    own real-time debug logging, and ``job_service.py``'s persisted
-    ``job.logs`` — so there is exactly one place that defines what
-    "credential-shaped" means. Ansible's default behavior echoes a
-    ``set_fact``/``debug`` task's rendered value in its own "ok" output;
-    without ``no_log: true`` on the task itself (the primary defense, kept
-    current in ``vm-create.yml``/``vm-reset-password.yml``), that value
-    reaches this function's input. This is defense in depth, not a
-    substitute for ``no_log`` on the playbook side.
 
-    ``vm-management/tasks/json-output.yml``'s ``debug: var:``/``debug:
-    msg:`` tasks are a deliberate exception that MUST NOT gain `no_log`:
-    they are the literal transport `_extract_ansible_json` parses by
-    searching raw stdout for a `"<fact_name>":` marker, so credentials
-    reach this function's input by design on every VM create. Ansible can
-    render that debug-msg'd JSON string either as literal text or as a
-    backslash-escaped string nested inside its own outer result dict
-    (depends on ``stdout_callback``/``callback_result_format`` and the
-    installed Ansible version) as well as the bare YAML `password: value`
-    shape `debug: var:` produces — the JSON-shaped pattern below matches
-    both the escaped and unescaped forms.
+def redact_ansible_output(text: str, secret_fields: Iterable[str] = ()) -> str:
+    """Scrub credential-shaped content out of raw Ansible stdout and stderr.
+
+    Ansible echoes a task's rendered value in its own output unless the task
+    sets ``no_log``, and a playbook that reports its result through a printed
+    fact does so by design, so a secret can reach this function's input
+    whatever the playbook does. This is defense in depth, not a substitute for
+    ``no_log`` on the playbook side.
+
+    The value of every field named in ``GENERIC_SECRET_FIELDS`` or
+    ``secret_fields`` is replaced, both in the JSON form a printed fact takes
+    (literal, or backslash-escaped inside Ansible's own result dictionary,
+    depending on the callback and Ansible version) and in the bare YAML form a
+    ``debug: var:`` task produces. A domain names the further fields its own
+    playbooks print. An SSH identity-file argument and an ``sshpass``
+    password are always replaced.
     """
     if not text:
         return text
+    names = "|".join(
+        re.escape(name) for name in sorted({*GENERIC_SECRET_FIELDS, *secret_fields})
+    )
     redacted = re.sub(
-        r'(\\?"(?:password|ssh_key_path_host|frp_auth_token)\\?":\s*)\\?"[^"\\]*\\?"',
+        rf'(\\?"(?:{names})\\?":\s*)\\?"[^"\\]*\\?"',
         r'\1"[REDACTED]"',
         text,
     )
     redacted = re.sub(
-        r"(password:\s*)(?!\[REDACTED\]).+",
-        r"\1[REDACTED]",
-        redacted,
-    )
-    # A relay's admission token is a credential of the same class as the two
-    # above. It reaches this function through the same route: the extra-vars
-    # file is rendered into a command line, and json-output.yml echoes facts by
-    # design. Matching the bare YAML form as well, since that is what a
-    # ``debug: var:`` task produces.
-    redacted = re.sub(
-        r"(frp_auth_token:\s*)(?!\[REDACTED\]).+",
+        rf"((?:{names}):\s*)(?!\[REDACTED\]).+",
         r"\1[REDACTED]",
         redacted,
     )
@@ -89,13 +78,62 @@ def redact_ansible_output(text: str) -> str:
     return redacted
 
 
+def extract_json_block(text: str, search_start: int) -> Optional[dict]:
+    """The first balanced JSON object in ``text`` at or after ``search_start``."""
+    brace_start = text.find("{", search_start)
+    if brace_start == -1:
+        return None
+    depth = 0
+    in_string = False
+    escape_next = False
+    for i in range(brace_start, len(text)):
+        ch = text[i]
+        if escape_next:
+            escape_next = False
+            continue
+        if ch == "\\":
+            if in_string:
+                escape_next = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                try:
+                    return json.loads(text[brace_start: i + 1])
+                except json.JSONDecodeError:
+                    return None
+    return None
+
+
+def extract_fact(stdout: str, fact_name: str) -> Optional[dict]:
+    """The value of fact ``fact_name`` a ``debug: var:`` task printed, if any."""
+    marker = f'"{fact_name}":'
+    index = stdout.find(marker)
+    if index == -1:
+        return None
+    return extract_json_block(stdout, index + len(marker))
+
+
 @dataclass
 class AnsibleRun:
-    """Handle to a running ansible-playbook process."""
+    """Handle to a running ansible-playbook process.
+
+    ``job_parameters`` are the stored parameters of the job the run serves.
+    The runner never reads them; a stand-in that keys its behaviour on the job
+    (the mock runner's rules) does.
+    """
 
     process: subprocess.Popen
     process_id: int
     vars_path: Path
+    job_parameters: Mapping[str, Any] | None = None
 
 
 @dataclass
@@ -236,6 +274,7 @@ class AnsibleRunner:
         extra_vars_path: Path,
         limit: str,
         extra_cli_vars: dict[str, str] | None = None,
+        job_parameters: Mapping[str, Any] | None = None,
     ) -> AnsibleRun:
         """Spawn ansible-playbook and return immediately with a process handle.
 
@@ -268,6 +307,7 @@ class AnsibleRunner:
             process=process,
             process_id=process.pid,
             vars_path=extra_vars_path,
+            job_parameters=job_parameters,
         )
 
     async def wait_for_playbook(
@@ -275,8 +315,13 @@ class AnsibleRunner:
         run: AnsibleRun,
         timeout_seconds: int,
         log_callback: Optional[Callable[[str, str], None]] = None,
+        redact: Callable[[str], str] = redact_ansible_output,
     ) -> AnsibleResult:
         """Wait for a running playbook to finish, streaming output to log_callback.
+
+        ``redact`` scrubs each line this method logs; the caller passes one
+        that knows its playbook's secret fields. What ``log_callback`` and the
+        result receive is raw: their consumer redacts it.
 
         Cleans up ``run.vars_path`` on exit regardless of success or failure.
         Raises ``AnsibleError`` on non-zero exit or timeout.
@@ -310,7 +355,7 @@ class AnsibleRunner:
                                     stdout_lines.append(line)
                                     logger.debug(
                                         "ansible stdout: %s",
-                                        redact_ansible_output(line.rstrip()),
+                                        redact(line.rstrip()),
                                     )
                         else:
                             line = run.process.stdout.readline()
@@ -331,7 +376,7 @@ class AnsibleRunner:
                                     stderr_lines.append(line)
                                     logger.debug(
                                         "ansible stderr: %s",
-                                        redact_ansible_output(line.rstrip()),
+                                        redact(line.rstrip()),
                                     )
                         else:
                             line = run.process.stderr.readline()
@@ -406,8 +451,12 @@ class AnsibleRunner:
     # Inventory rendering
     # ------------------------------------------------------------------
 
-    def write_inventory(self, hosts: list) -> "MaterializedInventory":
+    def write_inventory(self, hosts: list, *, group: str) -> "MaterializedInventory":
         """Write a temporary Ansible INI inventory for ``InventoryTarget``s.
+
+        Every host is listed under ``group``, the group the playbook that runs
+        against this inventory targets; the caller names it, because which
+        group a playbook targets is part of that playbook.
 
         A ``path`` key is referenced where it lies. An ``embedded`` key is
         decrypted just in time into an owner-only temporary file the inventory
@@ -421,7 +470,7 @@ class AnsibleRunner:
         directory = Path(tempfile.gettempdir())
         inventory = MaterializedInventory(path=directory / f"inventory_{nonce}.ini")
         try:
-            lines = ["[kvm_hosts]"]
+            lines = [f"[{group}]"]
             for host in hosts:
                 if host.ssh_key_type == "path":
                     key_ref = host.ssh_key_value
@@ -464,48 +513,12 @@ class AnsibleRunner:
         )
         return inventory
 
-    @staticmethod
-    def extract_json_block(text: str, search_start: int) -> Optional[dict]:
-        """The first balanced JSON object in ``text`` at or after ``search_start``."""
-        brace_start = text.find("{", search_start)
-        if brace_start == -1:
-            return None
-        depth = 0
-        in_string = False
-        escape_next = False
-        for i in range(brace_start, len(text)):
-            ch = text[i]
-            if escape_next:
-                escape_next = False
-                continue
-            if ch == "\\":
-                if in_string:
-                    escape_next = True
-                continue
-            if ch == '"':
-                in_string = not in_string
-                continue
-            if in_string:
-                continue
-            if ch == "{":
-                depth += 1
-            elif ch == "}":
-                depth -= 1
-                if depth == 0:
-                    json_str = text[brace_start: i + 1]
-                    try:
-                        return json.loads(json_str)
-                    except json.JSONDecodeError:
-                        return None
-        return None
-
     async def check_connectivity_with_inventory(
         self, host: str, inventory_path: Path
     ) -> ConnectivityResult:
         """Run ``ansible -m ping`` using the supplied *inventory_path*.
 
-        Used by ``HostController`` after rendering a temp inventory from DB rows.
-        The caller is responsible for cleaning up any temp file.
+        The caller renders the inventory and is responsible for cleaning it up.
         """
         cmd = [
             "ansible",
@@ -552,7 +565,10 @@ __all__ = [
     "AnsibleRunner",
     "ConnectivityResult",
     "InventoryTarget",
+    "GENERIC_SECRET_FIELDS",
     "MaterializedInventory",
+    "extract_fact",
+    "extract_json_block",
     "inventory_target",
     "redact_ansible_output",
 ]

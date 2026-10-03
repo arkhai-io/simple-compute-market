@@ -16,7 +16,6 @@ from compute_provisioning_ansible import ssh_connection
 
 import asyncio
 from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock
 
 import pytest
 from arkhai_bare_metal import (
@@ -28,9 +27,8 @@ from arkhai_bare_metal import (
 from market_site.ledger import ALLOCATION_MODE_EXCLUSIVE
 from compute_provisioning.hosts import HostCreate
 
-from bare_metal_provisioning_adapter.services.bare_metal_mock_executor import (
-    BareMetalMockAnsibleService,
-)
+from bare_metal_provisioning_adapter.services.mock_output import bare_metal_mock_output
+from compute_provisioning_ansible import MockAnsibleRunner
 from compute_provisioning_service import container as _container_module
 from compute_provisioning.jobs.queue import AsyncJobQueue
 
@@ -40,7 +38,7 @@ SSH_HOST = "192.0.2.10"
 
 @pytest.fixture
 def bare_metal_runner():
-    return BareMetalMockAnsibleService(MagicMock())
+    return MockAnsibleRunner(default_output=bare_metal_mock_output)
 
 
 def _register_host() -> None:
@@ -120,7 +118,7 @@ async def test_a_held_grant_runs_through_the_bare_metal_mock(
     reserved = _reserve("escrow-bm-mock")
     await test_client.add_bare_metal_mock_rule(
         rule_id="grant-gate",
-        match={"executor_action": NODE_GRANT_ACCESS_ACTION, "host_id": HOST_ID},
+        match={"action": NODE_GRANT_ACCESS_ACTION, "host_id": HOST_ID},
         pause_before_result=True,
     )
 
@@ -160,7 +158,7 @@ async def test_a_held_grant_runs_through_the_bare_metal_mock(
     finished = await test_client.wait_for_job(grant_job_id, timeout=5.0)
 
     assert finished["status"] == "succeeded", finished
-    access = finished["result"]["value"]["ansible_result"]
+    access = finished["result"]["value"]
     assert access["action"] == NODE_GRANT_ACCESS_ACTION
     assert access["ssh_user"] == "tenant-a"
     assert access["host"] == SSH_HOST
@@ -175,7 +173,7 @@ async def test_a_bare_metal_rule_can_fail_a_grant(
     reserved = _reserve("escrow-bm-mock-fail")
     await test_client.add_bare_metal_mock_rule(
         rule_id="grant-fails",
-        match={"executor_action": NODE_GRANT_ACCESS_ACTION},
+        match={"action": NODE_GRANT_ACCESS_ACTION},
         fail_with="host unreachable",
     )
 

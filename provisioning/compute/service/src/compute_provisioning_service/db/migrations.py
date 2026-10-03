@@ -2831,6 +2831,70 @@ def _migrate_job_envelopes(engine: Engine, *, default_host_id: str | None = None
         )
 
 
+# The parameters a bare-metal access job stores, in the order the bare-metal
+# adapter writes them.
+_BARE_METAL_JOB_PARAMETERS = (
+    "action", "host_id", "physical_host_id", "escrow_uid", "executor_ref",
+    "access_ref", "ssh_user", "ssh_public_key", "reclaim_policy",
+)
+
+
+def _migrate_bare_metal_job_shapes(engine: Engine) -> None:
+    """Store bare-metal access jobs' parameters and results in bare metal's shape.
+
+    Bare-metal jobs were submitted with the VM job parameters (their bare-metal
+    fields filled, the VM ones empty) and their results were VM's result payload
+    with the access fact nested under ``ansible_result``. A bare-metal job's
+    parameters become the bare-metal parameter model (``action`` from the
+    executor action, ``reclaim_policy`` from ``bare_metal_reclaim_policy``), and
+    its result's value becomes the access fact itself; a result that carried no
+    fact is removed. Rows already in that shape are left as they are, so a rerun
+    changes nothing.
+    """
+    if not _table_exists(engine, "ansible_jobs"):
+        return
+    with engine.begin() as connection:
+        jobs = connection.execute(text(
+            "SELECT id, params, result FROM ansible_jobs WHERE offering_mode = 'bare_metal'"
+        )).mappings().all()
+        for job in jobs:
+            params = _json_mapping(job["params"], label=f"ansible_jobs {job['id']} params")
+            updates: dict[str, object] = {"id": job["id"]}
+            assignments: list[str] = []
+            if "vm_action" in params or "executor_action" in params:
+                converted = {
+                    "action": params.get("executor_action") or params.get("vm_action"),
+                    "host_id": params.get("host_id"),
+                    "physical_host_id": params.get("physical_host_id"),
+                    "escrow_uid": params.get("escrow_uid"),
+                    "executor_ref": params.get("executor_ref"),
+                    "access_ref": params.get("access_ref"),
+                    "ssh_user": params.get("ssh_user"),
+                    "ssh_public_key": params.get("ssh_public_key"),
+                    "reclaim_policy": params.get("bare_metal_reclaim_policy"),
+                }
+                updates["params"] = json.dumps(
+                    {name: converted[name] for name in _BARE_METAL_JOB_PARAMETERS}
+                )
+                assignments.append("params = :params")
+            result = job["result"]
+            if isinstance(result, str):
+                result = json.loads(result) if result else None
+            value = result.get("value") if isinstance(result, dict) else None
+            if isinstance(value, dict) and "ansible_result" in value:
+                fact = value["ansible_result"]
+                if isinstance(fact, dict):
+                    updates["result"] = json.dumps({**result, "value": fact}, sort_keys=True)
+                else:
+                    updates["result"] = None
+                assignments.append("result = :result")
+            if assignments:
+                connection.execute(
+                    text("UPDATE ansible_jobs SET " + ", ".join(assignments) + " WHERE id = :id"),
+                    updates,
+                )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration("20260603_001_ansible_jobs_escrow_uid", _migrate_ansible_jobs_escrow_uid),
     Migration("20260603_002_hosts_public_host", _migrate_hosts_public_host),
@@ -2919,5 +2983,9 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20261002_002_job_envelopes",
         _migrate_job_envelopes,
+    ),
+    Migration(
+        "20261002_003_bare_metal_job_shapes",
+        _migrate_bare_metal_job_shapes,
     ),
 )

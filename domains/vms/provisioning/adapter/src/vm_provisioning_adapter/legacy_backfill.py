@@ -23,6 +23,7 @@ from market_fulfillment.ids import derive_provisioned_resource_id
 from market_fulfillment.provider import SettlementResult
 from market_fulfillment.settlement_types import SettlementResource
 
+from vm_provisioning_adapter.codec import VmAnsibleCodec
 from vm_provisioning_adapter.services.ansible_fulfillment_provider import (
     AnsibleFulfillmentProvider,
 )
@@ -74,14 +75,10 @@ def prepare_historical_vm_teardown(
     teardown command is what normal dispatch would have produced.
     """
 
-    class _PreparationOnlyJobService:
-        @staticmethod
-        def reserved_var_keys(params):
-            return frozenset({"host_id", "vm_action", "vm_target", "escrow_uid"})
-
     provider = AnsibleFulfillmentProvider(
-        job_service=_PreparationOnlyJobService(),
+        job_service=None,
         job_queue_provider=lambda: None,
+        reserved_var_keys=VmAnsibleCodec().reserved_var_keys,
     )
     return provider.prepare_teardown(settlement_result, pool_config)
 

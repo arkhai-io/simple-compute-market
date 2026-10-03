@@ -10,12 +10,10 @@ from __future__ import annotations
 from compute_provisioning_ansible import ssh_connection
 
 from datetime import datetime, timezone
-from unittest.mock import MagicMock
 
 from arkhai_bare_metal import NODE_GRANT_ACCESS_ACTION
-from bare_metal_provisioning_adapter.services.bare_metal_mock_executor import (
-    BareMetalMockAnsibleService,
-)
+from bare_metal_provisioning_adapter.services.mock_output import bare_metal_mock_output
+from compute_provisioning_ansible import MockAnsibleRunner
 from compute_provisioning_service import container as _container_module
 import pytest
 
@@ -227,7 +225,7 @@ class TestBareMetalTestRouteCoverage:
 
     @pytest.fixture
     def bare_metal_runner(self):
-        return BareMetalMockAnsibleService(MagicMock())
+        return MockAnsibleRunner(default_output=bare_metal_mock_output)
 
     async def test_rule_and_evaluate_routes_use_their_route_contracts(
         self, test_client, bare_metal_runner
@@ -236,7 +234,7 @@ class TestBareMetalTestRouteCoverage:
 
         added = await test_client.add_bare_metal_mock_rule(
             rule_id="coverage-gate",
-            match={"executor_action": NODE_GRANT_ACCESS_ACTION},
+            match={"action": NODE_GRANT_ACCESS_ACTION},
             pause_before_result=True,
         )
         listed = await test_client.list_bare_metal_mock_rules()

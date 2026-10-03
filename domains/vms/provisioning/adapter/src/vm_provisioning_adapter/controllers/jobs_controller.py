@@ -4,7 +4,7 @@ Handles all GET and cancel operations on the ``/api/v1/jobs`` resource.
 
 Job *submission* is handled by the typed VM and host controllers
 (``vms_controller.py``, ``hosts_controller.py``), which accept typed request
-models and translate them to ``AnsibleJobParams`` before calling
+models and translate them to ``VmJobParams`` before calling
 ``AnsibleJobService.submit()``.
 
 Polling pattern

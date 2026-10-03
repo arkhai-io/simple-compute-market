@@ -8,11 +8,9 @@ This service is intentionally free of FastAPI and any HTTP concerns — those
 live in the controller.  It can be instantiated and tested without starting
 the application.
 
-The ``ansible_readiness`` method reads host inventory from the host authority
-(DB table), not from the Ansible INI file on disk.  SSH key diagnostics:
-  - ``path`` hosts: stat the key file and compute its SHA-256.
-  - ``embedded`` hosts: report ``exists=True``; no SHA-256 (key is encrypted
-    at rest).
+``ansible_readiness`` reports the Ansible implementation's readiness through
+``compute_provisioning_ansible.probes``, over the registered hosts and the VM
+playbook.
 
 Version resolution order
 ------------------------
@@ -25,9 +23,7 @@ Version resolution order
 
 from __future__ import annotations
 
-import hashlib
 import os
-import subprocess
 import tomllib
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Optional
@@ -38,13 +34,9 @@ from compute_provisioning import (
     COMPUTE_PROVISIONING_CONTRACT_VERSION,
     SUPPORTED_COMPUTE_PROVISIONING_MAJOR_VERSIONS,
 )
-from vm_provisioning_operator.models import (
-    AnsibleReadinessResponse,
-    FileInfo,
-    InventoryInfo,
-    SshKeyInfo,
-)
-from vm_provisioning_adapter.services.ansible_service import AnsibleService
+from compute_provisioning_ansible import AnsibleReadinessResponse, ansible_readiness
+from compute_provisioning_ansible.probes import ansible_version
+from compute_provisioning_ansible.runner import AnsibleRunner
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session, sessionmaker
@@ -90,80 +82,6 @@ SERVICE_VERSION: str = _read_version()
 # ---------------------------------------------------------------------------
 
 
-def sha256_file(path: Path) -> Optional[str]:
-    """Return the SHA-256 hex digest of *path*, or ``None`` if unreadable."""
-    try:
-        return hashlib.sha256(path.read_bytes()).hexdigest()
-    except OSError:
-        return None
-
-
-def ansible_version() -> Optional[str]:
-    """Run ``ansible --version`` and return the first output line, or ``None``."""
-    try:
-        result = subprocess.run(
-            ["ansible", "--version"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        if result.returncode == 0:
-            return result.stdout.splitlines()[0].strip()
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
-        pass
-    return None
-
-
-def collect_ssh_keys_from_hosts(hosts: list) -> list[SshKeyInfo]:
-    """Build SSH key diagnostics from DB host rows.
-
-    Groups hosts by their effective key reference:
-      - ``path`` hosts: grouped by path string; the file is stat'd.
-      - ``embedded`` hosts: each appears as a distinct ``<encrypted>`` entry.
-
-    Returns one ``SshKeyInfo`` per unique key reference.
-    """
-    path_to_hosts: dict[str, list[str]] = {}
-    embedded_hosts: list[str] = []
-
-    for host in hosts:
-        key_path = host.connection.public.get("key_path")
-        if key_path:
-            path_to_hosts.setdefault(key_path, []).append(host.host_id)
-        elif "private_key" in host.connection.protected:
-            embedded_hosts.append(host.host_id)
-
-    results: list[SshKeyInfo] = []
-
-    for raw_path, host_ids in path_to_hosts.items():
-        expanded = Path(os.path.expanduser(raw_path))
-        exists = expanded.exists()
-        results.append(
-            SshKeyInfo(
-                key_type="path",
-                raw_path=raw_path,
-                path=str(expanded),
-                exists=exists,
-                sha256=sha256_file(expanded) if exists else None,
-                referenced_by=sorted(host_ids),
-            )
-        )
-
-    for host_id in embedded_hosts:
-        results.append(
-            SshKeyInfo(
-                key_type="embedded",
-                raw_path="<encrypted>",
-                path="<encrypted>",
-                exists=True,
-                sha256=None,
-                referenced_by=[host_id],
-            )
-        )
-
-    return results
-
-
 # ---------------------------------------------------------------------------
 # Service
 # ---------------------------------------------------------------------------
@@ -172,7 +90,7 @@ def collect_ssh_keys_from_hosts(hosts: list) -> list[SshKeyInfo]:
 class SystemService:
     """Diagnostics operations for the system controller.
 
-    Depends on ``AnsibleService`` and ``Settings``; optionally accepts
+    Depends on ``AnsibleRunner`` and ``Settings``; optionally accepts
     the host authority for DB-backed inventory diagnostics, a DB session factory
     and job-queue provider for local health checks, and a lease lifecycle
     service for watchdog status/admin operations. Filesystem-oriented public
@@ -182,7 +100,7 @@ class SystemService:
 
     def __init__(
         self,
-        ansible_service: AnsibleService,
+        ansible_service: AnsibleRunner,
         settings,
         host_service: "Optional[HostAuthority]" = None,
         session_factory: "Optional[sessionmaker[Session]]" = None,
@@ -242,51 +160,20 @@ class SystemService:
         return {"status": "ok" if all_ok else "degraded", "checks": checks}, all_ok
 
     def ansible_readiness(self) -> AnsibleReadinessResponse:
-        """Collect full Ansible readiness information synchronously.
+        """The Ansible implementation's readiness, over the enabled registered hosts.
 
-        Inventory data is sourced from the ``hosts`` DB table via
-        host authority.  SSH key diagnostics iterate DB rows instead of
-        parsing the INI file.
-
-        This method performs filesystem and subprocess I/O; callers in an
-        async context should invoke it via ``asyncio.to_thread``.
+        This performs filesystem and subprocess I/O; callers in an async
+        context should invoke it via ``asyncio.to_thread``.
         """
-        # --- Inventory info (from DB) ---
-        if self._host_service is not None:
-            try:
-                enabled_hosts = self._host_service.list_hosts(enabled_only=True)
-                host_count = len(enabled_hosts)
-                inventory_info = InventoryInfo(
-                    source="database",
-                    path=str(self._settings.database_url),
-                    exists=True,
-                    host_count=host_count,
-                )
-                ssh_keys = collect_ssh_keys_from_hosts(enabled_hosts)
-            except Exception:
-                inventory_info = InventoryInfo(
-                    source="database",
-                    path=str(self._settings.database_url),
-                    exists=False,
-                    host_count=None,
-                )
-                ssh_keys = []
-        else:
-            # Fallback: no host authority wired (e.g. during early startup or tests)
-            inventory_info = InventoryInfo(
-                source="database",
-                path=str(self._settings.database_url),
-                exists=False,
-                host_count=None,
-            )
-            ssh_keys = []
-
-        # --- Playbook info (filesystem) ---
-        playbook_path = self._settings.resolved_playbook_path
-        playbook_exists = playbook_path.exists()
-
-        return AnsibleReadinessResponse(
-            ansible_version=ansible_version(),
+        host_service = self._host_service
+        return ansible_readiness(
+            list_hosts=(
+                (lambda: host_service.list_hosts(enabled_only=True))
+                if host_service is not None
+                else None
+            ),
+            inventory_path=str(self._settings.database_url),
+            playbook_path=self._settings.resolved_playbook_path,
             ansible_mode=(
                 "mock" if "mock" in os.environ.get("ACTIVE_PROFILES", "") else "real"
             ),
@@ -295,13 +182,6 @@ class SystemService:
                 if self._job_executors is not None and self._job_executors.frozen
                 else {}
             ),
-            inventory=inventory_info,
-            playbook=FileInfo(
-                path=str(playbook_path),
-                exists=playbook_exists,
-                sha256=sha256_file(playbook_path) if playbook_exists else None,
-            ),
-            ssh_keys=ssh_keys,
         )
 
     async def get_status(self) -> dict:

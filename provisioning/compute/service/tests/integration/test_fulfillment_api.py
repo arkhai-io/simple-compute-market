@@ -418,6 +418,7 @@ class TestTeardownPreparation:
             pool_config = dict(pool.provider_config)
 
         from market_fulfillment import SettlementResource
+        from vm_provisioning_adapter.codec import VmAnsibleCodec
         from vm_provisioning_adapter.services.ansible_fulfillment_provider import (
             AnsibleFulfillmentProvider,
         )
@@ -425,6 +426,7 @@ class TestTeardownPreparation:
         provider = AnsibleFulfillmentProvider(
             job_service=_container_module.resolved_job_service,
             job_queue_provider=lambda: _container_module.resolved_job_queue,
+            reserved_var_keys=VmAnsibleCodec().reserved_var_keys,
         )
         settlement_result = SettlementResult(
             capacity_reservation_id=capacity_reservation_id,
@@ -566,6 +568,7 @@ class TestAcknowledgementFailureRecovery:
                     raise RuntimeError("simulated acknowledgement failure")
                 return super().acknowledge_create(*args, **kwargs)
 
+        from vm_provisioning_adapter.codec import VmAnsibleCodec
         from vm_provisioning_adapter.services.ansible_fulfillment_provider import (
             AnsibleFulfillmentProvider,
         )
@@ -575,6 +578,7 @@ class TestAcknowledgementFailureRecovery:
         provider = AnsibleFulfillmentProvider(
             job_service=_container_module.resolved_job_service,
             job_queue_provider=lambda: _container_module.resolved_job_queue,
+            reserved_var_keys=VmAnsibleCodec().reserved_var_keys,
         )
         faulty_orchestrator = FulfillmentOrchestrator(
             provider_registry=ProviderRegistry({"ansible": provider}),

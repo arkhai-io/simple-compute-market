@@ -14,6 +14,7 @@ DIST_DIR ?= ../../../.dist
 # key so a rebuilt adapter/service can never be hidden by a stale final stage.
 DIST_FINGERPRINT := $(shell find $(DIST_DIR) -maxdepth 1 -type f -name '*.whl' -exec cksum {} + 2>/dev/null | LC_ALL=C sort | cksum | awk '{print $$1}')
 IAC_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../../../domains/vms/provisioning/iac)
+BARE_METAL_IAC_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../../../domains/bare_metal/provisioning/iac)
 
 install: reinit ## Install service and development dependencies
 
@@ -23,6 +24,7 @@ reinit: ## Refresh local internal packages and adapters
 serve: ## Start the compute provisioning API and in-process workers
 	PROVISIONING_INVENTORY_PATH="$(IAC_DIR)/ansible/inventory/hosts" \
 	PROVISIONING_PLAYBOOK_PATH="$(IAC_DIR)/ansible/playbooks/single-tenant/vm-operations.yaml" \
+	PROVISIONING_BARE_METAL_PLAYBOOK_PATH="$(BARE_METAL_IAC_DIR)/ansible/playbooks/node-access.yaml" \
 	PROVISIONING_MANAGEMENT_VARS_PATH="$(IAC_DIR)/ansible/inventory/management-vars.yaml" \
 	ANSIBLE_CONFIG="$(IAC_DIR)/ansible/ansible.cfg" \
 	uv run --find-links $(DIST_DIR) compute-provisioning-api

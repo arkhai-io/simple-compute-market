@@ -52,11 +52,10 @@ from compute_provisioning.client import (
 from market_identity import EMPTY_BODY, Signer, TrustedIdentitySet
 from vm_provisioning_operator.routes import VM_PROVISIONING_ROUTES
 from vm_provisioning_operator.models import (
-    AnsibleReadinessResponse,
     CreateVmRequest,
-    HostConnectivityResponse,
     VmActionRequest,
 )
+from compute_provisioning_ansible import AnsibleReadinessResponse, ConnectivityResult
 from compute_provisioning.hosts import (
     HostCreate,
     HostListResponse,
@@ -396,14 +395,14 @@ class ProvisioningClient(_ProvisioningClientBase):
         """POST /api/v1/hosts/{host_id}/disable"""
         return HostResponse(**(await self._post(f"/api/v1/hosts/{host_id}/disable", {})))
 
-    async def check_connectivity(self, host: str) -> HostConnectivityResponse:
+    async def check_connectivity(self, host: str) -> ConnectivityResult:
         """GET /api/v1/hosts/{host}/connectivity — run ansible -m ping.
 
         Always returns 200 with ``reachable=True/False`` — only raises on
         404 (host not registered) or unexpected server errors.
         """
         data = await self._get(f"/api/v1/hosts/{host}/connectivity")
-        return HostConnectivityResponse.model_validate(data)
+        return ConnectivityResult.model_validate(data)
 
     async def import_hosts_from_path(self, path: Path, ssh_key_type: str = "path") -> HostListResponse:
         """POST /api/v1/hosts/import — upload an INI file from disk."""
@@ -928,9 +927,9 @@ class SyncProvisioningClient(_ProvisioningClientBase):
     def disable_host(self, host_id: str) -> HostResponse:
         return HostResponse(**(self._post(f"/api/v1/hosts/{host_id}/disable", {})))
 
-    def check_connectivity(self, host: str) -> HostConnectivityResponse:
+    def check_connectivity(self, host: str) -> ConnectivityResult:
         """GET /api/v1/hosts/{host}/connectivity — run ansible -m ping."""
-        return HostConnectivityResponse.model_validate(self._get(f"/api/v1/hosts/{host}/connectivity"))
+        return ConnectivityResult.model_validate(self._get(f"/api/v1/hosts/{host}/connectivity"))
 
     def import_hosts_from_text(self, ini_text: str, ssh_key_type: str = "path",
                                 filename: str = "hosts") -> HostListResponse:

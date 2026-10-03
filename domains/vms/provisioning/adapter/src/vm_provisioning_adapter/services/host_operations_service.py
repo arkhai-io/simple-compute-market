@@ -16,10 +16,10 @@ from compute_provisioning_ansible.runner import ConnectivityResult
 from vm_provisioning_adapter.models.vm_request_model import build_simple_params
 from compute_provisioning.jobs.queue import AsyncJobQueue
 from compute_provisioning.hosts.service import HostNotFoundError
-from compute_provisioning_ansible.runner import inventory_target
+from compute_provisioning_ansible import probe_connectivity
 
 if TYPE_CHECKING:
-    from vm_provisioning_adapter.services.ansible_service import AnsibleService
+    from compute_provisioning_ansible.runner import AnsibleRunner
     from compute_provisioning.hosts.service import HostAuthority
     from vm_provisioning_adapter.services.job_service import AnsibleJobService
 
@@ -30,7 +30,7 @@ class HostOperationsService:
     def __init__(
         self,
         *,
-        ansible_service: "AnsibleService",
+        ansible_service: "AnsibleRunner",
         host_service: "HostAuthority",
         job_service: "AnsibleJobService",
         job_queue_provider: Callable[[], AsyncJobQueue],
@@ -58,10 +58,4 @@ class HostOperationsService:
         if execution_host is None:
             raise HostNotFoundError(f"Host '{host}' not found")
 
-        with self._ansible_service.write_inventory(
-            [inventory_target(execution_host)]
-        ) as inventory:
-            return await self._ansible_service.check_connectivity_with_inventory(
-                host,
-                inventory.path,
-            )
+        return await probe_connectivity(self._ansible_service, execution_host)

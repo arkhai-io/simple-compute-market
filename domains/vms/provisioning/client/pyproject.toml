@@ -6,6 +6,9 @@ description = "VM provisioning operator client and direct VM administration mode
 requires-python = ">=3.12"
 dependencies = [
     "arkhai-compute-provisioning>=0.8.0",
+    # The Ansible readiness and connectivity responses are the Ansible
+    # distribution's models.
+    "arkhai-compute-provisioning-ansible>=0.1.0",
     "arkhai-kit-identity==0.3.0",
     "httpx>=0.28.1",
     "pydantic>=2.7",

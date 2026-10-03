@@ -4,9 +4,9 @@ These models are the direct VM operator HTTP contract. The host, job, and
 aggregate health and version models are compute provisioning's; callers import
 them from ``compute_provisioning``.
 
-Internal server-only types (``AnsibleJobParams``, ``AnsibleRunResult``,
-``build_simple_params``, ``EvaluateJobRequest``, ``EvaluateJobResponse``) remain
-in the service wheel and are not part of this public surface.
+Internal server-only types (``VmJobParams``, ``build_simple_params``,
+``EvaluateJobRequest``, ``EvaluateJobResponse``) remain in the VM adapter and
+are not part of this public surface.
 """
 
 from __future__ import annotations
@@ -20,22 +20,6 @@ from pydantic import BaseModel, Field, model_validator
 # ---------------------------------------------------------------------------
 # Host registry
 # ---------------------------------------------------------------------------
-
-
-class HostConnectivityResponse(BaseModel):
-    """Response from ``GET /api/v1/hosts/{host}/connectivity``.
-
-    The endpoint always returns 200 — ``reachable`` carries the actual
-    result.  Returns 404 if ``host`` is not registered.
-    """
-
-    host: str = Field(description="Host alias that was tested.")
-    reachable: bool = Field(
-        description="True if Ansible could authenticate and execute on the host."
-    )
-    detail: str = Field(
-        description="Ansible stdout on success, or the error message on failure."
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -388,108 +372,3 @@ class LeaseListResponse(BaseModel):
 
     leases: list[LeaseResponse]
     total: int
-
-
-# ---------------------------------------------------------------------------
-# System diagnostics
-# ---------------------------------------------------------------------------
-
-
-class FileInfo(BaseModel):
-    path: str = Field(description="Absolute (expanded) filesystem path")
-    exists: bool
-    sha256: Optional[str] = Field(
-        default=None,
-        description="SHA-256 hex digest of the file contents (None if file absent)",
-    )
-
-
-class InventoryInfo(BaseModel):
-    """Host inventory diagnostics.
-
-    ``source`` is ``'database'`` when inventory is read from the ``hosts``
-    table (normal operation) or ``'file'`` for a legacy INI path.
-    ``host_count`` is the number of enabled hosts found.
-    ``path`` is the DB URL or file path, for informational purposes.
-    """
-
-    source: str = Field(description="'database' or 'file'")
-    path: str = Field(description="DB URL or inventory file path")
-    exists: bool = Field(description="True if the source is reachable")
-    host_count: Optional[int] = Field(
-        default=None,
-        description="Number of enabled hosts (None if source is unreadable)",
-    )
-
-
-class SshKeyInfo(BaseModel):
-    key_type: str = Field(description="'path' or 'embedded'")
-    raw_path: str = Field(
-        description=(
-            "For 'path': the configured key path. "
-            "For 'embedded': '<encrypted>' sentinel."
-        ),
-    )
-    path: str = Field(description="Expanded path (path-type) or '<encrypted>'")
-    exists: bool = Field(
-        description=(
-            "For 'path': whether the key file exists on disk. "
-            "For 'embedded': always True (key is stored in DB)."
-        )
-    )
-    sha256: Optional[str] = Field(
-        default=None,
-        description=(
-            "SHA-256 of the key file (path-type only; None for embedded or absent files)."
-        ),
-    )
-    referenced_by: list[str] = Field(
-        description="Host aliases that use this key configuration.",
-    )
-
-
-class AnsibleReadinessResponse(BaseModel):
-    ansible_version: Optional[str] = Field(
-        default=None,
-        description="ansible --version first line (None if ansible not on PATH)",
-    )
-    ansible_mode: str = Field(
-        default="real",
-        description=(
-            "'mock' when ACTIVE_PROFILES includes 'mock' (ProgrammableMockAnsibleService); "
-            "'real' otherwise (AnsibleService). Used by e2e tests to gate on mock mode."
-        ),
-    )
-    executor_modes: dict[str, str] = Field(
-        default_factory=dict,
-        description=(
-            "'mock' or 'real' per offering mode, from the job executors compute "
-            "provisioning composed. Empty before composition."
-        ),
-    )
-    inventory: InventoryInfo
-    playbook: FileInfo
-    ssh_keys: list[SshKeyInfo] = Field(
-        description=(
-            "SSH key diagnostics per unique key reference across all enabled hosts."
-        )
-    )
-
-
-__all__ = [
-    "AnsibleReadinessResponse",
-    "CreateVmRequest",
-    "FileInfo",
-    "HostConnectivityResponse",
-    "InventoryInfo",
-    "LeaseCreate",
-    "LeaseForceReleaseRequest",
-    "LeaseListResponse",
-    "LeaseReleaseOversightRequest",
-    "LeaseResponse",
-    "LeaseRetryReleaseRequest",
-    "LeaseTerminateRequest",
-    "LeaseUpdate",
-    "SshKeyInfo",
-    "VmActionRequest",
-]

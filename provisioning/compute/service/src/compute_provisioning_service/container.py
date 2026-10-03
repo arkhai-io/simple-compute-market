@@ -331,10 +331,17 @@ class Container(containers.DeclarativeContainer):
         ledger=capacity_ledger_service,
     )
 
+    # Bare metal submits to the job authority directly; it is built inside VM's
+    # job service until the composition root builds it.
+    job_engine = providers.Callable(
+        _runtime_value,
+        runtime=vm_runtime,
+        name=providers.Object("job_engine"),
+    )
     bare_metal_runtime = providers.Singleton(
         build_bare_metal_runtime,
         site_authority=site_authority,
-        job_service=job_service,
+        job_engine=job_engine,
         job_queue_provider=providers.Object(_resolved_job_queue),
         config=config,
         host_service=host_service,

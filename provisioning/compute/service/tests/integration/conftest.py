@@ -316,7 +316,7 @@ class AsyncProvisioningTestClient:
             body["ssh_pubkey"] = ssh_pubkey
         return await self._post("/test/evaluate-job", body)
 from compute_provisioning_service.main import app, provisioning_route_table
-from vm_provisioning_adapter.services.ansible_service import AnsibleService
+from compute_provisioning_ansible.runner import AnsibleRunner
 from compute_provisioning_ansible.runner import AnsibleResult, AnsibleRun
 from compute_provisioning.jobs.queue import AsyncJobQueue
 from compute_provisioning.hosts import ConnectionCodecs
@@ -325,14 +325,16 @@ from compute_provisioning_ansible import SshConnectionCodec
 from compute_provisioning_service.services.capacity_derivation import (
     LegacyHostCapacityDerivation,
 )
+from vm_provisioning_adapter.codec import VmAnsibleCodec
 from vm_provisioning_adapter.services.job_service import AnsibleJobService
-from vm_provisioning_adapter.services.mock_ansible_service import ProgrammableMockAnsibleService
+from compute_provisioning_ansible import MockAnsibleRunner
+from vm_provisioning_adapter.services.mock_output import vm_mock_output
 from vm_provisioning_adapter.services.system_service import SystemService
 
 
 # ---------------------------------------------------------------------------
 # Representative playbook stdout for a successful vm_create job.
-# Contains a vm_creation_data JSON block that AnsibleService.parse_playbook_result
+# Contains a vm_creation_data JSON block that the VM codec
 # will extract into the job result.  Credentials are embedded so the credential
 # storage path is exercised.
 # ---------------------------------------------------------------------------
@@ -459,24 +461,24 @@ def _job_executor_table(runner, settings, bare_metal_runner=None):
     service."""
     from arkhai_bare_metal import BARE_METAL_ACCESS_ACTIONS
     from compute_provisioning import JobExecutorTable
+    from compute_provisioning_ansible import AnsibleJobExecutor
     from vm_provisioning_adapter.bundle import VM_JOB_ACTIONS
-    from bare_metal_provisioning_adapter.runtime import bare_metal_result_kind
-    from vm_provisioning_adapter.runtime import vm_result_kind
-    from vm_provisioning_adapter.services.ansible_job_executor import (
-        AnsibleJobExecutor,
-    )
+    from vm_provisioning_adapter.codec import VmAnsibleCodec
+    from bare_metal_provisioning_adapter.codec import BareMetalAnsibleCodec
 
     vm = AnsibleJobExecutor(
         runner,
+        VmAnsibleCodec(),
         settings.resolved_playbook_path,
-        settings=settings,
-        result_kind=vm_result_kind,
+        timeout_seconds=settings.ansible_timeout_seconds,
+        non_retryable_errors=settings.non_retryable_errors,
     )
     bare_metal = AnsibleJobExecutor(
         bare_metal_runner if bare_metal_runner is not None else runner,
+        BareMetalAnsibleCodec(),
         settings.resolved_bare_metal_playbook_path,
-        settings=settings,
-        result_kind=bare_metal_result_kind,
+        timeout_seconds=settings.ansible_timeout_seconds,
+        non_retryable_errors=settings.non_retryable_errors,
     )
     table = JobExecutorTable()
     for action in VM_JOB_ACTIONS:
@@ -488,8 +490,8 @@ def _job_executor_table(runner, settings, bare_metal_runner=None):
 
 @pytest.fixture
 def fake_ansible() -> MagicMock:
-    """AnsibleService mock with a successful create playbook response."""
-    mock = MagicMock(spec=AnsibleService)
+    """Ansible runner mock with a successful create playbook response."""
+    mock = MagicMock(spec=AnsibleRunner)
 
     fake_run = AnsibleRun(
         process=MagicMock(),
@@ -502,13 +504,9 @@ def fake_ansible() -> MagicMock:
         process_id=99999,
     )
 
-    mock.build_vars_file.return_value = Path("/tmp/fake_vars.yml")
     mock.start_playbook.return_value = fake_run
+    # The codec interprets this output as it would a real run's.
     mock.wait_for_playbook = AsyncMock(return_value=fake_result)
-
-    # parse_playbook_result uses real logic — delegate to a real instance.
-    real_ansible_impl = AnsibleService(MagicMock())
-    mock.parse_playbook_result.side_effect = real_ansible_impl.parse_playbook_result
 
     # write_inventory — a materialized inventory the caller cleans up (content
     # irrelevant; Ansible never runs)
@@ -643,10 +641,10 @@ async def client_and_queue(
 
     from bare_metal_provisioning_adapter.services.bare_metal_operations_service import BareMetalOperationsService
     bare_metal_operations_service = BareMetalOperationsService(
-        job_service=job_service,
+        jobs=job_service.engine,
         job_queue_provider=lambda: job_queue,
-        settings=mock_settings,
         host_service=host_service,
+        reclaim_policy=mock_settings.bare_metal_reclaim_policy,
     )
 
     from market_fulfillment import (
@@ -665,6 +663,7 @@ async def client_and_queue(
     ansible_fulfillment_provider = AnsibleFulfillmentProvider(
         job_service=job_service,
         job_queue_provider=lambda: job_queue,
+        reserved_var_keys=VmAnsibleCodec().reserved_var_keys,
         # Without this a relay-backed pool cannot lease a port, so every
         # relay-backed fulfillment is rejected as invalid provider
         # configuration — which reads as a bad request rather than as a
@@ -734,6 +733,7 @@ async def client_and_queue(
         session_factory=session_factory,
         job_queue_provider=lambda: job_queue,
         ansible_service=fake_ansible,
+        codec=VmAnsibleCodec(),
         host_service=host_service,
         pool_config_handler=AnsiblePoolConfigHandler(settings=mock_settings),
         job_service=job_service,
@@ -789,14 +789,8 @@ async def client_and_queue(
     _container_module.resolved_host_service = host_service
     _container_module.resolved_bare_metal_lease_service = bare_metal_lease_service
     _container_module.resolved_bare_metal_operations_service = bare_metal_operations_service
-    from bare_metal_provisioning_adapter.services.bare_metal_mock_executor import (
-        BareMetalMockAnsibleService,
-    )
-
     _container_module.resolved_bare_metal_mock_executor = (
-        bare_metal_runner
-        if isinstance(bare_metal_runner, BareMetalMockAnsibleService)
-        else None
+        bare_metal_runner if isinstance(bare_metal_runner, MockAnsibleRunner) else None
     )
     _container_module.resolved_lease_lifecycle_service = lease_lifecycle_service
     _container_module.resolved_capacity_ledger_service = capacity_ledger_service
@@ -924,9 +918,7 @@ async def test_client(client_and_queue) -> AsyncIterator[AsyncProvisioningTestCl
     Depends on client_and_queue to ensure the full service stack (including
     the test controller router) is mounted and the container is wired.
     """
-    job_service = _container_module.resolved_job_service
-    mock_settings = getattr(job_service, "_settings", MagicMock())
-    programmable_mock = ProgrammableMockAnsibleService(mock_settings)
+    programmable_mock = MockAnsibleRunner(default_output=vm_mock_output)
 
     original_ansible = _container_module.resolved_ansible_service
     _container_module.resolved_ansible_service = programmable_mock

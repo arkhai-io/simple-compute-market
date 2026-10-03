@@ -1,3 +1,5 @@
+"""Bare-metal access jobs are submitted to the job authority in bare metal's shape."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -22,12 +24,12 @@ from bare_metal_provisioning_adapter.services.bare_metal_operations_service impo
 @pytest.mark.asyncio
 async def test_grant_access_submits_node_grant_job():
     queue = object()
-    job_service = MagicMock()
-    job_service.submit = AsyncMock(
+    jobs = MagicMock()
+    jobs.submit = AsyncMock(
         return_value=JobSubmitResponse(job_id="grant-1", status="queued"),
     )
     service = BareMetalOperationsService(
-        job_service=job_service,
+        jobs=jobs,
         job_queue_provider=lambda: queue,
         host_service=MagicMock(
             get_host=MagicMock(return_value=SimpleNamespace(enabled=True)),
@@ -48,36 +50,43 @@ async def test_grant_access_submits_node_grant_job():
     )
 
     assert response.job_id == "grant-1"
-    params, submitted_queue = job_service.submit.await_args.args
-    assert submitted_queue is queue
-    assert params.host_id == "bm-node-1"
-    assert params.vm_target == "bm-node-1"
-    assert params.vm_action == NODE_GRANT_ACCESS_ACTION
-    assert params.offering_mode == "bare_metal"
-    assert params.executor_action == NODE_GRANT_ACCESS_ACTION
-    assert params.executor_target == "bm-node-1"
-    assert params.executor_ref == {
+    submitted = jobs.submit.await_args.kwargs
+    assert submitted["job_queue"] is queue
+    assert (submitted["offering_mode"], submitted["action"], submitted["host_id"]) == (
+        "bare_metal", NODE_GRANT_ACCESS_ACTION, "bm-node-1",
+    )
+    assert submitted["escrow_uid"] == "0xbm"
+    assert submitted["params"] == {
+        "action": NODE_GRANT_ACCESS_ACTION,
+        "host_id": "bm-node-1",
         "physical_host_id": "host-physical-1",
+        "escrow_uid": "0xbm",
+        "executor_ref": {
+            "physical_host_id": "host-physical-1",
+            "ssh_user": "tenant-a",
+            "ssh_public_key": "ssh-ed25519 AAAA tenant-a",
+        },
+        "access_ref": {
+            "ssh_user": "tenant-a",
+            "ssh_public_key": "ssh-ed25519 AAAA tenant-a",
+        },
         "ssh_user": "tenant-a",
         "ssh_public_key": "ssh-ed25519 AAAA tenant-a",
+        "reclaim_policy": None,
     }
-    assert params.escrow_uid == "0xbm"
-    assert params.physical_host_id == "host-physical-1"
-    assert params.ssh_user == "tenant-a"
-    assert params.ssh_public_key == "ssh-ed25519 AAAA tenant-a"
 
 
 @pytest.mark.asyncio
 async def test_reclaim_access_submits_node_reclaim_job_from_reservation():
     queue = object()
-    job_service = MagicMock()
-    job_service.submit = AsyncMock(
+    jobs = MagicMock()
+    jobs.submit = AsyncMock(
         return_value=JobSubmitResponse(job_id="reclaim-1", status="queued"),
     )
     service = BareMetalOperationsService(
-        job_service=job_service,
+        jobs=jobs,
         job_queue_provider=lambda: queue,
-        settings=MagicMock(bare_metal_reclaim_policy="lock_user"),
+        reclaim_policy="lock_user",
         host_service=MagicMock(
             get_host=MagicMock(return_value=SimpleNamespace(enabled=True)),
         ),
@@ -96,46 +105,54 @@ async def test_reclaim_access_submits_node_reclaim_job_from_reservation():
     })
 
     assert job_id == "reclaim-1"
-    params, submitted_queue = job_service.submit.await_args.args
-    assert submitted_queue is queue
-    assert params.host_id == "bm-node-1"
-    assert params.vm_target == "bm-node-1"
-    assert params.vm_action == NODE_RECLAIM_ACCESS_ACTION
-    assert params.offering_mode == "bare_metal"
-    assert params.executor_action == NODE_RECLAIM_ACCESS_ACTION
-    assert params.executor_target == "bm-node-1"
-    assert params.executor_ref == {
-        "physical_host_id": "host-physical-1",
-        "ssh_user": "tenant-a",
-        "ssh_public_key": "ssh-ed25519 AAAA tenant-a",
-    }
-    assert params.escrow_uid == "0xbm"
-    assert params.physical_host_id == "host-physical-1"
-    assert params.ssh_user == "tenant-a"
-    assert params.ssh_public_key == "ssh-ed25519 AAAA tenant-a"
-    assert params.bare_metal_reclaim_policy == "lock_user"
+    submitted = jobs.submit.await_args.kwargs
+    assert submitted["job_queue"] is queue
+    assert (submitted["offering_mode"], submitted["action"], submitted["host_id"]) == (
+        "bare_metal", NODE_RECLAIM_ACCESS_ACTION, "bm-node-1",
+    )
+    params = submitted["params"]
+    assert params["action"] == NODE_RECLAIM_ACCESS_ACTION
+    assert params["physical_host_id"] == "host-physical-1"
+    assert params["ssh_user"] == "tenant-a"
+    assert params["ssh_public_key"] == "ssh-ed25519 AAAA tenant-a"
+    assert params["reclaim_policy"] == "lock_user"
+    assert not any(name.startswith("vm_") for name in params)
+
+
+def test_an_unset_reclaim_policy_is_the_default_and_an_unknown_one_is_refused():
+    service = BareMetalOperationsService(
+        jobs=MagicMock(), job_queue_provider=lambda: object(), host_service=MagicMock()
+    )
+    assert service._reclaim_policy == "remove_lease_key"
+    with pytest.raises(ValueError, match="Invalid bare_metal_reclaim_policy"):
+        BareMetalOperationsService(
+            jobs=MagicMock(),
+            job_queue_provider=lambda: object(),
+            host_service=MagicMock(),
+            reclaim_policy="wipe_disk",
+        )
 
 
 @pytest.mark.asyncio
 async def test_reclaim_access_without_machine_id_returns_none():
-    job_service = MagicMock()
-    job_service.submit = AsyncMock()
+    jobs = MagicMock()
+    jobs.submit = AsyncMock()
     service = BareMetalOperationsService(
-        job_service=job_service,
+        jobs=jobs,
         job_queue_provider=lambda: object(),
         host_service=MagicMock(),
     )
 
     assert await service.reclaim_access_for_reservation({}) is None
-    job_service.submit.assert_not_awaited()
+    jobs.submit.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_grant_access_unknown_machine_raises_without_submitting_job():
-    job_service = MagicMock()
-    job_service.submit = AsyncMock()
+    jobs = MagicMock()
+    jobs.submit = AsyncMock()
     service = BareMetalOperationsService(
-        job_service=job_service,
+        jobs=jobs,
         job_queue_provider=lambda: object(),
         host_service=MagicMock(get_host=MagicMock(return_value=None)),
     )
@@ -151,15 +168,15 @@ async def test_grant_access_unknown_machine_raises_without_submitting_job():
         )
 
     assert exc_info.value.status_code == 404
-    job_service.submit.assert_not_awaited()
+    jobs.submit.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_grant_access_disabled_machine_raises_without_submitting_job():
-    job_service = MagicMock()
-    job_service.submit = AsyncMock()
+    jobs = MagicMock()
+    jobs.submit = AsyncMock()
     service = BareMetalOperationsService(
-        job_service=job_service,
+        jobs=jobs,
         job_queue_provider=lambda: object(),
         host_service=MagicMock(
             get_host=MagicMock(return_value=SimpleNamespace(enabled=False)),
@@ -177,15 +194,15 @@ async def test_grant_access_disabled_machine_raises_without_submitting_job():
         )
 
     assert exc_info.value.status_code == 409
-    job_service.submit.assert_not_awaited()
+    jobs.submit.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_reclaim_access_for_unknown_machine_returns_none_without_submitting_job():
-    job_service = MagicMock()
-    job_service.submit = AsyncMock()
+    jobs = MagicMock()
+    jobs.submit = AsyncMock()
     service = BareMetalOperationsService(
-        job_service=job_service,
+        jobs=jobs,
         job_queue_provider=lambda: object(),
         host_service=MagicMock(get_host=MagicMock(return_value=None)),
     )
@@ -196,13 +213,13 @@ async def test_reclaim_access_for_unknown_machine_returns_none_without_submittin
     })
 
     assert result is None
-    job_service.submit.assert_not_awaited()
+    jobs.submit.assert_not_awaited()
 
 
 def test_the_host_registry_is_required():
     """Host validation has no path that skips it for want of a registry."""
     with pytest.raises(TypeError):
         BareMetalOperationsService(
-            job_service=MagicMock(),
+            jobs=MagicMock(),
             job_queue_provider=lambda: object(),
         )

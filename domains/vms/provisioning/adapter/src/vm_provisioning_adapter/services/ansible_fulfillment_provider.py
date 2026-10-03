@@ -34,7 +34,7 @@ from vm_provisioning_adapter.models.fulfillment_model import (
     AnsiblePreparedOperation,
     VmFulfillmentRequirements,
 )
-from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
+from vm_provisioning_adapter.models.jobs_model import VmJobParams
 from vm_provisioning_adapter.requirement_delegates import resolve_requirement_delegate
 
 logger = logging.getLogger(__name__)
@@ -70,10 +70,15 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
         *,
         job_service: "AnsibleJobService",
         job_queue_provider: Callable[[], "AsyncJobQueue"],
+        reserved_var_keys: Callable[[VmJobParams], frozenset[str]],
         port_allocator: Any | None = None,
     ) -> None:
         self._job_service = job_service
         self._job_queue_provider = job_queue_provider
+        # The variable names a job sets itself (the VM codec's answer), so a
+        # pool's extra variables that would replace one are refused when the
+        # fulfillment is prepared, before anything is written.
+        self._reserved_var_keys = reserved_var_keys
         # Optional so a pool with no relay — the direct-NAT path — needs no
         # allocator at all. A pool that does reference a relay and finds no
         # allocator is rejected rather than dispatched without a port.
@@ -181,11 +186,11 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
 
     def _validate_extra_vars(
         self,
-        params: AnsibleJobParams,
+        params: VmJobParams,
         extra: dict[str, Any],
     ) -> None:
         collisions = sorted(
-            self._job_service.reserved_var_keys(params).intersection(extra)
+            self._reserved_var_keys(params).intersection(extra)
         )
         if collisions:
             raise ProviderConfigInvalidError(
@@ -194,12 +199,12 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
             )
 
     @staticmethod
-    def _prepared_parameters(params: AnsibleJobParams) -> AnsiblePreparedJobParameters:
+    def _prepared_parameters(params: VmJobParams) -> AnsiblePreparedJobParameters:
         return AnsiblePreparedJobParameters.model_validate(dataclasses.asdict(params))
 
     @staticmethod
-    def _job_params(parameters: AnsiblePreparedJobParameters) -> AnsibleJobParams:
-        return AnsibleJobParams(**parameters.model_dump(mode="python"))
+    def _job_params(parameters: AnsiblePreparedJobParameters) -> VmJobParams:
+        return VmJobParams(**parameters.model_dump(mode="python"))
 
     def prepare_create(
         self,
@@ -255,7 +260,7 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
             if uses_relay and allocate
             else None
         )
-        params = AnsibleJobParams(
+        params = VmJobParams(
             host_id=host_id,
             vm_action="create",
             offering_mode=resource.offering_mode,
@@ -369,7 +374,7 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
         # configuration would reload the wrong host client and release a port
         # against a relay it never occupied.
         relay_id = self._leased_relay_id(settlement_result.capacity_reservation_id)
-        params = AnsibleJobParams(
+        params = VmJobParams(
             host_id=metadata.host_id,
             vm_action="vm_remove",
             offering_mode=settlement_result.resource.offering_mode,

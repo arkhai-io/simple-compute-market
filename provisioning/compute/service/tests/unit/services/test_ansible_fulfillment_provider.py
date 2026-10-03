@@ -17,11 +17,12 @@ from market_fulfillment import (
     SettlementResult,
     VersionedEnvelope,
 )
-from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
+from vm_provisioning_adapter.models.jobs_model import VmJobParams
 from vm_provisioning_adapter.services.ansible_fulfillment_provider import (
     AnsibleFulfillmentProvider,
 )
-from vm_provisioning_adapter.services.ansible_service import AnsibleService
+from compute_provisioning_ansible import render_extra_vars
+from vm_provisioning_adapter.codec import VmAnsibleCodec
 
 
 def _request() -> VersionedEnvelope[dict]:
@@ -85,7 +86,6 @@ def _settlement_result(**overrides) -> SettlementResult:
 def job_service():
     service = MagicMock()
     service.submit = AsyncMock(return_value=SimpleNamespace(job_id="job-1", status="queued"))
-    service.reserved_var_keys = AnsibleService(settings=MagicMock()).reserved_var_keys
     return service
 
 
@@ -94,6 +94,7 @@ def provider(job_service):
     return AnsibleFulfillmentProvider(
         job_service=job_service,
         job_queue_provider=lambda: MagicMock(),
+        reserved_var_keys=VmAnsibleCodec().reserved_var_keys,
     )
 
 
@@ -120,7 +121,7 @@ class TestCreate:
         )
         await provider.dispatch_create(prepared)
 
-        submitted_params: AnsibleJobParams = job_service.submit.await_args.args[0]
+        submitted_params: VmJobParams = job_service.submit.await_args.args[0]
         assert submitted_params.playbook_path == "playbooks/custom.yaml"
         assert submitted_params.provider_extra_vars == {"region": "eu"}
 
@@ -153,7 +154,7 @@ class TestSizingPrecedence:
         )
         await provider.dispatch_create(prepared)
 
-        submitted_params: AnsibleJobParams = job_service.submit.await_args.args[0]
+        submitted_params: VmJobParams = job_service.submit.await_args.args[0]
         assert submitted_params.vm_ram == 4096  # 4 GB -> MiB
         assert submitted_params.vm_vcpus == 2
         assert submitted_params.vm_disk_size == "40G"
@@ -171,7 +172,7 @@ class TestSizingPrecedence:
         )
         await provider.dispatch_create(prepared)
 
-        submitted_params: AnsibleJobParams = job_service.submit.await_args.args[0]
+        submitted_params: VmJobParams = job_service.submit.await_args.args[0]
         assert submitted_params.vm_ram == 8192
         assert submitted_params.vm_vcpus == 4
         assert submitted_params.vm_disk_size == "80G"
@@ -194,7 +195,7 @@ class TestSizingPrecedence:
         )
         await provider.dispatch_create(prepared)
 
-        submitted_params: AnsibleJobParams = job_service.submit.await_args.args[0]
+        submitted_params: VmJobParams = job_service.submit.await_args.args[0]
         assert submitted_params.vm_gpu_count == 2
         assert submitted_params.gpu_provisioned is True
         assert (submitted_params.vm_ram, submitted_params.vm_vcpus, submitted_params.vm_disk_size) == (
@@ -209,7 +210,7 @@ class TestSizingPrecedence:
         )
         await provider.dispatch_create(prepared)
 
-        submitted_params: AnsibleJobParams = job_service.submit.await_args.args[0]
+        submitted_params: VmJobParams = job_service.submit.await_args.args[0]
         assert submitted_params.vm_ram is None
         assert submitted_params.vm_vcpus is None
         assert submitted_params.vm_disk_size is None
@@ -233,7 +234,7 @@ class TestSizingPrecedence:
         )
         await provider.dispatch_create(prepared)
 
-        submitted_params: AnsibleJobParams = job_service.submit.await_args.args[0]
+        submitted_params: VmJobParams = job_service.submit.await_args.args[0]
         # The reservation's committed shape wins, not the request payload's.
         assert submitted_params.vm_vcpus == 8
         assert submitted_params.vm_ram == 32 * 1024
@@ -288,6 +289,7 @@ class TestRelayAccessPath:
         provider = AnsibleFulfillmentProvider(
             job_service=job_service,
             job_queue_provider=lambda: MagicMock(),
+            reserved_var_keys=VmAnsibleCodec().reserved_var_keys,
             port_allocator=self._Allocator(),
         )
         prepared = provider.prepare_create(
@@ -303,7 +305,7 @@ class TestRelayAccessPath:
         )
         await provider.dispatch_create(prepared)
 
-        submitted: AnsibleJobParams = job_service.submit.await_args.args[0]
+        submitted: VmJobParams = job_service.submit.await_args.args[0]
         assert submitted.relay_addr is None
         assert submitted.vm_remote_port is None
 
@@ -314,6 +316,7 @@ class TestRelayAccessPath:
         provider = AnsibleFulfillmentProvider(
             job_service=job_service,
             job_queue_provider=lambda: MagicMock(),
+            reserved_var_keys=VmAnsibleCodec().reserved_var_keys,
             port_allocator=allocator,
         )
         prepared = provider.prepare_create(
@@ -322,7 +325,7 @@ class TestRelayAccessPath:
         )
         await provider.dispatch_create(prepared)
 
-        submitted: AnsibleJobParams = job_service.submit.await_args.args[0]
+        submitted: VmJobParams = job_service.submit.await_args.args[0]
         assert submitted.relay_id == "site-a"
         assert submitted.vm_remote_port == 6142
         # The endpoint and the token are deliberately absent. What is submitted
@@ -339,6 +342,7 @@ class TestRelayAccessPath:
         provider = AnsibleFulfillmentProvider(
             job_service=job_service,
             job_queue_provider=lambda: MagicMock(),
+            reserved_var_keys=VmAnsibleCodec().reserved_var_keys,
             port_allocator=allocator,
         )
         provider.prepare_create(
@@ -355,6 +359,7 @@ class TestRelayAccessPath:
         provider = AnsibleFulfillmentProvider(
             job_service=job_service,
             job_queue_provider=lambda: MagicMock(),
+            reserved_var_keys=VmAnsibleCodec().reserved_var_keys,
             port_allocator=self._Allocator(),
         )
         with pytest.raises(ProviderConfigInvalidError):
@@ -376,6 +381,7 @@ class TestRelayAccessPath:
         provider = AnsibleFulfillmentProvider(
             job_service=job_service,
             job_queue_provider=lambda: MagicMock(),
+            reserved_var_keys=VmAnsibleCodec().reserved_var_keys,
             port_allocator=allocator,
         )
         provider.prepare_create(
@@ -394,6 +400,7 @@ class TestRelayAccessPath:
         provider = AnsibleFulfillmentProvider(
             job_service=job_service,
             job_queue_provider=lambda: MagicMock(),
+            reserved_var_keys=VmAnsibleCodec().reserved_var_keys,
             port_allocator=allocator,
         )
         provider.prepare_create(
@@ -421,6 +428,7 @@ class TestRelayAccessPath:
         provider = AnsibleFulfillmentProvider(
             job_service=job_service,
             job_queue_provider=lambda: MagicMock(),
+            reserved_var_keys=VmAnsibleCodec().reserved_var_keys,
             port_allocator=self._Allocator(),
         )
         with pytest.raises(ProviderConfigInvalidError) as excinfo:
@@ -458,7 +466,7 @@ class TestTeardown:
         result = await provider.dispatch_teardown(prepared)
 
         assert result.provider_metadata["teardown_job_id"] == "job-1"
-        submitted_params: AnsibleJobParams = job_service.submit.await_args.args[0]
+        submitted_params: VmJobParams = job_service.submit.await_args.args[0]
         assert submitted_params.vm_action == "vm_remove"
         assert submitted_params.vm_target == "vm-alloc-1"
 
@@ -531,22 +539,22 @@ class TestExtraVarsCollision:
             pool_config=_pool_config(extra_vars={"region": "eu"}),
         )
         await provider.dispatch_create(prepared)
-        submitted_params: AnsibleJobParams = job_service.submit.await_args.args[0]
+        submitted_params: VmJobParams = job_service.submit.await_args.args[0]
         assert submitted_params.provider_extra_vars == {"region": "eu"}
 
-    def test_reserved_var_keys_matches_what_build_vm_vars_actually_emits(self):
-        ansible_service = AnsibleService(settings=MagicMock())
-        params = AnsibleJobParams(
+    def test_reserved_var_keys_matches_what_the_job_renders(self):
+        codec = VmAnsibleCodec()
+        params = VmJobParams(
             host_id="kvm1", vm_action="create", offering_mode="vm"
         )
-        reserved = ansible_service.reserved_var_keys(params)
+        reserved = codec.reserved_var_keys(params)
         assert "offering_mode" in reserved
         assert "host_id" in reserved
+        assert reserved == frozenset(codec.variables(params))
 
+        # The executor refuses the same collision when it renders the job.
         with pytest.raises(ValueError, match="offering_mode"):
-            ansible_service._build_vm_vars(
-                dataclasses.replace(params, provider_extra_vars={"offering_mode": "x"})
-            )
+            render_extra_vars(codec.variables(params), {"offering_mode": "x"})
 
 
 class TestPreparedEnvelope:
@@ -641,6 +649,7 @@ class TestTeardownReadsTheLease:
         provider = AnsibleFulfillmentProvider(
             job_service=job_service,
             job_queue_provider=lambda: MagicMock(),
+            reserved_var_keys=VmAnsibleCodec().reserved_var_keys,
             port_allocator=allocator,
         )
 
@@ -655,6 +664,7 @@ class TestTeardownReadsTheLease:
         provider = AnsibleFulfillmentProvider(
             job_service=job_service,
             job_queue_provider=lambda: MagicMock(),
+            reserved_var_keys=VmAnsibleCodec().reserved_var_keys,
             port_allocator=self._NoLeaseAllocator(),
         )
 
@@ -668,6 +678,7 @@ class TestTeardownReadsTheLease:
         provider = AnsibleFulfillmentProvider(
             job_service=job_service,
             job_queue_provider=lambda: MagicMock(),
+            reserved_var_keys=VmAnsibleCodec().reserved_var_keys,
             port_allocator=self._NoLeaseAllocator(),
         )
 

@@ -283,7 +283,6 @@ class TestDispatchRequiresARegisteredHost:
             )
         fake_ansible.start_playbook.assert_not_called()
         fake_ansible.write_inventory.assert_not_called()
-        fake_ansible.build_vars_file.assert_not_called()
 
     async def test_a_registered_host_job_renders_its_inventory_from_the_record(
         self, client_and_queue, fake_ansible

@@ -156,20 +156,6 @@ wheels = [
 ]
 
 [[package]]
-name = "arkhai-bare-metal"
-version = "0.6.0"
-source = { registry = "../../../../.dist" }
-dependencies = [
-    { name = "arkhai-compute" },
-    { name = "arkhai-core" },
-    { name = "arkhai-kit-capability-shape" },
-    { name = "pydantic" },
-]
-wheels = [
-    { path = "arkhai_bare_metal-0.6.0-py3-none-any.whl" },
-]
-
-[[package]]
 name = "arkhai-compute"
 version = "0.1.0"
 source = { registry = "../../../../.dist" }
@@ -395,7 +381,6 @@ name = "arkhai-vms-provisioning-adapter"
 version = "0.5.0"
 source = { editable = "." }
 dependencies = [
-    { name = "arkhai-bare-metal" },
     { name = "arkhai-compute-provisioning" },
     { name = "arkhai-compute-provisioning-ansible" },
     { name = "arkhai-compute-provisioning-service" },
@@ -418,7 +403,6 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arkhai-bare-metal", specifier = ">=0.4.0" },
     { name = "arkhai-compute-provisioning", specifier = ">=0.8.0" },
     { name = "arkhai-compute-provisioning-ansible", specifier = ">=0.1.0" },
     { name = "arkhai-compute-provisioning-service", specifier = ">=0.5.0" },
@@ -445,6 +429,7 @@ version = "0.6.0"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "arkhai-compute-provisioning" },
+    { name = "arkhai-compute-provisioning-ansible" },
     { name = "arkhai-kit-identity" },
     { name = "httpx" },
     { name = "pydantic" },

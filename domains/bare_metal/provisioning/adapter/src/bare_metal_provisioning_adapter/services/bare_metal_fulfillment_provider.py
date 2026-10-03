@@ -105,6 +105,8 @@ class BareMetalFulfillmentProvider(FulfillmentProvider):
         job_service: Any,
     ) -> None:
         self._operations = operations_service
+        # The compute family's job authority, read for the jobs this provider
+        # submitted through ``operations_service``.
         self._job_service = job_service
 
     @staticmethod
@@ -433,22 +435,12 @@ class BareMetalFulfillmentProvider(FulfillmentProvider):
         except Exception as exc:
             raise CredentialFetchFailedError(str(exc)) from exc
 
+        # The grant job's result is the access fact the access role printed.
         result = dict(job.result.value) if job.result is not None else {}
-        operation_result = result.get("ansible_result")
-        if not isinstance(operation_result, dict):
-            operation_result = result
-        ssh_user = operation_result.get("ssh_user")
-        if not isinstance(ssh_user, str) or not ssh_user.strip():
-            ssh_user = result.get("tenant_user")
-        host = operation_result.get("host")
-        if not isinstance(host, str) or not host.strip():
-            host = result.get("host")
-        port = operation_result.get("port")
-        if port is None:
-            port = result.get("port", result.get("ssh_port"))
-        timestamp = operation_result.get("timestamp")
-        if not isinstance(timestamp, str):
-            timestamp = result.get("timestamp")
+        ssh_user = result.get("ssh_user")
+        host = result.get("host")
+        port = result.get("port")
+        timestamp = result.get("timestamp")
         details = {
             key: result[key]
             for key in ("result_message", "note")

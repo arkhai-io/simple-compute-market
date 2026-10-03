@@ -9,9 +9,11 @@ from typing import Any, Callable, Mapping
 from compute_provisioning import JobExecutorResolver
 from compute_provisioning.hosts import ConnectionCodecs
 from compute_provisioning.hosts.service import HostAuthority
-from compute_provisioning_ansible import SshConnectionCodec
+from compute_provisioning_ansible import AnsibleJobExecutor, SshConnectionCodec
+from compute_provisioning_ansible.runner import AnsibleRunner
 from compute_provisioning_service.services.relay_rebinding import check_host_pool_change
 from vm_provisioning_adapter.bundle import HOST_REQUIREMENT, build_vm_adapter_bundle
+from vm_provisioning_adapter.codec import GoldenImageCredentials, VmAnsibleCodec
 from vm_provisioning_adapter.compute_adapter import VmComputeAdapter
 from vm_provisioning_adapter.release import VmFulfillmentReleaseJobPort, VmReleaseExecutor
 from compute_provisioning_service.services.relay_port_allocator import (
@@ -26,8 +28,6 @@ from vm_provisioning_adapter.services.ansible_fulfillment_provider import (
 from vm_provisioning_adapter.services.ansible_pool_config_handler import (
     AnsiblePoolConfigHandler,
 )
-from vm_provisioning_adapter.services.ansible_job_executor import AnsibleJobExecutor
-from vm_provisioning_adapter.services.ansible_service import AnsibleService
 from vm_provisioning_adapter.services.host_operations_service import (
     HostOperationsService,
 )
@@ -40,7 +40,10 @@ class VmProvisioningRuntime:
     config: Any
     session_factory: Any
     job_queue_provider: Callable[[], Any]
+    # The Ansible runner VM jobs and connectivity checks use: the real one, or
+    # under the mock profile the programmable mock.
     ansible_service: Any
+    codec: VmAnsibleCodec
     host_service: HostAuthority
     pool_config_handler: AnsiblePoolConfigHandler
     job_service: AnsibleJobService
@@ -49,24 +52,27 @@ class VmProvisioningRuntime:
     settlement_repository: Any
     teardown_port: Any
     job_executors: Any = None
-    # Fills a referenced relay's address and token into a VM job's parameters
-    # immediately before it runs; a deployment with no relay needs none.
-    relay_resolver: Any = None
+
+    @property
+    def job_engine(self):
+        """The compute family's job authority every domain submits to."""
+        return self.job_service.engine
 
     def job_executor(self) -> AnsibleJobExecutor:
-        """What runs every VM job action: this runtime's runner and playbook."""
+        """What runs every VM job action: this runtime's runner, codec, and playbook."""
         return AnsibleJobExecutor(
             self.ansible_service,
+            self.codec,
             self.config.resolved_playbook_path,
-            settings=self.config,
-            result_kind=vm_result_kind,
-            relay_resolver=self.relay_resolver,
+            timeout_seconds=self.config.ansible_timeout_seconds,
+            non_retryable_errors=self.config.non_retryable_errors,
         )
 
     def fulfillment_provider(self):
         return AnsibleFulfillmentProvider(
             job_service=self.job_service,
             job_queue_provider=self.job_queue_provider,
+            reserved_var_keys=self.codec.reserved_var_keys,
             port_allocator=RelayPortAllocator(self.session_factory),
         )
 
@@ -134,11 +140,6 @@ def project_ansible_pool_defaults(raw_view: Mapping[str, Any]) -> dict[str, Any]
     }
 
 
-def vm_result_kind(action: str) -> str:
-    """The kind of the result a VM action's job produces."""
-    return f"vm_{action}"
-
-
 def _relay_pool_change(db, host_id: str, current_pool_id: str, new_pool_id: str) -> None:
     # A host moving to a pool on a different relay while it holds leases would
     # strand its VMs' buyers on the old address; the move is refused.
@@ -166,13 +167,12 @@ def build_vm_runtime(
         if profile.strip()
     ]
     if "mock" in active:
-        from vm_provisioning_adapter.services.mock_ansible_service import (
-            ProgrammableMockAnsibleService,
-        )
+        from compute_provisioning_ansible import MockAnsibleRunner
+        from vm_provisioning_adapter.services.mock_output import vm_mock_output
 
-        ansible_service = ProgrammableMockAnsibleService(config)
+        ansible_service = MockAnsibleRunner(default_output=vm_mock_output)
     else:
-        ansible_service = AnsibleService(config)
+        ansible_service = AnsibleRunner(config)
 
     host_service = HostAuthority(
         session_factory,
@@ -190,14 +190,25 @@ def build_vm_runtime(
         job_service=job_service,
         job_queue_provider=job_queue_provider,
     )
-    return VmProvisioningRuntime(
+    codec = VmAnsibleCodec(
+        golden_image=GoldenImageCredentials(
+            root_ssh_filename=str(config.golden_root_ssh_filename or ""),
+            root_ssh_password=str(config.golden_root_ssh_password or ""),
+            image_name=str(config.golden_image_name or ""),
+        ),
+        # Fills a referenced relay's address and token into a VM job's
+        # parameters immediately before it runs; a job naming no relay passes
+        # through untouched.
         relay_resolver=RelayExecutionResolver(
             session_factory=session_factory, settings=config
         ),
+    )
+    return VmProvisioningRuntime(
         config=config,
         session_factory=session_factory,
         job_queue_provider=job_queue_provider,
         ansible_service=ansible_service,
+        codec=codec,
         host_service=host_service,
         pool_config_handler=AnsiblePoolConfigHandler(settings=config),
         job_service=job_service,

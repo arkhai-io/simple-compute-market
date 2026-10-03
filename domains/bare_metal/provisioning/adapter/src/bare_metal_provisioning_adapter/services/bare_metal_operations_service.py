@@ -1,8 +1,8 @@
-"""Bare-metal executor job submission.
+"""Bare-metal access job submission.
 
-This is a transitional adapter inside the VM provisioning service. It keeps
-bare-metal action construction separate so the implementation can move with the
-multi-domain provisioner later.
+Grants and reclaims are submitted to the compute family's job authority as
+``BareMetalJobParams``, which the bare-metal codec turns into the access
+playbook's variables when the job runs.
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 
 from collections.abc import Callable
-from typing import Any, TYPE_CHECKING
+from typing import Any
 
 from arkhai_bare_metal import (
     BARE_METAL_OFFERING_MODE,
@@ -20,16 +20,13 @@ from arkhai_bare_metal import (
     bare_metal_executor_ref,
 )
 from compute_provisioning.contracts import ExecutorActionEnvelope
-from compute_provisioning_service.config import DEFAULT_BARE_METAL_RECLAIM_POLICY
-from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
+from compute_provisioning.hosts.service import HostAuthority
 from compute_provisioning.jobs import JobSubmitResponse
+from compute_provisioning.jobs.engine import JobEngine
 from compute_provisioning.jobs.queue import AsyncJobQueue
+from bare_metal_provisioning_adapter.codec import BareMetalJobParams, reclaim_policy_from
 from bare_metal_provisioning_adapter.services.bare_metal_lease_service import bare_metal_access_ref
 from bare_metal_provisioning_adapter.release import get_physical_host_id
-
-if TYPE_CHECKING:
-    from vm_provisioning_adapter.services.job_service import AnsibleJobService
-    from vm_provisioning_adapter.services.host_service import HostService
 
 
 def _access_value(access_ref: dict[str, Any] | None, *keys: str) -> str | None:
@@ -53,15 +50,17 @@ class BareMetalOperationsService:
     def __init__(
         self,
         *,
-        job_service: "AnsibleJobService",
+        jobs: JobEngine,
         job_queue_provider: Callable[[], AsyncJobQueue],
-        host_service: "HostService",
-        settings: Any | None = None,
+        host_service: HostAuthority,
+        reclaim_policy: str | None = None,
     ) -> None:
-        self._job_service = job_service
+        self._jobs = jobs
         self._job_queue_provider = job_queue_provider
-        self._settings = settings
         self._host_service = host_service
+        # Validated here, at composition, so a deployment configured with a
+        # policy the access role does not implement refuses to start.
+        self._reclaim_policy = reclaim_policy_from(reclaim_policy)
 
     async def grant_access(
         self,
@@ -86,14 +85,10 @@ class BareMetalOperationsService:
                 body.host_id,
                 body.physical_host_id,
             )
-        return await self._job_service.submit(
-            AnsibleJobParams(
+        return await self._submit(
+            BareMetalJobParams(
+                action=NODE_GRANT_ACCESS_ACTION,
                 host_id=body.host_id,
-                vm_action=NODE_GRANT_ACCESS_ACTION,
-                vm_target=body.host_id,
-                offering_mode=BARE_METAL_OFFERING_MODE,
-                executor_action=NODE_GRANT_ACCESS_ACTION,
-                executor_target=body.host_id,
                 executor_ref=bare_metal_executor_ref(
                     body.physical_host_id,
                     access_ref=access_ref or None,
@@ -106,7 +101,6 @@ class BareMetalOperationsService:
                 ),
                 access_ref=access_ref or None,
             ),
-            self._job_queue_provider(),
             contract=contract,
             operation_id=resolved_operation_id,
         )
@@ -146,14 +140,10 @@ class BareMetalOperationsService:
                 host_id,
                 get_physical_host_id(reservation),
             )
-        return await self._job_service.submit(
-            AnsibleJobParams(
+        return await self._submit(
+            BareMetalJobParams(
+                action=NODE_RECLAIM_ACCESS_ACTION,
                 host_id=host_id,
-                vm_action=NODE_RECLAIM_ACCESS_ACTION,
-                vm_target=host_id,
-                offering_mode=BARE_METAL_OFFERING_MODE,
-                executor_action=NODE_RECLAIM_ACCESS_ACTION,
-                executor_target=host_id,
                 executor_ref=reservation.get("executor_ref"),
                 escrow_uid=reservation.get("escrow_uid"),
                 physical_host_id=get_physical_host_id(reservation),
@@ -162,20 +152,29 @@ class BareMetalOperationsService:
                     access_ref, "ssh_public_key", "ssh_pubkey", "public_key",
                 ),
                 access_ref=access_ref,
-                bare_metal_reclaim_policy=self._reclaim_policy(),
+                reclaim_policy=self._reclaim_policy,
             ),
-            self._job_queue_provider(),
             contract=contract,
             operation_id=resolved_operation_id,
         )
 
-    def _reclaim_policy(self) -> str:
-        if self._settings is None:
-            return DEFAULT_BARE_METAL_RECLAIM_POLICY
-        try:
-            return str(self._settings.bare_metal_reclaim_policy)
-        except AttributeError:
-            return DEFAULT_BARE_METAL_RECLAIM_POLICY
+    async def _submit(
+        self,
+        params: BareMetalJobParams,
+        *,
+        contract: ExecutorActionEnvelope | None,
+        operation_id: str,
+    ) -> JobSubmitResponse:
+        return await self._jobs.submit(
+            offering_mode=BARE_METAL_OFFERING_MODE,
+            action=params.action,
+            host_id=params.host_id,
+            params=params.model_dump(mode="json"),
+            job_queue=self._job_queue_provider(),
+            escrow_uid=params.escrow_uid,
+            contract=contract,
+            operation_id=operation_id,
+        )
 
     def _validate_host(self, host_id: str) -> None:
         # Access jobs run only against a registered, enabled host record; there

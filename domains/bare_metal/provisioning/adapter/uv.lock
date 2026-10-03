@@ -176,6 +176,7 @@ source = { editable = "." }
 dependencies = [
     { name = "arkhai-bare-metal" },
     { name = "arkhai-compute-provisioning" },
+    { name = "arkhai-compute-provisioning-ansible" },
     { name = "arkhai-compute-provisioning-service" },
     { name = "arkhai-kit-fulfillment" },
     { name = "arkhai-kit-resource-pools" },
@@ -194,6 +195,7 @@ dev = [
 requires-dist = [
     { name = "arkhai-bare-metal", specifier = ">=0.6.0" },
     { name = "arkhai-compute-provisioning", specifier = ">=0.8.0" },
+    { name = "arkhai-compute-provisioning-ansible", specifier = ">=0.1.0" },
     { name = "arkhai-compute-provisioning-service", specifier = ">=0.5.0" },
     { name = "arkhai-kit-fulfillment", specifier = ">=0.3.0" },
     { name = "arkhai-kit-resource-pools", specifier = ">=0.3.0" },
@@ -434,7 +436,6 @@ name = "arkhai-vms-provisioning-adapter"
 version = "0.5.0"
 source = { registry = "../../../../.dist" }
 dependencies = [
-    { name = "arkhai-bare-metal" },
     { name = "arkhai-compute-provisioning" },
     { name = "arkhai-compute-provisioning-ansible" },
     { name = "arkhai-compute-provisioning-service" },
@@ -458,6 +459,7 @@ version = "0.6.0"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "arkhai-compute-provisioning" },
+    { name = "arkhai-compute-provisioning-ansible" },
     { name = "arkhai-kit-identity" },
     { name = "httpx" },
     { name = "pydantic" },

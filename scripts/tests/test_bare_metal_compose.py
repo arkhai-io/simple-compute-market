@@ -59,6 +59,9 @@ def test_bare_metal_compose_merges_bindings_and_preserves_mount_paths(
     assert mounts["/opt/domains/vms/provisioning/iac"] == str(
         REPO_ROOT / "domains/vms/provisioning/iac"
     )
+    assert mounts["/opt/domains/bare_metal/provisioning/iac"] == str(
+        REPO_ROOT / "domains/bare_metal/provisioning/iac"
+    )
     registry = services["bare-metal-registry"]
     assert registry["environment"]["REGISTRY_AUTHORITY_ID"] == "bare-metal-registry"
     mounts = {v["target"]: v["source"] for v in registry["volumes"]}

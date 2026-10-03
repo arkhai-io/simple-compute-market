@@ -463,6 +463,7 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
         "20260927_001_drop_reservation_release_mirror",
         "20261002_001_host_connection_envelope",
         "20261002_002_job_envelopes",
+        "20261002_003_bare_metal_job_shapes",
     }
 
 

@@ -1,12 +1,11 @@
-"""Ansible jobs' front to the compute family's job authority.
+"""VM jobs' front to the compute family's job authority.
 
-``AnsibleJobService`` is how VM and bare-metal operations submit jobs: it turns
-``AnsibleJobParams`` into a submission (route key, host, opaque parameters) and
-answers what only the Ansible implementation knows, such as which variable
-names a job's runner reserves. Everything about a job's durable lifecycle —
-persistence, retries, cancellation, processing, reads — is the
-``compute_provisioning.jobs.JobEngine`` it holds, which knows nothing of
-Ansible or of either domain.
+``AnsibleJobService`` is how VM operations submit jobs: it turns
+``VmJobParams`` into a submission (route key, host, opaque parameters).
+Everything about a job's durable lifecycle — persistence, retries,
+cancellation, processing, reads — is the ``compute_provisioning.jobs.JobEngine``
+it holds, which knows nothing of Ansible or of any domain. The engine is built
+here until the composition root builds it; other domains submit to it directly.
 
 The in-process ``AsyncJobQueue`` is started in the FastAPI lifespan with the
 engine's ``process_job`` as its handler.
@@ -30,8 +29,7 @@ from compute_provisioning.jobs import (
 )
 from compute_provisioning.jobs.engine import JobEngine
 from compute_provisioning_service.config import Settings
-from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
-from vm_provisioning_adapter.services.ansible_job_executor import ReservesVariableKeys
+from vm_provisioning_adapter.models.jobs_model import VmJobParams
 
 
 def retry_policy_from(settings: Settings) -> JobRetryPolicy:
@@ -55,7 +53,6 @@ class AnsibleJobService:
         # The host registry is required: it is the only source of the host a
         # job runs against.
         self._settings = settings
-        self._executors = executors
         self._engine = JobEngine(
             session_factory,
             executors=executors,
@@ -69,13 +66,13 @@ class AnsibleJobService:
 
     async def submit(
         self,
-        params: AnsibleJobParams,
+        params: VmJobParams,
         job_queue,
         *,
         contract: ExecutorActionEnvelope | None = None,
         operation_id: str | None = None,
     ) -> JobSubmitResponse:
-        """Persist and enqueue an Ansible job."""
+        """Persist and enqueue a VM job."""
         return await self._engine.submit(
             offering_mode=params.offering_mode,
             action=params.executor_action or params.vm_action,
@@ -92,24 +89,6 @@ class AnsibleJobService:
             contract=contract,
             operation_id=operation_id,
         )
-
-    def reserved_var_keys(self, params: AnsibleJobParams) -> frozenset[str]:
-        """Built-in variable keys the runner would emit for these params.
-
-        Lets callers (AnsibleFulfillmentProvider) validate proposed pool
-        extra-vars synchronously, before submit(), without depending on the
-        runner directly.
-        """
-        executor = self._executors.resolve(
-            params.offering_mode, params.executor_action or params.vm_action
-        )
-        if not isinstance(executor, ReservesVariableKeys):
-            raise TypeError(
-                f"the executor for {params.offering_mode!r}/"
-                f"{params.executor_action or params.vm_action!r} does not report "
-                "the variable names it reserves"
-            )
-        return executor.reserved_var_keys(params)
 
     # The job authority's operations, unchanged.
 

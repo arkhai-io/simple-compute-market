@@ -1,11 +1,11 @@
 """
 Unit tests for AnsibleJobService's submissions and retry policy.
 
-Covers: the route key and host a job is submitted under, and the retry policy
-read from settings.
-Orchestration methods (submit, list_jobs, _process_job, etc.) delegate to
-the DB and queue — they are exercised in integration tests; how an executor
-interprets parameters and output is covered in test_ansible_job_executor.py.
+Covers: the route key and host a VM job is submitted under, and the retry
+policy read from settings. Orchestration methods (submit, list_jobs,
+_process_job, etc.) delegate to the DB and queue — they are exercised in
+integration tests; how the VM codec interprets parameters and output is
+covered in test_vm_codec.py.
 """
 from __future__ import annotations
 
@@ -16,16 +16,14 @@ import pytest
 
 from arkhai_bare_metal import (
     BARE_METAL_ACCESS_ACTIONS,
-    NODE_GRANT_ACCESS_ACTION,
     NODE_RECLAIM_ACCESS_ACTION,
 )
 from compute_provisioning import JobExecutorTable, UnsupportedExecutorActionError
 from vm_provisioning_adapter.bundle import VM_JOB_ACTIONS
-from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
-from vm_provisioning_adapter.services.ansible_job_executor import (
-    AnsibleJobExecutor,
-    ReservesVariableKeys,
-)
+from bare_metal_provisioning_adapter.codec import BareMetalAnsibleCodec
+from compute_provisioning_ansible import AnsibleJobExecutor
+from vm_provisioning_adapter.codec import VmAnsibleCodec
+from vm_provisioning_adapter.models.jobs_model import VmJobParams
 from vm_provisioning_adapter.services.job_service import AnsibleJobService, retry_policy_from
 
 
@@ -35,6 +33,7 @@ from vm_provisioning_adapter.services.job_service import AnsibleJobService, retr
 
 
 def _make_service(*, host_service=None, **settings_overrides) -> AnsibleJobService:
+    """A job service over ``_executors``, which ``svc._engine_executors`` exposes."""
     settings = MagicMock()
     settings.default_host_id = "kvm1"
     settings.default_max_retries = 3
@@ -54,23 +53,27 @@ def _make_service(*, host_service=None, **settings_overrides) -> AnsibleJobServi
     for k, v in settings_overrides.items():
         setattr(settings, k, v)
 
-    return AnsibleJobService(
+    executors = _executors(settings)
+    service = AnsibleJobService(
         settings=settings,
         session_factory=MagicMock(),
-        executors=_executors(settings),
+        executors=executors,
         host_service=host_service if host_service is not None else MagicMock(),
     )
+    service._engine_executors = executors
+    return service
 
 
 def _executors(settings, runner=None):
     runner = runner if runner is not None else MagicMock()
     vm = AnsibleJobExecutor(
-        runner, settings.resolved_playbook_path, settings=settings,
-        result_kind=lambda action: f"vm_{action}",
+        runner, VmAnsibleCodec(), settings.resolved_playbook_path, timeout_seconds=30,
     )
     bare_metal = AnsibleJobExecutor(
-        runner, settings.resolved_bare_metal_playbook_path, settings=settings,
-        result_kind=lambda action: "bare_metal_access",
+        runner,
+        BareMetalAnsibleCodec(),
+        settings.resolved_bare_metal_playbook_path,
+        timeout_seconds=30,
     )
     table = JobExecutorTable()
     for action in VM_JOB_ACTIONS:
@@ -90,7 +93,7 @@ class _RecordingEngine:
         return None
 
 
-def _submitted(svc, params: AnsibleJobParams) -> dict:
+def _submitted(svc, params: VmJobParams) -> dict:
     import asyncio
 
     engine = _RecordingEngine()
@@ -104,48 +107,48 @@ class TestSubmission:
 
     def test_vm_actions_use_the_vm_registration(self):
         svc = _make_service()
-        params = AnsibleJobParams(host_id="kvm1", vm_action="create", offering_mode="vm")
+        params = VmJobParams(host_id="kvm1", vm_action="create", offering_mode="vm")
 
         fields = _submitted(svc, params)
 
         assert (fields["offering_mode"], fields["action"], fields["host_id"]) == (
             "vm", "create", "kvm1",
         )
-        assert svc._executors.resolve("vm", "create")._playbook_path == Path(
+        assert svc._engine_executors.resolve("vm", "create").playbook_path == Path(
             "/playbooks/vm-operations.yaml"
         )
 
     def test_bare_metal_actions_use_the_bare_metal_registration(self):
         svc = _make_service()
 
-        assert svc._executors.resolve(
+        assert svc._engine_executors.resolve(
             "bare_metal", NODE_RECLAIM_ACCESS_ACTION
-        )._playbook_path == Path("/playbooks/node-access.yaml")
+        ).playbook_path == Path("/playbooks/node-access.yaml")
 
     def test_executor_action_takes_precedence_over_vm_action(self):
         svc = _make_service()
-        params = AnsibleJobParams(
-            host_id="bm-node-1",
-            vm_action="create",
-            offering_mode="bare_metal",
-            executor_action=NODE_GRANT_ACCESS_ACTION,
+        params = VmJobParams(
+            host_id="kvm1",
+            vm_action="vm_remove",
+            offering_mode="vm",
+            executor_action="destroy",
         )
 
-        assert _submitted(svc, params)["action"] == NODE_GRANT_ACCESS_ACTION
+        assert _submitted(svc, params)["action"] == "destroy"
 
     def test_an_unregistered_mode_and_action_is_refused(self):
         svc = _make_service()
 
         with pytest.raises(UnsupportedExecutorActionError):
-            svc._executors.resolve("bare_metal", "create")
+            svc._engine_executors.resolve("bare_metal", "create")
 
     def test_a_job_naming_no_host_runs_against_its_target_or_the_default(self):
         svc = _make_service()
 
-        targeted = AnsibleJobParams(
+        targeted = VmJobParams(
             host_id=None, vm_action="create", offering_mode="vm", executor_target="kvm9"
         )
-        untargeted = AnsibleJobParams(host_id=None, vm_action="create", offering_mode="vm")
+        untargeted = VmJobParams(host_id=None, vm_action="create", offering_mode="vm")
 
         assert _submitted(svc, targeted)["host_id"] == "kvm9"
         assert _submitted(svc, untargeted)["host_id"] == "kvm1"
@@ -154,7 +157,7 @@ class TestSubmission:
         import dataclasses
 
         svc = _make_service()
-        params = AnsibleJobParams(host_id="kvm1", vm_action="create", offering_mode="vm")
+        params = VmJobParams(host_id="kvm1", vm_action="create", offering_mode="vm")
 
         assert _submitted(svc, params)["params"] == dataclasses.asdict(params)
 
@@ -192,36 +195,3 @@ def test_the_host_registry_is_required():
             session_factory=MagicMock(),
             executors=MagicMock(),
         )
-
-
-class TestReservedVariableKeys:
-    """Reserved variable names are an Ansible capability, checked for, not
-    assumed of every registered executor."""
-
-    def test_the_ansible_executor_reports_its_reserved_keys(self):
-        runner = MagicMock()
-        runner.reserved_var_keys.return_value = frozenset({"vm_name"})
-        svc = _make_service()
-        svc._executors = _executors(svc._settings, runner)
-        params = AnsibleJobParams(host_id="kvm1", vm_action="create", offering_mode="vm")
-
-        assert svc.reserved_var_keys(params) == frozenset({"vm_name"})
-        assert isinstance(svc._executors.resolve("vm", "create"), ReservesVariableKeys)
-
-    def test_an_executor_without_the_capability_is_refused_clearly(self):
-        class PlainExecutor:
-            async def execute(self, run):
-                raise NotImplementedError
-
-            async def cancel(self, handle):
-                return None
-
-        table = JobExecutorTable()
-        table.register("vm", "create", PlainExecutor())
-        table.freeze()
-        svc = _make_service()
-        svc._executors = table
-        params = AnsibleJobParams(host_id="kvm1", vm_action="create", offering_mode="vm")
-
-        with pytest.raises(TypeError, match="does not report the variable names"):
-            svc.reserved_var_keys(params)

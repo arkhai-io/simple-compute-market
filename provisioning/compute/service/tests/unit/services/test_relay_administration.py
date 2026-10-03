@@ -615,11 +615,11 @@ class TestExecutionTimeTokenResolution:
         return RelayExecutionResolver(session_factory=session_factory, settings=settings)
 
     def _params(self, **overrides):
-        from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
+        from vm_provisioning_adapter.models.jobs_model import VmJobParams
 
         fields = {"host_id": "kvm1", "vm_action": "create", "offering_mode": "vm"}
         fields.update(overrides)
-        return AnsibleJobParams(**fields)
+        return VmJobParams(**fields)
 
     def test_a_job_with_no_relay_passes_through(self, session_factory, settings):
         params = self._params()
@@ -651,11 +651,12 @@ class TestExecutionTimeTokenResolution:
         rotation took effect "without a restart", which was true of the
         variables and false of the host.
         """
-        from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
-        from vm_provisioning_adapter.services.ansible_service import AnsibleService
+        from compute_provisioning_ansible import render_extra_vars
+        from vm_provisioning_adapter.codec import VmAnsibleCodec
+        from vm_provisioning_adapter.models.jobs_model import VmJobParams
 
         _make_relay(relays, token="original")
-        params = AnsibleJobParams(
+        params = VmJobParams(
             host_id="kvm1",
             vm_action="create",
             offering_mode="vm",
@@ -665,10 +666,10 @@ class TestExecutionTimeTokenResolution:
         relays.rotate_token("site-a", "rotated")
 
         resolved = self._resolver(session_factory, settings).resolve_into(params)
-        lines = AnsibleService(settings)._build_builtin_var_lines(resolved)
+        rendered = render_extra_vars(VmAnsibleCodec().variables(resolved))
 
-        assert 'frp_auth_token: "rotated"' in lines
-        assert "original" not in "\n".join(lines)
+        assert 'frp_auth_token: "rotated"' in rendered.splitlines()
+        assert "original" not in rendered
 
     def test_a_rotation_reaches_a_job_accepted_before_it(
         self, relays, session_factory, settings

@@ -28,7 +28,7 @@ def _build_container():
     """A fresh `Container` instance wired to an isolated in-memory database.
 
     `ACTIVE_PROFILES=mock` (set for this whole test run, see Makefile)
-    makes `build_vm_runtime` compose `ProgrammableMockAnsibleService`
+    makes `build_vm_runtime` compose the mock Ansible runner
     instead of a real Ansible client, so resolving the container's VM
     runtime -- required to resolve `resource_pool_service`'s Ansible pool
     config handler -- performs no real network I/O.

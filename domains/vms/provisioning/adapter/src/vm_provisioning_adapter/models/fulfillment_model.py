@@ -100,11 +100,6 @@ class AnsiblePreparedJobParameters(BaseModel):
     gcs_bucket_url: str | None = None
     gcs_image_path: str | None = None
     escrow_uid: str | None = None
-    physical_host_id: str | None = None
-    ssh_user: str | None = None
-    ssh_public_key: str | None = None
-    access_ref: dict[str, Any] | None = None
-    bare_metal_reclaim_policy: str | None = None
     max_retries: int | None = None
     playbook_path: str | None = None
     provider_extra_vars: dict[str, Any] = Field(default_factory=dict)

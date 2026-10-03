@@ -7,12 +7,14 @@ from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
 from arkhai_bare_metal import BareMetalResourceProjection
-from vm_provisioning_adapter.services.ansible_job_executor import AnsibleJobExecutor
+from compute_provisioning_ansible import AnsibleJobExecutor, MockAnsibleRunner
+from compute_provisioning_ansible.runner import AnsibleRunner
 
 from bare_metal_provisioning_adapter.bundle import (
     HOST_REQUIREMENT,
     build_bare_metal_adapter_bundle,
 )
+from bare_metal_provisioning_adapter.codec import BareMetalAnsibleCodec
 from bare_metal_provisioning_adapter.compute_adapter import BareMetalComputeAdapter
 from bare_metal_provisioning_adapter.release import BareMetalReleaseExecutor
 from bare_metal_provisioning_adapter.services.bare_metal_lease_service import (
@@ -35,7 +37,7 @@ class BareMetalProvisioningRuntime:
     operations_service: BareMetalOperationsService
     fulfillment_provider: BareMetalFulfillmentProvider
     pool_config_handler: BareMetalPoolConfigHandler
-    # Runs the bare-metal access playbook: the real Ansible service, or under
+    # Runs the bare-metal access playbook: the real Ansible runner, or under
     # the mock profile this adapter's own mock.
     ansible_service: Any
     playbook_path: Any
@@ -45,9 +47,10 @@ class BareMetalProvisioningRuntime:
         """What runs both bare-metal access actions."""
         return AnsibleJobExecutor(
             self.ansible_service,
+            BareMetalAnsibleCodec(),
             self.playbook_path,
-            settings=self.settings,
-            result_kind=bare_metal_result_kind,
+            timeout_seconds=self.settings.ansible_timeout_seconds,
+            non_retryable_errors=self.settings.non_retryable_errors,
         )
 
     def readiness(self) -> dict[str, bool]:
@@ -56,11 +59,7 @@ class BareMetalProvisioningRuntime:
     @property
     def mock_executor(self):
         """This adapter's mock runner, or ``None`` outside the mock profile."""
-        from bare_metal_provisioning_adapter.services.bare_metal_mock_executor import (
-            BareMetalMockAnsibleService,
-        )
-
-        if isinstance(self.ansible_service, BareMetalMockAnsibleService):
+        if isinstance(self.ansible_service, MockAnsibleRunner):
             return self.ansible_service
         return None
 
@@ -82,11 +81,6 @@ class BareMetalProvisioningRuntime:
         )
 
 
-def bare_metal_result_kind(action: str) -> str:
-    """Both bare-metal access actions produce the access result."""
-    return "bare_metal_access"
-
-
 def project_bare_metal_resource(raw_view: Mapping[str, Any]) -> dict[str, Any]:
     """Validate and serialize the public bare-metal resource projection."""
     return BareMetalResourceProjection.model_validate(raw_view).model_dump(mode="json")
@@ -95,7 +89,7 @@ def project_bare_metal_resource(raw_view: Mapping[str, Any]) -> dict[str, Any]:
 def build_bare_metal_runtime(
     *,
     site_authority,
-    job_service,
+    job_engine,
     job_queue_provider: Callable[[], Any],
     config,
     host_service,
@@ -106,27 +100,25 @@ def build_bare_metal_runtime(
         if profile.strip()
     ]
     if "mock" in active:
-        from bare_metal_provisioning_adapter.services.bare_metal_mock_executor import (
-            BareMetalMockAnsibleService,
+        from bare_metal_provisioning_adapter.services.mock_output import (
+            bare_metal_mock_output,
         )
 
-        ansible_service = BareMetalMockAnsibleService(config)
+        ansible_service = MockAnsibleRunner(default_output=bare_metal_mock_output)
     else:
-        from vm_provisioning_adapter.services.ansible_service import AnsibleService
-
-        ansible_service = AnsibleService(config)
+        ansible_service = AnsibleRunner(config)
     operations_service = BareMetalOperationsService(
-        job_service=job_service,
+        jobs=job_engine,
         job_queue_provider=job_queue_provider,
-        settings=config,
         host_service=host_service,
+        reclaim_policy=getattr(config, "bare_metal_reclaim_policy", None),
     )
     return BareMetalProvisioningRuntime(
         lease_service=BareMetalLeaseService(site_authority=site_authority),
         operations_service=operations_service,
         fulfillment_provider=BareMetalFulfillmentProvider(
             operations_service=operations_service,
-            job_service=job_service,
+            job_service=job_engine,
         ),
         pool_config_handler=BareMetalPoolConfigHandler(),
         ansible_service=ansible_service,

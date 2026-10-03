@@ -21,10 +21,14 @@ packages = ["src/compute_provisioning_ansible"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests/unit"]
+asyncio_mode = "auto"
 
 [dependency-groups]
 dev = [
     # The tests generate throwaway Fernet keys.
     "cryptography>=42.0",
     "pytest>=8.3.4",
+    "pytest-asyncio>=0.23",
+    # The tests read rendered variables files back.
+    "pyyaml>=6.0",
 ]

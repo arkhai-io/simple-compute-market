@@ -120,6 +120,7 @@ COPY --from=builder --chown=appuser:appuser /home/appuser/.ansible /home/appuser
 
 RUN mkdir -p /app/data && chown appuser:appuser /app/data
 COPY --chown=appuser:appuser domains/vms/provisioning/iac /opt/domains/vms/provisioning/iac
+COPY --chown=appuser:appuser domains/bare_metal/provisioning/iac /opt/domains/bare_metal/provisioning/iac
 
 ENV PATH="/app/.venv/bin:/home/appuser/ansible-venv/bin:$PATH"
 ENV ANSIBLE_COLLECTIONS_PATH="/home/appuser/.ansible/collections:/usr/share/ansible/collections"

@@ -98,11 +98,10 @@ def evaluate_job(body: BareMetalEvaluateJobRequest) -> BareMetalEvaluateJobRespo
     host_service = _container_module.resolved_host_service
     if host_service is None:
         raise HTTPException(status_code=503, detail="HostService not available")
+    # Shaped as a submitted job's stored parameters, which rules match.
     params = {
+        "action": body.action,
         "host_id": body.host,
-        "vm_action": body.action,
-        "executor_action": body.action,
-        "offering_mode": "bare_metal",
         "physical_host_id": body.physical_host_id,
         "escrow_uid": body.escrow_uid,
     }

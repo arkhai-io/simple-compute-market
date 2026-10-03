@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock
 
 import pytest
 from arkhai_bare_metal import BARE_METAL_OFFERING_MODE, NODE_GRANT_ACCESS_ACTION
@@ -15,15 +13,15 @@ from market_fulfillment import (
     VersionedEnvelope,
 )
 
-from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
-from vm_provisioning_adapter.services.ansible_job_executor import AnsibleJobExecutor
-
+from bare_metal_provisioning_adapter.codec import BareMetalJobParams
 from bare_metal_provisioning_adapter.services.bare_metal_fulfillment_provider import (
     BareMetalFulfillmentProvider,
 )
-from bare_metal_provisioning_adapter.services.bare_metal_mock_executor import (
-    BareMetalMockAnsibleService,
-)
+from compute_provisioning_ansible import MockAnsibleRunner
+
+from bare_metal_provisioning_adapter.services.mock_output import bare_metal_mock_output
+
+from execution import executor, job_run
 
 
 class FakeOperations:
@@ -53,27 +51,24 @@ class FakeJobs:
             "job-create": SimpleNamespace(
                 status="succeeded",
                 error=None,
+                # The access fact the role prints, with a field no buyer may see.
                 result=_access_result({
-                    "tenant_user": None,
+                    "action": "node_grant_access",
                     "host": "203.0.113.25",
-                    "ssh_port": None,
+                    "port": 2222,
+                    "ssh_user": "buyer",
+                    "status": "success",
                     "timestamp": "2030-01-01T00:00:01Z",
                     "result_message": "access granted",
                     "authentication": {"private_key": "must-not-escape"},
-                    "ansible_result": {
-                        "action": "node_grant_access",
-                        "host": "203.0.113.25",
-                        "port": 2222,
-                        "ssh_user": "buyer",
-                        "status": "success",
-                        "timestamp": "2030-01-01T00:00:01Z",
-                    },
                 }),
             ),
             "job-teardown": SimpleNamespace(
                 status="succeeded",
                 error=None,
-                result=_access_result({"result_message": "access reclaimed"}),
+                result=_access_result(
+                    {"action": "node_reclaim_access", "status": "success"}
+                ),
             ),
         }
 
@@ -211,39 +206,21 @@ def test_buyer_payload_cannot_replace_selected_machine():
 async def _mock_grant_job_result() -> dict:
     """The result a grant job records when the bare-metal mock runs it.
 
-    The mock's default output is parsed by the real result parser and shaped
-    into the result payload by the Ansible job executor, exactly as for any run,
-    so this is what the provider reads after a mock-profile grant.
+    The mock's default output is interpreted by the bare-metal codec in the
+    real executor, exactly as for any run, so this is what the provider reads
+    after a mock-profile grant.
     """
-    host = SimpleNamespace(
-        host_id="machine-1",
-        ssh_host="198.51.100.7",
-        ssh_port=2201,
-        public_host="203.0.113.7",
-    )
-    params = AnsibleJobParams(
-        host_id="machine-1",
-        vm_action=NODE_GRANT_ACCESS_ACTION,
-        offering_mode=BARE_METAL_OFFERING_MODE,
-        executor_action=NODE_GRANT_ACCESS_ACTION,
+    params = BareMetalJobParams(
+        action=NODE_GRANT_ACCESS_ACTION,
+        host_id="bm-node-1",
         physical_host_id="physical-host-1",
         escrow_uid="escrow-1",
         ssh_user="tenant-a",
     )
-    mock = BareMetalMockAnsibleService(MagicMock())
-    mock.write_inventory([host]).cleanup()
-    run = mock.start_playbook(
-        playbook_path=Path("/playbooks/node-access.yaml"),
-        inventory_path=Path("/tmp/inventory"),
-        extra_vars_path=Path("/tmp/vars"),
-        limit=params.host_id,
+    outcome = await executor(MockAnsibleRunner(default_output=bare_metal_mock_output)).execute(
+        job_run(params)
     )
-    run._params = params
-    output = await mock.wait_for_playbook(run, timeout_seconds=5)
-    run_result = mock.parse_playbook_result(
-        output, params, tenant_address=host.public_host
-    )
-    return AnsibleJobExecutor.build_result_payload(run_result)
+    return outcome.result.value
 
 
 @pytest.mark.asyncio
@@ -273,7 +250,7 @@ async def test_a_mock_profile_grant_reads_as_the_buyers_access_result():
     assert payload["host_id"] == "machine-1"
     assert payload["physical_host_id"] == "physical-host-1"
     assert payload["ssh_user"] == "tenant-a"
-    assert payload["host"] == "198.51.100.7"
+    assert payload["host"] == "10.0.0.5"
     assert payload["port"] == 2201
     assert payload["access_grant_ref"] == "job-create"
     assert payload["status"] == "success"

@@ -40,6 +40,7 @@ from vm_provisioning_adapter.release import (
     VmFulfillmentReleaseJobPort,
     VmReleaseExecutor,
 )
+from vm_provisioning_adapter.codec import VmAnsibleCodec
 from vm_provisioning_adapter.services.ansible_fulfillment_provider import (
     AnsibleFulfillmentProvider,
 )
@@ -145,6 +146,7 @@ def test_pre_cutover_vm_lease_backfills_and_tears_down_to_release():
         provider_registry=ProviderRegistry({
             "ansible": AnsibleFulfillmentProvider(
                 job_service=None, job_queue_provider=lambda: None,
+                reserved_var_keys=VmAnsibleCodec().reserved_var_keys,
             ),
         }),
         unit_of_work=SqlAlchemyFulfillmentUnitOfWork(

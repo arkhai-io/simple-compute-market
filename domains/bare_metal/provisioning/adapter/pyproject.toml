@@ -7,6 +7,7 @@ requires-python = ">=3.12"
 dependencies = [
     "arkhai-bare-metal>=0.6.0",
     "arkhai-compute-provisioning>=0.8.0",
+    "arkhai-compute-provisioning-ansible>=0.1.0",
     "arkhai-compute-provisioning-service>=0.5.0",
     "arkhai-kit-fulfillment>=0.3.0",
     "arkhai-kit-resource-pools>=0.3.0",
