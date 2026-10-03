@@ -330,6 +330,16 @@ def _add_bare_metal_settlement_records(conn: sqlite3.Connection) -> None:
     )
 
 
+def _share_payment_mandates(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        "UPDATE negotiation_threads SET settlement_data = COALESCE(settlement_data, "
+        "(SELECT settlement_data_json FROM bare_metal_settlement_records "
+        "WHERE bare_metal_settlement_records.negotiation_id = negotiation_threads.negotiation_id)) "
+        "WHERE negotiation_id IN (SELECT negotiation_id FROM bare_metal_settlement_records)"
+    )
+    conn.execute("ALTER TABLE bare_metal_settlement_records DROP COLUMN settlement_data_json")
+
+
 BARE_METAL_STOREFRONT_MIGRATIONS = (
     Migration(
         id="bare-metal-storefront-0001-agreement-payloads",
@@ -362,5 +372,9 @@ BARE_METAL_STOREFRONT_MIGRATIONS = (
     Migration(
         id="bare-metal-storefront-0008-settlement-records",
         apply=_add_bare_metal_settlement_records,
+    ),
+    Migration(
+        id="bare-metal-storefront-0009-shared-payment-mandates",
+        apply=_share_payment_mandates,
     ),
 )

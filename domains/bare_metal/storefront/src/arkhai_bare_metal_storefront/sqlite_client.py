@@ -293,7 +293,7 @@ class SQLiteClient(CoreSQLiteClient):
                     UPDATE negotiation_threads
                     SET status=?, terminal_state=?, agreed_price=?,
                         agreed_duration_seconds=?, agreed_at=?, agreement_bytes=?,
-                        updated_at=?
+                        settlement_data=?, updated_at=?
                     WHERE negotiation_id=?
                     """,
                     (
@@ -303,6 +303,7 @@ class SQLiteClient(CoreSQLiteClient):
                         message.duration_seconds if agreed_amount is not None else None,
                         (accepted_at or now) if agreed_amount is not None else None,
                         agreement_bytes,
+                        settlement_data_json,
                         now,
                         negotiation_id,
                     ),
@@ -313,23 +314,21 @@ class SQLiteClient(CoreSQLiteClient):
                     conn.execute(
                         "INSERT OR IGNORE INTO bare_metal_settlement_records("
                         "negotiation_id, mechanism, agreement_sha256, "
-                        "settlement_data_json, status) VALUES (?, ?, ?, ?, 'accepted')",
+                        "status) VALUES (?, ?, ?, 'accepted')",
                         (
                             negotiation_id,
                             settlement_mechanism,
                             agreement_sha256,
-                            settlement_data_json,
                         ),
                     )
                     stored = conn.execute(
-                        "SELECT mechanism, agreement_sha256, settlement_data_json "
+                        "SELECT mechanism, agreement_sha256 "
                         "FROM bare_metal_settlement_records WHERE negotiation_id = ?",
                         (negotiation_id,),
                     ).fetchone()
                     if stored != (
                         settlement_mechanism,
                         agreement_sha256,
-                        settlement_data_json,
                     ):
                         raise RuntimeError(
                             "accepted settlement data conflicts with stored state"
@@ -816,7 +815,6 @@ class SQLiteClient(CoreSQLiteClient):
     @staticmethod
     def _decode_bare_metal_settlement_record(row: sqlite3.Row) -> dict[str, Any]:
         record = dict(row)
-        record["settlement_data"] = json.loads(record.pop("settlement_data_json"))
         receipt_json = record.pop("receipt_json")
         record["receipt"] = (
             json.loads(receipt_json) if receipt_json is not None else None
@@ -872,16 +870,8 @@ class SQLiteClient(CoreSQLiteClient):
         settlement_ref: str,
         mechanism: str,
         agreement_sha256: str,
-        settlement_data: Mapping[str, Any],
         receipt: Mapping[str, Any],
     ) -> dict[str, Any]:
-        data_json = json.dumps(
-            dict(settlement_data),
-            ensure_ascii=False,
-            separators=(",", ":"),
-            sort_keys=True,
-            allow_nan=False,
-        )
         receipt_json = json.dumps(
             dict(receipt),
             ensure_ascii=False,
@@ -900,7 +890,7 @@ class SQLiteClient(CoreSQLiteClient):
                         "status = 'settlement_verified', receipt_json = ?, "
                         "updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now') "
                         "WHERE negotiation_id = ? AND mechanism = ? "
-                        "AND agreement_sha256 = ? AND settlement_data_json = ? "
+                        "AND agreement_sha256 = ? "
                         "AND status IN ('accepted', 'settlement_verified')",
                         (
                             settlement_ref,
@@ -908,7 +898,6 @@ class SQLiteClient(CoreSQLiteClient):
                             negotiation_id,
                             mechanism,
                             agreement_sha256,
-                            data_json,
                         ),
                     )
                 row = conn.execute(
@@ -921,7 +910,6 @@ class SQLiteClient(CoreSQLiteClient):
                 if (
                     record["mechanism"] != mechanism
                     or record["agreement_sha256"] != agreement_sha256
-                    or record["settlement_data"] != dict(settlement_data)
                     or record["settlement_ref"] != settlement_ref
                     or record["status"] != "settlement_verified"
                     or record["receipt"] != dict(receipt)

@@ -65,20 +65,19 @@ class VmPaymentsCoordinator:
             record = await self.db.load_vm_payment_record(negotiation_id=negotiation_id)
             mandate_wire = self.stage.mandate_for_agreement(agreement)
             digest = hashlib.sha256(raw).hexdigest()
-            if (
-                record is None
-                or record["agreement_sha256"] != digest
-                or record["mandate"] != mandate_wire
-            ):
+            data = thread.get("settlement_data")
+            if not isinstance(data, dict) or data.get("mandate") != mandate_wire:
                 raise ValueError("stored mandate does not match accepted Agreement")
             mandate = Mandate.model_validate(mandate_wire)
             transaction = transaction_id(mandate)
-            if record["receipt"] is not None:
+            if record is not None and record["receipt"] is not None:
                 receipt = SignedReceipt.model_validate(record["receipt"])
-                if record[
-                    "transaction_id"
-                ] != transaction or not self.stage.receipt_matches(
-                    receipt, agreement=agreement, mandate=mandate
+                if (
+                    record["agreement_sha256"] != digest
+                    or record["transaction_id"] != transaction
+                    or not self.stage.receipt_matches(
+                        receipt, agreement=agreement, mandate=mandate
+                    )
                 ):
                     raise ValueError("stored receipt does not match accepted mandate")
             else:
@@ -95,7 +94,6 @@ class VmPaymentsCoordinator:
                 await self.db.verify_vm_payment_record(
                     negotiation_id=negotiation_id,
                     agreement_sha256=digest,
-                    mandate=mandate_wire,
                     transaction_id=transaction,
                     receipt=receipt.model_dump(
                         mode="json", by_alias=True, exclude_none=True

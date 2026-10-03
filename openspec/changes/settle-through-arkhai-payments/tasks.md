@@ -32,7 +32,7 @@ Dependency: exact Agreement bytes from Section 2.
 
 ## 4. Verify, promote, and close out
 
-- [ ] 4.0 Converge bare metal's and VMs' stored Arkhai mandate (VM adds its own payment-evidence table) onto the shared `settlement_data` persistence in `negotiation_threads` (landed with API credits), so every domain loads the mandate by negotiation id from one place.
+- [x] 4.0 Converge bare metal's and VMs' stored Arkhai mandate (VM adds its own payment-evidence table) onto the shared `settlement_data` persistence in `negotiation_threads` (landed with API credits), so every domain loads the mandate by negotiation id from one place.
 - [ ] 4.1 Run focused existing core-schema, Alkahest, negotiation-runtime, payments-kit, and per-domain regressions; run the relevant package, integration, packaging, and typing checks. Do not add new permanent acceptance tests in this implementation lane; record driver observations for reviewer-owned acceptance coverage.
 - [x] 4.2 Validate the completed change with `openspec validate settle-through-arkhai-payments` and run `make check-comment-hygiene`.
   Strict change validation, strict validation of all permanent specs, and comment hygiene pass. Scenario headings aligned between promoted specs and deltas; archive preview notes already-promoted ADDED requirements.

@@ -469,6 +469,19 @@ def _migrate_resource_settlement_clauses(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "compute_capacity_pools", "settlements", "TEXT")
 
 
+def _share_vm_payment_mandates(conn: sqlite3.Connection) -> None:
+    for negotiation_id, payload in conn.execute(
+        "SELECT negotiation_id, mandate_json FROM vm_payment_records"
+    ).fetchall():
+        data = json.dumps({"mandate": json.loads(payload)}, sort_keys=True, separators=(",", ":"))
+        conn.execute(
+            "UPDATE negotiation_threads SET settlement_data = COALESCE(settlement_data, ?) "
+            "WHERE negotiation_id = ?",
+            (data, negotiation_id),
+        )
+    conn.execute("ALTER TABLE vm_payment_records DROP COLUMN mandate_json")
+
+
 VM_MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260604_001_compute_allocation_callback_metadata",
@@ -503,4 +516,5 @@ VM_MIGRATIONS: tuple[Migration, ...] = (
         _migrate_resource_settlement_clauses,
     ),
     Migration("20261001_011_vm_payment_records", add_vm_payment_records),
+    Migration("20261003_012_shared_payment_mandates", _share_vm_payment_mandates),
 )

@@ -254,12 +254,10 @@ async def main():
             agreement_bytes=raw,
             accepted_at=now,
             agreed_start_utc=now,
+            settlement_data={"mandate": mandate},
         )
         await db.update_negotiation_thread_terminal(
             negotiation_id="payment-demo", terminal_state="success"
-        )
-        await db.save_vm_payment_acceptance(
-            negotiation_id="payment-demo", agreement_bytes=raw, mandate=mandate
         )
         coordinator = VmPaymentsCoordinator(domain=domain, db=db, stage=stage)
         container.resolved_sqlite_client = db

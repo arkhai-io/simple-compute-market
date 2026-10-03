@@ -118,7 +118,7 @@ class BareMetalSettlementService:
                     "stored Agreement does not match the accepted negotiation"
                 )
             derived = stage.mandate_for_agreement(agreement)
-            if record.get("settlement_data") != derived:
+            if thread.get("settlement_data") != derived:
                 raise ValueError(
                     "stored payment mandate differs from the accepted Agreement"
                 )
@@ -172,7 +172,6 @@ class BareMetalSettlementService:
                 settlement_ref=settlement_ref,
                 mechanism=ARKHAI_PAYMENTS_MECHANISM,
                 agreement_sha256=agreement_sha256,
-                settlement_data=derived,
                 receipt=signed_receipt.model_dump(
                     mode="json", by_alias=True, exclude_none=True
                 ),

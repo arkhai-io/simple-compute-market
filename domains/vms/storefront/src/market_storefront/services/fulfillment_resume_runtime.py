@@ -582,11 +582,15 @@ async def converge_escrow_once(
         if not isinstance(raw, bytes) or stage is None:
             raise RuntimeError("accepted payment Agreement or verifier is unavailable")
         agreement = json.loads(raw)
-        mandate = Mandate.model_validate(record["mandate"])
+        data = thread.get("settlement_data") if thread else None
+        if not isinstance(data, dict):
+            raise RuntimeError("accepted payment mandate is unavailable")
+        mandate_wire = data.get("mandate")
+        mandate = Mandate.model_validate(mandate_wire)
         if (
             record["agreement_sha256"] != hashlib.sha256(raw).hexdigest()
             or record["transaction_id"] != transaction_id(mandate)
-            or record["mandate"] != stage.mandate_for_agreement(agreement)
+            or mandate_wire != stage.mandate_for_agreement(agreement)
             or not stage.receipt_matches(
                 SignedReceipt.model_validate(record["receipt"]),
                 agreement=agreement, mandate=mandate,

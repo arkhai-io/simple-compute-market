@@ -259,16 +259,15 @@ wheels = [
 [[package]]
 name = "arkhai-kit-alkahest"
 version = "0.2.1"
-source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
+source = { registry = "../../../.dist" }
 dependencies = [
     { name = "alkahest-py" },
     { name = "arkhai-kit-settlement-runtime" },
     { name = "pydantic" },
     { name = "web3" },
 ]
-sdist = { url = "https://mirrors.aliyun.com/pypi/packages/46/28/6c9c3722e302b93ea0cb350ac93f3d3cdcb361a6b32f3c5f993b62b3b918/arkhai_kit_alkahest-0.2.1.tar.gz", hash = "sha256:2e1ea20c40334b6279e6e7c7d7e0b92e0267e7292306353924ec5ced15a7da03" }
 wheels = [
-    { url = "https://mirrors.aliyun.com/pypi/packages/46/9b/0d6550d5aadd1e7676e56246dd2137d945fe1993d82d5cb487eed696ab9f/arkhai_kit_alkahest-0.2.1-py3-none-any.whl", hash = "sha256:45021f504277331b6105b09e42963911665592d518327d0d9e2714b62bf06e6e" },
+    { path = "arkhai_kit_alkahest-0.2.1-py3-none-any.whl" },
 ]
 
 [[package]]

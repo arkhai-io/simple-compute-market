@@ -660,13 +660,7 @@ async def _persist_artifacts(
             buyer_principal=acceptance.buyer_principal,
             seller_principal=acceptance.seller_principal,
         )
-    data = artifacts.get("settlement_data")
-    if isinstance(data, Mapping):
-        await repository.save_vm_payment_acceptance(
-            negotiation_id=acceptance.negotiation_id,
-            agreement_bytes=base64.b64decode(artifacts["agreement_bytes"], validate=True),
-            mandate=data["mandate"],
-        )
+
 
 
 def lookup_pool_policy_tags(
