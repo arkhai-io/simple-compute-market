@@ -1,1 +1,0 @@
-# TOMBSTONE: delete this file — the host registry moved to compute_provisioning.hosts (tested in provisioning/compute/tests/integration/test_host_authority.py), INI parsing to compute_provisioning_ansible (tests/unit/test_inventory.py), and the SSH columns to a connection envelope (tests/unit/test_host_connection_migration.py).

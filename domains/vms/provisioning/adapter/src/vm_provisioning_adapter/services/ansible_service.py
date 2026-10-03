@@ -1,1 +1,0 @@
-# TOMBSTONE: delete this file — the VM job variables and output parsing are vm_provisioning_adapter.codec, the bare-metal ones bare_metal_provisioning_adapter.codec, and the runner is compute_provisioning_ansible.runner.AnsibleRunner.

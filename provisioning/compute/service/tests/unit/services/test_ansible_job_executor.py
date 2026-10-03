@@ -1,1 +1,0 @@
-# TOMBSTONE: delete this file — the VM codec's tests are test_vm_codec.py, the runner's and executor's are in provisioning/compute/ansible/tests, and the bare-metal codec's are in the bare-metal adapter's tests.

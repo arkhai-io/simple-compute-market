@@ -1,1 +1,0 @@
-# TOMBSTONE: delete this file — AnsibleJobExecutor is compute_provisioning_ansible.executor, and the VM job parameters, result payload, credentials, and failure classification are vm_provisioning_adapter.codec.
