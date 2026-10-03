@@ -252,7 +252,7 @@ edited.
       `config-local.yml`. A VM deal settles by introduction through the VM buyer CLI,
       the buyer's file sink receives the seller's contact, and Mailpit holds the
       seller-side message carrying the buyer's.
-      Written and added to the VM lane's `E2E_MODULE`; not yet run (needs the Compose lane). Lane edits: Mailpit in `domains/vms/compose.yml`, Bob's contact and SMTP delivery in `domains/vms/storefront/storefront.bob.toml`, `mailpit.api_url` in `e2e-tests/config/config-docker.yml` and `config-local.yml`.
+      Written and added to the VM lane's `E2E_MODULE`. First lane run: stage 00 passed; stage 01 declared its unbacked pool with a deliverable mode, which the site refuses (an unbacked pool delivers nothing), and looked for published listings in the cycle report, which names derivation keys rather than pools. Both corrected, with the site projection refreshed before the override and the cycle; rerun pending. Lane edits: Mailpit in `domains/vms/compose.yml`, Bob's contact and SMTP delivery in `domains/vms/storefront/storefront.bob.toml`, `mailpit.api_url` in `e2e-tests/config/config-docker.yml` and `config-local.yml`.
 - [ ] 6.4 **System.** Same module: backed and unbacked VM listings from one storefront
       are returned by one rate-bounded query, a listing publishing no rate is excluded,
       and an unbacked one reaches a usable introduction. Transferred from

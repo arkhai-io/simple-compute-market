@@ -40,7 +40,8 @@ from tests.e2e.roles.scenarios.vms.conftest import (
 )
 from tests.e2e.roles.scenarios.vms.host_registry import (
     declare_e2e_capacity,
-    register_e2e_pool,
+    provision_e2e_executor,
+    refresh_storefront_projections,
 )
 
 pytestmark = [
@@ -155,14 +156,23 @@ def _found(registry, query: str) -> set[str]:
     return {listing.id for listing in response.listings}
 
 
-def _published(report: dict[str, Any], pool_id: str) -> str:
-    listings = [
-        str(item["listing_id"])
-        for item in report["actions"]
-        if item["action"] == "publish" and item["source"].get("pool_id") == pool_id
-    ]
-    assert len(listings) == 1, report
-    return listings[0]
+def _pool_listing(storefront_admin_client, pool_id: str, cycle: dict[str, Any]) -> str:
+    """The one open listing published from ``pool_id``.
+
+    A cycle's publish action names its derivation key rather than its pool, so
+    the listing is found by the pool its resource records; the cycle is reported
+    when it is not there, so a failure says what publication did instead.
+    """
+    page = storefront_admin_client.list_listings(status="open", limit=200)
+    found = []
+    for listing in page.listings:
+        resource = listing.listing_resource
+        if isinstance(resource, str):
+            resource = json.loads(resource)
+        if (resource or {}).get("pool_id") == pool_id:
+            found.append(str(listing.listing_id))
+    assert len(found) == 1, f"listings for {pool_id}: {found}; cycle: {cycle}"
+    return found[0]
 
 
 def _json_line(text: str) -> dict[str, Any]:
@@ -193,18 +203,23 @@ class TestStage01_BackedAndUnbackedSupply:
     ):
         state.backed_pool = f"vm-intro-backed-{state.run}"
         state.unbacked_pool = f"vm-intro-unbacked-{state.run}"
-        register_e2e_pool(
+        # Backed supply: a pool, an executor host, and its capacity declaration.
+        provision_e2e_executor(
             provisioning_client,
+            site_capacity_admin_client,
+            host=f"{state.backed_pool}-host",
+            resource_id=f"{state.backed_pool}-res",
+            attributes={"gpu_model": GPU_MODEL, "region": REGION},
             pool_id=state.backed_pool,
+            sellable_units=1,
             listing_mode="fungible",
             listing_shapes={VM: [SHAPE]},
             region=REGION,
         )
         backed = provisioning_client.get_pool(state.backed_pool)
-        provisioning_client.patch_pool(
-            state.backed_pool,
-            _with_rate(backed, BACKED_RATE),
-        )
+        provisioning_client.patch_pool(state.backed_pool, _with_rate(backed, BACKED_RATE))
+        # Unbacked supply: declared and advertised, never delivered, so no
+        # executor stands behind it.
         provisioning_client.create_pool(
             PoolCreate(
                 id=state.unbacked_pool,
@@ -212,7 +227,7 @@ class TestStage01_BackedAndUnbackedSupply:
                 provider="ansible",
                 policy_tags={
                     "listing_mode": "fungible",
-                    "deliverable_modes": [VM],
+                    "deliverable_modes": [],
                     "advertisable_modes": [VM],
                     "capacity_backing": "unbacked",
                     "region": REGION,
@@ -222,15 +237,17 @@ class TestStage01_BackedAndUnbackedSupply:
                 provider_config=dict(backed.provider_config or {}),
             )
         )
-        for pool_id in (state.backed_pool, state.unbacked_pool):
-            declare_e2e_capacity(
-                site_capacity_admin_client,
-                resource_id=f"{pool_id}-res",
-                host_id=f"{pool_id}-host",
-                attributes={"gpu_model": GPU_MODEL, "region": REGION},
-                pool_id=pool_id,
-                sellable_units=1,
-            )
+        declare_e2e_capacity(
+            site_capacity_admin_client,
+            resource_id=f"{state.unbacked_pool}-res",
+            host_id=f"{state.unbacked_pool}-declared",
+            attributes={"gpu_model": GPU_MODEL, "region": REGION},
+            pool_id=state.unbacked_pool,
+            sellable_units=1,
+        )
+        # The storefront's pollers are held, so it pulls the site's new pools
+        # now; an override is checked against the pools it has pulled.
+        refresh_storefront_projections(storefront_admin_client)
         # Only the unbacked pool offers introduction; the lane's configured
         # clauses still govern every other listing.
         SyncPoolOverrideClient(storefront_admin_client).put_pool_override(
@@ -248,10 +265,12 @@ class TestStage01_BackedAndUnbackedSupply:
             }
         )
 
-        report = advance_storefront(storefront_admin_client, PUBLICATION)
+        cycle = advance_storefront(storefront_admin_client, PUBLICATION)
 
-        state.backed_listing = _published(report, state.backed_pool)
-        state.unbacked_listing = _published(report, state.unbacked_pool)
+        state.backed_listing = _pool_listing(storefront_admin_client, state.backed_pool, cycle)
+        state.unbacked_listing = _pool_listing(
+            storefront_admin_client, state.unbacked_pool, cycle
+        )
 
     def test_02_one_rate_bounded_query_returns_both(
         self, registry_client, state: IntroductionState
