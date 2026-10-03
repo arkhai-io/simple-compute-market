@@ -89,6 +89,8 @@ The hosted-document cleanup includes all 18 destinations named in §3.2, plus th
 
 Implementation evidence retained from §3: Stripe removal commits `aa97accd` and `c39090ea` preserved Alkahest/contact coverage, with 2,251 regressions (one skipped), 42-source typing, wheels/CLI/Helm checks. VM fractional-time derivation and restored admin diagnostics were separate repairs. VM controlled HTTP/payment/delivery smoke observed pending → provisioning → ready with one delivery; it is not live-ledger or hardware evidence. Bare-metal ran no payment-service smoke. API-credit E2E was unavailable because the local payments service was down. Global integration, deployment, and typing qualification remains §4.1-owned.
 
+Verification closeout compared the accepted decisions with promotion `e97b4b7a`; `docs/attachments/settle-through-arkhai-payments/decision-review.md` records the comparison. Small normative wording corrections remain in `negotiation-protocol/spec.md#requirement-deterministic-agreed-terms` and `api-credits/spec.md#requirement-idempotent-credit-issuance` / `#requirement-verified-settlement-fulfillment`. API-credit domain-local configuration/registration still differs from the accepted shared-kit rule; implementation follow-up is SCM #254. Local real-ledger evidence does not waive that boundary.
+
 ## Design promotion record
 
 | Accepted decision | Permanent location |
