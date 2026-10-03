@@ -106,7 +106,7 @@ and [`contact-exchange-settlement-mechanism`](archive/2026-08-19-contact-exchang
 
 | Change | Status | Acceptance boundary |
 |---|---|---|
-| [`settle-through-arkhai-payments`](settle-through-arkhai-payments/) | design phase; headless payer credentials depend on `arkhai-io/arkhai-payments` | The settlement slot stops being escrow-shaped: escrow fields move into `alkahest.v1`, negotiation emits an explicit agreement, `arkhai.payments.v1` settles charge-first through the Arkhai payments service, and `fiat.stripe.v1` with `kit/hosted-settlement` is deleted. Supersedes the hosted-fiat changes built on them ([overview](settle-through-arkhai-payments/overview.html)) |
+| [`settle-through-arkhai-payments`](settle-through-arkhai-payments/) | implemented §2–§3; verification and closeout active; §1 deferred | Exact Agreements feed `arkhai.payments.v1` as a peer of Alkahest in VM, bare-metal, and API-credit domains. Signed receipts gate provisioning/issuance; shared negotiation settlement data stores mandates. `fiat.stripe.v1` and `kit/hosted-settlement` are absent; the escrow-carrier refactor is deferred. Supersedes the hosted-fiat changes built on them ([overview](settle-through-arkhai-payments/overview.html)) |
 
 ## Lesser goal — POOLS capacity and fulfillment foundation
 

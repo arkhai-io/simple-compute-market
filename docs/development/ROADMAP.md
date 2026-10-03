@@ -151,7 +151,7 @@ collection. Their connection details, credentials, capacity repair, refund,
 and issuance rollback remain at their real domain boundaries rather than
 becoming generic settlement state.
 
-API credits now composes hosted Stripe and Alkahest over the shared buyer transport, storefront route service, settlement runtime, credits authority, and portable evidence boundary. Its hosted-only Ed25519 path is locally implementable and packageable without a wallet or chain; provider-authentic acceptance remains external until the exact signed hosted release, protected Stripe inputs, and deployed resolver are available. Bare-metal release evidence remains separately dependent on its live selected-site provisioning prerequisites.
+VMs, bare metal, and API credits compose Arkhai payments and Alkahest as peer settlement mechanisms. Exact Agreements and seller-derived mandates feed receipt-gated selected-site fulfillment or idempotent credit issuance. Payment-only Ed25519 paths need no wallet or chain; live ledger and domain delivery qualification remain separate evidence boundaries.
 
 The domain layer's own structure is better than the duplication suggests. All three domains follow one pattern — a base contract with a storefront-side extension — and all three pass the shared conformance suite, which works without assuming a repository layout. Only the directory conventions differ, and a composed domain is small enough that relocating them buys nothing.
 
@@ -159,7 +159,7 @@ The domain layer's own structure is better than the duplication suggests. All th
 
 | Open gap | Owned by |
 |---|---|
-| Provider-authentic API-credit hosted evidence still requires the exact signed producer release, protected Stripe inputs, and deployed resolver; bare-metal still requires live selected-site provisioning and access/teardown proof | [`add-api-credits-hosted-settlement`](../../openspec/changes/add-api-credits-hosted-settlement/), [`add-bare-metal-hosted-settlement`](../../openspec/changes/add-bare-metal-hosted-settlement/) |
+| Live Arkhai payment qualification across VM delivery, API-credit issuance, and bare-metal selected-site access/teardown | [`settle-through-arkhai-payments`](../../openspec/changes/settle-through-arkhai-payments/) |
 
 **Design promotion (2026-08-15).** `kit-storefront-composition-seam`,
 `kit-owned-negotiation-runtime`, and `kit-owned-capacity-and-publication` are now
@@ -170,22 +170,10 @@ API credits preserve their one-domain route and timing behavior through
 explicit storefront contributions, inject domain hooks into the shared
 negotiation lifecycle, and use the shared durable capacity/publication binding;
 bare metal composes the previously missing watchdog and chain factory and the
-same capacity seams. The remaining multi-domain, domain-stack, and hosted
-settlement adoption gaps build on these seams rather than reopening them.
+same capacity seams. The remaining multi-domain, domain-stack, and live
+settlement qualification gaps build on these seams rather than reopening them.
 
-**Design promotion (2026-08-15, API-credit hosted adoption).** API credits now
-publishes independent mechanism-neutral options, uses the core hosted buyer
-transport and shared callback-driven storefront route service, derives one
-canonical principal-bound fulfillment/grant identity, and orders authoritative
-funding before exact-once issuance, signed portable evidence, condition
-evaluation, and collection. Credits-service request-digest grants and
-storefront private-result/evidence migrations make acknowledgement loss,
-restart, collection/reclaim races, and secret separation durable. These
-decisions are promoted to the API credits, buyer orchestration, storefront
-publication, market composition, settlement servicing, deployment state, and
-test compatibility specifications and repository architecture/deployment/test
-guides. Remaining signed-producer, protected Stripe, and live resolver evidence
-is recorded as external rather than replaced with local simulation.
+API-credit issuance uses canonical principal ownership, deterministic fulfillment/grant identities, request digests, unknown-outcome retrieval, and a private credential result channel. Arkhai payment receipts gate issuance; Alkahest retains its own condition and collection path.
 
 A compute-dimension name leaking into every domain's capacity declaration is a real defect but too small to own a gap row here; it rides with [`capacity-resource-administration`](../../openspec/changes/capacity-resource-administration/), which already rewrites the code that causes it.
 
@@ -221,18 +209,18 @@ Restoring a non-zero hold default is `billable-capacity-reservations`' own work:
 
 **Value.** Escrow is one way to close a deal, not the definition of one. The hosted-fiat work proved a second mechanism can compose from kit; the next mechanism class is introduction-only settlement — a large share of real capacity trade is arranged person-to-person, with commercial terms too exotic to parametrize, where the marketplace's value is discovery, negotiation, and a trustworthy introduction rather than payment custody or provisioning. Finishing mechanism neutrality also changes the marginal cost of every future mechanism: a registration and a config section instead of a conditional arm in every domain.
 
-**Current state.** Settlement mechanisms are composed registrations: `kit/settlement-runtime` owns the registration surface, configuration hierarchy, readiness, publication options, buyer compatibility, and the obligation servicing lifecycle; `alkahest.v1` and `fiat.stripe.v1` both plug in through kit-side factories named only in domain composition roots. The registry accepts option-only listings, a mechanism-neutral durable identity (`obligation_ref`) exists with its own signed route family, and buyer and seller can complete a deal with no wallet or chain resources at all.
+**Current state.** `alkahest.v1` and `arkhai.payments.v1` are peer registrations in VM, bare-metal, and API-credit compositions. Shared configuration owns readiness, publication options, and buyer compatibility, not a universal escrow API. Negotiation emits exact Agreement bytes; the selected settlement stage produces evidence consumed by domain provisioning. Arkhai payments stores the seller-derived mandate in shared negotiation `settlement_data`, approves and polls a deterministic transaction, and gates provisioning or issuance on a verified signed receipt. It creates no settlement plan or obligation and runs no servicing daemon. `fiat.stripe.v1` and its hosted client, funding profiles, setup, and recovery commands are not part of the installed system.
 
-A third mechanism now exists: `contact-exchange.v1` completes a deal by durable, authenticated introduction — rateless options, a scalar-declining registration, one non-financial obligation, a persisted reveal surface (`/api/v1/introductions`), and a loose-listing discovery profile — composed end-to-end on bare metal. All three storefront domains now dispatch exact-selection acceptance through the registration's accepted-obligation builder with no per-mechanism arm: the mechanism resolves once from the selection, rate arithmetic (duration-scaled and counted-unit alike) lives inside the mechanism, and each domain keeps only its own service terms and scaling input. Scalar participation is a declinable registration capability carried to counterparties through the option shape.
-
-Deal identity is convergent: every deal — Alkahest included — has a `settlement_obligations` record keyed by `obligation_ref` with the mechanism's own identifier as `mechanism_ref` (legacy escrows are backfilled at startup), and every mechanism surface's status projection exposes the neutral ref. Settlement verification is a registration hook, the Alkahest-shaped carriers are kit-owned (core keeps tombstoned aliases only for the wire models it still types), the main compute discovery filters project settlement options (generic mechanism filter plus option-embedded token filters), and the pre-terms mechanism literals are gone — the buyer hosted transport takes its mechanism from the composing CLI, seller CLIs mount mechanism command groups from registrations, and option identities derive through the shared helper.
+Alkahest and `contact-exchange.v1` retain the shared obligation journal and escrow-oriented carriers. Contact exchange completes a bare-metal deal by durable authenticated introduction: rateless options, a scalar-declining registration, a non-financial obligation, and a persisted reveal surface. Core carries public options, accepted Agreements, and opaque stage data; each supporting domain owns the translation into delivery.
 
 A revealed introduction now reaches its owner rather than only being readable: each side hands its own copy of the reveal to sinks its operator configured locally, through an installed-plugin contract that grows a destination by installing a package rather than editing the marketplace. `kit/delivery` owns a mechanism-neutral event, the sink protocol, discovery, and four protocol-thin built-ins (file, local program, webhook, mail); the seller dispatches off the reveal's critical path from the introduction route service, the buyer dispatches inline after printing. Delivery is never authoritative — the durable, re-readable reveal is what makes best-effort delivery safe — and the mechanism kit gained no delivery dependency, because its dispatch is injected.
 
-What deliberately remains: the `escrows` table and the `/api/v1/settle/{escrow_uid}` route family serve as the Alkahest mechanism surface (retirement needs deployment evidence), hosted-specific servicing gates guard hosted's own surfaces, and pre-plan legacy escrow rows keep only their mechanism-surface identity.
+Current limits: escrow claimant, expiration, and condition fields remain in existing core carriers, and `kit/settlement-runtime` remains shared by Alkahest and contact exchange. Moving those escrow semantics fully into Alkahest is a separate refactor. The legacy `/api/v1/settle/{escrow_uid}` family remains the Alkahest surface; VM payment provisioning progress may occupy a local `escrows` row under negotiation ID without becoming a chain obligation.
 
 | Open gap | Owned by |
 |---|---|
+| Live Arkhai payment and domain delivery qualification | [`settle-through-arkhai-payments`](../../openspec/changes/settle-through-arkhai-payments/) |
+| Isolate escrow carriers and the conditional-escrow port fully within Alkahest | Unowned follow-up; deferred scope in [`settle-through-arkhai-payments`](../../openspec/changes/settle-through-arkhai-payments/) |
 | Cross-domain contact-exchange composition beyond bare metal; contact-payload retention automation | Unowned — needs a new change; background in [`contact-exchange-settlement-mechanism`](../../openspec/changes/archive/2026-08-19-contact-exchange-settlement-mechanism/) |
 | Delivery beyond bare metal, and a second event producer (a settled charge, a completed escrow) | Unowned — needs a new change; background in [`add-introduction-delivery-sinks`](../../openspec/changes/archive/2026-08-19-add-introduction-delivery-sinks/) |
 
@@ -255,76 +243,11 @@ verification tasks; it does not restore legacy identity precedence.
 
 ---
 
-## Hosted settlement release status
+## Payment qualification boundaries
 
-The common VM consumer supports exact hosted funding profiles `card.v1`,
-`us_bank_transfer.v1`, and `us_ach_debit.v1` through the released
-provider-neutral client. VM publication keeps ready profiles as distinct
-options; the persistent buyer profile owns its opaque authority/environment
-payer binding; exact post-acceptance purchase authorization is direct; escrow
-materialization, status, fulfillment, collection, and reclaim remain
-storefront-mediated through the shared settlement runtime. Historical
-card-only accepted state is recovery-only, and Alkahest remains an independent
-mechanism lane.
+Local focused suites exercise Agreement retention, mandate validation, signed receipts, retryable pending, and idempotent physical/grant progress. The controlled VM smoke reaches pending → provisioning → ready with one delivery; it is not live-ledger or hardware acceptance. Bare-metal and API-credit package tests likewise do not establish external payments or delivery qualification.
 
-The independently signed hosted `v0.2.1` producer release, manifest, client
-wheel, service image, API/schema/conformance artifacts, SBOM/provenance,
-repository/workflow identity, and source commit have been verified. Production
-activation still requires role-scoped credentials and readiness for each
-selected Stripe account, rail, instrument or mandate, browser action, webhook,
-and condition resolver; local provider fixtures cannot establish those claims.
-
-**One VM hosted lane now completes end to end.** A development
-`us_bank_transfer.v1` collection run against the real Stripe test account
-carries an accepted obligation through authoritative funding, VM provisioning,
-portable condition evidence, and collection, with exactly one PaymentIntent,
-charge, and transfer, matching amount, currency, destination, transfer group,
-and operation metadata. That is the first VM hosted lane to reach a terminal
-collected state; a development run still qualifies nothing.
-
-Getting there resolved seven defects, each of which had been hiding the next.
-Three were consumer-side blindness — a staged subprocess that swallowed every
-startup failure, a rejection path that discarded the authority's error code,
-and a refusal that named the shape it wanted rather than the answer it got.
-Four were real:
-
-- bodyless routes (`GET /api/v1/settlements/{ref}`, reclaim) authorized against
-  a JSON `null` instead of the empty body the buyer signs, so every status poll
-  was refused — and refused unsigned, before the response-signing wrapper;
-- the adapter read the authority's `attribution_underpaid` incident as an
-  operator condition, but it is raised on the first retrieval of *every* push
-  transfer, before money can have arrived, so every bank deal parked
-  permanently;
-- a hosted deal had no storefront escrow row, which VM provisioning, lease
-  registration, and terminal lease truncation all read the deal through; adding
-  it then exposed two more — the chain convergence sweep adopting hosted deals
-  it has no reservation for, and a 30-second operation lease expiring inside an
-  hour-long provisioning attempt, each handing one deal to two racing workers;
-- the portable resolver was pointed at the key that signed the release rather
-  than the authority's own runtime identity, so the authority refused its own
-  attestation lookup and the condition came back `manual_required`.
-
-The remaining VM hosted work is qualification under a protected run, plus two
-lanes blocked at Stripe's hosted Checkout page rather than by marketplace code:
-`card.v1` behind hCaptcha, and `us_ach_debit.v1` behind Financial Connections,
-whose page presents no manual routing/account fields at all. Those two are
-hosted-page lanes and belong on that side of any CI split; the push-transfer
-profile is headless throughout.
-
-API-credit and bare-metal are separate adopters of the shared hosted transport,
-route service, configuration registry, and settlement runtime; neither imports
-VM lifecycle code. Bare metal ships an installed buyer contribution, dedicated
-seller composition, trusted selected-site publication, funding-gated Capacity
-Reservation and fulfillment, portable lease-ready evidence, and independent
-teardown/recovery. One release-qualified `us_bank_transfer.v1` whole-host lane
-has proved authoritative Stripe funding and collection, portable condition
-evidence, authenticated SSH access, key revocation and failed subsequent
-access, teardown, Capacity Reservation release, and capacity republication.
-Card, ACH, automatic-fallback, and failure/recovery whole-host lanes remain
-unqualified until the buyer status-polling response authentication and the
-remaining provider matrix are resolved.
-
----
+A qualified payment run needs the intended owned payments target, owner-scoped credentials, observed readiness, and the actual domain delivery authority. VM delivery, API-key use and top-up, and bare-metal authenticated access, revocation, teardown, and capacity release remain separate outcomes. Unavailable service or hardware prerequisites remain named evidence gaps, not permission to claim a simulated result.
 
 ## Related documents
 

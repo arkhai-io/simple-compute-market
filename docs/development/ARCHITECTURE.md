@@ -23,7 +23,7 @@ Directional context — which goals are being pursued, the value each delivers, 
 
 ## System overview
 
-Arkhai is a reference implementation of an agent-driven marketplace. Buyers discover listings through registries, negotiate with seller storefronts through signed synchronous HTTP rounds, materialize settlement plans, and service obligations over time. Market-domain code defines what is traded; shared role packages provide schema-opaque control flow; reusable kit capabilities provide identity, policy, settlement, capacity, resource-pool, and fulfillment machinery.
+Arkhai is a reference implementation of an agent-driven marketplace. Buyers discover listings through registries, negotiate with seller storefronts through signed synchronous HTTP rounds, settle accepted Agreements through a selected mechanism, then receive domain delivery. Market-domain code defines what is traded; shared role packages provide schema-opaque control flow; reusable kit capabilities provide identity, policy, settlement, capacity, resource-pool, and fulfillment machinery.
 
 Physical delivery is deliberately separate from commercial agreement. A seller may advertise fungible capacity or intentionally expose a specific resource. The storefront owns market-facing listings and deal state. Site authorities own admitted capacity. Resource-pool services own provisioning routing metadata. Fulfillment scheduling binds admitted capacity to a settlement resource, and providers execute against that selected resource.
 
@@ -34,7 +34,7 @@ buyer (`market`) ── discovery ──> registry
        │                            ▲
        └─ signed negotiation ──> storefront
                                   │
-                                  ├─ settlement servicing ──> chain / mechanism provider
+                                  ├─ settlement ──> chain / Arkhai payments
                                   └─ capacity + fulfillment ──> site authority / compute provisioner
 ```
 
@@ -42,17 +42,17 @@ Production permits independently operated registries and seller stacks. Buyers m
 
 ## Composition from above and below
 
-A behavior belongs in the market core when it is invariant across listing schemas. Behavior that varies by schema is supplied from below through injected domain or kit hooks.
+A behavior belongs in the market core when it is invariant across listing schemas. Shared carriers define only what at least two of buyer, seller, and registry read: settlement options and the accepted Agreement. Mechanism status, servicing, refunds, and provisioning translations belong to their owning kits and domain compositions. Behavior that varies by schema is supplied from below through injected domain or kit hooks.
 
 The schema-opaque market composition is:
 
 ```text
-terms   = negotiate(messages...)
-plan    = settle(terms)
-receipt = service(plan)
+agreement = negotiate(messages...)
+evidence  = settle(agreement)
+result    = provision(evidence)
 ```
 
-Core owns schema-opaque carriers and role structure around these phases: signed transport, round sequencing, persistence mechanics, and deterministic handoffs. Domain packages own listing vocabulary, message content, validation, deterministic interpretation of terms, fulfillment requirements, and result vocabulary. Kit packages own reusable mechanisms and authorities, including the single commercial-settlement obligation lifecycle and the shared storefront application/lifecycle shell. Composition roots wire concrete domain and kit implementations into role packages.
+Core owns schema-opaque carriers and role structure around these phases: signed transport, round sequencing, persistence mechanics, and deterministic handoffs. Domain packages own listing vocabulary, message content, validation, deterministic interpretation of terms, fulfillment requirements, and result vocabulary. Kit packages own reusable mechanisms and authorities, including obligation servicing and stateless payment clients and the shared storefront application/lifecycle shell. Composition roots wire concrete domain and kit implementations into role packages.
 
 Each domain-owned storefront validates one immutable `MarketDomainContract` at its composition boundary before constructing persistence, services, workers, or the HTTP application. The validated object is carried through common listing/negotiation/artifact bindings and lifecycle contexts. Domain contributions expose that contract through `market.storefront_contributions`; shared core dispatch resolves only the frozen domain identity/version and never guesses from a payload or imports the domain.
 
@@ -144,7 +144,7 @@ Within `market_fulfillment`, carrier modules such as identifiers, envelopes, req
 
 `kit/identity` is the foundation owner for canonical scheme-tagged principals, Ed25519 and EIP-191 signer/verifier dispatch, version 2 authenticated request and response envelopes, replay reservation, and dual-proof rotation. Composition roots resolve public principal configuration and secret credential material separately, construct signers, and inject them into roles and typed clients. Core, domain, settlement, and service-peer code handles only the signer interface and complete public principals; it does not receive raw private-key fields or infer identity from an address.
 
-The same scheme-neutral role lifecycle supports wallet-free Ed25519 discovery, negotiation, hosted settlement, status, reclaim, and recovery. Wallet and chain inputs are optional adapter-owned configuration required only after selection of an explicit EVM effect. The independently released hosted client owns its own canonical wire, response verification, and provider-facing identity models; the marketplace adapter passes an injected signer through that exact client rather than copying the protocol.
+The scheme-neutral role lifecycle supports wallet-free Ed25519 discovery, negotiation, Arkhai payment settlement, status, and recovery. Wallet and chain inputs are required only for selected EVM effects. Payment calls use separate owner-scoped WorkOS credentials; receipts use trusted Ed25519 `arkhai.payments.receipt.v1` framing through the identity kit.
 
 Buyer identity lifecycle is core-owned above that cryptographic foundation.
 `market_identity.profiles` stores versioned public XDG metadata: stable random
@@ -227,7 +227,7 @@ no-op.
 
 ### Settlement configuration
 
-Marketplace roles configure settlement mechanisms through one typed `[Settlement]` root. Its duplicate-free `priority` list contains canonical mechanism IDs; registered `alkahest` and `contact` subsections own their mechanism policy and public client inputs. Identity, wallet, and chains remain independent shared resources. Composition roots register installed mechanisms explicitly and inject only the resources each declares.
+Marketplace roles configure settlement mechanisms through one typed `[Settlement]` root. Its duplicate-free `priority` list contains canonical mechanism IDs; registered `alkahest`, `arkhai_payments`, and `contact` subsections own their mechanism policy and public client inputs. Identity, wallet, and chains remain independent shared resources. Composition roots register installed mechanisms explicitly and inject only the resources each declares.
 
 A market may settle by introduction: the `contact-exchange.v1` mechanism completes a deal with no payment and no provisioning — buyer and seller are put durably into contact with the context established during negotiation, revealed only after acceptance through the authenticated introductions surface. Its options are rateless (the mechanism declines scalar negotiation), its one obligation is non-financial, and contact payloads are bounded, deliberately persisted PII that never appears in listings or discovery.
 
@@ -259,14 +259,14 @@ to obtain vocabulary or policy.
 
 Preflight remains mechanism-owned but projects one sanitized readiness contract. Storefront publication combines enabled ready registrations with explicit typed clauses in configured mechanism order; it never uses one untyped price for multiple mechanisms. Buyer policy ranks only compatible advertised survivors after ordered explicit clauses. Priority and clauses apply before acceptance only. Accepted Terms and persisted operation identities remain authoritative through readiness or configuration changes.
 
-Typed metadata generates role-appropriate templates, edit validation, environment and Helm schema fragments, clause descriptors, and reference output. Marketplace schemas admit public consumer trust and policy but reject hosted provider, administrator, webhook, database, and service-migration state. See the [CLI query language](../../openspec/specs/cli-query-language/spec.md), [settlement configuration contract](../../openspec/specs/settlement-configuration/spec.md), and its [architecture](../../openspec/specs/settlement-configuration/architecture.md).
+Typed metadata generates role-appropriate templates, edit validation, environment and Helm schema fragments, clause descriptors, and reference output. Marketplace schemas admit public consumer trust and policy but reject payment-provider, administrator, webhook, ledger database, and service-migration state. See the [CLI query language](../../openspec/specs/cli-query-language/spec.md), [settlement configuration contract](../../openspec/specs/settlement-configuration/spec.md), and its [architecture](../../openspec/specs/settlement-configuration/architecture.md).
 
 ## Runtime service map
 
 ```text
 ┌──────────────────────────────────────────────────────────────┐
 │                   Settlement mechanisms                      │
-│                       Alkahest                               │
+│                Alkahest / Arkhai payments                    │
 └───────────────────┬──────────────────────────┬───────────────┘
                     │                          │
           ┌─────────▼─────────┐       ┌────────▼──────────┐
@@ -313,8 +313,9 @@ Within a service, controllers stay thin: HTTP routing, request/response schemas,
 | Provider-specific create/status/teardown | Fulfillment provider | Executes against the selected resource and does not substitute placement |
 | Asynchronous infrastructure job state | Compute provisioner | Durable job identity with in-process execution queue |
 | Lease expiry and physical release | Provisioning lifecycle plus fulfillment convergence | Lease lifecycle owns the release decision; fulfillment convergence owns teardown dispatch/recovery — see "Release" and "Recovery workers" |
-| On-chain/mechanism claim state | Settlement servicing engine | Mechanism-neutral core with kit/domain codecs and policies |
-| API keys, credit balances, grants, and consumption | API-credits service | Wallet authorization for purchase is distinct from bearer authorization for use |
+| Escrow claims and obligation journal | Settlement-runtime and Alkahest kit | Domain codecs and fulfillment policy |
+| Payment transactions, ledger, hold release, fees, disputes, and cash movement | External Arkhai payments service | SCM consumes the published API and verified receipt, not provider state |
+| API keys, credit balances, grants, and consumption | API-credits service | Marketplace purchase ownership is distinct from bearer authorization for use |
 
 ### Storefront capacity boundary
 
@@ -403,7 +404,7 @@ Fulfillment lifecycle identifiers are opaque UUIDv7 strings. They are not encode
 | `site_id` | Explicit authority/routing identity; never encoded into another ID |
 | `pool_id` | Globally unique pool identity with explicit site ownership where required |
 
-`obligation_ref` is the universal deal-settlement identity: every deal, regardless of settlement mechanism, has one durable `settlement_obligations` record keyed by its `obligation_ref` (derived from the agreement, obligation index, and canonical obligation content). A mechanism-issued identifier — the Alkahest `escrow_uid`, a hosted settlement reference, an introduction operation reference — is recorded on that record as the mechanism's `mechanism_ref`. Cross-mechanism status and tooling correlate deals by `obligation_ref`; mechanism-specific route families (such as `/api/v1/settle/{escrow_uid}`) remain each mechanism's own surface and expose the neutral `obligation_ref` in their status projections. Legacy escrows rows are backfilled with their neutral record at storefront startup; rows whose negotiation predates persisted settlement plans keep only their mechanism-surface identity.
+Accepted deal identity is the negotiation ID and exact Agreement. Mechanisms using the obligation runtime correlate through `obligation_ref` in `settlement_obligations`, with escrow and introduction references as `mechanism_ref`. Arkhai payments instead stores the mandate in `negotiation_threads.settlement_data` and derives its transaction ID from it; it creates no plan or obligation. Domain receipt and delivery progress remain linked to the negotiation ID. Legacy escrow rows are backfilled only where persisted plans provide neutral obligation identity.
 
 `fulfillment_uid` is a distinct, older identifier predating `fulfillment_id`: the on-chain settlement-claim identity a storefront's settlement mechanism (Alkahest today) issues for escrow arbitration. It is not part of the fulfillment-lifecycle UUIDv7 family above, is owned by the settlement mechanism rather than the fulfillment capability, and MUST NOT be confused with `fulfillment_id` — a storefront workflow row may legitimately carry both, for the same deal, meaning two different things.
 
@@ -415,9 +416,9 @@ Commercial agreement identity does not cross the generic provisioning boundary m
 
 ### Discovery and negotiation
 
-The buyer discovers listings from a registry and drives signed synchronous request/response rounds against a storefront. Negotiation is a deterministic reduction of the shared message history to agreed terms. Seller policy evaluates listing data, captured side inputs, and the message history; protocol infrastructure does not reinterpret domain policy.
+The buyer discovers listings from a registry and drives signed synchronous request/response rounds against a storefront. Acceptance emits one Agreement with accepted terms, exact option and opaque selection parameters, canonical parties, explicit start, and domain provision terms. Relative starts resolve once at acceptance. Both parties retain exact response bytes rather than reconstructing the Agreement from the transcript. Seller policy evaluates listing data, captured side inputs, and the message history; protocol infrastructure does not reinterpret domain policy.
 
-VM and API-credit storefronts use that one kit lifecycle. Opening resolution
+VM, bare-metal, and API-credit storefronts use that one kit lifecycle. Opening resolution
 selects the storefront's configured domain contract and listing before the
 runtime persists anything. Continuation resolution starts from the recorded
 thread, re-establishes the exact listing and canonical buyer/seller binding,
@@ -438,17 +439,23 @@ buyer opening message
     ↓
 signed synchronous rounds
     ↓
-shared canonical history
+seller acceptance
     ↓
-Terms
+exact Agreement bytes + opaque settlement_data
 ```
 
 ### Settlement servicing
 
-Settlement materializes agreed terms into a mechanism-neutral plan. Servicing may outlive fulfillment and repeatedly evaluate conditions, collect claims, accept heartbeats, or reclaim expired obligations. The settlement-runtime kit owns one stable per-obligation lifecycle and operation journal; mechanism kits translate and execute opaque conditional-escrow calls; domain policy selects and interprets conditions. A verified-only domain may register and adopt an obligation, but servicing does not begin until its composition binds a real immutable fulfillment reference.
+The selected settlement stage consumes the exact Agreement and produces its own evidence. Alkahest uses plans, obligations, condition checks, collection, and expiry/reclaim through the shared settlement-runtime journal and its own client. Contact exchange may fuse settlement and delivery. A charge-first stage does not implement a conditional-escrow API.
+
+`arkhai.payments.v1` is a stateless peer of Alkahest in VM, bare-metal, and API-credit compositions. Shared registration, typed configuration, and owner-scoped client provision live in `kit/arkhai-payments`'s `settlement_config.py`. Seller acceptance returns the derived mandate in opaque `settlement_data`, persisted next to exact `agreement_bytes` in `negotiation_threads`. Buyer `payer_account` travels in selection params and Agreement `settlement_params`, separately from marketplace identity.
+
+The kit defines `deal = sha256(JCS(agreement))` and transaction ID `sha256(JCS(mandate))`. Hold intervals round up and approval expiry rounds down without rewriting fractional Agreement timestamps. The buyer validates/approves the mandate and polls that ID; its seller settle call carries only the negotiation ID. The seller loads accepted state, polls the same transaction, and verifies the signed receipt against the mandate before provisioning or issuing. Pending is retryable, completed delivery is idempotent, and nonterminal domain progress is re-driven. `make_settle_hook` routes a selected outcome with no escrow proposal to the domain's `agreement_settlement` hook.
+
+The payments service owns the ledger, fees, hold release, disputes, and cash providers. The kit has no servicing daemon, ledger, plan, or obligation; refund calls `reverse`. Domain receipt and delivery journals are local recovery state, not financial authority.
 
 ```text
-Terms → SettlementPlan → active obligations → Receipt
+Alkahest: Agreement → SettlementPlan → active obligations → Receipt
                          ├─ condition checks
                          ├─ claims / collection
                          ├─ heartbeats
@@ -498,6 +505,8 @@ Provider result + zero or more Provisioned Resources
         ↓
 status / teardown / durable results
 ```
+
+VM and bare-metal payment delivery requires a matching signed receipt before any protected physical effect. Accepted selected-site bindings govern fulfillment and recovery; VM's local provisioning progress under the negotiation ID is not a chain escrow or obligation. API-credit payment similarly gates idempotent authority-owned issuance and private credential delivery.
 
 Scheduling and provider execution are separate. The scheduler selects and binds a resource. The provider may validate the selected resource but must not choose a substitute. Retries for the same reservation and equivalent request return the existing assignment or operation result; conflicting retries are rejected.
 

@@ -331,7 +331,7 @@ Scheme-neutral behavior is exercised from one shared fixture matrix under both
 Ed25519 and EIP-191 rather than by maintaining parallel feature suites. Tests
 specific to normalization and cryptographic dispatch stay with the identity
 plugins; tests that require a wallet or chain stay with the explicitly selected
-EVM adapter. The representative hosted-fiat system path deliberately uses
+EVM adapter. Arkhai payment composition coverage uses
 Ed25519 with every wallet and chain setting absent, while focused EIP-191
 integration coverage proves that selecting that scheme or an EVM effect does
 not change the common marketplace contract.
@@ -363,15 +363,15 @@ manifest must fail startup rather than admit mixed identity precedence.
   obligation, fulfillment, and operation identifiers, explicit buyer run-log
   migration, complete rollback on malformed or conflicting owners, and
   startup/readiness rejection of drift or mixed signature versions.
-- Composition tests exercise an Ed25519 hosted-fiat path with wallet, chain,
+- Composition tests exercise an Ed25519 Arkhai payment path with wallet, chain,
   RPC, balance, and gas configuration absent, and separately prove that a
   selected EVM effect resolves and validates only its adapter-owned inputs.
 - Configuration and artifact tests use secret canaries to reject private
   material in public models, persistence, logs, rendered ConfigMaps,
-  arguments, images, wheels, manifests, and fixtures. Hosted integration uses
-  the exact manifest-pinned released client and shared conformance fixtures;
-  editable sibling imports or copied hosted signing behavior are test
-  failures.
+  arguments, images, wheels, manifests, and fixtures. Payment integration uses
+  generated wire models and shared conformance vectors through the installed
+  payments kit; service implementation imports and copied receipt signing
+  behavior are test failures.
 - VM and API-credit plugin conformance uses the same selected-primary and
   retained-principal recovery fixtures. Discovery rejects any plugin missing
   `core.resolved-buyer-identity.v1` before command registration.
@@ -379,11 +379,11 @@ manifest must fail startup rather than admit mixed identity precedence.
   output, exceptions/reprs, generated buyer TOML, Compose/Helm renders,
   ConfigMaps, wheels, images, and evidence. Credential values may appear only
   inside the selected provider boundary.
-- The system-level identity scenario runs publication, discovery, negotiation,
-  hosted funding, settlement, status, reclaim, and recovery with Ed25519
-  principals and no wallet configuration. It also checks coordinated
-  readiness failure when any authority or client lacks the pinned identity
-  version.
+- A payment system scenario must cover publication, discovery, negotiation,
+  approval, receipt-gated delivery, status, and recovery with Ed25519 and no
+  wallet. Local controlled smoke evidence does not establish live ledger or
+  physical access. Check readiness before a live run and report unavailable
+  service or credential prerequisites rather than run against a down target.
 
 ## Boundary-Change Validation
 

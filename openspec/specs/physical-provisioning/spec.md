@@ -468,21 +468,24 @@ surface before the host is publishable.
 - **WHEN** a `bare_metal.ansible` pool contains a non-empty `provider_config`
 - **THEN** validation rejects the pool before it can authorize or dispatch fulfillment
 
-### Requirement: Hosted funding gates whole-host allocation
+### Requirement: Signed payment receipts gate selected-site execution
 
-For a hosted bare-metal obligation, no Capacity Reservation commit, scheduling, executor dispatch, lease, or access grant may begin before authoritative funding is ready. The fulfillment identity MUST be derived from the accepted agreement, obligation, seller-owned Physical Resource or pool selection, site, buyer, claimant, and executor kind. Replay and restart MUST converge on the same selected-site reservation and fulfillment; they MUST NOT substitute a different resource or site.
+For `arkhai.payments.v1`, VM and bare-metal storefronts MUST load the accepted mandate from shared `negotiation_threads.settlement_data` beside exact `agreement_bytes` and verify the service-signed receipt against that mandate before any protected physical effect. Fulfillment MUST use the accepted domain/site binding and durable fulfillment identity, not buyer-supplied routing or current listing state. Retries and restart recovery MUST recheck accepted receipt evidence and converge on the same reservation and physical operation. VM's local provisioning-progress row MAY use the negotiation ID but MUST NOT turn the transaction into a chain escrow, settlement plan, or obligation.
 
-#### Scenario: Access-ready evidence
+#### Scenario: Receipt is pending or mismatched
 
-- **WHEN** the funded selected-site fulfillment becomes authoritatively access-ready
-- **THEN** the storefront persists a public result and content-addressed seller-signed lease-ready evidence before collection
-- **AND** the evidence binds agreement, obligation, accepted binding, fulfillment, buyer, seller, claimant, site, executor, resource/allocation, condition, access method, and expiry without exposing credentials
+- **WHEN** the seller cannot verify a matching signed receipt
+- **THEN** it reports retryable pending or rejects invalid evidence without provisioning or creating access
 
-#### Scenario: Teardown is independent
+#### Scenario: Verified VM provisioning restarts
 
-- **WHEN** financial collection is complete and the lease later expires
-- **THEN** revocation, executor teardown, and capacity release converge under their physical operation identities
-- **AND** no financial reclaim is inferred from teardown
+- **WHEN** foreground work or recovery resumes verified payment progress
+- **THEN** the existing convergence lease and durable physical fulfillment ID prevent duplicate delivery
+
+#### Scenario: Bare-metal receipt is verified
+
+- **WHEN** payment settlement succeeds for an accepted bare-metal Agreement
+- **THEN** reservation, fulfillment, result retrieval, and teardown continue against that Agreement's selected-site authority
 
 ## Evidence
 

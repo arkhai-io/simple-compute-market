@@ -78,38 +78,25 @@ An API gate MUST parse bearer credentials as `<key_id>.<secret>`, verify them th
 - **WHEN** a middleware repeats consumption for one key with the same idempotency key
 - **THEN** the credits service charges the balance at most once
 
-### Requirement: Hosted settlement grants are principal-bound and exact once
+### Requirement: Payment grants are principal-bound and exact once
 
-An accepted hosted API-credit obligation MUST bind the named service, positive
-quantity, key mode and optional key ID, canonical buyer and claimant
-principals, exact amount and currency, funding profile, expiry, and issuance
-condition. The credits authority MUST grant under the deterministic
-mechanism-neutral fulfillment identity derived from the obligation, and one
-fulfillment identity MUST map to one immutable request digest and one grant.
-The marketplace storefront MUST NOT issue before authoritative hosted funding.
+An accepted `arkhai.payments.v1` Agreement MUST bind service, positive quantity, key mode and optional key ID, canonical buyer and seller, amount, asset, and selected payment policy. The storefront MUST verify the signed receipt against its persisted mandate before issuance. The credits authority MUST accept `arkhai.payments.v1` and `alkahest.v1` issuance, key each grant by deterministic fulfillment identity, and reject changed reuse against its immutable request digest. Key ownership, balance, and quota remain authority-owned.
 
-#### Scenario: Hosted issuance acknowledgement is lost
-- **WHEN** the authority commits a grant but its response is lost
-- **THEN** the storefront retrieves that grant by fulfillment identity and does not reserve quota, create a key, or increase balance again
+#### Scenario: Issuance acknowledgement is lost
 
-#### Scenario: Existing key belongs to another marketplace principal
-- **WHEN** a hosted top-up targets a key owned by a different canonical principal
-- **THEN** the credits authority rejects the issuance without changing quota or balance
+- **WHEN** the authority commits a grant but the storefront did not record its response
+- **THEN** retry retrieves or resumes the same grant without creating another key or increasing balance again
 
-### Requirement: Hosted issuance evidence is signed, portable, and secret-free
+#### Scenario: Existing key belongs to another principal
 
-After an exact-once grant commits, the storefront MUST publish a canonical
-seller-signed evidence body binding the accepted obligation, fulfillment and
-grant identities, service, quantity, key mode/key ID, canonical owner and
-claimant, credits-authority attestation, and request/evidence digests. The
-configured portable resolver MUST authenticate callers and return that evidence
-by digest. Evidence, public settlement state, logs, and hosted payloads MUST NOT
-contain the bearer secret, raw API credential, or provider data.
+- **WHEN** a top-up targets a key owned by a different canonical principal
+- **THEN** the authority rejects issuance without changing quota or balance
 
-#### Scenario: Evidence resolves for the accepted condition
-- **WHEN** the hosted condition evaluator retrieves the signed evidence digest
-- **THEN** signature, signer, schema/capability, freshness, condition anchor, owner, service, quantity, key target, and fulfillment identity all match before collection
+### Requirement: Payment progress and credentials remain separate
 
-#### Scenario: Issuance fails before grant commit
-- **WHEN** funding is authoritative but the credits authority has no committed grant
-- **THEN** no evidence is published, no collection occurs, and eligible reclaim remains available after the accepted deadline
+The storefront MUST re-drive nonterminal payment issuance using the accepted negotiation and deterministic transaction/grant identities. Public payment state MUST omit bearer secrets; buyer credentials MUST be delivered through the authenticated private result boundary. A pending transaction or absent matching receipt MUST authorize no issuance.
+
+#### Scenario: Buyer retries provisioning state
+
+- **WHEN** seller state is nonterminal after a verified payment
+- **THEN** settlement resumes or retrieves the same issuance instead of returning pending forever

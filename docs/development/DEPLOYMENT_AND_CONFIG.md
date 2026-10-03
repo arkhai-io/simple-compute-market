@@ -127,7 +127,7 @@ and bare-metal SQLite/queue/registry stores occupy separate named volumes.
 
 Stack files carry public URLs, canonical principals, explicit Resource Pool
 offering modes, and exact selected-site bindings. Signer, API-admin,
-provisioning SSH, hosted-authority, and buyer credentials are independent
+provisioning SSH, payment account, and buyer credentials are independent
 role-scoped file references with no committed fallback. Missing identity,
 inventory, pool declaration, site authority, or credential blocks startup or
 scenario preflight; it never selects a test signer, default site, payload-
@@ -161,7 +161,7 @@ The Helm chart and Compose profile run one storefront process against one
 single-writer SQLite volume; they do not start one container per domain.
 
 `storefront_domains` is public routing metadata only. Signing credentials,
-provider settings, SSH material, tenant credentials, hosted provider objects,
+provider settings, SSH material, tenant credentials, payment-provider objects,
 and private domain results remain in role-owned Secret channels and never enter
 ConfigMaps, command arguments, images, listing bindings, or migration reports.
 Startup rejects missing wheels, duplicate modes/identities, assertion mismatch,
@@ -206,8 +206,7 @@ drift, and old signature versions fail closed. Versioned buyer run logs have
 their own explicit migration before recovery.
 
 For an identity-contract cutover, authenticated mutations remain quiesced
-until every participating registry, storefront, service peer, hosted
-authority, and exact client reports the pinned version and capabilities.
+until every participating registry, storefront, service peer, and exact client reports the pinned version and capabilities.
 Rollback is limited to the boundary before the identity schema cutover and
 before provider or settlement mutations resume. After version 2 effects run
 against migrated state, operators recover by rolling forward from current
@@ -218,15 +217,15 @@ identity history and operation journals rather than restoring stale state.
 
 Marketplace roles resolve one strict `[Settlement]` root. `schema_version`
 selects the configuration contract, `priority` orders mechanism IDs, and peer
-`[Settlement.alkahest]` tables contain only
-mechanism-owned consumer settings. Buyer marketplace identity comes only from
+`[Settlement.alkahest]`, `[Settlement.arkhai_payments]`, and `[Settlement.contact]` tables contain only
+mechanism-owned consumer settings. Arkhai payments resolves trusted service origin, Ed25519 receipt identity, fee/dispute policy, and an `api_key_env` reference through the shared kit's `settlement_config.py`. The owner-scoped WorkOS credential reaches only its consuming process; HTTPS is required outside loopback. Buyer `payer_account` is separate domain input, carried in selection params and the accepted Agreement, not inferred from marketplace identity. Buyer marketplace identity comes only from
 the selected durable profile referenced by `[BuyerProfile]`; storefront and
 service-role principals retain their role-owned public identity configuration.
 EVM credentials and networks remain in `[Wallet]` and `[Chains]`.
 Generated TOML, ConfigMaps, status output, and run logs contain only public
 configuration projections.
 
-Role CLIs reject legacy settlement keys and expose the same explicit migration contract. The storefront additionally rejects legacy publication pricing that would synthesize options from `min_price`, `token`, or raw `accepted_escrows`. A check is read-only and reports paths and actions with values redacted. A write requires `--backup`, validates the complete candidate before mutation, creates a restrictive same-directory `.bak`, fsyncs, and atomically replaces the source. Conflicting old and new values fail rather than choosing one. Repeating a completed migration is a no-op.
+Stripe consumer settings are rejected with removal diagnostics; they are not migrated to Arkhai accounts, credentials, or transactions. Role CLIs reject legacy settlement keys and expose the same explicit migration contract. The storefront additionally rejects legacy publication pricing that would synthesize options from `min_price`, `token`, or raw `accepted_escrows`. A check is read-only and reports paths and actions with values redacted. A write requires `--backup`, validates the complete candidate before mutation, creates a restrictive same-directory `.bak`, fsyncs, and atomically replaces the source. Conflicting old and new values fail rather than choosing one. Repeating a completed migration is a no-op.
 
 Publication config and inventory CSV migrate separately from the `[Settlement]` hierarchy. The migration converts an unambiguous single-mechanism legacy price into one complete typed clause. It refuses a dual-mechanism source whose one scalar price has no authoritative asset scale, and refuses CSV rows whose legacy `accepted_escrows` lack a resolvable rate. Resource `settlements` replace command/config defaults as a whole after cutover.
 

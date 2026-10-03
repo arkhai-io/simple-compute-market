@@ -33,22 +33,17 @@ An architecture companion does not replace a normative requirement. When explana
 | Storefront publication | [Spec](storefront-publication/spec.md) | [Architecture](storefront-publication/architecture.md) |
 | Testing and compatibility | [Spec](test-compatibility/spec.md) | [Architecture](test-compatibility/architecture.md) |
 
-## Hosted settlement acceptance ownership
 
-Hosted settlement acceptance is distributed by authority boundary; no test or
-composition surface may redefine another owner's contract:
+## Settlement documentation ownership
 
-| Durable decision | Owning permanent documentation |
+| Current contract | Permanent home |
 |---|---|
-| Exact `card.v1`, `us_bank_transfer.v1`, and `us_ach_debit.v1` option identity, independent readiness, compatibility, and bounded buyer automation | [`settlement-configuration/spec.md`](settlement-configuration/spec.md) and [`settlement-configuration/architecture.md`](settlement-configuration/architecture.md) |
-| Direct buyer payer/profile/authorization calls and storefront-mediated escrow calls remain separate lanes over the released client | [`buyer-orchestration/spec.md`](buyer-orchestration/spec.md), [`market-composition/spec.md`](market-composition/spec.md), and their architecture companions |
-| Accepted authorization, authoritative funding, immutable runtime recovery, fulfillment/reclaim exclusion, and recovery-only legacy card handling | [`storefront-publication/spec.md`](storefront-publication/spec.md), [`settlement-servicing/spec.md`](settlement-servicing/spec.md), and their architecture companions |
-| Provider-neutral scripted outcomes prove only Arkhai journal, retry, reconciliation, inbox, and idempotency behavior at the hosted producer's internal provider boundary | [`test-compatibility/spec.md`](test-compatibility/spec.md) and [`test-compatibility/architecture.md`](test-compatibility/architecture.md) |
-| Supported Stripe behavior is accepted only by the marketplace-owned protected `stripe-test` system lane | [`test-compatibility/spec.md`](test-compatibility/spec.md), [`test-compatibility/architecture.md`](test-compatibility/architecture.md), and [`docs/development/TESTING.md`](../../docs/development/TESTING.md) |
-| Protected reports keep marketplace consumer identity separate from the hosted manifest, client, image, signed repository/workflow/source identity, and protected producer-run identity and apply one sanitization/failure taxonomy | [`test-compatibility/spec.md`](test-compatibility/spec.md) and [`docs/development/TESTING.md`](../../docs/development/TESTING.md) |
-| Hosted financial E2E composes only ordinary signed production client/service artifacts, with role-scoped prerequisites and fail-closed activation | [`deployment-state/spec.md`](deployment-state/spec.md), [`deployment-state/architecture.md`](deployment-state/architecture.md), and [`docs/development/DEPLOYMENT_AND_CONFIG.md`](../../docs/development/DEPLOYMENT_AND_CONFIG.md) |
-| Marketplace/authority ownership and the producer/consumer release boundary | [`docs/development/ARCHITECTURE.md`](../../docs/development/ARCHITECTURE.md) |
-| Current operator commands and staged evidence fields | [`e2e-tests/tests/e2e/roles/README.md`](../../e2e-tests/tests/e2e/roles/README.md) |
+| Peer mechanism registration, typed configuration, readiness, and account/credential separation | [Settlement configuration](settlement-configuration/spec.md) and [architecture](settlement-configuration/architecture.md) |
+| Exact Agreement bytes and shared opaque `settlement_data` persistence | [Negotiation protocol](negotiation-protocol/spec.md) |
+| Mandate derivation, transaction identity, signed receipts, retry, and refund authority | [Settlement servicing](settlement-servicing/spec.md) and [architecture](settlement-servicing/architecture.md) |
+| Negotiate → settle → provision composition and external payments authority | [Market composition](market-composition/spec.md) and [repository architecture](../../docs/development/ARCHITECTURE.md) |
+| Receipt-gated selected-site execution and idempotent credit issuance | [Physical provisioning](physical-provisioning/spec.md) and [API credits](api-credits/spec.md) |
+| Package/deployment ownership and scoped validation evidence | [Deployment](deployment-state/spec.md) and [testing](test-compatibility/spec.md) |
 
 ## Reading order
 
