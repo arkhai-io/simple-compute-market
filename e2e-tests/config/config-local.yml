@@ -17,6 +17,11 @@ buyer:
   wallet_address: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
   chain_rpc_url:  "ws://localhost:8545"
 
+# Mailpit receives the storefront's seller-side introduction mail; scenarios
+# read it back through its query API.
+mailpit:
+  api_url: "http://localhost:8025"
+
 seller:
   api_url:           "http://localhost:8001"
   base_url_override: "http://bob-storefront:8001/"

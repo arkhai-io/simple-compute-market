@@ -99,6 +99,9 @@ def register(app: typer.Typer) -> None:
         help="Join the operator's ZeroTier network and list peers.",
     )
 
+    from .introduction_cli import request_introduction
+
+    app.command("request-introduction")(request_introduction)
     buy_module.register(app)
     negotiate_module.register(app)
     settle_module.register(app)

@@ -174,79 +174,67 @@ def test_hosted_option_binding_compares_physical_host_identity() -> None:
             physical_host_id="different-host",
         )
 
-def test_contact_entries_parse_as_bounded_pairs() -> None:
-    from arkhai_bare_metal_buyer.cli import _parse_contact
-
-    assert _parse_contact(["telegram=@buyer", "email= me@example.com "]) == {
-        "telegram": "@buyer",
-        "email": "me@example.com",
-    }
-    import typer
-
-    with pytest.raises(typer.BadParameter):
-        _parse_contact(["telegram"])
-    with pytest.raises(typer.BadParameter):
-        _parse_contact(["=value"])
-
-
 def test_introduction_commands_are_registered() -> None:
-    from arkhai_bare_metal_buyer.cli import bare_metal_app
+    from arkhai_bare_metal_buyer.cli import bare_metal_app, settlement_app
 
     names = {command.name for command in bare_metal_app.registered_commands}
-    assert {"request-introduction", "introduce", "introduction"} <= names
+    assert "request-introduction" in names
+    (contact,) = [
+        group for group in settlement_app.registered_groups if group.name == "contact"
+    ]
+    commands = {command.name for command in contact.typer_instance.registered_commands}
+    assert commands == {"introduce", "introduction"}
 
 
-def test_the_reveal_is_printed_before_it_is_delivered(capsys, tmp_path) -> None:
-    """A slow sink must never delay or obscure the answer the buyer came for."""
+def test_the_context_builds_sinks_before_recovering_the_deal(monkeypatch) -> None:
+    """A misconfigured sink is refused before anything is revealed."""
 
     from types import SimpleNamespace
 
     from arkhai_bare_metal_buyer import cli
 
     order: list[str] = []
-
-    class Sinks:
-        warnings = ()
-        sinks = ("one",)
-
-    def fake_deliver(projection, *, sinks, agreement_ref, counterparty):
-        order.append("delivered")
-        return ()
-
-    original_json = cli._json
-
-    def watching_json(value):
-        order.append("printed")
-        original_json(value)
-
-    monkey = pytest.MonkeyPatch()
-    monkey.setattr(cli, "_json", watching_json)
-    monkey.setattr(cli, "deliver_introduction", fake_deliver)
-    monkey.setattr(cli, "report_delivery", lambda *args, **kwargs: None)
-    try:
-        projection = {"obligation_ref": "a" * 64, "revealed": True}
-        cli._json(projection)
-        cli._deliver_locally(
-            projection,
-            SimpleNamespace(negotiation_id="neg-1", seller_principals=None),
-            Sinks(),
-            SimpleNamespace(event=lambda *args, **kwargs: None),
-        )
-    finally:
-        monkey.undo()
-
-    assert order == ["printed", "delivered"]
-
-
-def test_the_read_command_can_redeliver() -> None:
-    from arkhai_bare_metal_buyer.cli import bare_metal_app
-
-    command = next(
-        item
-        for item in bare_metal_app.registered_commands
-        if item.name == "introduction"
+    deal = SimpleNamespace(
+        negotiation_id="neg-1",
+        settlement_plan={"obligations": []},
+        seller_url="https://seller.invalid",
+        buyer_principal=None,
+        seller_principals=None,
     )
-    assert "deliver" in command.callback.__code__.co_varnames
+    identity = SimpleNamespace(signer=object(), profile_id="profile-1")
+
+    def sinks(config):
+        order.append("sinks")
+        return SimpleNamespace(sinks=(), warnings=())
+
+    def recovered(run_id, config):
+        order.append("deal")
+        return deal, identity, lambda: None
+
+    monkeypatch.setattr(cli, "load_buyer_delivery_sinks", sinks)
+    monkeypatch.setattr(cli, "_recovered_deal", recovered)
+    monkeypatch.setattr(cli, "IntroductionTransport", lambda **kwargs: SimpleNamespace(start=None, read=None))
+
+    run = cli._IntroductionContext().recover("run-1", None, deliver=True)
+    assert order == ["sinks", "deal"]
+    assert run.deliver is not None
+
+    order.clear()
+    quiet = cli._IntroductionContext().recover("run-1", None, deliver=False)
+    assert order == ["deal"]
+    assert quiet.deliver is None
+
+
+def test_the_deleted_outcome_is_the_transports() -> None:
+    from core_buyer.introductions import IntroductionPayloadsDeleted
+
+    from arkhai_bare_metal_buyer.cli import _IntroductionContext
+
+    assert _IntroductionContext.deleted_error is IntroductionPayloadsDeleted
+    deleted = IntroductionPayloadsDeleted(
+        obligation_ref="a" * 64, payloads_deleted_at="2026-10-01T12:00:00Z"
+    )
+    assert deleted.outcome()["payloads_deleted_at"] == "2026-10-01T12:00:00Z"
 
 
 # The two compute-schema filters these tests query, declared as a registry does.
@@ -299,76 +287,3 @@ def test_a_field_the_registry_does_not_declare_is_refused_before_any_read() -> N
         bare_metal_listing_params(
             _SpecClient(), "region=us-west", registry_url="https://registry"
         )
-
-
-@pytest.mark.parametrize(
-    "arguments",
-    [
-        ["introduce", "--run-id", "run-1", "--contact", "email=b@example.com"],
-        ["introduction", "--run-id", "run-1", "--deliver"],
-    ],
-)
-def test_a_deleted_introduction_is_reported_as_an_outcome(
-    monkeypatch, arguments: list[str]
-) -> None:
-    """Both reveal commands print the deleted outcome and deliver nothing."""
-
-    from types import SimpleNamespace
-
-    from core_buyer.introductions import IntroductionPayloadsDeleted
-
-    from arkhai_bare_metal_buyer import cli
-
-    ref = "a" * 64
-    deleted = IntroductionPayloadsDeleted(
-        obligation_ref=ref, payloads_deleted_at="2026-10-01T12:00:00Z"
-    )
-
-    class Transport:
-        def start(self, **kwargs):
-            raise deleted
-
-        def read(self, **kwargs):
-            raise deleted
-
-    events: list[tuple[str, dict]] = []
-    delivered: list[object] = []
-    identity = SimpleNamespace(signer=object(), profile_id="profile-1")
-    monkeypatch.setattr(
-        cli,
-        "_recovered_introduction",
-        lambda run_id, config: (
-            SimpleNamespace(negotiation_id="neg-1", seller_principals=None),
-            identity,
-            Transport(),
-            ref,
-        ),
-    )
-    monkeypatch.setattr(
-        cli,
-        "open_run_log",
-        lambda *args, **kwargs: SimpleNamespace(
-            event=lambda name, **fields: events.append((name, fields))
-        ),
-    )
-    monkeypatch.setattr(cli, "load_buyer_delivery_sinks", lambda config: object())
-    monkeypatch.setattr(
-        cli, "_deliver_locally", lambda *args, **kwargs: delivered.append(args)
-    )
-
-    result = CliRunner().invoke(cli.bare_metal_app, arguments)
-
-    assert result.exit_code == 0, result.output
-    assert json.loads(result.output) == {
-        "obligation_ref": ref,
-        "revealed": False,
-        "code": "introduction_payloads_deleted",
-        "payloads_deleted_at": "2026-10-01T12:00:00Z",
-    }
-    assert events == [
-        (
-            "introduction_payloads_deleted",
-            {"obligation_ref": ref, "payloads_deleted_at": "2026-10-01T12:00:00Z"},
-        )
-    ]
-    assert delivered == []

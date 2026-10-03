@@ -65,7 +65,6 @@ from .negotiation_service import NegotiationRequestError
 from .runtime import BareMetalStorefrontRuntime
 from .settlement_service import SettlementRequestError
 from .hosted_routes import build_bare_metal_hosted_route_service
-from .introduction_routes import build_bare_metal_introduction_service
 from .response_auth import bind_response_auth, bind_response_contract
 
 router = APIRouter()
@@ -302,25 +301,12 @@ async def _authorize_introduction_request(
 
 
 def _introduction_service(request: Request) -> Any:
-    runtime = _runtime(request)
-    section = runtime.contact_settlement_config()
-    retention = runtime.introduction_retention()
-    if section is None or retention is None:
-        raise HTTPException(status_code=404, detail="contact exchange is disabled")
-    if not section.contact_payload:
-        raise HTTPException(
-            status_code=503,
-            detail="contact-exchange reveal is unavailable",
-        )
-    return build_bare_metal_introduction_service(
-        db=runtime.db,
-        repository=runtime.settlement_repository,
-        settlement_runtime=runtime.settlement_runtime,
-        seller_contact=section.contact_payload,
-        authorize_request=_authorize_introduction_request,
-        deliver=runtime.introduction_delivery,
-        disclosure=retention.disclosure,
+    service = _runtime(request).contact_exchange.reveal_service(
+        _authorize_introduction_request
     )
+    if service is None:
+        raise HTTPException(status_code=404, detail="contact exchange is disabled")
+    return service
 
 
 @router.post("/api/v1/introductions")

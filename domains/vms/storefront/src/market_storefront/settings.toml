@@ -85,7 +85,14 @@ schema_version = 1
 priority = []
 
 # Mechanism subsections are intentionally absent from new defaults. Operators
-# add [Settlement.stripe] and/or [Settlement.alkahest] explicitly; generated
+# add [Settlement.stripe], [Settlement.alkahest], and/or [Settlement.contact]
+# explicitly. [Settlement.contact] settles by introduction: its profiles, and
+# the seller's contact either as contact_payload (one site) or per site under
+# [Settlement.contact.origins.<site_id>] -- ordinary configuration that is
+# never published. A [Delivery] section sends each revealed buyer contact to
+# the seller's own sinks, routed per site by [Delivery.origins] when the
+# storefront has more than one; sink credentials belong in
+# storefront.secrets.toml. See DEPLOYMENT_AND_CONFIG.md. Generated
 # role configuration supplies every typed field and the exact capability pins.
 # Hosted consumer configuration contains only public client/trust policy.
 # Provider, webhook, database, migration, EAS, and RPC service configuration is

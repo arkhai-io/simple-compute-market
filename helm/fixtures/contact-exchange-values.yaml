@@ -1,0 +1,98 @@
+# Overlay for a test release that settles VM deals by introduction and
+# verifies seller-side delivery: Bob offers contact exchange with a contact for
+# his `default` site, delivers each revealed buyer contact by SMTP to the
+# dev-env Mailpit, and Mailpit is enabled so a scenario can read it back.
+#
+# Apply on top of helm/values.yaml:
+#   helm upgrade --install arkhai-node-operator helm \
+#     --values helm/values.yaml --values helm/fixtures/contact-exchange-values.yaml
+#
+# Helm replaces lists rather than merging them, so Bob's agent entry is
+# repeated in full; only its Settlement and Delivery differ from the default.
+
+dev-env:
+  mailpit:
+    enabled: true
+
+storefront:
+  agents:
+    - name: bob
+      port: 8001
+      component: seller
+      identity:
+        credentialSecret:
+          name: arkhai-bob-identity
+          key: credential
+      internalRegistryTrust:
+        authority: registry-a
+        principals:
+          - scheme: eip191
+            identifier: "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
+      secret:
+        createSecret: false
+        secretName: arkhai-bob-runtime
+        configKey: storefront.secrets.toml
+      config:
+        agent_id: bob
+        log_file_path: ./logs/bob.log
+        storefront_domains:
+          - contribution: vms
+            offering_mode: vm
+            domain_identity: compute.v1
+            contract_version: "1.0"
+          - contribution: bare_metal
+            offering_mode: bare_metal
+            domain_identity: bare_metal.v1
+            contract_version: "1.0"
+        Identity:
+          principal:
+            scheme: eip191
+            identifier: "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
+          service_peers:
+            provisioning_default:
+              role: service
+              site_id: default
+              principals:
+                - scheme: eip191
+                  identifier: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+          administrators:
+            operator:
+              principals:
+                - scheme: eip191
+                  identifier: "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
+        provisioning:
+          mode: mock
+          identity:
+            principals:
+              - scheme: eip191
+                identifier: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+        negotiation:
+          policies:
+            - has_matching_inventory_guard
+            - escrow_shape_guard
+            - bisection
+        Settlement:
+          priority:
+            - contact-exchange.v1
+          contact:
+            enabled: true
+            origins:
+              default:
+                contact_payload:
+                  email: bob-sales@seller.invalid
+            profiles:
+              default:
+                channel: email
+                terms: Quoted per engagement; reply within one business day.
+        Delivery:
+          enabled:
+            - seller-mail
+          seller-mail:
+            sink: smtp
+            host: arkhai-node-operator-dev-env-mailpit
+            port: 1025
+            start_tls: false
+            sender: storefront-bob@seller.invalid
+            recipients:
+              - bob-sales@seller.invalid
+

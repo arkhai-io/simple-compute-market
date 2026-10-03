@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-kit-delivery"
-version = "0.1.0"
+version = "0.2.0"
 description = "Recipient-side delivery of revealed marketplace events to locally configured sinks"
 requires-python = ">=3.12,<3.14"
 license = "MIT"

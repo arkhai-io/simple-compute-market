@@ -15,10 +15,13 @@ _ALLOWED_IMPORT_ROOTS = {
     "market_core",
     "market_identity",
     "market_settlement_runtime",
+    "pathlib",
     "pydantic",
     "re",
     "sqlite3",
+    "typer",
     "typing",
+    "uuid",
 }
 
 

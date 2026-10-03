@@ -578,3 +578,24 @@ def test_client_dispatch_ignores_current_enablement_for_recovery() -> None:
     registry.create_client("demo.pay.v1", config, role="buyer")
 
     assert events == ["factory:buyer"]
+
+
+class _NeverPublishedSettings(BaseModel):
+    contact: dict[str, str] = Field(
+        default_factory=dict, json_schema_extra={"never_published": True}
+    )
+    tokens: list[str] = Field(default_factory=list, json_schema_extra={"secret": True})
+    channel: str = "email"
+
+
+def test_never_published_and_secret_items_are_withheld_individually() -> None:
+    from market_settlement_runtime.configuration import _secret_values
+
+    withheld = _secret_values(
+        _NeverPublishedSettings(
+            contact={"email": "ops@west.example"}, tokens=["t-1", "t-2"]
+        )
+    )
+
+    assert {"ops@west.example", "t-1", "t-2"} <= withheld
+    assert "email" not in withheld

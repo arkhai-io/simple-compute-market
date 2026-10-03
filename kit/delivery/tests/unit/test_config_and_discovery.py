@@ -9,6 +9,7 @@ from market_delivery import (
     DeliveryConfigurationError,
     build_delivery_sinks,
     load_delivery_config,
+    validate_delivery_origins,
 )
 from market_delivery.discovery import discover_sink_factories
 
@@ -161,3 +162,119 @@ def test_a_third_party_sink_delivers_with_no_marketplace_change(monkeypatch) -> 
 
     assert received == [("4", "e" * 64, {"pigeon": "loft 9"})]
     assert outcomes[0].delivered is True
+
+
+def _recording_factory(received: list):
+    def factory(settings, **_):
+        return lambda event: received.append((dict(settings), event))
+
+    return factory
+
+
+def test_two_instances_of_one_sink_each_keep_their_own_settings() -> None:
+    config = load_delivery_config(
+        {
+            "enabled": ["west-hook", "east-hook"],
+            "west-hook": {"sink": "webhook", "url": "https://west.invalid"},
+            "east-hook": {"sink": "webhook", "url": "https://east.invalid"},
+        }
+    )
+    built: list = []
+    sinks = build_delivery_sinks(
+        config,
+        factories={"webhook": lambda settings: built.append(dict(settings)) or (lambda e: None)},
+    )
+    assert [sink.name for sink in sinks.sinks] == ["west-hook", "east-hook"]
+    assert built == [{"url": "https://west.invalid"}, {"url": "https://east.invalid"}]
+
+
+def test_a_configuration_written_before_instances_keeps_its_meaning() -> None:
+    config = load_delivery_config(
+        {"enabled": ["file"], "file": {"path": "/tmp/introductions.jsonl"}}
+    )
+    assert config.sink_for("file") == "file"
+    received: list = []
+    sinks = build_delivery_sinks(config, factories={"file": _recording_factory(received)})
+    assert [sink.name for sink in sinks.sinks] == ["file"]
+
+
+def test_an_instance_named_for_one_sink_stating_another_is_refused() -> None:
+    config = load_delivery_config(
+        {"enabled": ["webhook"], "webhook": {"sink": "file", "path": "/tmp/x"}}
+    )
+    with pytest.raises(DeliveryConfigurationError, match="named for the 'webhook' sink"):
+        build_delivery_sinks(
+            config,
+            factories={"webhook": _recording_factory([]), "file": _recording_factory([])},
+        )
+
+
+def test_an_instance_may_not_take_a_section_settings_name() -> None:
+    with pytest.raises(DeliveryConfigurationError, match="section settings"):
+        load_delivery_config({"enabled": ["origins"]}, role="seller")
+
+
+def _routed(**origins) -> dict:
+    return {
+        "enabled": ["west-hook", "east-hook", "audit"],
+        "west-hook": {"sink": "webhook", "url": "https://west.invalid"},
+        "east-hook": {"sink": "webhook", "url": "https://east.invalid"},
+        "audit": {"sink": "file", "path": "/tmp/audit.jsonl"},
+        "origins": origins
+        or {"dc-west": ["west-hook", "audit"], "dc-east": ["east-hook", "audit"]},
+    }
+
+
+def test_a_seller_routing_table_is_read() -> None:
+    config = load_delivery_config(_routed(), role="seller")
+    assert config.origins == {
+        "dc-west": ("west-hook", "audit"),
+        "dc-east": ("east-hook", "audit"),
+    }
+
+
+def test_a_buyer_may_not_route() -> None:
+    with pytest.raises(DeliveryConfigurationError, match="no origin"):
+        load_delivery_config(_routed())
+
+
+def test_routing_an_instance_that_is_not_enabled_is_refused() -> None:
+    with pytest.raises(DeliveryConfigurationError, match="not enabled: west-hok"):
+        load_delivery_config(
+            _routed(**{"dc-west": ["west-hok", "audit"], "dc-east": ["east-hook"]}),
+            role="seller",
+        )
+
+
+def test_an_enabled_instance_routed_for_no_origin_is_refused() -> None:
+    with pytest.raises(DeliveryConfigurationError, match="enabled instances: audit"):
+        load_delivery_config(
+            _routed(**{"dc-west": ["west-hook"], "dc-east": ["east-hook"]}),
+            role="seller",
+        )
+
+
+def test_routing_an_unknown_origin_is_refused() -> None:
+    config = load_delivery_config(_routed(), role="seller")
+    validate_delivery_origins(config, {"dc-west", "dc-east"})
+    with pytest.raises(DeliveryConfigurationError, match="dc-east"):
+        validate_delivery_origins(config, {"dc-west"})
+
+
+def test_several_origins_without_routing_are_refused_and_one_is_not() -> None:
+    config = load_delivery_config(
+        {"enabled": ["file"], "file": {"path": "/tmp/x"}}, role="seller"
+    )
+    validate_delivery_origins(config, {"default"})
+    with pytest.raises(DeliveryConfigurationError, match="dc-east, dc-west"):
+        validate_delivery_origins(config, {"dc-west", "dc-east"})
+    # Nothing enabled routes nothing, whatever the origins.
+    validate_delivery_origins(load_delivery_config(None), {"dc-west", "dc-east"})
+
+
+def test_signing_requires_a_signer() -> None:
+    config = load_delivery_config(
+        {"enabled": ["hook"], "hook": {"sink": "webhook", "url": "https://x.invalid", "sign": True}}
+    )
+    with pytest.raises(DeliveryConfigurationError, match="no marketplace signer"):
+        build_delivery_sinks(config, factories={"webhook": _recording_factory([])})

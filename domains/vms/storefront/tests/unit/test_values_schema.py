@@ -156,7 +156,9 @@ def test_registry_auth_is_refused_and_the_section_left_open(definition) -> None:
 def test_settlement_is_closed_to_registered_mechanisms(definition) -> None:
     settlement = _section(definition, "Settlement")
     assert settlement["additionalProperties"] is False
-    assert _allowed(settlement, "schema_version", "priority", "alkahest", "stripe")
+    assert _allowed(
+        settlement, "schema_version", "priority", "alkahest", "stripe", "contact"
+    )
 
 
 def test_buyer_only_stripe_fields_are_refused_for_the_seller(definition) -> None:
@@ -220,3 +222,50 @@ def test_check_reports_a_stale_schema(tmp_path, definition) -> None:
 
     assert values_schema.main(["check", str(current)]) == 0
     assert values_schema.main(["check", str(current), str(stale)]) == 1
+
+
+def test_contact_fields_are_public_configuration(definition) -> None:
+    contact = _field(_section(definition, "Settlement"), "contact")
+    payload = _field(contact, "contact_payload")
+    assert payload is not False
+    origins = _field(contact, "origins")
+    keyed = origins["additionalProperties"]
+    assert _field(keyed, "contact_payload") is not False
+
+
+def _delivery(definition: dict) -> dict:
+    return _section(definition, "Delivery")
+
+
+def test_delivery_keeps_its_own_settings_and_types_shipped_sinks(definition) -> None:
+    delivery = _delivery(definition)
+    for name in ("enabled", "timeout_seconds", "origins"):
+        assert _field(delivery, name) is not False
+    for sink in ("apprise", "command", "file", "smtp", "webhook"):
+        assert _field(delivery, sink)["additionalProperties"] is False
+
+
+def test_secret_sink_settings_are_refused_however_the_instance_is_named(definition) -> None:
+    delivery = _delivery(definition)
+    assert _withheld(_field(delivery, "webhook"), "url", "headers")
+    assert _withheld(_field(delivery, "smtp"), "password")
+    assert _withheld(_field(delivery, "apprise"), "urls")
+    assert _field(_field(delivery, "smtp"), "host") is not False
+    (choices,) = delivery["additionalProperties"]["dependencies"].values()
+    webhook = next(
+        choice
+        for choice in choices["anyOf"]
+        if _field(choice, "sink") == {"const": "webhook"}
+    )
+    assert _withheld(webhook, "url")
+
+
+def test_a_table_named_for_a_sink_may_state_no_other(definition) -> None:
+    assert _field(_field(_delivery(definition), "webhook"), "sink") == {"const": "webhook"}
+
+
+def test_an_instance_of_an_unshipped_sink_stays_open(definition) -> None:
+    (choices,) = _delivery(definition)["additionalProperties"]["dependencies"].values()
+    unshipped = choices["anyOf"][-1]
+    (pattern,) = unshipped["patternProperties"].values()
+    assert set(pattern["not"]["enum"]) == {"apprise", "command", "file", "smtp", "webhook"}

@@ -104,6 +104,36 @@ def settlement_config_mapping(source: Dynaconf | None = None) -> dict[str, Any]:
         raise ValueError("Settlement must be a table")
     return value
 
+def delivery_config_mapping(source: Dynaconf | None = None) -> dict[str, Any] | None:
+    """Return the storefront's ``[Delivery]`` section, or None when absent.
+
+    Dynaconf merges top-level keys case-insensitively, so ``[Delivery]`` and
+    ``[delivery]`` are the same section.
+    """
+    active = source or settings
+    raw = active.get("delivery")
+    if raw is None:
+        return None
+    value = _detached(raw)
+    if not isinstance(value, dict):
+        raise ValueError("Delivery must be a table")
+    return value
+
+
+def _detached(value: Any) -> Any:
+    """Detach Dynaconf containers keeping key spelling.
+
+    ``[Delivery]`` names its instances both as table keys and as values in
+    ``enabled`` and ``origins``; lowercasing only the keys would separate the
+    two spellings of one name.
+    """
+    if hasattr(value, "items"):
+        return {str(key): _detached(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_detached(item) for item in value]
+    return value
+
+
 def storefront_domain_registry(
     source: Dynaconf | None = None,
     *,

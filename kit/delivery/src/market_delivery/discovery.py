@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from importlib.metadata import EntryPoint, entry_points
 from typing import Any
 
+from market_identity import Signer
+
 from .config import DeliveryConfig
 from .sinks import (
     SINK_ENTRY_POINT_GROUP,
@@ -63,8 +65,14 @@ def build_delivery_sinks(
     config: DeliveryConfig,
     *,
     factories: Mapping[str, Any] | None = None,
+    signer: Signer | None = None,
 ) -> DeliverySinkSet:
-    """Construct the configured sink set, or fail naming the sink at fault."""
+    """Construct the configured instances, or fail naming the instance at fault.
+
+    ``signer`` is the process's marketplace signer, handed to an instance that
+    asks to sign rather than carried in its settings: signing material never
+    travels through configuration.
+    """
 
     if not config.active:
         return DeliverySinkSet()
@@ -74,21 +82,35 @@ def build_delivery_sinks(
     built: list[ConfiguredSink] = []
     surviving_warnings = list(warnings)
     for name in config.enabled:
-        factory = factories.get(name)
+        sink_name = config.sink_for(name)
+        if name in factories and sink_name != name:
+            # A table named for one sink that instantiates another would make
+            # the configuration say one thing and deliver through another.
+            raise DeliveryConfigurationError(
+                f"delivery instance {name!r} is named for the {name!r} sink but "
+                f"states sink {sink_name!r}; name the instance differently"
+            )
+        factory = factories.get(sink_name)
         if factory is None:
             installed = ", ".join(sorted(factories)) or "none"
             raise DeliveryConfigurationError(
-                f"delivery sink {name!r} is enabled but not installed "
-                f"(installed sinks: {installed})"
+                f"delivery instance {name!r} uses sink {sink_name!r}, which is not "
+                f"installed (installed sinks: {installed})"
             )
         settings = config.settings_for(name)
+        signs = bool(settings.get("sign"))
+        if signs and signer is None:
+            raise DeliveryConfigurationError(
+                f"delivery instance {name!r} asks to sign, and this process has no "
+                "marketplace signer to sign with"
+            )
         try:
-            sink = factory(settings)
+            sink = factory(settings, signer=signer) if signs else factory(settings)
         except DeliveryConfigurationError:
             raise
         except Exception as exc:  # noqa: BLE001 - the operator owns this input
             raise DeliveryConfigurationError(
-                f"delivery sink {name!r} rejected its settings: {exc}"
+                f"delivery instance {name!r} rejected its settings: {exc}"
             ) from exc
         timeout = settings.get("timeout_seconds") or config.timeout_seconds
         built.append(

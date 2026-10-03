@@ -18,12 +18,14 @@ from collections.abc import Mapping
 from typing import Any
 
 from core_storefront.stage_log import stage_event
+from market_contact_exchange import INTRODUCTION_RETENTION_ROUTE
 from market_storefront_kit import LifecycleRouteError, sweep_stale_negotiations
 
 import market_storefront.container as _container
 from market_storefront.lifecycle import (
     CAPACITY_EVENTS_POLLER,
     FULFILLMENT_RESUME,
+    INTRODUCTION_RETENTION,
     NEGOTIATION_WATCHDOG,
     PUBLICATION,
     SETTLEMENT_SERVICING,
@@ -133,6 +135,27 @@ async def publication_preview() -> Mapping[str, Any]:
     return await run_publication_cycle_once(dry_run=True)
 
 
+def _introduction_retention() -> Any:
+    composition = _container.resolved_contact_exchange
+    return composition.retention() if composition is not None else None
+
+
+async def introduction_retention_step() -> Mapping[str, Any]:
+    """Run one retention sweep now; answers disabled while contact exchange is."""
+    retention = _introduction_retention()
+    if retention is None:
+        return {"loop": INTRODUCTION_RETENTION, "enabled": False}
+    return await retention.sweep_once()
+
+
+async def introduction_retention_preview() -> Mapping[str, Any]:
+    """Which introductions the next sweep would delete, deleting none."""
+    retention = _introduction_retention()
+    if retention is None:
+        return {"loop": INTRODUCTION_RETENTION, "enabled": False}
+    return await retention.preview()
+
+
 def register_vm_lifecycle_steps() -> None:
     register_step(NEGOTIATION_WATCHDOG, route="negotiation-watchdog", step=negotiation_watchdog_step)
     register_step(SETTLEMENT_SERVICING, route="settlement-servicing", step=settlement_servicing_step)
@@ -145,6 +168,12 @@ def register_vm_lifecycle_steps() -> None:
         preview=capacity_events_preview,
     )
     register_step(PUBLICATION, route="publication", step=publication_step, preview=publication_preview)
+    register_step(
+        INTRODUCTION_RETENTION,
+        route=INTRODUCTION_RETENTION_ROUTE,
+        step=introduction_retention_step,
+        preview=introduction_retention_preview,
+    )
 
 
 register_vm_lifecycle_steps()

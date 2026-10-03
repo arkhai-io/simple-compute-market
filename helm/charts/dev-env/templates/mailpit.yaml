@@ -1,0 +1,56 @@
+{{- if .Values.mailpit.enabled }}
+{{- /* Its own name label: Anvil's selectors match on name and instance, and
+       must never select this pod. */ -}}
+{{- $selector := dict "app.kubernetes.io/name" (printf "%s-mailpit" (include "dev-env.name" .)) "app.kubernetes.io/instance" .Release.Name }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "dev-env.fullname" . }}-mailpit
+  labels:
+    {{- toYaml $selector | nindent 4 }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- toYaml $selector | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- toYaml $selector | nindent 8 }}
+    spec:
+      containers:
+        - name: mailpit
+          image: {{ .Values.mailpit.image }}
+          ports:
+            - name: smtp
+              containerPort: {{ .Values.mailpit.smtpPort }}
+              protocol: TCP
+            - name: api
+              containerPort: {{ .Values.mailpit.apiPort }}
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: api
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "dev-env.fullname" . }}-mailpit
+  labels:
+    {{- toYaml $selector | nindent 4 }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  selector:
+    {{- toYaml $selector | nindent 4 }}
+  ports:
+    - name: smtp
+      port: {{ .Values.mailpit.smtpPort }}
+      targetPort: smtp
+      protocol: TCP
+    - name: api
+      port: {{ .Values.mailpit.apiPort }}
+      targetPort: api
+      protocol: TCP
+{{- end }}

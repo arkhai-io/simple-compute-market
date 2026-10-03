@@ -131,6 +131,10 @@ class BareMetalStorefrontSettlementComposition:
                     **self.resources,
                     "publication_clause": clause,
                     "candidate": dict(candidate),
+                    # The site the listing binding records, so a mechanism
+                    # resolving anything per origin sees the value its
+                    # negotiation will later inherit.
+                    "origin": str(candidate["site_id"]),
                 },
             )
             if not isinstance(artifacts, Mapping):

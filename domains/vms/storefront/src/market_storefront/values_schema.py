@@ -12,7 +12,11 @@ ConfigMap. The typed configuration models already say which fields are secret
 * closes each typed section, so a field its model does not have — hosted payer
   data, say — is refused too;
 * carries no defaults and no required fields, and leaves ``config`` and every
-  untyped section open.
+  untyped section open;
+* types ``[Delivery]``: each sink instance by the installed sink it
+  instantiates -- its ``sink`` value, or its own name when it states none -- so
+  a secret sink setting is refused like any other, while an instance of a sink
+  this storefront does not ship stays open.
 
 The definition is written into the umbrella and storefront chart schemas under
 :data:`DEFINITION`. See openspec/specs/deployment-state/spec.md, "Generated
@@ -29,6 +33,12 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from market_delivery import SINK_KEY
+from market_delivery.builtin.command_sink import CommandSinkSettings
+from market_delivery.builtin.file_sink import FileSinkSettings
+from market_delivery.builtin.smtp_sink import SmtpSinkSettings
+from market_delivery.builtin.webhook_sink import WebhookSinkSettings
+from market_delivery_apprise import AppriseSinkSettings
 from pydantic import BaseModel
 
 from market_storefront.settlement_composition import (
@@ -45,7 +55,18 @@ ROLE = "seller"
 
 # Annotation keywords that describe a value rather than constrain it. Defaults
 # are dropped because the storefront, not the chart, owns them.
-_ANNOTATIONS = frozenset({"default", "title", "description", "examples", "roles", "secret"})
+_ANNOTATIONS = frozenset(
+    {"default", "title", "description", "examples", "roles", "secret", "never_published"}
+)
+
+# The sinks this storefront ships, by the name an instance uses to select one.
+_SHIPPED_SINKS: Mapping[str, type[BaseModel]] = {
+    "apprise": AppriseSinkSettings,
+    "command": CommandSinkSettings,
+    "file": FileSinkSettings,
+    "smtp": SmtpSinkSettings,
+    "webhook": WebhookSinkSettings,
+}
 
 
 def any_case(name: str) -> str:
@@ -172,9 +193,55 @@ def _settlement_fragment(role: str) -> dict[str, Any]:
     }
 
 
+def _sink_instance(sink: str, model: type[BaseModel], role: str) -> dict[str, Any]:
+    """An instance of ``sink``: its settings, plus ``sink`` naming only it."""
+    fragment = model_fragment(model, role=role)
+    patterns = dict(fragment.get("patternProperties", {}))
+    patterns[any_case(SINK_KEY)] = {"const": sink}
+    fragment["patternProperties"] = patterns
+    return fragment
+
+
+def _delivery_fragment(role: str) -> dict[str, Any]:
+    """The ``Delivery`` section, each instance typed by the sink it uses.
+
+    A table named for a shipped sink is that sink, and may state no other. Any
+    other table is an instance whose ``sink`` selects its settings; one naming
+    a sink this storefront does not ship is left open, since an installed
+    plugin's settings are not known here.
+    """
+    instances = {name: _sink_instance(name, model, role) for name, model in _SHIPPED_SINKS.items()}
+    # Each shipped instance fragment already pins ``sink`` to its own name.
+    selected = list(instances.values())
+    unshipped = {
+        "patternProperties": {f"^{SINK_KEY}$": {"not": {"enum": sorted(_SHIPPED_SINKS)}}}
+    }
+    # One entry per key in RESERVED_SECTION_KEYS: the section's own settings.
+    root: dict[str, Any] = {
+        "enabled": {"type": "array", "items": {"type": "string"}},
+        "timeout_seconds": {"type": "number"},
+        "origins": {
+            "type": "object",
+            "additionalProperties": {"type": "array", "items": {"type": "string"}},
+        },
+    }
+    return {
+        "type": "object",
+        "patternProperties": {
+            **_any_case_fields(root),
+            **{any_case(name): instance for name, instance in instances.items()},
+        },
+        "additionalProperties": {
+            "type": "object",
+            "dependencies": {SINK_KEY: {"anyOf": [*selected, unshipped]}},
+        },
+    }
+
+
 def storefront_config_definition(role: str = ROLE) -> dict[str, Any]:
     """Return the generated definition for an agent's ``config``."""
     sections: dict[str, Any] = {
+        "delivery": _delivery_fragment(role),
         "identity": model_fragment(IdentityConfigDeclaration, role=role),
         "registry": model_fragment(RegistryConfigDeclaration, role=role),
         "settlement": _settlement_fragment(role),

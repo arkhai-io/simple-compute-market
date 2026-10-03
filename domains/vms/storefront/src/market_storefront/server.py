@@ -245,6 +245,8 @@ class VmStorefrontServices:
     system_service: Any
     pool_override_service: Any
     settlement_composition: Any
+    contact_exchange: Any
+    introduction_delivery: Any
 
 
 def _build_vm_services(
@@ -305,6 +307,22 @@ def _build_vm_services(
         sqlite_client=sqlite_client,
         capacity_runtime=capacity_runtime,
     )
+    from market_storefront.contact_exchange import (
+        build_vm_contact_exchange,
+        build_vm_introduction_delivery,
+    )
+
+    known_origins = capacity_runtime.site_ids
+    introduction_delivery = build_vm_introduction_delivery(
+        known_origins=known_origins,
+        signer=marketplace_signer,
+    )
+    contact_exchange = build_vm_contact_exchange(
+        sqlite_client=sqlite_client,
+        settlement_composition=settlement_composition,
+        known_origins=known_origins,
+        delivery=introduction_delivery,
+    )
     return VmStorefrontServices(
         registry=registry,
         binding=binding,
@@ -319,6 +337,8 @@ def _build_vm_services(
         system_service=system_service,
         pool_override_service=pool_override_service,
         settlement_composition=settlement_composition,
+        contact_exchange=contact_exchange,
+        introduction_delivery=introduction_delivery,
     )
 
 async def _start_vm_services(services: VmStorefrontServices) -> None:
@@ -346,6 +366,8 @@ async def _start_vm_services(services: VmStorefrontServices) -> None:
         _container.resolved_system_service = services.system_service
         _container.resolved_pool_override_service = services.pool_override_service
         _container.resolved_settlement_composition = services.settlement_composition
+        _container.resolved_contact_exchange = services.contact_exchange
+        _container.resolved_introduction_delivery = services.introduction_delivery
         logger.info("[STARTUP] Singletons initialized")
         await _run_startup_tasks(
             registry=services.registry,
@@ -385,6 +407,9 @@ from market_storefront.controllers.admin_controller import (  # noqa: E402
 )
 from market_storefront.controllers.deals_controller import (  # noqa: E402
     router as deals_router,
+)
+from market_storefront.controllers.introductions_controller import (  # noqa: E402
+    router as introductions_router,
 )
 from market_storefront.controllers.listings_controller import (  # noqa: E402
     admin_router as admin_listings_router,
@@ -452,6 +477,7 @@ def build_vm_storefront_app(*, registry: StorefrontDomainRegistry):
                     settlements_router,
                     deals_router,
                     admin_settle_router,
+                    introductions_router,
                 ),
                 middleware=(
                     listing_lifecycle_middleware,

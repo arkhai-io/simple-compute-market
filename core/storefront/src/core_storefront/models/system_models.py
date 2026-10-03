@@ -65,6 +65,11 @@ class HealthResponse(BaseModel):
     #: `GET /health`, which shares this model and reports neither, stays
     #: valid.
     provisioning_contract_version: str | None = None
+    #: Storefront policies a counterparty may read before committing data,
+    #: keyed by subject -- for example the introduction retention window,
+    #: which a buyer reads before handing over contact details. Absent when
+    #: the storefront discloses nothing.
+    disclosures: dict[str, dict[str, Any]] | None = None
 
 
 class AdminPauseResponse(BaseModel):

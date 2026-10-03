@@ -269,7 +269,7 @@ async def test_contact_options_publish_through_the_composition() -> None:
     )
     now = datetime.now(timezone.utc)
     payload = await composition.publication_payload(
-        candidate={"host_id": "machine-1"},
+        candidate={"host_id": "machine-1", "site_id": "default"},
         clauses=[
             SettlementPublicationClause(
                 mechanism=CONTACT_MECHANISM,
@@ -470,7 +470,7 @@ async def test_operator_deletion_keeps_the_deal_and_stops_every_reveal(tmp_path)
     assert on_read.value.payloads_deleted_at == deleted.payloads_deleted_at
     assert on_start.value.outcome()["revealed"] is False
     # Nothing was persisted again and the seller was not told a second time.
-    stored = await runtime.db.load_contact_introduction(obligation_ref=obligation_ref)
+    stored = await runtime.contact_exchange.store.load(obligation_ref)
     assert stored is not None and stored.buyer_contact == {}
     assert deliveries == [obligation_ref]
     # The deal remains: its obligation record resolves and correlates.

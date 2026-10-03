@@ -164,6 +164,16 @@ values shape of storefront chart releases before 0.2.0 — `seller`,
 under `config`; `agentId`, `autoRegister`, and `rootPath` on an agent; and
 `image.settlementConfigSchemaVersion` — naming the key.
 
+The generated definition also types `[Settlement.contact]` and `[Delivery]`. A
+seller's contact is public configuration, so it is accepted in `config`. Each
+`[Delivery]` instance is typed by the sink it uses, its `sink` value or its own
+name: a shipped sink's secret settings are refused wherever the instance is named,
+a table named for one shipped sink may not state another, and an instance of a sink
+the storefront does not ship stays open. `helm/fixtures/contact-exchange-values.yaml`
+is a test overlay enabling contact exchange for Bob with SMTP delivery to the
+`dev-env` chart's optional Mailpit (`dev-env.mailpit.enabled`), which a scenario
+reads back; `docs/development/VALIDATION_RUNBOOK.md` gives the commands.
+
 `storefront.json` is JSON so every string, including a 160-bit address, is read
 back as a string. Every number in a values file passes through a float on its
 way into Helm, so write an integer above 2^53 as a string.
@@ -742,11 +752,94 @@ independent release and chart. Marketplace packages consume the exact hosted
 client wheel and identity interface bound by that signed release manifest;
 editable sibling sources and compatible-major substitution are rejected.
 
+### Contact-exchange contacts
+
+A storefront composing `contact-exchange.v1` (bare metal and VM) configures it in
+the peer `[Settlement.contact]` table: its `profiles`, the public terms an
+introduction option advertises, and the seller's contact in exactly one of two
+forms.
+
+```toml
+# One storefront, one origin site: the single form.
+[Settlement.contact]
+enabled = true
+contact_payload = { email = "sales@bob.example" }
+
+# One storefront, several seller sites: a contact per origin.
+[Settlement.contact.origins.dc-west]
+contact_payload = { email = "ops@west-seller.example" }
+
+[Settlement.contact.origins.dc-east]
+contact_payload = { email = "sales@east-seller.example" }
+```
+
+An origin is the site a listing's durable binding records; the storefront reads
+its configured sites (`[capacity.sites]` on VM, `BARE_METAL_STOREFRONT_SITES` on
+bare metal) as the known origins. The storefront refuses to start when both forms
+are set, when the single form is set while more than one site is configured, or
+when an `origins` key names no configured site. A site without an entry is legal:
+its listings publish no introduction option, and a reveal for an accepted deal whose
+origin has lost its entry is refused with `seller_contact_unavailable` before
+anything is stored. The contact is never substituted from another origin.
+
+Contacts are ordinary configuration, marked `never_published` rather than secret:
+they may sit in the public configuration (the Helm ConfigMap included) and still
+never appear in a listing, an option, readiness, or an obligation. Readiness stays
+storefront-wide: the mechanism is unready only with no profiles or no contact in
+either form.
+
+### Introduction delivery
+
+`[Delivery]` sends each revealed introduction to destinations the side's own
+operator configured; the seller's side carries the buyer's contact, the buyer's
+side the seller's. `enabled` names sink instances; an instance's table names the
+installed sink it uses with `sink`, and a table naming none uses the sink of its own
+name, so `[Delivery.file]` keeps its meaning.
+
+```toml
+[Delivery]
+enabled = ["west-hook", "east-mail", "audit"]
+
+[Delivery.west-hook]
+sink = "webhook"
+sign = true                         # signed with the storefront's marketplace signer
+
+[Delivery.east-mail]
+sink = "smtp"
+host = "mail.east-seller.example"
+sender = "storefront@example.com"
+recipients = ["sales@east-seller.example"]
+
+[Delivery.audit]
+sink = "file"
+path = "/var/log/introductions.jsonl"
+
+[Delivery.origins]                  # seller side only
+dc-west = ["west-hook", "audit"]
+dc-east = ["east-mail", "audit"]
+```
+
+A storefront with more than one origin must route: with sinks enabled and no
+`[Delivery.origins]`, it refuses to start, since broadcasting every reveal to every
+destination would hand one seller's buyers' contacts to another. Every routed name
+must be enabled, every enabled instance routed, and every origin configured; an
+unrouted origin receives no seller-side delivery. A buyer may not route. With
+`sign = true` a webhook request carries a v2 marketplace signature its receiver
+verifies against the storefront principal. The installable `apprise` sink
+(`arkhai-kit-delivery-apprise`, in both storefront images) reaches any service an
+Apprise URL names. Credentials — a webhook's `url` and `headers`, an SMTP
+`password`, Apprise `urls` — are secret settings: they belong in the secrets overlay,
+and the Helm values schema refuses them in an agent's `config`.
+
+Operators re-deliver a revealed introduction to its origin's instances with
+`market-storefront settlement contact redeliver --obligation-ref …` on VM and the
+bare-metal storefront's `redeliver-introduction` command. Delivery and re-delivery
+are specified in [introduction delivery](../../openspec/specs/introduction-delivery/spec.md).
+
 ### Contact-exchange retention
 
-A storefront composing `contact-exchange.v1` configures it in the peer
-`[Settlement.contact]` table. Besides the seller's `contact_payload` and its
-`profiles`, two seller-only settings bound how long revealed contacts are kept:
+Two seller-only settings in `[Settlement.contact]` bound how long revealed contacts
+are kept:
 
 | Setting | Default | Meaning |
 |---|---|---|
