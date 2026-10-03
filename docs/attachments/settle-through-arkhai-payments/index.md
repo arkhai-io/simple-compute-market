@@ -45,7 +45,26 @@ Bare-metal buyer has no Makefile: `cd domains/bare_metal/buyer && uv sync --dev 
 - Core configured typing and registry-client typing passed (5 source files each in this run). Payments kit typing passed (9 sources), upstream conformance vectors and generated-model freshness passed.
 - Final `make dist` passed: **38 py3-none-any wheels**; payments wheel contains generated models, settlement_config.py and py.typed; no hosted-settlement wheel. `mise exec helm@3.15.3 -- make test-deployment-packaging` passed 80 release-tooling checks plus all 23 Helm structural assertions. No container-image deployment claim.
 - The previous registry FastAPI 204-with-body collection failure at `core/registry/src/api/admin_routes.py:86` was pre-existing. Current locked FastAPI 0.123.5 did not reproduce it. The permitted one-line repair adds response_model=None; explicit FastAPI 0.115.8 integration rerun passed **87**, preserving HTTP 204 behavior.
-- Strict change validation, all permanent-spec validation, and comment hygiene passed after the documentation corrections. [Accepted-decision comparison](decision-review.md) lists permanent destinations, the small Agreement/credit wording corrections, and the larger API-credit configuration implementation mismatch owned by [SCM #254](https://github.com/arkhai-io/simple-compute-market/issues/254).
+- Strict change validation, all permanent-spec validation, and comment hygiene passed after the documentation corrections. [Accepted-decision comparison](decision-review.md) lists permanent destinations, the small Agreement/credit wording corrections, and the API-credit shared-configuration correction in [SCM #254](https://github.com/arkhai-io/simple-compute-market/issues/254).
+
+## API-credit shared configuration (#254)
+
+Implementation `07ca2b8e` (base `7ed4e74a`). API-credit buyer/storefront roots use the shared payments registration, configuration and owner-scoped client helper. `api_key_env` names the WorkOS credential input; no resolved key is stored in configuration. Buyer input is `[apicredits].payer_account`; seller ownership comes from the accepted option's `payee_account`. Local development uses the kit's loopback-only `development_auth`. The shared builder handles integer base units per generic unit; the API-credit adapter restricts its units to credit/token/request. Hourly scaling is unchanged.
+
+Prepared target: the `apicredits-shared-config` checkout's installed wheels and local configuration diagnostic. No payment service, ledger, credits authority, browser, container or remote deployment was started for this follow-up. The diagnostic uses synthetic public accounts and a local receipt pin without network calls or persisted state. Production requires each role's owner-scoped `ARKHAI_PAYMENTS_API_KEY`; this diagnostic does not establish WorkOS authentication.
+
+Runnable entry point from SCM root after `make dist && make -C domains/apicredits/storefront reinit`:
+
+```sh
+uv run --project domains/apicredits/storefront --find-links .dist \
+  python docs/attachments/settle-through-arkhai-payments/api_credit_smoke.py --check-config
+```
+
+Observed: shared config ready; payment option=125 base units/credit; no wallet, chain or service calls. Both real-ledger script and seed-pin discovery now use shared development-mode owner clients, but the crash/lost/resume ledger phases were not rerun for #254. The earlier real-ledger results below belong to their recorded verification revisions.
+
+Checks after wheel rebuild/reinit: API-credit buyer **17**, storefront **70**, domain **35**, service **32**, payments kit **7** (**161 passed**, no skips). Payments kit mypy checks **9 sources**, upstream vectors **4**, generated models current. Touched-file Ruff correctness/import checks (`E4,E7,E9,F,I`), comment hygiene and strict change validation pass. No new permanent tests were added or kept assertions removed.
+
+Two small repairs: `a64be320` removes imports that shadowed payment recovery's earlier branch and updates its existing fixture seam; `33e8bba8` parses canonical true/false publication text without relaxing payment wire validation. The configuration diagnostic was redriven after the boolean repair. No roadmap change: the shared-kit boundary was already promoted.
 
 ## Real-ledger setup and readiness
 

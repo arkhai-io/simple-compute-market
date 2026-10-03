@@ -8,7 +8,7 @@ Define one typed operator and consumer contract for configuring, validating, ins
 
 ### Requirement: Payments configuration separates accounts and credentials
 
-Shared Arkhai payments registration, typed configuration, and owner-scoped client provision MUST live in `kit/arkhai-payments`'s `settlement_config.py`. `[Settlement.arkhai_payments]` MUST contain trusted service origin, Ed25519 receipt identity, fee policy, dispute authority, and an API-key environment-variable reference, not the resolved credential. Buyer domain input MUST supply `payer_account` independently of marketplace identity and service policy; VM uses `[vms].payer_account`. Payment credentials MUST NOT appear in public options, Agreement bytes, run logs, or status.
+Shared Arkhai payments registration, typed configuration, and owner-scoped client provision MUST live in `kit/arkhai-payments`'s `settlement_config.py`. `[Settlement.arkhai_payments]` MUST contain trusted service origin, Ed25519 receipt identity, fee policy, dispute authority, and an API-key environment-variable reference, not the resolved credential. Buyer domain input MUST supply `payer_account` independently of marketplace identity and service policy; VM uses `[vms].payer_account` and API credits uses `[apicredits].payer_account`. Seller client ownership MUST come from the accepted option's `payee_account`, not a service-policy account field. Payment credentials MUST NOT appear in public options, Agreement bytes, run logs, or status.
 
 #### Scenario: Buyer chooses a payer account
 
