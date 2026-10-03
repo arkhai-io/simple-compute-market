@@ -8,7 +8,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from market_core.schemas import EscrowProposal, SettlementPlan
+from market_core.schemas import Agreement, EscrowProposal, SettlementPlan
 from market_identity import Identity
 from market_settlement_runtime import SettlementRuntime
 
@@ -102,6 +102,7 @@ class BareMetalSettlementService:
             )
         try:
             agreement = json.loads(agreement_bytes)
+            accepted = Agreement.model_validate(agreement)
             if (
                 agreement.get("negotiation_id") != negotiation_id
                 or agreement.get("listing_id") != thread.get("our_listing_id")
@@ -110,7 +111,7 @@ class BareMetalSettlementService:
                 != Identity.model_validate(thread["seller_principal"]).model_dump(
                     mode="json"
                 )
-                or agreement.get("amount") != thread.get("agreed_price")
+                or accepted.amount != thread.get("agreed_price")
                 or agreement.get("duration_seconds")
                 != thread.get("agreed_duration_seconds")
             ):
