@@ -56,7 +56,7 @@ def test_compute_spec_declares_the_option_aware_filters(spec) -> None:
 def test_mechanism_filter_is_option_aware_and_missing_tolerant(spec) -> None:
     listing = _option_listing()
     assert _match(spec, listing, mechanism="in:[alkahest.v1]")
-    assert not _match(spec, listing, mechanism="in:[fiat.stripe.v1]")
+    assert not _match(spec, listing, mechanism="in:[example.payment.v1]")
     escrow_only = {"listing_id": "legacy-1", "accepted_escrows": [{}]}
     assert _match(spec, escrow_only, mechanism="in:[alkahest.v1]")
 

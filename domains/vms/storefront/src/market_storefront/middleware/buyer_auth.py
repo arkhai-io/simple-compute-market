@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from core_storefront.auth import AuthenticatedPrincipal, AuthError, authenticate_request
+from core_storefront.models.settle_models import SettleRequest
 from fastapi import HTTPException, Request
 from market_identity import EMPTY_BODY, Identity
 
@@ -88,9 +89,7 @@ async def settle_escrow_auth(
     *,
     negotiation_thread: Any = None,
 ) -> AuthenticatedPrincipal:
-    from market_storefront.models.settle_models import VmSettleRequest
-
-    if not isinstance(body, VmSettleRequest):
+    if not isinstance(body, SettleRequest):
         raise HTTPException(status_code=400, detail="Invalid request body type")
     thread = negotiation_thread
     if thread is None:

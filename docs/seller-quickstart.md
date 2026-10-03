@@ -15,18 +15,9 @@ To sell request quota for an OpenAI-compatible vLLM server instead, see the
 
 ## Supported settlement methods
 
-A VM storefront can publish independent Alkahest and hosted Stripe options on
-the same listing. Hosted fiat uses `fiat.stripe.v1` with one exact profile per
-option: `card.v1`, US/USD push `us_bank_transfer.v1`, or US/USD
-`us_ach_debit.v1`. It may publish only the profiles for which the hosted
-authority, seller account, country/currency policy, condition resolver, signed
-release, and funding window are ready. One unavailable rail does not suppress
-the others, and the accepted deal never falls back to a different mechanism or
-profile. See the
-[`buyer quickstart`](./buyer-quickstart.md#supported-settlement-methods) for the
-buyer-side payment flow and
-[`ROADMAP.md`](./development/ROADMAP.md#hosted-settlement-release-status) for
-current external qualification status.
+A VM storefront publishes Alkahest settlement options. See the
+[`buyer quickstart`](./buyer-quickstart.md#supported-settlement-methods) for
+buyer-side escrow requirements.
 
 ## Prerequisites
 
@@ -36,9 +27,6 @@ current external qualification status.
   token required to publish.
 - For Alkahest settlement only: an EVM wallet funded with gas and the accepted
   token, an RPC URL, and the deployed Alkahest address file.
-- For hosted Stripe settlement only: the hosted authority URL and trust,
-  release manifest/API/schema pins, ready seller account reference, and
-  condition profile. No EVM wallet or chain is required.
 - **Live provisioning only** — KVM-capable host: `egrep -c "(vmx|svm)"
   /proc/cpuinfo > 0`, `libvirtd` running, your ansible user has
   passwordless sudo and is in the `libvirt` group.
@@ -115,33 +103,6 @@ default_min_price = "2"                 # negotiation floor only
 default_max_duration_seconds = 86400
 ```
 
-For hosted-only publication, set priority to `["fiat.stripe.v1"]`, configure
-the generated `[Settlement.stripe]` public authority/release/account/condition
-fields, omit wallet and chains, and publish one complete clause for each exact
-funding profile and rate you offer:
-
-```toml
-[pricing]
-settlements = [
-  { mechanism = "fiat.stripe.v1", asset = "usd", rate = "2", per = "hour", mechanism_input = { funding_profile = "card.v1", interaction = "interactive" } },
-  { mechanism = "fiat.stripe.v1", asset = "usd", rate = "1.90", per = "hour", mechanism_input = { funding_profile = "us_bank_transfer.v1", interaction = "interactive" } },
-  { mechanism = "fiat.stripe.v1", asset = "usd", rate = "1.95", per = "hour", mechanism_input = { funding_profile = "us_ach_debit.v1", interaction = "interactive" } },
-]
-```
-
-The equivalent command-level override combines decimal rate and unit in
-`rate=<decimal>/<unit>` and accepts only registered public Stripe fields:
-
-```bash
-market-storefront publish --inventory /app/resources.csv \
-  --settlement 'mechanism=fiat.stripe.v1 asset=usd rate=2/hour stripe.funding_profile=card.v1 stripe.interaction=interactive'
-```
-
-`funds_flow="separate_charges_transfers"` is fixed by the hosted registration;
-callers cannot override it. Hosted authority trust, account, condition,
-currency/country policy, and exact client/API/schema/capability pins remain in
-`[Settlement.stripe]`. Provider credentials, IDs, webhooks, and persistence are
-rejected by marketplace configuration.
 
 The full schema is at
 [`domains/vms/storefront/src/market_storefront/settings.toml`](../domains/vms/storefront/src/market_storefront/settings.toml).
@@ -302,32 +263,6 @@ touching libvirt. To create real VMs:
 
    `SUCCESS / ping: pong` means the next buy will actually create a VM.
 
-## Optional hosted fiat publication
-
-Hosted settlement is disabled by default. Add `fiat.stripe.v1` to
-`[Settlement].priority`, configure the public authority/release/account/
-condition and currency/country policy fields under `[Settlement.stripe]`, and
-publish complete clauses such as `mechanism=fiat.stripe.v1 asset=usd
-rate=20/hour stripe.funding_profile=card.v1
-stripe.interaction=interactive`. Repeat the clause for
-`us_bank_transfer.v1` or `us_ach_debit.v1`; the profile participates in option
-identity even if rate and condition are equal.
-
-Use `market-storefront config init-user` and
-`market-storefront settlement stripe onboard|status` for the exact installed
-schema and account workflow. Publication preflights the signed release,
-account, condition, currency/country policy, and each configured profile
-independently. An unready profile suppresses only its clauses; ready hosted
-profiles and valid Alkahest alternatives remain publishable.
-
-The storefront never receives payer profiles, saved instruments, Stripe
-credentials, or provider IDs and never stores setup, Checkout, confirmation,
-bank-instruction, or account-link URLs. After exact buyer authorization it
-persists only the safe authorization/settlement references and drives
-authoritatively funded VM fulfillment, condition check/collect, and eligible
-reclaim through the shared settlement worker. Provider-custodied funds remain
-owned by the separately operated authority; an EAS condition anchor is
-audit/predicate evidence, not custody.
 
 ## Common pitfalls
 

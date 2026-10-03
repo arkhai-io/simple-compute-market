@@ -1,12 +1,10 @@
-"""API-credits fulfillment orchestration.
+"""API-credit issuance after the selected settlement's authoritative gate.
 
-The token analog of ``fulfill_vm_obligation``, much smaller because the
-deliverable is a ledger write, not a machine: one issuance call against
-the credits service (which commits the negotiation-time quota hold —
-open-ended, credits don't expire — or reserves fresh, idempotent on the
-escrow uid), then the on-chain fulfillment obligation. The bearer
-secret never goes on chain; it returns to the buyer once through the
-settle-status credentials channel.
+The credits service commits any negotiation-time quota hold with one
+idempotent issuance call. Alkahest then submits an on-chain fulfillment;
+payment-backed deals rely on the verified receipt and do not create an
+escrow fulfillment. The bearer secret never goes on chain; it returns once
+through the signed settlement-status credentials channel.
 """
 
 from __future__ import annotations
@@ -15,6 +13,7 @@ import json
 import logging
 import uuid
 from typing import Any, Awaitable, Callable
+
 from market_identity import Identity
 
 from domains.apicredits.settlement.credits_client import (
@@ -45,11 +44,11 @@ def prepare_credit_issuance_request(
 ) -> CreditIssuanceRequest:
     """Build one deterministic command only from an authoritative settlement gate."""
 
-    admitted_gate = {
+    expected_gates = {
         "alkahest.v1": "alkahest_verified",
-        "fiat.stripe.v1": "hosted_funded",
-    }.get(mechanism)
-    if admitted_gate is None or authoritative_gate != admitted_gate:
+        "arkhai.payments.v1": "payments_receipt_verified",
+    }
+    if expected_gates.get(mechanism) != authoritative_gate:
         raise ValueError(
             "credit issuance requires the exact mechanism's authoritative funding gate"
         )
@@ -60,7 +59,7 @@ def prepare_credit_issuance_request(
         service=service,
         resource_id=resource_id,
         quantity=quantity,
-        key=CreditKeyTarget(mode=key_mode, key_id=key_id),
+        key=CreditKeyTarget.model_validate({"mode": key_mode, "key_id": key_id}),
         capacity_reservation_id=capacity_reservation_id,
     )
 
@@ -116,6 +115,8 @@ async def fulfill_api_credits_obligation(
     *,
     client: Any | None,
     escrow_uid: str,
+    mechanism: str = "alkahest.v1",
+    authoritative_gate: str = "alkahest_verified",
     offer_resource: dict[str, Any],
     quantity: int,
     key_mode: str = "new",
@@ -129,14 +130,11 @@ async def fulfill_api_credits_obligation(
     apply_failure_policy: ApplyFailurePolicyFn | None = None,
     held_reservation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Issue credits and submit settlement fulfillment.
+    """Issue credits after the selected mechanism's authoritative gate.
 
-    ``held_reservation`` is the TTL soft hold the negotiation's
-    acceptance placed; its capacity_reservation_id rides the issuance call so the
-    credits service commits that hold (open-ended) instead of racing a
-    fresh reserve. The service is the single writer for quota + grant —
-    a partial failure between issuance and the on-chain obligation is
-    rolled back through the same admin surface.
+    Negotiation holds are committed by the idempotent issuance command. Alkahest
+    then submits its on-chain fulfillment; payment-backed deals rely on the
+    verified receipt and do not create an escrow fulfillment.
     """
     capacity_reservation_id = (
         str(held_reservation.get("capacity_reservation_id"))
@@ -190,8 +188,8 @@ async def fulfill_api_credits_obligation(
         )
     request = prepare_credit_issuance_request(
         obligation_ref=escrow_uid,
-        mechanism="alkahest.v1",
-        authoritative_gate="alkahest_verified",
+        mechanism=mechanism,
+        authoritative_gate=authoritative_gate,
         owner=buyer_principal,
         service=service_name,
         resource_id=str(resource_id),
@@ -203,8 +201,41 @@ async def fulfill_api_credits_obligation(
     try:
         issuance = await credits_client.submit_credit_issuance(request)
     except CreditsServiceError as error:
+        retryable = (
+            error.status_code == 0
+            or error.status_code in {408, 425, 429}
+            or error.status_code >= 500
+        )
+        if mechanism == "arkhai.payments.v1" and retryable:
+            stage_event(
+                "provision",
+                "issuance_retryable",
+                escrow_uid=escrow_uid,
+                listing_id=listing_id,
+                resource_id=resource_id,
+                error=str(error),
+            )
+            return {
+                "status": "pending",
+                "message": f"Issuance remains retryable: {error}",
+                "escrow_uid": escrow_uid,
+            }
         return await _fail(error.reason, f"Issuance refused: {error}")
     except Exception as error:
+        if mechanism == "arkhai.payments.v1":
+            stage_event(
+                "provision",
+                "issuance_retryable",
+                escrow_uid=escrow_uid,
+                listing_id=listing_id,
+                resource_id=resource_id,
+                error=str(error),
+            )
+            return {
+                "status": "pending",
+                "message": f"Issuance remains retryable: {error}",
+                "escrow_uid": escrow_uid,
+            }
         return await _fail("issuance_unreachable", f"Issuance failed: {error}")
 
     issued_key_id = issuance.key_id
@@ -228,36 +259,35 @@ async def fulfill_api_credits_obligation(
         key_id=issued_key_id,
         quantity=quantity,
     )
-    try:
-        fulfillment_uid = await _submit_token_fulfillment(
-            client=client,
-            escrow_uid=escrow_uid,
-            payload=payload,
-        )
-    except Exception as error:
-        rollback = await credits_client.rollback_issuance(
-            escrow_uid=escrow_uid,
-            issuance={
-                "key_id": issuance.key_id,
-                "quantity": issuance.quantity,
-            },
-            key_mode=key_mode,
-        )
-        stage_event(
-            "settlement",
-            "failed_after_issuance",
-            escrow_uid=escrow_uid,
-            listing_id=listing_id,
-            key_id=issued_key_id,
-            rollback=rollback,
-            error=str(error),
-        )
-        return {
-            "status": "error",
-            "message": f"On-chain fulfillment failed after issuance: {error}",
-            "escrow_uid": escrow_uid,
-        }
-
+    if mechanism == "alkahest.v1":
+        try:
+            fulfillment_uid = await _submit_token_fulfillment(
+                client=client,
+                escrow_uid=escrow_uid,
+                payload=payload,
+            )
+        except Exception as error:
+            rollback = await credits_client.rollback_issuance(
+                escrow_uid=escrow_uid,
+                issuance={"key_id": issuance.key_id, "quantity": issuance.quantity},
+                key_mode=key_mode,
+            )
+            stage_event(
+                "settlement",
+                "failed_after_issuance",
+                escrow_uid=escrow_uid,
+                listing_id=listing_id,
+                key_id=issued_key_id,
+                rollback=rollback,
+                error=str(error),
+            )
+            return {
+                "status": "error",
+                "message": f"On-chain fulfillment failed after issuance: {error}",
+                "escrow_uid": escrow_uid,
+            }
+    else:
+        fulfillment_uid = issuance.fulfillment_id
     stage_event(
         "provision",
         "fulfilled",

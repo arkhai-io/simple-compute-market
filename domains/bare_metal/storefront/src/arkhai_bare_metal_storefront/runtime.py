@@ -12,10 +12,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from core_storefront.identity_config import IdentityConfig, resolve_storefront_signer
-from market_identity import Identity, IdentityScheme, Signer, TrustedIdentitySet
 from market_alkahest import create_alkahest_registration
 from market_core import MarketDomainContract, validate_domain_contract
-from market_hosted_settlement import PortableRemoteFulfillmentRef, canonical_json
+from market_identity import Identity, IdentityScheme, Signer, TrustedIdentitySet
 from market_settlement_runtime import (
     SettlementRuntime,
     SettlementServicingWorker,
@@ -27,64 +26,27 @@ from market_storefront_kit import (
     build_alkahest_clients,
 )
 
-from .domain_runtime import get_market_domain_contract
-from .negotiation import default_seller_round_hook
-from .negotiation_service import BareMetalNegotiationService
-from .settlement import build_bare_metal_settlement_plan
-from .settlement_service import BareMetalSettlementService
-from .fulfillment_service import BareMetalFulfillmentService
-from .hosted_lifecycle import BareMetalHostedLifecycleCallbacks
-from .hosted_routes import (
-    BareMetalHostedDomainCallbacks,
-    lifecycle_domain_callbacks,
-)
 from .delivery import (
     build_introduction_delivery,
     load_storefront_delivery_sinks,
     storefront_delivery_section,
 )
-from .sqlite_client import SQLiteClient
+from .domain_runtime import get_market_domain_contract
+from .fulfillment_service import BareMetalFulfillmentService
+from .negotiation import default_seller_round_hook
+from .negotiation_service import BareMetalNegotiationService
+from .settlement import build_bare_metal_settlement_plan
+from .settlement_composition import (
+    ALKAHEST_MECHANISM,
+    BareMetalStorefrontSettlementComposition,
+)
+from .settlement_service import BareMetalSettlementService
 from .site_clients import (
     BareMetalSiteBinding,
     build_trusted_site_clients,
     parse_site_bindings,
 )
-from .settlement_composition import (
-    ALKAHEST_MECHANISM,
-    BareMetalStorefrontSettlementComposition,
-    default_hosted_selection_dispatch,
-)
-
-
-def _portable_evidence_reference(
-    lifecycle: Any,
-    attestation_uid: str,
-) -> str:
-    condition = lifecycle.accepted_binding.option.option.params.get("condition")
-    evaluator = condition.get("evaluator") if isinstance(condition, Mapping) else None
-    resolver_id = (
-        evaluator.get("resolver_id") if isinstance(evaluator, Mapping) else None
-    )
-    if not isinstance(resolver_id, str) or not resolver_id:
-        raise RuntimeError("hosted evidence resolver is unavailable")
-    fulfillment = PortableRemoteFulfillmentRef(
-        resolver_id=resolver_id,
-        uid=attestation_uid,
-    )
-    return canonical_json(fulfillment.model_dump(mode="json")).decode()
-
-
-async def _publish_portable_evidence_reference(
-    lifecycle: Any,
-    evidence: Any,
-    publisher: Any,
-) -> str:
-    attestation_uid = await publisher.publish_fulfillment(
-        condition_anchor=evidence.condition_anchor,
-        evidence=evidence.canonical_json(),
-    )
-    return _portable_evidence_reference(lifecycle, attestation_uid)
-
+from .sqlite_client import SQLiteClient
 
 logger = logging.getLogger(__name__)
 
@@ -101,10 +63,6 @@ class BareMetalStorefrontRuntime:
     marketplace_signer: Signer = field(repr=False)
     seller_evm_address: str | None = None
     settlement_composition: BareMetalStorefrontSettlementComposition | None = field(
-        default=None,
-        repr=False,
-    )
-    hosted_domain_callbacks: BareMetalHostedDomainCallbacks | None = field(
         default=None,
         repr=False,
     )
@@ -155,22 +113,39 @@ class BareMetalStorefrontRuntime:
             accepted_obligation_dispatch=(
                 self.settlement_composition.accepted_obligation_dispatch()
                 if self.settlement_composition is not None
-                else default_hosted_selection_dispatch()
+                else {}
+            ),
+            settlement_data_dispatch=(
+                self.settlement_composition.settlement_data_dispatch()
+                if self.settlement_composition is not None
+                else {}
             ),
         )
 
     def settlement_service(self) -> BareMetalSettlementService:
         """Build commercial verification from explicitly configured chains."""
-        if not self.seller_evm_address:
+        alkahest_enabled = (
+            self.settlement_composition is None
+            or ALKAHEST_MECHANISM in self.settlement_composition.enabled_mechanisms
+        )
+        if alkahest_enabled and not self.seller_evm_address:
             raise RuntimeError("Alkahest settlement is not configured")
+        arkhai_payments_stage = (
+            self.settlement_composition.arkhai_payments_stage()
+            if self.settlement_composition is not None
+            else None
+        )
+        if not alkahest_enabled and arkhai_payments_stage is None:
+            raise RuntimeError("no bare-metal settlement mechanism is configured")
         return BareMetalSettlementService(
             db=self.db,
-            seller_wallet=self.seller_evm_address,
+            seller_wallet=self.seller_evm_address or None,
             chain_clients=self.chain_clients,
             chain_config_paths=self.chain_config_paths,
             build_plan=self.plan_builder,
             verify_escrow=self.escrow_verifier,
             settlement_runtime=self.settlement_runtime,
+            arkhai_payments_stage=arkhai_payments_stage,
         )
 
     def fulfillment_service(self) -> BareMetalFulfillmentService:
@@ -429,63 +404,4 @@ def build_runtime_from_environment(
         capacity_client=capacity_client,
         fulfillment_client=fulfillment_client,
     )
-    if settlement_composition is not None and "fiat.stripe.v1" in (
-        settlement_composition.enabled_mechanisms
-    ):
-
-        async def publish_evidence(evidence: Any) -> str:
-            lifecycle = await db.load_bare_metal_hosted_lifecycle(
-                obligation_ref=evidence.obligation_ref
-            )
-            if lifecycle is None:
-                raise RuntimeError("hosted evidence lifecycle is unavailable")
-            publisher = runtime.settlement_clients["fiat.stripe.v1"]
-            return await _publish_portable_evidence_reference(
-                lifecycle,
-                evidence,
-                publisher,
-            )
-
-        lifecycle = BareMetalHostedLifecycleCallbacks(
-            db=db,
-            runtime=runtime.settlement_runtime,
-            local_principal=identity_config.principal,
-            capacity_client=capacity_client,
-            fulfillment_client=fulfillment_client,
-            publish_evidence=publish_evidence,
-        )
-        callbacks = lifecycle_domain_callbacks(db=db, lifecycle=lifecycle)
-        object.__setattr__(runtime, "hosted_domain_callbacks", callbacks)
-
-        async def on_ready(record: Any, worker_id: str) -> None:
-            await callbacks.fulfill(record, worker_id)
-
-        async def on_terminal(
-            record: Any,
-            state: str,
-            reason: str | None,
-        ) -> None:
-            if state != "collected":
-                await callbacks.cleanup(
-                    record.agreement_ref,
-                    reason or state,
-                )
-
-        object.__setattr__(
-            runtime,
-            "settlement_worker",
-            SettlementServicingWorker(
-                runtime.settlement_runtime,
-                runtime.settlement_repository,
-                worker_id=f"bare-metal-storefront:{identity_config.principal.identifier}",
-                interval_seconds=float(
-                    os.environ.get(
-                        "BARE_METAL_SETTLEMENT_SERVICING_INTERVAL_SECONDS",
-                        "30",
-                    )
-                ),
-                on_ready=on_ready,
-                on_terminal=on_terminal,
-            ),
-        )
     return runtime

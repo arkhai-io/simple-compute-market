@@ -31,7 +31,8 @@ constrained with lower bounds (see Versioning policy).
 | `arkhai-core-registry-client` | `core/registry-client/` | 0.10.0 | none |
 | `arkhai-core-registry` | `core/registry/` | 0.1.0 | `arkhai-kit-identity` |
 | `arkhai-kit-site` | `kit/site/` | 0.1.0 | none |
-| `arkhai-kit-identity` | `kit/identity/` | 0.1.0 | none |
+| `arkhai-kit-identity` | `kit/identity/` | 0.3.0 | none |
+| `arkhai-kit-arkhai-payments` | `kit/arkhai-payments/` | 0.1.0 | `arkhai-kit-identity` |
 | `arkhai-kit-policy` | `kit/policy/` | 0.1.0 | none |
 | `arkhai-kit-alkahest` | `kit/alkahest/` | 0.1.0 | none |
 | `arkhai-kit-config` | `kit/config/` | 0.1.0 | `arkhai-kit-alkahest` |
@@ -129,27 +130,6 @@ without a publish round-trip. `uv build --no-sources` strips those
 overrides so the built wheel records plain PyPI dependencies; the publish
 workflow always passes `--no-sources`.
 
-## Hosted settlement release pin
-
-`arkhai-kit-hosted-settlement` consumes an exact
-`arkhai-hosted-settlement-client` version. A deployable marketplace release
-must additionally pin the hosted service's signed immutable manifest: exact
-client wheel/version/hash, service image digest, OpenAPI/conformance hash,
-migration schema version, SBOM, provenance, and repository signer identity.
-The storefront readiness preflight verifies the manifest digest, API version,
-and required capabilities; a matching major version or floating image tag is
-not a substitute. The hosted repository publishes those artifacts. This
-repository publishes only the thin adapter and marketplace consumers.
-
-Hosted financial system E2E consumes that same ordinary production release; it
-does not acquire a second test distribution or alternate service image. The
-verified release identity records its repository, workflow reference, and
-hosted source commit. Protected reports record the producer workflow run
-identity separately as orchestration evidence and keep all producer
-coordinates separate from the
-marketplace consumer commit. Provider-neutral scripted collaborators exist
-only in the hosted producer's focused tests and are absent from client/service
-wheels, image layers, manifests, capabilities, migrations, and entry points.
 
 ## Troubleshooting
 

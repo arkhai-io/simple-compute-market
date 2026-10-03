@@ -100,14 +100,13 @@ capacity-reservation-lifecycle-hardening ──► billable-capacity-reservation
 
 ## Roadmap goal — Make the settlement mechanism a composed choice
 
-```text
-finish-settlement-mechanism-neutrality ──► contact-exchange-settlement-mechanism
-```
+Both earlier changes were archived 2026-08-19:
+[`finish-settlement-mechanism-neutrality`](archive/2026-08-19-finish-settlement-mechanism-neutrality/)
+and [`contact-exchange-settlement-mechanism`](archive/2026-08-19-contact-exchange-settlement-mechanism/).
 
 | Change | Status | Acceptance boundary |
 |---|---|---|
-| [`finish-settlement-mechanism-neutrality`](finish-settlement-mechanism-neutrality/) | design phase; core/kit-alkahest sections independent, hosted-surface sections coordinate with `consume-expanded-stripe-funding` | Pre-terms mechanism dispatch, verification, and negotiation scalar participation become registration-owned with no per-domain mechanism conditionals; every deal gains the neutral `obligation_ref` identity; Alkahest-shaped carriers move to `kit/alkahest` while `RateValue` stays core; option-aware discovery filters; residual mechanism literals removed |
-| [`contact-exchange-settlement-mechanism`](contact-exchange-settlement-mechanism/) | design phase; blocked only on the declinable-scalar and accepted-plan `service_terms` items of `finish-settlement-mechanism-neutrality` | A `contact-exchange.v1` peer mechanism completing a deal by durable, authenticated, idempotent contact reveal — no payment, no provisioning — with the introduction package in persisted `service_terms`, plus a loose-listing registry profile; composed first on bare metal |
+| [`settle-through-arkhai-payments`](settle-through-arkhai-payments/) | implemented §2–§3; verification and closeout active; §1 deferred | Exact Agreements feed `arkhai.payments.v1` as a peer of Alkahest in VM, bare-metal, and API-credit domains. Signed receipts gate provisioning/issuance; shared negotiation settlement data stores mandates. `fiat.stripe.v1` and `kit/hosted-settlement` are absent; the escrow-carrier refactor is deferred. Supersedes the hosted-fiat changes built on them ([overview](settle-through-arkhai-payments/overview.html)) |
 
 ## Lesser goal — POOLS capacity and fulfillment foundation
 
@@ -200,3 +199,15 @@ Changes with no campaign; each stands alone.
 ## Archived and superseded
 
 `prune-storefront-database` was archived because dead policy tables are already gone and the remaining candidates carry continuation, idempotency, or observability state. `complete-development-documentation` was synchronized and archived after audience-owned documentation became permanent planning governance. `add-storefront-principal-authentication` and `provisioning-result-push-delivery` were superseded on 2026-08-06 by `service-identity-signing` and `replace-polling-with-authenticated-push` respectively.
+
+## Superseded by settle-through-arkhai-payments
+
+The following changes are superseded by `settle-through-arkhai-payments`:
+
+- `consume-expanded-stripe-funding`
+- `add-api-credits-hosted-settlement`
+- `add-bare-metal-hosted-settlement`
+- `bind-one-hosted-release-coordinate`
+- `carry-the-payer-return-address`
+- `project-an-authoritative-funding-loss`
+- The hosted sections of `disburse-a-settlement-disposition`; its Alkahest work remains applicable.

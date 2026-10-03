@@ -5,35 +5,16 @@ from pathlib import Path
 
 import pytest
 from market_config.config_loader import EscrowTemplate, RateSlot
-from market_hosted_settlement import create_stripe_registration
-from market_settlement_runtime import (
-    SettlementConfigurationRegistry,
-    compile_settlement_publication_clause,
-)
 
-from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
+from market_storefront.domain_runtime import (
+    build_vm_storefront_domain,
+    build_vm_storefront_registry,
+)
 from market_storefront.utils.sqlite_client import SQLiteClient
 
 
 def _write_csv(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
-
-
-def _stripe_clause_compiler(raw):
-    registry = SettlementConfigurationRegistry([create_stripe_registration()])
-    config = registry.resolve(
-        {
-            "priority": ["fiat.stripe.v1"],
-            "stripe": {"enabled": True, "currency": "usd"},
-        },
-        role="seller",
-    )
-    return compile_settlement_publication_clause(
-        raw,
-        registry=registry,
-        config=config,
-        role="seller",
-    )
 
 
 @pytest.mark.asyncio
@@ -42,7 +23,10 @@ async def test_upsert_resources_from_csv_reports_matched_and_unrecognized(
 ):
     db_path = str(tmp_path / "agent.db")
     csv_path = tmp_path / "resources.csv"
-    sqlite_client = SQLiteClient(db_path=db_path, registry=build_vm_storefront_registry(build_vm_storefront_domain()))
+    sqlite_client = SQLiteClient(
+        db_path=db_path,
+        registry=build_vm_storefront_registry(build_vm_storefront_domain()),
+    )
 
     _write_csv(
         csv_path,
@@ -79,7 +63,10 @@ async def test_upsert_resources_from_csv_reports_matched_and_unrecognized(
 async def test_upsert_resources_from_csv_invalid_known_schema_row_fails(tmp_path: Path):
     db_path = str(tmp_path / "agent.db")
     csv_path = tmp_path / "resources_invalid.csv"
-    sqlite_client = SQLiteClient(db_path=db_path, registry=build_vm_storefront_registry(build_vm_storefront_domain()))
+    sqlite_client = SQLiteClient(
+        db_path=db_path,
+        registry=build_vm_storefront_registry(build_vm_storefront_domain()),
+    )
 
     # Missing attribute.sla for known compute.gpu schema should fail validation.
     _write_csv(
@@ -113,7 +100,10 @@ async def test_upsert_resources_from_csv_persists_per_row_pricing(tmp_path: Path
     loop to read."""
     db_path = str(tmp_path / "agent.db")
     csv_path = tmp_path / "resources_priced.csv"
-    sqlite_client = SQLiteClient(db_path=db_path, registry=build_vm_storefront_registry(build_vm_storefront_domain()))
+    sqlite_client = SQLiteClient(
+        db_path=db_path,
+        registry=build_vm_storefront_registry(build_vm_storefront_domain()),
+    )
 
     usdc = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
     _write_csv(
@@ -145,7 +135,10 @@ async def test_compute_resource_import_preserves_explicit_shared_host_metadata(
 ):
     db_path = str(tmp_path / "agent.db")
     csv_path = tmp_path / "resources_physical_host.csv"
-    sqlite_client = SQLiteClient(db_path=db_path, registry=build_vm_storefront_registry(build_vm_storefront_domain()))
+    sqlite_client = SQLiteClient(
+        db_path=db_path,
+        registry=build_vm_storefront_registry(build_vm_storefront_domain()),
+    )
 
     _write_csv(
         csv_path,
@@ -173,7 +166,10 @@ async def test_bare_metal_compute_resource_import_preserves_exclusive_metadata(
 ):
     db_path = str(tmp_path / "agent.db")
     csv_path = tmp_path / "resources_bare_metal.csv"
-    sqlite_client = SQLiteClient(db_path=db_path, registry=build_vm_storefront_registry(build_vm_storefront_domain()))
+    sqlite_client = SQLiteClient(
+        db_path=db_path,
+        registry=build_vm_storefront_registry(build_vm_storefront_domain()),
+    )
 
     _write_csv(
         csv_path,
@@ -202,7 +198,10 @@ async def test_upsert_resources_from_csv_generates_resource_id_when_missing(
 ):
     db_path = str(tmp_path / "agent.db")
     csv_path = tmp_path / "resources_no_id.csv"
-    sqlite_client = SQLiteClient(db_path=db_path, registry=build_vm_storefront_registry(build_vm_storefront_domain()))
+    sqlite_client = SQLiteClient(
+        db_path=db_path,
+        registry=build_vm_storefront_registry(build_vm_storefront_domain()),
+    )
 
     _write_csv(
         csv_path,
@@ -238,7 +237,10 @@ async def test_csv_accepted_escrows_column_round_trips_through_sqlite(tmp_path: 
     publish loop."""
     db_path = str(tmp_path / "agent.db")
     csv_path = tmp_path / "resources_templates.csv"
-    sqlite_client = SQLiteClient(db_path=db_path, registry=build_vm_storefront_registry(build_vm_storefront_domain()))
+    sqlite_client = SQLiteClient(
+        db_path=db_path,
+        registry=build_vm_storefront_registry(build_vm_storefront_domain()),
+    )
 
     usdc_template = EscrowTemplate(
         name="usdc",
@@ -278,87 +280,16 @@ async def test_csv_accepted_escrows_column_round_trips_through_sqlite(tmp_path: 
 
 
 @pytest.mark.asyncio
-async def test_csv_settlements_column_round_trips_as_complete_clauses(
-    tmp_path: Path,
-):
-    db_path = str(tmp_path / "agent.db")
-    csv_path = tmp_path / "resources_settlements.csv"
-    sqlite_client = SQLiteClient(db_path=db_path, registry=build_vm_storefront_registry(build_vm_storefront_domain()))
-    clause = (
-        '[{""mechanism"":""fiat.stripe.v1"",""asset"":""usd"",'
-        '""rate"":""125"",""per"":""hour"",""mechanism_input"":'
-        '{""funding_profile"":""card.v1"",""interaction"":""interactive"",'
-        '""funds_flow"":""separate_charges_transfers""}}]'
-    )
-    _write_csv(
-        csv_path,
-        "\n".join(
-            [
-                "resource_id,resource_type,state,settlements,attribute.topic",
-                f'info-1,information.note,available,"{clause}",market-overview',
-            ]
-        ),
-    )
-
-    report = await sqlite_client.upsert_resources_from_csv(
-        csv_path=str(csv_path),
-        settlement_compiler=_stripe_clause_compiler,
-    )
-    resources = await sqlite_client.list_resources()
-
-    assert report["imported_count"] == 1
-    assert resources[0]["settlements"] == [
-        {
-            "mechanism": "fiat.stripe.v1",
-            "asset": "usd",
-            "rate": "125",
-            "per": "hour",
-            "mechanism_input": {
-                "funding_profile": "card.v1",
-                "interaction": "interactive",
-                "funds_flow": "separate_charges_transfers",
-            },
-        }
-    ]
-
-
-@pytest.mark.asyncio
-async def test_csv_settlements_rejects_missing_common_field_atomically(
-    tmp_path: Path,
-):
-    db_path = str(tmp_path / "agent.db")
-    csv_path = tmp_path / "resources_invalid_settlement.csv"
-    sqlite_client = SQLiteClient(db_path=db_path, registry=build_vm_storefront_registry(build_vm_storefront_domain()))
-    clause = '[{""mechanism"":""fiat.stripe.v1"",""rate"":""125"",""per"":""hour""}]'
-    _write_csv(
-        csv_path,
-        "\n".join(
-            [
-                "resource_id,resource_type,state,settlements,attribute.topic",
-                f'info-1,information.note,available,"{clause}",market-overview',
-            ]
-        ),
-    )
-
-    report = await sqlite_client.upsert_resources_from_csv(
-        csv_path=str(csv_path),
-        settlement_compiler=_stripe_clause_compiler,
-    )
-
-    assert report["imported_count"] == 0
-    assert report["failed_count"] == 1
-    assert await sqlite_client.list_resources() == []
-    assert "asset" in report["rows"][0]["errors"][0]
-
-
-@pytest.mark.asyncio
 async def test_csv_accepted_escrows_column_without_templates_errors(tmp_path: Path):
     """When the CSV references templates but the storefront passes no
     templates catalog, the import surfaces a row-level error rather than
     silently dropping the column."""
     db_path = str(tmp_path / "agent.db")
     csv_path = tmp_path / "resources_no_templates.csv"
-    sqlite_client = SQLiteClient(db_path=db_path, registry=build_vm_storefront_registry(build_vm_storefront_domain()))
+    sqlite_client = SQLiteClient(
+        db_path=db_path,
+        registry=build_vm_storefront_registry(build_vm_storefront_domain()),
+    )
 
     _write_csv(
         csv_path,
@@ -382,7 +313,10 @@ async def test_csv_accepted_escrows_empty_cell_stores_null(tmp_path: Path):
     imports, the column round-trips as ``None``."""
     db_path = str(tmp_path / "agent.db")
     csv_path = tmp_path / "resources_empty_ae.csv"
-    sqlite_client = SQLiteClient(db_path=db_path, registry=build_vm_storefront_registry(build_vm_storefront_domain()))
+    sqlite_client = SQLiteClient(
+        db_path=db_path,
+        registry=build_vm_storefront_registry(build_vm_storefront_domain()),
+    )
 
     _write_csv(
         csv_path,
@@ -407,7 +341,10 @@ async def test_csv_token_must_be_canonical_hex_before_persistence(
 ):
     db_path = str(tmp_path / "agent.db")
     csv_path = tmp_path / "resources_invalid_token.csv"
-    sqlite_client = SQLiteClient(db_path=db_path, registry=build_vm_storefront_registry(build_vm_storefront_domain()))
+    sqlite_client = SQLiteClient(
+        db_path=db_path,
+        registry=build_vm_storefront_registry(build_vm_storefront_domain()),
+    )
     invalid = "0x" + ("z" * 40)
     _write_csv(
         csv_path,
@@ -423,34 +360,4 @@ async def test_csv_token_must_be_canonical_hex_before_persistence(
 
     assert report["imported_count"] == 0
     assert "20-byte hexadecimal address" in report["rows"][0]["errors"][0]
-    assert await sqlite_client.list_resources() == []
-
-
-@pytest.mark.asyncio
-async def test_csv_uninstalled_settlement_mechanism_fails_before_persistence(
-    tmp_path: Path,
-):
-    db_path = str(tmp_path / "agent.db")
-    csv_path = tmp_path / "resources_uninstalled_settlement.csv"
-    sqlite_client = SQLiteClient(db_path=db_path, registry=build_vm_storefront_registry(build_vm_storefront_domain()))
-    clause = (
-        '[{""mechanism"":""missing.v1"",""asset"":""usd"",'
-        '""rate"":""1"",""per"":""hour""}]'
-    )
-    _write_csv(
-        csv_path,
-        "\n".join(
-            [
-                "resource_id,resource_type,state,settlements,attribute.topic",
-                f'info-1,information.note,available,"{clause}",market-overview',
-            ]
-        ),
-    )
-
-    report = await sqlite_client.upsert_resources_from_csv(
-        csv_path=str(csv_path),
-        settlement_compiler=_stripe_clause_compiler,
-    )
-    assert "uninstalled" in report["rows"][0]["errors"][0]
-    assert report["imported_count"] == 0
     assert await sqlite_client.list_resources() == []

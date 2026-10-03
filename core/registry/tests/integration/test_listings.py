@@ -91,23 +91,23 @@ class TestPublishOrder:
         assert result["listing_id"] == "pub-1"
         assert publishers.publishers[0].publisher_id == result["publisher_id"]
 
-    async def test_hosted_settlement_options_round_trip(self, registry_client):
+    async def test_mechanism_options_round_trip(self, registry_client):
         option = {
             "option_id": "a" * 64,
-            "mechanism": "fiat.stripe.v1",
+            "mechanism": "example.payment.v1",
             "asset": "usd",
             "rates": [{"field": "amount", "per": "hour", "value": "125"}],
             "params": {"account_ref": "acct-seller"},
         }
         request = ListingRequest(
-            listing_id="pub-hosted",
+            listing_id="pub-mechanism",
             offer={"gpu_model": "A100", "region": "us-west"},
             accepted_escrows=[],
             settlement_options=[option],
             storefront_url="http://localhost:8001/",
         )
         await registry_client.publish_listing(request)
-        listing = await registry_client.get_listing("pub-hosted")
+        listing = await registry_client.get_listing("pub-mechanism")
         assert listing.accepted_escrows == []
         assert listing.settlement_options == [option]
 

@@ -128,6 +128,7 @@ async def test_lifespan_publishes_and_clears_exact_contract_without_cross_app_le
         binding,
         capacity_runtime: object,
         accepted_obligation_dispatch: object = None,
+        arkhai_payments_stage: object = None,
     ):
         registration = registry.resolve_registration(binding)
         assert registry is built["registry"]
@@ -163,6 +164,8 @@ async def test_lifespan_publishes_and_clears_exact_contract_without_cross_app_le
         composition = SimpleNamespace(
             domain=domain,
             accepted_obligation_dispatch=lambda: {},
+            arkhai_payments_stage=None,
+            payments_coordinator=None,
         )
         built["settlement_composition"] = composition
         return composition

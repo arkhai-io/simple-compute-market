@@ -185,7 +185,7 @@ def test_typed_payload_keeps_settlement_options_independent() -> None:
         build_payload=lambda *_args: PublicationPayload(
             accepted_escrows=({"escrow": "alkahest"},),
             settlement_options=({"option_id": "hosted"},),
-            publication_clauses=({"mechanism": "fiat.stripe.v1"},),
+            publication_clauses=({"mechanism": "example.payment.v1"},),
             demands=({"demand": "compute"},),
             max_duration_seconds=60,
         ),
@@ -197,4 +197,4 @@ def test_typed_payload_keeps_settlement_options_independent() -> None:
     assert published[0]["settlement_options"] == [{"option_id": "hosted"}]
     assert captured["accepted_escrows"] == [{"escrow": "alkahest"}]
     assert captured["settlement_options"] == [{"option_id": "hosted"}]
-    assert captured["publication_clauses"] == [{"mechanism": "fiat.stripe.v1"}]
+    assert captured["publication_clauses"] == [{"mechanism": "example.payment.v1"}]

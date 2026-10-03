@@ -29,6 +29,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from datetime import datetime, timezone
 
 from typing import Any, Literal
 
@@ -576,13 +577,74 @@ class SettlementOption(BaseModel):
 
 
 class SettlementSelection(BaseModel):
-    """Buyer selection of one exact listing settlement option."""
+    """Buyer selection of one exact listing settlement option.
+
+    ``expiration_unix`` is required by mechanisms that materialize expiring
+    obligations, such as Alkahest. Agreement-only mechanisms omit it.
+    """
 
     model_config = {"extra": "forbid"}
 
     mechanism: str = Field(min_length=1)
     option_id: str = Field(pattern=r"^[0-9a-f]{64}$")
-    expiration_unix: int = Field(gt=0)
+    expiration_unix: int | None = Field(default=None, gt=0)
+    # Buyer-side mechanism parameters, opaque to core. The seller's option
+    # params cannot name the buyer's own mechanism identity (for example the
+    # payer account an Arkhai payments mandate charges), so the buyer supplies
+    # it here and the Agreement carries it as settlement_params.
+    params: dict[str, Any] | None = None
+
+
+class Agreement(BaseModel):
+    """Accepted deal terms passed unchanged from negotiation to settlement."""
+
+    model_config = {"extra": "forbid"}
+
+    negotiation_id: str = Field(min_length=1)
+    listing_id: str = Field(min_length=1)
+    listing_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    buyer: dict[str, str]
+    seller: dict[str, str]
+    settlement: SettlementOption | None = None
+    settlement_params: dict[str, Any] | None = None
+    amount: int = Field(ge=0)
+    asset: str | None = None
+    duration_seconds: int = Field(ge=0)
+    start_utc: str
+    provision_terms: dict[str, Any] | None = None
+    accepted_at: str
+
+    @field_validator("amount", mode="before")
+    @classmethod
+    def _parse_agreement_amount(cls, v: Any) -> int:
+        parsed = _parse_uint256_str(v, "amount")
+        if parsed is None:
+            raise ValueError("Agreement.amount must not be null")
+        return parsed
+
+    @field_serializer("amount")
+    def _serialize_agreement_amount(self, v: int) -> str:
+        return _serialize_uint256_str(v) or "0"
+
+    @field_validator("start_utc", "accepted_at")
+    @classmethod
+    def _require_utc_timestamp(cls, value: str) -> str:
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("Agreement timestamps must be non-empty UTC strings")
+        text = value.strip()
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError("Agreement timestamps must be ISO-8601") from exc
+        if parsed.tzinfo is None or parsed.utcoffset() != timezone.utc.utcoffset(parsed):
+            raise ValueError("Agreement timestamps must include a UTC offset")
+        return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    @model_validator(mode="after")
+    def _settlement_asset_matches(self) -> "Agreement":
+        if self.settlement is not None and self.asset != self.settlement.asset:
+            raise ValueError("Agreement asset must match its selected settlement option")
+        return self
 
 
 def compute_rate_total(rate: RateValue, duration_seconds: int) -> int:

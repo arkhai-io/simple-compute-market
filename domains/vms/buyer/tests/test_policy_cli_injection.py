@@ -18,6 +18,7 @@ from identity_helpers import (
     BUYER_SIGNER,
     seller_principals,
     signed_response_headers,
+    with_accepted_agreement,
 )
 
 runner = CliRunner()
@@ -113,6 +114,7 @@ def test_negotiate_with_seller_delivers_policy_params_to_the_chain():
             "proposal": {"fields": {"amount": 100}},
             "accepted_provision_terms": _provision(3600).model_dump(mode="json"),
         }
+        body = with_accepted_agreement(req, body)
         return _MockResponse(
             status=200,
             text=json.dumps(body),

@@ -15,14 +15,14 @@ import json
 import logging
 import sqlite3
 import uuid
-from datetime import datetime
 from collections.abc import Collection, Sequence
+from datetime import datetime
 from typing import Any
 
+from core_storefront.domain_registry import StorefrontDomainRegistry
 from core_storefront.sqlite_client import (
     SQLiteClient as CoreSQLiteClient,
 )
-from core_storefront.domain_registry import StorefrontDomainRegistry
 from core_storefront.sqlite_migrations import MigrationLike
 from domains.vms.listings.host_csv_importer import upsert_hosts_from_csv
 from domains.vms.listings.reconciler import ensure_derived_compute_listings_table
@@ -31,9 +31,10 @@ from domains.vms.listings.resource_csv_importer import (
     upsert_resources_from_csv,
     upsert_resources_from_csv_content,
 )
-from market_hosted_settlement import HOSTED_SETTLEMENT_MIGRATIONS
-from market_settlement_runtime import settlement_migrations
 from market_identity import Identity
+from market_settlement_runtime import settlement_migrations
+
+from market_storefront.payment_repository import VmPaymentRepository
 
 from .config import BASE_URL_OVERRIDE, resolve_marketplace_signer, settings
 from .migrations import (  # noqa: F401 — re-exported (tests import via here)
@@ -45,8 +46,9 @@ from .migrations import (  # noqa: F401 — re-exported (tests import via here)
 logger = logging.getLogger(__name__)
 
 
-class SQLiteClient(CoreSQLiteClient):
+class SQLiteClient(VmPaymentRepository, CoreSQLiteClient):
     """Core market-state client + the VM domain's inventory tables."""
+
     def __init__(
         self,
         db_path: str,
@@ -73,7 +75,6 @@ class SQLiteClient(CoreSQLiteClient):
 
         return self._domain_registry
 
-
     _ESCROW_COLS = (
         *CoreSQLiteClient._ESCROW_COLS,
         "obligation_ref",
@@ -83,7 +84,6 @@ class SQLiteClient(CoreSQLiteClient):
     def _domain_migrations(self) -> tuple[MigrationLike, ...]:
         return (
             *settlement_migrations(),
-            *HOSTED_SETTLEMENT_MIGRATIONS,
             *VM_MIGRATIONS,
         )
 

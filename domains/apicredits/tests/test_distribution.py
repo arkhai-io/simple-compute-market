@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 import shutil
 import subprocess
 import sys
@@ -8,7 +7,6 @@ import zipfile
 from pathlib import Path
 
 import pytest
-
 
 REPO = Path(__file__).resolve().parents[3]
 APICREDITS = REPO / "domains" / "apicredits"
@@ -75,6 +73,10 @@ def wheels(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
         "policy": (REPO / "kit" / "policy", "arkhai_kit_policy-*.whl"),
         "alkahest": (REPO / "kit" / "alkahest", "arkhai_kit_alkahest-*.whl"),
         "identity": (REPO / "kit" / "identity", "arkhai_kit_identity-*.whl"),
+        "arkhai_payments": (
+            REPO / "kit" / "arkhai-payments",
+            "arkhai_kit_arkhai_payments-*.whl",
+        ),
         "capacity_publication": (
             REPO / "kit" / "capacity-publication",
             "arkhai_kit_capacity_publication-*.whl",
@@ -89,10 +91,6 @@ def wheels(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
         "settlement_runtime": (
             REPO / "kit" / "settlement-runtime",
             "arkhai_kit_settlement_runtime-*.whl",
-        ),
-        "hosted_settlement": (
-            REPO / "kit" / "hosted-settlement",
-            "arkhai_kit_hosted_settlement-*.whl",
         ),
         "resource_pools": (
             REPO / "kit" / "resource-pools",
@@ -115,22 +113,6 @@ def wheels(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
         matches = sorted(output.glob(pattern))
         assert len(matches) == 1
         built[name] = matches[0]
-    # The version follows the pin rather than being spelled again here, where
-    # nothing would keep it in step with the package that actually declares it.
-    pinned = re.search(
-        r'arkhai-hosted-settlement-client==([0-9]+\.[0-9]+\.[0-9]+)',
-        (REPO / "kit" / "hosted-settlement" / "pyproject.toml").read_text(
-            encoding="utf-8"
-        ),
-    )
-    assert pinned is not None
-    hosted_clients = sorted(
-        (REPO / ".dist").glob(
-            f"arkhai_hosted_settlement_client-{pinned.group(1)}-py3-none-any.whl"
-        )
-    )
-    assert len(hosted_clients) == 1
-    shutil.copy2(hosted_clients[0], output / hosted_clients[0].name)
     return built
 
 
@@ -184,12 +166,15 @@ def test_role_wheels_require_shared_domain_and_versioned_core(
     storefront_metadata = _metadata(wheels["storefront"])
 
     assert "Requires-Dist: arkhai-core>=0.2.0" in domain_metadata
+    assert "Requires-Dist: arkhai-kit-arkhai-payments" in domain_metadata
     assert "Requires-Dist: arkhai-apicredits-domain>=0.1.0" in buyer_metadata
     assert "Requires-Dist: arkhai-core>=0.2.0" in buyer_metadata
     assert "Requires-Dist: arkhai-core-buyer>=0.3.0" in buyer_metadata
+    assert "Requires-Dist: arkhai-kit-arkhai-payments" in buyer_metadata
     assert "Requires-Dist: arkhai-apicredits-domain>=0.1.0" in storefront_metadata
     assert "Requires-Dist: arkhai-core>=0.2.0" in storefront_metadata
     assert "Requires-Dist: arkhai-core-storefront>=0.3.0" in storefront_metadata
+    assert "Requires-Dist: arkhai-kit-arkhai-payments" in storefront_metadata
 
 
 def test_storefront_wheels_require_settlement_runtime(

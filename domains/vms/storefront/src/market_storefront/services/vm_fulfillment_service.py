@@ -257,6 +257,7 @@ async def _build_vm_fulfillment_context(
             "seller_order_id": seller_order_id,
             "duration_seconds": int(duration_seconds),
             "start_utc": start_utc,
+            "settlement_mechanism": settlement_mechanism,
             "required_attributes": plan.required_attributes,
             "fulfillment_request": {
                 "kind": "vm.fulfillment.request",
@@ -686,11 +687,17 @@ async def fulfill_vm_obligation(
     shutdown_task.add_done_callback(_background_tasks.discard)
 
     try:
-        fulfillment_uid = await submit_compute_fulfillment(
-            client=client,
-            escrow_uid=escrow_uid,
-            connection_details=connection_details,
-        )
+        if settlement_mechanism == "arkhai.payments.v1":
+            row = await get_sqlite_client().load_escrow(escrow_uid=escrow_uid)
+            fulfillment_uid = (row or {}).get("fulfillment_id")
+            if not fulfillment_uid:
+                raise ValueError("physical fulfillment has no durable identity")
+        else:
+            fulfillment_uid = await submit_compute_fulfillment(
+                client=client,
+                escrow_uid=escrow_uid,
+                connection_details=connection_details,
+            )
     except Exception as error:
         logger.error(
             "[SETTLEMENT] EVENT=settlement_failed_after_provisioning "

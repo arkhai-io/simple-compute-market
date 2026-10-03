@@ -28,6 +28,10 @@ from domains.apicredits.settlement.issuance_evidence import (
     sign_api_credits_issuance_evidence,
     verify_api_credits_issuance_evidence,
 )
+from domains.apicredits.settlement.payments import (
+    mandate_policy_from_agreement,
+    validate_payer_account,
+)
 
 __all__ = [
     "ApiCreditsIssuanceEvidenceBodyV1",
@@ -52,4 +56,6 @@ __all__ = [
     "prepare_credit_issuance_request",
     "sign_api_credits_issuance_evidence",
     "verify_api_credits_issuance_evidence",
+    "mandate_policy_from_agreement",
+    "validate_payer_account",
 ]

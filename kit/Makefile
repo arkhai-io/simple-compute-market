@@ -1,8 +1,8 @@
-.PHONY: test test-alkahest test-capacity-publication test-config test-contact-exchange test-delivery test-identity test-policy test-site test-site-client test-resource-pools test-fulfillment test-settlement-runtime test-negotiation-runtime test-hosted-settlement test-storefront dist dist-capacity-publication dist-contact-exchange dist-delivery dist-site dist-site-client dist-resource-pools dist-fulfillment dist-settlement-runtime dist-negotiation-runtime dist-hosted-settlement dist-storefront
+.PHONY: test test-alkahest test-capacity-publication test-config test-contact-exchange test-delivery test-identity test-policy test-site test-site-client test-resource-pools test-fulfillment test-settlement-runtime test-negotiation-runtime test-storefront test-arkhai-payments dist dist-capacity-publication dist-contact-exchange dist-delivery dist-site dist-site-client dist-resource-pools dist-fulfillment dist-settlement-runtime dist-negotiation-runtime dist-storefront dist-arkhai-payments
 
 DIST_DIR ?= ../.dist
 
-test: dist test-alkahest test-capacity-publication test-config test-contact-exchange test-delivery test-identity test-policy test-site test-site-client test-resource-pools test-fulfillment test-settlement-runtime test-negotiation-runtime test-hosted-settlement test-storefront
+test: dist test-alkahest test-capacity-publication test-config test-contact-exchange test-delivery test-identity test-policy test-site test-site-client test-resource-pools test-fulfillment test-settlement-runtime test-negotiation-runtime test-storefront test-arkhai-payments
 
 test-alkahest:
 	cd alkahest && $(MAKE) test
@@ -43,13 +43,10 @@ test-settlement-runtime:
 test-negotiation-runtime:
 	cd negotiation-runtime && $(MAKE) test
 
-test-hosted-settlement:
-	cd hosted-settlement && $(MAKE) test
-
 test-storefront:
 	cd storefront && $(MAKE) test
 
-dist: dist-capacity-publication dist-contact-exchange dist-delivery dist-site dist-site-client dist-resource-pools dist-fulfillment dist-settlement-runtime dist-negotiation-runtime dist-hosted-settlement dist-storefront
+dist: dist-capacity-publication dist-contact-exchange dist-delivery dist-site dist-site-client dist-resource-pools dist-fulfillment dist-settlement-runtime dist-negotiation-runtime dist-storefront dist-arkhai-payments
 
 dist-contact-exchange: dist-settlement-runtime
 	-mkdir -p $(DIST_DIR)
@@ -105,14 +102,18 @@ dist-negotiation-runtime:
 	@ls $(DIST_DIR)/arkhai_kit_negotiation_runtime-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-kit-negotiation-runtime produced a platform-specific wheel — must build inside Docker" && exit 1)
 
-dist-hosted-settlement:
-	-mkdir -p $(DIST_DIR)
-	cd hosted-settlement && $(MAKE) build
-	@ls $(DIST_DIR)/arkhai_kit_hosted_settlement-*-none-any.whl > /dev/null 2>&1 || \
-		(echo "ERROR: arkhai-kit-hosted-settlement produced a platform-specific wheel" && exit 1)
-
 dist-storefront:
 	-mkdir -p $(DIST_DIR)
 	cd storefront && $(MAKE) build
 	@ls $(DIST_DIR)/arkhai_kit_storefront-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-kit-storefront produced a platform-specific wheel — must build inside Docker" && exit 1)
+
+
+test-arkhai-payments:
+	cd arkhai-payments && $(MAKE) test
+
+dist-arkhai-payments:
+	-mkdir -p $(DIST_DIR)
+	cd arkhai-payments && $(MAKE) build
+	@ls $(DIST_DIR)/arkhai_kit_arkhai_payments-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-kit-arkhai-payments produced a platform-specific wheel" && exit 1)

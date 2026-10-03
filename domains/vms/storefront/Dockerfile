@@ -55,8 +55,6 @@ RUN --mount=type=cache,target=/root/.cache/uv \
             --refresh-package arkhai-kit-negotiation-runtime \
             --refresh-package arkhai-kit-alkahest \
             --refresh-package arkhai-kit-identity \
-            --refresh-package arkhai-hosted-settlement-client \
-            --refresh-package arkhai-kit-hosted-settlement \
             --refresh-package arkhai-kit-config \
             --refresh-package arkhai-kit-site-client \
             --refresh-package arkhai-kit-site \
@@ -80,8 +78,6 @@ RUN --mount=type=cache,target=/root/.cache/uv \
             --refresh-package arkhai-kit-negotiation-runtime \
             --refresh-package arkhai-kit-alkahest \
             --refresh-package arkhai-kit-identity \
-            --refresh-package arkhai-hosted-settlement-client \
-            --refresh-package arkhai-kit-hosted-settlement \
             --refresh-package arkhai-kit-config \
             --refresh-package arkhai-kit-site-client \
             --refresh-package arkhai-kit-site \
@@ -141,9 +137,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         arkhai-vms-storefront==0.3.5 \
         arkhai-bare-metal-storefront==0.2.5
 
-# Fail the image build if the immutable hosted client regains a seller command
-# or any repository dependency was installed as an editable sibling source.
-RUN python -c 'import importlib.metadata as m, json; import domains.vms.listings, domains.vms.negotiation, domains.vms.settlement, market_storefront.cli; assert all(ep.name != "hosted-settlement-seller" for ep in m.entry_points(group="console_scripts")); assert all(not (json.loads(text).get("dir_info") or {}).get("editable", False) for dist in m.distributions() if (text := dist.read_text("direct_url.json")))'
+# Runtime distributions must not be editable source installations.
+RUN python -c 'import importlib.metadata as m, json; import domains.vms.listings, domains.vms.negotiation, domains.vms.settlement, market_storefront.cli; assert all(not (json.loads(text).get("dir_info") or {}).get("editable", False) for dist in m.distributions() if (text := dist.read_text("direct_url.json")))'
 
 ARG PORT=8080
 ENV PORT=${PORT}

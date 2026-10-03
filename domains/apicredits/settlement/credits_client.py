@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
-from typing import Any, Literal, Self
+from typing import Any, Final, Literal, Self
 
 import httpx
 from market_identity import Identity, canonical_json
@@ -13,8 +13,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 logger = logging.getLogger(__name__)
 
-ISSUANCE_REQUEST_SCHEMA = "arkhai.api-credits.issuance-request.v1"
-ISSUANCE_RESULT_SCHEMA = "arkhai.api-credits.issuance-result.v1"
+ISSUANCE_REQUEST_SCHEMA: Final = "arkhai.api-credits.issuance-request.v1"
+ISSUANCE_RESULT_SCHEMA: Final = "arkhai.api-credits.issuance-result.v1"
 _SAFE_REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,254}$")
 
 
@@ -84,10 +84,11 @@ def credit_issuance_request_digest(
 class CreditIssuanceRequest(_CreditsContract):
     """Complete immutable command accepted by the credits authority."""
 
-    schema: Literal["arkhai.api-credits.issuance-request.v1"] = ISSUANCE_REQUEST_SCHEMA
+    # The wire schema field shadows Pydantic's deprecated schema() method.
+    schema: Literal["arkhai.api-credits.issuance-request.v1"] = ISSUANCE_REQUEST_SCHEMA  # type: ignore[assignment]
     fulfillment_id: str = Field(min_length=1, max_length=320)
     obligation_ref: str = Field(min_length=1, max_length=255)
-    mechanism: Literal["alkahest.v1", "fiat.stripe.v1"]
+    mechanism: Literal["alkahest.v1", "arkhai.payments.v1"]
     owner: Identity
     service: str = Field(min_length=1, max_length=255)
     resource_id: str = Field(min_length=1, max_length=255)
@@ -105,7 +106,7 @@ class CreditIssuanceRequest(_CreditsContract):
         cls,
         *,
         obligation_ref: str,
-        mechanism: Literal["alkahest.v1", "fiat.stripe.v1"],
+        mechanism: Literal["alkahest.v1", "arkhai.payments.v1"],
         owner: Identity,
         service: str,
         resource_id: str,
@@ -164,11 +165,11 @@ class CreditIssuanceRequest(_CreditsContract):
 class CreditIssuanceResult(_CreditsContract):
     """Committed grant projection; bearer material is excluded from serialization."""
 
-    schema: Literal["arkhai.api-credits.issuance-result.v1"] = ISSUANCE_RESULT_SCHEMA
+    schema: Literal["arkhai.api-credits.issuance-result.v1"] = ISSUANCE_RESULT_SCHEMA  # type: ignore[assignment]
     fulfillment_id: str = Field(min_length=1, max_length=320)
     grant_id: str = Field(min_length=1, max_length=320)
     obligation_ref: str = Field(min_length=1, max_length=255)
-    mechanism: Literal["alkahest.v1", "fiat.stripe.v1"]
+    mechanism: Literal["alkahest.v1", "arkhai.payments.v1"]
     owner: Identity | None
     service: str = Field(min_length=1, max_length=255)
     resource_id: str = Field(min_length=1, max_length=255)
@@ -192,8 +193,6 @@ class CreditIssuanceResult(_CreditsContract):
     def validate_result(self) -> Self:
         if self.grant_id != self.fulfillment_id:
             raise ValueError("grant_id must equal fulfillment_id")
-        if self.mechanism == "fiat.stripe.v1" and self.owner is None:
-            raise ValueError("hosted issuance result requires a canonical owner")
         if self.key_mode == "existing" and self.secret is not None:
             raise ValueError("existing-key top-up must not return a secret")
         if self.secret is not None and not self.secret.startswith(f"{self.key_id}."):

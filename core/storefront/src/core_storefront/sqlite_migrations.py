@@ -39,12 +39,12 @@ class LegacyMigrationInputs:
 class Migration:
     id: str
     apply: Callable[[sqlite3.Connection], None]
-    apply_with_identity_context: Callable[
-        [sqlite3.Connection, Identity | None, Collection[str]], None
-    ] | None = None
-    apply_with_legacy_context: Callable[
-        [sqlite3.Connection, LegacyMigrationInputs | None], None
-    ] | None = None
+    apply_with_identity_context: (
+        Callable[[sqlite3.Connection, Identity | None, Collection[str]], None] | None
+    ) = None
+    apply_with_legacy_context: (
+        Callable[[sqlite3.Connection, LegacyMigrationInputs | None], None] | None
+    ) = None
     required_tables: tuple[str, ...] = ()
 
 
@@ -87,9 +87,7 @@ def apply_schema_migrations(
             identity_contextual = getattr(
                 migration, "apply_with_identity_context", None
             )
-            legacy_contextual = getattr(
-                migration, "apply_with_legacy_context", None
-            )
+            legacy_contextual = getattr(migration, "apply_with_legacy_context", None)
             if identity_contextual is not None and legacy_contextual is not None:
                 raise RuntimeError(
                     f"migration {migration.id!r} declares two context owners"
@@ -218,6 +216,8 @@ def _migrate_negotiation_amount_columns(conn: sqlite3.Connection) -> None:
         for column_name, column_sql in (
             ("buyer", "TEXT"),
             ("matched_offer_id", "TEXT"),
+            ("agreement_bytes", "BLOB"),
+            ("settlement_data", "TEXT"),
         ):
             _add_column_if_missing(conn, "negotiation_threads", column_name, column_sql)
 
@@ -245,6 +245,8 @@ def _migrate_negotiation_amount_columns(conn: sqlite3.Connection) -> None:
               agreed_price TEXT,
               agreed_duration_seconds INTEGER,
               agreed_at TEXT,
+              agreement_bytes BLOB,
+              settlement_data TEXT,
               buyer TEXT,
               matched_offer_id TEXT
             )
@@ -257,7 +259,8 @@ def _migrate_negotiation_amount_columns(conn: sqlite3.Connection) -> None:
                 our_agent_id, their_agent_id, status, created_at,
                 updated_at, terminal_state, requested_duration_seconds,
                 requested_start_utc, buyer_escrow_proposal, provision_terms,
-                agreed_price, agreed_duration_seconds, agreed_at, buyer,
+                agreed_price, agreed_duration_seconds, agreed_at,
+                agreement_bytes, settlement_data, buyer,
                 matched_offer_id
             )
             SELECT negotiation_id, our_listing_id, their_listing_id,
@@ -267,7 +270,8 @@ def _migrate_negotiation_amount_columns(conn: sqlite3.Connection) -> None:
                    buyer_escrow_proposal,
                    provision_terms,
                    CASE WHEN agreed_price IS NULL THEN NULL ELSE CAST(agreed_price AS TEXT) END,
-                   agreed_duration_seconds, agreed_at, buyer, matched_offer_id
+                   agreed_duration_seconds, agreed_at, agreement_bytes,
+                   settlement_data, buyer, matched_offer_id
             FROM negotiation_threads__amount_migration
             """
         )
@@ -603,7 +607,9 @@ def _require_embedded_principal(
         field=field,
     )
     if actual != expected:
-        raise ValueError(f"{field} principal conflicts with durable negotiation parties")
+        raise ValueError(
+            f"{field} principal conflicts with durable negotiation parties"
+        )
 
 
 def _migrate_settlement_plan_parties(
@@ -619,7 +625,9 @@ def _migrate_settlement_plan_parties(
         ("seller_principal", seller),
     ):
         if key in plan:
-            _require_embedded_principal(plan[key], expected=expected, field=f"{field}.{key}")
+            _require_embedded_principal(
+                plan[key], expected=expected, field=f"{field}.{key}"
+            )
         else:
             plan[key] = _principal_dict(expected)
     obligations = plan.get("obligations")
@@ -789,11 +797,12 @@ def _rebuild_service_peers_without_legacy_identity(
     missing = required - columns
     if missing:
         raise ValueError(
-            "service_peers lacks required binding fields: "
-            + ", ".join(sorted(missing))
+            "service_peers lacks required binding fields: " + ", ".join(sorted(missing))
         )
     status = "status" if "status" in columns else "'active'"
-    created_at = "created_at" if "created_at" in columns else "'1970-01-01T00:00:00+00:00'"
+    created_at = (
+        "created_at" if "created_at" in columns else "'1970-01-01T00:00:00+00:00'"
+    )
     updated_at = "updated_at" if "updated_at" in columns else created_at
     conn.execute("DROP TABLE IF EXISTS service_peers_identity_new")
     conn.execute(
@@ -824,9 +833,7 @@ def _rebuild_service_peers_without_legacy_identity(
         """
     )
     conn.execute("DROP TABLE service_peers")
-    conn.execute(
-        "ALTER TABLE service_peers_identity_new RENAME TO service_peers"
-    )
+    conn.execute("ALTER TABLE service_peers_identity_new RENAME TO service_peers")
 
 
 def _migrate_marketplace_principals(
@@ -891,7 +898,11 @@ def _migrate_marketplace_principals(
                 if current_url is not None
                 else None
             )
-            if legacy_url is not None and stored_url is not None and legacy_url != stored_url:
+            if (
+                legacy_url is not None
+                and stored_url is not None
+                and legacy_url != stored_url
+            ):
                 raise ValueError(
                     f"listings[{listing_id}] storefront URL conflicts with its legacy value"
                 )
@@ -904,12 +915,17 @@ def _migrate_marketplace_principals(
             if scheme is None and identifier is None:
                 pass
             elif scheme is None or identifier is None:
-                raise ValueError(f"listings[{listing_id}] has a partial seller principal")
-            elif _validated_principal(
-                scheme,
-                identifier,
-                field=f"listings[{listing_id}].seller_principal",
-            ) != principal:
+                raise ValueError(
+                    f"listings[{listing_id}] has a partial seller principal"
+                )
+            elif (
+                _validated_principal(
+                    scheme,
+                    identifier,
+                    field=f"listings[{listing_id}].seller_principal",
+                )
+                != principal
+            ):
                 raise ValueError(
                     f"listings[{listing_id}] seller principal conflicts with local identity"
                 )
@@ -1017,7 +1033,9 @@ def _migrate_marketplace_principals(
     if _table_exists(conn, "negotiation_messages"):
         _add_column_if_missing(conn, "negotiation_messages", "sender_role", "TEXT")
         _add_column_if_missing(conn, "negotiation_messages", "sender_scheme", "TEXT")
-        _add_column_if_missing(conn, "negotiation_messages", "sender_identifier", "TEXT")
+        _add_column_if_missing(
+            conn, "negotiation_messages", "sender_identifier", "TEXT"
+        )
         columns = _cols(conn, "negotiation_messages")
         has_legacy_sender = "sender" in columns
         select_sender = "sender" if has_legacy_sender else "NULL"
@@ -1250,8 +1268,6 @@ def _migrate_marketplace_principals(
                 ),
             )
 
-
-
     for table_name, key_column in (
         ("auth_replay_reservations", "request_id"),
         ("identity_claims", "claim_id"),
@@ -1260,11 +1276,7 @@ def _migrate_marketplace_principals(
             continue
         columns = _cols(conn, table_name)
         legacy_column = next(
-            (
-                name
-                for name in ("principal", "identity", "address")
-                if name in columns
-            ),
+            (name for name in ("principal", "identity", "address") if name in columns),
             None,
         )
         _add_column_if_missing(conn, table_name, "principal_scheme", "TEXT")
@@ -1336,12 +1348,20 @@ def _migrate_marketplace_principals(
             _add_column_if_missing(conn, "identity_audit", name, "TEXT")
         rows = conn.execute(
             f"""
-            SELECT id, {actor_legacy or 'NULL'}, actor_scheme, actor_identifier,
-                   {target_legacy or 'NULL'}, target_scheme, target_identifier
+            SELECT id, {actor_legacy or "NULL"}, actor_scheme, actor_identifier,
+                   {target_legacy or "NULL"}, target_scheme, target_identifier
             FROM identity_audit
             """
         ).fetchall()
-        for row_id, actor_old, actor_scheme, actor_identifier, target_old, target_scheme, target_identifier in rows:
+        for (
+            row_id,
+            actor_old,
+            actor_scheme,
+            actor_identifier,
+            target_old,
+            target_scheme,
+            target_identifier,
+        ) in rows:
             if actor_scheme is None and actor_identifier is None:
                 actor = _legacy_principal(
                     actor_old,
@@ -1403,7 +1423,9 @@ def _migrate_marketplace_principals(
         )
         if legacy_column is not None:
             _add_column_if_missing(conn, "service_peers", "principal_scheme", "TEXT")
-            _add_column_if_missing(conn, "service_peers", "principal_identifier", "TEXT")
+            _add_column_if_missing(
+                conn, "service_peers", "principal_identifier", "TEXT"
+            )
             seen: dict[tuple[str, str, str], str] = {}
             rows = conn.execute(
                 f"""
@@ -1431,7 +1453,9 @@ def _migrate_marketplace_principals(
                     )
                 owner = seen.get((str(role), principal[0], principal[1]))
                 if owner is not None and owner != str(peer_id):
-                    raise ValueError("duplicate active service-peer principal ownership")
+                    raise ValueError(
+                        "duplicate active service-peer principal ownership"
+                    )
                 seen[(str(role), principal[0], principal[1])] = str(peer_id)
                 conn.execute(
                     """
@@ -1530,6 +1554,7 @@ def _migrate_marketplace_principals(
             raise RuntimeError(
                 f"{table_name}.{old_column} could not be removed during identity cutover"
             )
+
 
 def migrate_storefront_domain_bindings_schema(conn: sqlite3.Connection) -> None:
     """Create immutable listing, negotiation, and domain-artifact bindings."""

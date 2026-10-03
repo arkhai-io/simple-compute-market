@@ -3,8 +3,6 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 import pytest
-from pydantic import ValidationError
-
 from arkhai_bare_metal import (
     BARE_METAL_ACCESS_ACTIONS,
     BARE_METAL_PROVISION_VERSION,
@@ -27,6 +25,7 @@ from arkhai_bare_metal import (
     materialization_to_lease_create,
     receipt_from_lease_view,
 )
+from pydantic import ValidationError
 
 
 def test_bare_metal_listing_is_domain_payload_not_registry_row():
@@ -100,10 +99,43 @@ def test_bare_metal_message_unwraps_versioned_provision_terms():
 @pytest.mark.parametrize(
     "value",
     [
-        {"kind": "compute.v1", "version": 1, "payload": {"duration_seconds": 1, "access_method": "ssh", "ssh_public_key": "key"}},
-        {"kind": "bare_metal.v1", "version": 2, "payload": {"duration_seconds": 1, "access_method": "ssh", "ssh_public_key": "key"}},
-        {"kind": "bare_metal.v1", "version": 1, "payload": {"duration_seconds": 1, "access_method": "ssh", "ssh_public_key": "key", "unknown": True}},
-        {"kind": "bare_metal.v1", "version": 1, "payload": {"duration_seconds": 1, "access_method": "ssh", "ssh_public_key": "   "}},
+        {
+            "kind": "compute.v1",
+            "version": 1,
+            "payload": {
+                "duration_seconds": 1,
+                "access_method": "ssh",
+                "ssh_public_key": "key",
+            },
+        },
+        {
+            "kind": "bare_metal.v1",
+            "version": 2,
+            "payload": {
+                "duration_seconds": 1,
+                "access_method": "ssh",
+                "ssh_public_key": "key",
+            },
+        },
+        {
+            "kind": "bare_metal.v1",
+            "version": 1,
+            "payload": {
+                "duration_seconds": 1,
+                "access_method": "ssh",
+                "ssh_public_key": "key",
+                "unknown": True,
+            },
+        },
+        {
+            "kind": "bare_metal.v1",
+            "version": 1,
+            "payload": {
+                "duration_seconds": 1,
+                "access_method": "ssh",
+                "ssh_public_key": "   ",
+            },
+        },
     ],
 )
 def test_bare_metal_provision_terms_reject_invalid_envelopes(value):
@@ -186,32 +218,6 @@ def test_materialization_to_lease_create_adapts_current_api_request():
     }
 
 
-def test_hosted_materialization_derives_stable_identity_bound_ssh_user():
-    materialization = BareMetalMaterialization(
-        settlement_obligation_ref="obligation-a",
-        machine_id="bm-node-1",
-        physical_host_id="host-physical-1",
-        lease_end_utc=datetime(2099, 1, 1, 1, tzinfo=timezone.utc),
-        ssh_public_key="ssh-ed25519 AAAA buyer",
-    )
-
-    first = materialization_to_lease_create(materialization)
-    replayed = materialization_to_lease_create(materialization)
-    distinct = materialization_to_lease_create(
-        materialization.model_copy(
-            update={"settlement_obligation_ref": "obligation-b"}
-        )
-    )
-
-    assert first.access_ref is not None
-    assert replayed.access_ref is not None
-    assert distinct.access_ref is not None
-    assert first.access_ref["ssh_user"] == replayed.access_ref["ssh_user"]
-    assert first.access_ref["ssh_user"].startswith("arkhai-")
-    assert len(first.access_ref["ssh_user"]) <= 32
-    assert first.access_ref["ssh_user"] != distinct.access_ref["ssh_user"]
-
-
 def test_bare_metal_receipt_is_domain_view_not_executor_result():
     receipt = BareMetalReceipt(
         escrow_uid="0xbm",
@@ -251,7 +257,10 @@ def test_receipt_from_lease_view_adapts_current_api_view():
     assert receipt.machine_id == "bm-node-1"
     assert receipt.status == "leased"
     assert receipt.lease_start_utc == datetime(
-        2099, 1, 1, tzinfo=timezone.utc,
+        2099,
+        1,
+        1,
+        tzinfo=timezone.utc,
     )
     assert receipt.result_ref == {"capacity_reservation_id": "alloc-1"}
 

@@ -38,11 +38,11 @@ The bare-metal storefront is a client of the accepted POOLS-7 scheduling and ful
 
 The scheduler's recorded resource kind, provider, and executor selection remain authoritative for begin, status, result, and teardown. The storefront never substitutes a process-global provisioner, buyer-supplied URL, or guessed adapter. It pulls normalized status and the versioned result envelope through the same recorded site client after restart; provisioning remains the authority for jobs, provider metadata, execution credentials, and teardown convergence.
 
-### Hosted funding and public lease evidence
+### Signed payment receipt boundary
 
-For a hosted obligation, the storefront invokes the selected-site reservation and fulfillment ports only after the shared route service reports authoritative `funded`. The accepted binding fixes site, resource constraint, buyer, seller/claimant, access mode, deadline, and deterministic fulfillment identity. Equivalent retries resume the same reservation and job; a conflicting site, resource, or result fails closed. A buyer-safe physical result exists only after committed capacity, a live lease, and authoritative access-ready state agree. Its content-addressed evidence binds the accepted agreement/obligation and physical references without credentials, provider data, unrestricted topology, or an SSH private key.
+Arkhai payment acceptance stores the seller-derived mandate in shared negotiation `settlement_data` beside exact Agreement bytes. The seller verifies the service-signed receipt against that mandate before selected-site reservation, scheduling, or fulfillment. Pending payment cannot create access or renew capacity. Equivalent retries reuse the accepted site, durable reservation, and fulfillment identity; recovery rechecks receipt evidence before physical effects.
 
-Financial return before collection blocks further collection and starts convergent physical cleanup; post-collection loss is an incident and never releases capacity. Lease expiry and revocation call the same provisioning-owned teardown convergence. Capacity remains quarantined until authoritative teardown and release, independently of hosted reclaim status.
+VM retains its existing provisioning progress and convergence lease under the negotiation ID, without a chain escrow or payment obligation. Bare-metal retains its selected-site lifecycle and public result. Lease expiry and revocation use provisioning-owned teardown convergence; capacity stays quarantined until authoritative release, independently of payment hold release or refund.
 
 ## Proof-driven release
 

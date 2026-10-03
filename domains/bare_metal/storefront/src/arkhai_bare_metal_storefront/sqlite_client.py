@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import sqlite3
 from collections.abc import Callable, Mapping
@@ -10,20 +11,13 @@ from datetime import datetime, timezone
 from typing import Any, TypeVar
 
 from arkhai_bare_metal import (
-    BareMetalAcceptedHostedBinding,
     BareMetalAccessResult,
-    BareMetalLeaseReadyEvidence,
-    BareMetalLeaseReadyResult,
     BareMetalListing,
     BareMetalMaterialization,
     BareMetalMessage,
     BareMetalReceipt,
     BareMetalTerms,
-    derive_bare_metal_fulfillment_identity,
 )
-from core_storefront.sqlite_client import SQLiteClient as CoreSQLiteClient
-from core_storefront.sqlite_migrations import MigrationLike
-from market_core import MarketDomainContract, validate_domain_contract
 from core_storefront import (
     StorefrontDomainBinding,
     StorefrontDomainRegistration,
@@ -32,19 +26,21 @@ from core_storefront import (
     StorefrontThreadBinding,
     build_storefront_derivation_key,
 )
+from core_storefront.sqlite_client import SQLiteClient as CoreSQLiteClient
+from core_storefront.sqlite_migrations import MigrationLike
 from market_contact_exchange import (
     CONTACT_EXCHANGE_MIGRATIONS,
     IntroductionRecord,
     insert_introduction,
     load_introduction,
 )
-from market_settlement_runtime import settlement_migrations
+from market_core import MarketDomainContract, validate_domain_contract
 from market_identity import Identity
+from market_settlement_runtime import settlement_migrations
 from pydantic import BaseModel
 
 from .domain_runtime import get_market_domain_contract
 from .migrations import BARE_METAL_STOREFRONT_MIGRATIONS
-from .models import BareMetalHostedLifecycle
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -190,8 +186,30 @@ class SQLiteClient(CoreSQLiteClient):
         seller_amount: int | None,
         terms: BareMetalTerms | None,
         agreed_amount: int | None,
+        agreement_bytes: bytes | None = None,
+        accepted_at: str | None = None,
+        settlement_data: Mapping[str, Any] | None = None,
+        settlement_mechanism: str | None = None,
     ) -> None:
         """Persist one opening under the listing's immutable domain/site binding."""
+        if (settlement_data is None) != (settlement_mechanism is None):
+            raise ValueError("settlement data and mechanism must be supplied together")
+        if settlement_data is not None and seller_action != "accept":
+            raise ValueError("settlement data is only valid for accepted agreements")
+        settlement_data_json = None
+        agreement_sha256 = None
+        if settlement_data is not None:
+            if agreement_bytes is None:
+                raise ValueError("settlement data requires retained Agreement bytes")
+            settlement_data_json = json.dumps(
+                dict(settlement_data),
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+                allow_nan=False,
+            )
+            agreement_sha256 = hashlib.sha256(agreement_bytes).hexdigest()
+
         listing_binding = await self.load_listing_binding(listing_id=listing_id)
         if listing_binding is None:
             raise RuntimeError(
@@ -274,7 +292,8 @@ class SQLiteClient(CoreSQLiteClient):
                     """
                     UPDATE negotiation_threads
                     SET status=?, terminal_state=?, agreed_price=?,
-                        agreed_duration_seconds=?, agreed_at=?, updated_at=?
+                        agreed_duration_seconds=?, agreed_at=?, agreement_bytes=?,
+                        settlement_data=?, updated_at=?
                     WHERE negotiation_id=?
                     """,
                     (
@@ -282,11 +301,38 @@ class SQLiteClient(CoreSQLiteClient):
                         terminal_state,
                         None if agreed_amount is None else str(agreed_amount),
                         message.duration_seconds if agreed_amount is not None else None,
-                        now if agreed_amount is not None else None,
+                        (accepted_at or now) if agreed_amount is not None else None,
+                        agreement_bytes,
+                        settlement_data_json,
                         now,
                         negotiation_id,
                     ),
                 )
+                if settlement_data_json is not None:
+                    assert settlement_mechanism is not None
+                    assert agreement_sha256 is not None
+                    conn.execute(
+                        "INSERT OR IGNORE INTO bare_metal_settlement_records("
+                        "negotiation_id, mechanism, agreement_sha256, "
+                        "status) VALUES (?, ?, ?, 'accepted')",
+                        (
+                            negotiation_id,
+                            settlement_mechanism,
+                            agreement_sha256,
+                        ),
+                    )
+                    stored = conn.execute(
+                        "SELECT mechanism, agreement_sha256 "
+                        "FROM bare_metal_settlement_records WHERE negotiation_id = ?",
+                        (negotiation_id,),
+                    ).fetchone()
+                    if stored != (
+                        settlement_mechanism,
+                        agreement_sha256,
+                    ):
+                        raise RuntimeError(
+                            "accepted settlement data conflicts with stored state"
+                        )
                 conn.execute(
                     """
                     INSERT OR IGNORE INTO negotiation_messages(
@@ -767,118 +813,27 @@ class SQLiteClient(CoreSQLiteClient):
         return await asyncio.to_thread(_save)
 
     @staticmethod
-    def _hosted_lifecycle_from_row(
-        row: Mapping[str, Any],
-    ) -> BareMetalHostedLifecycle:
-        binding = BareMetalAcceptedHostedBinding.model_validate_json(
-            str(row["accepted_binding_json"])
+    def _decode_bare_metal_settlement_record(row: sqlite3.Row) -> dict[str, Any]:
+        record = dict(row)
+        receipt_json = record.pop("receipt_json")
+        record["receipt"] = (
+            json.loads(receipt_json) if receipt_json is not None else None
         )
-        public_result = (
-            BareMetalLeaseReadyResult.model_validate_json(
-                str(row["public_result_json"])
-            )
-            if row.get("public_result_json") is not None
-            else None
-        )
-        portable_evidence = (
-            BareMetalLeaseReadyEvidence.model_validate_json(
-                str(row["portable_evidence_json"])
-            )
-            if row.get("portable_evidence_json") is not None
-            else None
-        )
-        return BareMetalHostedLifecycle(
-            accepted_binding=binding,
-            accepted_binding_digest=str(row["accepted_binding_digest"]),
-            fulfillment_identity=str(row["fulfillment_identity"]),
-            physical_state=str(row["physical_state"]),
-            financial_state=str(row["financial_state"]),
-            recovery_state=str(row["recovery_state"]),
-            teardown_state=str(row["teardown_state"]),
-            capacity_reservation_id=row.get("capacity_reservation_id"),
-            settlement_resource_id=row.get("settlement_resource_id"),
-            fulfillment_id=row.get("fulfillment_id"),
-            public_result=public_result,
-            public_result_digest=row.get("public_result_digest"),
-            portable_evidence=portable_evidence,
-            portable_evidence_digest=row.get("portable_evidence_digest"),
-            portable_evidence_ref=row.get("portable_evidence_ref"),
-            failure_reason=row.get("failure_reason"),
-        )
+        return record
 
-    async def save_bare_metal_hosted_binding(
-        self,
-        binding: BareMetalAcceptedHostedBinding,
-    ) -> BareMetalHostedLifecycle:
-        """Persist one seller-derived hosted binding or reject changed replay."""
-
-        accepted = BareMetalAcceptedHostedBinding.model_validate(binding)
-        accepted_json = accepted.model_dump_json(exclude_none=True)
-        accepted_digest = accepted.binding_digest
-        fulfillment_identity = derive_bare_metal_fulfillment_identity(accepted)
-
-        def _save() -> BareMetalHostedLifecycle:
-            conn = sqlite3.connect(self.db_path)
-            conn.row_factory = sqlite3.Row
-            try:
-                with conn:
-                    conn.execute(
-                        """
-                        INSERT OR IGNORE INTO bare_metal_hosted_lifecycle(
-                          obligation_ref, agreement_ref, negotiation_id,
-                          accepted_binding_json, accepted_binding_digest,
-                          fulfillment_identity
-                        ) VALUES (?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            accepted.obligation_ref,
-                            accepted.agreement_ref,
-                            accepted.negotiation_id,
-                            accepted_json,
-                            accepted_digest,
-                            fulfillment_identity,
-                        ),
-                    )
-                row = conn.execute(
-                    "SELECT * FROM bare_metal_hosted_lifecycle "
-                    "WHERE obligation_ref = ?",
-                    (accepted.obligation_ref,),
-                ).fetchone()
-                if row is None:
-                    raise RuntimeError(
-                        "bare-metal hosted negotiation/obligation identity conflict"
-                    )
-                lifecycle = self._hosted_lifecycle_from_row(dict(row))
-                if (
-                    lifecycle.accepted_binding != accepted
-                    or lifecycle.accepted_binding_digest != accepted_digest
-                    or lifecycle.fulfillment_identity != fulfillment_identity
-                ):
-                    raise RuntimeError(
-                        "bare-metal hosted accepted binding changed on replay"
-                    )
-                return lifecycle
-            finally:
-                conn.close()
-
-        return await asyncio.to_thread(_save)
-
-    async def load_bare_metal_hosted_lifecycle(
-        self,
-        *,
-        obligation_ref: str,
-    ) -> BareMetalHostedLifecycle | None:
-        def _load() -> BareMetalHostedLifecycle | None:
+    async def load_bare_metal_settlement_record(
+        self, *, negotiation_id: str
+    ) -> dict[str, Any] | None:
+        def _load() -> dict[str, Any] | None:
             conn = sqlite3.connect(self.db_path)
             conn.row_factory = sqlite3.Row
             try:
                 row = conn.execute(
-                    "SELECT * FROM bare_metal_hosted_lifecycle "
-                    "WHERE obligation_ref = ?",
-                    (obligation_ref,),
+                    "SELECT * FROM bare_metal_settlement_records WHERE negotiation_id = ?",
+                    (negotiation_id,),
                 ).fetchone()
                 return (
-                    self._hosted_lifecycle_from_row(dict(row))
+                    self._decode_bare_metal_settlement_record(row)
                     if row is not None
                     else None
                 )
@@ -887,293 +842,83 @@ class SQLiteClient(CoreSQLiteClient):
 
         return await asyncio.to_thread(_load)
 
-    async def load_bare_metal_hosted_evidence(
-        self,
-        *,
-        evidence_digest: str,
-    ) -> BareMetalLeaseReadyEvidence | None:
-        """Resolve one content-addressed public evidence document."""
-
-        def _load() -> BareMetalLeaseReadyEvidence | None:
+    async def load_bare_metal_settlement_record_by_ref(
+        self, *, settlement_ref: str
+    ) -> dict[str, Any] | None:
+        def _load() -> dict[str, Any] | None:
             conn = sqlite3.connect(self.db_path)
             conn.row_factory = sqlite3.Row
             try:
                 row = conn.execute(
-                    "SELECT portable_evidence_json FROM bare_metal_hosted_lifecycle "
-                    "WHERE portable_evidence_digest = ?",
-                    (evidence_digest,),
+                    "SELECT * FROM bare_metal_settlement_records WHERE settlement_ref = ?",
+                    (settlement_ref,),
                 ).fetchone()
-                if row is None or row["portable_evidence_json"] is None:
-                    return None
-                return BareMetalLeaseReadyEvidence.model_validate_json(
-                    str(row["portable_evidence_json"])
+                return (
+                    self._decode_bare_metal_settlement_record(row)
+                    if row is not None
+                    else None
                 )
             finally:
                 conn.close()
 
         return await asyncio.to_thread(_load)
 
-    async def load_bare_metal_hosted_lifecycle_for_agreement(
+    async def mark_bare_metal_settlement_verified(
         self,
         *,
-        agreement_ref: str,
-    ) -> BareMetalHostedLifecycle | None:
-        def _load() -> BareMetalHostedLifecycle | None:
-            conn = sqlite3.connect(self.db_path)
-            conn.row_factory = sqlite3.Row
-            try:
-                rows = conn.execute(
-                    "SELECT * FROM bare_metal_hosted_lifecycle WHERE agreement_ref = ?",
-                    (agreement_ref,),
-                ).fetchall()
-                if len(rows) > 1:
-                    raise RuntimeError(
-                        "bare-metal hosted agreement has multiple obligations"
-                    )
-                return self._hosted_lifecycle_from_row(dict(rows[0])) if rows else None
-            finally:
-                conn.close()
+        negotiation_id: str,
+        settlement_ref: str,
+        mechanism: str,
+        agreement_sha256: str,
+        receipt: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        receipt_json = json.dumps(
+            dict(receipt),
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+            allow_nan=False,
+        )
 
-        return await asyncio.to_thread(_load)
-
-    async def advance_bare_metal_hosted_lifecycle(
-        self,
-        *,
-        obligation_ref: str,
-        physical_state: str | None = None,
-        financial_state: str | None = None,
-        recovery_state: str | None = None,
-        teardown_state: str | None = None,
-        capacity_reservation_id: str | None = None,
-        settlement_resource_id: str | None = None,
-        fulfillment_id: str | None = None,
-        public_result: BareMetalLeaseReadyResult | None = None,
-        portable_evidence: BareMetalLeaseReadyEvidence | None = None,
-        portable_evidence_ref: str | None = None,
-        failure_reason: str | None = None,
-    ) -> BareMetalHostedLifecycle:
-        """Advance monotonic hosted/physical facts with exact replay checks."""
-
-        if (portable_evidence is None) != (portable_evidence_ref is None):
-            raise ValueError("portable evidence payload and ref are atomic")
-
-        physical_order = {
-            "accepted": 0,
-            "funded": 1,
-            "capacity_reserved": 2,
-            "capacity_committed": 3,
-            "scheduled": 4,
-            "fulfillment_pending": 5,
-            "access_ready": 6,
-            "evidence_published": 7,
-        }
-        financial_transitions = {
-            "pending": {
-                "pending",
-                "collection_unknown",
-                "collected",
-                "collection_blocked",
-                "reclaimed",
-                "manual_review",
-            },
-            "collection_unknown": {
-                "collection_unknown",
-                "collected",
-                "manual_review",
-            },
-            "collection_blocked": {
-                "collection_blocked",
-                "reclaimed",
-                "manual_review",
-            },
-            "collected": {"collected"},
-            "reclaimed": {"reclaimed"},
-            "manual_review": {"manual_review"},
-        }
-        recovery_transitions = {
-            "none": {
-                "none",
-                "funding_returned",
-                "reclaim_pending",
-                "reclaimed",
-                "loss_manual",
-                "manual_review",
-            },
-            "funding_returned": {
-                "funding_returned",
-                "reclaim_pending",
-                "reclaimed",
-                "manual_review",
-            },
-            "reclaim_pending": {
-                "reclaim_pending",
-                "reclaimed",
-                "manual_review",
-            },
-            "reclaimed": {"reclaimed"},
-            "loss_manual": {"loss_manual"},
-            "manual_review": {"manual_review"},
-        }
-        teardown_transitions = {
-            "not_started": {"not_started", "pending", "released"},
-            "pending": {"pending", "tearing_down", "failed", "torn_down"},
-            "tearing_down": {"tearing_down", "failed", "torn_down"},
-            "failed": {"failed", "pending", "tearing_down", "torn_down"},
-            "torn_down": {"torn_down", "released"},
-            "released": {"released"},
-        }
-
-        def _advance() -> BareMetalHostedLifecycle:
+        def _save() -> dict[str, Any]:
             conn = sqlite3.connect(self.db_path)
             conn.row_factory = sqlite3.Row
             try:
                 with conn:
-                    row = conn.execute(
-                        "SELECT * FROM bare_metal_hosted_lifecycle "
-                        "WHERE obligation_ref = ?",
-                        (obligation_ref,),
-                    ).fetchone()
-                    if row is None:
-                        raise RuntimeError("bare-metal hosted lifecycle is missing")
-                    current = self._hosted_lifecycle_from_row(dict(row))
-                    for field_name, incoming in (
-                        ("capacity_reservation_id", capacity_reservation_id),
-                        ("settlement_resource_id", settlement_resource_id),
-                        ("fulfillment_id", fulfillment_id),
-                    ):
-                        existing = getattr(current, field_name)
-                        if (
-                            incoming is not None
-                            and existing is not None
-                            and incoming != existing
-                        ):
-                            raise RuntimeError(
-                                f"bare-metal hosted {field_name} changed on replay"
-                            )
-                    if public_result is not None and (
-                        current.public_result is not None
-                        and current.public_result != public_result
-                    ):
-                        raise RuntimeError(
-                            "bare-metal hosted public result changed on replay"
-                        )
-                    if portable_evidence is not None and (
-                        current.portable_evidence is not None
-                        and (
-                            current.portable_evidence != portable_evidence
-                            or current.portable_evidence_ref != portable_evidence_ref
-                        )
-                    ):
-                        raise RuntimeError(
-                            "bare-metal hosted evidence changed on replay"
-                        )
-                    next_physical = physical_state or current.physical_state
-                    if next_physical != "physical_failed":
-                        if current.physical_state == "physical_failed":
-                            raise RuntimeError(
-                                "failed bare-metal physical lifecycle cannot advance"
-                            )
-                        if (
-                            next_physical not in physical_order
-                            or physical_order[next_physical]
-                            < physical_order[current.physical_state]
-                        ):
-                            raise RuntimeError(
-                                "bare-metal hosted physical state regressed"
-                            )
-                    elif current.physical_state == "evidence_published":
-                        raise RuntimeError(
-                            "published bare-metal evidence cannot become failure"
-                        )
-                    next_financial = financial_state or current.financial_state
-                    if (
-                        next_financial
-                        not in financial_transitions[current.financial_state]
-                    ):
-                        raise RuntimeError(
-                            "bare-metal hosted financial state conflicts"
-                        )
-                    next_recovery = recovery_state or current.recovery_state
-                    if (
-                        next_recovery
-                        not in recovery_transitions[current.recovery_state]
-                    ):
-                        raise RuntimeError("bare-metal hosted recovery state conflicts")
-                    next_teardown = teardown_state or current.teardown_state
-                    if (
-                        next_teardown
-                        not in teardown_transitions[current.teardown_state]
-                    ):
-                        raise RuntimeError("bare-metal hosted teardown state conflicts")
-                    result_json = (
-                        public_result.model_dump_json(exclude_none=True)
-                        if public_result is not None
-                        else None
-                    )
-                    evidence_json = (
-                        portable_evidence.model_dump_json(exclude_none=True)
-                        if portable_evidence is not None
-                        else None
-                    )
                     conn.execute(
-                        """
-                        UPDATE bare_metal_hosted_lifecycle SET
-                          physical_state = ?,
-                          financial_state = ?,
-                          recovery_state = ?,
-                          teardown_state = ?,
-                          capacity_reservation_id =
-                            COALESCE(?, capacity_reservation_id),
-                          settlement_resource_id =
-                            COALESCE(?, settlement_resource_id),
-                          fulfillment_id = COALESCE(?, fulfillment_id),
-                          public_result_json =
-                            COALESCE(?, public_result_json),
-                          public_result_digest =
-                            COALESCE(?, public_result_digest),
-                          portable_evidence_json =
-                            COALESCE(?, portable_evidence_json),
-                          portable_evidence_digest =
-                            COALESCE(?, portable_evidence_digest),
-                          portable_evidence_ref =
-                            COALESCE(?, portable_evidence_ref),
-                          failure_reason = COALESCE(?, failure_reason),
-                          updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')
-                        WHERE obligation_ref = ?
-                        """,
+                        "UPDATE bare_metal_settlement_records SET settlement_ref = ?, "
+                        "status = 'settlement_verified', receipt_json = ?, "
+                        "updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now') "
+                        "WHERE negotiation_id = ? AND mechanism = ? "
+                        "AND agreement_sha256 = ? "
+                        "AND status IN ('accepted', 'settlement_verified')",
                         (
-                            next_physical,
-                            next_financial,
-                            next_recovery,
-                            next_teardown,
-                            capacity_reservation_id,
-                            settlement_resource_id,
-                            fulfillment_id,
-                            result_json,
-                            (
-                                public_result.result_digest
-                                if public_result is not None
-                                else None
-                            ),
-                            evidence_json,
-                            (
-                                portable_evidence.evidence_digest
-                                if portable_evidence is not None
-                                else None
-                            ),
-                            portable_evidence_ref,
-                            failure_reason,
-                            obligation_ref,
+                            settlement_ref,
+                            receipt_json,
+                            negotiation_id,
+                            mechanism,
+                            agreement_sha256,
                         ),
                     )
-                updated = conn.execute(
-                    "SELECT * FROM bare_metal_hosted_lifecycle "
-                    "WHERE obligation_ref = ?",
-                    (obligation_ref,),
+                row = conn.execute(
+                    "SELECT * FROM bare_metal_settlement_records WHERE negotiation_id = ?",
+                    (negotiation_id,),
                 ).fetchone()
-                assert updated is not None
-                return self._hosted_lifecycle_from_row(dict(updated))
+                if row is None:
+                    raise RuntimeError("accepted settlement record is missing")
+                record = self._decode_bare_metal_settlement_record(row)
+                if (
+                    record["mechanism"] != mechanism
+                    or record["agreement_sha256"] != agreement_sha256
+                    or record["settlement_ref"] != settlement_ref
+                    or record["status"] != "settlement_verified"
+                    or record["receipt"] != dict(receipt)
+                ):
+                    raise RuntimeError(
+                        "settlement evidence conflicts with accepted state"
+                    )
+                return record
             finally:
                 conn.close()
 
-        return await asyncio.to_thread(_advance)
+        return await asyncio.to_thread(_save)

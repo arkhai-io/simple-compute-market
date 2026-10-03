@@ -13,28 +13,29 @@ this file just covers the HTTP loop wrapping the chain.
 
 from __future__ import annotations
 
+import base64
 import json
 from dataclasses import dataclass
 from unittest.mock import patch
+
 import pytest
-
-
-from market_policy.negotiation_middleware import load_negotiation_chain
-
-from market_core.schemas import (
-    EscrowProposal,
-    RateValue,
-    SettlementOption,
-    SettlementSelection,
-    derive_settlement_option_id,
-)
-from domains.vms.buyer.buyer_client import NegotiationOutcome, negotiate_with_seller
 from arkhai_vms import VmProvisionTerms, make_vm_provision_terms
 from identity_helpers import (
     BUYER_SIGNER,
     seller_principals,
     signed_response_headers,
 )
+from market_core.schemas import (
+    Agreement,
+    EscrowProposal,
+    RateValue,
+    SettlementOption,
+    SettlementSelection,
+    derive_settlement_option_id,
+)
+from market_policy.negotiation_middleware import load_negotiation_chain
+
+from domains.vms.buyer.buyer_client import NegotiationOutcome, negotiate_with_seller
 
 
 # Canonical provision / escrow proposals used by every negotiate test —
@@ -71,7 +72,7 @@ def _seller_proposal(amount: int) -> dict:
     }
 
 
-def _hosted_option() -> SettlementOption:
+def _example_option() -> SettlementOption:
     seller = seller_principals().identities[0]
     rates = [RateValue(field="amount", per="hour", value=50)]
     params = {
@@ -80,19 +81,19 @@ def _hosted_option() -> SettlementOption:
     }
     return SettlementOption(
         option_id=derive_settlement_option_id(
-            mechanism="fiat.stripe.v1",
+            mechanism="example.payment.v1",
             asset="usd",
             rates=rates,
             params=params,
         ),
-        mechanism="fiat.stripe.v1",
+        mechanism="example.payment.v1",
         asset="usd",
         rates=rates,
         params=params,
     )
 
 
-def _hosted_accept_reply(
+def _example_accept_reply(
     *,
     negotiation_id: str,
     selection: SettlementSelection,
@@ -104,6 +105,20 @@ def _hosted_accept_reply(
     params = dict(option.params)
     params["payer_principal"] = buyer.model_dump(mode="json")
     params["claimant_principal"] = seller.model_dump(mode="json")
+    agreement = Agreement(
+        negotiation_id=negotiation_id,
+        listing_id="seller-1",
+        listing_hash="0" * 64,
+        buyer=buyer.model_dump(mode="json"),
+        seller=seller.model_dump(mode="json"),
+        settlement=option,
+        amount=amount,
+        asset=option.asset,
+        duration_seconds=3600,
+        start_utc="2025-01-01T00:00:00Z",
+        provision_terms=_provision().model_dump(mode="json"),
+        accepted_at="2025-01-01T00:00:00Z",
+    )
     return {
         "negotiation_id": negotiation_id,
         "action": "accept",
@@ -133,6 +148,10 @@ def _hosted_accept_reply(
             ],
             "service_terms": {},
         },
+        "agreement": agreement.model_dump(mode="json", exclude_none=True),
+        "agreement_bytes": base64.b64encode(
+            agreement.model_dump_json(exclude_none=True).encode("utf-8")
+        ).decode("ascii"),
     }
 
 
@@ -170,8 +189,64 @@ def _with_round_zero_provision(req, body):
     return body
 
 
+def _with_accepted_agreement(req, body):
+    if body.get("action") != "accept" or body.get("agreement") is not None:
+        return body
+    request_body = json.loads(req.data.decode("utf-8")) if req.data else {}
+    negotiation_id = body.get("negotiation_id") or req.full_url.rstrip("/").rsplit("/", 1)[-1]
+    listing_id = request_body.get("listing_id") or "seller-1"
+    proposal = body.get("proposal")
+    fields = proposal.get("fields") if isinstance(proposal, dict) else None
+    amount = int(fields.get("amount", 0)) if isinstance(fields, dict) else 0
+    provision_terms = body.get("accepted_provision_terms") or request_body.get("provision_terms") or _provision().model_dump(mode="json")
+    payload = provision_terms.get("payload", {}) if isinstance(provision_terms, dict) else {}
+    duration_seconds = payload.get("duration_seconds", 3600) if isinstance(payload, dict) else 3600
+    start_utc = payload.get("start_utc") if isinstance(payload, dict) else None
+    accepted_at = "2025-01-01T00:00:00Z"
+    if not isinstance(start_utc, str) or start_utc.strip().lower() in {"", "now"}:
+        start_utc = accepted_at
+    selection = body.get("settlement_selection")
+    if not isinstance(selection, dict) and isinstance(proposal, dict):
+        selection = proposal.get("settlement_selection")
+    settlement = None
+    if isinstance(selection, dict):
+        selected = SettlementSelection.model_validate(selection)
+        option = _example_option()
+        if selected.option_id == option.option_id and selected.mechanism == option.mechanism:
+            settlement = option
+    buyer = BUYER_SIGNER.identity
+    seller = seller_principals().identities[0]
+    asset = settlement.asset if settlement is not None else (
+        fields.get("token") if isinstance(fields, dict) else None
+    )
+    agreement = Agreement(
+        negotiation_id=negotiation_id,
+        listing_id=listing_id,
+        listing_hash="0" * 64,
+        buyer=buyer.model_dump(mode="json"),
+        seller=seller.model_dump(mode="json"),
+        settlement=settlement,
+        amount=amount,
+        asset=asset,
+        duration_seconds=int(duration_seconds),
+        start_utc=start_utc,
+        provision_terms=provision_terms,
+        accepted_at=accepted_at,
+    )
+    return {
+        **body,
+        "buyer_principal": buyer.model_dump(mode="json"),
+        "seller_principal": seller.model_dump(mode="json"),
+        "agreement": agreement.model_dump(mode="json", exclude_none=True),
+        "agreement_bytes": base64.b64encode(
+            agreement.model_dump_json(exclude_none=True).encode("utf-8")
+        ).decode("ascii"),
+    }
+
+
 def _signed_mock_response(req, body):
     body = _with_round_zero_provision(req, body)
+    body = _with_accepted_agreement(req, body)
     return _MockResponse(
         status=200,
         text=json.dumps(body),
@@ -186,6 +261,7 @@ def _urlopen_fake(responses):
     def _fn(req, timeout=None):
         body = next(it)
         body = _with_round_zero_provision(req, body)
+        body = _with_accepted_agreement(req, body)
         return _MockResponse(
             status=200,
             text=json.dumps(body),
@@ -228,9 +304,9 @@ def test_round_0_seller_accepts_immediately(mock_urlopen):
 
 
 @patch("core_buyer.negotiation_client.urllib.request.urlopen")
-def test_round_0_hosted_selection_is_pinned_and_returned(mock_urlopen):
+def test_round_0_example_selection_is_pinned_and_returned(mock_urlopen):
     seen_body = {}
-    option = _hosted_option()
+    option = _example_option()
     selection = SettlementSelection(
         mechanism=option.mechanism,
         option_id=option.option_id,
@@ -241,7 +317,7 @@ def test_round_0_hosted_selection_is_pinned_and_returned(mock_urlopen):
         seen_body.update(json.loads(req.data.decode("utf-8")))
         return _signed_mock_response(
             req,
-            _hosted_accept_reply(
+            _example_accept_reply(
                 negotiation_id="neg-hosted",
                 selection=selection,
                 option=option,
@@ -266,14 +342,14 @@ def test_round_0_hosted_selection_is_pinned_and_returned(mock_urlopen):
     assert seen_body["proposal"]["settlement_selection"] == selection.model_dump()
     assert outcome.settlement_selection == selection
     assert outcome.settlement_plan is not None
-    assert outcome.settlement_plan.obligations[0].mechanism == "fiat.stripe.v1"
+    assert outcome.settlement_plan.obligations[0].mechanism == "example.payment.v1"
 
 
 @patch("core_buyer.negotiation_client.urllib.request.urlopen")
 def test_round_0_delegates_domain_plan_semantics_after_universal_checks(
     mock_urlopen,
 ):
-    base = _hosted_option()
+    base = _example_option()
     params = {**base.params, "domain_binding": {"resource": "resource-1"}}
     option = SettlementOption(
         option_id=derive_settlement_option_id(
@@ -292,7 +368,7 @@ def test_round_0_delegates_domain_plan_semantics_after_universal_checks(
         option_id=option.option_id,
         expiration_unix=1_800_000_000,
     )
-    reply = _hosted_accept_reply(
+    reply = _example_accept_reply(
         negotiation_id="neg-domain",
         selection=selection,
         option=option,
@@ -325,14 +401,14 @@ def test_round_0_delegates_domain_plan_semantics_after_universal_checks(
 
 @patch("core_buyer.negotiation_client.urllib.request.urlopen")
 def test_round_0_rejects_signed_seller_selection_substitution(mock_urlopen):
-    option = _hosted_option()
+    option = _example_option()
     selection = SettlementSelection(
         mechanism=option.mechanism,
         option_id=option.option_id,
         expiration_unix=1_800_000_000,
     )
     substituted = selection.model_copy(update={"option_id": "f" * 64})
-    reply = _hosted_accept_reply(
+    reply = _example_accept_reply(
         negotiation_id="neg-substituted",
         selection=substituted,
         option=option,
@@ -359,13 +435,13 @@ def test_round_0_rejects_signed_seller_selection_substitution(mock_urlopen):
 
 @patch("core_buyer.negotiation_client.urllib.request.urlopen")
 def test_later_accept_rejects_plan_amount_substitution_before_observer(mock_urlopen):
-    option = _hosted_option()
+    option = _example_option()
     selection = SettlementSelection(
         mechanism=option.mechanism,
         option_id=option.option_id,
         expiration_unix=1_800_000_000,
     )
-    final_reply = _hosted_accept_reply(
+    final_reply = _example_accept_reply(
         negotiation_id="neg-later",
         selection=selection,
         option=option,
@@ -375,7 +451,7 @@ def test_later_accept_rejects_plan_amount_substitution_before_observer(mock_urlo
     mock_urlopen.side_effect = _urlopen_fake(
         [
             {
-                **_hosted_accept_reply(
+                **_example_accept_reply(
                     negotiation_id="neg-later",
                     selection=selection,
                     option=option,

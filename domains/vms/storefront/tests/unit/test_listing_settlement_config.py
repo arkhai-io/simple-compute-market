@@ -30,7 +30,6 @@ _CAPACITY_SOURCE = {
 }
 
 
-
 def _repository(**values):
     return SimpleNamespace(
         domain_registry=_REGISTRY,
@@ -66,7 +65,7 @@ def test_clause_only_listing_request_is_a_valid_publication_input() -> None:
         capacity_source=_CAPACITY_SOURCE,
         settlements=[
             SettlementPublicationClause(
-                mechanism="fiat.stripe.v1",
+                mechanism="example.payment.v1",
                 asset="usd",
                 rate="2",
                 per="hour",
@@ -100,7 +99,7 @@ async def test_clause_only_create_persists_canonical_clause_before_publication(
     monkeypatch,
 ) -> None:
     clause = SettlementPublicationClause(
-        mechanism="fiat.stripe.v1",
+        mechanism="example.payment.v1",
         asset="usd",
         rate="2",
         per="hour",
@@ -111,8 +110,8 @@ async def test_clause_only_create_persists_canonical_clause_before_publication(
         },
     )
     option = {
-        "option_id": "stripe-option",
-        "mechanism": "fiat.stripe.v1",
+        "option_id": "example-option",
+        "mechanism": "example.payment.v1",
         "asset": "usd",
         "rates": [{"field": "amount", "per": "hour", "value": "200"}],
         "params": {},
@@ -166,9 +165,9 @@ async def test_clause_only_create_persists_canonical_clause_before_publication(
         },
         clauses=[clause],
     )
-    assert db.upsert_listing_with_binding.await_args.kwargs[
-        "publication_clauses"
-    ] == [clause.model_dump(mode="json", exclude_defaults=True)]
+    assert db.upsert_listing_with_binding.await_args.kwargs["publication_clauses"] == [
+        clause.model_dump(mode="json", exclude_defaults=True)
+    ]
 
 
 @pytest.mark.asyncio
@@ -189,7 +188,7 @@ async def test_direct_settlement_options_are_rejected() -> None:
         settlement_options=[
             {
                 "option_id": "direct",
-                "mechanism": "fiat.stripe.v1",
+                "mechanism": "example.payment.v1",
                 "asset": "usd",
                 "rates": [],
                 "params": {},
@@ -202,10 +201,10 @@ async def test_direct_settlement_options_are_rejected() -> None:
 
 
 @pytest.mark.asyncio
-async def test_registration_composition_receives_ordered_hosted_clauses() -> None:
+async def test_registration_composition_receives_ordered_example_clauses() -> None:
     option = {
         "option_id": "hosted",
-        "mechanism": "fiat.stripe.v1",
+        "mechanism": "example.payment.v1",
         "asset": "usd",
         "rates": [{"field": "amount", "per": "hour", "value": "125"}],
         "params": {
@@ -228,7 +227,7 @@ async def test_registration_composition_receives_ordered_hosted_clauses() -> Non
     )
     clauses = [
         SettlementPublicationClause(
-            mechanism="fiat.stripe.v1",
+            mechanism="example.payment.v1",
             asset="usd",
             rate="125",
             per="hour",

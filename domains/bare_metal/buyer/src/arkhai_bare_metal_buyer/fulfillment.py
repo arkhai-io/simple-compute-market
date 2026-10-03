@@ -41,6 +41,23 @@ class BareMetalFulfillmentTransport:
             resolve_response_principals=self.resolve_seller_principals,
         )
 
+    def begin(self, negotiation_id: str) -> dict[str, Any]:
+        body = {
+            "negotiation_id": negotiation_id,
+            "buyer_principal": self.principal.model_dump(mode="json"),
+        }
+        return signed_storefront_json(
+            self.seller_url.rstrip("/") + "/api/v1/fulfillments/begin",
+            body,
+            signer=self.signer,
+            principal=self.principal,
+            method="POST",
+            operation="bare_metal_fulfillment_begin",
+            resource=negotiation_id,
+            timeout=self.timeout,
+            resolve_response_principals=self.resolve_seller_principals,
+        )
+
     def status(self, negotiation_id: str) -> dict[str, Any]:
         return self._request(
             negotiation_id,

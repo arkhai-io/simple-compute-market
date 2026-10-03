@@ -165,13 +165,14 @@ async def fulfill_credit_obligation(
     buyer_principal: Identity,
     listing_id: str | None = None,
     negotiation_id: str | None = None,
+    mechanism: str = "alkahest.v1",
+    authoritative_gate: str = "alkahest_verified",
 ) -> dict[str, Any]:
-    """Issue credits for a settled escrow and fulfill the obligation.
+    """Issue credits after the selected mechanism's verified settlement gate.
 
-    When the negotiation's acceptance placed a TTL quota hold (two-phase
-    reserve), its capacity_reservation_id rides the issuance call — the tokens
-    service commits that hold open-ended instead of racing a fresh
-    reserve. Consume-once: the hold row's job is done either way.
+    Any negotiation-time capacity hold accompanies the idempotent issuance
+    command. Alkahest additionally submits its on-chain fulfillment;
+    payment-backed deals use the signed receipt as their funding evidence.
     """
 
     from apicredits_storefront.domain_runtime import (
@@ -179,6 +180,7 @@ async def fulfill_credit_obligation(
     )
 
     held_reservation: dict | None = None
+    db = None
     if negotiation_id:
         db = get_sqlite_client()
         hold = await db.load_capacity_hold(negotiation_id=negotiation_id)
@@ -187,10 +189,8 @@ async def fulfill_credit_obligation(
             held_reservation.setdefault(
                 "capacity_reservation_id", hold.get("capacity_reservation_id")
             )
-            await db.delete_capacity_hold(negotiation_id=negotiation_id)
-
     listing = get_market_domain_contract().codecs.listing(order)
-    return await fulfill_api_credits_obligation(
+    result = await fulfill_api_credits_obligation(
         client=client,
         escrow_uid=escrow_uid,
         offer_resource=listing.offer_resource.model_dump(mode="json"),
@@ -201,6 +201,15 @@ async def fulfill_credit_obligation(
         listing_id=listing_id,
         credits_client=get_credits_service_client(),
         stage_event=stage_event,
+        mechanism=mechanism,
+        authoritative_gate=authoritative_gate,
         apply_failure_policy=_apply_fulfillment_failure_policy_adapter,
         held_reservation=held_reservation,
     )
+    if (
+        db is not None
+        and held_reservation is not None
+        and result.get("status") != "pending"
+    ):
+        await db.delete_capacity_hold(negotiation_id=negotiation_id)
+    return result

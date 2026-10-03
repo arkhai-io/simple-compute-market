@@ -10,7 +10,6 @@ exists to exercise /negotiate/new + /negotiate/{id} directly.
 
 from __future__ import annotations
 
-import asyncio
 import time
 from typing import Any
 
@@ -18,26 +17,26 @@ import typer
 from market_alkahest.schemas import accepted_token_address
 from market_alkahest.token import TokenResolutionError, resolve_token
 from market_core.schemas import SettlementSelection
-from market_hosted_settlement import FundingMode, FundingSelection
 from market_identity import TrustedIdentitySet
+from market_settlement_runtime import CompiledSettlementClause
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from .arkhai_payments import payer_selection
 from .buy_orchestrator import fetch_listing_dict
 from .buyer_client import ResumeState, load_buyer_chain, negotiate_with_seller
 from .cli_helpers import resolve_prices_from_matches
+from .common import chain_by_name, resolve_buyer_wallet, resolve_negotiation_config
 from .deal_helpers import (
     load_negotiation_resume_point,
     make_publisher_trust_resolver,
 )
-from .common import chain_by_name, resolve_buyer_wallet, resolve_negotiation_config
 from .listing_cli import settlement_clause_error_message
 from .run_log import RunLog
 from .settlement_composition import (
     alkahest_entry_from_selection,
     resolve_buyer_settlement_policy,
-    revalidate_hosted_buyer_option,
 )
 
 
@@ -235,14 +234,12 @@ def register(app: typer.Typer) -> None:
             )
 
         settlement_policy = None
-        funding_selection = FundingSelection(mode=FundingMode.INTERACTIVE)
-        settlement_clauses = ()
+        settlement_clauses: tuple[CompiledSettlementClause, ...] = ()
         resolved_ssh_public_key: str | None = None
         if resume_state is None:
             try:
                 settlement_policy = resolve_buyer_settlement_policy(
                     identity=identity,
-                    funding_selection=funding_selection,
                     action_capable=True,
                 )
             except ValueError as exc:
@@ -381,6 +378,7 @@ def register(app: typer.Typer) -> None:
                     "settlement option"
                 )
 
+            selected_settlement = payer_selection(selected_settlement)
             if selected_settlement.registration.config_key == "alkahest":
                 picked_entry = alkahest_entry_from_selection(selected_settlement)
                 if picked_entry is None:
@@ -545,13 +543,12 @@ def register(app: typer.Typer) -> None:
                 start_utc=requested_start_utc,
                 ssh_public_key=resolved_ssh_public_key,
             )
-            if selected_settlement.registration.config_key == "stripe":
+
+            if picked_entry is None:
                 settlement_selection = selected_settlement.selection
             else:
-                assert picked_entry is not None
                 escrow_proposal = escrow_proposal_from_accepted_entry(
-                    listing=listing_dict or {},
-                    entry=picked_entry,
+                    listing=listing_dict or {}, entry=picked_entry,
                     expiration_unix=selected_settlement.selection.expiration_unix,
                 )
 
@@ -580,26 +577,6 @@ def register(app: typer.Typer) -> None:
             current=expected_seller_principals,
             signer=signer,
         )
-
-        if resume_state is None:
-            assert settlement_policy is not None
-            assert selected_settlement is not None
-            try:
-                asyncio.run(
-                    revalidate_hosted_buyer_option(
-                        policy=settlement_policy,
-                        option=selected_settlement.option,
-                        identity=identity,
-                        funding_selection=funding_selection,
-                        action_capable=True,
-                    )
-                )
-            except ValueError:
-                run_log.end("error", error="settlement_revalidation_failed")
-                raise typer.BadParameter(
-                    "selected hosted funding is not ready"
-                ) from None
-
 
         negotiation_policy_params = dict(policy_params_all)
         if selected_settlement is not None:
@@ -648,6 +625,8 @@ def register(app: typer.Typer) -> None:
                 else None
             ),
             **accepted_settlement,
+            agreement_bytes=outcome.agreement_bytes,
+            settlement_data=outcome.settlement_data,
             accepted_escrow_terms=(
                 [term.model_dump() for term in outcome.accepted_escrow_terms]
                 if outcome.accepted_escrow_terms is not None

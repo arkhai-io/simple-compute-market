@@ -6,12 +6,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-
 CHART_DIR = Path(__file__).resolve().parents[1]
 ROOT_SCHEMA = CHART_DIR / "values.schema.json"
 STOREFRONT_SCHEMA = CHART_DIR / "charts" / "storefront" / "values.schema.json"
 SETTLEMENT_DEFINITIONS = (
-    "stripeSettlement",
     "alkahestSettlement",
     "settlement",
     "pricing",
@@ -22,7 +20,9 @@ SETTLEMENT_DEFINITIONS = (
 
 def main() -> int:
     root = json.loads(ROOT_SCHEMA.read_text(encoding="utf-8"))["definitions"]
-    storefront = json.loads(STOREFRONT_SCHEMA.read_text(encoding="utf-8"))["definitions"]
+    storefront = json.loads(STOREFRONT_SCHEMA.read_text(encoding="utf-8"))[
+        "definitions"
+    ]
     drifted = [
         name
         for name in SETTLEMENT_DEFINITIONS

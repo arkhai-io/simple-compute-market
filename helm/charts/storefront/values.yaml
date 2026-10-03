@@ -85,7 +85,6 @@ agents:
       # Required when the registry sets requireWriteApiKey. Never commit a
       # real token; inject via --set at render/deploy time.
       registryAuthToken: ""
-      # Hosted requests use the marketplace signer supplied by
       # identity.credentialSecret; no second credential is accepted here.
     # config.* lands in the public storefront.toml ConfigMap. Private identity
     # and wallet credentials are accepted only through Secret references.
@@ -125,7 +124,6 @@ agents:
       settlement:
         schema_version: 1
         priority: []
-      # Optional public EVM resources. Keep both mappings empty for fiat-only.
       wallet: {}
       chains: {}
 

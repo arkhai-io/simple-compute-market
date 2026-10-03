@@ -84,7 +84,9 @@ async def test_listing_binding_identical_replay_is_idempotent_and_conflict_rolls
     await _persist_listing(client, binding, status="paused")
 
     assert await client.load_listing_binding(listing_id=binding.listing_id) == binding
-    assert (await client.load_listing(listing_id=binding.listing_id))["status"] == "paused"
+    assert (await client.load_listing(listing_id=binding.listing_id))[
+        "status"
+    ] == "paused"
 
     changed = StorefrontListingBinding.from_source_envelope(
         listing_id=binding.listing_id,
@@ -102,7 +104,9 @@ async def test_listing_binding_identical_replay_is_idempotent_and_conflict_rolls
     )
     with pytest.raises(StorefrontDomainBindingError, match="different immutable"):
         await _persist_listing(client, changed, status="closed")
-    assert (await client.load_listing(listing_id=binding.listing_id))["status"] == "paused"
+    assert (await client.load_listing(listing_id=binding.listing_id))[
+        "status"
+    ] == "paused"
 
 
 @pytest.mark.asyncio
@@ -179,9 +183,10 @@ async def test_opening_copies_binding_message_and_artifact_in_one_transaction(tm
         domain_artifact=artifact,
     )
 
-    assert await client.load_thread_binding(
-        negotiation_id=thread_binding.negotiation_id
-    ) == thread_binding
+    assert (
+        await client.load_thread_binding(negotiation_id=thread_binding.negotiation_id)
+        == thread_binding
+    )
     assert await client.load_domain_artifact(
         negotiation_id=thread_binding.negotiation_id,
         artifact_slot="message:0",
@@ -191,6 +196,21 @@ async def test_opening_copies_binding_message_and_artifact_in_one_transaction(tm
         "schema_version": 1,
         "payload": {},
     }
+
+    settlement_data = {
+        "transaction_id": "a" * 64,
+        "mandate": {"from": "buyer-account", "to": "seller-account"},
+    }
+    await client.commit_agreed_terms(
+        negotiation_id=thread_binding.negotiation_id,
+        agreed_price=100,
+        agreed_duration_seconds=3600,
+        settlement_data=settlement_data,
+    )
+    accepted = await client.load_negotiation_thread_row(
+        negotiation_id=thread_binding.negotiation_id
+    )
+    assert accepted["settlement_data"] == settlement_data
 
 
 @pytest.mark.asyncio
@@ -223,10 +243,13 @@ async def test_thread_and_artifact_cross_swaps_fail_before_mutation(tmp_path):
             binding=other,
         )
     with sqlite3.connect(client.db_path) as conn:
-        assert conn.execute(
-            "SELECT 1 FROM negotiation_threads WHERE negotiation_id=?",
-            (other.negotiation_id,),
-        ).fetchone() is None
+        assert (
+            conn.execute(
+                "SELECT 1 FROM negotiation_threads WHERE negotiation_id=?",
+                (other.negotiation_id,),
+            ).fetchone()
+            is None
+        )
 
 
 def test_direct_sql_binding_mutation_is_rejected(tmp_path):
@@ -235,8 +258,9 @@ def test_direct_sql_binding_mutation_is_rejected(tmp_path):
     import asyncio
 
     asyncio.run(_persist_listing(client, binding))
-    with sqlite3.connect(client.db_path) as conn, pytest.raises(
-        sqlite3.IntegrityError, match="immutable"
+    with (
+        sqlite3.connect(client.db_path) as conn,
+        pytest.raises(sqlite3.IntegrityError, match="immutable"),
     ):
         conn.execute(
             "UPDATE storefront_listing_bindings SET site_id='site-b' "
@@ -253,9 +277,7 @@ def test_legacy_synthesizers_are_explicit_per_database():
             "CREATE TABLE listings (listing_id TEXT PRIMARY KEY, "
             "demand_resource TEXT, accepted_escrows TEXT)"
         )
-        conn.execute(
-            "INSERT INTO listings VALUES ('listing', '{}', NULL)"
-        )
+        conn.execute("INSERT INTO listings VALUES ('listing', '{}', NULL)")
 
     _backfill_accepted_escrows(
         first,
@@ -270,9 +292,9 @@ def test_legacy_synthesizers_are_explicit_per_database():
         ),
     )
 
-    assert json.loads(first.execute(
-        "SELECT accepted_escrows FROM listings"
-    ).fetchone()[0]) == [{"rail": "first"}]
-    assert json.loads(second.execute(
-        "SELECT accepted_escrows FROM listings"
-    ).fetchone()[0]) == [{"rail": "second"}]
+    assert json.loads(
+        first.execute("SELECT accepted_escrows FROM listings").fetchone()[0]
+    ) == [{"rail": "first"}]
+    assert json.loads(
+        second.execute("SELECT accepted_escrows FROM listings").fetchone()[0]
+    ) == [{"rail": "second"}]

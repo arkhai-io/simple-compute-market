@@ -19,7 +19,6 @@ from __future__ import annotations
 import asyncio
 import time
 from typing import Any, Optional
-from core_buyer.hosted_settlement import HostedSettlementTransport
 
 import typer
 from rich.console import Console
@@ -84,6 +83,8 @@ def _deal_expiration_unix(deal) -> Optional[float]:
                     return float(exp)
                 except (TypeError, ValueError):
                     pass
+
+    return None
 
 
 def _deal_seller_principal(deal):
@@ -173,23 +174,6 @@ async def _service_loop(
 
     # Post-expiry: reclaim if the seller never collected. A revert here
     # normally means collection already happened — report, don't fail.
-    if deal.settlement_ref:
-        transport = HostedSettlementTransport(
-            seller_url=deal.seller_url,
-            principal=deal.buyer_principal,
-            signer=signer,
-            resolve_seller_principals=resolve_seller_principals,
-        )
-        result = await asyncio.to_thread(
-            transport.reclaim,
-            settlement_ref=deal.settlement_ref,
-        )
-        log.event(
-            "hosted_settlement_reclaimed",
-            settlement_ref=deal.settlement_ref,
-            status=result.get("status"),
-        )
-        return 0
 
     from .escrow_cli import _do_reclaim
 
@@ -271,6 +255,8 @@ def register(app: typer.Typer) -> None:
         chain_settings = None
         if deal.escrow_uid:
             chain_name = _accepted_proposal_chain(deal) or _first_listing_chain(deal)
+            if chain_name is None:
+                raise typer.BadParameter("accepted escrow has no selected chain")
             chain_cfg = chain_by_name(chain_name)
             chain_settings = resolve_chain_settings(
                 buyer_address=None,
