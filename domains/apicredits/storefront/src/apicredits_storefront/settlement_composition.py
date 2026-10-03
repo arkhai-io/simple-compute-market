@@ -11,6 +11,13 @@ from market_alkahest import (
     AlkahestConditionalEscrowClient,
     create_alkahest_registration,
 )
+from market_arkhai_payments import (
+    ARKHAI_PAYMENTS_CONFIG_KEY,
+    ARKHAI_PAYMENTS_MECHANISM,
+    create_arkhai_payments_registration,
+    derive_mandate,
+    transaction_id,
+)
 from market_core import MarketDomainContract
 from market_identity import Identity, Signer, TrustedIdentitySet
 from market_settlement_runtime import (
@@ -22,13 +29,6 @@ from market_settlement_runtime import (
     SettlementSQLiteRepository,
     compile_settlement_publication_clause,
 )
-from domains.apicredits.settlement import (
-    CONFIG_KEY,
-    MECHANISM_ID,
-    create_api_credits_payments_registration,
-    mandate_policy_from_agreement,
-)
-from market_arkhai_payments import derive_mandate, transaction_id
 
 from apicredits_storefront.services.issuance_evidence import (
     ApiCreditPrivateResultRepository,
@@ -38,7 +38,9 @@ from apicredits_storefront.services.issuance_evidence import (
 from apicredits_storefront.utils import config as storefront_config
 from domains.apicredits.settlement import (
     CreditsServiceClient,
+    mandate_policy_from_agreement,
 )
+from domains.apicredits.settlement.payments import validate_payment_publication_clause
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +54,7 @@ def _mapping(value: Any) -> dict[str, Any]:
 def build_storefront_settlement_registry() -> SettlementConfigurationRegistry:
     """Install the Alkahest and Arkhai payments registrations."""
     return SettlementConfigurationRegistry(
-        (create_alkahest_registration(), create_api_credits_payments_registration())
+        (create_alkahest_registration(), create_arkhai_payments_registration())
     )
 
 
@@ -71,12 +73,11 @@ class ApiCreditsSettlementComposition:
     evidence_service: ApiCreditsIssuanceEvidenceService
     private_results: ApiCreditPrivateResultRepository
     failure_policy: Any
-    payments_client: Any | None = None
 
     def payment_settlement_artifacts(
         self, agreement: Mapping[str, Any]
     ) -> dict[str, Any]:
-        config = self.settlement_config.mechanism_config(CONFIG_KEY)
+        config = self.settlement_config.mechanism_config(ARKHAI_PAYMENTS_CONFIG_KEY)
         if config is None or not getattr(config, "enabled", False):
             raise ValueError("Arkhai payments is not enabled for API credits")
         policy = mandate_policy_from_agreement(
@@ -209,6 +210,10 @@ class ApiCreditsSettlementComposition:
                     ",".join(blocker.code for blocker in status.blockers),
                 )
                 continue
+            if status.mechanism == ARKHAI_PAYMENTS_MECHANISM:
+                validate_payment_publication_clause(
+                    option_resources.get("publication_clause")
+                )
             envelope = self.configuration_registry.build_option(
                 status,
                 self.settlement_config,
@@ -253,7 +258,6 @@ def build_api_credit_settlement_composition(
         "default_chain": next(iter(storefront_config.CHAINS), None),
     }
     mechanism_clients: dict[str, Any] = {}
-    payments_client: Any | None = None
     for registration in registry.ordered_registrations(
         settlement_config, role="seller"
     ):
@@ -271,13 +275,7 @@ def build_api_credit_settlement_composition(
                     default_chain=resources["default_chain"],
                 )
             )
-        elif registration.mechanism_id == MECHANISM_ID:
-            payments_client = registry.create_client(
-                registration.mechanism_id,
-                settlement_config,
-                role="seller",
-                resources=resources,
-            )
+
     runtime = SettlementRuntime(repository, mechanism_clients)
     credits_client = CreditsServiceClient(
         storefront_config.credits_service_url(),
@@ -304,7 +302,6 @@ def build_api_credit_settlement_composition(
         worker=worker,
         local_principal=marketplace_signer.identity,
         mechanism_clients=mechanism_clients,
-        payments_client=payments_client,
         settlement_config=settlement_config,
         configuration_registry=registry,
         mechanism_resources=resources,

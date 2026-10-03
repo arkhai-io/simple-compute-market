@@ -8,29 +8,38 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from core_buyer.buyer_config import ResolvedBuyerIdentity
-from core_buyer.orchestrator import BuyConfig, BuyResult, NegotiationResult
 from core_buyer.orchestration import (
     make_publisher_trust_resolver,
     submit_settlement_request,
     wait_for_settlement,
 )
+from core_buyer.orchestrator import BuyConfig, BuyResult, NegotiationResult
 from market_arkhai_payments import (
+    ARKHAI_PAYMENTS_CONFIG_KEY,
+    ARKHAI_PAYMENTS_MECHANISM,
+    ArkhaiPaymentsConfig,
     MandatePolicy,
-    PaymentsClient,
     PaymentsOptionParams,
     check,
+    payments_client_for_owner,
     transaction_id,
     verify_receipt,
 )
+from market_config.config_loader import load_user_config
 from market_core.schemas import Agreement, SettlementOption, SettlementSelection
 from market_settlement_runtime import SettlementConfig
 
 from domains.apicredits.settlement import (
-    CONFIG_KEY,
-    MECHANISM_ID,
-    payments_client_options,
     validate_payer_account,
 )
+
+
+def configured_payer_account() -> str:
+    """Resolve the buyer account independently of payment-service policy."""
+    settings = load_user_config().get("apicredits", {})
+    if not isinstance(settings, Mapping):
+        raise ValueError("[apicredits] must be a table")
+    return validate_payer_account(settings.get("payer_account"))
 
 
 class _PaymentApprovalDeclined(RuntimeError):
@@ -42,10 +51,11 @@ def payment_selection_for_listing(
     listing: Mapping[str, Any],
     *,
     expiration_unix: int,
+    payer_account: str | None,
     prefer_payment: bool = False,
 ) -> SettlementSelection | None:
     """Return a selected payment option carrying the buyer's Arkhai account."""
-    config = policy.config.mechanism_config(CONFIG_KEY)
+    config = policy.config.mechanism_config(ARKHAI_PAYMENTS_CONFIG_KEY)
     if config is None or not getattr(config, "enabled", False):
         return None
     if prefer_payment:
@@ -55,7 +65,7 @@ def payment_selection_for_listing(
                 for registration, option in policy.compatible_options(
                     listing.get("settlement_options") or ()
                 )
-                if registration.mechanism_id == MECHANISM_ID
+                if registration.mechanism_id == ARKHAI_PAYMENTS_MECHANISM
             ),
             None,
         )
@@ -65,7 +75,10 @@ def payment_selection_for_listing(
         option_id = candidate.option_id
     else:
         selected = policy.select(listing, expiration_unix=expiration_unix)
-        if selected is None or selected.selection.mechanism != MECHANISM_ID:
+        if (
+            selected is None
+            or selected.selection.mechanism != ARKHAI_PAYMENTS_MECHANISM
+        ):
             return None
         mechanism = selected.selection.mechanism
         option_id = selected.selection.option_id
@@ -73,15 +86,20 @@ def payment_selection_for_listing(
         mechanism=mechanism,
         option_id=option_id,
         expiration_unix=expiration_unix,
-        params={"payer_account": config.account_id},
+        params={"payer_account": validate_payer_account(payer_account)},
     )
 
 
-def _mandate_policy(agreement: Mapping[str, Any], config: Any) -> MandatePolicy:
+def _mandate_policy(
+    agreement: Mapping[str, Any], config: ArkhaiPaymentsConfig, payer_account: str
+) -> MandatePolicy:
     selected = agreement.get("settlement")
-    if not isinstance(selected, Mapping) or selected.get("mechanism") != MECHANISM_ID:
+    if (
+        not isinstance(selected, Mapping)
+        or selected.get("mechanism") != ARKHAI_PAYMENTS_MECHANISM
+    ):
         raise ValueError("accepted Agreement does not select arkhai.payments.v1")
-    account_id = validate_payer_account(getattr(config, "account_id", None))
+    account_id = validate_payer_account(payer_account)
     settlement_params = agreement.get("settlement_params")
     payer_account = (
         settlement_params.get("payer_account")
@@ -113,6 +131,7 @@ def settle_api_credit_payment(
     buyer: ResolvedBuyerIdentity,
     buy_config: BuyConfig,
     settlement_config: SettlementConfig,
+    payer_account: str,
     agreement: Mapping[str, Any],
     agreement_bytes: str,
     settlement_selection: Mapping[str, Any] | SettlementSelection | None,
@@ -128,7 +147,7 @@ def settle_api_credit_payment(
     selected = None
     if settlement_selection is not None:
         selected = SettlementSelection.model_validate(settlement_selection)
-        if selected.mechanism != MECHANISM_ID:
+        if selected.mechanism != ARKHAI_PAYMENTS_MECHANISM:
             raise ValueError("accepted settlement selection is not an Arkhai payment")
     if not agreement_bytes:
         raise ValueError("accepted Agreement bytes are required for payment settlement")
@@ -180,10 +199,10 @@ def settle_api_credit_payment(
             "accepted Agreement settlement params differ from the buyer selection"
         )
 
-    config = settlement_config.mechanism_config(CONFIG_KEY)
+    config = settlement_config.mechanism_config(ARKHAI_PAYMENTS_CONFIG_KEY)
     if config is None or not getattr(config, "enabled", False):
         raise ValueError("buyer Arkhai payments is not enabled")
-    policy = _mandate_policy(agreement_json, config)
+    policy = _mandate_policy(agreement_json, config, payer_account)
     if not isinstance(settlement_data, Mapping):
         raise ValueError("seller did not return payment settlement artifacts")
     mandate_value = settlement_data.get("mandate")
@@ -200,8 +219,7 @@ def settle_api_credit_payment(
     ):
         raise _PaymentApprovalDeclined("buyer declined payment approval")
 
-    service_url, auth = payments_client_options(config)
-    client = PaymentsClient(service_url, **auth)
+    client = payments_client_for_owner(config, policy.buyer_account)
     try:
         signed_receipt = client.approve(
             mandate,
@@ -291,6 +309,7 @@ def settle_api_credit_negotiation(
     buyer: ResolvedBuyerIdentity,
     buy_config: BuyConfig,
     settlement_config: SettlementConfig,
+    payer_account: str,
     poll_interval: float,
     total_timeout: float,
     on_event: Callable[[str, dict[str, Any]], None],
@@ -318,6 +337,7 @@ def settle_api_credit_negotiation(
             buyer=buyer,
             buy_config=buy_config,
             settlement_config=settlement_config,
+            payer_account=payer_account,
             agreement=outcome.agreement.model_dump(mode="json", exclude_none=True),
             agreement_bytes=outcome.agreement_bytes or "",
             settlement_selection=outcome.settlement_selection,
@@ -371,6 +391,7 @@ def settle_api_credit_negotiation(
 
 
 __all__ = [
+    "configured_payer_account",
     "payment_selection_for_listing",
     "settle_api_credit_negotiation",
     "settle_api_credit_payment",

@@ -14,12 +14,11 @@ import uuid
 from types import SimpleNamespace
 
 import pytest
-
-import domains.apicredits.buyer.settle_cli as settle_cli
 from core_buyer.buyer_config import ResolvedBuyerIdentity
 from core_buyer.run_log import read_run
-from market_identity import Eip191Signer, REQUEST_PROTOCOL, TrustedIdentitySet
+from market_identity import REQUEST_PROTOCOL, Eip191Signer, TrustedIdentitySet
 
+import domains.apicredits.buyer.settle_cli as settle_cli
 
 _PROPOSAL = {
     "chain_name": "anvil",

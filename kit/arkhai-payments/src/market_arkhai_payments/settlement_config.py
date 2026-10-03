@@ -292,15 +292,23 @@ def arkhai_payments_option_builder(
 
     rates: list[RateValue] = []
     if clause.rate is not None:
-        if clause.per != "hour":
-            raise ValueError("Arkhai payments supports fixed hourly rates")
-        precision = int(params.asset.rsplit("/", 1)[1]) if "/" in params.asset else 0
-        scaled = Decimal(clause.rate) * (Decimal(10) ** precision)
-        if scaled != scaled.to_integral_value():
-            raise ValueError(
-                f"payment rate has more than {precision} decimal places for {params.asset}"
+        if clause.per == "hour":
+            precision = (
+                int(params.asset.rsplit("/", 1)[1]) if "/" in params.asset else 0
             )
-        rates.append(RateValue(field="amount", per="hour", value=int(scaled)))
+            scaled = Decimal(clause.rate) * (Decimal(10) ** precision)
+            if scaled != scaled.to_integral_value():
+                raise ValueError(
+                    f"payment rate has more than {precision} decimal places for {params.asset}"
+                )
+            value = int(scaled)
+        else:
+            # Unit prices are already integer base units; asset precision
+            # must not scale them a second time. Domains own the unit vocabulary.
+            if clause.per is None or not clause.rate.isdigit():
+                raise ValueError("payment unit rate must be integer base units")
+            value = int(clause.rate)
+        rates.append(RateValue(field="amount", per=clause.per, value=value))
 
     option_params = params.model_dump(mode="json")
     option = SettlementOption(

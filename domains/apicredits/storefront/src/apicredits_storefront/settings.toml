@@ -48,7 +48,13 @@ claims_sweep_interval = 30
 schema_version = 1
 priority = []
 
-# release/trust/profile/resolver configuration and provider credentials are
+[Settlement.arkhai_payments]
+enabled = false
+# Public policy: service_url, Ed25519 service_identity, fee_bps,
+# dispute_authority. Seller account comes from the publication clause.
+# The WorkOS key is resolved only when constructing an owner-scoped client.
+# api_key_env = "ARKHAI_PAYMENTS_API_KEY"
+# development_auth = true is an alternative for a loopback development service.
 
 [wallet]
 # Sensitive — populated by Secret overlay in k8s, by local file otherwise.

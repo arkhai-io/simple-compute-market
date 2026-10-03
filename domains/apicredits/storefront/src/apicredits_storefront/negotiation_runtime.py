@@ -12,6 +12,7 @@ from decimal import Decimal
 from typing import Any
 
 from market_alkahest.proposals import accepted_escrow_artifacts_from_proposal
+from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM
 from market_core import MarketDomainContract
 from market_core.schemas import (
     Agreement,
@@ -35,7 +36,6 @@ from market_negotiation_runtime import (
     RoundRequest,
 )
 from market_policy.scalar_policies import _amount_from_proposal
-from domains.apicredits.settlement import MECHANISM_ID, validate_payer_account
 
 from apicredits_storefront.services.capacity_client import (
     build_capacity_client,
@@ -55,6 +55,7 @@ from domains.apicredits.negotiation.terms import (
     provision_key_mode,
     provision_quantity,
 )
+from domains.apicredits.settlement import validate_payer_account
 
 logger = logging.getLogger(__name__)
 
@@ -367,7 +368,7 @@ def _accepted_selection_artifacts(
         or accepted.mechanism != advertised.mechanism
     ):
         raise OfferUnfulfillableError("settlement_selection_not_exact")
-    if accepted.mechanism == MECHANISM_ID:
+    if accepted.mechanism == ARKHAI_PAYMENTS_MECHANISM:
         params = accepted.params
         if not isinstance(params, Mapping) or set(params) != {"payer_account"}:
             raise OfferUnfulfillableError("payments_payer_account_missing")
@@ -511,7 +512,7 @@ def _with_agreement(
     )
     agreement_bytes = agreement.model_dump_json(exclude_none=True).encode("utf-8")
     artifacts["agreement"] = agreement
-    if settlement is not None and settlement.mechanism == MECHANISM_ID:
+    if settlement is not None and settlement.mechanism == ARKHAI_PAYMENTS_MECHANISM:
         if settlement_artifacts_builder is None:
             raise RuntimeError("API-credit payments mandate builder is not composed")
         artifacts["settlement_data"] = settlement_artifacts_builder(
@@ -612,7 +613,10 @@ async def _place_quota_hold(
     """Place the API-credit domain's best-effort quota hold after acceptance."""
     state = _acceptance_policy_state(acceptance, dispatch)
     selection = state.get("accepted_settlement_selection")
-    if isinstance(selection, Mapping) and selection.get("mechanism") != MECHANISM_ID:
+    if (
+        isinstance(selection, Mapping)
+        and selection.get("mechanism") != ARKHAI_PAYMENTS_MECHANISM
+    ):
         return
 
     from core_storefront.stage_log import stage_event

@@ -45,6 +45,17 @@ identities = [
   { scheme = "ed25519", identifier = "skkdlQKuKGMKK6yy4MdFEP_N0yjDNP8-E5PnWy0x59w" },
 ]
 
+[Settlement]
+schema_version = 1
+priority = []
+
+[Settlement.arkhai_payments]
+enabled = false
+api_key_env = "ARKHAI_PAYMENTS_API_KEY"
+# Enabling payments also requires service_url, Ed25519 service_identity,
+# fee_bps, dispute_authority and an explicit payment publication clause
+# containing payee_account and asset. Never store the WorkOS key here.
+
 [credits]
 # The credits service this storefront sells for. It hosts the quota ledger
 # selected explicitly below and the separate issuance/keys mechanism API.

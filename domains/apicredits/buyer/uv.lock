@@ -319,7 +319,9 @@ name = "arkhai-kit-arkhai-payments"
 version = "0.1.0"
 source = { registry = "../../../.dist" }
 dependencies = [
+    { name = "arkhai-core" },
     { name = "arkhai-kit-identity" },
+    { name = "arkhai-kit-settlement-runtime" },
     { name = "httpx" },
     { name = "pydantic" },
     { name = "rfc8785" },

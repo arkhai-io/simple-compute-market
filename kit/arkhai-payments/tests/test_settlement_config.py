@@ -4,11 +4,8 @@ import asyncio
 from collections.abc import Mapping
 from typing import Any
 
-import pytest
-from market_identity import Eip191Signer, Ed25519Signer
-from market_settlement_runtime import SettlementPublicationClause
-
 import market_arkhai_payments.settlement_config as settlement_config
+import pytest
 from market_arkhai_payments import PaymentsClient
 from market_arkhai_payments.settlement_config import (
     ARKHAI_PAYMENTS_MECHANISM,
@@ -19,6 +16,8 @@ from market_arkhai_payments.settlement_config import (
     create_arkhai_payments_registration,
     payments_client_for_owner,
 )
+from market_identity import Ed25519Signer, Eip191Signer
+from market_settlement_runtime import SettlementPublicationClause
 
 BUYER = "00000000-0000-4000-8000-000000000011"
 PAYEE = "00000000-0000-4000-8000-000000000012"
@@ -81,7 +80,7 @@ def test_preflight_checks_configured_environment_name_without_exposing_secret(
     assert "never-print-this" not in repr(ready)
 
 
-def test_publication_builder_preserves_option_identity_and_hourly_rate(
+def test_publication_builder_preserves_option_identity_and_rate_units(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv(API_KEY_ENV, "test-secret")
@@ -115,6 +114,15 @@ def test_publication_builder_preserves_option_identity_and_hourly_rate(
     assert option["mechanism"] == ARKHAI_PAYMENTS_MECHANISM
     assert option["rates"] == [{"field": "amount", "per": "hour", "value": "125"}]
     assert option["option_id"]
+    for unit in ("unit", "item"):
+        unit_clause = clause.model_copy(update={"rate": "125", "per": unit})
+        unit_option = arkhai_payments_option_builder(
+            config, readiness, {"publication_clause": unit_clause}, "seller"
+        )["settlement_options"][0]
+        assert unit_option["rates"] == [
+            {"field": "amount", "per": unit, "value": "125"}
+        ]
+        assert unit_option["params"] == option["params"]
     assert registration.client_factory is None
     assert registration.accepted_obligation_builder is None
     assert registration.settlement_verifier is None
@@ -133,7 +141,7 @@ def test_publication_builder_preserves_option_identity_and_hourly_rate(
     }
 
 
-def test_publication_builder_rejects_precision_loss_and_non_hour_units(
+def test_publication_builder_rejects_precision_loss_and_fractional_base_units(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv(API_KEY_ENV, "test-secret")
@@ -146,7 +154,7 @@ def test_publication_builder_rejects_precision_loss_and_non_hour_units(
         "deposit_agreement": False,
     }
 
-    for rate, unit in (("1.001", "hour"), ("1.25", "day")):
+    for rate, unit in (("1.001", "hour"), ("1.25", "day"), ("1.25", "unit")):
         clause = SettlementPublicationClause.model_validate(
             {
                 "mechanism": ARKHAI_PAYMENTS_MECHANISM,

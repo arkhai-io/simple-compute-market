@@ -8,6 +8,7 @@ from typing import Any
 from core_buyer.buyer_config import ResolvedBuyerIdentity
 from core_buyer.settlement import BuyerSettlementPolicy
 from market_alkahest import create_alkahest_registration
+from market_arkhai_payments import create_arkhai_payments_registration
 from market_config.config_loader import load_user_config
 from market_settlement_runtime import (
     MechanismReadiness,
@@ -20,15 +21,12 @@ from .common import (
     resolve_buyer_wallet,
     resolve_fresh_buyer_identity,
 )
-from domains.apicredits.settlement import (
-    create_api_credits_payments_registration,
-)
 
 
 def buyer_settlement_registry() -> SettlementConfigurationRegistry:
     """Return both installed API-credit settlement registrations."""
     return SettlementConfigurationRegistry(
-        (create_alkahest_registration(), create_api_credits_payments_registration())
+        (create_alkahest_registration(), create_arkhai_payments_registration())
     )
 
 

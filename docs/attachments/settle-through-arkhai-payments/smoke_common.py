@@ -8,10 +8,10 @@ from pathlib import Path
 import httpx
 from market_arkhai_payments import (
     ArkhaiPaymentsConfig,
-    PaymentsClient,
+    payments_client_for_owner,
 )
-from market_identity import Ed25519Signer
 from market_core.schemas import Agreement, SettlementOption, derive_settlement_option_id
+from market_identity import Ed25519Signer
 
 PAYER = "00000000-0000-4000-8000-000000000011"
 PAYEE = "00000000-0000-4000-8000-000000000012"
@@ -26,16 +26,18 @@ def config():
     response = httpx.get(URL + "/health", trust_env=False)
     response.raise_for_status()
     assert response.json()["status"] == "ok"
-    with PaymentsClient(URL, development_account=PAYER) as client:
-        # Public pin from the checkout-owned seed transaction, not the tested mandate.
-        identity = client.get_transaction(SEED_TX).snapshot.issuer
-    return ArkhaiPaymentsConfig(
+    settings = ArkhaiPaymentsConfig(
         enabled=True,
         service_url=URL,
-        service_identity=identity.model_dump(mode="json"),
         fee_bps=250,
         dispute_authority=DISPUTE,
         development_auth=True,
+    )
+    with payments_client_for_owner(settings, PAYER) as client:
+        # Public pin from the checkout-owned seed transaction, not the tested mandate.
+        identity = client.get_transaction(SEED_TX).snapshot.issuer
+    return ArkhaiPaymentsConfig.model_validate(
+        {**settings.model_dump(), "service_identity": identity.model_dump(mode="json")}
     )
 
 

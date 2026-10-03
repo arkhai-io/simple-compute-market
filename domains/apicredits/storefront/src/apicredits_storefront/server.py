@@ -259,10 +259,6 @@ async def _start_api_credit_services(
 async def _stop_api_credit_services(
     services: ApiCreditsStorefrontServices,
 ) -> None:
-    composition = getattr(services, "settlement_composition", None)
-    payments_client = getattr(composition, "payments_client", None)
-    if payments_client is not None:
-        payments_client.close()
     _container.clear_lifespan_state(domain=services.domain)
     _container.resolved_negotiation_runtime = None
     logger.info("[SHUTDOWN] API-credits storefront shutting down")

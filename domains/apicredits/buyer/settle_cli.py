@@ -31,7 +31,7 @@ from rich.table import Table
 
 from .deal_helpers import load_deal_context
 from .escrow_client import looks_like_propagation_lag
-from .payments import settle_api_credit_payment
+from .payments import configured_payer_account, settle_api_credit_payment
 from .settlement_composition import resolve_buyer_settlement_policy
 
 
@@ -188,6 +188,7 @@ def run_settle_from_log(
                 settlement_config=resolve_buyer_settlement_policy(
                     identity=identity
                 ).config,
+                payer_account=configured_payer_account(),
                 agreement=deal.agreement,
                 agreement_bytes=deal.agreement_bytes,
                 settlement_selection=deal.settlement_selection,

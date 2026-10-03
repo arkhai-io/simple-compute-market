@@ -44,7 +44,11 @@ from domains.apicredits.negotiation import (
 from .buyer_client import load_buyer_chain
 from .cli_helpers import resolve_prices_from_matches
 from .common import resolve_config_value
-from .payments import payment_selection_for_listing, settle_api_credit_negotiation
+from .payments import (
+    configured_payer_account,
+    payment_selection_for_listing,
+    settle_api_credit_negotiation,
+)
 from .settle_cli import render_credentials, run_settle_from_log
 from .settlement_composition import resolve_buyer_settlement_policy
 
@@ -263,6 +267,7 @@ def register(credits_app: typer.Typer) -> None:
         payments_enabled = bool(
             payments_config is not None and getattr(payments_config, "enabled", False)
         )
+        payer_account = configured_payer_account() if payments_enabled else None
         if not alkahest_enabled and not payments_enabled:
             raise typer.BadParameter("no buyer settlement mechanism is enabled")
         if from_run:
@@ -482,6 +487,7 @@ def register(credits_app: typer.Typer) -> None:
                 buyer_settlement,
                 match,
                 expiration_unix=expiration_unix,
+                payer_account=payer_account,
                 prefer_payment=not alkahest_available,
             )
             if payment_selection is not None:
@@ -654,6 +660,7 @@ def register(credits_app: typer.Typer) -> None:
                     buyer=identity,
                     buy_config=config,
                     settlement_config=buyer_settlement.config,
+                    payer_account=payer_account,
                     poll_interval=poll_interval,
                     total_timeout=settlement_timeout,
                     on_event=on_event,

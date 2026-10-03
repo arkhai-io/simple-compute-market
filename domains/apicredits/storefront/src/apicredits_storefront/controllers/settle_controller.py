@@ -15,38 +15,41 @@ import time
 from collections.abc import Mapping
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
-from fastapi_utils.cbv import cbv
-
-import apicredits_storefront.container as _container
-from apicredits_storefront.middleware import buyer_auth
-from apicredits_storefront.middleware.admin_auth import require_admin_principal
-from apicredits_storefront.domain_runtime import (
-    serialize_api_credit_settlement,
-    serialize_api_credit_settlement_start,
-)
 from core_storefront.models.settle_models import (
     SettleResponse,
     SettleStatusResponse,
     SettleWaitResponse,
 )
-from apicredits_storefront.settlement_models import ApiCreditsSettleRequest
-from domains.apicredits.settlement import (
-    CONFIG_KEY,
-    MECHANISM_ID,
-    mandate_policy_from_agreement,
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
+from fastapi_utils.cbv import cbv
+from market_arkhai_payments import (
+    ARKHAI_PAYMENTS_CONFIG_KEY,
+    ARKHAI_PAYMENTS_MECHANISM,
+    ArkhaiPaymentsConfigurationError,
+    PaymentsOptionParams,
+    PaymentsPollTimeout,
+    derive_mandate,
+    payments_client_for_owner,
+    verify_receipt,
 )
 from market_arkhai_payments import (
-    PaymentsOptionParams,
-    derive_mandate,
     transaction_id as derive_transaction_id,
-    verify_receipt,
-    PaymentsPollTimeout,
 )
 from market_core.schemas import Agreement
 from market_identity import Identity
 
+import apicredits_storefront.container as _container
+from apicredits_storefront.domain_runtime import (
+    serialize_api_credit_settlement,
+    serialize_api_credit_settlement_start,
+)
+from apicredits_storefront.middleware import buyer_auth
+from apicredits_storefront.middleware.admin_auth import require_admin_principal
+from apicredits_storefront.settlement_models import ApiCreditsSettleRequest
+from domains.apicredits.settlement import (
+    mandate_policy_from_agreement,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +121,7 @@ class SettleController:
             )
         if (
             agreement.settlement is None
-            or agreement.settlement.mechanism != MECHANISM_ID
+            or agreement.settlement.mechanism != ARKHAI_PAYMENTS_MECHANISM
         ):
             raise HTTPException(
                 status_code=400, detail="Agreement does not select Arkhai payments"
@@ -138,7 +141,7 @@ class SettleController:
             raise HTTPException(
                 status_code=409, detail="accepted payment transaction is unavailable"
             )
-        payment_config = composition.settlement_config.mechanism_config(CONFIG_KEY)
+        payment_config = composition.settlement_config.mechanism_config(ARKHAI_PAYMENTS_CONFIG_KEY)
         if payment_config is None or not getattr(payment_config, "enabled", False):
             raise HTTPException(
                 status_code=503, detail="Arkhai payments is not enabled"
@@ -166,7 +169,7 @@ class SettleController:
                 status_code=409,
                 detail="stored payment mandate differs from the accepted Agreement",
             )
-        if body.settlement_mechanism not in (None, MECHANISM_ID):
+        if body.settlement_mechanism not in (None, ARKHAI_PAYMENTS_MECHANISM):
             raise HTTPException(
                 status_code=400,
                 detail="settlement mechanism conflicts with accepted Agreement",
@@ -206,148 +209,153 @@ class SettleController:
                 raise HTTPException(
                     status_code=409, detail="payment settlement could not be reserved"
                 )
-        payments_client = composition.payments_client
-        if payments_client is None:
+        try:
+            payments_client = payments_client_for_owner(
+                payment_config, policy.option.payee_account
+            )
+        except ArkhaiPaymentsConfigurationError as exc:
             raise HTTPException(
                 status_code=503, detail="Arkhai payments client is unavailable"
-            )
-        try:
-            snapshot = await asyncio.to_thread(
-                payments_client.poll,
-                expected_transaction_id,
-                timeout=30.0,
-                interval=0.5,
-            )
-        except PaymentsPollTimeout:
-            pending = await self._db.load_escrow(escrow_uid=negotiation_id)
-            serialized = serialize_api_credit_settlement_start(
-                pending
-                or {
-                    "escrow_uid": negotiation_id,
-                    "negotiation_id": negotiation_id,
-                    "status": "provisioning",
-                }
-            )
-            serialized["settlement_ref"] = expected_transaction_id
-            serialized["buyer_principal"] = buyer.model_dump(mode="json")
-            serialized["seller_principal"] = seller.model_dump(mode="json")
-            return JSONResponse(content=serialized, status_code=202)
-        except Exception as exc:
-            logger.warning(
-                "Arkhai payments polling failed for %s: %s",
-                expected_transaction_id,
-                exc,
-            )
-            raise HTTPException(
-                status_code=502, detail="payments service receipt is unavailable"
             ) from exc
-        if not verify_receipt(
-            snapshot.snapshot.receipt,
-            payment_config.service_identity,
-            mandate=expected_mandate,
-            agreement_json=agreement_json,
-        ):
-            raise HTTPException(
-                status_code=400, detail="payments receipt does not prove this Agreement"
-            )
-        option = PaymentsOptionParams.model_validate(agreement.settlement.params)
-        try:
-            await asyncio.to_thread(
-                payments_client.ensure_agreement_attached,
-                expected_transaction_id,
-                agreement_json,
-                option,
-            )
-        except Exception as exc:
-            logger.warning(
-                "Could not attach API-credit Agreement for %s: %s",
-                expected_transaction_id,
-                exc,
-            )
-            raise HTTPException(
-                status_code=502, detail="payments Agreement attachment is unavailable"
-            ) from exc
-        try:
-            result = await fulfillment.fulfill(
-                client=None,
-                escrow_uid=negotiation_id,
-                order=order,
-                quantity=int(terms["quantity"]),
-                key_mode=str(terms.get("key_mode") or "new"),
-                key_id=terms.get("key_id"),
-                buyer_principal=buyer,
-                listing_id=listing_id,
-                negotiation_id=negotiation_id,
-                mechanism=MECHANISM_ID,
-                authoritative_gate="payments_receipt_verified",
-            )
-        except Exception as exc:
-            logger.warning(
-                "API-credit issuance for payment %s is retryable after error: %s",
-                negotiation_id,
-                exc,
-            )
-            result = {
-                "status": "pending",
-                "message": f"Credit issuance outcome is uncertain: {exc}",
-            }
-        if result.get("status") == "fulfilled":
-            await self._db.update_escrow(
-                escrow_uid=negotiation_id,
-                status="ready",
-                fulfillment_uid=result.get("fulfillment_uid"),
-                connection_details=result.get("connection_details"),
-                tenant_credentials=(
-                    json.dumps(result["tenant_credentials"])
-                    if isinstance(result.get("tenant_credentials"), Mapping)
-                    else None
-                ),
-            )
-        elif result.get("status") == "pending":
-            pending = await self._db.load_escrow(escrow_uid=negotiation_id)
-            serialized = serialize_api_credit_settlement_start(
-                pending
-                or {
-                    "escrow_uid": negotiation_id,
-                    "negotiation_id": negotiation_id,
-                    "status": "provisioning",
-                }
-            )
-            serialized["settlement_ref"] = expected_transaction_id
-            serialized["buyer_principal"] = buyer.model_dump(mode="json")
-            serialized["seller_principal"] = seller.model_dump(mode="json")
-            serialized["reason"] = result.get("message")
-            return JSONResponse(content=serialized, status_code=202)
-        else:
-            reason = str(result.get("message") or "credit issuance failed")
-            await self._db.update_escrow(
-                escrow_uid=negotiation_id, status="failed", reason=reason
-            )
+        with payments_client:
+            try:
+                snapshot = await asyncio.to_thread(
+                    payments_client.poll,
+                    expected_transaction_id,
+                    timeout=30.0,
+                    interval=0.5,
+                )
+            except PaymentsPollTimeout:
+                pending = await self._db.load_escrow(escrow_uid=negotiation_id)
+                serialized = serialize_api_credit_settlement_start(
+                    pending
+                    or {
+                        "escrow_uid": negotiation_id,
+                        "negotiation_id": negotiation_id,
+                        "status": "provisioning",
+                    }
+                )
+                serialized["settlement_ref"] = expected_transaction_id
+                serialized["buyer_principal"] = buyer.model_dump(mode="json")
+                serialized["seller_principal"] = seller.model_dump(mode="json")
+                return JSONResponse(content=serialized, status_code=202)
+            except Exception as exc:
+                logger.warning(
+                    "Arkhai payments polling failed for %s: %s",
+                    expected_transaction_id,
+                    exc,
+                )
+                raise HTTPException(
+                    status_code=502, detail="payments service receipt is unavailable"
+                ) from exc
+            if not verify_receipt(
+                snapshot.snapshot.receipt,
+                payment_config.service_identity,
+                mandate=expected_mandate,
+                agreement_json=agreement_json,
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail="payments receipt does not prove this Agreement",
+                )
+            option = PaymentsOptionParams.model_validate(agreement.settlement.params)
             try:
                 await asyncio.to_thread(
-                    payments_client.reverse, expected_transaction_id
-                )
-            except Exception:
-                logger.exception(
-                    "Could not reverse failed API-credit payment %s",
+                    payments_client.ensure_agreement_attached,
                     expected_transaction_id,
+                    agreement_json,
+                    option,
                 )
-        row = await self._db.load_escrow(escrow_uid=negotiation_id)
-        serialized = serialize_api_credit_settlement(
-            row
-            or {
-                "escrow_uid": negotiation_id,
-                "negotiation_id": negotiation_id,
-                "status": "failed",
-            }
-        )
-        serialized["settlement_ref"] = expected_transaction_id
-        serialized["buyer_principal"] = buyer.model_dump(mode="json")
-        serialized["seller_principal"] = seller.model_dump(mode="json")
-        return JSONResponse(
-            content=serialized,
-            status_code=200 if serialized.get("status") in ("ready", "failed") else 202,
-        )
+            except Exception as exc:
+                logger.warning(
+                    "Could not attach API-credit Agreement for %s: %s",
+                    expected_transaction_id,
+                    exc,
+                )
+                raise HTTPException(
+                    status_code=502, detail="payments Agreement attachment is unavailable"
+                ) from exc
+            try:
+                result = await fulfillment.fulfill(
+                    client=None,
+                    escrow_uid=negotiation_id,
+                    order=order,
+                    quantity=int(terms["quantity"]),
+                    key_mode=str(terms.get("key_mode") or "new"),
+                    key_id=terms.get("key_id"),
+                    buyer_principal=buyer,
+                    listing_id=listing_id,
+                    negotiation_id=negotiation_id,
+                    mechanism=ARKHAI_PAYMENTS_MECHANISM,
+                    authoritative_gate="payments_receipt_verified",
+                )
+            except Exception as exc:
+                logger.warning(
+                    "API-credit issuance for payment %s is retryable after error: %s",
+                    negotiation_id,
+                    exc,
+                )
+                result = {
+                    "status": "pending",
+                    "message": f"Credit issuance outcome is uncertain: {exc}",
+                }
+            if result.get("status") == "fulfilled":
+                await self._db.update_escrow(
+                    escrow_uid=negotiation_id,
+                    status="ready",
+                    fulfillment_uid=result.get("fulfillment_uid"),
+                    connection_details=result.get("connection_details"),
+                    tenant_credentials=(
+                        json.dumps(result["tenant_credentials"])
+                        if isinstance(result.get("tenant_credentials"), Mapping)
+                        else None
+                    ),
+                )
+            elif result.get("status") == "pending":
+                pending = await self._db.load_escrow(escrow_uid=negotiation_id)
+                serialized = serialize_api_credit_settlement_start(
+                    pending
+                    or {
+                        "escrow_uid": negotiation_id,
+                        "negotiation_id": negotiation_id,
+                        "status": "provisioning",
+                    }
+                )
+                serialized["settlement_ref"] = expected_transaction_id
+                serialized["buyer_principal"] = buyer.model_dump(mode="json")
+                serialized["seller_principal"] = seller.model_dump(mode="json")
+                serialized["reason"] = result.get("message")
+                return JSONResponse(content=serialized, status_code=202)
+            else:
+                reason = str(result.get("message") or "credit issuance failed")
+                await self._db.update_escrow(
+                    escrow_uid=negotiation_id, status="failed", reason=reason
+                )
+                try:
+                    await asyncio.to_thread(
+                        payments_client.reverse, expected_transaction_id
+                    )
+                except Exception:
+                    logger.exception(
+                        "Could not reverse failed API-credit payment %s",
+                        expected_transaction_id,
+                    )
+            row = await self._db.load_escrow(escrow_uid=negotiation_id)
+            serialized = serialize_api_credit_settlement(
+                row
+                or {
+                    "escrow_uid": negotiation_id,
+                    "negotiation_id": negotiation_id,
+                    "status": "failed",
+                }
+            )
+            serialized["settlement_ref"] = expected_transaction_id
+            serialized["buyer_principal"] = buyer.model_dump(mode="json")
+            serialized["seller_principal"] = seller.model_dump(mode="json")
+            return JSONResponse(
+                content=serialized,
+                status_code=200 if serialized.get("status") in ("ready", "failed") else 202,
+            )
 
     @router.post(
         "/{escrow_uid}",
@@ -395,7 +403,7 @@ class SettleController:
                 status_code=400,
                 detail="settlement mechanism conflicts with accepted Agreement",
             )
-        if mechanism == MECHANISM_ID:
+        if mechanism == ARKHAI_PAYMENTS_MECHANISM:
             if escrow_uid != body.negotiation_id:
                 raise HTTPException(
                     status_code=400,
@@ -500,7 +508,7 @@ class SettleController:
         if (
             agreement is not None
             and agreement.settlement is not None
-            and agreement.settlement.mechanism == MECHANISM_ID
+            and agreement.settlement.mechanism == ARKHAI_PAYMENTS_MECHANISM
             and job.get("status") not in ("ready", "failed")
         ):
             lock = _payment_locks.setdefault(negotiation_id, asyncio.Lock())
@@ -527,7 +535,7 @@ class SettleController:
         if (
             agreement is not None
             and agreement.settlement is not None
-            and agreement.settlement.mechanism == MECHANISM_ID
+            and agreement.settlement.mechanism == ARKHAI_PAYMENTS_MECHANISM
         ):
             settlement_data = thread.get("settlement_data")
             if isinstance(settlement_data, Mapping):

@@ -9,27 +9,86 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import httpx
+from apicredits_storefront import container
+from apicredits_storefront.controllers.settle_controller import SettleController
+from apicredits_storefront.domain_runtime import get_market_domain_contract
+from apicredits_storefront.settlement_composition import (
+    build_storefront_settlement_registry,
+)
+from apicredits_storefront.settlement_models import ApiCreditsSettleRequest
+from apicredits_storefront.utils.sqlite_client import SQLiteClient
 from market_arkhai_payments import (
-    PaymentsClient,
     check,
     derive_mandate,
+    payments_client_for_owner,
     transaction_id,
     verify_receipt,
 )
 from market_core import ImmutableFulfillmentCapability
-from apicredits_storefront import container
-from apicredits_storefront.controllers.settle_controller import SettleController
-from apicredits_storefront.domain_runtime import get_market_domain_contract
-from apicredits_storefront.settlement_models import ApiCreditsSettleRequest
-from apicredits_storefront.utils.sqlite_client import SQLiteClient
+from market_settlement_runtime import compile_settlement_publication_clause
+from smoke_common import (
+    BUYER,
+    DISPUTE,
+    PAYEE,
+    PAYER,
+    SELLER,
+    URL,
+    agreement,
+    config,
+    crash,
+)
+
+from domains.apicredits.listings.models import coerce_resource_dict
 from domains.apicredits.settlement import (
-    ApiCreditsArkhaiPaymentsConfig,
     mandate_policy_from_agreement,
 )
 from domains.apicredits.settlement.credits_client import CreditsServiceClient
-from domains.apicredits.listings.models import coerce_resource_dict
 from domains.apicredits.settlement.fulfillment import fulfill_api_credits_obligation
-from smoke_common import BUYER, SELLER, PAYER, PAYEE, URL, agreement, config, crash
+from domains.apicredits.settlement.payments import validate_payment_publication_clause
+
+
+async def check_configuration():
+    """Exercise shared payment readiness and credit publication without services."""
+    registry = build_storefront_settlement_registry()
+    settings = registry.resolve(
+        {
+            "schema_version": 1,
+            "priority": ["arkhai.payments.v1"],
+            "arkhai_payments": {
+                "enabled": True,
+                "service_url": URL,
+                "service_identity": SELLER.identity.model_dump(mode="json"),
+                "fee_bps": 250,
+                "dispute_authority": DISPUTE,
+                "development_auth": True,
+            },
+        },
+        role="seller",
+    )
+    readiness = await registry.ordered_readiness(settings, role="seller", resources={})
+    payment_ready = next(
+        status for status in readiness if status.mechanism == "arkhai.payments.v1"
+    )
+    assert payment_ready.ready
+    clause = compile_settlement_publication_clause(
+        "mechanism=arkhai.payments.v1 asset=USD/2 rate=125/credit "
+        f"arkhai_payments.payee_account={PAYEE} arkhai_payments.asset=USD/2 "
+        "arkhai_payments.window=P7D arkhai_payments.deposit_agreement=true",
+        registry=registry,
+        config=settings,
+        role="seller",
+    )
+    validate_payment_publication_clause(clause)
+    artifacts = registry.build_option(
+        payment_ready, settings, role="seller", resources={"publication_clause": clause}
+    )
+    assert artifacts["accepted_escrows"] == []
+    assert artifacts["settlement_options"][0]["rates"] == [
+        {"field": "amount", "per": "credit", "value": "125"}
+    ]
+    print(
+        "API credits: shared config ready; payment option=125 base units/credit; no wallet, chain or service calls"
+    )
 
 
 async def main(directory, phase, authority):
@@ -38,15 +97,7 @@ async def main(directory, phase, authority):
     response.raise_for_status()
     db = SQLiteClient(str(Path(directory) / "storefront.db"))
     identifier = "api-smoke-" + Path(directory).name
-    payment_config = ApiCreditsArkhaiPaymentsConfig(
-        enabled=True,
-        account_id=PAYEE,
-        service_url=URL,
-        development_account=PAYEE,
-        fee_bps=settings.fee_bps,
-        dispute_authority=settings.dispute_authority,
-        service_identity=settings.service_identity,
-    )
+
     credits_client = CreditsServiceClient(
         "http://127.0.0.1:3181",
         Path(authority, "admin-key").read_text(),
@@ -84,11 +135,9 @@ async def main(directory, phase, authority):
         get_market_domain_contract(),
         fulfillment=ImmutableFulfillmentCapability(fulfill=deliver),
     )
-    payments_client = PaymentsClient(URL, development_account=PAYEE)
     container.resolved_settlement_composition = SimpleNamespace(
         domain=domain,
-        payments_client=payments_client,
-        settlement_config=SimpleNamespace(mechanism_config=lambda key: payment_config),
+        settlement_config=SimpleNamespace(mechanism_config=lambda key: settings),
     )
     if phase == "crash":
         provision = {
@@ -165,7 +214,7 @@ async def main(directory, phase, authority):
             )
         print("API credits: before approval -> retryable pending; grants=0", flush=True)
         checked = check(mandate, wire, policy)
-        with PaymentsClient(URL, development_account=PAYER) as buyer:
+        with payments_client_for_owner(settings, PAYER) as buyer:
             receipt = buyer.approve(checked, agreement=wire)
             snapshot = buyer.poll(transaction_id(checked), timeout=10, interval=0.01)
             assert verify_receipt(
@@ -194,8 +243,10 @@ async def main(directory, phase, authority):
     print(
         "API credits: restarted -> ready with private credentials; repeated settle -> ready; grants=1, balance=10"
     )
-    payments_client.close()
 
 
 if __name__ == "__main__":
-    asyncio.run(main(sys.argv[1], sys.argv[2], sys.argv[3]))
+    if sys.argv[1:] == ["--check-config"]:
+        asyncio.run(check_configuration())
+    else:
+        asyncio.run(main(sys.argv[1], sys.argv[2], sys.argv[3]))
