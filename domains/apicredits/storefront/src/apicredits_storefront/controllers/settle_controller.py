@@ -110,8 +110,8 @@ class SettleController:
             )
         if (
             agreement.negotiation_id != negotiation_id
-            or agreement.buyer != buyer
-            or agreement.seller != seller
+            or Identity.model_validate(agreement.buyer) != buyer
+            or Identity.model_validate(agreement.seller) != seller
         ):
             raise HTTPException(
                 status_code=409, detail="Agreement parties or negotiation do not match"
