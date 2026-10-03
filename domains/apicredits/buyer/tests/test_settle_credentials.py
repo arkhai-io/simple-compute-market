@@ -143,10 +143,8 @@ def fake_chain_config(monkeypatch):
     )
     monkeypatch.setattr(common, "resolve_registry_api_keys", lambda: {})
     monkeypatch.setattr(common, "resolve_discovery_timeout", lambda: 5.0)
-    import core_buyer.orchestration as buyer_orchestration
-
     monkeypatch.setattr(
-        buyer_orchestration,
+        settle_cli,
         "make_publisher_trust_resolver",
         lambda **_kwargs: lambda: trust,
     )

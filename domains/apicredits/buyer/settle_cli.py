@@ -267,9 +267,6 @@ def run_settle_from_log(
     )
     log = open_run_log(run_id, signer=signer, profile_id=identity.profile_id)
     log.event("settle_resumed")
-    from core_buyer.orchestration import make_publisher_trust_resolver
-    from core_buyer.orchestrator import BuyConfig
-
     registry_urls = resolve_indexer_urls()
     registry_authorities = resolve_registry_authorities(registry_urls)
     resolve_seller_principals = make_publisher_trust_resolver(
