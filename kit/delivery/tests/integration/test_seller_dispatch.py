@@ -53,6 +53,9 @@ async def test_a_reveal_is_delivered_in_the_background_to_its_origin_only() -> N
     delivery(PROJECTION, Agreement("neg-1", BUYER, "dc-west"))
 
     await asyncio.wait_for(arrived.wait(), timeout=5)
+    # The dispatch task outlives the sinks' last call by its own completion; let it
+    # finish before the loop closes rather than leave it pending.
+    await asyncio.wait_for(asyncio.gather(*delivery._pending), timeout=5)
     assert set(received) == expected
     (event,) = received["west-hook"]
     assert event.role == "seller"

@@ -481,16 +481,14 @@ edited.
       delivery), with the seller accepting at round 0 (`unpriced_selection`) and
       delivering to `seller-mail`; bare metal 16, including its introduction scenario.
       The same six stages passed against a local Helm release on 2026-10-04 (6.6).
-      On the final tree (commit `bf6ec220`, clean, images rebuilt), the six stages
-      passed again against a fresh local Helm release in namespace
-      `scm-intro-rerun-20261004` (`6 passed` in 4.24 s), deployed from the regenerated
-      values schema, with the seller accepting at round 0 (`unpriced_selection`) and
-      delivering to `seller-mail`. That run covers what 8.10 changed after the Compose
-      run: the schema generator through the Helm render, the buyer's amountless check
-      through the buyer CLI's negotiation, and the scenario's typed health read. The
-      Compose lanes last ran before 8.10; its buyer change only stops refusing an
-      amountless acceptance of an option whose rates are all on other fields, so every
-      acceptance those lanes passed is still accepted.
+      On the final tree (commit `bf6ec220`, clean, images rebuilt) the six stages also
+      passed against a fresh local Helm release in namespace `scm-intro-rerun-20261004`
+      (`6 passed` in 4.24 s), with the seller accepting at round 0 and delivering to
+      `seller-mail`. On the final tree, Actions run 37188498183
+      (branch `feat/compose-contact-exchange-across-compute`, 2026-10-04) passed both
+      lanes: VM 135, including all six introduction stages, with the seller again
+      accepting at round 0 (`unpriced_selection`) and delivering to `seller-mail`; bare
+      metal 16, including its introduction scenario.
 - [x] 7.10 **Packaging.** Run `make check-packaging` and resolve every failure it
       reports: environment and image installs derive their internal packages from
       their locks, every lock is current, and every Python version selection reads

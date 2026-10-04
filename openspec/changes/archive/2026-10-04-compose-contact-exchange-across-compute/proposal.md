@@ -217,13 +217,15 @@ None.
 
 ## Permanent documentation impact
 
-- [ ] `docs/development/ARCHITECTURE.md` — the settlement-configuration section's
-      delivery paragraph describes delivery as storefront-wide; it gains per-origin
-      routing and the per-origin contact. Re-confirm the composition-from-kit
-      principle needs no change.
+- [x] `docs/development/ARCHITECTURE.md` — the settlement-configuration section
+      records contact exchange composed in both compute domains with its
+      accepted-state interpretation in the mechanism kit, the contact resolved per
+      listing origin, and seller-side delivery routed per origin through named sink
+      instances. The composition-from-kit principle needed no change.
 - [x] Existing subsystem specification —
-      `openspec/specs/contact-exchange-settlement/spec.md` and
-      `openspec/specs/introduction-delivery/spec.md`.
+      `openspec/specs/contact-exchange-settlement/spec.md`,
+      `openspec/specs/introduction-delivery/spec.md`, and
+      `openspec/specs/negotiation-protocol/spec.md`.
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 

@@ -9,7 +9,6 @@ from market_delivery import (
     DeliveryConfigurationError,
     SinkSettings,
     build_delivery_sinks,
-    discover_sink_factories,
     discover_sink_settings_models,
     load_delivery_config,
     validate_delivery_origins,
