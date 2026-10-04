@@ -84,9 +84,11 @@ composition roots / deployed services
         ↓
 domain packages and role implementations
         ↓
+family kits
+        ↓
 family vocabulary packages
         ↓
-kit capabilities
+repository-wide kit capabilities
         ↓
 core carrier and role contracts
 ```
@@ -95,9 +97,32 @@ Core carrier packages must not import domain vocabulary. Domain packages may imp
 
 A family vocabulary package holds what sibling domains of one market family share, so they bind one definition instead of importing each other. `domains/compute` (`arkhai_compute`) is the compute family's: the capability schema whose families, fields, and flat names both the VM and bare-metal domains publish, claim, and declare capacity in. It depends only on foundation kits, never on a domain, a role, or core. The vocabulary belongs to neither the market-neutral foundation kit, which knows no family, nor core, which carries no market's vocabulary. See the [market composition architecture](../../openspec/specs/market-composition/architecture.md#the-compute-family-vocabulary).
 
+### Family kits
+
+A family kit owns reusable mechanism, authority, and optionally persistence for concepts whose scope is one market family rather than every market or one concrete domain. It is the operational counterpart to a family vocabulary package. Unqualified "kit" in this document means a repository-wide kit capability, whose abstractions are family-neutral; a family kit is not one, because it speaks its family's vocabulary.
+
+A capability belongs in a family kit when it belongs intrinsically to the family: several sibling domains use it, or it is the family's single cross-domain authority. Code that merely looks similar across domains does not qualify. A family kit stays meaningful independently of any one domain, and a new sibling domain consumes it by contributing values, codecs, hooks, or registrations, never by adding domain-specific branches to it. It carries no concrete domain's listing schema, policy, result meaning, domain-specific infrastructure choices, or composition wiring, so it belongs to no sibling domain.
+
+A family kit may own durable state, workers, and authority lifecycles for its family. It may depend on its family's vocabulary package, repository-wide kit capabilities, core contracts, and lower-level family-kit distributions of the same family. Dependencies among a family's kit distributions must be acyclic: an optional implementation distribution may depend on the family's base mechanisms and authorities, and those base distributions must not depend back on an optional implementation. A family kit must not depend on a concrete domain, another family's packages, a concrete role implementation, or a deployed service. The permitted edges point downward only: a repository-wide kit must never depend on a family kit. Any import is a dependency, whether at module top level, inside a function, under `TYPE_CHECKING`, or behind `try`/`except`, so every tier shares one definition of "depends on" and boundary checks walk every import, not only module-level ones.
+
+Domains define the values, codecs, hooks, and registrations a family kit consumes; composition roots select and assemble those contributions, provide configuration and external resources, and wire runtime instances. A family kit never discovers or imports its domains. A family may split its kit into more than one distribution where dependency weight or an optional implementation technology would otherwise force unrelated consumers to install dependencies they do not use; such optional implementation distributions are not a further architectural tier.
+
+Family vocabulary packages stay the lower and narrower layer: they define a family's shared names, schemas, identifiers, and value semantics, own no authority or persistence, and never depend on a family kit.
+
+Placement tests, applied in order:
+
+- **Outside the family.** A capability meaningful and family-neutral for every market belongs in a repository-wide kit. Behaviour invariant across marketplace roles may instead belong in core.
+- **Contribution or change.** If adding a sibling domain would mean registering a new contribution, the capability belongs in the family kit; if it would mean changing the capability's internal domain semantics, it belongs in the domain.
+- **Third domain.** A family kit passes only if a third domain of its family could use it without the kit learning that domain's schema or branching on its identity.
+- **Wiring.** Instance wiring, process lifecycle, route mounting, and aggregation of contributions belong in the composition root.
+
+Another market family needing apparently similar behaviour is a signal to evaluate extraction into a repository-wide kit, not an automatic promotion. Promotion is right only when the capability's vocabulary and authority semantics can be made family-neutral without depending on either family's identity or domain meaning; otherwise two family kits are correct.
+
+In the compute family, `domains/compute` (`arkhai_compute`) is the vocabulary and `provisioning/compute` (`compute_provisioning`) is the family kit for cross-domain physical provisioning: executor registration, provisioning jobs, the operational host registry, lease lifecycle, shared release, and job-backed fulfillment support. The VM and bare-metal provisioning adapters contribute their execution preparation, codecs, playbooks, result interpretation, credentials, and provider semantics, and neither imports the other or the deployed service. The compute provisioning service is the composition root that wires them.
+
 ### Kit layers
 
-Kit is not a flat peer group. It has an explicit one-way hierarchy:
+Repository-wide kit is not a flat peer group. It has an explicit one-way hierarchy:
 
 1. **Foundation capabilities** — identity, configuration, generic policy, `kit/negotiation-runtime`'s schema-opaque round lifecycle, settlement-mechanism primitives, `kit/settlement-runtime`'s domain-neutral obligation/operation lifecycle, `kit/capability-shape`'s family-grouped capability shapes, which import only the standard library so buyers, pool administration, sites, and domains can all depend on them, and `kit/capability-pricing`'s exact pricing of a shape from per-family rates behind a replaceable aggregator, which imports only the standard library and the shape kit so storefronts, buyers, and hold billing can all price a shape.
 2. **Authority capabilities** — `kit/site` and `kit/resource-pools`, which own capacity and pool administration and depend only on foundation capabilities.
@@ -270,11 +295,7 @@ Marketplace roles configure peer settlement mechanisms through one typed `[Settl
 
 A market may settle by introduction: the `contact-exchange.v1` mechanism completes a deal with no payment and no provisioning — buyer and seller are put durably into contact with the context established during negotiation, revealed only after acceptance through the authenticated introductions surface. Its options are rateless (the mechanism declines scalar negotiation), its one obligation is non-financial, and contact payloads are bounded, deliberately persisted PII that never appears in listings or discovery.
 
-Bare metal and VM both compose it, and the logic interpreting a domain's accepted state for it — including re-deriving the obligation reference a reveal names, which is what stops a reveal against an obligation the accepted plan does not contain — lives once in the mechanism kit; a storefront supplies its persistence reads, configuration, and route bindings. One storefront may publish for several seller sites, so the seller's contact is resolved from the origin site recorded on the listing's binding, never from one value applied to every origin.
-
-Revealed contact payloads are held under a retention window the storefront configures. Deletion redacts both payloads in place, keeping the introduction and its obligation record, so a deleted introduction cannot be revealed again; see [contact-exchange settlement](../../openspec/specs/contact-exchange-settlement/spec.md) for retention, disclosure, and deletion semantics.
-
-Each side may deliver its own copy of a revealed introduction to sinks its operator configures locally — a file, a local program, a webhook, mail, or any sink installed as a plugin. Delivery is recipient-side and self-addressed: the storefront delivers the buyer's contact to the seller's own destinations and the buyer's CLI delivers the seller's to theirs, and neither side ever sends anything to an address the counterparty supplied. It is never authoritative — a sink failure cannot fail a deal, change obligation servicing, or extend a counterparty's request — because the reveal is durable and idempotently re-readable, which is also why delivery is best-effort with explicit re-delivery rather than a queue. A delivered copy falls outside the introduction retention boundary: `delete_introduction_payloads` governs what the marketplace persists, not what a recipient's own mailbox or file already holds. Seller-side dispatch is the delivery kit's, shared by every composing storefront, and routes each reveal by its listing's origin: a storefront publishing for several sellers must name each origin's destinations, because broadcasting would hand one seller's buyers' contacts to another. Sinks are named instances of installed sinks, so one sink type can serve several sellers, and a webhook can sign its request so a seller's own API can verify the storefront sent it.
+Each side may deliver its own copy of a revealed introduction to sinks its operator configures locally — a file, a local program, a webhook, mail, or any sink installed as a plugin. Delivery is recipient-side and self-addressed: the storefront delivers the buyer's contact to the seller's own destinations and the buyer's CLI delivers the seller's to theirs, and neither side ever sends anything to an address the counterparty supplied. It is never authoritative — a sink failure cannot fail a deal, change obligation servicing, or extend a counterparty's request — because the reveal is durable and idempotently re-readable, which is also why delivery is best-effort with explicit re-delivery rather than a queue. A delivered copy falls outside the introduction retention boundary: `delete_introduction` governs what the marketplace persists, not what a recipient's own mailbox or file already holds.
 
 The shared CLI comparison grammar has two typed uses. Resource queries derive their fields, aliases, operators, types, and missing-value semantics from the active registry filter specification and carry its ETag. Settlement clauses use common option identity fields plus mechanism-owned public projections. Buyer clauses are correlated ordered alternatives after resource filtering; storefront clauses are complete option-construction inputs. Provider, secret, raw RPC, and administrator fields are outside both languages.
 
@@ -302,7 +323,7 @@ to obtain vocabulary or policy.
 
 Preflight remains mechanism-owned but projects one sanitized readiness contract. Storefront publication combines enabled ready registrations with explicit typed clauses in configured mechanism order; it never uses one untyped price for multiple mechanisms. Buyer policy ranks only compatible advertised survivors after ordered explicit clauses. Priority and clauses apply before acceptance only. Accepted Terms and persisted operation identities remain authoritative through readiness or configuration changes.
 
-Typed metadata generates role-appropriate templates, edit validation, environment schema fragments, clause descriptors, and reference output. Marketplace schemas admit public consumer trust and policy but reject hosted provider, administrator, webhook, database, and service-migration state. The VM storefront chart passes an agent's configuration through rather than describing it: its values schema carries one definition generated from the storefront's typed models, which refuses secret-marked, role-inapplicable, and unknown typed fields in any spelling and carries no defaults, and the storefront applies its own typed and semantic validation at startup; untyped settings are not checked key by key. See [deployment and configuration](DEPLOYMENT_AND_CONFIG.md#kubernetes-configmap-and-secret-mounting). See the [CLI query language](../../openspec/specs/cli-query-language/spec.md), [settlement configuration contract](../../openspec/specs/settlement-configuration/spec.md), and its [architecture](../../openspec/specs/settlement-configuration/architecture.md).
+Typed metadata generates role-appropriate templates, edit validation, environment and Helm schema fragments, clause descriptors, and reference output. Marketplace schemas admit public consumer trust and policy but reject hosted provider, administrator, webhook, database, and service-migration state. See the [CLI query language](../../openspec/specs/cli-query-language/spec.md), [settlement configuration contract](../../openspec/specs/settlement-configuration/spec.md), and its [architecture](../../openspec/specs/settlement-configuration/architecture.md).
 
 ### API-credit hosted settlement
 
@@ -368,6 +389,20 @@ The buyer is normally a pure HTTP client. The registry is a shared discovery ser
 ## Service Architecture
 
 Within a service, controllers stay thin: HTTP routing, request/response schemas, and translating exceptions into status codes. Business rules, orchestration, and I/O composition live in the 'service' layer beneath them. A per-service breakdown of its own layers belongs in that subsystem's `architecture.md`, not here.
+
+### Route contracts and their HTTP binding
+
+A capability that serves HTTP routes is split into five pieces. The package that owns the capability owns the wire models, the route contract, and the route service:
+
+1. **Wire models**: the request and response schemas.
+2. **Route contract**: each route's method, path, signed operation name, the resource a request binds, and the caller roles it admits. Request authentication and the typed client both bind requests from it, so the two cannot disagree.
+3. **Typed client**: a method for every route, sync and async where both are offered, built on the route contract. It may live beside the capability or in a thin client package of its own that depends only on the models and the contract, so a caller does not install the capability's service code to call it.
+4. **Route service**: a framework-free class over the capability's collaborators that validates and performs each route and shapes its response. It reports a refusal as an error carrying a status code and detail, and it imports no web framework.
+5. **HTTP binding**: the thin controller that maps each route to its route service, turns the route-service error into a response, and sits behind the process's authentication. It belongs to whatever composes the process: a storefront for storefront capabilities, the provisioning service for the compute family kit's routes, and a domain package for the routes that domain contributes.
+
+A domain that contributes routes to a service it does not compose declares their contracts in its own package and supplies its router as a factory taking accessors for its collaborators, so no route reaches into the composing service's module state. Because a binding repeats its contract's path, the provisioning service, which assembles its route table from contributions, tests that every route it mounts resolves to exactly one contract and that every contract resolves to a mounted route.
+
+`kit/pool-overrides` is the reference instance. `kit/site` predates the pattern and ships its own FastAPI router.
 
 ## Authority boundaries
 
