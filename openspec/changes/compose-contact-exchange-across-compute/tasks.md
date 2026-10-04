@@ -288,13 +288,16 @@ edited.
       storefront keep distinct origin and source identity, each reveals its own
       seller's contact, and seller-side delivery reaches only that origin's instances.
       Transferred from `unbacked-listing-publication` (its 6.8).
-- [ ] 6.6 **Helm.** With `helm/fixtures/contact-exchange-values.yaml` applied and port
+- [x] 6.6 **Helm.** With `helm/fixtures/contact-exchange-values.yaml` applied and port
       forwards to Bob's storefront (8001), the registry (8080), provisioning (8081), and
       Mailpit's API (8025), `make -C e2e-tests test-module MODULE=e2e_vm_introduction
       ACTIVE_PROFILES=local` passes. Confirm the Service names against `helm template`
       and record the exact commands in 5.6.
 
-      Commands recorded in `docs/development/VALIDATION_RUNBOOK.md`; awaiting a run against a Helm release.
+      Passed all six scenarios against a fresh local Helm release. The fixture
+      supplies a backed-pool settlement clause and advertises Bob through the
+      port-forward; the local profile supplies the signed development identities.
+      Commands are recorded in `docs/development/VALIDATION_RUNBOOK.md`.
 ## 8. Review corrections
 
 - [x] 8.1 **Single-form contact binds to its one site.** `resolve_seller_contact` in

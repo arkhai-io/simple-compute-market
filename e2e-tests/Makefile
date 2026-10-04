@@ -10,7 +10,7 @@ PYTHON      ?= python3
 
 # Default profile if none supplied
 ACTIVE_PROFILES ?= local
-CONFIG_DIRECTORY ?= $(PWD)/config
+CONFIG_DIRECTORY ?= $(CURDIR)/config
 MODULE ?= contracts
 
 # Path to the monorepo .dist/ wheel directory, relative to e2e-tests/.

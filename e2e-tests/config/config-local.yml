@@ -1,7 +1,8 @@
 # ---------------------------------------------------------------------------
 # Profile: local
 # Targets a prebuilt dev-env Anvil node running on localhost.
-# Addresses and keys are ok to commit
+# Well-known deterministic Anvil identities for local development only;
+# never use them on a public network.
 # ---------------------------------------------------------------------------
 
 rpc:
@@ -10,6 +11,8 @@ rpc:
 
 registry:
   api_url: "http://localhost:8080"
+  authority_id: "registry-a"
+  identifier: "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
 
 buyer:
   marketplace_credential: "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
@@ -24,10 +27,13 @@ mailpit:
 
 seller:
   api_url:           "http://localhost:8001"
-  base_url_override: "http://bob-storefront:8001/"
+  base_url_override: "http://localhost:8001/"
   private_key:       "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
   wallet_address:    "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
   admin_api_key:     "test-api-key"  # set to match [seller].admin_api_key in config.toml
+  # Public deterministic Anvil account #2, also pinned as Helm Bob's operator.
+  admin_scheme:      "eip191"
+  admin_credential:  "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
 
 # Second seller (Alice) — only used by the multi-registry scenario.
 # Anvil account #3. Her storefront is configured against registry-A
@@ -42,6 +48,14 @@ alice:
 
 provisioning:
   api_url: "http://localhost:8081"
+  # Public deterministic Anvil accounts #5 (admin) and #0 (service).
+  # These development identities must never be used on a public network.
+  admin_scheme:         "eip191"
+  admin_credential:     "0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba"
+  authority_scheme:     "eip191"
+  authority_identifier: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+  service_scheme:       "eip191"
+  service_credential:   "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 
 tests:
   order_create_timeout: 3 #time in seconds

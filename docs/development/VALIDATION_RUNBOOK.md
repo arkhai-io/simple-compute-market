@@ -833,17 +833,22 @@ make unforward
 storefront offers contact exchange, delivers each revealed buyer contact by SMTP,
 and the `dev-env` chart runs Mailpit to receive it. It repeats Bob's whole agent
 entry, since Helm replaces lists; layer your environment's values first if it
-already redefines Bob.
+already redefines Bob. The fixture advertises Bob at the host port-forward URL
+and gives capacity-backed test pools a contact-exchange settlement clause. Use
+it only for a local Helm test release with the deterministic development
+identities and existing chart Secrets.
 
 ```bash
-helm upgrade --install "$RELEASE" "$APP_REPO/helm" \
-  --values "$APP_REPO/helm/values.yaml" \
-  --values "$APP_REPO/helm/fixtures/contact-exchange-values.yaml" \
-  --namespace default --wait --timeout 10m
+make build-dev
+make -C e2e-tests reinit
+make -C helm template VALUES=fixtures/contact-exchange-values.yaml \
+  > /tmp/arkhai-contact-exchange-rendered.yaml
+make -C helm deploy VALUES=fixtures/contact-exchange-values.yaml NAMESPACE=default
 
 # Confirm the Service names this release rendered before forwarding.
 kubectl get svc -n default | grep -E "storefront-bob|registry|provisioning|mailpit"
 
+kubectl port-forward -n default "svc/${RELEASE}-dev-env" 8545:8545 &
 kubectl port-forward -n default "svc/${RELEASE}-storefront-bob" 8001:8001 &
 kubectl port-forward -n default "svc/${RELEASE}-registry" 8080:8080 &
 kubectl port-forward -n default "svc/${RELEASE}-provisioning" 8081:8081 &

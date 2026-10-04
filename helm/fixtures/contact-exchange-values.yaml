@@ -34,6 +34,8 @@ storefront:
         configKey: storefront.secrets.toml
       config:
         agent_id: bob
+        # The local-profile buyer reaches the advertised seller through a port-forward.
+        base_url: http://localhost:8001/
         log_file_path: ./logs/bob.log
         storefront_domains:
           - contribution: vms
@@ -71,6 +73,12 @@ storefront:
             - has_matching_inventory_guard
             - escrow_shape_guard
             - bisection
+        pricing:
+          settlements:
+            - mechanism: contact-exchange.v1
+              asset: introduction
+              mechanism_input:
+                profile: default
         Settlement:
           priority:
             - contact-exchange.v1
@@ -95,4 +103,3 @@ storefront:
             sender: storefront-bob@seller.invalid
             recipients:
               - bob-sales@seller.invalid
-
