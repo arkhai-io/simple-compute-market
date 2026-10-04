@@ -827,6 +827,40 @@ bash scripts/validate/api-gateway.sh "$ENV"
 make unforward
 ```
 
+### Settlement by introduction on a Helm release
+
+`helm/fixtures/contact-exchange-values.yaml` overlays the default release so Bob's
+storefront offers contact exchange, delivers each revealed buyer contact by SMTP,
+and the `dev-env` chart runs Mailpit to receive it. It repeats Bob's whole agent
+entry, since Helm replaces lists; layer your environment's values first if it
+already redefines Bob. The fixture advertises Bob at the host port-forward URL
+and gives capacity-backed test pools a contact-exchange settlement clause. Use
+it only for a local Helm test release with the deterministic development
+identities and existing chart Secrets.
+
+```bash
+make build-dev
+make -C e2e-tests reinit
+make -C helm template VALUES=fixtures/contact-exchange-values.yaml \
+  > /tmp/arkhai-contact-exchange-rendered.yaml
+make -C helm deploy VALUES=fixtures/contact-exchange-values.yaml NAMESPACE=default
+
+# Confirm the Service names this release rendered before forwarding.
+kubectl get svc -n default | grep -E "storefront-bob|registry|provisioning|mailpit"
+
+kubectl port-forward -n default "svc/${RELEASE}-dev-env" 8545:8545 &
+kubectl port-forward -n default "svc/${RELEASE}-storefront-bob" 8001:8001 &
+kubectl port-forward -n default "svc/${RELEASE}-registry" 8080:8080 &
+kubectl port-forward -n default "svc/${RELEASE}-provisioning" 8081:8081 &
+kubectl port-forward -n default "svc/${RELEASE}-dev-env-mailpit" 8025:8025 &
+
+make -C e2e-tests test-module MODULE=e2e_vm_introduction ACTIVE_PROFILES=local
+```
+
+The `local` profile addresses each service on `localhost` at those ports, and
+reads Mailpit's API at `http://localhost:8025`. The scenario holds the
+storefront's loops while it runs and resumes them when it finishes.
+
 ## 21. Manual GCE KVM Host
 
 Create a local operator key for the manual Ansible setup run. The provisioning

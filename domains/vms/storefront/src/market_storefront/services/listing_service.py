@@ -343,6 +343,7 @@ class ListingService:
         *,
         clauses: tuple[SettlementPublicationClause, ...] | None = None,
         composition: Any | None = None,
+        origin: str,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         if request.settlement_options:
             raise ValueError(
@@ -359,6 +360,9 @@ class ListingService:
         resources: dict[str, Any] = {
             "accepted_escrows": list(request.accepted_escrows),
             "claimant_principal": self._marketplace_signer.identity,
+            # The site the listing's binding records, so a mechanism resolving
+            # anything per origin sees the value the negotiation will inherit.
+            "origin": origin,
         }
         try:
             accepted, options, _readiness = await composition.publication_artifacts(
@@ -518,13 +522,16 @@ class ListingService:
         listing_resource, _accepted_inputs, _settlement_inputs, demands = (
             self._parse_listing_resource_and_escrows(request)
         )
+        # Read first: the source's site becomes the listing binding's origin,
+        # and options are built for exactly that origin.
+        capacity_source = request.capacity_source.model_dump(mode="json")
         accepted_escrows, settlement_options = await self._derive_settlement_artifacts(
             request,
             clauses=canonical_clauses,
             composition=composition,
+            origin=str(capacity_source["site_id"]),
         )
 
-        capacity_source = request.capacity_source.model_dump(mode="json")
         if (
             capacity_source["pool_id"] != listing_resource.pool_id
             or capacity_source["resource_id"] != listing_resource.resource_id
@@ -713,9 +720,13 @@ class ListingService:
         composition = self._settlement_composition_provider()
         if composition is None:
             raise RuntimeError("settlement composition is not initialized")
+        binding = await self._db.load_listing_binding(listing_id=listing_id)
         option_resources: dict[str, Any] = {
             "accepted_escrows": list(stored.get("accepted_escrows") or ()),
             "claimant_principal": self._marketplace_signer.identity,
+            # A listing with no durable binding has no origin to resolve
+            # per-origin terms for, so it is offered none.
+            "origin": binding.site_id if binding is not None else None,
         }
         if resources:
             option_resources.update(resources)

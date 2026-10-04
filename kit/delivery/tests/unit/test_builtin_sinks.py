@@ -5,16 +5,22 @@ from __future__ import annotations
 import json
 import smtplib
 import sys
+import time
 import urllib.error
 from pathlib import Path
 
 import pytest
-
 from market_delivery import DeliveryError, introduction_delivery_event
 from market_delivery.builtin.command_sink import build_command_sink
 from market_delivery.builtin.file_sink import build_file_sink
 from market_delivery.builtin.smtp_sink import build_smtp_sink
 from market_delivery.builtin.webhook_sink import build_webhook_sink
+from market_identity import (
+    Ed25519Signer,
+    TrustedIdentitySet,
+    VerificationCode,
+    verify_request,
+)
 
 HOSTILE = "; rm -rf / #$(whoami)`id`"
 
@@ -300,3 +306,68 @@ def test_smtp_settings_require_a_username_with_a_password() -> None:
                 "password": "hunter2",
             }
         )
+
+
+def test_a_signing_webhook_sends_a_request_the_receiver_can_verify(monkeypatch) -> None:
+
+    signer = Ed25519Signer(b"s" * 32)
+    seen = {}
+
+    class Response:
+        status = 204
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def fake_urlopen(request, timeout=None):
+        seen["data"] = request.data
+        seen["headers"] = {key.lower(): value for key, value in request.header_items()}
+        return Response()
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    sink = build_webhook_sink(
+        {"url": "https://seller.invalid/introductions", "sign": True}, signer=signer
+    )
+    event = _event()
+    sink(event)
+
+    headers = seen["headers"]
+    body = json.loads(seen["data"])
+    assert body == json.loads(json.dumps(event.payload()))
+    result = verify_request(
+        {
+            "protocol": headers["x-market-signature-version"],
+            "role": headers["x-market-role"],
+            "principal": {
+                "scheme": headers["x-market-identity-scheme"],
+                "identifier": headers["x-market-identity-identifier"],
+            },
+            "method": "POST",
+            "operation": "introduction_delivery",
+            "resource": event.obligation_ref,
+            "request_id": headers["x-market-request-id"],
+            "timestamp": int(headers["x-market-timestamp"]),
+            "body_hash": __import__("market_identity").canonical_body_hash(body),
+            "proof": {
+                "scheme": headers["x-market-identity-scheme"],
+                "value": headers["x-market-signature"],
+            },
+        },
+        body=body,
+        now=int(time.time()),
+        max_skew=60,
+        expected_role="seller",
+        expected_method="POST",
+        expected_operation="introduction_delivery",
+        expected_resource=event.obligation_ref,
+        expected_principals=TrustedIdentitySet(identities=(signer.identity,)),
+    )
+    assert result.code == VerificationCode.VERIFIED
+
+
+def test_a_signing_webhook_requires_a_signer() -> None:
+    with pytest.raises(ValueError, match="marketplace signer"):
+        build_webhook_sink({"url": "https://seller.invalid/hook", "sign": True})

@@ -17,6 +17,7 @@ from market_storefront.services.publication_terms import (
 from market_storefront.lifecycle import (
     CAPACITY_EVENTS_POLLER,
     FULFILLMENT_RESUME,
+    INTRODUCTION_RETENTION,
     NEGOTIATION_WATCHDOG,
     SETTLEMENT_SERVICING,
     PUBLICATION,
@@ -34,6 +35,7 @@ from core_storefront.app_startup import (
     start_storefront_background_task,
 )
 from core_storefront.stage_log import stage_event
+from market_contact_exchange import run_introduction_retention_sweep
 from market_core import MarketDomainContract
 from market_storefront_kit import (
     NegotiationWatchdogPolicy,
@@ -283,6 +285,29 @@ def _start_settlement_servicing() -> None:
     )
 
 
+def _start_introduction_retention() -> None:
+    """Every storefront composing contact exchange runs the retention sweep."""
+    import market_storefront.container as _container
+
+    composition = _container.resolved_contact_exchange
+    retention = composition.retention() if composition is not None else None
+    if retention is None:
+        return
+    start_registered_loop(
+        StorefrontBackgroundTask(
+            name=INTRODUCTION_RETENTION,
+            task_factory=partial(
+                run_introduction_retention_sweep,
+                retention,
+                paused=loop_gate(INTRODUCTION_RETENTION),
+                wait=idle,
+            ),
+            log_message="[STARTUP] Introduction retention sweep started",
+        ),
+        task_logger=logger,
+    )
+
+
 def _start_fulfillment_resume(sqlite_client: Any) -> None:
     from market_storefront.services.fulfillment_resume_runtime import (
         fulfillment_resume_loop,
@@ -428,6 +453,9 @@ async def _startup_tasks(*, registry: Any, domain: MarketDomainContract) -> None
                 error_message="[STARTUP] Escrow identity backfill failed: %s",
             ),
             StorefrontStartupStep("settlement_servicing", _start_settlement_servicing),
+            StorefrontStartupStep(
+                "introduction_retention", _start_introduction_retention
+            ),
             StorefrontStartupStep(
                 "fulfillment_resume",
                 partial(_start_fulfillment_resume, sqlite_client),

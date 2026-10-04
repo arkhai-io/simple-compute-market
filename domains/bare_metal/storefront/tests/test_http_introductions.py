@@ -35,6 +35,7 @@ from arkhai_bare_metal_storefront.server import (
 from arkhai_bare_metal_storefront.settlement_composition import (
     BareMetalStorefrontSettlementComposition,
 )
+from arkhai_bare_metal_storefront.site_clients import BareMetalSiteBinding
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
 from core_buyer.introductions import IntroductionPayloadsDeleted, IntroductionTransport
@@ -119,6 +120,15 @@ def _runtime(
         seller_principal=SELLER_SIGNER.identity,
         admin_principals=TrustedIdentitySet(identities=(ADMIN_SIGNER.identity,)),
         storefront_url="http://seller:8000",
+        # The one site the introduction listing is published from: the single
+        # contact form is that site's contact and resolves for no other.
+        site_bindings=(
+            BareMetalSiteBinding(
+                site_id="site-a",
+                authority_principal=SELLER_SIGNER.identity,
+                authority_url="http://site-a",
+            ),
+        ),
         # Openings recheck each listing against the site that published it.
         capacity_client=SourceSites(),
         marketplace_signer=SELLER_SIGNER,
@@ -269,7 +279,7 @@ async def test_contact_options_publish_through_the_composition() -> None:
     )
     now = datetime.now(timezone.utc)
     payload = await composition.publication_payload(
-        candidate={"host_id": "machine-1"},
+        candidate={"host_id": "machine-1", "site_id": "default"},
         clauses=[
             SettlementPublicationClause(
                 mechanism=CONTACT_MECHANISM,
@@ -470,7 +480,7 @@ async def test_operator_deletion_keeps_the_deal_and_stops_every_reveal(tmp_path)
     assert on_read.value.payloads_deleted_at == deleted.payloads_deleted_at
     assert on_start.value.outcome()["revealed"] is False
     # Nothing was persisted again and the seller was not told a second time.
-    stored = await runtime.db.load_contact_introduction(obligation_ref=obligation_ref)
+    stored = await runtime.contact_exchange.store.load(obligation_ref)
     assert stored is not None and stored.buyer_contact == {}
     assert deliveries == [obligation_ref]
     # The deal remains: its obligation record resolves and correlates.

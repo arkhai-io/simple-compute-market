@@ -202,6 +202,14 @@ class SystemService:
         all_ok = all(_check_is_healthy(k, v) for k, v in checks.items())
 
         result: dict = {"status": "ok" if all_ok else "degraded", "checks": checks}
+        # Public on both routes: a buyer reads these before handing over any
+        # data, so they cannot wait for an authenticated status call.
+        contact_exchange = _container.resolved_contact_exchange
+        disclosures = (
+            contact_exchange.disclosures() if contact_exchange is not None else {}
+        )
+        if disclosures:
+            result["disclosures"] = disclosures
 
         if include_registry:
             principal = self._marketplace_signer.identity

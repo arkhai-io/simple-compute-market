@@ -44,6 +44,8 @@ def rpc_settings() -> dict:
 def registry_settings() -> dict:
     return {
         "api_url": settings.REGISTRY.API_URL,
+        "authority_id": settings.REGISTRY.get("authority_id", ""),
+        "identifier": settings.REGISTRY.get("identifier", ""),
     }
 
 
@@ -55,6 +57,7 @@ def buyer_settings() -> dict:
     requests against the seller's storefront and on-chain escrow calls.
     """
     return {
+        "marketplace_credential": settings.BUYER.get("marketplace_credential", ""),
         "private_key": settings.BUYER.PRIVATE_KEY,
         "wallet_address": settings.BUYER.WALLET_ADDRESS,
     }

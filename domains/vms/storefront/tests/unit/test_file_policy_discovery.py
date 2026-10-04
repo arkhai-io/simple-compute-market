@@ -86,6 +86,7 @@ def test_load_storefront_chain_builds_dispatch_for_policy_table():
         "buyer_counter_guard",
         "has_matching_inventory_guard",
         "escrow_shape_guard",
+        "accept_unpriced_selection_middleware",
         "escrow_kind_dispatch_middleware",
     ]
 
@@ -170,3 +171,16 @@ def test_discovery_runs_once_per_process(tmp_path):
         extra_policy_paths=[tmp_path],
     )
     assert "once" in _REGISTRY
+
+
+def test_the_default_chain_accepts_an_unpriced_selection_before_bargaining():
+    """An unpriced option, such as an introduction, is accepted as published;
+    the terminal bisection policy would counter it forever."""
+    chain = storefront_round._load_storefront_chain(
+        negotiation_config=SimpleNamespace(policies=None, policy_mode=""),
+        extra_policy_paths=[],
+    )
+    names = [getattr(item, "__name__", "") for item in chain]
+    assert names.index("accept_unpriced_selection_middleware") < names.index(
+        "bisection_middleware"
+    )

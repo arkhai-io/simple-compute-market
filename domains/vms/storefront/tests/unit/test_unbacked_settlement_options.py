@@ -23,7 +23,12 @@ def test_every_mechanism_the_vm_storefront_composes_is_declared():
     assert set(VM_MECHANISM_FULFILLS_THROUGH_CAPACITY) == {
         "alkahest.v1",
         "fiat.stripe.v1",
+        "contact-exchange.v1",
     }
+
+
+def test_an_introduction_is_offered_on_unbacked_supply():
+    assert VM_MECHANISM_FULFILLS_THROUGH_CAPACITY["contact-exchange.v1"] is False
 
 
 def test_an_undeclared_mechanism_is_refused_not_defaulted():

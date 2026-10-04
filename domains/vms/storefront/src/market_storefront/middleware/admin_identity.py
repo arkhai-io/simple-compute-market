@@ -27,6 +27,7 @@ from core_storefront.identity_lifecycle import (
     identity_subject_resource,
 )
 from fastapi import Request
+from market_contact_exchange import DELETE_INTRODUCTION_PAYLOADS_OPERATION
 from market_identity import EMPTY_BODY, Identity
 from market_pool_overrides import (
     POOL_OVERRIDES_PATH,
@@ -315,6 +316,14 @@ def _contract(request: Request, body: Any) -> AdminRouteContract | None:
 
     if method == "POST" and path == "/api/v1/admin/portfolio/resources/import":
         return AdminRouteContract("admin_import_resources", "portfolio/resources", body)
+
+    prefix = "/api/v1/admin/introductions/"
+    if method == "DELETE" and path.startswith(prefix) and path.endswith("/payloads"):
+        return AdminRouteContract(
+            DELETE_INTRODUCTION_PAYLOADS_OPERATION,
+            path[len(prefix) : -len("/payloads")],
+            EMPTY_BODY,
+        )
 
     prefix = "/api/v1/admin/deals/"
     if method == "POST" and path.startswith(prefix) and path.endswith("/interrupt"):

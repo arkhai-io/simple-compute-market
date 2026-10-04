@@ -74,6 +74,9 @@ multi-seller introductions depend on.
   contact fields become public configuration that is never published, `[Delivery]` is
   typed in the generated values schema so sink secrets stay out of the ConfigMap, and
   a values overlay and verification command ship with the change.
+- Make VM accept an introduction: the policy kit gains a guard that accepts an exact
+  selection of an option bargaining no amount, and VM's default policy chain runs it
+  before any bargaining policy, as the negotiation protocol already requires.
 - State normatively that accepted-state interpretation, seller-side delivery
   dispatch, and the buyer's introduction commands each have one implementation,
   and that a composing domain supplies persistence, configuration, and route
@@ -91,6 +94,8 @@ multi-seller introductions depend on.
   one seller-side dispatch; sinks are named instances; seller-side delivery routes
   by the listing's origin.
 - `introduction-delivery` also gains webhook request signing.
+- `negotiation-protocol`: a seller's default policy accepts an exact unpriced
+  selection rather than countering it.
 - `contact-exchange-settlement` also gains the mechanism-owned buyer introduction
   commands.
 
@@ -135,6 +140,8 @@ None.
   - `kit/delivery-apprise`: a new sink plugin distribution.
   - `kit/settlement-runtime`: the readiness leak check honours the never-published
     marker.
+  - `kit/policy` and `domains/vms/negotiation`: the unpriced-selection guard, run in
+    VM's default policy chain.
   - `core/storefront`: `HealthResponse` gains `disclosures`.
   - The bare-metal storefront: its introduction glue and delivery module reduce to
     persistence, configuration carrier, and route bindings; its publication passes
@@ -166,7 +173,7 @@ None.
   rateless introduction; what it could not supply is the unbacked VM listing this
   change first makes publishable.
 - **Owns the system evidence for `unbacked-listing-publication`** (tasks 6.4 and
-  6.5). That change made unbacked listings derivable, bound, and published through
+  6.5; 6.5 is transferred on to `unbacked-bare-metal-listings`). That change made unbacked listings derivable, bound, and published through
   the storefront's loop, but VM composes no settlement option an unbacked listing
   may publish until this change composes introduction, so no stack could show one
   to a buyer. The scenarios live here, with the flow that first makes them
@@ -179,8 +186,9 @@ None.
   baseline the VM storefront chart passes configuration through and generates its
   values schema from the storefront's typed models; this change registers the contact
   mechanism, types `[Delivery]` in that generator, and regenerates the schema.
-- **Task 6.5 is blocked on `bare-metal-mock-provisioned-deal`**'s two-storefront,
-  two-site topology and is redesigned from it.
+- **Task 6.5 is transferred to `unbacked-bare-metal-listings`**, which carries the
+  two-seller system scenario for both domains, since neither lane has a storefront
+  serving two seller sites.
 - **Runs alongside `bare-metal-mock-provisioned-deal`**, which is moving bare-metal
   negotiation onto the kit runtime and deal controls into kit route services. This
   change edits the bare-metal storefront's introduction, delivery, publication, and
@@ -202,19 +210,22 @@ None.
 - **Blocks `unbacked-bare-metal-listings`**, which settles unbacked bare-metal
   introductions through the composition this change promotes and needs the per-origin
   payload. Bare metal is Goal 7's primary target domain; its unbacked system evidence
-  is owned by that change, and this change's 6.4 and 6.5 remain the VM half.
+  is owned by that change, and this change's 6.4 is the VM half. That change also
+  carries the two-seller system scenario (this change's 6.5) for both domains.
 - Discharges the remaining half of the recorded open gap for cross-domain
   contact-exchange composition in `docs/development/ROADMAP.md`.
 
 ## Permanent documentation impact
 
-- [ ] `docs/development/ARCHITECTURE.md` — the settlement-configuration section's
-      delivery paragraph describes delivery as storefront-wide; it gains per-origin
-      routing and the per-origin contact. Re-confirm the composition-from-kit
-      principle needs no change.
+- [x] `docs/development/ARCHITECTURE.md` — the settlement-configuration section
+      records contact exchange composed in both compute domains with its
+      accepted-state interpretation in the mechanism kit, the contact resolved per
+      listing origin, and seller-side delivery routed per origin through named sink
+      instances. The composition-from-kit principle needed no change.
 - [x] Existing subsystem specification —
-      `openspec/specs/contact-exchange-settlement/spec.md` and
-      `openspec/specs/introduction-delivery/spec.md`.
+      `openspec/specs/contact-exchange-settlement/spec.md`,
+      `openspec/specs/introduction-delivery/spec.md`, and
+      `openspec/specs/negotiation-protocol/spec.md`.
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 

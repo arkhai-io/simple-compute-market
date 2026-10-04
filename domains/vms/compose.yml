@@ -85,6 +85,8 @@ services:
         condition: service_healthy
       provisioning:
         condition: service_healthy
+      mailpit:
+        condition: service_healthy
     ports:
       - "8001:8001"
     cap_add:
@@ -129,6 +131,19 @@ services:
       timeout: 5s
       retries: 6
       start_period: 10s
+
+  # 2a. Mailpit — receives the storefront's seller-side introduction mail.
+  # An off-the-shelf SMTP server with a query API, so a scenario can read
+  # what the seller would have been sent.
+  mailpit:
+    image: docker.io/axllent/mailpit:v1.27
+    ports:
+      - "8025:8025"
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   # 2b. Alice's storefront — exercises heterogeneous registry
   # topology in the multi-registry e2e scenario. Alice's config.toml

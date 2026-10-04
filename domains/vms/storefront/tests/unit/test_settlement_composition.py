@@ -186,11 +186,12 @@ def db(tmp_path):
     return SQLiteClient(db_path=str(tmp_path / "vm-settlement.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
 
 
-def test_storefront_installs_both_mechanism_registrations():
+def test_storefront_installs_every_mechanism_registration():
     registry = build_storefront_settlement_registry()
 
     assert [registration.mechanism_id for registration in registry.registrations] == [
         "alkahest.v1",
+        "contact-exchange.v1",
         "fiat.stripe.v1",
     ]
 

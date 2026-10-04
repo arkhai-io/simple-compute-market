@@ -105,7 +105,15 @@ class Harness:
             }
         )
 
-    def service(self, deliver=None, disclosure=None) -> IntroductionRouteService:
+    def service(
+        self, deliver=None, disclosure=None, seller_contact=_SELLER_CONTACT
+    ) -> IntroductionRouteService:
+        self.resolved: list[IntroductionAgreement] = []
+
+        def resolve(agreement: IntroductionAgreement) -> Mapping[str, str] | None:
+            self.resolved.append(agreement)
+            return dict(seller_contact) if seller_contact is not None else None
+
         return IntroductionRouteService(
             callbacks=IntroductionRouteCallbacks(
                 prepare=self.prepare,
@@ -114,7 +122,7 @@ class Harness:
                 load=self.load,
                 complete=self.complete,
             ),
-            seller_contact=dict(_SELLER_CONTACT),
+            resolve_seller_contact=resolve,
             deliver=deliver,
             disclosure=disclosure,
         )
@@ -194,19 +202,29 @@ async def test_only_the_buyer_may_start() -> None:
     assert caught.value.status_code == 403
 
 
-def test_service_requires_a_seller_contact_payload() -> None:
+async def test_a_start_whose_origin_has_no_contact_is_refused_before_anything_happens() -> None:
     harness = Harness()
-    with pytest.raises(ValueError, match="requires a seller contact payload"):
-        IntroductionRouteService(
-            callbacks=IntroductionRouteCallbacks(
-                prepare=harness.prepare,
-                authorize=harness.authorize,
-                persist=harness.persist,
-                load=harness.load,
-                complete=harness.complete,
-            ),
-            seller_contact={},
-        )
+    delivered: list[tuple] = []
+    service = harness.service(
+        deliver=lambda projection, agreement: delivered.append((projection, agreement)),
+        seller_contact=None,
+    )
+    with pytest.raises(IntroductionRouteError) as caught:
+        await service.start({"principal": BUYER}, _start())
+    assert caught.value.status_code == 503
+    assert caught.value.detail["code"] == "seller_contact_unavailable"
+    assert harness.records == {}
+    assert harness.completions == []
+    assert delivered == []
+
+
+async def test_the_contact_is_resolved_for_the_agreement_being_revealed() -> None:
+    harness = Harness()
+    service = harness.service()
+    await service.start({"principal": BUYER}, _start())
+    assert [agreement.obligation_ref for agreement in harness.resolved] == [
+        _OBLIGATION_REF
+    ]
 
 
 async def test_the_seller_side_is_told_its_own_half_of_the_reveal() -> None:

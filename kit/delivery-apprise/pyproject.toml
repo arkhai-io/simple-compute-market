@@ -1,0 +1,28 @@
+[project]
+name = "arkhai-kit-delivery-apprise"
+version = "0.1.0"
+description = "An Apprise delivery sink: revealed marketplace events to any service Apprise reaches"
+requires-python = ">=3.12,<3.14"
+license = "MIT"
+dependencies = [
+  "arkhai-kit-delivery==0.2.0",
+  "apprise>=1.9,<2",
+  "pydantic>=2.7",
+]
+
+[project.entry-points."market.delivery_sinks"]
+apprise = "market_delivery_apprise.sink:APPRISE_SINK"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/market_delivery_apprise"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests/unit", "tests/integration"]
+
+[dependency-groups]
+dev = ["pytest>=8.3.4,<9.0.0"]

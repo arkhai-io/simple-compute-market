@@ -34,14 +34,7 @@ from core_storefront import (
     StorefrontThreadBinding,
     build_storefront_derivation_key,
 )
-from market_contact_exchange import (
-    CONTACT_EXCHANGE_MIGRATIONS,
-    IntroductionRecord,
-    delete_introduction_payloads,
-    insert_introduction,
-    load_introduction,
-    select_expired_introductions,
-)
+from market_contact_exchange import CONTACT_EXCHANGE_MIGRATIONS
 from market_settlement_runtime import settlement_migrations
 from market_identity import Identity
 from market_pool_overrides import pool_override_migrations
@@ -95,73 +88,6 @@ class SQLiteClient(CoreSQLiteClient):
             *pool_override_migrations(),
             *BARE_METAL_STOREFRONT_MIGRATIONS,
         )
-
-    async def save_contact_introduction(
-        self,
-        record: IntroductionRecord,
-    ) -> IntroductionRecord:
-        """Persist one revealed introduction exactly once (idempotent replays)."""
-
-        def _save() -> IntroductionRecord:
-            conn = sqlite3.connect(self.db_path)
-            try:
-                stored = insert_introduction(conn, record)
-                conn.commit()
-                return stored
-            finally:
-                conn.close()
-
-        return await asyncio.to_thread(_save)
-
-    async def load_contact_introduction(
-        self,
-        *,
-        obligation_ref: str,
-    ) -> IntroductionRecord | None:
-        def _load() -> IntroductionRecord | None:
-            conn = sqlite3.connect(self.db_path)
-            try:
-                return load_introduction(conn, obligation_ref)
-            finally:
-                conn.close()
-
-        return await asyncio.to_thread(_load)
-
-    async def delete_contact_introduction_payloads(
-        self,
-        obligation_ref: str,
-        deleted_at: datetime,
-    ) -> bool:
-        """Redact one introduction's contact payloads; ``False`` if nothing to redact."""
-
-        def _delete() -> bool:
-            conn = sqlite3.connect(self.db_path)
-            try:
-                redacted = delete_introduction_payloads(
-                    conn, obligation_ref, deleted_at=deleted_at
-                )
-                conn.commit()
-                return redacted
-            finally:
-                conn.close()
-
-        return await asyncio.to_thread(_delete)
-
-    async def select_expired_contact_introductions(
-        self,
-        cutoff: datetime,
-        limit: int,
-    ) -> list[str]:
-        """Obligation refs of unredacted introductions revealed at or before ``cutoff``."""
-
-        def _select() -> list[str]:
-            conn = sqlite3.connect(self.db_path)
-            try:
-                return select_expired_introductions(conn, cutoff=cutoff, limit=limit)
-            finally:
-                conn.close()
-
-        return await asyncio.to_thread(_select)
 
     async def is_global_paused(self) -> bool:
         """Return the durable storefront-wide negotiation pause state."""

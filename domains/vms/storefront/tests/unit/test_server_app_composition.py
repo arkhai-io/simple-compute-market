@@ -104,13 +104,15 @@ async def test_lifespan_publishes_and_clears_exact_contract_without_cross_app_le
     monkeypatch,
 ) -> None:
     signer = SimpleNamespace(identity=object())
-    capacity_runtime = SimpleNamespace(client=lambda: None)
+    capacity_runtime = SimpleNamespace(client=lambda: None, site_ids=("default",))
     built = {}
 
     def fake_sqlite_client(*, registry):
         sqlite_client = SimpleNamespace(
             db_path=f"/{id(registry)}.db",
             domain_registry=registry,
+            load_negotiation_thread_row=None,
+            load_thread_binding=None,
         )
         built["registry"] = registry
         built["sqlite_client"] = sqlite_client
@@ -163,6 +165,9 @@ async def test_lifespan_publishes_and_clears_exact_contract_without_cross_app_le
         composition = SimpleNamespace(
             domain=domain,
             accepted_obligation_dispatch=lambda: {},
+            settlement_config=SimpleNamespace(priority=()),
+            repository=SimpleNamespace(load_settlement_obligation=None),
+            runtime=None,
         )
         built["settlement_composition"] = composition
         return composition

@@ -445,6 +445,41 @@ def test_fiat_fixture_passes_its_settlement_through() -> None:
     assert "wait-for-rpc" not in _source(manifest, "deployment.yaml")
 
 
+def test_contact_exchange_fixture_passes_contact_and_delivery_through() -> None:
+    manifest = _ok(_render(files=("contact-exchange-values.yaml",)))
+    config = _config(manifest)
+
+    contact = config["Settlement"]["contact"]
+    assert contact["origins"]["default"]["contact_payload"] == {
+        "email": "bob-sales@seller.invalid"
+    }
+    assert config["Delivery"]["seller-mail"]["sink"] == "smtp"
+    assert config["Delivery"]["seller-mail"]["port"] == 1025
+    assert "# Source: arkhai-node-operator/charts/dev-env/templates/mailpit.yaml" in manifest
+
+
+def test_mailpit_is_absent_unless_enabled() -> None:
+    assert "dev-env/templates/mailpit.yaml" not in _ok(_render())
+
+
+def test_generated_schema_refuses_secret_delivery_settings() -> None:
+    def delivery(**instances) -> dict:
+        return _with_config(Delivery={"enabled": list(instances), **instances})
+
+    smtp = {"sink": "smtp", "host": "mail", "sender": "s@x.invalid", "recipients": ["r@x.invalid"]}
+    cases = {
+        "webhook url": (delivery(hook={"sink": "webhook", "url": "https://x.invalid"}), "url"),
+        "smtp password": (delivery(mail={**smtp, "password": "p"}), "password"),
+        "apprise urls": (delivery(note={"sink": "apprise", "urls": ["mailto://x"]}), "urls"),
+        "misnamed table": (delivery(webhook={"sink": "file", "path": "/x"}), "sink"),
+    }
+    for label, (agent, name) in cases.items():
+        rendered = _render(agent=agent)
+        assert rendered.returncode != 0, label
+        assert name in rendered.stderr, f"{label}: {rendered.stderr}"
+    _ok(_render(agent=delivery(mail=smtp)))
+
+
 def test_evm_fixture_waits_for_its_chain() -> None:
     manifest = _ok(_render(files=("eip191-evm-values.yaml",)))
 

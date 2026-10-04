@@ -21,9 +21,10 @@ from market_contact_exchange import (
     MECHANISM as CONTACT_MECHANISM,
 )
 from market_contact_exchange import (
+    ContactExchangeComposition,
     ContactSettlementConfig,
-    IntroductionRetentionPolicy,
     IntroductionRetentionService,
+    SQLiteIntroductionStore,
 )
 from market_hosted_settlement import PortableRemoteFulfillmentRef, canonical_json
 from market_settlement_runtime import (
@@ -52,11 +53,7 @@ from .hosted_routes import (
     lifecycle_domain_callbacks,
 )
 from .lifecycle_steps import register_bare_metal_lifecycle_steps
-from .delivery import (
-    build_introduction_delivery,
-    load_storefront_delivery_sinks,
-    storefront_delivery_section,
-)
+from .delivery import storefront_introduction_delivery
 from .pool_overrides import (
     BareMetalPoolOverrideContribution,
     accepted_site_projection,
@@ -164,6 +161,7 @@ class BareMetalStorefrontRuntime:
     settlement_repository: SettlementSQLiteRepository = field(init=False, repr=False)
     settlement_clients: Mapping[str, Any] = field(init=False, repr=False)
     settlement_runtime: SettlementRuntime = field(init=False, repr=False)
+    contact_exchange: ContactExchangeComposition = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         repository = SettlementSQLiteRepository(
@@ -182,7 +180,34 @@ class BareMetalStorefrontRuntime:
             "settlement_runtime",
             SettlementRuntime(repository, clients),
         )
+        object.__setattr__(
+            self,
+            "contact_exchange",
+            ContactExchangeComposition(
+                config=self.contact_settlement_config,
+                store=SQLiteIntroductionStore(self.db.db_path),
+                load_thread=self.db.load_negotiation_thread_row,
+                load_obligation=repository.load_settlement_obligation,
+                load_origin=self._negotiation_origin,
+                settlement_runtime=self.settlement_runtime,
+                known_origins=[binding.site_id for binding in self.site_bindings],
+                deliver=self._deliver_introduction,
+            ),
+        )
         register_bare_metal_lifecycle_steps(self)
+
+    def _deliver_introduction(self, projection: Any, agreement: Any) -> None:
+        """Hand a fresh reveal to the configured seller-side dispatch, if any."""
+        if self.introduction_delivery is not None:
+            self.introduction_delivery(projection, agreement)
+
+    async def _negotiation_origin(self, negotiation_id: str) -> str | None:
+        """The site recorded on the negotiation's binding, or None if unbound."""
+        try:
+            binding = await self.db.load_thread_binding(negotiation_id=negotiation_id)
+        except (KeyError, ValueError):
+            return None
+        return binding.site_id
 
     def negotiation_service(self) -> BareMetalNegotiationService:
         """Build the request-scoped bare-metal negotiation orchestrator."""
@@ -237,25 +262,8 @@ class BareMetalStorefrontRuntime:
         return section if isinstance(section, ContactSettlementConfig) else None
 
     def introduction_retention(self) -> IntroductionRetentionService | None:
-        """Introduction retention under the running configuration, or None.
-
-        Present whenever contact exchange is enabled, whether or not a seller
-        contact is configured to reveal: payloads already revealed are held
-        under the window either way. Built from configuration on each call, so
-        the sweep, its step and preview, the operator deletion, and both
-        disclosures all read the same policy.
-        """
-        section = self.contact_settlement_config()
-        if section is None:
-            return None
-        return IntroductionRetentionService(
-            policy=IntroductionRetentionPolicy.from_config(section),
-            select_expired=self.db.select_expired_contact_introductions,
-            delete_payloads=self.db.delete_contact_introduction_payloads,
-            load=lambda obligation_ref: self.db.load_contact_introduction(
-                obligation_ref=obligation_ref
-            ),
-        )
+        """Introduction retention under the running configuration, or None."""
+        return self.contact_exchange.retention()
 
     def pool_override_service(self) -> PoolOverrideService | None:
         """The storefront's pool-override service, or ``None`` without sites.
@@ -338,17 +346,8 @@ class BareMetalStorefrontRuntime:
         }
 
     def _disclosures(self) -> dict[str, dict[str, object]]:
-        """Storefront policies a counterparty may read before committing data.
-
-        Public and unauthenticated, because the point is that a buyer can read
-        them before handing over anything. The introduction retention window is
-        here because the buyer's contact accompanies the introduction start, so
-        disclosing it only in the reveal would be too late to decline.
-        """
-        retention = self.introduction_retention()
-        if retention is None:
-            return {}
-        return {"introduction_retention": retention.disclosure()}
+        """Storefront policies a counterparty may read before committing data."""
+        return self.contact_exchange.disclosures()
 
     async def _site_projections(self) -> dict[str, dict[str, dict[str, object]]]:
         """Each trusted site's resource-pool projection as fetched just now.
@@ -566,13 +565,16 @@ def build_runtime_from_environment(
             "bare-metal storefront trusted site composition is invalid",
         ) from exc
     try:
-        delivery_sinks = load_storefront_delivery_sinks(storefront_delivery_section())
+        introduction_delivery = storefront_introduction_delivery(
+            known_origins=[binding.site_id for binding in site_bindings],
+            signer=signer,
+        )
     except (TypeError, ValueError, json.JSONDecodeError) as exc:
         raise RuntimeError(
             "BARE_METAL_STOREFRONT_DELIVERY must be a strict [Delivery] section"
         ) from exc
     runtime = BareMetalStorefrontRuntime(
-        introduction_delivery=build_introduction_delivery(delivery_sinks.sinks),
+        introduction_delivery=introduction_delivery,
         db=db,
         domain=selected_domain,
         seller_principal=principal,

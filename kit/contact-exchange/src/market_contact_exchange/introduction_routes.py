@@ -40,13 +40,19 @@ class IntroductionStart(BaseModel):
 
 @dataclass(frozen=True, slots=True)
 class IntroductionAgreement:
-    """Server-authoritative accepted introduction loaded by a domain callback."""
+    """Server-authoritative accepted introduction loaded by a domain callback.
+
+    ``origin`` is the listing origin recorded on the negotiation's durable
+    binding: the one value the seller's contact and seller-side delivery
+    routing are resolved from.
+    """
 
     agreement_ref: str
     obligation_ref: str
     buyer_principal: Identity
     seller_principal: Identity
     introduction_package: Mapping[str, Any]
+    origin: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +83,10 @@ class IntroductionRecord(BaseModel):
 #: The stable code of the outcome every introduction surface answers once the
 #: payloads have been deleted.
 INTRODUCTION_PAYLOADS_DELETED = "introduction_payloads_deleted"
+
+#: The stable code of a start refused because the agreement's origin resolves
+#: no seller contact under the running configuration.
+SELLER_CONTACT_UNAVAILABLE = "seller_contact_unavailable"
 
 
 class IntroductionPayloadsDeletedError(ValueError):
@@ -140,6 +150,10 @@ class CompleteIntroduction(Protocol):
 #: Returns the retention disclosure to embed in a reveal, read from the running
 #: configuration at each call so a reveal never states a stale window.
 IntroductionDisclosure = Callable[[], Mapping[str, Any]]
+
+#: Returns the seller contact for one agreement under the running
+#: configuration, or None when its origin has none.
+ResolveSellerContact = Callable[[IntroductionAgreement], Mapping[str, str] | None]
 
 
 class DeliverIntroduction(Protocol):
@@ -215,23 +229,22 @@ class IntroductionRouteService:
     """Run the signed start/read reveal family over an injected domain contract.
 
     The seller's contact payload binds from configuration at the first
-    introduction operation; acceptance stays payload-free by construction, so
-    deals that never start persist no contact data at all.
+    introduction operation, resolved from the agreement's origin; acceptance
+    stays payload-free by construction, so deals that never start persist no
+    contact data at all.
     """
 
     def __init__(
         self,
         *,
         callbacks: IntroductionRouteCallbacks,
-        seller_contact: Mapping[str, str],
+        resolve_seller_contact: ResolveSellerContact,
         mechanism_id: str = MECHANISM,
         deliver: DeliverIntroduction | None = None,
         disclosure: IntroductionDisclosure | None = None,
     ) -> None:
         self._callbacks = callbacks
-        self._seller_contact = validate_contact_payload(seller_contact)
-        if not self._seller_contact:
-            raise ValueError("introduction reveal requires a seller contact payload")
+        self._resolve_seller_contact = resolve_seller_contact
         self._mechanism_id = mechanism_id
         self._deliver = deliver
         self._disclosure = disclosure
@@ -320,11 +333,12 @@ class IntroductionRouteService:
             # whose earlier completion failed converges after deletion.
             await self._complete(agreement)
             raise self._deleted(existing.payloads_deleted_at)
+        seller_contact = self._seller_contact_for(agreement)
         try:
             record = await self._callbacks.persist(
                 agreement,
                 start.contact_payload,
-                self._seller_contact,
+                seller_contact,
             )
         except IntroductionPayloadsDeletedError as exc:
             # Redacted between the read above and the persist.
@@ -340,6 +354,25 @@ class IntroductionRouteService:
             viewer=auth.principal,
             buyer_principal=agreement.buyer_principal,
         )
+
+    def _seller_contact_for(self, agreement: IntroductionAgreement) -> dict[str, str]:
+        """The contact configured for this agreement's origin, or a refusal.
+
+        Resolved before anything is persisted, driven, or delivered, and never
+        substituted: an origin with no contact refuses the reveal rather than
+        revealing another origin's.
+        """
+
+        contact = self._resolve_seller_contact(agreement)
+        if not contact:
+            raise IntroductionRouteError(
+                503,
+                {
+                    "code": SELLER_CONTACT_UNAVAILABLE,
+                    "message": "no seller contact is configured for this listing's origin",
+                },
+            )
+        return validate_contact_payload(contact)
 
     def _deliver_to_seller(
         self,
@@ -401,6 +434,7 @@ class IntroductionRouteService:
 
 __all__ = [
     "INTRODUCTION_PAYLOADS_DELETED",
+    "SELLER_CONTACT_UNAVAILABLE",
     "AuthorizedIntroductionRequest",
     "DeliverIntroduction",
     "IntroductionAgreement",
@@ -412,6 +446,7 @@ __all__ = [
     "IntroductionRouteService",
     "IntroductionStart",
     "LoadIntroduction",
+    "ResolveSellerContact",
     "introduction_payloads_deleted_detail",
     "introduction_projection",
 ]
