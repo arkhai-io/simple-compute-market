@@ -176,6 +176,10 @@ class HealthResponse:
     #: a domain contribution's `contract_version`: this is the wire a cutover
     #: has to find skew on before mutations resume.
     provisioning_contract_version: str | None = None  # present on /api/v1/system/status
+    #: Storefront policies disclosed publicly, before a counterparty commits
+    #: data, keyed by policy: ``introduction_retention`` while contact exchange
+    #: is enabled. Empty when the storefront discloses none.
+    disclosures: dict[str, Any] = field(default_factory=dict)
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -186,6 +190,7 @@ class HealthResponse:
             "listing_cardinality_mode_explanations",
             "publication_derivation",
             "provisioning_contract_version",
+            "disclosures",
         }
         raw_chain_id = d.get("chain_id")
         raw_resource_count = d.get("resource_count")
@@ -202,6 +207,7 @@ class HealthResponse:
             ),
             publication_derivation=d.get("publication_derivation"),
             provisioning_contract_version=d.get("provisioning_contract_version"),
+            disclosures=dict(d.get("disclosures") or {}),
             extra={k: v for k, v in d.items() if k not in known},
         )
 

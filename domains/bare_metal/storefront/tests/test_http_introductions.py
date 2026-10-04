@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+import sqlite3
 import time
 import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 from market_contact_exchange import MECHANISM as CONTACT_MECHANISM
+from market_contact_exchange import (
+    IntroductionAdminClient,
+    format_introduction_timestamp,
+)
 from market_core.schemas import derive_settlement_option_id
 from market_identity import (
     EMPTY_BODY,
@@ -29,12 +35,13 @@ from arkhai_bare_metal_storefront.server import (
 from arkhai_bare_metal_storefront.settlement_composition import (
     BareMetalStorefrontSettlementComposition,
 )
+from arkhai_bare_metal_storefront.site_clients import BareMetalSiteBinding
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
-from core_buyer.introductions import IntroductionTransport
+from core_buyer.introductions import IntroductionPayloadsDeleted, IntroductionTransport
 from loopback import serving
 from source_sites import SourceSites
-from storefront_client import StorefrontClient
+from storefront_client import StorefrontClient, StorefrontClientError
 
 BUYER_SIGNER = Eip191Signer(bytes.fromhex("22" * 32))
 SELLER_SIGNER = Eip191Signer(bytes.fromhex("11" * 32))
@@ -99,7 +106,13 @@ def _contact_option() -> dict[str, Any]:
     }
 
 
-def _runtime(path: str) -> BareMetalStorefrontRuntime:
+def _runtime(
+    path: str,
+    *,
+    contact: dict[str, Any] | None = None,
+    deliver: Any = None,
+    contact_enabled: bool = True,
+) -> BareMetalStorefrontRuntime:
     domain = get_market_domain_contract()
     return BareMetalStorefrontRuntime(
         db=SQLiteClient(path, domain=domain),
@@ -107,6 +120,15 @@ def _runtime(path: str) -> BareMetalStorefrontRuntime:
         seller_principal=SELLER_SIGNER.identity,
         admin_principals=TrustedIdentitySet(identities=(ADMIN_SIGNER.identity,)),
         storefront_url="http://seller:8000",
+        # The one site the introduction listing is published from: the single
+        # contact form is that site's contact and resolves for no other.
+        site_bindings=(
+            BareMetalSiteBinding(
+                site_id="site-a",
+                authority_principal=SELLER_SIGNER.identity,
+                authority_url="http://site-a",
+            ),
+        ),
         # Openings recheck each listing against the site that published it.
         capacity_client=SourceSites(),
         marketplace_signer=SELLER_SIGNER,
@@ -123,10 +145,14 @@ def _runtime(path: str) -> BareMetalStorefrontRuntime:
                                 "terms": "Net-30, prose contract on request.",
                             }
                         },
+                        **(contact or {}),
                     },
                 }
             )
+            if contact_enabled
+            else None
         ),
+        introduction_delivery=deliver,
     )
 
 
@@ -253,7 +279,7 @@ async def test_contact_options_publish_through_the_composition() -> None:
     )
     now = datetime.now(timezone.utc)
     payload = await composition.publication_payload(
-        candidate={"host_id": "machine-1"},
+        candidate={"host_id": "machine-1", "site_id": "default"},
         clauses=[
             SettlementPublicationClause(
                 mechanism=CONTACT_MECHANISM,
@@ -328,3 +354,168 @@ async def test_reveal_refusals(tmp_path) -> None:
         _, obligation_ref, _ = await _accept_and_start(base_url, option)
         with pytest.raises(RuntimeError, match="403"):
             _introductions(base_url, OUTSIDER_SIGNER).read(obligation_ref=obligation_ref)
+
+
+
+# -- retention ---------------------------------------------------------------
+
+_ONE_DAY = 86_400
+
+
+def _admin(base_url: str) -> StorefrontClient:
+    return StorefrontClient(
+        base_url,
+        signer=ADMIN_SIGNER,
+        caller_role="admin",
+        expected_publishers=TrustedIdentitySet(identities=(SELLER_SIGNER.identity,)),
+    )
+
+
+def _backdate_reveal(db_path: str, obligation_ref: str, *, days: int) -> None:
+    """Make one revealed introduction ``days`` old.
+
+    Service-internal precondition state no API can express: the reveal time is
+    the storefront's clock at insert, and the persistence triggers refuse any
+    change to it. The fixture steps around them the way a database owner
+    repairing data would, and restores them before the storefront reads again.
+    """
+    conn = sqlite3.connect(db_path)
+    try:
+        triggers = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='trigger' "
+            "AND tbl_name='contact_introductions'"
+        ).fetchall()
+        conn.execute("DROP TRIGGER contact_introductions_redaction_only")
+        conn.execute("DROP TRIGGER contact_introductions_keep_unredacted")
+        conn.execute(
+            "UPDATE contact_introductions SET created_at=? WHERE obligation_ref=?",
+            (
+                format_introduction_timestamp(
+                    datetime.now(timezone.utc) - timedelta(days=days)
+                ),
+                obligation_ref,
+            ),
+        )
+        for (sql,) in triggers:
+            conn.execute(sql)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+async def test_readiness_discloses_the_window_the_reveal_carries(tmp_path) -> None:
+    runtime = _runtime(
+        str(tmp_path / "storefront.db"), contact={"retention_seconds": _ONE_DAY}
+    )
+    option = await _insert_contact_listing(runtime)
+    with serving(_app(runtime)) as base_url:
+        async with StorefrontClient(base_url) as anonymous:
+            readiness = await anonymous.get_health()
+        _, obligation_ref, started = await _accept_and_start(base_url, option)
+        read = _introductions(base_url).read(obligation_ref=obligation_ref)
+    expected = {
+        "window_seconds": _ONE_DAY,
+        "basis": "current_policy",
+        "scope": "introduction_record",
+    }
+    assert readiness.disclosures == {"introduction_retention": expected}
+    assert started["retention"] == expected
+    assert read["retention"] == expected
+
+
+async def test_an_indefinite_window_is_disclosed_explicitly(tmp_path) -> None:
+    runtime = _runtime(
+        str(tmp_path / "storefront.db"), contact={"retention_seconds": "indefinite"}
+    )
+    with serving(_app(runtime)) as base_url:
+        async with StorefrontClient(base_url) as anonymous:
+            readiness = await anonymous.get_health()
+    assert readiness.disclosures["introduction_retention"]["window_seconds"] is None
+
+
+async def test_no_retention_is_disclosed_without_contact_exchange(tmp_path) -> None:
+    runtime = _runtime(str(tmp_path / "storefront.db"), contact_enabled=False)
+    with serving(_app(runtime)) as base_url:
+        async with StorefrontClient(base_url) as anonymous:
+            readiness = await anonymous.get_health()
+        async with _admin(base_url) as admin:
+            with pytest.raises(StorefrontClientError) as refused:
+                await IntroductionAdminClient(admin).delete_introduction_payloads(
+                    "ab" * 32
+                )
+    assert readiness.disclosures == {}
+    assert refused.value.status_code == 404
+    assert "introduction-retention" not in runtime.loops.step_routes()
+
+
+async def test_operator_deletion_keeps_the_deal_and_stops_every_reveal(tmp_path) -> None:
+    deliveries: list[str] = []
+    runtime = _runtime(
+        str(tmp_path / "storefront.db"),
+        deliver=lambda projection, agreement: deliveries.append(
+            projection["obligation_ref"]
+        ),
+    )
+    option = await _insert_contact_listing(runtime)
+    with serving(_app(runtime)) as base_url:
+        negotiation_id, obligation_ref, _ = await _accept_and_start(base_url, option)
+        assert deliveries == [obligation_ref]
+        async with _admin(base_url) as admin:
+            introductions_admin = IntroductionAdminClient(admin)
+            deleted = await introductions_admin.delete_introduction_payloads(obligation_ref)
+            again = await introductions_admin.delete_introduction_payloads(obligation_ref)
+        with pytest.raises(IntroductionPayloadsDeleted) as on_read:
+            _introductions(base_url).read(obligation_ref=obligation_ref)
+        # A fresh request identity, so not an exact replay of the first start.
+        with pytest.raises(IntroductionPayloadsDeleted) as on_start:
+            _introductions(base_url).start(
+                negotiation_id=negotiation_id,
+                obligation_ref=obligation_ref,
+                contact_payload=dict(_BUYER_CONTACT),
+            )
+
+    assert deleted.obligation_ref == obligation_ref
+    assert deleted.redacted is True
+    assert again == deleted.model_copy(update={"redacted": False})
+    assert on_read.value.payloads_deleted_at == deleted.payloads_deleted_at
+    assert on_start.value.outcome()["revealed"] is False
+    # Nothing was persisted again and the seller was not told a second time.
+    stored = await runtime.contact_exchange.store.load(obligation_ref)
+    assert stored is not None and stored.buyer_contact == {}
+    assert deliveries == [obligation_ref]
+    # The deal remains: its obligation record resolves and correlates.
+    assert await runtime.settlement_repository.load_settlement_obligation(
+        obligation_ref
+    ) is not None
+    status = await runtime.settlement_runtime.get_status(negotiation_id)
+    assert status.status == "complete"
+
+
+async def test_held_retention_sweep_deletes_what_it_previewed(
+    tmp_path,
+) -> None:
+    db_path = str(tmp_path / "storefront.db")
+    runtime = _runtime(db_path, contact={"retention_seconds": _ONE_DAY})
+    option = await _insert_contact_listing(runtime)
+    with serving(_app(runtime)) as base_url:
+        async with _admin(base_url) as admin:
+            held = await admin.admin_pause_lifecycle_loops()
+            assert held["loops"]["introduction_retention"] == "paused"
+            _, expired_ref, _ = await _accept_and_start(base_url, option)
+            _, fresh_ref, _ = await _accept_and_start(base_url, option)
+            _backdate_reveal(db_path, expired_ref, days=2)
+
+            preview = await admin.admin_dry_run_lifecycle_cycle(
+                "introduction-retention"
+            )
+            assert preview["eligible"] == [expired_ref]
+            assert _introductions(base_url).read(obligation_ref=expired_ref)
+
+            stepped = await admin.admin_run_lifecycle_cycle("introduction-retention")
+            assert stepped == {"loop": "introduction_retention", "deleted": 1}
+            with pytest.raises(IntroductionPayloadsDeleted):
+                _introductions(base_url).read(obligation_ref=expired_ref)
+            assert _introductions(base_url).read(obligation_ref=fresh_ref)[
+                "counterparty_contact"
+            ] == _SELLER_CONTACT
+            await admin.admin_resume_lifecycle_loops()

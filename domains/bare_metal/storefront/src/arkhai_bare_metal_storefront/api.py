@@ -23,12 +23,12 @@ from core_storefront.models.system_models import AdminPauseResponse
 from fastapi import APIRouter, Body, HTTPException, Query, Request
 
 from market_contact_exchange import (
+    DELETE_INTRODUCTION_PAYLOADS_OPERATION,
+    INTRODUCTION_PAYLOADS_ROUTE,
     AuthorizedIntroductionRequest,
-    ContactSettlementConfig,
     IntroductionRouteError,
     IntroductionStart,
 )
-from market_contact_exchange import MECHANISM as CONTACT_MECHANISM
 from market_identity import EMPTY_BODY, Identity
 from market_pool_overrides import (
     POOL_OVERRIDES_PATH,
@@ -65,7 +65,6 @@ from .negotiation_service import NegotiationRequestError
 from .runtime import BareMetalStorefrontRuntime
 from .settlement_service import SettlementRequestError
 from .hosted_routes import build_bare_metal_hosted_route_service
-from .introduction_routes import build_bare_metal_introduction_service
 from .response_auth import bind_response_auth, bind_response_contract
 
 router = APIRouter()
@@ -302,27 +301,12 @@ async def _authorize_introduction_request(
 
 
 def _introduction_service(request: Request) -> Any:
-    runtime = _runtime(request)
-    composition = runtime.settlement_composition
-    if (
-        composition is None
-        or CONTACT_MECHANISM not in composition.enabled_mechanisms
-    ):
-        raise HTTPException(status_code=404, detail="contact exchange is disabled")
-    section = composition.config.mechanism_config("contact")
-    if not isinstance(section, ContactSettlementConfig) or not section.contact_payload:
-        raise HTTPException(
-            status_code=503,
-            detail="contact-exchange reveal is unavailable",
-        )
-    return build_bare_metal_introduction_service(
-        db=runtime.db,
-        repository=runtime.settlement_repository,
-        settlement_runtime=runtime.settlement_runtime,
-        seller_contact=section.contact_payload,
-        authorize_request=_authorize_introduction_request,
-        deliver=runtime.introduction_delivery,
+    service = _runtime(request).contact_exchange.reveal_service(
+        _authorize_introduction_request
     )
+    if service is None:
+        raise HTTPException(status_code=404, detail="contact exchange is disabled")
+    return service
 
 
 @router.post("/api/v1/introductions")
@@ -345,6 +329,29 @@ async def read_introduction(
         return await _introduction_service(request).read(request, obligation_ref)
     except IntroductionRouteError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.delete(INTRODUCTION_PAYLOADS_ROUTE)
+async def delete_introduction_payloads(
+    obligation_ref: str,
+    request: Request,
+) -> Mapping[str, Any]:
+    """Delete one introduction's contact payloads now, whatever the window says.
+
+    The same deletion operation the retention sweep runs. The deal and its
+    obligation record remain; repeating the request converges.
+    """
+    runtime = _runtime(request)
+    await _admin(
+        request=request,
+        runtime=runtime,
+        operation=DELETE_INTRODUCTION_PAYLOADS_OPERATION,
+        resource=obligation_ref,
+    )
+    retention = runtime.introduction_retention()
+    if retention is None:
+        raise HTTPException(status_code=404, detail="contact exchange is disabled")
+    return await retention.delete_one(obligation_ref)
 
 
 @router.post("/api/v1/settlements")

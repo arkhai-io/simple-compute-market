@@ -86,11 +86,11 @@ Hosted identity wire behavior belongs to the independently released hosted clien
 
 ## Settlement configuration cutover
 
-Role TOML, generated defaults and references, environment overlays, Helm values and templates, Compose, and automation all consume the same typed `[Settlement]` hierarchy. Public mechanism policy and trust pins may render through ordinary configuration; private signer or wallet material comes from approved Secret overlays. Hosted provider, administrator, webhook, database, and service-migration settings remain owned by the hosted authority and are not marketplace deployment inputs.
+Role TOML, generated defaults and references, environment overlays, Helm values, Compose, and automation all consume the same typed `[Settlement]` hierarchy; the VM storefront chart passes it through unchanged rather than rendering it key by key. Public mechanism policy and trust pins may render through ordinary configuration; private signer or wallet material comes from approved Secret overlays. Hosted provider, administrator, webhook, database, and service-migration settings remain owned by the hosted authority and are not marketplace deployment inputs.
 
 The settlement cutover deliberately rejects runtime aliases. Migration tooling is deployed first, then operators preview and back up every affected role file and overlay, quiesce publication and configuration automation, migrate and validate the complete population, and activate the matching image and configuration together. A schema/image mismatch fails before publication or settlement mutation. Rollback restores prior artifacts and backups only before the new configuration is activated; after new effects begin, recovery rolls forward from pinned plans and operation journals.
 
-Typed settlement metadata generates role-appropriate templates, edit validation, schema fragments, and reference output. Drift checks keep those surfaces aligned while omitting secrets and role-inapplicable fields.
+Typed settlement metadata generates role-appropriate templates, edit validation, environment schema fragments, and reference output. The VM storefront chart's values schema carries one generated definition that refuses secret-marked, role-inapplicable, and unknown typed fields under an agent's pass-through configuration, in any spelling, with no defaults and no required fields. Drift checks keep those surfaces aligned while omitting secrets and role-inapplicable fields.
 
 ## Protected hosted test composition
 

@@ -43,6 +43,7 @@ FULFILLMENT_RESUME = "fulfillment_resume"
 CAPACITY_EVENTS_POLLER = "capacity_events_poller"
 SITE_PROJECTION_POLLER = "site_projection_poller"
 PUBLICATION = "publication"
+INTRODUCTION_RETENTION = "introduction_retention"
 
 
 def capacity_site_loop_name(site: str) -> str:

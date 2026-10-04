@@ -1,27 +1,29 @@
 from __future__ import annotations
-import json
-import tomllib
+
 import inspect
-from dataclasses import replace
+import json
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import Any, cast
 
 import market_settlement_runtime as settlement_runtime
 import pytest
+import tomllib
 from market_settlement_runtime import (
     ComparisonOperator,
     FieldDescriptor,
     MechanismReadiness,
     MechanismRegistration,
-    ReadinessBlocker,
     QueryValueType,
+    ReadinessBlocker,
+    SettlementClauseField,
     SettlementConfig,
     SettlementConfigurationError,
     SettlementConfigurationRegistry,
-    SettlementClauseField,
     SettlementPublicationClause,
     compile_settlement_publication_clause,
 )
+from market_settlement_runtime.configuration import _secret_values
 from market_settlement_runtime.ports import ConditionalEscrowClient
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
@@ -578,3 +580,23 @@ def test_client_dispatch_ignores_current_enablement_for_recovery() -> None:
     registry.create_client("demo.pay.v1", config, role="buyer")
 
     assert events == ["factory:buyer"]
+
+
+class _NeverPublishedSettings(BaseModel):
+    contact: dict[str, str] = Field(
+        default_factory=dict, json_schema_extra={"never_published": True}
+    )
+    tokens: list[str] = Field(default_factory=list, json_schema_extra={"secret": True})
+    channel: str = "email"
+
+
+def test_never_published_and_secret_items_are_withheld_individually() -> None:
+
+    withheld = _secret_values(
+        _NeverPublishedSettings(
+            contact={"email": "ops@west.example"}, tokens=["t-1", "t-2"]
+        )
+    )
+
+    assert {"ops@west.example", "t-1", "t-2"} <= withheld
+    assert "email" not in withheld

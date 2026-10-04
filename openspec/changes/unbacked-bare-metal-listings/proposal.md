@@ -81,9 +81,9 @@ None.
   projected pool declarations and the kit publication runtime. That change added the
   requirement that an unbacked pool yields no bare-metal listing, now promoted into
   `openspec/specs/storefront-publication/spec.md`; this change's delta removes it.
-- **Blocked on `bare-metal-listing-shapes`**, so an unbacked bare-metal listing is
-  discoverable by the compute schema's dimension filters.
-- **Blocked on `compose-contact-exchange-across-compute`** Sections 1–3b, for the
+- **Depends on `bare-metal-listing-shapes`** (complete), so an unbacked bare-metal
+  listing is discoverable by the compute schema's dimension filters.
+- **Depends on `compose-contact-exchange-across-compute`** (complete), for the
   promoted introduction composition and the per-origin contact payload.
 - **Blocked on `bare-metal-mock-provisioned-deal`** for negotiation and settlement of
   an unbacked bare-metal listing through the kit negotiation runtime, which that
@@ -92,6 +92,11 @@ None.
 - **Carries** the bare-metal half of `publish-indicative-listing-rates`' unbacked
   supply system evidence, transferred here because this change creates the listing it
   needs.
+- **Carries** the two-seller introduction system scenario for both domains,
+  transferred from `compose-contact-exchange-across-compute` 6.5: two seller sites
+  behind one storefront, each revealing its own contact and receiving only its own
+  seller-side delivery. Neither lane yet has a storefront serving two sites, so this
+  change plans that topology.
 - **Builds on `contact-payload-retention`'s bare-metal introduction scenario**, the
   first end-to-end scenario to reach an introduction, rather than writing its own
   introduction flow.

@@ -39,7 +39,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-settlement-runtime"
-version = "0.1.3"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-core" },

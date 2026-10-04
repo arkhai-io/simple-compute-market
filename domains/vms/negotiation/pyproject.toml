@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-vms-negotiation"
-version = "0.2.0"
+version = "0.3.0"
 license = "MIT"
 description = "VM negotiation policies, the seller round, and the RL strategy, shared by the VM storefront and buyer."
 requires-python = ">=3.12,<3.14"

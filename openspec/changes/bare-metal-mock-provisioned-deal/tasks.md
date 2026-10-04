@@ -1105,10 +1105,11 @@ re-verifies them by grep before each move.
       injected collaborators instead of reading the service's `container` module.
       Callers: `vm_provisioning_operator/client.py`, the e2e lease view and backdating
       stages, the integration fixtures.
-      Before starting: the maintainer decides the questions in `design.md`, "Open for
-      5B.8: questions put to the maintainer" (two lease surfaces exist; route-service
-      shape; engine at the root; slicing; the readiness wire contract); amend this task
-      with the exact files per decision. Named by the architecture review (`design.md`,
+      Decided with the maintainer on 2026-10-04 (`design.md`, "Controls and routes
+      (5B.8)": three lease surfaces found; slices A0, A, B, C; 7.3 folded into B; the
+      same day's design review added decisions 9–11); this task is amended with the exact
+      files per decision when planned. Named by the
+      architecture review (`design.md`,
       "Architecture review: adapter imports of the deployed service"), all to be gone
       when 5B.8 is done:
       - the `container` reach-through in VM's `hosts_controller.py`,
@@ -1434,4 +1435,18 @@ service code.
 | The host authority is connection-neutral: a connection envelope with public fields and opaque protected values it never decrypts or discloses, an immutable `ExecutionHost`, per-kind codecs in implementation distributions that decrypt just in time (only `ssh` implemented) | `openspec/specs/physical-provisioning/spec.md` — "Host connections are typed by their implementation's codec", "Connection secrets stay protected"; `docs/development/ARCHITECTURE.md` "Family kits" compute example |
 | Provisioning route contracts are contributed as plain data and assembled by the composition root | `openspec/specs/physical-provisioning/spec.md` — "Compute-owned caller contract"; `docs/development/ARCHITECTURE.md` |
 | Compute provisioning owns jobs and hosts; executors are complete; adapters contribute preparation and meaning and import neither each other nor the deployed service | `openspec/specs/physical-provisioning/spec.md` — "Adapter-owned compute execution", "Compute-owned caller contract", "Compute provisioning owns the job and host authorities", "Provisioning adapters import neither each other nor the deployed service"; `docs/development/ARCHITECTURE.md` |
+| A capability's HTTP surface is five pieces (wire models, route contract, typed client, route service, HTTP binding), the binding owned by whatever composes the process | `docs/development/ARCHITECTURE.md` — "Route contracts and their HTTP binding" (promoted 2026-10-04, during design, at the maintainer's request) |
+| Leases have one family surface that records and releases and never delivers; leases are keyed by reservation id; the lease routes' roles | `openspec/specs/physical-provisioning/spec.md` — "Leases have one family surface that records and releases" |
+| A lease's executor identity and evidence are fixed at registration; its end moves only through site truncation | `openspec/specs/physical-provisioning/spec.md` — "A lease's executor identity and evidence are fixed at registration"; `openspec/specs/site-capacity/spec.md` — "A reservation's lease tail is written once", "Lease truncation neither resurrects nor extends a lease" |
+| The lease lifecycle is mode-agnostic: one provider-neutral release executor and status port | `openspec/specs/physical-provisioning/spec.md` — "Executor-dispatched lifecycle", "Site-backed release lifecycle", "Lease release delegates to durable fulfillment teardown"; `docs/development/ARCHITECTURE.md` "Release" |
+| Every provisioning route admits the administrator (a repository-wide stance applied to this service) | `openspec/specs/physical-provisioning/spec.md` — "Every provisioning route admits the administrator"; `docs/development/ROADMAP.md` (the repository-wide gap) |
+| The composition root builds the one job authority and the one host authority | `openspec/specs/physical-provisioning/spec.md` — "Compute provisioning owns the job and host authorities"; `docs/development/ARCHITECTURE.md` "Family kits" |
+| Execution readiness is part of system status; connectivity is probed by connection kind | `openspec/specs/physical-provisioning/spec.md` — "Execution readiness is reported in system status", "Host connectivity is probed by connection kind" |
+| The family's wire contract and client are thin distributions; VM keeps an extension client | `openspec/specs/physical-provisioning/spec.md` — "Compute-owned caller contract"; `docs/development/ARCHITECTURE.md` "Family kits" compute example |
+| `VersionedEnvelope` lives in `arkhai-core` | `openspec/specs/fulfillment/spec.md` — "Versioned envelopes"; `docs/development/ARCHITECTURE.md` (the fulfillment kit's carrier modules) |
+| Delivery happens only through fulfillment; the executor-action submission is removed | `openspec/specs/physical-provisioning/spec.md` — "Delivery happens only through fulfillment", "Validated executor registration"; `openspec/specs/compute-provisioning-contract/spec.md` (the removed requirement and the purpose statement) |
+| An undelivered lease is released by what its fulfillment proves; an uncommitted hold is released, not truncated | `openspec/specs/physical-provisioning/spec.md` — "An undelivered lease is released by what its fulfillment proves"; `openspec/specs/site-capacity/spec.md` — "Lease truncation neither resurrects nor extends a lease" |
+| Host import belongs to the implementation that reads its format | `openspec/specs/physical-provisioning/spec.md` — "Host import belongs to the execution implementation that reads its format" |
+| Resource pools and capacity definitions keep thin surfaces of their own | `openspec/specs/resource-pool-management/spec.md` — "The pool wire contract and client are thin distributions"; `openspec/specs/site-capacity/spec.md` — "Capacity-definition import has a thin typed client"; `docs/development/ARCHITECTURE.md` kit layers |
+| Findings recorded under "Controls and routes (5B.8)" | `docs/development/ROADMAP.md` or the change index, at closeout |
 | Scope migrations, the real-host scenario's disposition, and why the scenario uses typed clients | This change's `design.md` |

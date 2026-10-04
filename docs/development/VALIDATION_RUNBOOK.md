@@ -708,36 +708,22 @@ make bootstrap-admin-api-key ENV="$ENV"
 )
 
 make bootstrap-provisioning-secrets ENV="$ENV" HOSTS_INI=/dev/null
+```
 
-ADMIN_API_KEY="$(make --silent get-admin-api-key ENV="$ENV")"
+The storefront's Secret overlay is a `storefront.secrets.toml` written directly;
+the chart renders no Secret of its own. Only the private key belongs there; the
+public wallet address goes in the storefront agent's `config.Wallet.address`
+values, which the chart renders into its public `storefront.json`.
 
+```bash
 (
   TMPDIR="$(mktemp -d)"
   trap 'rm -rf "$TMPDIR"' EXIT
 
-  helm template "$RELEASE" "$APP_REPO/helm" \
-    --show-only charts/storefront/templates/secrets.yaml \
-    --values "$OPS_REPO/helm/argocd-apps/envs/dev/storefront-bootstrap-values.yaml" \
-    --set "storefront.agents[0].secret.privKey=0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a" \
-    --set "storefront.agents[0].secret.walletAddress=0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC" \
-    --set "global.adminApiKey=${ADMIN_API_KEY}" \
-    > "$TMPDIR/storefront-secret.yaml"
-
-  python3 - "$TMPDIR/storefront-secret.yaml" > "$TMPDIR/storefront.secrets.toml" <<'PY'
-import sys
-import yaml
-
-with open(sys.argv[1], encoding="utf-8") as fh:
-    for doc in yaml.safe_load_all(fh):
-        if not doc or doc.get("kind") != "Secret":
-            continue
-        value = (doc.get("stringData") or {}).get("storefront.secrets.toml")
-        if value is not None:
-            sys.stdout.write(value)
-            break
-    else:
-        raise SystemExit("ERROR: storefront.secrets.toml not found in rendered Secret")
-PY
+  cat > "$TMPDIR/storefront.secrets.toml" <<'TOML'
+[wallet]
+private_key = "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
+TOML
 
   gcloud secrets versions add simple-market-service-storefront-arkhai \
     --data-file="$TMPDIR/storefront.secrets.toml" \
@@ -841,6 +827,40 @@ curl -sf http://localhost:8081/api/v1/system/status | jq
 bash scripts/validate/api-gateway.sh "$ENV"
 make unforward
 ```
+
+### Settlement by introduction on a Helm release
+
+`helm/fixtures/contact-exchange-values.yaml` overlays the default release so Bob's
+storefront offers contact exchange, delivers each revealed buyer contact by SMTP,
+and the `dev-env` chart runs Mailpit to receive it. It repeats Bob's whole agent
+entry, since Helm replaces lists; layer your environment's values first if it
+already redefines Bob. The fixture advertises Bob at the host port-forward URL
+and gives capacity-backed test pools a contact-exchange settlement clause. Use
+it only for a local Helm test release with the deterministic development
+identities and existing chart Secrets.
+
+```bash
+make build-dev
+make -C e2e-tests reinit
+make -C helm template VALUES=fixtures/contact-exchange-values.yaml \
+  > /tmp/arkhai-contact-exchange-rendered.yaml
+make -C helm deploy VALUES=fixtures/contact-exchange-values.yaml NAMESPACE=default
+
+# Confirm the Service names this release rendered before forwarding.
+kubectl get svc -n default | grep -E "storefront-bob|registry|provisioning|mailpit"
+
+kubectl port-forward -n default "svc/${RELEASE}-dev-env" 8545:8545 &
+kubectl port-forward -n default "svc/${RELEASE}-storefront-bob" 8001:8001 &
+kubectl port-forward -n default "svc/${RELEASE}-registry" 8080:8080 &
+kubectl port-forward -n default "svc/${RELEASE}-provisioning" 8081:8081 &
+kubectl port-forward -n default "svc/${RELEASE}-dev-env-mailpit" 8025:8025 &
+
+make -C e2e-tests test-module MODULE=e2e_vm_introduction ACTIVE_PROFILES=local
+```
+
+The `local` profile addresses each service on `localhost` at those ports, and
+reads Mailpit's API at `http://localhost:8025`. The scenario holds the
+storefront's loops while it runs and resumes them when it finishes.
 
 ## 21. Manual GCE KVM Host
 
@@ -1036,7 +1056,7 @@ helm upgrade --install "$RELEASE" "$APP_REPO/helm" \
   --values "$APP_REPO/helm/values.yaml" \
   --values "$OPS_REPO/helm/argocd-apps/envs/dev/simple-market-service-values.yaml" \
   --set provisioning.mockMode=false \
-  --set storefront.agents[0].config.seller.provisioning.mode=real \
+  --set storefront.agents[0].config.provisioning.mode=real \
   --namespace default \
   --wait \
   --timeout 10m

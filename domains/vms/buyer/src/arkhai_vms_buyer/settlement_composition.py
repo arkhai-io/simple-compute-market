@@ -17,6 +17,10 @@ from core_buyer.profile_service import BuyerProfileService, ProfileServiceError
 from core_buyer.buyer_config import ResolvedBuyerIdentity
 from core_buyer.settlement import BuyerSettlementPolicy, SelectedSettlementOption
 from market_alkahest import create_alkahest_registration
+from market_contact_exchange import (
+    create_contact_command_group,
+    create_contact_exchange_registration,
+)
 from market_config.config_loader import load_user_config
 from market_hosted_settlement import (
     FundingMode,
@@ -42,6 +46,7 @@ from .common import (
     resolve_fresh_buyer_identity,
 )
 from .escrow_cli import escrow_app
+from .introduction_cli import IntroductionContext
 
 
 def _alkahest_command_group():
@@ -118,6 +123,10 @@ def _payer_command_context() -> PayerCommandContext:
     )
 
 
+def _introduction_context() -> Any:
+    return IntroductionContext()
+
+
 def buyer_settlement_registry() -> SettlementConfigurationRegistry:
     """Return the explicitly installed VM buyer mechanisms."""
 
@@ -129,6 +138,9 @@ def buyer_settlement_registry() -> SettlementConfigurationRegistry:
             ),
             create_stripe_registration(
                 command_group=create_stripe_command_group(_payer_command_context)
+            ),
+            create_contact_exchange_registration(
+                command_group=create_contact_command_group(_introduction_context)
             ),
         )
     )

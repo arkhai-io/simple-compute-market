@@ -23,6 +23,10 @@ from core_storefront.domain_lifecycle import (
 )
 from core_storefront.stage_log import stage_event
 from market_alkahest import create_alkahest_registration
+from market_contact_exchange import (
+    MECHANISM as CONTACT_MECHANISM,
+)
+from market_contact_exchange import create_contact_exchange_registration
 from market_core import MarketDomainContract
 from market_core.schemas import (
     EscrowProposal,
@@ -87,6 +91,9 @@ VM_MECHANISM_FULFILLS_THROUGH_CAPACITY: Mapping[str, bool] = MappingProxyType(
     {
         "alkahest.v1": True,
         "fiat.stripe.v1": True,
+        # An introduction settles by revealing contacts; nothing is admitted
+        # against capacity, so an unbacked listing may offer it.
+        CONTACT_MECHANISM: False,
     }
 )
 
@@ -332,6 +339,7 @@ def build_storefront_settlement_registry() -> SettlementConfigurationRegistry:
         (
             create_alkahest_registration(),
             create_stripe_registration(),
+            create_contact_exchange_registration(),
         )
     )
 

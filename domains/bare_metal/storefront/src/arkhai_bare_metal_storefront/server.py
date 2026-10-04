@@ -13,6 +13,7 @@ from core_storefront.app_startup import StorefrontBackgroundTask
 from core_storefront.domain_registry import StorefrontDomainRegistry
 from core_storefront.escrow_identity import backfill_escrow_obligation_records
 from core_storefront.stage_log import set_stage_event_db_path, stage_event
+from market_contact_exchange import run_introduction_retention_sweep
 from market_core import MarketDomainContract
 from market_storefront_kit import (
     NegotiationWatchdogPolicy,
@@ -25,7 +26,11 @@ from market_storefront_kit import (
 
 from .api import router as http_router
 from .domain_runtime import get_market_domain_contract
-from .lifecycle_steps import NEGOTIATION_WATCHDOG, SETTLEMENT_SERVICING
+from .lifecycle_steps import (
+    INTRODUCTION_RETENTION,
+    NEGOTIATION_WATCHDOG,
+    SETTLEMENT_SERVICING,
+)
 from .runtime import BareMetalStorefrontRuntime, build_runtime_from_environment
 from .storefront_registry import build_bare_metal_storefront_registry
 from .response_auth import authenticate_response
@@ -79,6 +84,21 @@ async def _start_runtime(runtime: BareMetalStorefrontRuntime) -> None:
                 task_factory=partial(
                     runtime.settlement_worker.run,
                     paused=loops.loop_gate(SETTLEMENT_SERVICING),
+                    wait=loops.idle,
+                ),
+            )
+        )
+    retention = runtime.introduction_retention()
+    if retention is not None:
+        # Every storefront composing contact exchange runs the retention sweep;
+        # its step and preview were registered with the runtime.
+        loops.start_loop(
+            StorefrontBackgroundTask(
+                name=INTRODUCTION_RETENTION,
+                task_factory=partial(
+                    run_introduction_retention_sweep,
+                    retention,
+                    paused=loops.loop_gate(INTRODUCTION_RETENTION),
                     wait=loops.idle,
                 ),
             )

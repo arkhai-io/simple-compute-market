@@ -390,6 +390,20 @@ The buyer is normally a pure HTTP client. The registry is a shared discovery ser
 
 Within a service, controllers stay thin: HTTP routing, request/response schemas, and translating exceptions into status codes. Business rules, orchestration, and I/O composition live in the 'service' layer beneath them. A per-service breakdown of its own layers belongs in that subsystem's `architecture.md`, not here.
 
+### Route contracts and their HTTP binding
+
+A capability that serves HTTP routes is split into five pieces. The package that owns the capability owns the wire models, the route contract, and the route service:
+
+1. **Wire models**: the request and response schemas.
+2. **Route contract**: each route's method, path, signed operation name, the resource a request binds, and the caller roles it admits. Request authentication and the typed client both bind requests from it, so the two cannot disagree.
+3. **Typed client**: a method for every route, sync and async where both are offered, built on the route contract. It may live beside the capability or in a thin client package of its own that depends only on the models and the contract, so a caller does not install the capability's service code to call it.
+4. **Route service**: a framework-free class over the capability's collaborators that validates and performs each route and shapes its response. It reports a refusal as an error carrying a status code and detail, and it imports no web framework.
+5. **HTTP binding**: the thin controller that maps each route to its route service, turns the route-service error into a response, and sits behind the process's authentication. It belongs to whatever composes the process: a storefront for storefront capabilities, the provisioning service for the compute family kit's routes, and a domain package for the routes that domain contributes.
+
+A domain that contributes routes to a service it does not compose declares their contracts in its own package and supplies its router as a factory taking accessors for its collaborators, so no route reaches into the composing service's module state. Because a binding repeats its contract's path, the provisioning service, which assembles its route table from contributions, tests that every route it mounts resolves to exactly one contract and that every contract resolves to a mounted route.
+
+`kit/pool-overrides` is the reference instance. `kit/site` predates the pattern and ships its own FastAPI router.
+
 ## Authority boundaries
 
 | State or decision | Authority | Notes |

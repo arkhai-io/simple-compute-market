@@ -20,6 +20,8 @@ if TYPE_CHECKING:
     )
     from core_storefront.services.negotiation_service import NegotiationService
     from market_capacity_publication import CapacityRuntime
+    from market_contact_exchange import ContactExchangeComposition
+    from market_delivery import SellerIntroductionDelivery
     from market_identity import Signer
     from market_negotiation_runtime import NegotiationRuntime
     from market_pool_overrides import PoolOverrideService
@@ -49,6 +51,8 @@ resolved_negotiation_service: NegotiationService | None = None
 resolved_system_service: SystemService | None = None
 resolved_pool_override_service: PoolOverrideService | None = None
 resolved_settlement_composition: VmSettlementComposition | None = None
+resolved_contact_exchange: ContactExchangeComposition | None = None
+resolved_introduction_delivery: SellerIntroductionDelivery | None = None
 
 resolved_storefront_service = None
 
@@ -73,6 +77,8 @@ def clear_lifespan_state(*, registry: StorefrontDomainRegistry) -> None:
     global resolved_system_service
     global resolved_pool_override_service
     global resolved_settlement_composition
+    global resolved_contact_exchange
+    global resolved_introduction_delivery
     global resolved_storefront_service
 
     if (
@@ -94,6 +100,8 @@ def clear_lifespan_state(*, registry: StorefrontDomainRegistry) -> None:
     resolved_system_service = None
     resolved_pool_override_service = None
     resolved_settlement_composition = None
+    resolved_contact_exchange = None
+    resolved_introduction_delivery = None
     resolved_storefront_service = None
 
 

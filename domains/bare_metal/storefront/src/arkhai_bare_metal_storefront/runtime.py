@@ -17,6 +17,15 @@ from core_storefront.models.system_models import ProjectionFamilyStatus
 from market_identity import Identity, IdentityScheme, Signer, TrustedIdentitySet
 from market_alkahest import create_alkahest_registration
 from market_core import MarketDomainContract, validate_domain_contract
+from market_contact_exchange import (
+    MECHANISM as CONTACT_MECHANISM,
+)
+from market_contact_exchange import (
+    ContactExchangeComposition,
+    ContactSettlementConfig,
+    IntroductionRetentionService,
+    SQLiteIntroductionStore,
+)
 from market_hosted_settlement import PortableRemoteFulfillmentRef, canonical_json
 from market_settlement_runtime import (
     SettlementRuntime,
@@ -44,11 +53,7 @@ from .hosted_routes import (
     lifecycle_domain_callbacks,
 )
 from .lifecycle_steps import register_bare_metal_lifecycle_steps
-from .delivery import (
-    build_introduction_delivery,
-    load_storefront_delivery_sinks,
-    storefront_delivery_section,
-)
+from .delivery import storefront_introduction_delivery
 from .pool_overrides import (
     BareMetalPoolOverrideContribution,
     accepted_site_projection,
@@ -156,6 +161,7 @@ class BareMetalStorefrontRuntime:
     settlement_repository: SettlementSQLiteRepository = field(init=False, repr=False)
     settlement_clients: Mapping[str, Any] = field(init=False, repr=False)
     settlement_runtime: SettlementRuntime = field(init=False, repr=False)
+    contact_exchange: ContactExchangeComposition = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         repository = SettlementSQLiteRepository(
@@ -174,7 +180,34 @@ class BareMetalStorefrontRuntime:
             "settlement_runtime",
             SettlementRuntime(repository, clients),
         )
+        object.__setattr__(
+            self,
+            "contact_exchange",
+            ContactExchangeComposition(
+                config=self.contact_settlement_config,
+                store=SQLiteIntroductionStore(self.db.db_path),
+                load_thread=self.db.load_negotiation_thread_row,
+                load_obligation=repository.load_settlement_obligation,
+                load_origin=self._negotiation_origin,
+                settlement_runtime=self.settlement_runtime,
+                known_origins=[binding.site_id for binding in self.site_bindings],
+                deliver=self._deliver_introduction,
+            ),
+        )
         register_bare_metal_lifecycle_steps(self)
+
+    def _deliver_introduction(self, projection: Any, agreement: Any) -> None:
+        """Hand a fresh reveal to the configured seller-side dispatch, if any."""
+        if self.introduction_delivery is not None:
+            self.introduction_delivery(projection, agreement)
+
+    async def _negotiation_origin(self, negotiation_id: str) -> str | None:
+        """The site recorded on the negotiation's binding, or None if unbound."""
+        try:
+            binding = await self.db.load_thread_binding(negotiation_id=negotiation_id)
+        except (KeyError, ValueError):
+            return None
+        return binding.site_id
 
     def negotiation_service(self) -> BareMetalNegotiationService:
         """Build the request-scoped bare-metal negotiation orchestrator."""
@@ -219,6 +252,18 @@ class BareMetalStorefrontRuntime:
             capacity_client=self.capacity_client,
             fulfillment_client=self.fulfillment_client,
         )
+
+    def contact_settlement_config(self) -> ContactSettlementConfig | None:
+        """The contact-exchange section when the mechanism is enabled, else None."""
+        composition = self.settlement_composition
+        if composition is None or CONTACT_MECHANISM not in composition.enabled_mechanisms:
+            return None
+        section = composition.config.mechanism_config("contact")
+        return section if isinstance(section, ContactSettlementConfig) else None
+
+    def introduction_retention(self) -> IntroductionRetentionService | None:
+        """Introduction retention under the running configuration, or None."""
+        return self.contact_exchange.retention()
 
     def pool_override_service(self) -> PoolOverrideService | None:
         """The storefront's pool-override service, or ``None`` without sites.
@@ -297,7 +342,12 @@ class BareMetalStorefrontRuntime:
             "sites": [binding.diagnostic() for binding in self.site_bindings],
             "resource_count": resource_count,
             "site_projections": await self._site_projections(),
+            "disclosures": self._disclosures(),
         }
+
+    def _disclosures(self) -> dict[str, dict[str, object]]:
+        """Storefront policies a counterparty may read before committing data."""
+        return self.contact_exchange.disclosures()
 
     async def _site_projections(self) -> dict[str, dict[str, dict[str, object]]]:
         """Each trusted site's resource-pool projection as fetched just now.
@@ -515,13 +565,16 @@ def build_runtime_from_environment(
             "bare-metal storefront trusted site composition is invalid",
         ) from exc
     try:
-        delivery_sinks = load_storefront_delivery_sinks(storefront_delivery_section())
+        introduction_delivery = storefront_introduction_delivery(
+            known_origins=[binding.site_id for binding in site_bindings],
+            signer=signer,
+        )
     except (TypeError, ValueError, json.JSONDecodeError) as exc:
         raise RuntimeError(
             "BARE_METAL_STOREFRONT_DELIVERY must be a strict [Delivery] section"
         ) from exc
     runtime = BareMetalStorefrontRuntime(
-        introduction_delivery=build_introduction_delivery(delivery_sinks.sinks),
+        introduction_delivery=introduction_delivery,
         db=db,
         domain=selected_domain,
         seller_principal=principal,

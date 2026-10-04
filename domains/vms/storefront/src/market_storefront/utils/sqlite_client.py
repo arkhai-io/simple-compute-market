@@ -30,6 +30,7 @@ from arkhai_vms_listings.resource_csv_importer import (
     upsert_resources_from_csv,
     upsert_resources_from_csv_content,
 )
+from market_contact_exchange import CONTACT_EXCHANGE_MIGRATIONS
 from market_hosted_settlement import HOSTED_SETTLEMENT_MIGRATIONS
 from market_pool_overrides import pool_override_migrations
 from market_settlement_runtime import settlement_migrations
@@ -84,6 +85,7 @@ class SQLiteClient(CoreSQLiteClient):
         return (
             *settlement_migrations(),
             *HOSTED_SETTLEMENT_MIGRATIONS,
+            *CONTACT_EXCHANGE_MIGRATIONS,
             *pool_override_migrations(),
             *VM_MIGRATIONS,
         )

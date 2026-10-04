@@ -1,8 +1,9 @@
 """Storefront configuration via dynaconf.
 
-Public profile values come from ``storefront.toml`` and environment-specific
-secrets come from ``storefront.secrets.toml`` or an approved environment
-Secret. Marketplace signing material is never loaded into Dynaconf:
+Public values come from an operator's ``storefront.toml`` and, under Helm, the
+chart-rendered ``storefront.json``; environment-specific secrets come from
+``storefront.secrets.toml`` or an approved environment Secret, which win over
+both. Marketplace signing material is never loaded into Dynaconf:
 ``ARKHAI_IDENTITY_CREDENTIAL`` is resolved at the composition root and passed
 directly to the identity signer factory.
 
@@ -31,6 +32,7 @@ from market_config.config_loader import (  # type: ignore[import-not-found]
 )
 from market_config.registry_url import normalize_registry_url
 from market_identity import Identity, IdentityScheme, Signer, TrustedIdentitySet
+from pydantic import BaseModel, ConfigDict, Field
 
 from .zerotier import BaseUrlResolutionError, resolve_base_url_best_effort
 
@@ -101,6 +103,36 @@ def settlement_config_mapping(source: Dynaconf | None = None) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError("Settlement must be a table")
     return value
+
+def delivery_config_mapping(source: Dynaconf | None = None) -> dict[str, Any] | None:
+    """Return the storefront's ``[Delivery]`` section, or None when absent.
+
+    Dynaconf merges top-level keys case-insensitively, so ``[Delivery]`` and
+    ``[delivery]`` are the same section.
+    """
+    active = source or settings
+    raw = active.get("delivery")
+    if raw is None:
+        return None
+    value = _detached(raw)
+    if not isinstance(value, dict):
+        raise ValueError("Delivery must be a table")
+    return value
+
+
+def _detached(value: Any) -> Any:
+    """Detach Dynaconf containers keeping key spelling.
+
+    ``[Delivery]`` names its instances both as table keys and as values in
+    ``enabled`` and ``origins``; lowercasing only the keys would separate the
+    two spellings of one name.
+    """
+    if hasattr(value, "items"):
+        return {str(key): _detached(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_detached(item) for item in value]
+    return value
+
 
 def storefront_domain_registry(
     source: Dynaconf | None = None,
@@ -231,6 +263,74 @@ def get_evm_wallet_private_key(source: Dynaconf | None = None) -> str:
 
     active = settings if source is None else source
     return str(active.get("wallet.private_key", "") or "").strip()
+
+
+class AdministratorDeclaration(BaseModel):
+    """One ``[Identity.administrators.<subject>]`` entry."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    principals: list[Identity] = Field(default_factory=list)
+
+
+class ServicePeerDeclaration(BaseModel):
+    """One ``[Identity.service_peers.<peer_id>]`` entry."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    role: str = ""
+    site_id: str = ""
+    principals: list[Identity] = Field(default_factory=list)
+
+
+class IdentityConfigDeclaration(BaseModel):
+    """The public shape of ``[Identity]``, read above through Dynaconf.
+
+    Not used to parse the section at runtime; the parsers above do that and
+    use the same identity models for each principal. It declares the keys the
+    section may hold, all public, so a chart's generated values schema refuses
+    anything else under ``Identity`` — private identity material arrives only
+    through ``ARKHAI_IDENTITY_CREDENTIAL``. A key the parsers gain must be
+    added here, or the values schema refuses it; see
+    docs/development/DEPLOYMENT_AND_CONFIG.md.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    principal: IdentityConfig | None = None
+    administrators: dict[str, AdministratorDeclaration] = Field(default_factory=dict)
+    service_peers: dict[str, ServicePeerDeclaration] = Field(default_factory=dict)
+
+
+class WalletConfigDeclaration(BaseModel):
+    """The public and secret shape of ``[Wallet]``, read above through Dynaconf.
+
+    Not used to parse the section at runtime. It declares which of its keys
+    are secret so a chart's generated values schema can keep them out of a
+    ConfigMap; see docs/development/DEPLOYMENT_AND_CONFIG.md. The section is
+    closed: these are the only keys any reader uses.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    address: str = ""
+    ssh_public_key: str = ""
+    private_key: str = Field(default="", json_schema_extra={"secret": True})
+
+
+class RegistryConfigDeclaration(BaseModel):
+    """The secret part of ``[registry]``, whose other keys stay untyped.
+
+    ``auth`` maps a registry URL to its write token and is read through
+    Dynaconf by publication and status. Declared here only so a chart's
+    generated values schema refuses it outside the Secret overlay.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    auth: dict[str, str] = Field(
+        default_factory=dict, json_schema_extra={"secret": True}
+    )
 
 
 def _trusted_identity_set(raw: Any, *, field: str) -> TrustedIdentitySet:

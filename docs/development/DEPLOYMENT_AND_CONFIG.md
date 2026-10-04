@@ -82,6 +82,11 @@ application Deployment and to Helm test pods.
   a ConfigMap, mounted at `CONFIG_DIRECTORY` as a `config-<profile>.yml`
   file. Adding a new non-secret key requires only a `values.yaml`
   change — no Deployment template change.
+  The provisioning chart and the umbrella's generated smoke-test profile
+  write JSON syntax into that YAML profile so 0x-prefixed EIP-191
+  identifiers remain strings when Dynaconf reads it: Helm's YAML encoder
+  leaves a 160-bit address unquoted, and a YAML loader reads it as an
+  integer.
 - Secret material (key material, credentials) that cannot go in a
   ConfigMap renders into a Kubernetes Secret whose data contains its own
   `config-<profile>.yml` key, mounted at the same `CONFIG_DIRECTORY`.
@@ -102,6 +107,81 @@ the same mechanism Helm test pods use to layer in test-only
 configuration: the shared non-secret values merge through one profile,
 and a pod needing secret material mounts an additional Secret-backed
 profile on top.
+
+### Storefront agents: pass-through configuration
+
+The VM storefront does not use profiles; it reads up to three files from
+`$XDG_CONFIG_HOME/arkhai/`, a later file winning on a conflicting key:
+`storefront.toml` (an operator's own file), `storefront.json` (the public
+document the chart renders), then `storefront.secrets.toml` (the Secret
+overlay). The chart mounts the last two at `/etc/arkhai/`.
+`market-storefront config show` reports the files merged as the server merges
+them; `--raw` prints each public file and never the overlay.
+
+Each entry of `storefront.agents` carries the storefront's own configuration
+in `config`, in the storefront's own key names, and the chart renders it
+unchanged into `storefront.json`. A setting or settlement mechanism the
+storefront gains deploys through values alone. Keys may be spelled in any case,
+as the storefront's loader reads them; a key stated in two spellings is refused
+at render. The chart adds only what the release knows, and except for the port
+only where `config` does not state it:
+
+| Setting | Derived from |
+|---|---|
+| `port` | the agent's `port`; always set, and a different stated value is refused |
+| `base_url` | the agent's Service |
+| `registry.urls`, `registry.authorities.<url>` | the internal registry's Service, with the agent's `internalRegistryTrust` written under its URL |
+| `provisioning.service_url` | the provisioning Service |
+| `capacity.sites` | `{default: <provisioning URL>}` |
+| `db_path` | `agent.db` under `persistence.mountPath` |
+
+`internalRegistryTrust` sits outside `config` because its key is the registry's
+release-derived URL; it is required while the agent uses the internal registry,
+and it must name `global.registryIdentity`'s authority and principal. When the
+agent uses the release's provisioning service, `config.provisioning.identity`
+and an `Identity.service_peers` entry for the site bound to it must include
+`global.provisioningIdentity`. Those checks relate the release's parts; the
+chart supplies no service default and does not validate the storefront's own
+settings. The storefront validates its typed sections at startup; untyped
+sections are not checked key by key (see below). Because the Deployment uses
+the `Recreate` strategy, a configuration the storefront refuses leaves no
+running pod; recover with `helm rollback`.
+
+`config` is public: it renders into a ConfigMap. The values schema carries one
+definition generated from the storefront's typed configuration models
+(`make helm-values-schema` regenerates it; a storefront unit test fails when it
+is stale). That definition refuses, in any spelling, every field a model marks
+secret or not applicable to the seller role, every field a typed section's
+model does not have, and every key in `Identity` other than its public
+principal, administrators, and service peers. So a wallet private key, a
+registry write token, private identity material, and hosted payer data are
+refused before anything renders; they belong in the Secret overlay, or for the
+signer credential in `identity.credentialSecret`. Untyped sections such as
+`provisioning`, `negotiation`, and `pricing` pass through unchecked, and a
+misspelled key there is ignored by the storefront. The schema also refuses the
+values shape of storefront chart releases before 0.2.0 — `seller`,
+`storefrontDomains`, `registryAuthority`, `registryUrl`, and `configMapName`
+under `config`; `agentId`, `autoRegister`, and `rootPath` on an agent; and
+`image.settlementConfigSchemaVersion` — naming the key.
+
+The generated definition also types `[Settlement.contact]` and `[Delivery]`. A
+seller's contact is public configuration, so it is accepted in `config`. Each
+`[Delivery]` instance is typed by the sink it uses, its `sink` value or its own
+name. The sinks typed are those installed in the storefront's image that declare
+their settings model, found by discovery when the schema is generated: their secret
+settings are refused wherever the instance is named, a table named for one of them
+may not state another, and an instance of any other sink stays open. `sink` must be
+spelled exactly so: the delivery kit reads no other spelling, and the schema refuses
+`Sink` or `SINK` rather than let such an instance escape the typing that keeps
+secret settings out of the ConfigMap.
+`helm/fixtures/contact-exchange-values.yaml`
+is a test overlay enabling contact exchange for Bob with SMTP delivery to the
+`dev-env` chart's optional Mailpit (`dev-env.mailpit.enabled`), which a scenario
+reads back; `docs/development/VALIDATION_RUNBOOK.md` gives the commands.
+
+`storefront.json` is JSON so every string, including a 160-bit address, is read
+back as a string. Every number in a values file passes through a float on its
+way into Helm, so write an integer above 2^53 as a string.
 
 ## Marketplace identity configuration
 
@@ -222,7 +302,9 @@ configuration contains a non-empty `storefront_domains` list; every row names
 one contribution, exact offering mode, domain identity, and contract version.
 Trusted provisioning authorities remain separately configured site bindings.
 The Helm chart and Compose profile run one storefront process against one
-single-writer SQLite volume; they do not start one container per domain.
+single-writer SQLite volume; they do not start one container per domain. Under
+Helm the list is each agent's `config.storefront_domains`, passed through as
+written (see "Storefront agents: pass-through configuration").
 
 `storefront_domains` is public routing metadata only. Signing credentials,
 provider settings, SSH material, tenant credentials, hosted provider objects,
@@ -647,7 +729,11 @@ sequence:
 
 4. Repeat `--check` for every file and render the Helm or Compose deployment.
    Do not proceed if a migration, typed configuration validation, generated
-   schema check, hosted manifest check, or image/config schema check fails.
+   schema check, or hosted manifest check fails. Helm values are not a file
+   `config migrate` reads: rendering applies the values schema, and at startup
+   the storefront applies its typed validation — refusing, for example, a
+   settlement schema version other than its own. Untyped settings are not
+   checked key by key.
 5. Quiesce publication, negotiation, settlement, and recovery automation.
    Deploy the coordinated marketplace configuration, wheels, image, Secret,
    and ConfigMap set. Keep automation quiesced while every storefront reports
@@ -670,6 +756,107 @@ Stripe credentials, or provider state. Those belong to the hosted service's
 independent release and chart. Marketplace packages consume the exact hosted
 client wheel and identity interface bound by that signed release manifest;
 editable sibling sources and compatible-major substitution are rejected.
+
+### Contact-exchange contacts
+
+A storefront composing `contact-exchange.v1` (bare metal and VM) configures it in
+the peer `[Settlement.contact]` table: its `profiles`, the public terms an
+introduction option advertises, and the seller's contact in exactly one of two
+forms.
+
+```toml
+# One storefront, one origin site: the single form.
+[Settlement.contact]
+enabled = true
+contact_payload = { email = "sales@bob.example" }
+
+# One storefront, several seller sites: a contact per origin.
+[Settlement.contact.origins.dc-west]
+contact_payload = { email = "ops@west-seller.example" }
+
+[Settlement.contact.origins.dc-east]
+contact_payload = { email = "sales@east-seller.example" }
+```
+
+An origin is the site a listing's durable binding records; the storefront reads
+its configured sites (`[capacity.sites]` on VM, `BARE_METAL_STOREFRONT_SITES` on
+bare metal) as the known origins. The storefront refuses to start when both forms
+are set, when the single form is set while more than one site is configured, or
+when an `origins` key names no configured site. A site without an entry is legal:
+its listings publish no introduction option, and a reveal for an accepted deal whose
+origin has lost its entry is refused with `seller_contact_unavailable` before
+anything is stored. The contact is never substituted from another origin.
+
+Contacts are ordinary configuration, marked `never_published` rather than secret:
+they may sit in the public configuration (the Helm ConfigMap included) and still
+never appear in a listing, an option, readiness, or an obligation. Readiness stays
+storefront-wide: the mechanism is unready only with no profiles or no contact in
+either form.
+
+### Introduction delivery
+
+`[Delivery]` sends each revealed introduction to destinations the side's own
+operator configured; the seller's side carries the buyer's contact, the buyer's
+side the seller's. `enabled` names sink instances; an instance's table names the
+installed sink it uses with `sink`, and a table naming none uses the sink of its own
+name, so `[Delivery.file]` keeps its meaning.
+
+```toml
+[Delivery]
+enabled = ["west-hook", "east-mail", "audit"]
+
+[Delivery.west-hook]
+sink = "webhook"
+sign = true                         # signed with the storefront's marketplace signer
+
+[Delivery.east-mail]
+sink = "smtp"
+host = "mail.east-seller.example"
+sender = "storefront@example.com"
+recipients = ["sales@east-seller.example"]
+
+[Delivery.audit]
+sink = "file"
+path = "/var/log/introductions.jsonl"
+
+[Delivery.origins]                  # seller side only
+dc-west = ["west-hook", "audit"]
+dc-east = ["east-mail", "audit"]
+```
+
+A storefront with more than one origin must route: with sinks enabled and no
+`[Delivery.origins]`, it refuses to start, since broadcasting every reveal to every
+destination would hand one seller's buyers' contacts to another. Every routed name
+must be enabled, every enabled instance routed, and every origin the table names
+must be one of the storefront's sites; a site the table does not name receives no
+seller-side delivery. A buyer may not route. With
+`sign = true` a webhook request carries a v2 marketplace signature its receiver
+verifies against the storefront principal. The installable `apprise` sink
+(`arkhai-kit-delivery-apprise`, in both storefront images) reaches any service an
+Apprise URL names. Credentials — a webhook's `url` and `headers`, an SMTP
+`password`, Apprise `urls` — are secret settings: they belong in the secrets overlay,
+and the Helm values schema refuses them in an agent's `config`.
+
+Operators re-deliver a revealed introduction to its origin's instances with
+`market-storefront settlement contact redeliver --obligation-ref …` on VM and the
+bare-metal storefront's `redeliver-introduction` command. Delivery and re-delivery
+are specified in [introduction delivery](../../openspec/specs/introduction-delivery/spec.md).
+
+### Contact-exchange retention
+
+Two seller-only settings in `[Settlement.contact]` bound how long revealed contacts
+are kept:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `retention_seconds` | `2592000` (30 days) | How long both contact payloads of a revealed introduction are kept, counted from the reveal. A positive integer, or `"indefinite"` for no deletion. Zero and negative values are refused, so a typo cannot delete introductions moments after reveal. |
+| `retention_sweep_interval_seconds` | `3600` | How often the retention sweep runs. Positive. |
+
+The window is current policy, not a term of any deal: a storefront restarted with a
+shorter window deletes, on its next sweep, every introduction already past the new
+window, including those revealed under the longer one. The window is published to
+buyers; deletion and disclosure behaviour are specified in
+[contact-exchange settlement](../../openspec/specs/contact-exchange-settlement/spec.md).
 
 ### Bare-metal hosted role configuration
 

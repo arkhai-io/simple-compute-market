@@ -19,6 +19,10 @@ alkahest_app = typer.Typer(
     no_args_is_help=True, help="Alkahest readiness checks."
 )
 
+from market_storefront.groups.contact import contact_app  # noqa: E402
+
+settlement_app.add_typer(contact_app, name="contact")
+
 
 def _settlement_context() -> tuple[Any, SettlementConfig, dict[str, Any]]:
     from market_storefront.settlement_composition import (

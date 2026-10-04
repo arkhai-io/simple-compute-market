@@ -39,8 +39,11 @@ from market_site_client.fixtures.resource_pools import (
     build_resource_pool_row,
 )
 import market_policy.negotiation_thread as thread_store
+from market_contact_exchange import MECHANISM as CONTACT_MECHANISM
+from market_contact_exchange import ContactExchangeClient
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from market_policy.identity import Identity as PolicyIdentity
+from market_settlement_runtime import SettlementRuntime, SettlementSQLiteRepository
 from storefront_client.client import StorefrontClient
 
 import market_storefront.container as container
@@ -51,7 +54,11 @@ from market_storefront.middleware import admin_identity
 import market_storefront.server  # noqa: F401  (import order, see above)
 from market_storefront.server import build_pool_override_service
 import market_storefront.negotiation_runtime as negotiation_runtime
+from market_storefront.contact_exchange import build_vm_contact_exchange
 from market_storefront.controllers.admin_controller import router as admin_router
+from market_storefront.controllers.introductions_controller import (
+    router as introductions_router,
+)
 from market_storefront.controllers.listings_controller import (
     admin_router as listings_admin_router,
 )
@@ -115,6 +122,40 @@ SETTLEMENT = {
 }
 
 
+#: The seller contacts a contact-exchange app reveals, one per configured site.
+#: Development values on a reserved domain.
+SITE_CONTACTS = {
+    "site-a": {"email": "sales@site-a.invalid"},
+    "site-b": {"email": "sales@site-b.invalid"},
+}
+
+
+def contact_settlement(origins: Mapping[str, Mapping[str, str]]) -> dict[str, Any]:
+    """``[Settlement]`` composing contact exchange beside Alkahest, keyed by site."""
+    return {
+        **SETTLEMENT,
+        "priority": ["alkahest.v1", CONTACT_MECHANISM],
+        "contact": {
+            "enabled": True,
+            "origins": {
+                site: {"contact_payload": dict(contact)} for site, contact in origins.items()
+            },
+            "profiles": {
+                "default": {"channel": "email", "terms": "Quoted per engagement."}
+            },
+        },
+    }
+
+
+def contact_clause() -> dict[str, Any]:
+    """One contact-exchange publication clause, as a pool override states it."""
+    return {
+        "mechanism": CONTACT_MECHANISM,
+        "asset": "introduction",
+        "mechanism_input": {"profile": "default"},
+    }
+
+
 def settlement_clause(rate: str = "100") -> dict[str, Any]:
     """One Alkahest publication clause, as `[pricing].settlements` holds it.
 
@@ -139,9 +180,10 @@ class SettlementCompositionDouble:
 
     Clauses compile against the real configuration registry and settlement
     configuration. Artifact construction, which the real composition delegates to
-    mechanism clients, yields one accepted escrow per Alkahest clause.
-    ``mechanism_fulfillment`` is the per-test declaration of which mechanisms VM
-    fulfils through capacity.
+    mechanism clients, yields one accepted escrow per Alkahest clause; a
+    contact-exchange clause, which needs no client, is built by the real
+    registry, and so is acceptance. ``mechanism_fulfillment`` is the per-test
+    declaration of which mechanisms VM fulfils through capacity.
     """
 
     def __init__(self, mechanism_fulfillment: Mapping[str, bool]) -> None:
@@ -151,7 +193,52 @@ class SettlementCompositionDouble:
         )
         self.mechanism_fulfillment = dict(mechanism_fulfillment)
 
+    async def _registry_options(self, resources, clauses) -> list[dict[str, Any]]:
+        contact = [clause for clause in clauses or () if clause.mechanism == CONTACT_MECHANISM]
+        if not contact or CONTACT_MECHANISM not in self.settlement_config.priority:
+            return []
+        readiness = {
+            status.mechanism: status
+            for status in await self.configuration_registry.ordered_readiness(
+                self.settlement_config, role="seller"
+            )
+        }
+        status = readiness.get(CONTACT_MECHANISM)
+        if status is None or not status.ready:
+            return []
+        options: list[dict[str, Any]] = []
+        for clause in contact:
+            built = self.configuration_registry.build_option(
+                status,
+                self.settlement_config,
+                role="seller",
+                resources={**resources, "publication_clause": clause},
+            )
+            options.extend(built["settlement_options"])
+        return options
+
+    def accepted_obligation_dispatch(self) -> dict[str, Any]:
+        """The real registry dispatch, as the composition root installs it."""
+        dispatch: dict[str, Any] = {}
+        for mechanism_id in self.settlement_config.priority:
+            registration = self.configuration_registry.registration(mechanism_id)
+            if registration.accepted_obligation_builder is None:
+                continue
+
+            def build(option, context, *, _mechanism_id: str = mechanism_id):
+                return self.configuration_registry.build_accepted_obligation(
+                    _mechanism_id,
+                    option,
+                    self.settlement_config,
+                    role="seller",
+                    context=context,
+                )
+
+            dispatch[mechanism_id] = build
+        return dispatch
+
     async def publication_artifacts(self, resources, clauses=None):
+        options = await self._registry_options(resources, clauses)
         accepted = [
             {
                 "chain_name": str(clause.mechanism_input["chain"]),
@@ -164,7 +251,7 @@ class SettlementCompositionDouble:
             for clause in clauses or ()
             if clause.mechanism == "alkahest.v1"
         ]
-        return accepted, [], ()
+        return accepted, options, ()
 
 
 REGISTRY_URLS = ("http://registry-a.test", "http://registry-b.test")
@@ -341,6 +428,8 @@ class PublicationApp:
     pools_b: list[dict[str, Any]] | None = None
     projection_b: HarnessProjectionClient | None = None
     service: StorefrontClient | None = None
+    app: FastAPI | None = None
+    contact_exchange: Any = None
 
     def set_settlement_clauses(self, clauses: list[dict[str, Any]]) -> None:
         """Replace `[pricing].settlements`, the storefront-wide durable terms."""
@@ -357,6 +446,7 @@ async def publication_app(
     negotiation: bool = False,
     registries: bool = False,
     second_site: bool = False,
+    contacts: Mapping[str, Mapping[str, str]] | None = None,
 ) -> AsyncIterator[PublicationApp]:
     """Run the VM storefront app for publication tests.
 
@@ -368,7 +458,12 @@ async def publication_app(
     ``RecordingRegistries``; otherwise publication records locally only.
     ``second_site`` configures ``SITE_B`` after ``SITE``, with its own fake site,
     pool list, and projection cache; ``SITE`` stays the home site.
+    ``contacts`` composes contact exchange, keyed by site, as the lifespan composes
+    it: the real registry builds its options and acceptance, a real settlement
+    runtime over the app's database drives its obligation, and the introduction
+    routes are mounted. Implies ``negotiation``.
     """
+    negotiation = negotiation or contacts is not None
     pools: list[dict[str, Any]] = []
     projection = HarnessProjectionClient(pools)
     pools_b: list[dict[str, Any]] = []
@@ -404,7 +499,12 @@ async def publication_app(
         # Replaced rather than overridden: an override merges into the test
         # configuration's own values, which would append to its lists.
         stack.enter_context(_replaced_setting("storefront_domains", STOREFRONT_DOMAINS))
-        stack.enter_context(_replaced_setting("settlement", SETTLEMENT))
+        stack.enter_context(
+            _replaced_setting(
+                "settlement",
+                contact_settlement(contacts) if contacts is not None else SETTLEMENT,
+            )
+        )
         stack.enter_context(
             _replaced_setting(
                 "registry.urls", list(REGISTRY_URLS) if registries else []
@@ -506,6 +606,7 @@ async def publication_app(
                 "resolved_marketplace_signer",
                 "resolved_system_service",
                 "resolved_pool_override_service",
+                "resolved_contact_exchange",
             )
         }
         container.resolved_sqlite_client = db
@@ -544,9 +645,29 @@ async def publication_app(
                     registry=registry,
                     binding=registration.binding,
                     capacity_runtime=capacity,
+                    accepted_obligation_dispatch=(
+                        composition.accepted_obligation_dispatch()
+                        if contacts is not None
+                        else None
+                    ),
                 )
             )
             routers = (negotiate_router,)
+        contact_exchange = None
+        if contacts is not None:
+            repository = SettlementSQLiteRepository(db.db_path, apply_migrations=False)
+            composition.repository = repository
+            composition.runtime = SettlementRuntime(
+                repository, {CONTACT_MECHANISM: ContactExchangeClient()}
+            )
+            contact_exchange = build_vm_contact_exchange(
+                sqlite_client=db,
+                settlement_composition=composition,
+                known_origins=capacity.site_ids,
+                delivery=None,
+            )
+            container.resolved_contact_exchange = contact_exchange
+            routers = (*routers, introductions_router)
         try:
             admin_identity.initialize_administrator_identities(db.db_path)
             initialize_service_peer_identities(db.db_path)
@@ -602,6 +723,8 @@ async def publication_app(
                     pools_b if second_site else None,
                     projection_b if second_site else None,
                     service,
+                    app,
+                    contact_exchange,
                 )
         finally:
             reset_site_event_cursors()

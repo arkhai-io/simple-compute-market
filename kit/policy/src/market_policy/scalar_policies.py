@@ -863,6 +863,38 @@ def escrow_shape_guard(
     return None, context
 
 
+@register_negotiation_middleware("accept_unpriced_selection")
+def accept_unpriced_selection_middleware(
+    history: list[NegotiationRound],
+    context: NegotiationContext,
+) -> NegotiationStep:
+    """Accept a selection of an option that bargains no amount, as published.
+
+    An option with no ``amount`` rate is take-it-or-leave-it
+    (:func:`option_uses_scalar_amount`): there is nothing for a scalar terminal
+    policy to bargain, and one that waits for an amount counters it forever. So
+    the exact selection of such an option is accepted here, after the guards
+    that check the selection and the inventory behind it. Any other proposal
+    passes through to the rest of the chain.
+    """
+    proposal = _peer_proposal(history)
+    if not isinstance(proposal, dict) or not isinstance(
+        proposal.get("settlement_selection"), dict
+    ):
+        return None, context
+    option = _settlement_option_for_selection(context.listing or {}, proposal)
+    if option is None or option_uses_scalar_amount(option):
+        return None, context
+    return (
+        NegotiationDecision(
+            action="accept",
+            proposal=dict(proposal),
+            reason="unpriced_selection",
+        ),
+        context,
+    )
+
+
 @register_negotiation_middleware("accept_exact_listing")
 def accept_exact_listing_middleware(
     history: list[NegotiationRound],

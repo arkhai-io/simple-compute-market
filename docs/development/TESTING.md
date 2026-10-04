@@ -166,8 +166,8 @@ drives transitions instead of waiting for a timer:
 |---|---|---|
 | Lease watchdog | `POST /api/v1/system/lease-watchdog/pause` | `POST /api/v1/system/check-leases` |
 | Fulfillment convergence | `POST /api/v1/system/fulfillment-convergence/pause` | `POST /api/v1/system/fulfillment-convergence/advance-cycle` |
-| VM storefront loops (`publication`, `capacity-events`, `site-projections`, `settlement-servicing`, `fulfillment-resume`, `negotiation-watchdog`) | `POST /api/v1/admin/lifecycle/pause`, which holds them all | `POST /api/v1/admin/lifecycle/<loop>/run-cycle`, previewed by `.../<loop>/dry-run` for `publication` and `capacity-events` |
-| Bare-metal storefront loops (`settlement-servicing`, `negotiation-watchdog`) | `POST /api/v1/admin/lifecycle/pause`, which holds them all | `POST /api/v1/admin/lifecycle/<loop>/run-cycle` |
+| VM storefront loops (`publication`, `capacity-events`, `site-projections`, `settlement-servicing`, `fulfillment-resume`, `negotiation-watchdog`, and `introduction-retention` while contact exchange is enabled) | `POST /api/v1/admin/lifecycle/pause`, which holds them all | `POST /api/v1/admin/lifecycle/<loop>/run-cycle`, previewed by `.../<loop>/dry-run` for `publication`, `capacity-events`, and `introduction-retention` |
+| Bare-metal storefront loops (`settlement-servicing`, `negotiation-watchdog`, and `introduction-retention` while contact exchange is enabled) | `POST /api/v1/admin/lifecycle/pause`, which holds them all | `POST /api/v1/admin/lifecycle/<loop>/run-cycle`, previewed by `.../introduction-retention/dry-run` |
 | Bare-metal storefront publication | none: publication has no timer, and each pass is operator-invoked | `POST /api/v1/admin/lifecycle/publication/run-cycle`, the same pass the `bare-metal-storefront publish` command runs |
 | API-credit storefront loops (`capacity-events`, `settlement-servicing`, `negotiation-watchdog`) | `POST /api/v1/admin/lifecycle/pause`, which holds them all | `POST /api/v1/admin/lifecycle/<loop>/run-cycle`, previewed by `.../capacity-events/dry-run` |
 
@@ -663,12 +663,21 @@ passing render is not deployment evidence, just as it is not deal evidence.
   each from `test-render.sh` so that one target runs every render check; a test
   reachable only through its chart's own Makefile is easily never run.
 - None of this is part of `make test`, and all of it needs `helm` on `PATH`.
+- `helm/charts/storefront/tests/test_render.py` also loads one rendered
+  `storefront.json` with the storefront's own configuration loader, through the
+  interpreter `STOREFRONT_PYTHON` names; `test-render.sh` sets it when the VM
+  storefront environment exists (`make init-storefront`). Without it the test
+  reports a skip. No CI job has both Helm and that environment, so in CI this
+  check does not run; run it locally before a change to the chart or the loader
+  is reviewed.
 
 **How to write one:**
 
 - Use the standard library only. `test-render.sh` runs a plain `python3`, so pass
   values as a JSON file (JSON is YAML) and assert on the rendered text, rather
-  than depending on a YAML parser.
+  than depending on a YAML parser. A document the chart renders as JSON, such as
+  the storefront's `storefront.json`, can be read back with `json` and asserted
+  on structurally.
 - Assert related artifacts together. When the chart derives a setting from a
   value, assert the rendered artifact, its mount, and the derived setting in one
   helper, both present and all absent, so a test cannot pass with one of the
@@ -680,6 +689,15 @@ passing render is not deployment evidence, just as it is not deal evidence.
 - When the rendered artifact is a document a service parses, parse one rendered
   instance with the service's own parser as well. The render test proves the
   chart emits what it was given; only the parser proves the service accepts it.
+
+**A values schema generated from typed models.** The VM storefront chart's
+values schemas carry one definition generated from the storefront's typed
+configuration models (`make helm-values-schema`). Its drift test is a storefront
+unit test, `domains/vms/storefront/tests/unit/test_values_schema.py`, so `make
+test` fails when a model or settlement registration changes without
+regenerating; packaging checks cannot run it, because the generator imports the
+storefront's third-party dependencies. The render tests then assert what the
+schema refuses and accepts.
 
 **Obtaining Helm where its download host is unreachable.** Helm's official
 binaries are served from `get.helm.sh`. An environment that cannot reach it can

@@ -1,3 +1,14 @@
+## Status
+
+Blocked on [`redesign-authenticated-replay-state`](../redesign-authenticated-replay-state/).
+That change found that every authority's replay store grows without bound, that the
+storefront and registry already retain response bodies indefinitely, and that most
+routes are idempotent in their own domain, so re-running them answers an exact retry
+better than a stored body. Retaining outcomes in the site stores on the present design
+would add a third store with the same problems. Its decision 1.7 settles whether this
+change is superseded, narrowed to the routes that genuinely cannot be re-run, or folded
+in; do not begin implementation until then.
+
 ## Why
 
 `openspec/specs/marketplace-identity/spec.md` requires that an authenticated

@@ -5,17 +5,23 @@ from pathlib import Path
 
 _ALLOWED_IMPORT_ROOTS = {
     "__future__",
+    "asyncio",
     "collections",
     "dataclasses",
+    "datetime",
     "json",
+    "logging",
     "market_contact_exchange",
     "market_core",
     "market_identity",
     "market_settlement_runtime",
+    "pathlib",
     "pydantic",
     "re",
     "sqlite3",
+    "typer",
     "typing",
+    "uuid",
 }
 
 

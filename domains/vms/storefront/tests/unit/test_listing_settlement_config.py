@@ -164,6 +164,7 @@ async def test_clause_only_create_persists_canonical_clause_before_publication(
         {
             "accepted_escrows": [],
             "claimant_principal": TEST_MARKETPLACE_SIGNER.identity,
+            "origin": _CAPACITY_SOURCE["site_id"],
         },
         clauses=[clause],
     )
@@ -199,7 +200,7 @@ async def test_direct_settlement_options_are_rejected() -> None:
     )
 
     with pytest.raises(ValueError, match="derived from installed"):
-        await service._derive_settlement_artifacts(request)
+        await service._derive_settlement_artifacts(request, origin="default")
 
 
 @pytest.mark.asyncio
@@ -249,6 +250,7 @@ async def test_registration_composition_receives_ordered_hosted_clauses() -> Non
     accepted, options = await service._derive_settlement_artifacts(
         request,
         clauses=tuple(clauses),
+        origin="default",
     )
 
     assert accepted == []
@@ -257,6 +259,7 @@ async def test_registration_composition_receives_ordered_hosted_clauses() -> Non
         {
             "accepted_escrows": [],
             "claimant_principal": TEST_MARKETPLACE_SIGNER.identity,
+            "origin": "default",
         },
         clauses=clauses,
     )

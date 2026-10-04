@@ -303,6 +303,15 @@ def _buyer_response_contract(request: Request, body: Any) -> tuple[str, str] | N
             return "settlement_status", suffix
         if method == "POST" and suffix.endswith("/reclaim"):
             return "settlement_reclaim", suffix[: -len("/reclaim")]
+    if path == "/api/v1/introductions" and method == "POST":
+        resource = (
+            str(body.get("obligation_ref") or "") if isinstance(body, dict) else ""
+        )
+        return "introduction_start", resource
+    if path.startswith("/api/v1/introductions/") and method == "GET":
+        suffix = path[len("/api/v1/introductions/") :]
+        if "/" not in suffix:
+            return "introduction_read", suffix
     return None
 
 

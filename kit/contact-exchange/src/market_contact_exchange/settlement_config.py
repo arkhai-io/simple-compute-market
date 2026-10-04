@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Mapping
-from typing import Any
+from collections.abc import Collection, Mapping
+from typing import Any, Literal
 
 from market_core.schemas import SettlementOption, derive_settlement_option_id
 from market_settlement_runtime import (
@@ -35,6 +35,21 @@ _MAX_TERMS_CHARS = 4000
 _MAX_PAYLOAD_ENTRIES = 16
 _MAX_PAYLOAD_KEY_CHARS = 64
 _MAX_PAYLOAD_VALUE_CHARS = 512
+_MAX_ORIGINS = 256
+_MAX_ORIGIN_CHARS = 128
+
+#: Marks a field whose value may come from any configuration layer, public ones
+#: included, but must never appear in anything the storefront publishes. The
+#: settlement runtime's readiness leak check treats it as it treats a secret;
+#: the values schema and layered resolution, which keep secrets out of public
+#: configuration, accept it.
+_NEVER_PUBLISHED = {"roles": ["seller"], "never_published": True}
+
+#: The retention window's literal for "never delete". A sentinel rather than a
+#: null because TOML, which some storefronts are configured in, has no null.
+INDEFINITE_RETENTION = "indefinite"
+DEFAULT_RETENTION_SECONDS = 30 * 24 * 60 * 60
+DEFAULT_RETENTION_SWEEP_INTERVAL_SECONDS = 60 * 60
 _CLAUSE_OPERATORS = frozenset(
     {
         ComparisonOperator.EQUAL,
@@ -93,12 +108,40 @@ class ContactPublicationInput(BaseModel):
     profile: str = Field(min_length=1)
 
 
+class ContactOrigin(BaseModel):
+    """The seller contact revealed for deals on listings from one origin."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    contact_payload: dict[str, str] = Field(
+        min_length=1,
+        repr=False,
+        json_schema_extra=_NEVER_PUBLISHED,
+    )
+
+    @field_validator("contact_payload")
+    @classmethod
+    def bound_contact_payload(cls, value: dict[str, str]) -> dict[str, str]:
+        return validate_contact_payload(value)
+
+
 class ContactSettlementConfig(BaseModel):
     """Strict contact-exchange settings.
 
-    ``contact_payload`` is the seller's held contact data: bounded, opaque,
-    and revealed only through the authenticated introduction surface after
-    acceptance. It must never reach readiness details, options, or listings.
+    The seller's contact is configured in exactly one of two forms:
+    ``contact_payload``, one contact for a storefront with exactly one origin,
+    or ``origins``, a contact per listing origin. Either is held contact data:
+    bounded, opaque, and revealed only through the authenticated introduction
+    surface after acceptance. It is ordinary configuration, but must never
+    reach readiness details, options, obligations, or listings. Origins are
+    opaque to this kit; the composing storefront says which exist.
+
+    ``retention_seconds`` is how long revealed payloads are kept, counted from
+    the reveal: a policy over everything the storefront holds, read from this
+    configuration wherever it applies and never recorded per introduction, so
+    a shortened window applies to introductions revealed before it. Zero is
+    refused, so a typo cannot delete introductions moments after reveal; an
+    operator wanting no deletion says ``indefinite``.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
@@ -107,17 +150,58 @@ class ContactSettlementConfig(BaseModel):
     contact_payload: dict[str, str] = Field(
         default_factory=dict,
         repr=False,
-        json_schema_extra={"roles": ["seller"], "secret": True},
+        json_schema_extra=_NEVER_PUBLISHED,
+    )
+    origins: dict[str, ContactOrigin] = Field(
+        default_factory=dict,
+        json_schema_extra={"roles": ["seller"]},
     )
     profiles: dict[str, ContactProfile] = Field(
         default_factory=dict,
         json_schema_extra={"roles": ["seller"]},
     )
+    retention_seconds: int | Literal["indefinite"] = Field(
+        default=DEFAULT_RETENTION_SECONDS,
+        json_schema_extra={"roles": ["seller"]},
+    )
+    retention_sweep_interval_seconds: int = Field(
+        default=DEFAULT_RETENTION_SWEEP_INTERVAL_SECONDS,
+        gt=0,
+        json_schema_extra={"roles": ["seller"]},
+    )
+
+    @field_validator("retention_seconds")
+    @classmethod
+    def require_positive_window(
+        cls, value: int | Literal["indefinite"]
+    ) -> int | Literal["indefinite"]:
+        if value != INDEFINITE_RETENTION and value <= 0:
+            raise ValueError(
+                "retention_seconds must be positive or 'indefinite'"
+            )
+        return value
 
     @field_validator("contact_payload")
     @classmethod
     def bound_contact_payload(cls, value: dict[str, str]) -> dict[str, str]:
         return validate_contact_payload(value)
+
+    @field_validator("origins")
+    @classmethod
+    def bound_origins(cls, value: dict[str, ContactOrigin]) -> dict[str, ContactOrigin]:
+        if len(value) > _MAX_ORIGINS:
+            raise ValueError(f"at most {_MAX_ORIGINS} contact origins are allowed")
+        invalid = sorted(
+            key
+            for key in value
+            if not key or len(key) > _MAX_ORIGIN_CHARS or key != key.strip()
+        )
+        if invalid:
+            raise ValueError(
+                "contact origins must be non-empty, trimmed, and at most "
+                f"{_MAX_ORIGIN_CHARS} characters: {', '.join(invalid)}"
+            )
+        return value
 
     @field_validator("profiles")
     @classmethod
@@ -132,6 +216,15 @@ class ContactSettlementConfig(BaseModel):
         return value
 
     @model_validator(mode="after")
+    def one_contact_form(self) -> ContactSettlementConfig:
+        if self.contact_payload and self.origins:
+            raise ValueError(
+                "configure contact_payload or origins, not both: contact_payload "
+                "is the contact for a storefront with one origin"
+            )
+        return self
+
+    @model_validator(mode="after")
     def payload_stays_out_of_profiles(self) -> ContactSettlementConfig:
         published = json.dumps(
             {key: item.model_dump(mode="json") for key, item in self.profiles.items()},
@@ -140,7 +233,8 @@ class ContactSettlementConfig(BaseModel):
         )
         leaked = sorted(
             key
-            for key, item in self.contact_payload.items()
+            for payload in contact_payloads(self)
+            for key, item in payload.items()
             if item and item in published
         )
         if leaked:
@@ -149,6 +243,77 @@ class ContactSettlementConfig(BaseModel):
                 + ", ".join(leaked)
             )
         return self
+
+
+def contact_payloads(config: ContactSettlementConfig) -> tuple[dict[str, str], ...]:
+    """Every seller contact the configuration holds, in either form."""
+
+    payloads = [config.contact_payload] if config.contact_payload else []
+    payloads.extend(origin.contact_payload for origin in config.origins.values())
+    return tuple(payloads)
+
+
+def _contact_leaks_into(config: ContactSettlementConfig, public_payload: str) -> bool:
+    return any(
+        value and value in public_payload
+        for payload in contact_payloads(config)
+        for value in payload.values()
+    )
+
+
+def resolve_seller_contact(
+    config: ContactSettlementConfig,
+    origin: str | None,
+    known_origins: Collection[str] | None = None,
+) -> dict[str, str] | None:
+    """The seller contact for a listing from ``origin``, or None if there is none.
+
+    Never falls back from one origin to another: revealing another seller's
+    contact is a disclosure, not a missing feature. A listing with no origin
+    resolves no contact in either form.
+
+    The single form is the contact of the storefront's one origin, so it
+    resolves only for that origin. Given ``known_origins`` -- as every reveal
+    is -- an agreement whose origin is not the one configured origin, such as a
+    deal accepted for a site the storefront no longer serves, resolves none.
+    Publication supplies the listing's own configured site and omits it.
+    """
+
+    if origin is None:
+        return None
+    if config.origins:
+        entry = config.origins.get(origin)
+        return dict(entry.contact_payload) if entry is not None else None
+    if not config.contact_payload:
+        return None
+    if known_origins is not None and set(known_origins) != {origin}:
+        return None
+    return dict(config.contact_payload)
+
+
+def validate_contact_origins(
+    config: ContactSettlementConfig,
+    known_origins: Collection[str],
+) -> None:
+    """Refuse a contact configuration that does not fit the storefront's origins.
+
+    Called by the composing storefront with the origins it is configured with,
+    which this kit never interprets.
+    """
+
+    known = set(known_origins)
+    if config.contact_payload and len(known) > 1:
+        raise ValueError(
+            "contact_payload is the contact for a storefront with one origin; "
+            "this storefront has several, so configure a contact per origin under "
+            f"origins: {', '.join(sorted(known))}"
+        )
+    unknown = sorted(set(config.origins) - known)
+    if unknown:
+        raise ValueError(
+            "contact origins name origins this storefront is not configured with: "
+            + ", ".join(unknown)
+        )
 
 
 def contact_preflight(
@@ -168,7 +333,7 @@ def contact_preflight(
                     message="no contact profiles are configured",
                 )
             )
-        if not config.contact_payload:
+        if not contact_payloads(config):
             blockers.append(
                 ReadinessBlocker(
                     code="no_contact_payload",
@@ -219,7 +384,18 @@ def contact_option_builder(
         return {"accepted_escrows": [], "settlement_options": []}
     raw_clause = resources.get("publication_clause")
     if raw_clause is None:
-        raise ValueError("contact-exchange publication requires one ordered clause")
+        # Only a clause selects a profile, so a listing published without one
+        # simply offers no introduction.
+        return {"accepted_escrows": [], "settlement_options": []}
+    if config.origins and "origin" not in resources:
+        raise ValueError(
+            "contact exchange is configured per origin, so publication must "
+            "supply the listing's origin"
+        )
+    if resolve_seller_contact(config, resources.get("origin")) is None:
+        # An origin with no contact cannot reveal one; advertising the option
+        # would only lead a buyer to a refused reveal.
+        return {"accepted_escrows": [], "settlement_options": []}
     clause = SettlementPublicationClause.model_validate(raw_clause)
     if clause.mechanism != MECHANISM:
         raise ValueError("publication clause does not select contact exchange")
@@ -240,10 +416,7 @@ def contact_option_builder(
         "claimant_principal": _principal_json(resources.get("claimant_principal")),
     }
     public_payload = json.dumps(params, ensure_ascii=False, sort_keys=True)
-    if any(
-        value and value in public_payload
-        for value in config.contact_payload.values()
-    ):
+    if _contact_leaks_into(config, public_payload):
         raise ValueError("contact payload must not reach a published option")
     option = {
         "option_id": derive_settlement_option_id(
@@ -333,10 +506,7 @@ def contact_accepted_obligation_builder(
         ensure_ascii=False,
         sort_keys=True,
     )
-    if any(
-        value and value in public_payload
-        for value in config.contact_payload.values()
-    ):
+    if _contact_leaks_into(config, public_payload):
         raise ValueError("contact payload must not reach an accepted obligation")
     return AcceptedObligationArtifacts(
         obligation={

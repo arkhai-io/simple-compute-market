@@ -263,6 +263,12 @@ kind-agnostic lease lifecycle and already reads and backdates a bare-metal
 reservation, so the bare-metal lease routes gain nothing; its VM-named fields are
 blank for bare metal.
 
+*Refined by "Controls and routes (5B.8)": the lease lifecycle is mode-agnostic and
+release goes through the fulfillment aggregate through one provider-neutral executor
+(7.3 is folded into 5B.8's lease slice); `/api/v1/leases` and the bare-metal lease routes
+are removed in favour of the one family lease surface; backdating goes through the
+site's truncate-lease, not a lease update.*
+
 ### Executors are selected by offering mode and action, and each adapter owns its mock
 
 *Refined by "Provisioning execution leaves the VM adapter": the table now resolves a
@@ -432,14 +438,20 @@ the job authority's canonical result and credential forms are the existing opaqu
 `ResultEnvelope` and `CredentialEnvelope`, and they are also its wire forms. Refined
 under "Pre-release wire and schema changes are accepted": there are no compatibility
 models or re-exports; callers import models from their owners, and SSH-shaped models
-such as `CredentialResponse` are removed.
+such as `CredentialResponse` are removed. *Refined by "Controls and routes (5B.8)",
+decision 8: the family's wire models and route contracts move again, out of
+`compute_provisioning` into a thin `arkhai-compute-provisioning-contracts` distribution,
+and every typed client into a thin `arkhai-compute-provisioning-client` distribution.*
 
 **`system_service.py` is split by owner**: aggregate health and status go to the
 service, which composes contributed diagnostics; Ansible readiness goes to the Ansible
 distribution; convergence and lease controls go to their owning capabilities. Generic
 lease read, update, terminate, and admin routes move to `compute_provisioning` and serve
 the neutral `LeaseView` (reopened with the maintainer; see "Job and host authority
-shape").
+shape"). *Refined by "Controls and routes (5B.8)": Ansible readiness is a contributed
+component of the service's system status, not a route of the Ansible distribution
+(decision 7); there is no generic lease update (decision 2); routes are framework-free
+route services in the family kit that the service binds (decision 4).*
 
 **The job-backed fulfillment-provider helper lands last (5B.12).** Decided with the
 maintainer. VM's and bare metal's fulfillment providers share one shape: prepare a domain
@@ -478,7 +490,9 @@ Invariants this change must leave true:
   models or re-exports remain.
 - `compute_provisioning` names no domain's routes: the provisioning route-contract table
   is assembled from contributions, and the client and the service's authentication read
-  the assembled table.
+  the assembled table. *Corrected by "Controls and routes (5B.8)", decision 8: the
+  service's authentication reads the assembled table; each typed client signs from its
+  owner's contracts.*
 - Test gates are owned beside the job lifecycle and expose a gate-reached observation.
 - Provider-neutral fulfillment stays unaware that these providers are job-backed; the
   job-backed shape lives in `compute_provisioning`.
@@ -503,6 +517,10 @@ with the maintainer, not an implementation defect.
   ownership, including postconditions of steps not yet landed, because this branch
   merges whole** (ruled when 5B began, and restated after both implementation
   reviews). The document is not revised step by step.
+- **An administrator can do everything** (ruled 2026-10-04). This is a repository-wide
+  stance, applied in this change to the provisioning service's route table only, with no
+  retrofit elsewhere: every route on that table admits the `admin` role (decision 1 of
+  "Controls and routes (5B.8)").
 
 ### Pre-release wire and schema changes are accepted
 
@@ -666,7 +684,9 @@ closeout.
 read, update, terminate, and administration routes move (5B.8), they serve
 `compute_provisioning`'s `LeaseView` and its request models; VM-only fields
 (`vm_target`, `resource_id`) leave the generic surface, and the e2e lease stages read the
-neutral view.
+neutral view. *Refined by "Controls and routes (5B.8)", decisions 1–3: the family lease
+surface is `/api/v1/contract/leases`, with no update route; a lease's end moves only
+through the site's truncate-lease.*
 
 **The transitional executor.** The Ansible half of today's `_process_job` becomes an
 `AnsibleJobExecutor` in the VM adapter first (5B.2), with today's classification,
@@ -901,7 +921,9 @@ maintainer:
 - **`ReservationNotProvisionableError` (5B.8 slice A).** Both domains' `compute_adapter.py`
   raise it, importing it from `compute_provisioning_service.services.compute_contract_service`.
   An error both domains raise belongs to the family kit: it moves to `compute_provisioning`
-  beside the compute-adapter contract both implement.
+  beside the compute-adapter contract both implement. *Superseded by "Controls and routes
+  (5B.8)", decision 10: the compute adapters that raise it, and the action route that
+  reaches them, are deleted, so the error goes with them.*
 - **`config.Settings` (5B.8 slice A).** Imported, as a type, by VM's
   `services/job_service.py` (the review attributed it to `runtime.py`, which does not
   import it). It goes when the job engine is built at the composition root and the job
@@ -931,38 +953,475 @@ maintainer:
   5B.10's adapter boundary test walks every `Import` and `ImportFrom` node of the
   syntax tree, relative imports included, not only module-level ones.
 
-Out of scope, recorded elsewhere by the review: the storefronts' import of the whole
-family kit for its wire contracts (a client distribution split, owned by
-`kit-owned-listing-and-fulfillment-lifecycles`), and the `kit/capacity-publication` →
-`core_storefront` edge, which this change does not touch.
+Out of scope, recorded elsewhere by the review: the `kit/capacity-publication` →
+`core_storefront` edge, which this change does not touch. The review also assigned the
+storefronts' import of the whole family kit for its wire contracts (a client
+distribution split) to `kit-owned-listing-and-fulfillment-lifecycles`; this change now
+does it ("Controls and routes (5B.8)", decision 8). That change's documents never
+recorded the item, so nothing there changes.
 
-### Open for 5B.8: questions put to the maintainer
+### Controls and routes (5B.8)
 
-5B.8's premise does not match the code: there are two lease surfaces. VM's
-`/api/v1/leases/*` serves `LeaseResponse` (create, list, by-escrow, get, update,
-terminate, release-oversight, retry-release, force-release); the service's
-`controllers/compute_contract_controller.py` already serves the neutral `LeaseView` at
-`/api/v1/contract/leases/*` (register, get, terminate, retry-release, force-release).
-The e2e `DealLease` keys leases by capacity reservation; its backdating still uses
-`PATCH /api/v1/leases/{id}`. Recommendations in brackets, awaiting decisions:
+Decided with the maintainer on 2026-10-04, question by question. 5B.8's premise did not
+match the code: the plan assumed two lease surfaces and there are three, with different
+roles and different jobs. The questions put to the maintainer, each with the
+recommendation it carried, were: one lease surface or two (one); what a neutral lease
+update may change (lease times only); the by-escrow lookup (a filter on the list route);
+what a route service is (router factories in `compute_provisioning`); whether the
+composition root builds the job engine (yes); the slices (A, B, C); and the readiness wire
+contract (a lightweight projected contract). A further question, where the family's typed
+client methods live, arose while answering them. Several recommendations changed in
+discussion; what follows is what was decided. A design review the same day, discussed
+point by point with the maintainer, corrected decisions 2, 4, 6, and 8 in place and added
+decisions 9–11; "Design review corrections" at the end of this section lists what changed
+and why.
 
-1. One neutral lease surface or two. [One: `/api/v1/contract/leases` becomes the
-   family's lease route service and gains list, update, and release-oversight;
-   `/api/v1/leases` is removed; the operator client, e2e stages, and fixtures move.]
-2. What a neutral lease update may change. [Lease times only.]
-3. The by-escrow lookup. [A filter on the list route.]
-4. What a route service is. [Router factories in `compute_provisioning` taking explicit
-   collaborators — jobs, hosts, leases, lease-watchdog controls, the test drain and
-   summary — and a readiness router factory in the Ansible distribution; the service
-   mounts them; no route reads the service's `container` module.]
-5. The job engine built in the service's container and passed to both runtimes. [Yes.]
-6. Slices: A (engine at the root, job and host routes, the shared error), B (the lease
-   surface), C (`system_service.py` split, contributed diagnostics and projections,
-   adapters stop reading `container`). [Yes.]
-7. The readiness wire contract. [A lightweight contract the service projects the
-   Ansible diagnostics into, so the operator client no longer depends on the Ansible
-   distribution, reporting every contributed playbook rather than VM's alone; decided
-   with question 4.]
+**1. One family lease surface, and the lease lifecycle is mode-agnostic.**
+
+A lease is not a resource and delivers nothing. It is the lifecycle tail on a site
+reservation: the lease window, the executor target, the create and release handles, and
+the lease state. `LeaseLifecycleService` and `ExecutorLeaseService` in `compute_provisioning`
+own it for every mode, over the site ledger. Delivery is fulfillment's: a domain's
+fulfillment provider creates the VM or grants the access, tracked by the fulfillment
+aggregate. The two meet at release, where lease termination asks the aggregate to tear
+down and the lease is released only when the aggregate reaches `torn_down`.
+
+The three surfaces found:
+
+| Surface | Serves | Roles | Callers |
+|---|---|---|---|
+| `/api/v1/contract/leases` (family) | `LeaseView`: register, get, terminate, retry-release, force-release | seller | the VM storefront through `ComputeProvisioningClient`; Section 7.2 plans the same for bare metal |
+| `/api/v1/leases`, `/api/v1/admin/leases` (VM) | `LeaseResponse` with VM vocabulary: list with filters, create, by-escrow, get, update, terminate, release-oversight, retry-release, force-release | admin | the VM operator client, `test_leases_api.py`, e2e's `DealLease` |
+| `/api/v1/bare-metal/leases` (bare metal) | `BareMetalLeaseView` with `physical_host_id` and `access_ref`: list, create, by-escrow, get | admin | the two bare-metal integration test files and the client's unit test |
+
+Decisions:
+
+- **The family surface absorbs VM's.** `/api/v1/contract/leases` serves register, get,
+  list, terminate, release-oversight, retry-release, and force-release, all returning
+  `LeaseView`. VM's routes, their route declarations, and VM's `Lease*` operator models
+  are removed.
+- **Bare metal's lease surface is deleted, and a bare-metal grant happens only through
+  fulfillment.** Its create submits `node_grant_access` outside the fulfillment aggregate
+  when no `create_job_id` is supplied. No production code calls it; it is a superseded
+  manual delivery path that predates `BareMetalFulfillmentProvider`, which calls the same
+  `grant_access` with a contract envelope and records the job in the aggregate. Once
+  release goes through the aggregate, a lease granted this way cannot be released by
+  expiry or termination (`submit_release` finds no aggregate), and because the route and
+  the provider derive different operation ids, one reservation could receive two grants.
+  Deleted: the route, its controller, `BareMetalLeaseService`, `BareMetalLeaseClient`,
+  `BARE_METAL_LEASE_ROUTES`, `BareMetalLeaseView`, and `bare_metal_access_ref`.
+  `BareMetalLeaseCreate` survives only as the grant parameters the provider prepares,
+  renamed to say so (`BareMetalAccessGrant`). The integration tests drive grants through
+  fulfillment, as VM's do. The generic action route, the other path that granted outside
+  fulfillment, is deleted too (decision 10).
+- **`physical_host_id` stays out of the lease.** It belongs where the grant happens: the
+  job parameters, the provider's metadata, and the result. The site's cross-mode
+  accounting reads it from the Physical Resource's declared attributes, not from a lease.
+- **A lease surface records and releases; it never delivers.** A domain extends what a
+  lease shows by contributing a versioned projection, never by adding or overriding lease
+  routes. Nothing needs such a projection today: a buyer's access details come from the
+  fulfillment result.
+- **The lease lifecycle is mode-agnostic.** The offering mode belongs to the reservation,
+  recorded by the site when capacity is claimed; a lease only reads it. `LeaseRegistration`
+  drops `offering_mode`, whose only effect was a guard against a mismatch with the
+  reservation. `LeaseView` keeps reporting the reservation's mode. Release goes through
+  one provider-neutral fulfillment release executor and its status port for every mode:
+  the aggregate already knows its provider through the pool, so a mode key carries no
+  information. The per-bundle `release_executor` contribution, both mode-keyed dispatch
+  tables (`ExecutorReleaseDispatcher`, `ReleaseJobDispatcher`), `BareMetalReleaseExecutor`, and
+  the `direct-release` sentinel it alone produced (which released capacity with no
+  teardown proof) are removed; the lifecycle's VM-named failure reasons (`vm_remove_failed`,
+  `vm_remove_timeout`) become neutral. **7.3 is folded into 5B.8's lease slice.** Revisit
+  trigger: a future mode whose delivery is not fulfillment-backed would route release on
+  the aggregate, not on the mode.
+- **Roles.** Every route on the provisioning service's table admits `admin` (the
+  maintainer's stance, "Maintainer rulings for review"): the family table's default for an
+  unlisted operation becomes seller and admin, the separate dual-role set is removed as
+  redundant, and `route_contract_from_declaration` refuses a domain declaration that does
+  not admit `admin`. Only identity rotation and VM's operator idempotency read the caller's
+  principal, and both are admin routes already. The lease routes:
+
+  | Route | Roles |
+  |---|---|
+  | register, get, terminate | seller, admin |
+  | list, release-oversight, retry-release, force-release | admin |
+
+  A storefront addresses its leases by reservation id; a list would show it every lease
+  at the site, including other storefronts'. Retry-release and force-release lose the
+  seller role the contract routes gave them; no production code calls them as seller.
+
+**2. No lease update; a lease's end moves only through the site's truncate-lease.**
+
+VM's `PATCH /api/v1/leases/{id}` wrote any non-terminal reservation, `releasing` included.
+It is removed rather than reproduced, field by field:
+
+- Executor identity (`host_id`, `vm_target`, `executor_target`, `executor_ref`) is
+  immutable after registration, because changing it can redirect teardown. If VM
+  migration ever becomes real, it gets an explicit migration operation.
+- Lifecycle evidence (`release_job_id`, `create_job_id`) is written only by the lifecycle,
+  never by an operator.
+- Agreement evidence (`lease_start_utc`) is immutable.
+- The offering mode was never writable in substance.
+
+The site already ends a lease early: `POST /api/v1/capacity/reservations/{id}/truncate-lease`
+(`CapacityLedgerService.truncate_lease`), open to seller and admin, typed in
+`SiteCapacityClient`, and reached through `kit/capacity-publication`, which routes it to
+the reservation's recorded site. The VM storefront uses it for uncollected terminal
+settlements and spot interruption, and it is what on-demand early termination needs. It
+stays the one primitive and stays on the capacity surface: `kit/capacity-publication`, a
+repository-wide kit, reaches sites only through the site client and may not depend on a
+family kit, and the capacity runtime's calls are pinned to the reservation's site where
+the VM storefront's provisioning client talks to one configured URL. e2e backdates through
+the typed site client, signed as admin.
+
+Three defects in it are fixed:
+
+- Truncation refuses `releasing`, `release_failed`, and `unmanaged`, returning `null` as
+  both callers already handle; it used to force them back to `leased`, undoing the release,
+  oversight, or repair the lifecycle recorded. It also refuses `reserved` and
+  `provisioning`: an uncommitted hold is released, not truncated (decision 9).
+- Truncation refuses a later end; extension belongs to on-demand work as a deliberate
+  operation with its own commercial check.
+- Truncation forced a `reserved` reservation to `leased`, which happens when a VM
+  settlement terminates before commit; with release through the aggregate, it then landed
+  in `release_failed`. First recorded as a gap for VM's storefront; the design review moved
+  the fix into slice B (decision 9): the storefront releases the hold, and truncation
+  refuses the state.
+
+**Lease registration writes the lease tail once.** `attach_lease` accepted any held state
+and overwrote the target, `executor_ref`, start, end, and `create_job_id`, setting the
+state to `leased`; the VM storefront's fulfillment-resume pass re-registers with the
+deal's original window, which would restore a truncated end or flip a releasing lease back
+to `leased`. Now: a first registration applies only to a reservation not yet leased; a
+repeat on a `leased` reservation is idempotent when its target and start match, returns
+the record unchanged, and never moves the end; a repeat with a different target or start
+is refused (409); registration on `releasing`, `release_failed`, or `unmanaged` is
+refused; a recorded `create_job_id` is never replaced. The maintainer weighed accepting
+that an operator can break things through admin routes, and chose consistency with
+decision 2.
+
+**3. Leases are keyed only by reservation id.** `escrow_uid` is Alkahest's mechanism
+reference, not the universal deal identity (`obligation_ref`); the site lifts it out of
+the caller's `deal_ref` only when present, and a bare-metal hosted deal records
+`{"negotiation_id": …, "hosted_obligation_ref": …}`, so a by-escrow lookup cannot find
+its lease. `ARCHITECTURE.md` ("Identifiers") also keeps commercial agreement identity from
+crossing the provisioning boundary merely for correlation; every caller that owns a deal
+already holds its reservation id. A `deal_ref` filter would correlate by commercial
+identity under a neutral name and make the family surface interpret the caller's opaque
+dict. So: no by-escrow route and no escrow or `deal_ref` filter; the list filters on the
+neutral `status` and `offering_mode`; VM's `host_id` filter is not carried over, since a
+host is not a family-neutral lease concept. An operator starting from an escrow uses the
+site's existing reservation-list filter, then reads the lease by id. `LeaseView.deal_ref`
+stays as reported data.
+
+**4. Route services are framework-free, the service binds them, and adapters bind their
+own routes through accessors.**
+
+The precedent survey: pool overrides, the storefront lifecycle and deal controls, the
+settlement admin and hosted routes, and introductions each put a framework-free route
+service in their kit and leave the FastAPI binding to the storefront; `kit/pool-overrides`
+also owns its path constant, operations, signed-resource builder, models, and typed client.
+`kit/site` is the exception: it ships its own FastAPI router (`make_capacity_router`). The
+dominant pattern is promoted to `ARCHITECTURE.md` ("Route contracts and their HTTP
+binding") as five pieces — wire models, route contract, typed client, route service, HTTP
+binding — with the binding owned by whatever composes the process. The first
+recommendation (router factories in the family kit, after `make_capacity_router`) is
+withdrawn: it contradicted "Deal controls are kit-owned route services" and the family
+kit's own `MockRuleRouteService`, and the maintainer wants the family kit framework-agnostic.
+
+- `compute_provisioning` gains `JobRouteService`, `HostRouteService`, `LeaseRouteService`,
+  and `JobTestRouteService` (summary, drain, wait), with one `ProvisioningRouteError(status_code,
+  detail)` into which `MockRouteError` folds. `HostRouteService` serves host CRUD, enable
+  and disable, and connectivity, taking probes keyed by connection kind as contributions
+  (decision 7).
+- **Host import is the Ansible implementation's** (design review). `POST /api/v1/hosts/import`
+  takes a multipart Ansible INI file and an `ssh_key_type` field; injecting the parser
+  would not make the operation family-neutral, and a domain with a non-Ansible executor
+  should not see it in the family contract. `compute_provisioning_ansible` owns its route
+  contract (a plain declaration it contributes), an `AnsibleHostImportRouteService` over the
+  host authority and the existing parser, and a typed client extension (async and sync)
+  over the family client's `authenticated_request`. The provisioning service binds it at
+  the existing path.
+- The provisioning service binds them in thin controllers in
+  `compute_provisioning_service/controllers/`; the contract controller's lease routes move
+  into the lease controller. System routes for the service's own workers (fulfillment
+  convergence and the lease watchdog live in `compute_provisioning_service/services`) are
+  bound there directly with no kit route service.
+- Each adapter exports router factories for its own routes taking zero-argument accessors,
+  because `main.py` mounts routers when it builds the app and services are resolved later in
+  the lifespan; the service passes the accessors, so no adapter imports `container`. The
+  service cannot bind domain routes itself without naming them.
+- Both adapters declare their own web dependencies; they import FastAPI and
+  `fastapi_utils` today through `arkhai-compute-provisioning-service`, which 5B.10 removes.
+- **Drift guard (option 1):** a service test asserts every route the app mounts resolves to
+  exactly one contract and every contract to a mounted route. Recorded as a possible
+  follow-up (option 2): path templates in the family contracts, from which the regex is
+  derived and the service binds, single-sourcing the family's paths.
+
+**5. The composition root builds one `HostAuthority` and one `JobEngine`.** The root
+supplies the `ssh` codec from `compute_provisioning_ansible` (with the service's decryption
+key), capacity derivation, VM's relay pool-change hook as a VM contribution (a static
+declaration the adapter exports and the root merges, like `HOST_REQUIREMENT`, because the
+authority exists before any runtime does), the retry policy (`retry_policy_from` moves to
+the service), and the executor table (created empty, filled and frozen by
+`compose_adapter_bundles`). Both runtimes receive the authorities; neither owns them for its
+sibling. VM's `AnsibleJobService` shrinks to VM submission (`VmJobParams` into an engine
+submission, with `default_host_id` passed as a value, so its `Settings` import goes) and is
+renamed to say so (`VmJobSubmitter`); every other caller reads the engine.
+`ComputeContractService` consumes `JobEngine` directly, and the lifespan runs the engine's
+queue handler and retry scheduler. The maintainer's instruction that
+`ReleaseJobDispatcher`'s bare-metal entry consume the engine is met by removing the
+dispatcher with the fold of 7.3. A composition unit test asserts one engine and one host
+authority reach both runtimes (`TESTING.md`'s composition-boundary convention).
+
+**6. Slices.** A0 → A → B → C, each ending with the provisioning-family suites green,
+comment hygiene, and a checkpoint:
+
+- **A0, the contracts and client packages** (decisions 8 and 11), opened by the route
+  ownership matrix: `VersionedEnvelope` to `arkhai-core`; the compute contracts and client
+  distributions; the resource-pool contracts and client distributions; capacity-definition
+  import in `kit/site-client`; every existing operation moved to its owner's client, with
+  sync variants and parity tests; VM's extension client and the Ansible host-import client;
+  every caller migrated. No wire change.
+- **A, authorities at the root and the job and host routes**: decision 5; the generic
+  action surface and the compute-adapter architecture deleted (decision 10);
+  `ProvisioningRouteError`; the job, host, and test-job route services and their bindings;
+  the Ansible host-import route service; VM's jobs controller removed and its hosts
+  controller reduced to the VM capacity route; the connectivity probe contribution and its
+  runner; adapters' web dependencies; the drift-guard test.
+- **B, the lease surface and mode-agnostic release** (decisions 1–3, 9, and 7.3): the lease
+  route service and roles; registration without `offering_mode`; `attach_lease` write-once
+  and the truncation guards in `kit/site`; one release executor and status port, deciding
+  by the aggregate's state; the VM storefront releasing an uncommitted hold instead of
+  truncating it; VM's and bare metal's lease surfaces deleted; grants only through
+  fulfillment; e2e `DealLease` through the family client and the site client.
+- **C, the system split and the last `container` reach**: health, status, version, and the
+  worker controls bound by the service; status with the execution section and contributed
+  components (decision 7); `resolve_identity_context` stays in the service;
+  `capacity_inventory.py` iterating a resource-projection contribution; VM's
+  `system_service.py` deleted; VM's VM-operation, capacity, and mock-rule routes and bare
+  metal's mock-rule routes as accessor-taking router factories; the service's
+  import-boundary test allowlisting (file, module) pairs.
+
+**7. Execution readiness is part of system status; connectivity is a contributed probe.**
+
+Today `GET /api/v1/system/ansible/readiness` returns `AnsibleReadinessResponse`
+(`ansible_version`, `ansible_mode` from `ACTIVE_PROFILES`, `executor_modes` from the table,
+`inventory`, VM's `playbook`, `ssh_keys`). The operator client imports the Ansible
+distribution for it; bare metal's playbook is invisible; the profile-derived mode can
+disagree with the executors (5B.6 slice C found exactly that); and `inventory.path` is
+`settings.database_url`, which can carry a password that "Operator lifecycle controls"
+forbids a diagnostic to expose.
+
+- **No readiness route.** `GET /api/v1/system/status` carries it. `SystemStatusResponse`, a
+  new model separate from `HealthResponse` so `/health` stays lean, keeps today's
+  `status`, `checks`, and contract-version fields and gains:
+  - `checks.execution`: `ok`, or `degraded` when a contributed component is not ready;
+  - `execution`: `mocked` (true when every composed executor is the mock) and `executors`,
+    a list of `{offering_mode, mocked}`;
+  - `components`: `{name, ready, detail}`, the detail a versioned envelope.
+- **"Mode" is not used for mock versus real**, because offering mode is the reserved term:
+  mock versus real is the boolean `mocked`, and executors are listed by `offering_mode`.
+  `ansible_mode` and the profile-derived value are removed; `JobExecutorTable.executor_modes()`
+  becomes a method returning `{offering_mode: mocked}`.
+- **The Ansible distribution contributes the `ansible` component**: `ansible_version`, each
+  Ansible executor's offering mode and playbook (path, existence, sha256), and the SSH key
+  references from the registered hosts, found by reading the Ansible executors in the table
+  so every contributed playbook is reported. It is ready when every playbook exists and
+  Ansible is on `PATH`, or the executors are mocked. `FileInfo` and `SshKeyInfo` stay as its
+  payload models; `AnsibleReadinessResponse`, `InventoryInfo`, and the database URL go.
+- A degraded status still answers 503; the typed client accepts that body, so e2e reads
+  `execution.mocked` whatever else is degraded. Status already calls the storefront; it now
+  also runs `ansible --version` and hashes playbooks.
+- Callers: e2e's mock-mode checks read `execution.mocked`; the smoke readiness test becomes
+  a status test; the validation runbook's `jq` follows.
+- **Connectivity**: `ConnectivityResult` (host, reachable, detail) becomes a neutral host
+  model; `HostRouteService` takes probes keyed by connection kind (the shape of
+  `ConnectionCodecs`), and a host whose kind has no probe is refused (422); the root
+  registers `ssh` → the distribution's `probe_connectivity` over a runner the root builds
+  (`AnsibleRunner`, or `MockAnsibleRunner` under the mock profile, whose connectivity always
+  succeeds) instead of borrowing VM's runner, which today serves bare-metal hosts too.
+
+**8. The family's wire contract and its client become thin distributions.**
+
+Two clients served one service, split by history: `ComputeProvisioningClient` in
+`compute_provisioning` (async, caller-chosen role; contract operations, contract leases,
+rotation, fulfillment, relays) and `vm_provisioning_operator`'s `ProvisioningClient` and
+`SyncProvisioningClient` (always admin; of about seventy methods only the ten VM operations
+and the host capacity check are VM's, the rest being family routes, service routes such as
+pools, and site capacity reads that duplicate `kit/site-client`). Bare-metal e2e uses VM's
+client to administer pools; the bare-metal adapter declares a dependency on VM's client it
+never imports. A thin client must not carry the family kit's weight (`kit-site` brings
+FastAPI and SQLAlchemy), and `ARCHITECTURE.md` lets a family split its kit where weight
+would force consumers to install what they do not use. So:
+
+- **`provisioning/compute/contracts`** (`arkhai-compute-provisioning-contracts`,
+  `compute_provisioning_contracts`; depending on `arkhai-core` for `VersionedEnvelope`,
+  `kit-identity` for the empty-body sentinel and the rotation models, and pydantic): the
+  versioned contract models, the host, job, lease, and system models,
+  `SystemStatusResponse`, the neutral `ConnectivityResult`, and the route contracts
+  (`ProvisioningRouteContract`, the family routes and roles, `ProvisioningRouteTable` and
+  its assembly, declaration validation, canonical request bodies). It carries no
+  resource-pool or site model: those belong to their capabilities (decision 11). The family
+  kit, the service's authentication, the adapters, and the client import them from here.
+  Two packages rather than one so the server never depends on its own caller (the
+  direction `kit/site/auth.py` names as wrong).
+- **`provisioning/compute/client`** (`arkhai-compute-provisioning-client`,
+  `compute_provisioning_client`; the contracts, `kit-identity`, and httpx):
+  `ComputeProvisioningClient` and `SyncComputeProvisioningClient` over one signing base (the
+  family client's and VM's `_ProvisioningClientBase`, merged), one error hierarchy,
+  `authenticated_request` in both variants for domain extensions, the polling helper, and
+  the client protocol, covering every route the ownership matrix gives the compute family
+  and nothing else. Family methods return typed models.
+- **Who reads which table** (design review): the provisioning service's authentication
+  resolves requests against the table the composition root assembles from every
+  contribution. The family client signs family routes from the family contracts; a domain's,
+  an implementation's, or a capability's typed client signs its routes from that owner's
+  contracts through an `authenticated_request` transport. Both sides use the same
+  contributed contract data, so operation, resource binding, and roles cannot diverge.
+- **A route-ownership matrix opens A0** (design review): every route the provisioning
+  service serves is assigned its owner (compute family, Ansible implementation, VM, bare
+  metal, resource pools, site, or the provisioning service itself) before anything moves,
+  and the matrix decides which contracts package and client receive each operation, so
+  A0 does not become "everything in `vm_provisioning_operator` moves to the family client".
+- **Deleted**: `ComputeProvisioningClient` and the route-table code from
+  `compute_provisioning`; the generic clients from `vm_provisioning_operator`; their parity
+  test.
+- **A sync variant replaces VM's sync client like for like**, because e2e's generic calls
+  use one today; `TESTING.md`'s parity rule is conditional ("when a client package exposes
+  both"), is not amended, and requires the parity test because the new client exposes both.
+- **VM keeps a small extension client**: `vm_provisioning_operator` keeps VM's models and
+  route declarations plus `VmOperatorClient` and `SyncVmOperatorClient`, typed methods for
+  VM's ten operations over the family client's `authenticated_request` (the
+  `kit/pool-overrides` shape), depending only on the two thin packages. The family client
+  names no domain route.
+- **Relays skip a move**: their wire models, route contracts, and client methods go
+  straight to VM's packages; 5B.9 still moves the serving code and tables.
+- **Site capacity stays with `kit/site-client`**, that capability's client; e2e drives
+  `SiteCapacityClient` through `asyncio.run` for capacity reads and backdating, as
+  bare-metal e2e already drives `SiteCapacityAdminClient`.
+- **Integration tests use the async variant**: httpx's in-process ASGI transport is
+  async-only, and a sync client in-process would need Starlette's `TestClient`, which runs
+  the app on its own loop thread, away from the tests' synchronization seams. The sync
+  variant is covered by the parity test and by e2e.
+- **`VersionedEnvelope` moves to `arkhai-core` (`market_core`)**, which depends only on
+  pydantic: the versioned-envelope rule applies to every provider-specific payload crossing
+  a boundary, which makes it universal to every market. `kit/fulfillment` and every importer
+  take it from there; no re-export.
+- Package dependencies follow: the family kit, the service, both adapters, and the Ansible
+  distribution depend on the contracts; both storefronts on the contracts and the client,
+  dropping `arkhai-compute-provisioning` if nothing else they import remains there;
+  `e2e-tests` on the client, plus VM's package for VM operations only; the bare-metal
+  adapter's unused dependency on VM's client goes.
+
+**9. A lease that was never delivered is released by what its fulfillment proves**
+(design review). In this codebase `commit` moves a reservation straight from `reserved` to
+`leased`, and nothing sets `provisioning`; so `leased` spans everything from "committed,
+fulfillment never begun" to "active". Fulfillment teardown can begin only from `active` (or
+be retried from `teardown_failed`); the settlement-abandonment hook abandons only an
+`assigned` aggregate; and `failed` arises only when a provider reported a create as
+succeeded but its resource identity could not be resolved, so a workload may exist. Under
+mode-agnostic release every undelivered lease would therefore end in `release_failed`. The
+review proposed releasing `reserved` and `provisioning` directly and truncating `leased`; the
+first half is adopted, the second does not hold, because a `leased` reservation is not
+necessarily delivered. Decided:
+
+- **An uncommitted hold is released, not truncated.** The VM storefront's
+  terminal-settlement path releases a `reserved` reservation through the capacity runtime's
+  release, which offers the abandonment hook its chance; truncation refuses `reserved` (and
+  `provisioning`).
+- **Release follows the aggregate's state:**
+
+  | Aggregate | Release |
+  |---|---|
+  | `active` | begin teardown, as today |
+  | absent or `assigned`, with provenance proving no dispatch | abandon an `assigned` aggregate and release the capacity directly, as a completed release |
+  | `dispatch_pending` or `dispatching` | the release is remembered and waits for the create to settle |
+  | `failed`, or absent or `assigned` without that proof | `release_failed`, for an operator to verify the host and force-release |
+
+- **Provenance proving no dispatch** is all three of: the aggregate is absent or `assigned`;
+  the reservation records no create handle; the job authority holds no job bound to the
+  reservation (job rows carry an indexed `capacity_reservation_id`). With the generic action
+  route deleted, fulfillment is the only path that puts a job on a reservation.
+- **An in-flight termination is remembered by the lease lifecycle** (option (a), chosen over
+  a teardown intent on the aggregate). Expiry or terminate moves the reservation to
+  `releasing` at once, with the fulfillment id as its release handle; `releasing` is already
+  durable and already the lifecycle's state, so it survives a restart and a second request
+  finds it. The release poll begins teardown when the aggregate reaches `active`, and records
+  `release_failed` if it ends `failed`; the grace timeout does not run while the create is
+  in flight. `kit/fulfillment` is unchanged. The maintainer noted the tension between the
+  two lifecycles here and chose the lease lifecycle for this case.
+
+**10. The generic action surface and the compute-adapter architecture are deleted**
+(design review). `POST /api/v1/actions` reaches each domain's compute adapter: VM's only
+action is `create`, which makes a VM outside fulfillment, and bare metal's only action is
+`node_grant_access`. Refusing delivery actions on it would refuse everything, so it is not
+narrowed but removed. No production code calls it or the three contract job routes beside
+it (`GET /api/v1/jobs/{id}/contract`, its credentials, and its cancel), and the compute
+adapters are the `ExecutorAdapterRegistry`'s only users. Deleted: the four routes and their
+contracts; both domains' `compute_adapter.py`; `ExecutorAdapter`, `ExecutorAdapterRegistry`,
+the bundles' compute-adapter contribution; the action half of `ComputeContractService` and
+its client methods; `ReservationNotProvisionableError`. `ExecutorActionEnvelope` stays: the
+fulfillment providers submit their jobs with it as the job's contract record. The
+`physical-provisioning` requirement "Validated executor registration" is modified: its
+executor-adapter dimension goes, and its duplicate-key guarantee is the job executor
+table's, already required by "Job execution resolves its executor by offering mode and
+action". Delivery happens only through fulfillment, for every mode.
+
+**11. Resource pools and capacity definitions get thin surfaces of their own** (design
+review). The family route table declared the pool routes and the capacity-definition
+import, `compute_provisioning` re-exported their models (`market_resource_pools`,
+`market_site`), and decision 8 first had the family client cover them. Hosting a route does
+not make it the host's: under the five-piece pattern each belongs to its capability. Typed
+pool methods on the family client would also have required `kit-resource-pools`, which
+brings SQLAlchemy. The maintainer chose to make the thin surfaces now rather than record
+the debt:
+
+- **`kit/resource-pools-contracts`** (`arkhai-kit-resource-pools-contracts`; pydantic and
+  `kit-capability-shape`): the pool models, the declaration hints they validate with, and
+  the pool route declarations as plain data. `market_resource_pools` keeps the authority and
+  persistence and imports its models from here; `ResourcePoolService` is the framework-free
+  route service, and the provisioning service keeps the HTTP binding and assembles the
+  declarations into its table.
+- **`kit/resource-pools-client`** (`arkhai-kit-resource-pools-client`; the contracts only):
+  `ResourcePoolClient` and `SyncResourcePoolClient` over any transport offering
+  `authenticated_request`, the shape `kit/pool-overrides` uses, so a repository-wide kit never
+  imports the compute family's client.
+- **Capacity-definition import goes into `kit/site-client`**, the site capability's existing
+  thin client, under the site's current convention: its own model copies, its own route
+  table entry, and the server-and-client parity test extended to cover it. A site contracts
+  package is recorded as the alternative for later.
+- `compute_provisioning` stops re-exporting pool and capacity-definition models, and the
+  `physical-provisioning` delta no longer claims to own resource-pool models.
+
+**Design review corrections (2026-10-04).** The review endorsed the 5B.8 direction and
+asked for seven corrections, each verified in code and discussed with the maintainer:
+
+| Review point | Outcome |
+|---|---|
+| Resource-pool contracts are not compute contracts | Accepted, with thin surfaces now rather than debt (decision 11) |
+| Host import is Ansible-specific | Accepted (decision 4) |
+| The assembled-table rule contradicts the client design | Accepted; the same contradiction stood in this document (decision 8) |
+| Fix pre-fulfillment termination in slice B | Accepted and widened: the hole is any undelivered lease, because `leased` begins at commit (decision 9) |
+| Close the direct bare-metal grant on the action route | Widened: VM's create is the same hole, so the whole action surface goes (decision 10) |
+| The contracts depend on `arkhai-core` | Accepted (decision 8) |
+| Reconcile stale decisions and plan implementation-sized tasks | Accepted: superseded passages are marked and listed under "Superseded decisions"; the task plan follows in planning |
+
+**Findings recorded for closeout** (none is fixed by 5B.8 unless stated above):
+
+- `kit/site` ships its own FastAPI router, outside the five-piece pattern.
+- VM's storefront binds pool overrides with a literal path under a router prefix rather than
+  `POOL_OVERRIDES_PATH`, as bare metal does.
+- The site's route contracts are declared three times: `kit/site/auth.py`,
+  `kit/site-client`, and the family route table.
+- Bare metal's mock-rule routes have no typed client.
+- `ReservationState.provisioning` is never set: `commit` moves a reservation from `reserved`
+  to `leased`.
+- A site contracts package, in place of the site's duplicated server and client models
+  (decision 11).
+- "An administrator can do everything" holds only on the provisioning service's route
+  table; the repository-wide stance is a roadmap gap.
+- Path templates in the family route contracts (decision 4, option 2).
 
 ### Implementation-review fixes for Sections 4–5
 
@@ -983,7 +1442,9 @@ client (corrected with the maintainer when 5A started). A bare-metal-typed metho
 exposes a market-neutral `authenticated_request`, and `arkhai_bare_metal` owns
 `BareMetalLeaseClient` beside the models it sends and returns, wrapping any transport
 that offers that method. Both the mock-profile test and the bare-metal lease API test
-use it.
+use it. *Superseded by "Controls and routes (5B.8)", decision 1: the bare-metal lease
+surface and `BareMetalLeaseClient` are deleted; the transport shape survives for the
+VM, Ansible, and resource-pool client extensions.*
 
 The same rule exposes a second gap: the provisioning route-contract table in
 `compute_provisioning/client.py` lists bare-metal routes (`/api/v1/bare-metal/leases*`
@@ -991,7 +1452,10 @@ and `/test/bare-metal/*`), so a third compute domain would have to edit the fami
 to have its routes signed. Decided with the maintainer: 5B.1 makes the table
 contributable. Each domain contributes its route contracts beside its typed client, the
 provisioning service assembles them, and both the client and the service's
-authentication read the assembled table.
+authentication read the assembled table. *Corrected by "Controls and routes (5B.8)",
+decision 8: the service's authentication reads the assembled table; each client signs
+from its owner's contracts, as "Clients take contracts, not the assembled table" below
+already said.*
 
 Settled with the maintainer when 5B.1 began:
 
@@ -1002,7 +1466,8 @@ Settled with the maintainer when 5B.1 began:
   `LeaseTermination`, `LeaseRetryRelease`, `LeaseForceRelease`). When the generic lease
   routes move (5B.8), the lease lifecycle serves the neutral view and VM keeps
   `/api/v1/leases` as a compatibility surface built from it, its VM fields blank for
-  bare metal. Moving them would put VM vocabulary in the family kit; neutralizing them
+  bare metal. *Superseded by "Controls and routes (5B.8)", decision 1: `/api/v1/leases` is
+  removed; the family lease surface is the only one.* Moving them would put VM vocabulary in the family kit; neutralizing them
   would change the wire the lease stages read.
 - **Client packages stay light.** A domain declares its route contracts as plain data in
   its own package, with no dependency on `compute_provisioning`; the family kit adapts
@@ -1131,6 +1596,25 @@ with `compose.local-identities.yml` removed and `docker-compose.yml` layering bo
 stack's two registries and stays in the VM lane.
 
 ## Superseded decisions
+
+Superseded by "Controls and routes (5B.8)" and its design review (2026-10-04):
+
+- **`BareMetalLeaseClient` and the contributed bare-metal lease routes** ("Implementation-review
+  fixes for Sections 4–5") → decision 1: the bare-metal lease surface is deleted.
+- **VM's `/api/v1/leases` as a compatibility surface** → decision 1: one family lease
+  surface.
+- **Both the client and the service's authentication read the assembled table** → decision
+  8: authentication reads the assembled table; each client signs from its owner's contracts.
+- **Generic lease update** ("Job and host authority shape") → decision 2: no lease update; a
+  lease's end moves only through the site's truncation.
+- **`ReservationNotProvisionableError` moving to `compute_provisioning`** ("Architecture
+  review") → decision 10: deleted with the compute adapters.
+- **Ansible readiness served by the Ansible distribution** ("Provisioning execution leaves
+  the VM adapter") → decision 7: a contributed component of system status.
+- **The job and host wire models living in `compute_provisioning`** → decision 8: the thin
+  contracts distribution.
+- **Release status selected by offering mode, and the `direct-release` sentinel** → decision
+  1: one release executor and status port.
 
 Superseded after the 2026-10-02 job and host design review:
 

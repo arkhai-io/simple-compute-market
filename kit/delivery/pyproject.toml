@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-kit-delivery"
-version = "0.1.0"
+version = "0.2.0"
 description = "Recipient-side delivery of revealed marketplace events to locally configured sinks"
 requires-python = ">=3.12,<3.14"
 license = "MIT"
@@ -10,10 +10,10 @@ dependencies = [
 ]
 
 [project.entry-points."market.delivery_sinks"]
-file = "market_delivery.builtin.file_sink:build_file_sink"
-command = "market_delivery.builtin.command_sink:build_command_sink"
-webhook = "market_delivery.builtin.webhook_sink:build_webhook_sink"
-smtp = "market_delivery.builtin.smtp_sink:build_smtp_sink"
+file = "market_delivery.builtin.file_sink:FILE_SINK"
+command = "market_delivery.builtin.command_sink:COMMAND_SINK"
+webhook = "market_delivery.builtin.webhook_sink:WEBHOOK_SINK"
+smtp = "market_delivery.builtin.smtp_sink:SMTP_SINK"
 
 [build-system]
 requires = ["hatchling"]
@@ -24,7 +24,7 @@ packages = ["src/market_delivery"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
-testpaths = ["tests/unit"]
+testpaths = ["tests/unit", "tests/integration"]
 asyncio_mode = "auto"
 
 [dependency-groups]

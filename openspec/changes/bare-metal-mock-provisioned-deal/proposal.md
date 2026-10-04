@@ -63,8 +63,9 @@ API-credit deal runs inside the VM lane.
   authority into `compute_provisioning`, defined as the compute family kit; shared
   Ansible mechanics into a sibling family-kit distribution, `provisioning/compute/ansible`;
   each domain contributes only its codec, playbooks, preparation, and result meaning.
-  Neither adapter imports the other or the deployed service. The job and host wire
-  models move to `compute_provisioning`, re-exported by `vm_provisioning_operator`.
+  Neither adapter imports the other or the deployed service. The composition root
+  builds the one job authority and the one host authority and hands both to every
+  adapter runtime.
   Once that boundary is proven, the two job-backed fulfillment providers' shared shape
   becomes a helper in `compute_provisioning`, leaving each domain its job preparation
   and result mapping.
@@ -75,6 +76,28 @@ API-credit deal runs inside the VM lane.
   authority, and decrypted only by their codec at execution. Being
   pre-release, this changes the host, job-credential, and generic lease wire formats and
   their schemas directly, through forward migrations, with no compatibility layer.
+- Give the family's wire contract and its client thin distributions of their own: the
+  wire models and route contracts move to `provisioning/compute/contracts`, and both
+  existing generic clients are replaced by `provisioning/compute/client`, async and sync,
+  with VM keeping a small extension for its own operations. `VersionedEnvelope` moves to
+  `arkhai-core`, so the contracts carry no kit weight. Routes the provisioning service hosts
+  for other capabilities keep their owners: resource pools get thin contracts and client
+  distributions of their own, capacity-definition import joins `kit/site-client`, and
+  Ansible host import moves to the Ansible distribution.
+- Consolidate leases on one family surface that records and releases and never delivers:
+  VM's lease routes are absorbed into it, bare metal's lease routes (and the access grant
+  they made outside fulfillment) are deleted, there is no lease update, a lease's end moves
+  only through the site's truncation, lease registration writes the lease tail once, and
+  the lease lifecycle and release are mode-agnostic. A lease that was never delivered is
+  released by what its fulfillment proves, and an uncommitted hold is released rather than
+  truncated. Every route on the provisioning service admits the administrator.
+- Delete the generic executor-action route, its contract job routes, and the
+  compute-adapter architecture behind them, so delivery happens only through fulfillment.
+- Serve the family's job, host, lease, and test-job routes from framework-free route
+  services the provisioning service binds, with adapters binding their own routes through
+  accessors rather than reaching into the service's module state; report execution
+  readiness in system status instead of a route of its own; record the five-piece route
+  pattern in `ARCHITECTURE.md`.
 - Share compute deal stages in `compute_deal_stages.py` with a per-domain driver, move
   VM's scenario onto them, and add the bare-metal mock-provisioned deal.
 - Prove bare-metal storefront restart recovery at integration level, as VM's is.
@@ -103,7 +126,21 @@ None.
   it; job, host, and readiness wire models are compute-owned; no adapter imports another
   adapter or the deployed service; lease release delegates to durable fulfillment teardown for
   every offering mode; storefront teardown goes through lease termination; job execution
-  resolves its executor by offering mode and action from a compute-provisioning table.
+  resolves its executor by offering mode and action from a compute-provisioning table;
+  leases have one family surface that records and releases, with executor identity and
+  evidence fixed at registration; every provisioning route admits the administrator;
+  execution readiness is reported in system status; host connectivity is probed by
+  connection kind; the family's wire contract and client are thin distributions; delivery
+  happens only through fulfillment; an undelivered lease is released by what its
+  fulfillment proves; host import belongs to the implementation that reads its format;
+  executor registration is the job executor table's.
+- `site-capacity`: a reservation's lease tail is written once; lease truncation neither
+  resurrects nor extends a lease, and refuses an uncommitted hold; capacity-definition
+  import has a thin typed client.
+- `compute-provisioning-contract`: the versioned executor action submission is removed;
+  jobs are submitted by fulfillment providers.
+- `resource-pool-management`: the pool wire contract and client are thin distributions.
+- `fulfillment`: `VersionedEnvelope` is provided by `arkhai-core`.
 - `storefront-publication`: bare-metal fulfillment starts at settlement verification,
   and bare-metal teardown releases capacity through the site's lease lifecycle.
 
@@ -126,14 +163,29 @@ None.
   adapter gains its codec, access parameters, and playbook and role, and loses every
   import of the VM adapter and the deployed service.
 - New `provisioning/compute/ansible` distribution (Ansible mechanics, the Ansible job
-  executor, its mock, readiness).
-- `domains/vms/provisioning/client` (`vm_provisioning_operator`): job, host, and
-  readiness models become re-exports.
+  executor, its mock, its readiness component).
+- New `provisioning/compute/contracts` (the family's wire models and route contracts) and
+  `provisioning/compute/client` (the family's async and sync typed client) distributions.
+- New `kit/resource-pools-contracts` and `kit/resource-pools-client` distributions;
+  `kit/resource-pools` imports its models from the former. `kit/site-client` gains
+  capacity-definition import.
+- `provisioning/compute/ansible`: the host-import route contract, route service, and client
+  extension.
+- `domains/vms/provisioning/client` (`vm_provisioning_operator`): its generic clients are
+  deleted; it keeps VM's models, route declarations, relays' client surface, and a VM
+  extension client over the family client.
+- `core` (`arkhai-core`): `VersionedEnvelope`. `kit/fulfillment` and its importers take it
+  from there.
+- `kit/site`: write-once lease attachment and guarded truncation.
 - `provisioning/compute/service`: Dockerfile and settings copy each domain's `iac`; the
   service composes contributed diagnostics and mounts the moved route services.
 - `provisioning/compute`: the `(offering_mode, action)` executor table, the
-  compute-family mock mechanism, provider-neutral release executor and job port, release
-  dispatcher composition, and the provisioning client's route contracts.
+  compute-family mock mechanism, the provider-neutral release executor and status port
+  (no mode-keyed dispatch), and framework-free job, host, lease, and test-job route
+  services; its client and route contracts move to the thin distributions.
+- `domains/bare_metal`: its lease surface and lease client are deleted.
+- Both provisioning adapters: their compute adapters are deleted, with the generic action
+  route, its contract job routes, and `ExecutorAdapterRegistry`.
 - `kit/negotiation-runtime`: administrative acceptance and opening preview.
   `kit/settlement-runtime`, `kit/capacity-publication`, and `kit/storefront`:
   deal-control route services and the evaluate-settle hook. `core/storefront`: the
@@ -146,7 +198,11 @@ None.
   capacity-released callback, the publication dry run, restart integration tests.
 - `domains/bare_metal/buyer`: `begin()` removed from the fulfillment transport.
 - `e2e-tests`: shared compute deal stages, VM's scenario moved onto them, the bare-metal
-  scenario and driver, shared helpers, the bare-metal buyer dependency, lane targets.
+  scenario and driver, shared helpers, the bare-metal buyer dependency, lane targets; the
+  family client in place of VM's generic client, and lease backdating through the site
+  client.
+- `domains/vms/storefront` and `domains/bare_metal/storefront`: the thin contracts and
+  client in place of the family kit.
 - Root `Makefile`, compose files, and `.github/workflows/e2e.yml`.
 - `openspec/changes/bare-metal-and-credits-domain-stacks/`,
   `openspec/changes/kit-owned-storefront-shell/`, and
@@ -155,14 +211,19 @@ None.
 ## Permanent documentation impact
 
 - [x] `docs/development/ARCHITECTURE.md` — the definition of a family kit and its
-      layer, the compute family's packages, the deal-control route services in the kit
-      layers, the compute-provisioning executor table and mock mechanism, release
-      ownership, and the bare-metal fulfillment hook statement, which is stale today.
+      layer, the compute family's packages (including the contracts and client
+      distributions), the deal-control route services in the kit layers, the five-piece
+      route pattern, the compute-provisioning executor table and mock mechanism, release
+      ownership (mode-agnostic), `VersionedEnvelope`'s home in core, and the bare-metal
+      fulfillment hook statement, which is stale today.
+- [x] `docs/development/ROADMAP.md` — the repository-wide administrator stance as an
+      open gap, and the findings recorded under "Controls and routes (5B.8)".
 - [x] `docs/development/TESTING.md` — three lanes on shared images, the loop table's
       bare-metal publication dry run, shared compute deal stages, the mock profile's
       per-adapter executors, and the stale "blocked—not mocked" bare-metal statement.
 - [x] Existing subsystem specification — `test-compatibility`, `market-composition`,
-      `physical-provisioning`, `storefront-publication`.
+      `physical-provisioning`, `storefront-publication`, `site-capacity`, `fulfillment`,
+      `compute-provisioning-contract`, `resource-pool-management`.
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 
@@ -190,6 +251,26 @@ None.
   `openspec/specs/physical-provisioning/spec.md`, `docs/development/ARCHITECTURE.md`.
 - Bare-metal fulfillment starts at settlement verification —
   `openspec/specs/storefront-publication/spec.md`, `docs/development/ARCHITECTURE.md`.
+- A capability's HTTP surface is five pieces, the binding owned by whatever composes the
+  process — `docs/development/ARCHITECTURE.md` ("Route contracts and their HTTP binding",
+  promoted during design at the maintainer's request).
+- Leases have one family surface that records and releases; executor identity and
+  evidence are fixed at registration; leases are keyed by reservation id; every
+  provisioning route admits the administrator; readiness is part of system status;
+  connectivity is probed by connection kind; the family's wire contract and client are
+  thin distributions — `openspec/specs/physical-provisioning/spec.md`,
+  `docs/development/ARCHITECTURE.md`.
+- A lease tail is written once and truncation neither resurrects nor extends a lease, nor
+  ends an uncommitted hold; capacity-definition import has a thin client —
+  `openspec/specs/site-capacity/spec.md`.
+- Delivery happens only through fulfillment; an undelivered lease is released by what its
+  fulfillment proves; host import belongs to its implementation —
+  `openspec/specs/physical-provisioning/spec.md`; the executor-action submission is removed
+  from `openspec/specs/compute-provisioning-contract/spec.md`.
+- The pool wire contract and client are thin distributions of the resource-pool capability —
+  `openspec/specs/resource-pool-management/spec.md`, `docs/development/ARCHITECTURE.md`.
+- `VersionedEnvelope` lives in `arkhai-core` — `openspec/specs/fulfillment/spec.md`,
+  `docs/development/ARCHITECTURE.md`.
 
 ## Dependencies
 
@@ -201,6 +282,10 @@ Takes over, and records as migrated in the source change:
 - `bare-metal-and-credits-domain-stacks` 4a.1, 4a.2, and the runtime half of 4a.3;
 - the deal-control route services from `kit-owned-storefront-shell`'s scope;
 - the separate API-credit lane from `apicredits-end-to-end-lane`.
+
+Also takes over the storefronts' thin compute-provisioning client, which an architecture
+review had assigned to `kit-owned-listing-and-fulfillment-lifecycles`; that change's
+documents never recorded the item, so nothing there changes.
 
 Hands to `bare-metal-and-credits-domain-stacks` its former tasks 3.1–3.4 and the
 `buyer-orchestration` delta. Supplies that change's pipeline deal evidence for Goal 4,

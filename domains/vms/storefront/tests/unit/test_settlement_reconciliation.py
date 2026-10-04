@@ -65,6 +65,7 @@ async def test_readiness_reconciliation_preserves_listing_identity_and_accepted_
         domain_registry=registry,
         market_domain=domain,
         load_listing=AsyncMock(return_value=stored),
+        load_listing_binding=AsyncMock(return_value=None),
         update_listing=AsyncMock(),
     )
     new_option = {

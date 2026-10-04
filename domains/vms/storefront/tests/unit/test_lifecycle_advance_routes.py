@@ -34,6 +34,7 @@ def _loop_names() -> set[str]:
         lifecycle.CAPACITY_EVENTS_POLLER,
         lifecycle.SITE_PROJECTION_POLLER,
         lifecycle.PUBLICATION,
+        lifecycle.INTRODUCTION_RETENTION,
     }
 
 
@@ -147,6 +148,7 @@ class TestEveryRouteNamesARegisteredLoop:
             "site-projections",
             "capacity-events",
             "publication",
+            "introduction-retention",
         }
 
 

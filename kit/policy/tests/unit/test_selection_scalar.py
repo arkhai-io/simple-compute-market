@@ -16,6 +16,8 @@ from market_policy.negotiation_middleware import (
 from market_policy.scalar_policies import (
     selected_settlement_artifact,
     accept_exact_listing_middleware,
+    accept_unpriced_selection_middleware,
+    bisection_middleware,
     buyer_counter_guard,
     option_uses_scalar_amount,
     proposal_uses_scalar_amount,
@@ -210,3 +212,49 @@ def test_nothing_selected_is_none():
         _TWO_ESCROWS,
         {"settlement_selection": {"option_id": "x" * 64, "mechanism": "fiat.stripe.v1"}},
     ) is None
+
+
+def _opening(proposal: dict[str, Any] | None) -> list[NegotiationRound]:
+    return [NegotiationRound(round_number=0, sender="them", action="initial", proposal=proposal)]
+
+
+def test_an_unpriced_selection_is_accepted_as_published() -> None:
+    proposal = _selection_proposal(_NON_SCALAR_OPTION)
+    decision, _ = accept_unpriced_selection_middleware(_opening(proposal), _context())
+    assert decision is not None
+    assert decision.action == "accept"
+    assert decision.proposal == proposal
+    assert decision.reason == "unpriced_selection"
+
+
+def test_a_priced_selection_passes_to_the_bargaining_policy() -> None:
+    proposal = _selection_proposal(_SCALAR_OPTION, {"amount": 100})
+    decision, _ = accept_unpriced_selection_middleware(_opening(proposal), _context(100))
+    assert decision is None
+
+
+def test_a_proposal_without_a_selection_passes_through() -> None:
+    decision, _ = accept_unpriced_selection_middleware(
+        _opening({"fields": {"amount": 100}}), _context(100)
+    )
+    assert decision is None
+    decision, _ = accept_unpriced_selection_middleware(_opening(None), _context())
+    assert decision is None
+
+
+def test_a_selection_of_no_advertised_option_passes_through() -> None:
+    unknown = {**_NON_SCALAR_OPTION, "option_id": "cc" * 32}
+    decision, _ = accept_unpriced_selection_middleware(
+        _opening(_selection_proposal(unknown)), _context()
+    )
+    assert decision is None
+
+
+def test_bisection_alone_never_accepts_an_unpriced_selection() -> None:
+    """Why the guard exists: a scalar terminal waits for an amount that an
+    unpriced option never carries, and counters instead."""
+    decision, _ = bisection_middleware(
+        _opening(_selection_proposal(_NON_SCALAR_OPTION)), _context()
+    )
+    assert decision.action == "counter"
+

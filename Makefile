@@ -60,7 +60,7 @@ HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT ?=
 HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE ?=
 HOSTED_STRIPE_TEST_EVIDENCE ?= $(DIST_DIR)/hosted-stripe-test-evidence.json
 
-.PHONY: e2e-dev-identities e2e-dev-identities-env e2e-bare-metal-dev-env check-hosted-client-pin fix-hosted-client-pin review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-storefront test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning dist-compute-provisioning-ansible dist-compute-provisioning-service dist-kits verify-hosted-release dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-packaging check-uv-setup check-locks check-python-version check-project-layout lock
+.PHONY: helm-values-schema e2e-dev-identities e2e-dev-identities-env e2e-bare-metal-dev-env check-hosted-client-pin fix-hosted-client-pin review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-storefront test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning dist-compute-provisioning-service dist-compute-provisioning-ansible dist-compute-provisioning-service dist-kits verify-hosted-release dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-packaging check-uv-setup check-locks check-python-version check-project-layout lock
 .PHONY: build-hosted-producer
 .PHONY: test-release-tooling test-deployment-packaging prepare-hosted-compose prepare-hosted-compose-local hosted-preflight hosted-preflight-local hosted-stripe-test-local hosted-compose-up hosted-compose-restart hosted-compose-clean hosted-stripe-test hosted-stripe-test-stop
 .PHONY: dist-arkhai-core-registry
@@ -596,7 +596,13 @@ e2e-bare-metal-dev-env: ## Print VAR=value lines for the bare-metal lane's `dock
 	@echo 'BARE_METAL_STOREFRONT_SITES_JSON=[{"site_id":"$(E2E_BARE_METAL_SITE_ID)","authority_url":"http://bare-metal-provisioning:8081","authority_principal":{"scheme":"eip191","identifier":"$(E2E_BARE_METAL_SITE_AUTHORITY_ID)"}}]'
 	@echo 'BARE_METAL_STOREFRONT_SITE_PLACEMENT=fill_first'
 	@echo 'BARE_METAL_STOREFRONT_REGISTRY_URL=http://bare-metal-registry:8080'
-	@echo 'BARE_METAL_STOREFRONT_SETTLEMENT_JSON={"schema_version":1,"priority":["alkahest.v1"],"alkahest":{"enabled":true,"address_config_path":"/app/alkahest_anvil_addresses.json","oracle_gated":false,"trusted_oracle_addresses":[],"interruptible":false,"interruptible_oracle_addresses":[]}}'
+	@# Contact exchange is enabled so the introduction scenario can offer it through
+	@# a pool override; the configured clauses below stay Alkahest-only, so no other
+	@# listing changes. The seller contact is a development fixture on a reserved
+	@# domain, never to be used on a public network. A 5-second retention window lets
+	@# the scenario watch an introduction expire; the day-long sweep interval keeps
+	@# the timer out of the way of the steps the scenario takes itself.
+	@echo 'BARE_METAL_STOREFRONT_SETTLEMENT_JSON={"schema_version":1,"priority":["alkahest.v1","contact-exchange.v1"],"alkahest":{"enabled":true,"address_config_path":"/app/alkahest_anvil_addresses.json","oracle_gated":false,"trusted_oracle_addresses":[],"interruptible":false,"interruptible_oracle_addresses":[]},"contact":{"enabled":true,"contact_payload":{"email":"seller@bare-metal-e2e.invalid"},"profiles":{"default":{"channel":"email","terms":"Development introduction; no commercial terms."}},"retention_seconds":5,"retention_sweep_interval_seconds":86400}}'
 	@echo 'BARE_METAL_STOREFRONT_CHAINS_JSON={"anvil":{"rpc_url":"ws://anvil:8545","alkahest_address_config_path":"/app/alkahest_anvil_addresses.json"}}'
 	@echo 'BARE_METAL_PUBLICATION_CLAUSES_JSON=[{"mechanism":"alkahest.v1","asset":"$(E2E_BARE_METAL_ALKAHEST_ASSET)","rate":"100","per":"hour","mechanism_input":{"chain":"anvil","escrow_kind":"erc20_escrow_obligation_default"}}]'
 	@echo 'BARE_METAL_FUNDING_DEADLINES_JSON={}'
@@ -936,6 +942,15 @@ check-comment-hygiene: ## Fail if change-ID/task-number references leak outside 
 # runbook block everyone else's archival.
 check-doc-citations: ## Fail if a document cites a path that is absent or tombstoned (CHANGE=<name> to scope)
 	@python3 scripts/check_doc_citations.py "$(CHANGE)"
+
+# The Helm values schemas carry one definition generated from the storefront's
+# typed configuration models; it keeps secret-marked fields out of an agent's
+# pass-through config. It runs in the storefront's own environment (make
+# init-storefront), and the storefront's unit suite fails when it is stale.
+STOREFRONT_VALUES_SCHEMAS := ../../../helm/values.schema.json ../../../helm/charts/storefront/values.schema.json
+
+helm-values-schema: ## Regenerate the storefront config definition in the Helm values schemas
+	cd domains/vms/storefront && uv run --frozen --no-sync python -m market_storefront.values_schema write $(STOREFRONT_VALUES_SCHEMAS)
 
 lock: dist ## Relock projects against current wheels without installing anything (PROJECTS="dir ..." narrows it)
 	python3 scripts/uv_project.py lock $(PROJECTS)

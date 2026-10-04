@@ -87,7 +87,6 @@ from __future__ import annotations
 import logging
 import time
 from datetime import datetime, timedelta, timezone
-import os
 from importlib import resources
 
 import pytest
@@ -761,13 +760,8 @@ class TestStage03b_ResumePublishesToRegistry:
 # e2e tests.
 # ===========================================================================
 
-# The e2e-tests venv reaches the primary registry directly rather than
-# going through CONFIG.indexer_urls, which lives inside the storefront container.
-_REGISTRY_A = (
-    "http://registry:8080"
-    if "docker" in {p.strip() for p in os.environ.get("ACTIVE_PROFILES", "").split(",")}
-    else "http://localhost:8080"
-)
+# The test process reaches the registry at the address supplied by its active
+# topology profile; the storefront's own registry URLs live in another process.
 
 class TestStage04a_PrimaryRegistryPublish:
     def test_04a_listing_appears_in_primary_registry(
@@ -778,7 +772,7 @@ class TestStage04a_PrimaryRegistryPublish:
         import httpx
 
         listing_id = deal_state.seller_listing_id
-        for url in (_REGISTRY_A,):
+        for url in (str(settings.REGISTRY.API_URL).rstrip("/"),):
             resp = httpx.get(
                 f"{url}/listings/{listing_id}",
                 timeout=5.0,

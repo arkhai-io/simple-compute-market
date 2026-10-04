@@ -380,6 +380,22 @@ class AdminController:
     # returns what that operation returns. Running while held is the purpose.
     # ------------------------------------------------------------------
 
+    @router.delete(
+        "/introductions/{obligation_ref}/payloads",
+        summary="Delete one introduction's contact payloads now (admin)",
+    )
+    async def delete_introduction_payloads(self, obligation_ref: str) -> dict:
+        """Delete one introduction's contact payloads, whatever the window says.
+
+        The same deletion the retention sweep runs. The deal and its obligation
+        record remain; repeating the request converges.
+        """
+        composition = _container.resolved_contact_exchange
+        retention = composition.retention() if composition is not None else None
+        if retention is None:
+            raise HTTPException(status_code=404, detail="contact exchange is disabled")
+        return await retention.delete_one(obligation_ref)
+
     @router.post(
         "/lifecycle/pause",
         summary="Hold every timer-driven loop idle (admin)",

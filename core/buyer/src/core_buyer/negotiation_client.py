@@ -389,6 +389,17 @@ def _validated_party(
         raise RuntimeError(f"seller accept state has invalid {field}") from exc
 
 
+def _option_bargains_amount(option: SettlementOption) -> bool:
+    """Whether an advertised option is bargained through a scalar ``amount``.
+
+    The negotiation protocol defines scalar participation by an ``amount`` rate:
+    an option with only rates on other fields (a token bundle's
+    ``nativeAmount``, say), or with none, is take-it-or-leave-it, so its
+    acceptance carries no negotiated amount.
+    """
+    return any(rate.field == "amount" for rate in option.rates)
+
+
 def _validate_settlement_acceptance(
     *,
     reply: Mapping[str, Any],
@@ -396,7 +407,7 @@ def _validate_settlement_acceptance(
     plan: SettlementPlan | None,
     expected_selection: SettlementSelection,
     advertised_option: SettlementOption | None,
-    agreed_amount: int,
+    agreed_amount: int | None,
     expected_plan: SettlementPlan | None,
     buyer_principal: Identity,
     trusted_seller_principals: TrustedIdentitySet,
@@ -459,6 +470,12 @@ def _validate_settlement_acceptance(
         raise RuntimeError(
             "seller settlement_plan amount differs from the negotiated amount"
         )
+    if (
+        agreed_amount is None
+        and advertised_option is not None
+        and _option_bargains_amount(advertised_option)
+    ):
+        raise RuntimeError("seller accept state omitted the negotiated amount")
     if obligation.expiration_unix != expected_selection.expiration_unix:
         raise RuntimeError(
             "seller settlement_plan expiry differs from the buyer selection"
@@ -526,6 +543,21 @@ _REQUEST_ID_HEADER = "X-Market-Request-ID"
 _TIMESTAMP_HEADER = "X-Market-Timestamp"
 _SIGNATURE_HEADER = "X-Market-Signature"
 _MAX_RESPONSE_SKEW = 300
+
+
+class AuthenticatedHTTPError(RuntimeError):
+    """A storefront answered with an authenticated, verified non-success status.
+
+    Carries the status and the parsed body, which the response signature
+    covers, so a caller can tell one refusal from another by its contract
+    rather than by message text. Still a ``RuntimeError``, so callers that
+    treat any refusal as a failure are unaffected.
+    """
+
+    def __init__(self, message: str, *, status_code: int, body: Any) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.body = body
 
 
 def _header(headers: Mapping[str, str] | Any, name: str) -> str | None:
@@ -703,8 +735,10 @@ def _authenticated_json(
             f"{method} {url} response authentication failed: {verification.code.value}"
         )
     if not 200 <= response_status < 300:
-        raise RuntimeError(
-            f"{method} {url} -> authenticated HTTP {response_status}: {text[:500]}"
+        raise AuthenticatedHTTPError(
+            f"{method} {url} -> authenticated HTTP {response_status}: {text[:500]}",
+            status_code=response_status,
+            body=payload,
         )
     if not isinstance(payload, dict):
         raise RuntimeError(f"{method} {url} returned non-object JSON")
@@ -1069,9 +1103,9 @@ def negotiate_with_seller(
         if expected_selection is not None and seller_action in {"counter", "accept"}:
             _validate_selection_echo(accepted_selection, expected_selection)
         agreed_amount = _amount(reply.get("proposal"))
-        if agreed_amount is None:
+        if agreed_amount is None and expected_selection is None:
             agreed_amount = initial_amount
-        if seller_action in {"counter", "accept"} and expected_selection is not None:
+        if seller_action == "accept" and expected_selection is not None:
             _validate_settlement_acceptance(
                 reply=reply,
                 selection=accepted_selection,
@@ -1262,10 +1296,6 @@ def negotiate_with_seller(
                 if agreed_amount is None:
                     agreed_amount = _amount(next_move.proposal)
                 if expected_selection is not None:
-                    if agreed_amount is None:
-                        raise RuntimeError(
-                            "seller accept state omitted the negotiated amount"
-                        )
                     _validate_settlement_acceptance(
                         reply=reply,
                         selection=reply_selection,
@@ -1359,10 +1389,6 @@ def negotiate_with_seller(
             if agreed_amount is None:
                 agreed_amount = _amount(next_move.proposal)
             if expected_selection is not None:
-                if agreed_amount is None:
-                    raise RuntimeError(
-                        "seller accept state omitted the negotiated amount"
-                    )
                 _validate_settlement_acceptance(
                     reply=reply,
                     selection=reply_selection,

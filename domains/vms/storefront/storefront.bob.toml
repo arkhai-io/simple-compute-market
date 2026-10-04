@@ -62,7 +62,7 @@ principals = [
 ]
 [Settlement]
 schema_version = 1
-priority = ["alkahest.v1"]
+priority = ["alkahest.v1", "contact-exchange.v1"]
 
 [Settlement.alkahest]
 enabled = true
@@ -71,6 +71,33 @@ oracle_gated = false
 trusted_oracle_addresses = []
 interruptible = false
 interruptible_oracle_addresses = []
+
+# Settlement by introduction. Offered only on listings whose publication
+# clauses select it, such as a pool override's. The contact is ordinary
+# configuration -- never published, revealed only to the accepted buyer --
+# and is keyed by the listing's origin site. A dev value on a reserved domain.
+[Settlement.contact]
+enabled = true
+
+[Settlement.contact.origins.default]
+contact_payload = { email = "bob-sales@seller.invalid" }
+
+[Settlement.contact.profiles.default]
+channel = "email"
+terms = "Quoted per engagement; reply within one business day."
+
+# Seller-side delivery of each revealed buyer contact. Mailpit receives it in
+# this lane; scenarios read it back through Mailpit's API.
+[Delivery]
+enabled = ["seller-mail"]
+
+[Delivery.seller-mail]
+sink = "smtp"
+host = "mailpit"
+port = 1025
+start_tls = false
+sender = "storefront-bob@seller.invalid"
+recipients = ["bob-sales@seller.invalid"]
 
 [Wallet]
 address     = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
