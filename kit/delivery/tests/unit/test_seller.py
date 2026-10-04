@@ -1,8 +1,12 @@
-"""Seller-side dispatch routes each reveal by its origin, off the request path."""
+"""Seller-side routing and re-delivery, with no background dispatch involved.
+
+Which instances a reveal reaches is decided by ``sinks_for`` alone, so routing is
+tested there directly; re-delivery runs inline. The background dispatch itself is
+covered at integration level.
+"""
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass
 
 import pytest
@@ -48,34 +52,30 @@ def _delivery(received: dict, origins=None) -> SellerIntroductionDelivery:
 ROUTES = {"dc-west": ("west-hook", "audit"), "dc-east": ("east-hook", "audit")}
 
 
-async def _settle() -> None:
-    for _ in range(100):
-        await asyncio.sleep(0.01)
+def _names(sinks) -> list[str]:
+    return [sink.name for sink in sinks]
 
 
-async def test_a_reveal_reaches_only_its_origins_instances() -> None:
-    received: dict = {}
-    delivery = _delivery(received, ROUTES)
-    delivery(PROJECTION, Agreement("neg-1", BUYER, "dc-west"))
-    await _settle()
-    assert sorted(received) == ["audit", "west-hook"]
-    (event,) = received["west-hook"]
-    assert event.role == "seller"
-    assert event.contact == {"email": "buyer@example.com"}
+def test_a_routed_origin_reaches_only_its_instances() -> None:
+    assert _names(_delivery({}, ROUTES).sinks_for("dc-west")) == ["west-hook", "audit"]
 
 
-async def test_an_unrouted_origin_receives_nothing() -> None:
+def test_an_unrouted_origin_reaches_nothing() -> None:
+    delivery = _delivery({}, ROUTES)
+    assert delivery.sinks_for("dc-north") == ()
+    assert delivery.sinks_for(None) == ()
+
+
+def test_without_routing_every_instance_receives_every_reveal() -> None:
+    assert _names(_delivery({}).sinks_for("default")) == ["west-hook", "east-hook", "audit"]
+
+
+def test_an_unrouted_reveal_schedules_nothing() -> None:
+    """With no instance for its origin, dispatch returns without scheduling, so
+    it needs no running event loop at all."""
     received: dict = {}
     _delivery(received, ROUTES)(PROJECTION, Agreement("neg-1", BUYER, "dc-north"))
-    await _settle()
     assert received == {}
-
-
-async def test_without_routing_every_instance_receives_every_reveal() -> None:
-    received: dict = {}
-    _delivery(received)(PROJECTION, Agreement("neg-1", BUYER, "default"))
-    await _settle()
-    assert sorted(received) == ["audit", "east-hook", "west-hook"]
 
 
 def test_redelivery_routes_by_origin_and_reports_outcomes() -> None:

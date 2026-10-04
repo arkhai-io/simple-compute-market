@@ -24,7 +24,6 @@ from core_buyer import (
 from core_buyer.buyer_config import resolve_fresh_buyer_identity
 from core_buyer.deal_helpers import settlement_acceptance_fields
 from core_buyer.introductions import IntroductionPayloadsDeleted
-from core_buyer.negotiation_client import negotiate_with_seller
 from market_contact_exchange import MECHANISM as CONTACT_MECHANISM
 from market_contact_exchange import RecoveredIntroductionRun
 from market_core.schemas import SettlementOption, SettlementSelection
@@ -33,6 +32,7 @@ from market_settlement_runtime import derive_obligation_ref
 from pydantic_core import to_jsonable_python
 
 from .buy_orchestrator import fetch_listing_dict
+from .buyer_client import negotiate_with_seller
 from .deal_helpers import (
     load_deal_context,
     make_deal_publisher_trust_resolver,
@@ -193,12 +193,14 @@ def request_introduction(
         resolve_seller_principals=lambda: publisher_principals,
         initial_price=0.0,
         max_price=0.0,
-        unit_count=duration_seconds / 3600,
         # An introduction provisions nothing, so it carries no access key.
         provision_terms=make_vm_provision_terms(
             duration_seconds=duration_seconds, ssh_public_key=""
         ),
         settlement_selection=selection,
+        policy_params={
+            "_selected_settlement_option": selected.model_dump(mode="json")
+        },
         max_rounds=max_rounds,
     )
     if outcome.status != "agreed" or outcome.negotiation_id is None:

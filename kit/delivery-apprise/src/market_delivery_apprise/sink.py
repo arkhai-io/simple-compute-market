@@ -14,7 +14,13 @@ from collections.abc import Mapping
 from typing import Any
 
 import apprise
-from market_delivery import DeliveryError, DeliveryEvent, DeliverySink, SinkSettings
+from market_delivery import (
+    DeclaredSink,
+    DeliveryError,
+    DeliveryEvent,
+    DeliverySink,
+    SinkSettings,
+)
 from pydantic import Field
 
 
@@ -50,4 +56,8 @@ def build_apprise_sink(settings: Mapping[str, Any]) -> DeliverySink:
     return deliver_through_apprise
 
 
-__all__ = ["AppriseSinkSettings", "build_apprise_sink"]
+#: The installed sink: its factory with the settings model it declares.
+APPRISE_SINK = DeclaredSink(build_apprise_sink, AppriseSinkSettings)
+
+
+__all__ = ["APPRISE_SINK", "AppriseSinkSettings", "build_apprise_sink"]

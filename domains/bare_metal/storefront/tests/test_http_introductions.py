@@ -35,6 +35,7 @@ from arkhai_bare_metal_storefront.server import (
 from arkhai_bare_metal_storefront.settlement_composition import (
     BareMetalStorefrontSettlementComposition,
 )
+from arkhai_bare_metal_storefront.site_clients import BareMetalSiteBinding
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
 from core_buyer.introductions import IntroductionPayloadsDeleted, IntroductionTransport
@@ -119,6 +120,15 @@ def _runtime(
         seller_principal=SELLER_SIGNER.identity,
         admin_principals=TrustedIdentitySet(identities=(ADMIN_SIGNER.identity,)),
         storefront_url="http://seller:8000",
+        # The one site the introduction listing is published from: the single
+        # contact form is that site's contact and resolves for no other.
+        site_bindings=(
+            BareMetalSiteBinding(
+                site_id="site-a",
+                authority_principal=SELLER_SIGNER.identity,
+                authority_url="http://site-a",
+            ),
+        ),
         # Openings recheck each listing against the site that published it.
         capacity_client=SourceSites(),
         marketplace_signer=SELLER_SIGNER,

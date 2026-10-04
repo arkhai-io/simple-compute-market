@@ -21,7 +21,9 @@ from .config import DeliveryConfig
 from .sinks import (
     SINK_ENTRY_POINT_GROUP,
     ConfiguredSink,
+    DeclaredSink,
     DeliveryConfigurationError,
+    SinkSettings,
 )
 
 
@@ -59,6 +61,23 @@ def discover_sink_factories() -> tuple[dict[str, Any], tuple[str, ...]]:
                 f"({type(exc).__name__}); it is skipped"
             )
     return factories, tuple(warnings)
+
+
+def discover_sink_settings_models() -> tuple[dict[str, type[SinkSettings]], tuple[str, ...]]:
+    """The declared settings model of every installed sink that declares one.
+
+    A sink whose entry point names a plain factory declares nothing and is
+    absent here; it still installs and delivers. A deployment schema types
+    exactly the sinks returned and leaves every other instance open.
+    """
+
+    factories, warnings = discover_sink_factories()
+    models = {
+        name: factory.settings_model
+        for name, factory in factories.items()
+        if isinstance(factory, DeclaredSink)
+    }
+    return models, warnings
 
 
 def build_delivery_sinks(
@@ -123,4 +142,5 @@ __all__ = [
     "DeliverySinkSet",
     "build_delivery_sinks",
     "discover_sink_factories",
+    "discover_sink_settings_models",
 ]

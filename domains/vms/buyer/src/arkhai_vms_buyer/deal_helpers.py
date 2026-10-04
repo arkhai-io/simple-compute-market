@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import typer
+from market_alkahest import ALKAHEST_MECHANISM_ID
+from market_alkahest.plans import escrow_terms_from_settlement_plan
 from core_buyer.deal_helpers import (  # noqa: F401 — re-exports
     DealContext,
     NegotiationResumePoint,
@@ -102,9 +104,11 @@ def load_deal_context(run_id: str, *, signer):
         token = accepted_token_address(deal.accepted_escrow_proposal)
         if token:
             deal.token_contract = token
-    if deal.settlement_plan is not None and not deal.accepted_escrow_terms:
-        from market_alkahest.plans import escrow_terms_from_settlement_plan
-
+    if (
+        deal.settlement_plan is not None
+        and not deal.accepted_escrow_terms
+        and accepted_settlement_mechanism(deal) == ALKAHEST_MECHANISM_ID
+    ):
         deal.accepted_escrow_terms = [
             terms.model_dump()
             for terms in escrow_terms_from_settlement_plan(deal.settlement_plan)

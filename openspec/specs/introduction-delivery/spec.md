@@ -183,6 +183,11 @@ instantiates; an instance that names none instantiates the plugin of its own nam
 so a configuration written before instances existed keeps its meaning. Instance
 names MUST NOT collide with the section's own reserved settings.
 
+A sink MAY declare the model of its settings beside its factory, and discovery MUST
+make the declared models of installed sinks available. A deployment schema that types
+delivery settings MUST take them from discovery and MUST NOT name a sink in code; an
+installed sink that declares no model MUST be accepted with its settings left open.
+
 #### Scenario: A third-party sink is installed
 
 - **WHEN** an operator installs a sink package and enables it by name
@@ -206,6 +211,19 @@ names MUST NOT collide with the section's own reserved settings.
 - **WHEN** an operator enables two instances naming the same installed plugin with
   different settings
 - **THEN** each instance delivers to its own destination
+
+#### Scenario: A deployment schema types the installed sinks
+
+- **WHEN** a storefront generates its deployment schema with a sink installed that
+  declares its settings model
+- **THEN** that sink's instances are typed by the declared model, its secret settings
+  are refused, and the storefront's code names no sink
+
+#### Scenario: An installed sink declares no settings model
+
+- **WHEN** an installed sink plugin provides only its factory
+- **THEN** it can be enabled and configured, and a deployment schema leaves its
+  settings open
 
 #### Scenario: A configuration predates instances
 

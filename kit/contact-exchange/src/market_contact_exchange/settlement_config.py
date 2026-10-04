@@ -264,19 +264,31 @@ def _contact_leaks_into(config: ContactSettlementConfig, public_payload: str) ->
 def resolve_seller_contact(
     config: ContactSettlementConfig,
     origin: str | None,
+    known_origins: Collection[str] | None = None,
 ) -> dict[str, str] | None:
     """The seller contact for a listing from ``origin``, or None if there is none.
 
     Never falls back from one origin to another: revealing another seller's
-    contact is a disclosure, not a missing feature. The single form applies
-    only because composition refuses it for a storefront with more than one
-    origin.
+    contact is a disclosure, not a missing feature. A listing with no origin
+    resolves no contact in either form.
+
+    The single form is the contact of the storefront's one origin, so it
+    resolves only for that origin. Given ``known_origins`` -- as every reveal
+    is -- an agreement whose origin is not the one configured origin, such as a
+    deal accepted for a site the storefront no longer serves, resolves none.
+    Publication supplies the listing's own configured site and omits it.
     """
 
+    if origin is None:
+        return None
     if config.origins:
-        entry = config.origins.get(origin) if origin is not None else None
+        entry = config.origins.get(origin)
         return dict(entry.contact_payload) if entry is not None else None
-    return dict(config.contact_payload) if config.contact_payload else None
+    if not config.contact_payload:
+        return None
+    if known_origins is not None and set(known_origins) != {origin}:
+        return None
+    return dict(config.contact_payload)
 
 
 def validate_contact_origins(

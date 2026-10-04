@@ -12,6 +12,13 @@ Paths abbreviate `kit/contact-exchange/src/market_contact_exchange/` as `KC/`,
 Order: Sections 1–2 promote and must leave bare metal's suites green before Section 3
 composes VM. Sections 3b, 4, and 4a may proceed in parallel after Section 2.
 
+## Review corrections
+
+Section 8 records the corrections an implementation review and an architecture
+review asked for, and the VM negotiation defect found while making them (8.8). The
+end-to-end scenario (`test_vm_introduction.py`) and the Helm fixture
+(`helm/fixtures/contact-exchange-values.yaml`) are iterated separately.
+
 ## 1. Survey and placement
 
 - [x] 1.1 Separated bare metal's introduction composition into domain-neutral parts
@@ -53,9 +60,13 @@ composes VM. Sections 3b, 4, and 4a may proceed in parallel after Section 2.
       `BM/runtime.py` reduce to composition; `BM/api.py` keeps routes and
       `_authorize_introduction_request`; `BM/server.py` keeps loop registration;
       `BM/sqlite_client.py` loses the wrappers.
-- [x] 2.6 **Unit.** `kit/contact-exchange/tests/unit/test_composition.py` and
-      `test_store.py`, covering each refusal the glue makes, the mismatch refusal, the
-      store's round trip and redaction, and the composition object's outputs.
+- [x] 2.6 **Kit integration.** `kit/contact-exchange/tests/integration/test_composition.py`
+      over a real introduction table with injected reads and runtime: each refusal
+      the glue makes, the mismatched-reference refusal, the store's round trip and
+      deletion, keyed and single-form resolution, and the composition's outputs.
+      Configuration, resolver, readiness, and option-builder rules are unit-tested in
+      `kit/contact-exchange/tests/unit/test_settlement_config.py`. The store has no
+      file of its own; it is exercised through the composition test.
 - [x] 2.7 **Unchanged coverage.** `domains/bare_metal/storefront/tests/test_http_introductions.py`,
       `test_introduction_delivery.py`, `test_persistence.py`, `test_http_system.py`, and
       `test_app_composition.py` pass against the promoted implementation before
@@ -79,15 +90,17 @@ composes VM. Sections 3b, 4, and 4a may proceed in parallel after Section 2.
 - [x] 3.5 `VM/middleware/seller_auth.py`: `_buyer_response_contract` signs and records
       both introduction routes, as it does for the hosted settlement routes.
 - [x] 3.6 Confirm composition is independent of backing in both directions.
-- [x] 3.7 **Integration.** `domains/vms/storefront/tests/integration/test_introductions.py`
-      through `core_buyer`'s `IntroductionTransport` over a loopback server
-      (`domains/vms/storefront/tests/loopback.py`, copied from bare metal's): an
-      accepted introduction reveals to both parties, an exact retry replays, a
-      mismatched `obligation_ref` is refused with no payload, the obligation reaches
-      collected without VM fulfillment, and a rateless contact selection negotiates to
-      acceptance with no agreed amount.
-
-      Done as `domains/vms/storefront/tests/integration/test_introductions.py`, signing requests and verifying responses as `core_buyer` does against the mounted router and middleware (the hosted wire test's pattern) rather than a loopback server; no loopback helper was added.
+- [x] 3.7 **Integration.** `domains/vms/storefront/tests/integration/test_introduction_origins.py`
+      on the VM full-app harness (`domains/vms/storefront/tests/publication_app.py`,
+      composing contact exchange with a real settlement runtime), driving
+      `core_buyer`'s `IntroductionTransport` over loopback
+      (`domains/vms/storefront/tests/loopback.py`): a published listing is negotiated
+      to acceptance under the default policy chain, revealed and re-read with the
+      seller's signature verified by the transport, and a reveal against another
+      obligation is refused with no payload. The VM buyer's own negotiation client,
+      as `request-introduction` runs it, reaches agreement with no amount when the
+      seller accepts the unpriced selection at the opening. Exact-retry replay is covered by the
+      kit's reveal-service unit tests and bare metal's typed-client tests.
 ## 3a. Retention
 
 - [x] 3a.1 `VM/lifecycle.py` and `VM/lifecycle_steps.py`: an `introduction-retention`
@@ -100,11 +113,14 @@ composes VM. Sections 3b, 4, and 4a may proceed in parallel after Section 2.
       `HealthResponse.disclosures`; `VM/services/system_service.py` fills it from the
       composition when the mechanism is enabled, for `/health` and
       `/api/v1/system/health`.
-- [x] 3a.4 **Integration.** `domains/vms/storefront/tests/integration/test_introduction_retention.py`:
-      the readiness disclosure matches the reveal's; admin deletion leaves the
-      obligation resolvable; read, start, and re-delivery answer the deleted outcome;
-      the sweep step and preview work while loops are held.
-
+- [x] 3a.4 **Integration.** `domains/vms/storefront/tests/integration/test_introduction_retention.py`
+      on the same harness, through typed clients only: the `/health` disclosure
+      matches the reveal's; admin deletion through its route and administrator
+      authentication converges, leaves the obligation resolvable, and turns read and
+      start into the deleted outcome; the `introduction-retention` dry-run names
+      exactly the expired introduction and run-cycle deletes it. Operator
+      re-delivery after deletion is shown at composition level: its `seller_view`
+      read raises the deleted outcome, so no sink can be reached.
 ## 3b. Per-origin contact resolution
 
 - [x] 3b.1 `KC/settlement_config.py`: `origins` tables with a non-empty
@@ -136,14 +152,12 @@ composes VM. Sections 3b, 4, and 4a may proceed in parallel after Section 2.
       empty-entry refusal, every startup refusal, readiness under each form, resolver,
       option suppression and fail-closed refusal, and that a never-published value in
       a readiness projection is refused.
-- [x] 3b.7 **Integration.** `domains/vms/storefront/tests/integration/test_introduction_origins.py`:
-      two origins behind one storefront each reveal their own payload and never the
-      other's; one listing followed from publication through acceptance to reveal
-      uses its binding's origin throughout.
-- [x] 3b.8 **Integration.** Same module: an origin with no payload publishes no contact
-      option; a start whose origin lost its payload is refused with nothing persisted,
-      driven, or delivered.
-
+- [x] 3b.7 **Integration.** `test_introduction_origins.py`: one listing's published
+      binding, its negotiation's inherited binding, and the revealed contact all name
+      the same site; two sites behind one storefront each reveal their own contact.
+- [x] 3b.8 **Integration.** Same module: a site with no contact publishes no
+      introduction option; a reveal for a deal whose site lost its contact after
+      acceptance is refused with nothing persisted or driven.
 ## 4. Delivery
 
 - [x] 4.1 `KD/config.py`: named instances with `sink`; a table without `sink`
@@ -244,21 +258,31 @@ System scenarios are new modules only; no shared end-to-end helper or fixture is
 edited.
 
 - [x] 6.1 Kit, buyer, and boundary suites from Sections 2, 3b, 4, and 4a.
-- [x] 6.2 Bare-metal and VM storefront suites, including 2.7, 3.7, 3a.4, 3b.7, 3b.8.
-      Done. Pre-existing failures reproduced unchanged on the snapshot source and recorded, not owned here: two `test_negotiate_controller.py` acceptance cases, two `test_publication_loop.py` order-dependent cases and its hang at `test_round_zero_evaluation_runs_the_inventory_guard`, and `test_alkahest.py`'s chain-dependent setup.
-- [ ] 6.3 **System.** A new module `test_vm_introduction.py` under
+- [x] 6.2 Bare-metal and VM storefront suites, including 2.7, 3.7, 3a.4, 3b.7, and
+      3b.8. Pre-existing failures reproduced unchanged on the snapshot source and not
+      owned here: `test_negotiate_controller.py`'s amountless Alkahest escrow and
+      unbacked-acceptance cases, `test_publication_loop.py`'s two order-dependent
+      cases and its hang at `test_round_zero_evaluation_runs_the_inventory_guard`, and
+      `test_alkahest.py`'s chain-dependent setup. The publication harness's
+      `set_settlement_clauses` appends to `pricing.settlements` across apps instead of
+      replacing it; the introduction tests offer pools through overrides instead.
+- [x] 6.3 **System.** A new module `test_vm_introduction.py` under
       `e2e-tests/tests/e2e/roles/scenarios/vms/`, marker `e2e_vm_introduction` registered in `e2e-tests/pyproject.toml`; a
       `mailpit_api_url` lane setting in `e2e-tests/config/config-docker.yml` and
       `config-local.yml`. A VM deal settles by introduction through the VM buyer CLI,
       the buyer's file sink receives the seller's contact, and Mailpit holds the
       seller-side message carrying the buyer's.
-      Written and added to the VM lane's `E2E_MODULE`. First lane run: stage 00 passed; stage 01 declared its unbacked pool with a deliverable mode, which the site refuses (an unbacked pool delivers nothing), and looked for published listings in the cycle report, which names derivation keys rather than pools. Both corrected, with the site projection refreshed before the override and the cycle; rerun pending. Lane edits: Mailpit in `domains/vms/compose.yml`, Bob's contact and SMTP delivery in `domains/vms/storefront/storefront.bob.toml`, `mailpit.api_url` in `e2e-tests/config/config-docker.yml` and `config-local.yml`.
-- [ ] 6.4 **System.** Same module: backed and unbacked VM listings from one storefront
+      The VM lane passed with 135 tests, including all six introduction scenarios.
+      Lane configuration includes Mailpit, Bob's contact and SMTP delivery, and
+      `mailpit.api_url` in the Docker and local profiles. That run predates 8.8, which
+      changes how the seller answers an introduction opening (it now accepts it), so
+      the lane is rerun once on the combined tree before closeout.
+- [x] 6.4 **System.** Same module: backed and unbacked VM listings from one storefront
       are returned by one rate-bounded query, a listing publishing no rate is excluded,
       and an unbacked one reaches a usable introduction. Transferred from
       `unbacked-listing-publication` (its 6.7); the rate bound from
       `publish-indicative-listing-rates` (its 7.13).
-      Written in the same module; not yet run.
+      Passed in the VM lane and in the focused introduction module run.
 - [ ] 6.5 **System — blocked** on `bare-metal-mock-provisioned-deal`'s two-storefront,
       two-site topology; redesign from that baseline. Two seller sites behind one
       storefront keep distinct origin and source identity, each reveals its own
@@ -271,6 +295,75 @@ edited.
       and record the exact commands in 5.6.
 
       Commands recorded in `docs/development/VALIDATION_RUNBOOK.md`; awaiting a run against a Helm release.
+## 8. Review corrections
+
+- [x] 8.1 **Single-form contact binds to its one site.** `resolve_seller_contact` in
+      `KC/settlement_config.py` takes the known origins; the single form resolves only
+      when the agreement's origin is the one configured origin, so a missing origin,
+      an unknown one, or a stale deal from a site no longer configured is refused with
+      `seller_contact_unavailable` before anything is persisted, driven, or delivered.
+      `KC/composition.py` keeps the known origins after construction. Unit tests for
+      `None`, an unexpected origin, and a stale deal.
+- [x] 8.2 **VM transport contract.** Replace the hand-signed router test (now removed) with tests driving
+      `core_buyer`'s `IntroductionTransport` (`start`, `read`, the deleted outcome, seller
+      signature verification) against the full VM app over loopback, as bare metal's
+      `test_http_introductions.py` does.
+- [x] 8.3 **Origin and retention at the full-app boundary.** Through the VM full-app
+      harness (`domains/vms/storefront/tests/publication_app.py`):
+      `test_introduction_origins.py` publishes, accepts, and reveals one listing and
+      asserts its binding's site governed all three; two sites reveal their own
+      contacts; a site with no contact publishes no option and refuses a reveal.
+      `test_introduction_retention.py` covers the `/health` disclosure, admin deletion
+      through its route and authentication, `introduction-retention` dry-run and
+      run-cycle, and read, start, and operator re-delivery after deletion. If the
+      harness's settlement runtime cannot drive the introduction obligation, stop and
+      raise it rather than substituting.
+- [x] 8.4 **Delivery tests synchronize instead of sleeping.** `sinks_for` routing as
+      plain unit tests; one background-dispatch test synchronized on an
+      `asyncio.Event`, moved to `kit/delivery/tests/integration`.
+- [x] 8.5 **Apprise loopback test is integration.** Move it to
+      `kit/delivery-apprise/tests/integration`; its `pyproject.toml` test paths and
+      `make test` run it.
+- [x] 8.6 **Sinks are discovered, never named.** A sink plugin may declare its settings
+      model beside its factory (`KD/sinks.py`); `KD/discovery.py` collects installed
+      sinks' declared models; the built-in sinks and `kit/delivery-apprise` declare
+      theirs; `VM/values_schema.py` types `[Delivery]` from discovery and imports no
+      sink module. A plugin declaring no model stays open. Both storefronts keep
+      `arkhai-kit-delivery-apprise` as a plain dependency, which is what ships it in
+      their images. Regenerate the Helm values schemas.
+- [x] 8.7 **Record corrections.** `tasks.md` 2.6, 3.7, 3a.4, 3b.7, 3b.8, and 6.2 name
+      the files and levels that exist; `design.md`'s migration plan names the mechanism
+      kit for buyer commands; `DEPLOYMENT_AND_CONFIG.md` says routed origins must be
+      configured sites; `VM/controllers/introductions_controller.py` says only the
+      buyer starts a reveal; `VM/startup.py` imports the retention sweep at module
+      scope.
+
+- [x] 8.8 **VM accepts an unpriced selection.** Found while doing 8.3: VM countered
+      every introduction opening, because its terminal `bisection` policy waits for
+      an amount an unpriced option never carries (`design.md` decision 14).
+      `kit/policy/src/market_policy/scalar_policies.py` gains
+      `accept_unpriced_selection`; `domains/vms/negotiation/src/arkhai_vms_negotiation/storefront_round.py`
+      runs it last among VM's default guards. The VM storefront's dev group carries
+      `arkhai-vms-buyer` for the buyer-client integration test. Unit tests in
+      `kit/policy/tests/unit/test_selection_scalar.py`; the chain position in
+      `domains/vms/storefront/tests/unit/test_file_policy_discovery.py`; acceptance
+      under the default chain in 3.7's integration tests. `kit-policy` 0.2.0,
+      `kit-negotiation-runtime` 0.2.1, `vms-negotiation` 0.3.0.
+
+- [x] 8.9 **Buyer-side fixes from the VM lane run.** The lane run showed the buyer
+      could not carry an amountless introduction deal through its own checks, each
+      fixed where it was found: `core/buyer/src/core_buyer/negotiation_client.py`
+      validates settlement acceptance only on an accept and allows an omitted amount
+      when the selected option advertises no rate; `core/buyer/src/core_buyer/deal_helpers.py`
+      recovers an accepted run whose single obligation has no amount;
+      `core/buyer/src/core_buyer/delivery.py` reads the `[Delivery]` section the
+      configuration documents; `domains/vms/buyer/src/arkhai_vms_buyer/deal_helpers.py`
+      derives escrow terms only for an Alkahest plan; and
+      `domains/vms/buyer/src/arkhai_vms_buyer/introduction_cli.py` negotiates through the
+      VM buyer client with the selected option in its policy parameters. Unit test for
+      the delivery section in `core/buyer/tests/unit/test_delivery.py`; the registry
+      smoke test authenticates as a buyer against the trusted registry authority.
+
 ## 7. Closeout
 
 - [x] 7.1 **Comment hygiene.** Run `make check-comment-hygiene` and resolve every
@@ -325,6 +418,7 @@ edited.
 | The seller's contact is resolved per opaque origin, guarded at publication and reveal; readiness stays storefront-wide; one origin from binding to reveal | `openspec/specs/contact-exchange-settlement/spec.md`; configuration in `docs/development/DEPLOYMENT_AND_CONFIG.md` |
 | Seller-side delivery has one implementation and remains non-authoritative across composing domains | `openspec/specs/introduction-delivery/spec.md` |
 | Sinks are named instances; seller-side delivery routes by origin, and a multi-origin storefront must route deliberately | `openspec/specs/introduction-delivery/spec.md`; `docs/development/DEPLOYMENT_AND_CONFIG.md`; `docs/development/ARCHITECTURE.md` |
+| A seller's default policy accepts an exact unpriced selection | `openspec/specs/negotiation-protocol/spec.md` |
 | Buyer introduction commands are mechanism-owned and domain-mounted | `openspec/specs/contact-exchange-settlement/spec.md` |
 | Contact details are public configuration that is never published | `openspec/specs/contact-exchange-settlement/spec.md`; `docs/development/DEPLOYMENT_AND_CONFIG.md` |
 | Webhook signing; instances never misname their sink; the Apprise plugin | `openspec/specs/introduction-delivery/spec.md`; `docs/development/DEPLOYMENT_AND_CONFIG.md` |

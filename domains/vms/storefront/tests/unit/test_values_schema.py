@@ -269,3 +269,39 @@ def test_an_instance_of_an_unshipped_sink_stays_open(definition) -> None:
     unshipped = choices["anyOf"][-1]
     (pattern,) = unshipped["patternProperties"].values()
     assert set(pattern["not"]["enum"]) == {"apprise", "command", "file", "smtp", "webhook"}
+
+
+def test_the_generator_names_no_sink() -> None:
+    """Sinks reach the schema by discovery; importing one by name would make an
+    optional plugin a hard dependency of the storefront."""
+    import ast
+
+    import market_storefront.values_schema as module
+
+    tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
+    imported = {
+        node.module
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module
+    } | {
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    }
+    assert not {name for name in imported if name.startswith("market_delivery.")}
+    assert not {name for name in imported if name.startswith("market_delivery_apprise")}
+
+
+def test_a_sink_without_a_declared_model_stays_open() -> None:
+    from market_delivery.builtin.file_sink import FileSinkSettings
+
+    from market_storefront.values_schema import _delivery_fragment, any_case
+
+    fragment = _delivery_fragment("seller", sinks={"file": FileSinkSettings})
+    (choices,) = fragment["additionalProperties"]["dependencies"].values()
+    (pattern,) = choices["anyOf"][-1]["patternProperties"].values()
+    assert pattern["not"]["enum"] == ["file"]
+    # A table named for a sink with no declared model is not typed by name.
+    assert any_case("file") in fragment["patternProperties"]
+    assert any_case("webhook") not in fragment["patternProperties"]

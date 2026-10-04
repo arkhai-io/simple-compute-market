@@ -35,6 +35,7 @@ from core_storefront.app_startup import (
     start_storefront_background_task,
 )
 from core_storefront.stage_log import stage_event
+from market_contact_exchange import run_introduction_retention_sweep
 from market_core import MarketDomainContract
 from market_storefront_kit import (
     NegotiationWatchdogPolicy,
@@ -287,7 +288,6 @@ def _start_settlement_servicing() -> None:
 def _start_introduction_retention() -> None:
     """Every storefront composing contact exchange runs the retention sweep."""
     import market_storefront.container as _container
-    from market_contact_exchange import run_introduction_retention_sweep
 
     composition = _container.resolved_contact_exchange
     retention = composition.retention() if composition is not None else None

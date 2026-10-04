@@ -75,6 +75,8 @@ async def test_option_builder_produces_one_canonical_rateless_option() -> None:
         config,
         role="seller",
         resources={
+            # The listing's origin: the single form serves only its one site.
+            "origin": "default",
             "publication_clause": {
                 "mechanism": "contact-exchange.v1",
                 "asset": "introduction",
@@ -101,6 +103,8 @@ async def test_option_builder_rejects_scalar_rate_clauses() -> None:
             config,
             role="seller",
             resources={
+                # The listing's origin: the single form serves only its one site.
+                "origin": "default",
                 "publication_clause": {
                     "mechanism": "contact-exchange.v1",
                     "asset": "introduction",
@@ -126,6 +130,8 @@ async def test_option_builder_refuses_leaking_contact_into_the_option() -> None:
             config,
             role="seller",
             resources={
+                # The listing's origin: the single form serves only its one site.
+                "origin": "default",
                 "publication_clause": {
                     "mechanism": "contact-exchange.v1",
                     "asset": "introduction",
@@ -299,6 +305,28 @@ def test_the_single_form_resolves_to_its_configured_value() -> None:
     }
 
 
+def test_the_single_form_resolves_only_for_its_one_origin() -> None:
+    config = ContactSettlementConfig.model_validate(_seller_raw()["contact"])
+    assert resolve_seller_contact(config, "default", {"default"}) is not None
+    # A listing with no origin, or one from a site this storefront does not
+    # serve, never borrows the storefront's one contact.
+    assert resolve_seller_contact(config, None, {"default"}) is None
+    assert resolve_seller_contact(config, "elsewhere", {"default"}) is None
+
+
+def test_a_stale_deal_from_a_site_no_longer_configured_resolves_nothing() -> None:
+    """A deal accepted at ``old-site`` stays bound to it after the storefront is
+    reconfigured to serve ``new-site``; the new site's contact is not its."""
+    config = ContactSettlementConfig.model_validate(_seller_raw()["contact"])
+    validate_contact_origins(config, {"new-site"})
+    assert resolve_seller_contact(config, "old-site", {"new-site"}) is None
+
+
+def test_keyed_contacts_need_an_origin() -> None:
+    config = ContactSettlementConfig.model_validate(_origin_raw()["contact"])
+    assert resolve_seller_contact(config, None) is None
+
+
 def test_the_single_form_is_refused_for_several_origins() -> None:
     config = ContactSettlementConfig.model_validate(_seller_raw()["contact"])
     validate_contact_origins(config, {"default"})
@@ -358,3 +386,16 @@ def test_contact_fields_are_never_published_rather_than_secret() -> None:
     for field in (single, keyed):
         assert field.get("never_published") is True
         assert "secret" not in field
+
+
+async def test_publication_without_an_origin_offers_no_introduction() -> None:
+    registry = _registry()
+    config = registry.resolve(_seller_raw(), role="seller")
+    (readiness,) = await registry.ordered_readiness(config, role="seller")
+    built = registry.build_option(
+        readiness,
+        config,
+        role="seller",
+        resources={"claimant_principal": _CLAIMANT, "publication_clause": _clause()},
+    )
+    assert built["settlement_options"] == []

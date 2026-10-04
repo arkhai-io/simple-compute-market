@@ -167,9 +167,11 @@ under `config`; `agentId`, `autoRegister`, and `rootPath` on an agent; and
 The generated definition also types `[Settlement.contact]` and `[Delivery]`. A
 seller's contact is public configuration, so it is accepted in `config`. Each
 `[Delivery]` instance is typed by the sink it uses, its `sink` value or its own
-name: a shipped sink's secret settings are refused wherever the instance is named,
-a table named for one shipped sink may not state another, and an instance of a sink
-the storefront does not ship stays open. `helm/fixtures/contact-exchange-values.yaml`
+name. The sinks typed are those installed in the storefront's image that declare
+their settings model, found by discovery when the schema is generated: their secret
+settings are refused wherever the instance is named, a table named for one of them
+may not state another, and an instance of any other sink stays open.
+`helm/fixtures/contact-exchange-values.yaml`
 is a test overlay enabling contact exchange for Bob with SMTP delivery to the
 `dev-env` chart's optional Mailpit (`dev-env.mailpit.enabled`), which a scenario
 reads back; `docs/development/VALIDATION_RUNBOOK.md` gives the commands.
@@ -822,8 +824,9 @@ dc-east = ["east-mail", "audit"]
 A storefront with more than one origin must route: with sinks enabled and no
 `[Delivery.origins]`, it refuses to start, since broadcasting every reveal to every
 destination would hand one seller's buyers' contacts to another. Every routed name
-must be enabled, every enabled instance routed, and every origin configured; an
-unrouted origin receives no seller-side delivery. A buyer may not route. With
+must be enabled, every enabled instance routed, and every origin the table names
+must be one of the storefront's sites; a site the table does not name receives no
+seller-side delivery. A buyer may not route. With
 `sign = true` a webhook request carries a v2 marketplace signature its receiver
 verifies against the storefront principal. The installable `apprise` sink
 (`arkhai-kit-delivery-apprise`, in both storefront images) reaches any service an

@@ -239,6 +239,45 @@ async def test_redelivery_reads_the_durable_reveal_and_stops_after_deletion(stor
         await composition.load_revealed(ref)
 
 
+def _single(contact: str = "one@x.example") -> ContactSettlementConfig:
+    return ContactSettlementConfig.model_validate(
+        {
+            "enabled": True,
+            "contact_payload": {"email": contact},
+            "profiles": {"default": {"channel": "email", "terms": "Quoted per engagement."}},
+        }
+    )
+
+
+@pytest.mark.parametrize("origin", [None, "elsewhere", "old-site"])
+async def test_the_single_form_refuses_any_origin_but_its_own(store, origin) -> None:
+    """A deal with no recorded origin, or one accepted at a site this storefront
+    no longer serves, is refused before anything is stored or driven."""
+    delivered: list[Any] = []
+    composition, runtime, ref = _composition(
+        store,
+        origin=origin,
+        config=_single(),
+        known_origins=("new-site",),
+        delivered=delivered,
+    )
+    with pytest.raises(IntroductionRouteError) as caught:
+        await composition.reveal_service(_authorize).start(BUYER, _start(ref))
+    assert caught.value.status_code == 503
+    assert caught.value.detail["code"] == "seller_contact_unavailable"
+    assert await store.load(ref) is None
+    assert runtime.calls == []
+    assert delivered == []
+
+
+async def test_the_single_form_reveals_for_its_own_origin(store) -> None:
+    composition, _, ref = _composition(
+        store, origin="new-site", config=_single(), known_origins=("new-site",)
+    )
+    projection = await composition.reveal_service(_authorize).start(BUYER, _start(ref))
+    assert projection["counterparty_contact"] == {"email": "one@x.example"}
+
+
 def test_construction_refuses_contacts_that_do_not_fit_the_origins(store) -> None:
     with pytest.raises(ValueError, match="dc-east"):
         _composition(store, known_origins=("dc-west",))

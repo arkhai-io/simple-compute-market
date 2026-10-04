@@ -1,8 +1,9 @@
 """Introduction reveal routes: the contact-exchange kit's service, bound here.
 
-Either party of an accepted introduction deal may start or read the reveal,
-so authorization admits the buyer and seller roles against the principals the
-kit names for each request. The response is signed and its outcome recorded
+The buyer of an accepted introduction deal starts the reveal, and either party
+may read it; authorization admits the buyer and seller roles against the
+principals the kit names for each request, which for a start is the buyer
+alone. The response is signed and its outcome recorded
 by the listing lifecycle middleware, which recognizes both routes.
 """
 

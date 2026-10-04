@@ -63,6 +63,24 @@ class SinkSettings(BaseModel):
 
 
 @dataclass(frozen=True, slots=True)
+class DeclaredSink:
+    """An installed sink that declares the model of its settings beside its factory.
+
+    A sink's entry point may name a plain factory or one of these. Declaring the
+    model lets a deployment schema type the sink's settings -- and refuse its
+    secret ones where configuration is public -- by discovery, so no storefront
+    names a sink in code. A sink declaring nothing still installs and works;
+    its settings are simply unknown outside it.
+    """
+
+    build: Any
+    settings_model: type[SinkSettings]
+
+    def __call__(self, settings: Mapping[str, Any], **kwargs: Any) -> DeliverySink:
+        return self.build(settings, **kwargs)
+
+
+@dataclass(frozen=True, slots=True)
 class ConfiguredSink:
     """One named, constructed sink and the bound it runs under."""
 
@@ -75,6 +93,7 @@ __all__ = [
     "DEFAULT_TIMEOUT_SECONDS",
     "SINK_ENTRY_POINT_GROUP",
     "ConfiguredSink",
+    "DeclaredSink",
     "DeliveryConfigurationError",
     "DeliveryError",
     "DeliverySink",

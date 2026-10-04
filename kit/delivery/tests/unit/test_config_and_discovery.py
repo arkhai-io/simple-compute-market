@@ -278,3 +278,65 @@ def test_signing_requires_a_signer() -> None:
     )
     with pytest.raises(DeliveryConfigurationError, match="no marketplace signer"):
         build_delivery_sinks(config, factories={"webhook": _recording_factory([])})
+
+
+def test_installed_built_in_sinks_declare_their_settings_models() -> None:
+    from market_delivery import discover_sink_settings_models
+    from market_delivery.builtin.smtp_sink import SmtpSinkSettings
+    from market_delivery.builtin.webhook_sink import WebhookSinkSettings
+
+    models, warnings = discover_sink_settings_models()
+
+    assert warnings == ()
+    assert {"command", "file", "smtp", "webhook"} <= set(models)
+    assert models["webhook"] is WebhookSinkSettings
+    assert models["smtp"] is SmtpSinkSettings
+
+
+def test_a_plain_factory_plugin_installs_and_declares_nothing(monkeypatch) -> None:
+    from market_delivery import (
+        DeclaredSink,
+        SinkSettings,
+        discover_sink_factories,
+        discover_sink_settings_models,
+    )
+
+    class Settings(SinkSettings):
+        target: str
+
+    class Declared:
+        name = "declared"
+
+        def load(self):
+            return DeclaredSink(lambda settings: (lambda event: None), Settings)
+
+    class Plain:
+        name = "plain"
+
+        def load(self):
+            return lambda settings: (lambda event: None)
+
+    monkeypatch.setattr(
+        "market_delivery.discovery._iter_entry_points", lambda: [Declared(), Plain()]
+    )
+
+    factories, _ = discover_sink_factories()
+    models, _ = discover_sink_settings_models()
+    assert set(factories) == {"declared", "plain"}
+    assert models == {"declared": Settings}
+
+
+def test_a_declared_sink_builds_like_its_factory() -> None:
+    from market_delivery import DeclaredSink, SinkSettings
+
+    built = []
+
+    class Settings(SinkSettings):
+        target: str
+
+    def build(settings, **kwargs):
+        built.append((dict(settings), kwargs))
+        return lambda event: None
+
+    DeclaredSink(build, Settings)({"target": "x"}, signer="s")
+    assert built == [({"target": "x"}, {"signer": "s"})]

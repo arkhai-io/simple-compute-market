@@ -17,7 +17,7 @@ dependencies = [
     "arkhai-kit-settlement-runtime>=0.1.0",
     "arkhai-kit-hosted-settlement>=0.1.1",
     "arkhai-kit-storefront==0.1.1",
-    "arkhai-kit-negotiation-runtime==0.2.0",
+    "arkhai-kit-negotiation-runtime==0.2.1",
     "arkhai-kit-site-client>=0.4.0",
     "alkahest-py==1.1.2",
     "fastapi~=0.115.8",

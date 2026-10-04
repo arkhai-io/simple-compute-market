@@ -31,7 +31,7 @@ from market_identity import (
 from pydantic import Field
 
 from ..events import DeliveryEvent
-from ..sinks import DeliveryError, DeliverySink, SinkSettings
+from ..sinks import DeclaredSink, DeliveryError, DeliverySink, SinkSettings
 
 
 class WebhookSinkSettings(SinkSettings):
@@ -148,4 +148,12 @@ def build_webhook_sink(
     return deliver_to_webhook
 
 
-__all__ = ["WebhookSinkSettings", "build_webhook_sink"]
+#: The installed sink: its factory with the settings model it declares.
+WEBHOOK_SINK = DeclaredSink(build_webhook_sink, WebhookSinkSettings)
+
+
+__all__ = [
+    "WEBHOOK_SINK",
+    "WebhookSinkSettings",
+    "build_webhook_sink",
+]

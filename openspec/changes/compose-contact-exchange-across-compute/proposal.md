@@ -74,6 +74,9 @@ multi-seller introductions depend on.
   contact fields become public configuration that is never published, `[Delivery]` is
   typed in the generated values schema so sink secrets stay out of the ConfigMap, and
   a values overlay and verification command ship with the change.
+- Make VM accept an introduction: the policy kit gains a guard that accepts an exact
+  selection of an option bargaining no amount, and VM's default policy chain runs it
+  before any bargaining policy, as the negotiation protocol already requires.
 - State normatively that accepted-state interpretation, seller-side delivery
   dispatch, and the buyer's introduction commands each have one implementation,
   and that a composing domain supplies persistence, configuration, and route
@@ -91,6 +94,8 @@ multi-seller introductions depend on.
   one seller-side dispatch; sinks are named instances; seller-side delivery routes
   by the listing's origin.
 - `introduction-delivery` also gains webhook request signing.
+- `negotiation-protocol`: a seller's default policy accepts an exact unpriced
+  selection rather than countering it.
 - `contact-exchange-settlement` also gains the mechanism-owned buyer introduction
   commands.
 
@@ -135,6 +140,8 @@ None.
   - `kit/delivery-apprise`: a new sink plugin distribution.
   - `kit/settlement-runtime`: the readiness leak check honours the never-published
     marker.
+  - `kit/policy` and `domains/vms/negotiation`: the unpriced-selection guard, run in
+    VM's default policy chain.
   - `core/storefront`: `HealthResponse` gains `disclosures`.
   - The bare-metal storefront: its introduction glue and delivery module reduce to
     persistence, configuration carrier, and route bindings; its publication passes

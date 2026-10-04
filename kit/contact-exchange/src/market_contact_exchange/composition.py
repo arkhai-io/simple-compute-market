@@ -155,6 +155,7 @@ class ContactExchangeComposition:
         self._load_origin = load_origin
         self._settlement_runtime = settlement_runtime
         self._deliver = deliver
+        self._known_origins = frozenset(known_origins)
         section = config()
         if section is not None:
             validate_contact_origins(section, known_origins)
@@ -215,7 +216,7 @@ class ContactExchangeComposition:
         section = self._config()
         if section is None:
             return None
-        return resolve_seller_contact(section, agreement.origin)
+        return resolve_seller_contact(section, agreement.origin, self._known_origins)
 
     def reveal_service(
         self, authorize: AuthorizeIntroduction

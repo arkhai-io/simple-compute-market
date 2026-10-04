@@ -192,12 +192,24 @@ the scalar, negotiation MUST proceed take-it-or-leave-it over the published opti
 the missing-amount rejection MUST NOT apply, and buyer ordering MUST treat its
 listings as priceless.
 
+A seller's default negotiation policy MUST accept an exact selection of an
+advertised option that bargains no amount once the selection and the inventory
+behind it have passed the seller's guards, and no scalar bargaining policy MAY
+counter such a selection: a policy that waits for an amount the option never
+carries would counter it forever.
+
 #### Scenario: A non-scalar mechanism reaches acceptance
 
 - **WHEN** a buyer opens negotiation with a settlement selection for a mechanism that
   declares no scalar and no `fields.amount`
 - **THEN** the round is not rejected for a missing amount and the negotiation can
   reach acceptance on the published option's terms
+
+#### Scenario: The default policy accepts an unpriced selection
+
+- **WHEN** a buyer opens negotiation with an exact selection of an advertised option
+  that bargains no amount, under the seller's default policy
+- **THEN** the seller accepts on the published option's terms rather than countering
 
 #### Scenario: A scalar mechanism keeps the guard
 

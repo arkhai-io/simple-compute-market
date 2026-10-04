@@ -17,6 +17,7 @@ from .discovery import (
     DeliverySinkSet,
     build_delivery_sinks,
     discover_sink_factories,
+    discover_sink_settings_models,
 )
 from .dispatch import DeliveryOutcome, deliver, deliver_async, describe_outcomes
 from .events import (
@@ -31,6 +32,7 @@ from .sinks import (
     DEFAULT_TIMEOUT_SECONDS,
     SINK_ENTRY_POINT_GROUP,
     ConfiguredSink,
+    DeclaredSink,
     DeliveryConfigurationError,
     DeliveryError,
     DeliverySink,
@@ -45,6 +47,7 @@ __all__ = [
     "SINK_ENTRY_POINT_GROUP",
     "SINK_KEY",
     "ConfiguredSink",
+    "DeclaredSink",
     "DeliveryConfig",
     "DeliveryConfigurationError",
     "DeliveryError",
@@ -64,6 +67,7 @@ __all__ = [
     "deliver_async",
     "describe_outcomes",
     "discover_sink_factories",
+    "discover_sink_settings_models",
     "introduction_delivery_event",
     "load_delivery_config",
     "validate_delivery_origins",

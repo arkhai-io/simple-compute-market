@@ -138,6 +138,9 @@ _DEFAULT_GUARDS = [
     "buyer_counter_guard",
     "has_matching_inventory_guard",
     "escrow_shape_guard",
+    # Last, so an unpriced option is accepted only once the selection and the
+    # inventory behind it have passed every guard above.
+    "accept_unpriced_selection",
 ]
 _DEFAULT_TERMINAL = "bisection"
 _RL_POLICY_NAMES = {"rl", "erc20_rl", "native_token_rl", "erc1155_rl"}

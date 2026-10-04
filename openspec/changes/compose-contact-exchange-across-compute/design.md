@@ -413,7 +413,23 @@ each instance table typed by the sink it instantiates — its `sink` value, or i
 name when it states none — using that sink's settings model, so the secret-marked
 fields are refused like any other; and a table naming a sink the generator does not
 know left open, as the pass-through design already accepts for externally installed
-plugins. The built-in sinks and the Apprise sink are known. An instance whose name is
+plugins.
+
+The generator learns which sinks it knows by discovery, never by import. A sink plugin
+may declare its settings model beside its factory, and the delivery kit's discovery
+collects the declared models of every installed sink; the generator types the
+instances of those sinks and leaves the rest open. A storefront that imported a sink's
+settings by name would make an optional plugin a hard code dependency and would need
+an edit for each future sink, which is the enumeration the delivery spec forbids. The
+schema is generated in the storefront's locked environment and committed, so
+discovery at generation time sees exactly the sinks its image installs, and the drift
+test catches an environment that differs. A plugin declaring no settings model keeps
+working as an open instance. Both storefronts keep `arkhai-kit-delivery-apprise` as a
+plain dependency: that is what ships it in their images, and it is a packaging choice
+that no code names. An optional extra was considered and not taken, since the images
+install from their locks and would need build changes to opt in.
+
+An instance whose name is
 a known sink's name and whose `sink` names a different one is refused, by the
 delivery kit at startup and by the schema at render, so a table's name never
 misleads about what it delivers through.
@@ -485,6 +501,30 @@ receiver. The two-seller
 scenario (6.5) is blocked until `bare-metal-mock-provisioned-deal` lands its
 two-storefront, two-site topology, and is redesigned from that baseline.
 
+### 14. An unpriced selection is accepted as published
+
+Composing VM exposed that it could not accept an introduction at all. VM's seller
+policy chain ends in a scalar bargaining policy, `bisection`, which counters with
+the seller's opening whenever the buyer's proposal carries no amount. An option that
+bargains no amount — an introduction — never carries one, so every opening was
+countered forever, contrary to the existing negotiation-protocol requirement that a
+non-scalar mechanism can reach acceptance on the published option's terms. Earlier
+VM evidence missed it because it seeded already-accepted deals.
+
+The policy kit gains `accept_unpriced_selection`: it accepts an exact selection of an
+advertised option that `option_uses_scalar_amount` says bargains no amount, and
+passes every other proposal through. VM's default guards run it last, so it fires
+only after the opening, buyer-counter, inventory, and escrow-shape guards pass, and
+before any bargaining policy. It lives in the policy kit rather than VM because
+"nothing to bargain means accept the published terms" is the mechanism-neutral
+reading of the scalar declaration, and any storefront composing a scalar terminal
+policy needs it.
+
+Rejected: a prerequisite change. Fixed here, since the VM half of this change does
+not work without it. Rejected: making `bisection` accept an amountless proposal; a
+terminal bargaining policy should not decide what a guard can decide from the option
+declaration, and other terminal policies would need the same change.
+
 ## Risks / Trade-offs
 
 - **[Promotion changes behaviour subtly]** → The glue's checks are security checks.
@@ -523,8 +563,8 @@ None. Every question raised in design review is recorded above as a decision.
 3. Extend `kit/delivery` with instances, routing, and the seller dispatcher; move bare
    metal onto it.
 4. Compose VM: mechanism, persistence, migrations, retention, routes, delivery.
-5. Promote the buyer introduction commands into `core_buyer`; bare metal mounts them;
-   VM gains them.
+5. Give the mechanism kit the buyer introduction commands; bare metal mounts them in
+   place of its own; VM gains them with its own `request-introduction`.
 
 Purely additive for existing deals and configuration: accepted plans, obligation
 records, and revealed introductions are untouched, the reveal surface's wire shape

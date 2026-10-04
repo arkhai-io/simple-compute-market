@@ -15,8 +15,12 @@ ConfigMap. The typed configuration models already say which fields are secret
   untyped section open;
 * types ``[Delivery]``: each sink instance by the installed sink it
   instantiates -- its ``sink`` value, or its own name when it states none -- so
-  a secret sink setting is refused like any other, while an instance of a sink
-  this storefront does not ship stays open.
+  a secret sink setting is refused like any other. The sinks typed are those
+  installed here that declare their settings model, found by discovery; no sink
+  is named in this module, and an instance of any other sink stays open.
+
+The definition is generated in this storefront's locked environment, so the
+sinks it types are the sinks this storefront's image installs.
 
 The definition is written into the umbrella and storefront chart schemas under
 :data:`DEFINITION`. See openspec/specs/deployment-state/spec.md, "Generated
@@ -33,12 +37,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from market_delivery import SINK_KEY
-from market_delivery.builtin.command_sink import CommandSinkSettings
-from market_delivery.builtin.file_sink import FileSinkSettings
-from market_delivery.builtin.smtp_sink import SmtpSinkSettings
-from market_delivery.builtin.webhook_sink import WebhookSinkSettings
-from market_delivery_apprise import AppriseSinkSettings
+from market_delivery import SINK_KEY, discover_sink_settings_models
 from pydantic import BaseModel
 
 from market_storefront.settlement_composition import (
@@ -58,15 +57,6 @@ ROLE = "seller"
 _ANNOTATIONS = frozenset(
     {"default", "title", "description", "examples", "roles", "secret", "never_published"}
 )
-
-# The sinks this storefront ships, by the name an instance uses to select one.
-_SHIPPED_SINKS: Mapping[str, type[BaseModel]] = {
-    "apprise": AppriseSinkSettings,
-    "command": CommandSinkSettings,
-    "file": FileSinkSettings,
-    "smtp": SmtpSinkSettings,
-    "webhook": WebhookSinkSettings,
-}
 
 
 def any_case(name: str) -> str:
@@ -202,19 +192,26 @@ def _sink_instance(sink: str, model: type[BaseModel], role: str) -> dict[str, An
     return fragment
 
 
-def _delivery_fragment(role: str) -> dict[str, Any]:
+def _delivery_fragment(
+    role: str, sinks: Mapping[str, type[BaseModel]] | None = None
+) -> dict[str, Any]:
     """The ``Delivery`` section, each instance typed by the sink it uses.
 
-    A table named for a shipped sink is that sink, and may state no other. Any
-    other table is an instance whose ``sink`` selects its settings; one naming
-    a sink this storefront does not ship is left open, since an installed
-    plugin's settings are not known here.
+    ``sinks`` maps each typed sink's name to its settings model; by default,
+    every installed sink that declares one. A table named for a typed sink is
+    that sink, and may state no other. Any other table is an instance whose
+    ``sink`` selects its settings; one naming a sink with no declared model is
+    left open, since its settings are not known here.
     """
-    instances = {name: _sink_instance(name, model, role) for name, model in _SHIPPED_SINKS.items()}
-    # Each shipped instance fragment already pins ``sink`` to its own name.
+    if sinks is None:
+        sinks, _warnings = discover_sink_settings_models()
+    instances = {
+        name: _sink_instance(name, model, role) for name, model in sorted(sinks.items())
+    }
+    # Each typed instance fragment already pins ``sink`` to its own name.
     selected = list(instances.values())
-    unshipped = {
-        "patternProperties": {f"^{SINK_KEY}$": {"not": {"enum": sorted(_SHIPPED_SINKS)}}}
+    untyped = {
+        "patternProperties": {f"^{SINK_KEY}$": {"not": {"enum": sorted(sinks)}}}
     }
     # One entry per key in RESERVED_SECTION_KEYS: the section's own settings.
     root: dict[str, Any] = {
@@ -233,7 +230,7 @@ def _delivery_fragment(role: str) -> dict[str, Any]:
         },
         "additionalProperties": {
             "type": "object",
-            "dependencies": {SINK_KEY: {"anyOf": [*selected, unshipped]}},
+            "dependencies": {SINK_KEY: {"anyOf": [*selected, untyped]}},
         },
     }
 
