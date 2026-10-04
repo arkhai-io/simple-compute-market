@@ -79,7 +79,8 @@ Defaults:
 - A quiet `anvil_dumpState` check runs after Anvil is reachable.
 - Helm render validation runs automatically when `helm` is available.
 - Compute-provisioning IAC validation runs automatically when Ansible tooling
-  and `domains/vms/provisioning/iac/ansible/inventory/hosts` are available.
+  and the inventory directory `domains/vms/provisioning/iac/ansible/inventory/`
+  (`hosts` and `provisioning-hosts.ini`) are available.
 - The single-pass `e2e-tests make test` sweep is off by default because
   it reruns stack-mutating e2e tests after the marker-specific runs.
 
@@ -217,7 +218,7 @@ Current note:
 ## 5. Optional Environment-Dependent Local Tests
 
 Compute provisioning IAC inventory/playbook validation requires Ansible tooling
-and `domains/vms/provisioning/iac/ansible/inventory/hosts`:
+and the inventory directory `domains/vms/provisioning/iac/ansible/inventory/`:
 
 ```bash
 cd domains/vms/provisioning/iac

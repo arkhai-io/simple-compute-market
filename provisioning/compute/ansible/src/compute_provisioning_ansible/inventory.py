@@ -1,11 +1,16 @@
 """Ansible INI inventories as an input format for the host registry.
 
-An inventory file names hosts under ``[kvm_hosts]`` or ``[bare_metal_nodes]``
-with their Ansible connection variables. Parsing turns each entry into an
-``InventoryHost`` with an ``ssh`` connection the host authority applies; the
-authority, not this module, decides what applying means. Other groups describe
-infrastructure that manages the provisioning service itself, not hosts it sells,
-and are skipped.
+Every host entry in an inventory given to the provisioning service is a host
+to register, under whatever section it is listed: the section names are the
+file's Ansible syntax and mean nothing to the host registry. What a host is
+sold as follows from its Resource Pool, not from its section. Parsing turns
+each entry into an ``InventoryHost`` with an ``ssh`` connection the host
+authority applies; the authority, not this module, decides what applying means.
+
+The file given to the service lists only hosts to sell. Infrastructure an
+operator manages with Ansible (relay proxies, the provisioning servers
+themselves) belongs in a separate file of the same inventory directory, which
+the service is not given.
 """
 
 from __future__ import annotations
@@ -65,10 +70,9 @@ def parse_inventory_ini(
 def _parse_entries(ini_text: str) -> list[dict]:
     """Parse an Ansible INI inventory block into a list of host dicts.
 
-    Only entries under ``[kvm_hosts]`` or ``[bare_metal_nodes]`` are imported.
-    Other groups (e.g. ``[frp_servers]``, ``[provisioning_servers]``) are
-    skipped — they describe infrastructure that manages the provisioning
-    service itself, not machines the provisioning service sells.
+    Every host entry is imported, under any section or none. A
+    ``[group:vars]`` section holds variables and a ``[group:children]``
+    section names groups; neither lists hosts, and both are skipped.
 
     Returns a list of ``{"host_id", "ssh_host", "ssh_user", "ssh_port",
     "gpu_count", "gpu_model", "pool_id", "ansible_ssh_private_key_file"}``
@@ -85,7 +89,7 @@ def _parse_entries(ini_text: str) -> list[dict]:
         All other variables              → ignored
     """
     results = []
-    in_supported_hosts_group = False
+    in_host_section = True
 
     for line in ini_text.splitlines():
         stripped = line.strip()
@@ -93,13 +97,10 @@ def _parse_entries(ini_text: str) -> list[dict]:
             continue
 
         if stripped.startswith("["):
-            in_supported_hosts_group = stripped in {
-                "[kvm_hosts]",
-                "[bare_metal_nodes]",
-            }
+            in_host_section = ":" not in stripped
             continue
 
-        if not in_supported_hosts_group:
+        if not in_host_section:
             continue
 
         parts = stripped.split()

@@ -40,7 +40,7 @@ def _make_service(*, host_service=None, **settings_overrides) -> AnsibleJobServi
     settings.retry_backoff_initial_seconds = 60
     settings.retry_backoff_multiplier = 2.0
     settings.retry_backoff_max_seconds = 3600
-    settings.non_retryable_errors = [
+    settings.additional_non_retryable_errors = [
         "Invalid SSH key",
         "VM target not found",
         "Permission denied",

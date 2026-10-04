@@ -25,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import os
 import tempfile
+import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -76,6 +77,7 @@ class _NoProcess:
 @dataclass
 class _MockRun(AnsibleRun):
     playbook: MockPlaybook | None = None
+    run_id: str = ""
 
 
 class MockAnsibleRunner:
@@ -89,6 +91,10 @@ class MockAnsibleRunner:
         self.rules = MockRuleSet()
         # Hosts of each inventory this runner wrote and has not yet run.
         self._inventories: dict[Path, dict[str, InventoryTarget]] = {}
+        # Runs started and not yet finished, by run id: the task waiting on
+        # each one's rule, once it waits, so ``cancel`` can end that wait.
+        self._waits: dict[str, asyncio.Task | None] = {}
+        self._cancelled: set[str] = set()
 
     # ------------------------------------------------------------------
     # Rules
@@ -134,8 +140,10 @@ class MockAnsibleRunner:
         extra_cli_vars: dict | None = None,
         job_parameters: Mapping[str, Any] | None = None,
     ) -> AnsibleRun:
-        # Process id 0 names no playbook; the executor never signals it.
+        run_id = uuid.uuid4().hex
+        self._waits[run_id] = None
         return _MockRun(
+            run_id=run_id,
             process=_NoProcess(),  # type: ignore[arg-type]
             process_id=0,
             vars_path=extra_vars_path,
@@ -147,6 +155,26 @@ class MockAnsibleRunner:
             ),
         )
 
+    @staticmethod
+    def execution_handle(run: AnsibleRun) -> dict[str, Any]:
+        """A mocked run is named by its run id; it has no process to signal."""
+        return {"mock_run": getattr(run, "run_id", "")}
+
+    async def cancel(self, handle: Mapping[str, Any]) -> None:
+        """End the named run as a cancelled playbook, wherever it is.
+
+        A run held at a gate leaves it without a resume, so its job's
+        processing ends and the gate's held count drops; a run not yet waiting
+        ends as soon as it would. A run already finished is left alone.
+        """
+        run_id = str(handle.get("mock_run", ""))
+        if run_id not in self._waits:
+            return
+        self._cancelled.add(run_id)
+        waiting = self._waits[run_id]
+        if waiting is not None:
+            waiting.cancel()
+
     async def wait_for_playbook(
         self,
         run: AnsibleRun,
@@ -156,11 +184,17 @@ class MockAnsibleRunner:
     ) -> AnsibleResult:
         """Apply the first matching rule, then hold, fail, or succeed.
 
-        A run that carries no job parameters matches no rule.
+        A run that carries no job parameters matches no rule. A run cancelled
+        before or while it is held fails as a stopped playbook would.
         """
-        parameters = run.job_parameters
-        rule = self.rules.find(dict(parameters)) if parameters is not None else None
-        await self.rules.hold(rule)
+        run_id = getattr(run, "run_id", "")
+        try:
+            parameters = run.job_parameters
+            rule = self.rules.find(dict(parameters)) if parameters is not None else None
+            await self._hold(run_id, rule)
+        finally:
+            self._waits.pop(run_id, None)
+            self._cancelled.discard(run_id)
         if rule is not None and rule.fail_with:
             raise AnsibleError(rule.fail_with, stdout="", stderr=rule.fail_with)
         if rule is not None and rule.result_stdout:
@@ -173,6 +207,24 @@ class MockAnsibleRunner:
         if log_callback is not None:
             await asyncio.to_thread(log_callback, stdout, "")
         return AnsibleResult(stdout=stdout, stderr="", process_id=run.process_id)
+
+    async def _hold(self, run_id: str, rule: MockRule | None) -> None:
+        cancelled = AnsibleError("Playbook cancelled", stdout="", stderr="")
+        if run_id in self._cancelled:
+            raise cancelled
+        waiting = asyncio.ensure_future(self.rules.hold(rule))
+        if run_id in self._waits:
+            self._waits[run_id] = waiting
+        try:
+            await asyncio.shield(waiting)
+        except asyncio.CancelledError:
+            if run_id in self._cancelled and waiting.cancelled():
+                raise cancelled from None
+            # The job's own processing was cancelled: take the wait with it.
+            waiting.cancel()
+            raise
+        if waiting.cancelled():
+            raise cancelled
 
     async def check_connectivity_with_inventory(
         self, host: str, inventory_path: Path

@@ -144,6 +144,18 @@ the callback, and `await asyncio.wait_for(event.wait(), timeout=...)`
 before proceeding. If no such seam exists yet where a test needs one,
 adding it is the correct fix, not a sleep.
 
+**Leave nothing held:** a test that holds a job at a mock rule's gate
+(`pause_before_result`) ends that hold itself, by resuming the rule or by
+cancelling the job, so the test is idempotent: it leaves no execution
+parked for the next test, the next module, or a rerun, and holds no queue
+slot. A job's status is not the evidence: a cancelled job is terminal the
+moment the cancellation commits, while its execution may still be waiting.
+Wait on the execution instead — `MockRuleSet.wait_until_released` for the
+gate and `AsyncJobQueue.wait_until_idle` for the processing — and assert
+the rule's `waiting` count is zero. Cancelling a held job must end its
+execution without a resume; a mock whose cancellation leaves the run
+waiting is a defect in the mock, not something to resume around.
+
 **Pause the loop, then advance it explicitly:** the same discipline
 applies to a service's own background lifecycle loops, where the seam is
 an HTTP control rather than a callback. Each loop should offer a pause,

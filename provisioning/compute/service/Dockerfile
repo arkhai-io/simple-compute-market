@@ -41,7 +41,6 @@ WORKDIR /app
 RUN chown appuser:appuser /app
 USER appuser
 
-COPY --chown=appuser:appuser domains/vms/provisioning/iac/ansible/requirements.yml /tmp/requirements.yml
 # Keep Ansible in its own venv so the Galaxy collection layer does not depend
 # on the application venv, local wheels, or compute-provisioning service source.
 RUN --mount=type=cache,target=/home/appuser/.cache/uv,uid=${APPUSER_UID} \
@@ -53,6 +52,10 @@ RUN --mount=type=cache,target=/home/appuser/.cache/uv,uid=${APPUSER_UID} \
 # curl --retry --retry-all-errors, then install from local files. The timeout
 # and speed guards make zero-throughput connections fail and retry instead of
 # hanging the whole image build.
+#
+# The collections are the union of every composed domain's
+# provisioning/iac/ansible/requirements.yml; a service test holds the list
+# below to exactly that union.
 USER root
 RUN apt-get update && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*

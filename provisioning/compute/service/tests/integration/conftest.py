@@ -471,14 +471,14 @@ def _job_executor_table(runner, settings, bare_metal_runner=None):
         VmAnsibleCodec(),
         settings.resolved_playbook_path,
         timeout_seconds=settings.ansible_timeout_seconds,
-        non_retryable_errors=settings.non_retryable_errors,
+        additional_non_retryable_errors=settings.additional_non_retryable_errors,
     )
     bare_metal = AnsibleJobExecutor(
         bare_metal_runner if bare_metal_runner is not None else runner,
         BareMetalAnsibleCodec(),
         settings.resolved_bare_metal_playbook_path,
         timeout_seconds=settings.ansible_timeout_seconds,
-        non_retryable_errors=settings.non_retryable_errors,
+        additional_non_retryable_errors=settings.additional_non_retryable_errors,
     )
     table = JobExecutorTable()
     for action in VM_JOB_ACTIONS:
@@ -546,7 +546,7 @@ async def client_and_queue(
         retry_backoff_multiplier=2.0,
         retry_backoff_max_seconds=3600,
         ansible_timeout_seconds=30,
-        non_retryable_errors=["UNREACHABLE", "Domain not found"],
+        additional_non_retryable_errors=["UNREACHABLE", "Domain not found"],
         frp_server_addr="",
         frp_domain="",
         frp_dashboard_password="",

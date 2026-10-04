@@ -1,15 +1,16 @@
 """Rule and gate mechanism shared by the compute adapters' mock executors.
 
 Under the provisioning service's mock profile each compute adapter runs its jobs
-through a mock executor of its own. What those mocks share lives here: when→then
-rules matched against a job's parameters, pause gates that hold a job until a test
-releases it, job-done notification, the evaluate-job dry run, and a
+through a mock of its own. What those mocks share lives here: when→then rules
+matched against a job's parameters, pause gates that hold a job until a test
+releases it or its run is cancelled, the evaluate-job dry run, and a
 framework-free route service each adapter binds under its own ``/test`` prefix.
 
 The mechanism knows nothing about how a job runs or what its output looks like:
 rules match an opaque parameter mapping, and ``result_stdout`` is handed back to
 the adapter's own mock untouched. A job held at a gate is counted on its rule, so
-a test waits for it with ``MockRuleSet.wait_until_held`` rather than on elapsed
+a test waits for it with ``MockRuleSet.wait_until_held`` (and for its departure
+with ``MockRuleSet.wait_until_released``) rather than on elapsed
 time, and the rule routes report the count. It serves the compute family only
 and is not a foundation kit.
 """
@@ -132,6 +133,21 @@ class MockRuleSet:
                 raise LookupError(f"rule {rule_id!r} has no gate to wait at")
             if rule.waiting >= count:
                 return rule.waiting
+            await self._gates_changed.wait()
+
+    async def wait_until_released(self, rule_id: str) -> None:
+        """Return once no job is held at ``rule_id``'s gate.
+
+        A held job leaves the gate when it is resumed or when its run is
+        cancelled; this is the signal a test of either waits on. Callers bound
+        it with ``asyncio.wait_for``. Returns at once for a rule that holds
+        nothing or no longer exists.
+        """
+
+        while True:
+            rule = self._rules.get(rule_id)
+            if rule is None or rule.waiting == 0:
+                return
             await self._gates_changed.wait()
 
     def _notify_gates_changed(self) -> None:

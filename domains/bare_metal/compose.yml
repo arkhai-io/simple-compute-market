@@ -56,9 +56,6 @@ services:
       - PROVISIONING_INVENTORY_PATH=/run/config/bare-metal-hosts.ini
       - PROVISIONING_POOL_DEFINITIONS_PATH=/run/config/resource-pools.yaml
     volumes:
-      # The VM tree supplies the deployment's ansible.cfg; the access playbook
-      # and role are bare metal's own.
-      - ../vms/provisioning/iac:/opt/domains/vms/provisioning/iac:ro
       - ./provisioning/iac:/opt/domains/bare_metal/provisioning/iac:ro
       - ${BARE_METAL_PROVISIONING_INVENTORY_FILE:?set selected-site host inventory file}:/run/config/bare-metal-hosts.ini:ro
       - ${BARE_METAL_POOL_DEFINITIONS_FILE:?set explicit resource-pool definitions file}:/run/config/resource-pools.yaml:ro

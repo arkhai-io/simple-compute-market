@@ -251,15 +251,50 @@ class TestExecutorIntegration:
 
         assert table.executor_modes() == {"mocked": "mock", "real": "real"}
 
-    async def test_cancelling_a_mocked_run_signals_no_process(self):
-        """A mocked run reports process id 0, which names the service's own
-        process group; cancelling it must not signal anything."""
-        executor = AnsibleJobExecutor(
-            MockAnsibleRunner(default_output=_default), _EchoCodec(), Path("/p.yaml"),
-            timeout_seconds=5,
+    async def test_cancelling_a_held_run_ends_it_without_a_resume(self):
+        runner = MockAnsibleRunner(default_output=_default)
+        runner.add_rule(MockRule(rule_id="gate", match={}, pause_before_result=True))
+        handles: list = []
+        executor = AnsibleJobExecutor(runner, _EchoCodec(), Path("/p.yaml"), timeout_seconds=5)
+        run = JobRun(
+            job_id="job-1", offering_mode="test", action="grant", host=_HOST,
+            parameters={"action": "grant", "host_id": "node-1"},
+            report_handle=handles.append, report_logs=lambda logs: None,
         )
 
-        await executor.cancel({"pid": 0})
+        running = asyncio.create_task(executor.execute(run))
+        await asyncio.wait_for(runner.rules.wait_until_held("gate"), timeout=2.0)
+        await executor.cancel(handles[0])
+        outcome = await asyncio.wait_for(running, timeout=2.0)
+
+        assert "pid" not in handles[0]
+        assert isinstance(outcome, JobFailure)
+        assert outcome.error.message == "Playbook cancelled"
+        await asyncio.wait_for(runner.rules.wait_until_released("gate"), timeout=2.0)
+        assert runner.list_rules()[0]["waiting"] == 0
+
+    async def test_a_run_cancelled_before_it_waits_never_reaches_the_gate(self):
+        runner = MockAnsibleRunner(default_output=_default)
+        runner.add_rule(MockRule(rule_id="gate", match={}, pause_before_result=True))
+        run = runner.start_playbook(
+            Path("/p.yaml"), Path("/tmp/i"), Path("/tmp/v"), "node-1", job_parameters={}
+        )
+
+        await runner.cancel(runner.execution_handle(run))
+
+        with pytest.raises(AnsibleError, match="Playbook cancelled"):
+            await runner.wait_for_playbook(run, timeout_seconds=5)
+        assert runner.list_rules()[0]["waiting"] == 0
+
+    async def test_cancelling_a_finished_or_unknown_run_does_nothing(self):
+        runner = MockAnsibleRunner(default_output=_default)
+        run = runner.start_playbook(
+            Path("/p.yaml"), Path("/tmp/i"), Path("/tmp/v"), "node-1", job_parameters={}
+        )
+        await runner.wait_for_playbook(run, timeout_seconds=5)
+
+        await runner.cancel(runner.execution_handle(run))
+        await runner.cancel({"mock_run": "unknown"})
 
     async def test_every_host_is_reachable(self):
         runner = MockAnsibleRunner(default_output=_default)

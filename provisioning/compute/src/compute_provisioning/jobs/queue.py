@@ -125,6 +125,20 @@ class AsyncJobQueue:
                     exc,
                 )
 
+    async def wait_until_idle(self) -> None:
+        """Return once no dispatched job is still being processed.
+
+        A job's status can be terminal while its processing still runs (a
+        cancelled job whose execution has not yet stopped, say); this waits
+        for the processing itself, which is what frees its concurrency slot.
+        Callers bound it with ``asyncio.wait_for``.
+        """
+        while True:
+            running = {task for task in self._running_tasks if not task.done()}
+            if not running:
+                return
+            await asyncio.wait(running)
+
     def _reap_done_tasks(self) -> None:
         done = {t for t in self._running_tasks if t.done()}
         self._running_tasks.difference_update(done)

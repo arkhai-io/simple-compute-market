@@ -1042,6 +1042,45 @@ re-verifies them by grep before each move.
         the VM adapter's `make test` file 39; VM IaC 65; e2e unit 236 with the known
         pre-existing failure, and every e2e and smoke module collects (167). Relocked: the
         distribution, the VM operator client, both adapters, the service, `e2e-tests`.
+      Implementation-review corrections, 2026-10-03 (`design.md`, "Maintainer rulings on
+      the 5B.6 implementation review"; 5B.6 was reopened for them and is checked again
+      now they have landed):
+      - Held mock cancellation: the runner owns cancellation (`AnsibleRunner`
+        `execution_handle` and `cancel`, refusing pid ≤ 0; `MockAnsibleRunner` names a
+        run and ends its gate wait as a cancelled playbook); `AnsibleJobExecutor.cancel`
+        delegates. The family kit gains `MockRuleSet.wait_until_released` and
+        `AsyncJobQueue.wait_until_idle`. Integration test in
+        `test_bare_metal_mock_profile.py`; `TESTING.md` gains "Leave nothing held".
+      - Inventory: `parse_inventory_ini` registers every host entry, skipping only
+        `[group:vars]` and `[group:children]`; `HostAuthority.apply_inventory` logs the
+        hosts it registers. VM's inventory directory: `inventory/hosts.example`
+        (infrastructure; the `[kvms]` group the VM role writes),
+        `inventory/provisioning-hosts.example` (new), `.gitignore`, `ansible.cfg`
+        (`inventory_ignore_extensions`), the IaC `Makefile`,
+        `domains/vms/provisioning/iac/scripts/run_acceptance_validation.sh`, `README.md`,
+        `vm-vars-example.yaml`.
+        `inventory_path` names `provisioning-hosts.ini` in `settings.toml`,
+        `config-docker.yml`, `config-local.yml.example`, Helm `values.yaml`, and the
+        service's `serve`. Docs: `seller-quickstart.md`, `bare-metal-seller-quickstart.md`,
+        `VALIDATION_RUNBOOK.md`; `compose/seller.live.yml`'s comment; the VM
+        host-import route's description.
+      - Shared Ansible configuration: `compute_provisioning_ansible/ansible.cfg` and
+        `DEFAULT_ANSIBLE_CONFIG`; `apply_ansible_config` uses it when `ansible_cfg` is
+        empty, now the default in `settings.toml`; the docker and mock profiles and
+        `serve` no longer name VM's. Bare metal's
+        `provisioning/iac/ansible/requirements.yml`; the Dockerfile's collection list is
+        the union, held by `tests/unit/test_image_collections.py`; the Dockerfile no
+        longer copies VM's requirements. `domains/bare_metal/compose.yml` no longer
+        mounts the VM tree (`scripts/tests/test_bare_metal_compose.py` asserts it).
+      - `non_retryable_errors` is `additional_non_retryable_errors` (setting, executor
+        parameter, fixtures).
+      - The compute mock module's docstring no longer mentions job-done notification.
+      - `test_job_envelope_migration.py` and `test_bare_metal_job_shape_migration.py`
+        move to `tests/integration`.
+      - Validation: `provisioning/compute` 202; the distribution 79; provisioning
+        service 897; bare-metal adapter 22; VM IaC 65; VM's inventory directory loads
+        only its two inventory files under VM's `ansible.cfg` (checked with
+        `ansible-inventory`).
 - [x] 5B.7 Domain codecs. Behaviour-neutral on the wire. Absorbed into slice B of 5B.6,
       with one amendment decided there: bare metal's stored parameters and results are
       bare-metal-shaped (`design.md`, "The Ansible job codec", decision 2), which changes
@@ -1066,20 +1105,48 @@ re-verifies them by grep before each move.
       injected collaborators instead of reading the service's `container` module.
       Callers: `vm_provisioning_operator/client.py`, the e2e lease view and backdating
       stages, the integration fixtures.
+      Before starting: the maintainer decides the questions in `design.md`, "Open for
+      5B.8: questions put to the maintainer" (two lease surfaces exist; route-service
+      shape; engine at the root; slicing; the readiness wire contract); amend this task
+      with the exact files per decision. Named by the architecture review (`design.md`,
+      "Architecture review: adapter imports of the deployed service"), all to be gone
+      when 5B.8 is done:
+      - the `container` reach-through in VM's `hosts_controller.py`,
+        `jobs_controller.py`, `system_controller.py`, `test_controller.py`,
+        `leases_controller.py`, `vms_controller.py` and bare metal's
+        `bare_metal_leases_controller.py` and `test_controller.py`;
+      - `ReservationNotProvisionableError` moves to `compute_provisioning`, beside the
+        compute-adapter contract; both `compute_adapter.py` files import it from there;
+      - VM's `services/job_service.py` stops importing `config.Settings` once the engine
+        is built at the composition root;
+      - `resolve_identity_context` leaves VM's `services/system_service.py` for the
+        service, with aggregate health and status;
+      - `capacity_inventory.py` iterates a resource-projection contribution the bundles
+        carry, instead of importing both runtimes' projection functions;
+      - the service's import-boundary test allowlists (file, module) pairs: `container.py`
+        and `main.py` the runtimes and routers, `db/migrations.py` `legacy_backfill`.
 - [ ] 5B.9 Relays to VM: `relay_rebinding.py`, `relay_port_allocator.py`, and
       `relay_execution.py` from the service's `services/` into the VM adapter; the relay,
       relay-port-lease, and Ansible pool-configuration table metadata into VM-owned
       metadata the service composes; the relay models and client methods from
       `compute_provisioning` and their route contracts from the family table to VM;
       VM's relay rebinding subscribes to the host authority's pool-change hook. Review
-      the relay routes' seller-only roles while moving them.
+      the relay routes' seller-only roles while moving them. VM's
+      `ansible_pool_config_handler.py` then imports `AnsiblePoolConfig`, `Relay`, and
+      relay rebinding from VM's own modules, not the service's.
 - [ ] 5B.10 Boundary check: remove `arkhai-compute-provisioning-service` from both
       adapters' dependencies and `arkhai-vms-provisioning-adapter` from bare metal's; add
       an import-boundary test asserting neither adapter imports
       `compute_provisioning_service` or the other adapter (including under
       `TYPE_CHECKING`), no neutral provisioning module imports
       `vm_provisioning_operator`, and `compute_provisioning.jobs` and
-      `compute_provisioning.hosts` import no Ansible or SSH module.
+      `compute_provisioning.hosts` import no Ansible or SSH module. The test walks every
+      `Import` and `ImportFrom` node of each module's syntax tree, relative imports
+      included, so a function-local, `TYPE_CHECKING`, or `try`/`except` import fails it
+      as a top-level one does (`ARCHITECTURE.md`, "Family kits"). The boundary covers
+      deployment configuration as well as Python: a check asserts no domain's compose
+      files, profiles, or inventory settings name another domain's tree, and the
+      Ansible distribution names no domain's inventory group or playbook.
 - [ ] 5B.11 **Gate.** All provisioning-family suites, `make check-packaging`, comment
       hygiene; the VM lane and the bare-metal publication lane pass.
 - [ ] 5B.12 Job-backed fulfillment-provider helper: `compute_provisioning` gains the shared
@@ -1328,6 +1395,10 @@ service code.
       `docs/development/ROADMAP.md`.
       Record the deferred stronger protection scheme for host connection secrets
       (design: "Deferred, not in this change") as an open gap with no owning change.
+      Record the deferred classification of real-run failures (design: "Maintainer
+      rulings on the 5B.6 implementation review", 4): structured terminal-failure
+      evidence from the runner, so the transport, codec, and operator patterns classify
+      real failures rather than only mocked ones.
 - [ ] 2.7 **Campaign index currency.** Update this change's row and the Goal 3, 4, and 7
       graphs in `openspec/changes/README.md`, and the rows of
       `bare-metal-and-credits-domain-stacks`, `kit-owned-storefront-shell`,

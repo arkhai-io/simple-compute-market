@@ -189,3 +189,29 @@ def test_route_service_without_an_active_mock_is_unavailable() -> None:
     with pytest.raises(MockRouteError) as refused:
         routes.list()
     assert refused.value.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_the_release_signal_waits_for_every_held_job_to_leave() -> None:
+    rules = MockRuleSet()
+    rule = rules.add(MockRule(rule_id="gate", match={}, pause_before_result=True))
+    held = [asyncio.create_task(rules.hold(rule)) for _ in range(2)]
+    await asyncio.wait_for(rules.wait_until_held("gate", count=2), timeout=1.0)
+
+    released = asyncio.create_task(rules.wait_until_released("gate"))
+    held[0].cancel()
+    await asyncio.wait_for(rules.wait_until_held("gate", count=1), timeout=1.0)
+    assert not released.done()
+
+    held[1].cancel()
+    await asyncio.wait_for(released, timeout=1.0)
+    assert rules.list()[0]["waiting"] == 0
+
+
+@pytest.mark.asyncio
+async def test_the_release_signal_returns_at_once_for_a_rule_holding_nothing() -> None:
+    rules = MockRuleSet()
+    rules.add(MockRule(rule_id="gate", match={}, pause_before_result=True))
+
+    await asyncio.wait_for(rules.wait_until_released("gate"), timeout=1.0)
+    await asyncio.wait_for(rules.wait_until_released("unknown"), timeout=1.0)

@@ -7,6 +7,8 @@ and ``AnsibleJobExecutor``, which runs any domain's jobs through the
 ``compute_provisioning``; nothing in ``compute_provisioning`` depends on it.
 """
 
+from pathlib import Path
+
 from .codec import (
     AnsibleJobCodec,
     AnsibleJobInterpretation,
@@ -37,7 +39,12 @@ from .probes import (
 )
 from .runner import ConnectivityResult
 
+#: The Ansible configuration every playbook the service runs is run under,
+#: exported as ``ANSIBLE_CONFIG`` unless a deployment names its own.
+DEFAULT_ANSIBLE_CONFIG = Path(__file__).with_name("ansible.cfg")
+
 __all__ = [
+    "DEFAULT_ANSIBLE_CONFIG",
     "AnsibleJobCodec",
     "AnsibleReadinessResponse",
     "ConnectivityResult",

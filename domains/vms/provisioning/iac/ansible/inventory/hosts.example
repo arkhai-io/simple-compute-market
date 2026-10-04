@@ -1,17 +1,21 @@
 # =============================================================================
-# Ansible inventory — example template
+# Ansible inventory: infrastructure — example template
 # =============================================================================
 # Copy to `hosts` and fill in your real values:
 #   cp ansible/inventory/hosts.example ansible/inventory/hosts
 #
-# The real `hosts` file is gitignored so operator-specific IPs, usernames,
-# and per-host overrides don't get committed.
+# This file lists infrastructure you manage with these playbooks: relay (FRP)
+# proxies and remote provisioning workers. The hosts you sell are in
+# `provisioning-hosts.ini` in the same directory (see
+# provisioning-hosts.example). Run playbooks against the whole directory,
+# `-i inventory/`, so they see both; the provisioning service is given only
+# `provisioning-hosts.ini`, and never registers anything listed here.
 #
-# Each line's first token is the host's `host_id`, which a capacity
-# declaration names to say which host it is delivered through. `[kvm_hosts]`
-# holds VM hosts and `[bare_metal_nodes]` holds bare-metal nodes. The other groups are only used if you also operate FRP proxies
-# or remote provisioning workers; for a single-box seller you can leave
-# them empty.
+# The VM-operations playbook also records each VM it creates here, under
+# `[kvms]`, and removes it when the VM is undefined; that group is written for
+# you. The real file is gitignored so operator-specific IPs, usernames, and
+# per-host overrides don't get committed. For a single-box seller you can
+# leave both groups below empty.
 # =============================================================================
 
 [frp_servers]
@@ -19,23 +23,3 @@
 
 [provisioning_servers]
 # provisioning-prod ansible_host=<IP> ansible_user=<user> ansible_ssh_private_key_file=~/.ssh/id_ed25519
-
-[kvm_hosts]
-# The host_id capacity declarations name — pick something short.
-# host1 ansible_host=<IP> ansible_user=<user> gpus=<count> ansible_ssh_private_key_file=~/.ssh/id_ed25519
-#
-# Optional per-host args:
-#   ansible_port=<port>     — if SSH isn't on 22
-#   gpus=<count>            — used by the provisioning service's capacity checks
-
-[bare_metal_nodes]
-# The host_id capacity declarations and bare-metal listings name. Use a
-# distinct alias from any VM target names.
-# bm-host1 ansible_host=<IP> ansible_user=<user> ansible_ssh_private_key_file=~/.ssh/id_ed25519
-#
-# Optional per-host args:
-#   ansible_port=<port>     — if SSH isn't on 22
-#   public_host=<IP/DNS>    — address buyers should use if different from ansible_host
-
-[kvms]
-# Reserved for future use. Leave empty.

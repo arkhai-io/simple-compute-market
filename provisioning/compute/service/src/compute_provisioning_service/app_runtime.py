@@ -22,16 +22,21 @@ from compute_provisioning_service.services.definition_documents import (
 )
 from compute_provisioning_service.services.relay_service import RelayService
 
+from compute_provisioning_ansible import DEFAULT_ANSIBLE_CONFIG
+
 logger = logging.getLogger(__name__)
 
 
 def apply_ansible_config() -> None:
-    """Apply ANSIBLE_CONFIG from the active profile if configured."""
+    """Export ``ANSIBLE_CONFIG`` for every playbook the service runs.
+
+    The profile's ``ansible_cfg`` when it names one, otherwise the Ansible
+    distribution's own defaults, which belong to no domain.
+    """
 
     ansible_cfg = str(getattr(settings, "ansible_cfg", "") or "").strip()
-    if ansible_cfg:
-        os.environ["ANSIBLE_CONFIG"] = ansible_cfg
-        logger.info("ANSIBLE_CONFIG set to %s", ansible_cfg)
+    os.environ["ANSIBLE_CONFIG"] = ansible_cfg or str(DEFAULT_ANSIBLE_CONFIG)
+    logger.info("ANSIBLE_CONFIG set to %s", os.environ["ANSIBLE_CONFIG"])
 
 
 def initialise_container_resources() -> None:

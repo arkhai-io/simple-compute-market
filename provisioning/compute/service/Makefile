@@ -22,11 +22,10 @@ reinit: ## Refresh local internal packages and adapters
 	python3 ../../../scripts/uv_project.py reinit
 
 serve: ## Start the compute provisioning API and in-process workers
-	PROVISIONING_INVENTORY_PATH="$(IAC_DIR)/ansible/inventory/hosts" \
+	PROVISIONING_INVENTORY_PATH="$(IAC_DIR)/ansible/inventory/provisioning-hosts.ini" \
 	PROVISIONING_PLAYBOOK_PATH="$(IAC_DIR)/ansible/playbooks/single-tenant/vm-operations.yaml" \
 	PROVISIONING_BARE_METAL_PLAYBOOK_PATH="$(BARE_METAL_IAC_DIR)/ansible/playbooks/node-access.yaml" \
 	PROVISIONING_MANAGEMENT_VARS_PATH="$(IAC_DIR)/ansible/inventory/management-vars.yaml" \
-	ANSIBLE_CONFIG="$(IAC_DIR)/ansible/ansible.cfg" \
 	uv run --find-links $(DIST_DIR) compute-provisioning-api
 
 worker: ## Start the background-only worker role

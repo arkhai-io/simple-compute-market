@@ -15,8 +15,6 @@ the registered host it names.
 from __future__ import annotations
 
 import logging
-import os
-import signal
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
@@ -46,7 +44,7 @@ TRANSPORT_FAILURES: tuple[str, ...] = (
 class AnsibleJobExecutor:
     """One runner, one domain's codec, and the playbook its actions run.
 
-    ``non_retryable_errors`` are operator-configured substrings: a failure
+    ``additional_non_retryable_errors`` are operator-configured substrings: a failure
     whose message contains one is not retried, in addition to the transport
     failures and the codec's own. ``runner`` is an ``AnsibleRunner`` or a
     stand-in for one with the same playbook and inventory surface.
@@ -59,13 +57,13 @@ class AnsibleJobExecutor:
         playbook_path: Path,
         *,
         timeout_seconds: int,
-        non_retryable_errors: Iterable[str] = (),
+        additional_non_retryable_errors: Iterable[str] = (),
     ) -> None:
         self._runner = runner
         self._codec = codec
         self._playbook_path = playbook_path
         self._timeout_seconds = timeout_seconds
-        self._non_retryable_errors = tuple(non_retryable_errors)
+        self._additional_non_retryable_errors = tuple(additional_non_retryable_errors)
 
     @property
     def runner(self) -> Any:
@@ -105,8 +103,9 @@ class AnsibleJobExecutor:
                 limit=plan.limit,
                 job_parameters=dict(run.parameters),
             )
-            run.report_handle({"pid": playbook_run.process_id})
-            logger.info("Job %s running with PID=%d", run.job_id, playbook_run.process_id)
+            handle = runner.execution_handle(playbook_run)
+            run.report_handle(handle)
+            logger.info("Job %s running as %s", run.job_id, handle)
 
             def log_callback(stdout: str, stderr: str) -> None:
                 run.report_logs(self.redact(_joined(stdout, stderr)))
@@ -140,22 +139,17 @@ class AnsibleJobExecutor:
             vars_path.unlink(missing_ok=True)
 
     async def cancel(self, handle: Mapping[str, Any]) -> None:
-        pid = int(handle["pid"])
-        if pid <= 0:
-            # Zero and negative ids name process groups (zero is this
-            # service's own), never a playbook; a mocked run reports 0.
-            logger.info("No playbook process to stop for handle %s", dict(handle))
-            return
-        try:
-            os.kill(pid, signal.SIGTERM)
-            logger.info("Sent SIGTERM to process %d", pid)
-        except ProcessLookupError:
-            logger.warning("Process %d not found (already terminated)", pid)
+        """Ask the runner to stop the run ``handle`` names.
+
+        The runner made the handle, so only it knows what stopping the run
+        means: signalling a playbook process, or ending a mocked run's wait.
+        """
+        await self._runner.cancel(handle)
 
     def is_retryable(self, message: str) -> bool:
         if matches_any(message, TRANSPORT_FAILURES):
             return False
-        if matches_any(message, self._non_retryable_errors):
+        if matches_any(message, self._additional_non_retryable_errors):
             return False
         return self._codec.is_retryable(message)
 

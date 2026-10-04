@@ -116,7 +116,7 @@ async def client_and_queue(
         retry_backoff_multiplier=2.0,
         retry_backoff_max_seconds=3600,
         ansible_timeout_seconds=30,
-        non_retryable_errors=["UNREACHABLE"],
+        additional_non_retryable_errors=["UNREACHABLE"],
         frp_server_addr="",
         frp_domain="",
         frp_dashboard_password="",

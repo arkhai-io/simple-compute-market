@@ -65,7 +65,7 @@ class VmProvisioningRuntime:
             self.codec,
             self.config.resolved_playbook_path,
             timeout_seconds=self.config.ansible_timeout_seconds,
-            non_retryable_errors=self.config.non_retryable_errors,
+            additional_non_retryable_errors=self.config.additional_non_retryable_errors,
         )
 
     def fulfillment_provider(self):

@@ -139,14 +139,14 @@ class HostController:
     ) -> HostListResponse:
         """Upload an Ansible INI inventory file and upsert host rows.
 
-        Only entries under the ``[kvm_hosts]`` group are imported.
-        Upsert semantics (append-only): hosts present in the file are inserted
+        Every host entry is imported, whatever section it is listed under;
+        upload a file of hosts to sell, not infrastructure. Upsert semantics (append-only): hosts present in the file are inserted
         or updated; hosts absent from the file are not touched.
 
         Example::
 
             curl -X POST /api/v1/hosts/import \
-                 -F "file=@/path/to/hosts" \
+                 -F "file=@/path/to/provisioning-hosts.ini" \
                  -F "ssh_key_type=path"
         """
         try:

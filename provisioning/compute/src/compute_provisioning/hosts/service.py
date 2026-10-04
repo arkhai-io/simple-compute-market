@@ -230,7 +230,13 @@ class HostAuthority:
                 host = db.query(Host).filter(Host.host_id == host_id).one_or_none()
                 if host is not None:
                     hosts.append(_view(host))
-        logger.info("apply_inventory: applied %d host(s)", len(hosts))
+        # Every entry of an inventory is registered whatever its section, so
+        # name them: an infrastructure server in the file shows up here.
+        logger.info(
+            "apply_inventory: applied %d host(s): %s",
+            len(hosts),
+            ", ".join(sorted(host.host_id for host in hosts)),
+        )
         return hosts
 
     # ------------------------------------------------------------------

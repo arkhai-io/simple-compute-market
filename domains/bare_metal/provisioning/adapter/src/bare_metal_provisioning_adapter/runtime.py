@@ -50,7 +50,7 @@ class BareMetalProvisioningRuntime:
             BareMetalAnsibleCodec(),
             self.playbook_path,
             timeout_seconds=self.settings.ansible_timeout_seconds,
-            non_retryable_errors=self.settings.non_retryable_errors,
+            additional_non_retryable_errors=self.settings.additional_non_retryable_errors,
         )
 
     def readiness(self) -> dict[str, bool]:

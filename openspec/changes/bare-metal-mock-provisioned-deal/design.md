@@ -828,6 +828,142 @@ listing, and the playbook.
 - **Bare metal no longer imports the VM adapter.** Neither its source nor its tests do;
   the declared dependency is removed with the import-boundary test in 5B.10.
 
+### Maintainer rulings on the 5B.6 implementation review
+
+Decided with the maintainer after the review of slices B and C (2026-10-03). The
+corrections land now, as part of 5B.6, which stays unchecked until they do.
+
+1. **A held mock execution is cancellable.** Cancellation belongs to the runner: the
+   executor reports the handle the runner gives a run and passes it back to the runner's
+   `cancel`. The real runner's handle is the process id, signalled with `SIGTERM` (never
+   an id of zero or less); the mock's names the run, and cancelling it ends that run's
+   gate wait as a failed playbook, so the processing coroutine exits, the gate's held
+   count drops, and the queue slot is released with no resume. The engine's conditional
+   transition keeps the job `cancelled`. Proven by an integration test of the sequence
+   submit, held, cancel, nothing held, nothing running, still cancelled.
+2. **An inventory section means nothing to the host registry.** The group was only an
+   import filter: a host's domain follows from its Resource Pool, and connection,
+   capacity, and pool come from the entry's own variables; the group was never
+   recorded. It existed because the service seeded from the VM operators' own
+   inventory, which also lists infrastructure (`[frp_servers]`,
+   `[provisioning_servers]`) and, written by the VM role on every create, the VMs
+   themselves (`[kvms]`). Ruling: the importer registers every host entry, under any
+   section, skipping only Ansible's `[group:vars]` and `[group:children]` sections,
+   and names no group; the host authority logs every host it registers. The file
+   given to the service lists only hosts to sell. VM's inventory becomes a directory:
+   `inventory/hosts` (infrastructure, and the VMs the role records) and
+   `inventory/provisioning-hosts.ini` (hosts to sell, under `[kvm_hosts]`, the group
+   VM's playbooks target); the IaC tooling runs against the directory, and the
+   service's `inventory_path` names only `provisioning-hosts.ini`. VM's own
+   `ansible.cfg` skips the committed templates, the VM role's backups, and the YAML
+   variable files kept in that directory, which Ansible would otherwise load. Bare
+   metal already seeded from a host-only file.
+3. **Shared Ansible configuration belongs to the distribution.** The distribution ships
+   the generic `ansible.cfg` (callback, host-key checking, logging, deprecation warnings)
+   and the service's `ansible_cfg` defaults to it. VM needs no role-path
+   contribution: every VM playbook names its roles by relative path and no role
+   includes another by name, so VM's `roles_path` served only operators running its
+   playbooks by hand, who keep VM's own `ansible.cfg`. Bare metal declares its
+   own Ansible collections (`requirements.yml`); the image installs the union. Bare
+   metal's compose stack no longer mounts the VM tree. 5B.10's boundary check covers
+   deployment configuration as well as Python imports: no domain's compose files,
+   profiles, or settings defaults name another domain's tree.
+4. **Real-run failure classification is a known limitation, deferred.** Classification
+   reads only the runner's terminal message, so the transport, codec, and operator
+   patterns classify mock failures but not real ones. Scanning raw output is rejected
+   (an ignored task failure would stop retries). The follow-up is structured
+   terminal-failure evidence from the runner (unreachable host, fatal task); recorded as
+   deferred work in `tasks.md`.
+5. **`non_retryable_errors` becomes `additional_non_retryable_errors`**, its meaning
+   (patterns added to the built-in ones), stated by its name. Pre-release: no alias.
+6. **The readiness wire contract is 5B.8's.** The operator client's dependency on the
+   Ansible distribution for the readiness and connectivity models, and readiness
+   reporting only VM's playbook, are resolved by 5B.8 (question 7 of its planning).
+7. **Obsolete vocabulary is removed when touched**: the compute mock module no longer
+   mentions job-done notification.
+8. **Tests that use real SQLite are integration tests**: both job-row migration tests
+   move to `tests/integration`.
+
+### Architecture review: adapter imports of the deployed service (2026-10-03)
+
+An architecture review checked the "Family kits" claim that neither provisioning
+adapter imports the other or the deployed service. The first half holds (bare metal's
+source and tests no longer import VM). The second does not yet: VM's adapter imports
+`compute_provisioning_service` from 11 files and bare metal's from 3. All of it is
+5B's to remove; the items no 5B task named are now assigned. Decided with the
+maintainer:
+
+- **Container reach-through (5B.8).** Exactly eight controller files resolve services
+  through the service's `container` module: VM's `hosts_controller.py`,
+  `jobs_controller.py`, `system_controller.py`, `test_controller.py`,
+  `leases_controller.py`, `vms_controller.py`, and bare metal's
+  `bare_metal_leases_controller.py` and `test_controller.py`. 5B.8 names them.
+- **`ReservationNotProvisionableError` (5B.8 slice A).** Both domains' `compute_adapter.py`
+  raise it, importing it from `compute_provisioning_service.services.compute_contract_service`.
+  An error both domains raise belongs to the family kit: it moves to `compute_provisioning`
+  beside the compute-adapter contract both implement.
+- **`config.Settings` (5B.8 slice A).** Imported, as a type, by VM's
+  `services/job_service.py` (the review attributed it to `runtime.py`, which does not
+  import it). It goes when the job engine is built at the composition root and the job
+  service receives the values it needs.
+- **`resolve_identity_context` (5B.8 slice C).** Lazily imported by VM's
+  `services/system_service.py`; it moves to the service with aggregate health and status
+  when `system_service.py` is split.
+- **Pool configuration and relay imports (5B.9).** `ansible_pool_config_handler.py`
+  imports `AnsiblePoolConfig` and `Relay` from the service's `db.models` and
+  `relay_rebinding` from its services; they move with the table metadata and relay
+  modules. Relays are VM's: `compute_provisioning/relays.py` (relay models and client
+  methods) also moves to VM in 5B.9, and the family-kit sentence in `ARCHITECTURE.md`
+  already lists no relays.
+- **Service-side adapter imports.** `capacity_inventory.py` imports both runtimes'
+  resource-projection functions: the composed bundles carry a resource-projection
+  contribution the service iterates without naming a domain (5B.8 slice C, with the
+  contributed diagnostics). `db/migrations.py` imports VM's `legacy_backfill`: it stays,
+  as a sanctioned composition-root entry point. It is a historical migration whose
+  purpose is reconstructing VM's legacy rows, and migrations run in the migration init
+  container where no adapter composition exists. The service's import-boundary test
+  allowlists (file, module) pairs rather than modules any file may import:
+  `container.py` and `main.py` the runtimes and routers, `db/migrations.py`
+  `legacy_backfill`, nothing else.
+- **What "depends on" means.** `ARCHITECTURE.md` now states that any import is a
+  dependency — top level, function-local, under `TYPE_CHECKING`, or behind
+  `try`/`except` — and that a repository-wide kit must never depend on a family kit.
+  5B.10's adapter boundary test walks every `Import` and `ImportFrom` node of the
+  syntax tree, relative imports included, not only module-level ones.
+
+Out of scope, recorded elsewhere by the review: the storefronts' import of the whole
+family kit for its wire contracts (a client distribution split, owned by
+`kit-owned-listing-and-fulfillment-lifecycles`), and the `kit/capacity-publication` →
+`core_storefront` edge, which this change does not touch.
+
+### Open for 5B.8: questions put to the maintainer
+
+5B.8's premise does not match the code: there are two lease surfaces. VM's
+`/api/v1/leases/*` serves `LeaseResponse` (create, list, by-escrow, get, update,
+terminate, release-oversight, retry-release, force-release); the service's
+`controllers/compute_contract_controller.py` already serves the neutral `LeaseView` at
+`/api/v1/contract/leases/*` (register, get, terminate, retry-release, force-release).
+The e2e `DealLease` keys leases by capacity reservation; its backdating still uses
+`PATCH /api/v1/leases/{id}`. Recommendations in brackets, awaiting decisions:
+
+1. One neutral lease surface or two. [One: `/api/v1/contract/leases` becomes the
+   family's lease route service and gains list, update, and release-oversight;
+   `/api/v1/leases` is removed; the operator client, e2e stages, and fixtures move.]
+2. What a neutral lease update may change. [Lease times only.]
+3. The by-escrow lookup. [A filter on the list route.]
+4. What a route service is. [Router factories in `compute_provisioning` taking explicit
+   collaborators — jobs, hosts, leases, lease-watchdog controls, the test drain and
+   summary — and a readiness router factory in the Ansible distribution; the service
+   mounts them; no route reads the service's `container` module.]
+5. The job engine built in the service's container and passed to both runtimes. [Yes.]
+6. Slices: A (engine at the root, job and host routes, the shared error), B (the lease
+   surface), C (`system_service.py` split, contributed diagnostics and projections,
+   adapters stop reading `container`). [Yes.]
+7. The readiness wire contract. [A lightweight contract the service projects the
+   Ansible diagnostics into, so the operator client no longer depends on the Ansible
+   distribution, reporting every contributed playbook rather than VM's alone; decided
+   with question 4.]
+
 ### Implementation-review fixes for Sections 4–5
 
 Decided with the maintainer after the 2026-10-02 implementation review. The successful

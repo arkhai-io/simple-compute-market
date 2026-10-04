@@ -287,16 +287,19 @@ touching libvirt. To create real VMs:
    chmod 600 ./keys/id_ed25519
    ```
 
-3. Customize your KVM inventory:
+3. List the hosts you sell:
 
    ```bash
    cd domains/vms/provisioning/iac/ansible/inventory
-   cp hosts.example hosts
-   # edit hosts with your real KVM host(s)
+   cp provisioning-hosts.example provisioning-hosts.ini
+   # edit provisioning-hosts.ini with your real KVM host(s)
    ```
 
-   The provisioning service imports these aliases into its authoritative Host
-   and Resource Pool tables. Storefront listings reference trusted projected
+   The provisioning service registers every host entry in this file into its
+   authoritative Host and Resource Pool tables, whatever section it is listed
+   under. List only hosts to sell: relay proxies and other infrastructure you
+   manage with the IaC playbooks go in `hosts` in the same directory
+   (`cp hosts.example hosts`), which the service is never given. Storefront listings reference trusted projected
    `pool_id`/`resource_id`; they do not carry a `host_id`. Each host line's
    `ansible_host` is how the provisioning service reaches the host over SSH.
    If buyers reach that host
@@ -312,7 +315,7 @@ touching libvirt. To create real VMs:
 
    Without `public_host`, the connection details fall back to `ansible_host`.
 
-   This file seeds the host registry when the provisioning service starts with
+   `provisioning-hosts.ini` seeds the host registry when the provisioning service starts with
    no hosts registered. Work then runs only against registered hosts, never
    against the file. To add a host to a running deployment, import the file
    again (`POST /api/v1/hosts/import`) or register the host (`POST
@@ -357,7 +360,7 @@ touching libvirt. To create real VMs:
    ```bash
    docker compose -f compose/seller.yml -f compose/seller.live.yml exec \
      seller-provisioning ansible \
-     -i /opt/domains/vms/provisioning/iac/ansible/inventory/hosts \
+     -i /opt/domains/vms/provisioning/iac/ansible/inventory/provisioning-hosts.ini \
      <your_host_alias> -m ping
    ```
 

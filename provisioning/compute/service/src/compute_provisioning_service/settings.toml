@@ -24,10 +24,9 @@ log_level = "info"
 database_url = "sqlite:///provisioning.db"
 
 # Ansible
-# Path to ansible.cfg, exported as ANSIBLE_CONFIG at startup (see main.py).
-# Defaults to the baked /opt path like the other ansible paths below; mock
-# mode overrides it back to "".
-ansible_cfg = "/opt/domains/vms/provisioning/iac/ansible/ansible.cfg"
+# Path to an ansible.cfg exported as ANSIBLE_CONFIG at startup. Empty means
+# the Ansible distribution's own defaults, which belong to no domain.
+ansible_cfg = ""
 ansible_timeout_seconds = 1800
 default_host_id = "kvm1"
 
@@ -36,7 +35,7 @@ default_host_id = "kvm1"
 # The Dockerfile bakes in the /opt paths; local dev overrides via config-local.yml.
 playbook_path = "/opt/domains/vms/provisioning/iac/ansible/playbooks/single-tenant/vm-operations.yaml"
 bare_metal_playbook_path = "/opt/domains/bare_metal/provisioning/iac/ansible/playbooks/node-access.yaml"
-inventory_path = "/opt/domains/vms/provisioning/iac/ansible/inventory/hosts"
+inventory_path = "/opt/domains/vms/provisioning/iac/ansible/inventory/provisioning-hosts.ini"
 management_vars_path = "/opt/domains/vms/provisioning/iac/ansible/inventory/management-vars.yaml"
 
 # Bare-metal reclaim policy for node_reclaim_access.
@@ -71,7 +70,7 @@ retry_scheduler_poll_interval_seconds = 10
 # already refuses to retry transport failures (an unreachable host, refused
 # authentication), and each domain's codec its own (a VM that does not exist);
 # substrings listed here are added to those, matched case-insensitively.
-non_retryable_errors = []
+additional_non_retryable_errors = []
 
 # Bootstrap admission token for a relay established from the relay definition
 # document. Read only when a relay is created, and never afterwards: a token

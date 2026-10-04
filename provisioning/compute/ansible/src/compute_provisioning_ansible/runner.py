@@ -19,6 +19,7 @@ import logging
 import os
 import re
 import select
+import signal
 import subprocess
 import sys
 import tempfile
@@ -309,6 +310,28 @@ class AnsibleRunner:
             vars_path=extra_vars_path,
             job_parameters=job_parameters,
         )
+
+    @staticmethod
+    def execution_handle(run: AnsibleRun) -> dict[str, Any]:
+        """What the job authority stores to stop ``run`` later: its process id."""
+        return {"pid": run.process_id}
+
+    async def cancel(self, handle: Mapping[str, Any]) -> None:
+        """Stop the playbook a handle from ``execution_handle`` names.
+
+        The process is sent ``SIGTERM``; its wait then ends as a failed run.
+        A process id of zero or less names a process group (zero is this
+        service's own), never a playbook, and is refused.
+        """
+        pid = int(handle["pid"])
+        if pid <= 0:
+            logger.warning("Refusing to signal process id %d for handle %s", pid, dict(handle))
+            return
+        try:
+            os.kill(pid, signal.SIGTERM)
+            logger.info("Sent SIGTERM to process %d", pid)
+        except ProcessLookupError:
+            logger.warning("Process %d not found (already terminated)", pid)
 
     async def wait_for_playbook(
         self,

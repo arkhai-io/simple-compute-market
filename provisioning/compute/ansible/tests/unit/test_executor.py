@@ -95,6 +95,7 @@ def _runner(*, failure: Exception | None = None, seen: dict | None = None):
         path=Path("/tmp/does-not-exist.ini")
     )
     runner.start_playbook.return_value = SimpleNamespace(process_id=4242)
+    runner.execution_handle = AnsibleRunner.execution_handle
 
     async def wait(run, timeout_seconds, log_callback=None, redact=None):
         variables_path = runner.start_playbook.call_args.kwargs["extra_vars_path"]
@@ -187,7 +188,7 @@ def test_a_failure_is_classified(message, codec_retryable, operator, retryable) 
     executor = _executor(
         _runner(failure=AnsibleError(message, stdout="token: x", stderr="")),
         _Codec(retryable=codec_retryable),
-        non_retryable_errors=operator,
+        additional_non_retryable_errors=operator,
     )
 
     outcome = asyncio.run(executor.execute(run))
@@ -222,7 +223,7 @@ def test_a_host_reached_other_than_over_ssh_is_refused_before_anything_runs() ->
 def test_cancel_stops_the_reported_process() -> None:
     process = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
     try:
-        asyncio.run(_executor(_runner()).cancel({"pid": process.pid}))
+        asyncio.run(_executor(AnsibleRunner(SimpleNamespace())).cancel({"pid": process.pid}))
         assert process.wait(timeout=10) != 0
     finally:
         if process.poll() is None:
@@ -233,7 +234,18 @@ def test_cancelling_a_process_that_already_ended_is_not_an_error() -> None:
     process = subprocess.Popen([sys.executable, "-c", "pass"])
     process.wait(timeout=10)
 
-    asyncio.run(_executor(_runner()).cancel({"pid": process.pid}))
+    asyncio.run(_executor(AnsibleRunner(SimpleNamespace())).cancel({"pid": process.pid}))
+
+
+@pytest.mark.parametrize("pid", [0, -1])
+def test_a_process_group_is_never_signalled(pid, monkeypatch) -> None:
+    """Zero and negative ids name process groups (zero is this service's own)."""
+    signalled: list = []
+    monkeypatch.setattr("os.kill", lambda *args: signalled.append(args))
+
+    asyncio.run(_executor(AnsibleRunner(SimpleNamespace())).cancel({"pid": pid}))
+
+    assert signalled == []
 
 
 @pytest.mark.parametrize("ending", ["success", "failure", "timeout", "cancelled"])

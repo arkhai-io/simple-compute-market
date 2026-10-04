@@ -166,6 +166,48 @@ async def test_a_held_grant_runs_through_the_bare_metal_mock(
     assert (await test_client.list_bare_metal_mock_rules())[0]["waiting"] == 0
 
 
+
+async def test_cancelling_a_held_grant_ends_its_execution_without_a_resume(
+    test_client, bare_metal_leases, bare_metal_runner, client_and_queue
+) -> None:
+    """A cancelled job held at a gate leaves it and frees its queue slot.
+
+    The job's status turns terminal when it is cancelled, but its processing is
+    still parked at the gate until the run itself is stopped; this proves the
+    processing ends, so no resume is needed and nothing is left held for the
+    next test.
+    """
+    provisioning_client, job_queue = client_and_queue
+    _register_host()
+    reserved = _reserve("escrow-bm-mock-cancel")
+    await test_client.add_bare_metal_mock_rule(
+        rule_id="grant-gate",
+        match={"action": NODE_GRANT_ACCESS_ACTION, "host_id": HOST_ID},
+        pause_before_result=True,
+    )
+    await _register_lease(
+        bare_metal_leases, reserved["capacity_reservation_id"], "escrow-bm-mock-cancel"
+    )
+    grant_job_id = _container_module.resolved_capacity_ledger_service.get_reservation(
+        reserved["capacity_reservation_id"]
+    )["create_job_id"]
+    await asyncio.wait_for(
+        bare_metal_runner.rules.wait_until_held("grant-gate"), timeout=5.0
+    )
+
+    await provisioning_client.cancel_job(grant_job_id)
+
+    await asyncio.wait_for(
+        bare_metal_runner.rules.wait_until_released("grant-gate"), timeout=5.0
+    )
+    await asyncio.wait_for(job_queue.wait_until_idle(), timeout=5.0)
+    rules = await test_client.list_bare_metal_mock_rules()
+    assert (rules[0]["paused"], rules[0]["waiting"]) == (True, 0)
+    # The run ended as a failed playbook after the cancellation was committed;
+    # that late outcome does not replace it.
+    job = _container_module.resolved_job_service.get_job(grant_job_id)
+    assert job.status == "cancelled"
+
 async def test_a_bare_metal_rule_can_fail_a_grant(
     test_client, bare_metal_leases
 ) -> None:
