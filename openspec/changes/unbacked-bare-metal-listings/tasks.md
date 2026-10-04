@@ -21,3 +21,14 @@ phase; not yet planned.
       discovery reaches a usable introduction, and that a buyer query bounded by
       asking rate returns backed and unbacked bare-metal listings together
       (transferred from `publish-indicative-listing-rates` 7.13).
+- [ ] 2.2 **System, both domains.** Two seller sites publishing unbacked supply to
+      one storefront keep distinct origin and source identity, each introduction
+      reveals its own seller's contact, and seller-side delivery reaches only that
+      origin's routed instances — on the VM lane and on the bare-metal lane.
+      Transferred from `compose-contact-exchange-across-compute` 6.5 (originally
+      `unbacked-listing-publication` 6.8). Each lane needs a topology with one
+      storefront serving two seller sites, which neither has today; planning decides
+      that topology, from whatever lane baseline then exists, as its own task. The
+      behaviour is already proven at integration level by
+      `domains/vms/storefront/tests/integration/test_introduction_origins.py` and the
+      delivery kit's routing tests, so this is the live multi-service evidence.

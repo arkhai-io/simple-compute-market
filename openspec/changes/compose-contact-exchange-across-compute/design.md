@@ -498,8 +498,9 @@ host, port, sender, and recipients are public settings, so the lane and a Helm
 deployment configure it without a Secret; Apprise URLs are secret-marked and would
 not be. The Apprise plugin is proven at integration level against a loopback
 receiver. The two-seller
-scenario (6.5) is blocked until `bare-metal-mock-provisioned-deal` lands its
-two-storefront, two-site topology, and is redesigned from that baseline.
+scenario (6.5) is transferred to `unbacked-bare-metal-listings` for both domains: it
+needs one storefront serving two seller sites, which no lane provides, and the
+behaviour it covers is proven here at integration level.
 
 ### 14. An unpriced selection is accepted as published
 

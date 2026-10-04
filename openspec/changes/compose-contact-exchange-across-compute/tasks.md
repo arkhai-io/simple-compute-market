@@ -1,8 +1,8 @@
 # Tasks — compose contact exchange across the compute family
 
 Depended on `contact-payload-retention` and `pass-through-storefront-config`, both
-complete and archived. Task 6.5 is blocked on `bare-metal-mock-provisioned-deal`'s
-two-storefront topology. Decisions are in `design.md` (1–13).
+complete and archived. Task 6.5 is transferred to `unbacked-bare-metal-listings`.
+Decisions are in `design.md` (1–14).
 
 Paths abbreviate `kit/contact-exchange/src/market_contact_exchange/` as `KC/`,
 `kit/delivery/src/market_delivery/` as `KD/`,
@@ -274,30 +274,49 @@ edited.
       seller-side message carrying the buyer's.
       The VM lane passed with 135 tests, including all six introduction scenarios.
       Lane configuration includes Mailpit, Bob's contact and SMTP delivery, and
-      `mailpit.api_url` in the Docker and local profiles. That run predates 8.8, which
-      changes how the seller answers an introduction opening (it now accepts it), so
-      the lane is rerun once on the combined tree before closeout.
+      `mailpit.api_url` in the Docker and local profiles. Rerun on the tree combining
+      8.8 and 8.9 in Actions run 37182810584: the VM lane passed 135 tests including
+      all six introduction stages, with the seller accepting the opening at round 0
+      (`decision_reason` `unpriced_selection`) and seller-side delivery reaching the
+      `seller-mail` instance; the bare-metal lane passed 16.
 - [x] 6.4 **System.** Same module: backed and unbacked VM listings from one storefront
       are returned by one rate-bounded query, a listing publishing no rate is excluded,
       and an unbacked one reaches a usable introduction. Transferred from
       `unbacked-listing-publication` (its 6.7); the rate bound from
       `publish-indicative-listing-rates` (its 7.13).
       Passed in the VM lane and in the focused introduction module run.
-- [ ] 6.5 **System — blocked** on `bare-metal-mock-provisioned-deal`'s two-storefront,
-      two-site topology; redesign from that baseline. Two seller sites behind one
+- [x] 6.5 *(transferred, not run here)* **System.** Two seller sites behind one
       storefront keep distinct origin and source identity, each reveals its own
       seller's contact, and seller-side delivery reaches only that origin's instances.
-      Transferred from `unbacked-listing-publication` (its 6.8).
+      Transferred from `unbacked-listing-publication` (its 6.8), and transferred on to
+      `unbacked-bare-metal-listings` with its bare-metal counterpart: neither lane
+      has a storefront serving two seller sites, and `bare-metal-mock-provisioned-deal`
+      deploys two storefronts with one site each, so the scenario needs a topology of
+      its own. The behaviour is proven below the system level here:
+      `domains/vms/storefront/tests/integration/test_introduction_origins.py` (two sites
+      behind one storefront each reveal their own contact; a site that lost its contact
+      is refused) and `kit/delivery/tests/unit/test_seller.py` with
+      `kit/delivery/tests/unit/test_config_and_discovery.py` (routing per origin, and
+      the multi-origin refusal without a routing table).
 - [x] 6.6 **Helm.** With `helm/fixtures/contact-exchange-values.yaml` applied and port
       forwards to Bob's storefront (8001), the registry (8080), provisioning (8081), and
       Mailpit's API (8025), `make -C e2e-tests test-module MODULE=e2e_vm_introduction
       ACTIVE_PROFILES=local` passes. Confirm the Service names against `helm template`
       and record the exact commands in 5.6.
 
-      Passed all six scenarios against a fresh local Helm release. The fixture
-      supplies a backed-pool settlement clause and advertises Bob through the
-      port-forward; the local profile supplies the signed development identities.
-      Commands are recorded in `docs/development/VALIDATION_RUNBOOK.md`.
+      Passed on 2026-10-04: all six introduction stages (`6 passed` in 3.61 s) against
+      a fresh local release `arkhai-node-operator` in namespace `scm-intro-20261004`,
+      deployed with `make -C helm deploy VALUES=fixtures/contact-exchange-values.yaml`,
+      after `make build-dev` and `make -C e2e-tests reinit`. Two earlier attempts
+      found what the fixture and profile now carry: the backed test pool had no
+      settlement clause (the fixture now gives Bob a contact-exchange
+      `pricing.settlements` default), and a redeploy left the storefront port-forward
+      bound to the replaced pod. The fixture advertises Bob at the port-forward URL;
+      `e2e-tests/config/config-local.yml` carries the registry authority and the
+      signed development identities the scenario needs; `e2e-tests/Makefile` resolves
+      its config directory from `CURDIR`. Commands are recorded in
+      `docs/development/VALIDATION_RUNBOOK.md`.
+
 ## 8. Review corrections
 
 - [x] 8.1 **Single-form contact binds to its one site.** `resolve_seller_contact` in

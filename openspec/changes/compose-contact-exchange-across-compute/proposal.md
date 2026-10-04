@@ -173,7 +173,7 @@ None.
   rateless introduction; what it could not supply is the unbacked VM listing this
   change first makes publishable.
 - **Owns the system evidence for `unbacked-listing-publication`** (tasks 6.4 and
-  6.5). That change made unbacked listings derivable, bound, and published through
+  6.5; 6.5 is transferred on to `unbacked-bare-metal-listings`). That change made unbacked listings derivable, bound, and published through
   the storefront's loop, but VM composes no settlement option an unbacked listing
   may publish until this change composes introduction, so no stack could show one
   to a buyer. The scenarios live here, with the flow that first makes them
@@ -186,8 +186,9 @@ None.
   baseline the VM storefront chart passes configuration through and generates its
   values schema from the storefront's typed models; this change registers the contact
   mechanism, types `[Delivery]` in that generator, and regenerates the schema.
-- **Task 6.5 is blocked on `bare-metal-mock-provisioned-deal`**'s two-storefront,
-  two-site topology and is redesigned from it.
+- **Task 6.5 is transferred to `unbacked-bare-metal-listings`**, which carries the
+  two-seller system scenario for both domains, since neither lane has a storefront
+  serving two seller sites.
 - **Runs alongside `bare-metal-mock-provisioned-deal`**, which is moving bare-metal
   negotiation onto the kit runtime and deal controls into kit route services. This
   change edits the bare-metal storefront's introduction, delivery, publication, and
@@ -209,7 +210,8 @@ None.
 - **Blocks `unbacked-bare-metal-listings`**, which settles unbacked bare-metal
   introductions through the composition this change promotes and needs the per-origin
   payload. Bare metal is Goal 7's primary target domain; its unbacked system evidence
-  is owned by that change, and this change's 6.4 and 6.5 remain the VM half.
+  is owned by that change, and this change's 6.4 is the VM half. That change also
+  carries the two-seller system scenario (this change's 6.5) for both domains.
 - Discharges the remaining half of the recorded open gap for cross-domain
   contact-exchange composition in `docs/development/ROADMAP.md`.
 
