@@ -466,7 +466,7 @@ edited.
       Passes for this change and for `unbacked-bare-metal-listings`. The repository-wide
       check reports the same 11 misses it reported before this change, none in a file
       this change touches.
-- [ ] 7.9 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and
+- [x] 7.9 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and
       record the evidence: the run, its result, and the scenarios that
       exercise this change's behaviour. Green unit and integration suites do
       not substitute -- this is the tier that catches a wire contract whose
@@ -481,17 +481,25 @@ edited.
       delivery), with the seller accepting at round 0 (`unpriced_selection`) and
       delivering to `seller-mail`; bare metal 16, including its introduction scenario.
       The same six stages passed against a local Helm release on 2026-10-04 (6.6).
-      Owed: one VM-lane run on the final tree, since 8.10 changed the schema
-      generator, the buyer's amountless check, and the scenario's health read after
-      those runs.
-- [ ] 7.10 **Packaging.** Run `make check-packaging` and resolve every failure it
+      On the final tree (commit `bf6ec220`, clean, images rebuilt), the six stages
+      passed again against a fresh local Helm release in namespace
+      `scm-intro-rerun-20261004` (`6 passed` in 4.24 s), deployed from the regenerated
+      values schema, with the seller accepting at round 0 (`unpriced_selection`) and
+      delivering to `seller-mail`. That run covers what 8.10 changed after the Compose
+      run: the schema generator through the Helm render, the buyer's amountless check
+      through the buyer CLI's negotiation, and the scenario's typed health read. The
+      Compose lanes last ran before 8.10; its buyer change only stops refusing an
+      amountless acceptance of an option whose rates are all on other fields, so every
+      acceptance those lanes passed is still accepted.
+- [x] 7.10 **Packaging.** Run `make check-packaging` and resolve every failure it
       reports: environment and image installs derive their internal packages from
       their locks, every lock is current, and every Python version selection reads
       the root declaration.
-      `check-uv-setup`, `check-python-version`, and `check-project-layout` pass on the
-      final tree, and every lock but one is current. Owed: regenerate
-      `domains/vms/storefront/uv.lock` for the `jsonschema` dev dependency 8.10 added,
-      which needs `download-r2.pytorch.org`, then rerun `make check-packaging`.
+      `make check-packaging` passes on the final tree after regenerating
+      `domains/vms/storefront/uv.lock` for the `jsonschema` dev dependency 8.10 added:
+      every install derives from its lock, every lock is current, every Python
+      version selection reads the root declaration, and every distribution has the
+      expected layout.
 ## Design promotion record
 
 | Accepted decision | Permanent location |
