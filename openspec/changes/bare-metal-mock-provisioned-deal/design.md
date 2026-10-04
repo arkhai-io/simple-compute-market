@@ -1178,13 +1178,13 @@ authority reach both runtimes (`TESTING.md`'s composition-boundary convention).
 comment hygiene, and a checkpoint:
 
 - **A0, the contracts and client packages** (decisions 8 and 11), opened by the route
-  ownership matrix: `VersionedEnvelope` to `arkhai-core`; the compute contracts and client
+  ownership matrix and by deleting the generic action surface (decision 10), so no client
+  is written for routes about to go: `VersionedEnvelope` to `arkhai-core`; the compute contracts and client
   distributions; the resource-pool contracts and client distributions; capacity-definition
   import in `kit/site-client`; every existing operation moved to its owner's client, with
   sync variants and parity tests; VM's extension client and the Ansible host-import client;
-  every caller migrated. No wire change.
-- **A, authorities at the root and the job and host routes**: decision 5; the generic
-  action surface and the compute-adapter architecture deleted (decision 10);
+  every caller migrated. No wire change beyond the action surface's removal.
+- **A, authorities at the root and the job and host routes**: decision 5;
   `ProvisioningRouteError`; the job, host, and test-job route services and their bindings;
   the Ansible host-import route service; VM's jobs controller removed and its hosts
   controller reduced to the VM capacity route; the connectivity probe contribution and its
@@ -1284,6 +1284,10 @@ would force consumers to install what they do not use. So:
   metal, resource pools, site, or the provisioning service itself) before anything moves,
   and the matrix decides which contracts package and client receive each operation, so
   A0 does not become "everything in `vm_provisioning_operator` moves to the family client".
+  Planning made the matrix (`tasks.md`, 5B.8). One consequence: the family table stops
+  copying the site's capacity routes, and the service assembles `kit/site`'s own
+  `CAPACITY_ROUTE_CONTRACTS` instead, so the site's contracts are declared twice (server
+  and client, held by their parity test) rather than three times.
 - **Deleted**: `ComputeProvisioningClient` and the route-table code from
   `compute_provisioning`; the generic clients from `vm_provisioning_operator`; their parity
   test.
@@ -1379,7 +1383,8 @@ the debt:
 
 - **`kit/resource-pools-contracts`** (`arkhai-kit-resource-pools-contracts`; pydantic and
   `kit-capability-shape`): the pool models, the declaration hints they validate with, and
-  the pool route declarations as plain data. `market_resource_pools` keeps the authority and
+  the pool route declarations as plain data. The hints module moves whole, so its many
+  importers across kits, storefronts, listings, and the API-credit service repoint to it. `market_resource_pools` keeps the authority and
   persistence and imports its models from here; `ResourcePoolService` is the framework-free
   route service, and the provisioning service keeps the HTTP binding and assembles the
   declarations into its table.
@@ -1412,13 +1417,12 @@ asked for seven corrections, each verified in code and discussed with the mainta
 - `kit/site` ships its own FastAPI router, outside the five-piece pattern.
 - VM's storefront binds pool overrides with a literal path under a router prefix rather than
   `POOL_OVERRIDES_PATH`, as bare metal does.
-- The site's route contracts are declared three times: `kit/site/auth.py`,
-  `kit/site-client`, and the family route table.
+- The site's route contracts are declared twice, `kit/site/auth.py` and `kit/site-client`,
+  held by a parity test (the family table's third copy goes in 5B.8.A0.3); a site contracts
+  package would make them one.
 - Bare metal's mock-rule routes have no typed client.
 - `ReservationState.provisioning` is never set: `commit` moves a reservation from `reserved`
   to `leased`.
-- A site contracts package, in place of the site's duplicated server and client models
-  (decision 11).
 - "An administrator can do everything" holds only on the provisioning service's route
   table; the repository-wide stance is a roadmap gap.
 - Path templates in the family route contracts (decision 4, option 2).

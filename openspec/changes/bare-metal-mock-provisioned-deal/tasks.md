@@ -1093,50 +1093,385 @@ re-verifies them by grep before each move.
       `domains/bare_metal/provisioning/iac`, with `provisioning/compute/service/Dockerfile`
       and `settings.toml` following. Deleting `bare_metal_mock_executor.py`, replaced by
       bare metal's contributed default output, moves to slice C of 5B.6.
-- [ ] 5B.8 Controls and routes. Changes the generic lease wire format. Split
-      `system_service.py`: aggregate health and status to the service, which composes
-      contributed diagnostics; Ansible readiness to the Ansible distribution; convergence
-      and lease-watchdog controls to their owners. Generic job, host, and lease routes
-      become `compute_provisioning` route services the service mounts, with their route
-      contracts in the family table; the generic lease read, update, terminate, and
-      administration routes serve `LeaseView` and its request models, and VM's `Lease*`
-      models and VM-only lease fields are removed from the generic surface (VM's route
-      declarations shrink to match). VM keeps its VM routes; adapter routes receive
-      injected collaborators instead of reading the service's `container` module.
-      Callers: `vm_provisioning_operator/client.py`, the e2e lease view and backdating
-      stages, the integration fixtures.
-      Decided with the maintainer on 2026-10-04 (`design.md`, "Controls and routes
-      (5B.8)": three lease surfaces found; slices A0, A, B, C; 7.3 folded into B; the
-      same day's design review added decisions 9–11); this task is amended with the exact
-      files per decision when planned. Named by the
-      architecture review (`design.md`,
-      "Architecture review: adapter imports of the deployed service"), all to be gone
-      when 5B.8 is done:
-      - the `container` reach-through in VM's `hosts_controller.py`,
-        `jobs_controller.py`, `system_controller.py`, `test_controller.py`,
-        `leases_controller.py`, `vms_controller.py` and bare metal's
-        `bare_metal_leases_controller.py` and `test_controller.py`;
-      - `ReservationNotProvisionableError` moves to `compute_provisioning`, beside the
-        compute-adapter contract; both `compute_adapter.py` files import it from there;
-      - VM's `services/job_service.py` stops importing `config.Settings` once the engine
-        is built at the composition root;
-      - `resolve_identity_context` leaves VM's `services/system_service.py` for the
-        service, with aggregate health and status;
-      - `capacity_inventory.py` iterates a resource-projection contribution the bundles
-        carry, instead of importing both runtimes' projection functions;
-      - the service's import-boundary test allowlists (file, module) pairs: `container.py`
-        and `main.py` the runtimes and routers, `db/migrations.py` `legacy_backfill`.
+- [ ] 5B.8 Controls and routes. Decided with the maintainer on 2026-10-04: `design.md`,
+      "Controls and routes (5B.8)", decisions 1–11, including the same day's design
+      review. Four slices, A0 → A → B → C, each its own checkpoint. A slice ends with the
+      provisioning-family suites green (`provisioning/compute`, its Ansible distribution,
+      the provisioning service's unit and integration suites, both adapters, the client
+      packages it touches), `make check-comment-hygiene`, and `make check-packaging`.
+      Every package a slice changes is bumped per `docs/development/RELEASING.md` (minor
+      for an incompatible change while below 1.0.0), exact pins move everywhere they
+      appear, and changed projects are relocked with `scripts/uv_project.py lock`; the
+      versions are recorded in that slice's implementation notes. Implementation
+      re-verifies each named file by grep before moving it; a file found missing or a
+      caller found unlisted is added to the slice, not skipped. Removed files are
+      tombstoned in the checkpoint fileset.
+
+      **Route ownership.** Every route the provisioning service serves, and the package
+      that owns its contract and client after A0:
+
+      | Routes | Owner | Contracts | Typed client |
+      |---|---|---|---|
+      | `/api/v1/fulfillment/*` (schedule, validate, begin, begin-teardown, status, result) | compute family | `compute_provisioning_contracts` | `compute_provisioning_client` |
+      | `/api/v1/contract/leases*` (and, from B, list and release-oversight) | compute family | `compute_provisioning_contracts` | `compute_provisioning_client` |
+      | `/api/v1/jobs`, `/api/v1/jobs/{id}`, its logs, credentials, cancel | compute family | `compute_provisioning_contracts` | `compute_provisioning_client` |
+      | `/api/v1/hosts*` CRUD, enable, disable, connectivity | compute family | `compute_provisioning_contracts` | `compute_provisioning_client` |
+      | `/api/v1/hosts/import` | Ansible implementation | `compute_provisioning_ansible` (declaration) | `compute_provisioning_ansible` (extension) |
+      | `/api/v1/system/*` (health, status, version, readiness until C, worker controls), `/api/v1/identity/rotations/*` | provisioning service; contracts and client in the compute family's packages, the service being the family's deployable | `compute_provisioning_contracts` | `compute_provisioning_client` |
+      | `/test/jobs/*` | compute family (mock profile) | `compute_provisioning_contracts` | e2e harness `ProvisioningTestClient` |
+      | `/api/v1/pools*` | resource pools | `market_resource_pools_contracts` | `market_resource_pools_client` |
+      | `/api/v1/capacity/definitions/import` | site | `kit/site-client` (its own table) | `kit/site-client` |
+      | `/api/v1/capacity/*` (resources, projections, snapshot, probe, reservations, commit, releases, truncate-lease, events) | site | `kit/site/auth.py` table, assembled by the service; `kit/site-client` | `kit/site-client` |
+      | `/api/v1/hosts/{host}/capacity`, `/api/v1/hosts/{host}/vms*` | VM | `vm_provisioning_operator` (declarations) | `vm_provisioning_operator` (extension) |
+      | `/api/v1/relays*` | VM | `vm_provisioning_operator` (declarations) | `vm_provisioning_operator` (extension) |
+      | `/api/v1/leases*`, `/api/v1/admin/leases*` (until B) | VM | `vm_provisioning_operator` | `vm_provisioning_operator` (extension) |
+      | `/test/mock-rules*`, `/test/evaluate-job` | VM | `vm_provisioning_operator` | e2e harness `ProvisioningTestClient` |
+      | `/api/v1/bare-metal/leases*` (until B) | bare metal | `arkhai_bare_metal` | `BareMetalLeaseClient` (until B) |
+      | `/test/bare-metal/*` | bare metal | `arkhai_bare_metal` | none (finding) |
+      | `/api/v1/actions`, `/api/v1/jobs/{id}/contract*` | deleted in A0.1 | — | — |
+
+      The provisioning service's request authentication resolves against the table its
+      composition root assembles from the family contracts, `kit/site`'s
+      `CAPACITY_ROUTE_CONTRACTS`, the resource-pool declarations, the Ansible host-import
+      declaration, and each adapter's declarations; the family table stops copying the
+      site's capacity routes.
+
+      **Slice A0: the action surface goes, and contracts and clients move to their owners.**
+      Changes no wire beyond removing the action surface.
+
+  - [ ] 5B.8.A0.1 Delete the generic action surface (decision 10). Remove
+        `POST /api/v1/actions` and `GET /api/v1/jobs/{id}/contract`, `.../credentials`, and
+        `.../cancel`: their contracts in `provisioning/compute/src/compute_provisioning/client.py`,
+        their routes in
+        `provisioning/compute/service/src/compute_provisioning_service/controllers/compute_contract_controller.py`,
+        and the action and contract-job half of
+        `services/compute_contract_service.py` (with `ReservationNotProvisionableError` and the
+        `job_service` parameter; the lease half stays until B). Tombstone
+        `domains/vms/provisioning/adapter/src/vm_provisioning_adapter/compute_adapter.py` and
+        `domains/bare_metal/provisioning/adapter/src/bare_metal_provisioning_adapter/compute_adapter.py`.
+        `provisioning/compute/src/compute_provisioning/adapters.py` loses `ExecutorAdapter`,
+        `FunctionalExecutorAdapter`, `ExecutorAdapterRegistry`, `UnsupportedExecutorActionError`,
+        and `ExecutorMismatchError` (keeping `JobExecutorResolver` and `JobExecutorTable`);
+        `composition.py`'s `ExecutorAdapterContribution` becomes `offering_mode`,
+        `job_executors`, and (until B) `release_executor`, `_validate_executor` checks those,
+        and `ComposedComputeAdapters` loses `executor_registry`. Both adapters' `runtime.py`
+        and `bundle.py` stop building compute adapters; `compute_provisioning/__init__.py` and
+        `container.py` follow. `ComputeProvisioningClient` loses `submit_action`, the contract
+        job methods, and `wait_for_job`-style helpers that read them. Tests:
+        `provisioning/compute/service/tests/integration/test_compute_contract_api.py` keeps only
+        its lease cases (moved to B's lease tests then); `provisioning/compute/tests/unit/test_composition.py`
+        and `test_route_table.py`, `provisioning/compute/service/tests/unit/test_route_table_composition.py`
+        and `unit/middleware/test_auth.py` drop the action routes and adapter registration;
+        `unit/services/test_provider_registry.py` keeps its provider cases. Spec:
+        `physical-provisioning` "Validated executor registration" and
+        `compute-provisioning-contract` are already amended in this change's deltas.
+  - [ ] 5B.8.A0.2 `VersionedEnvelope` to core (decision 8). Move
+        `kit/fulfillment/src/market_fulfillment/envelopes.py` (`VersionedEnvelope`, `envelope`)
+        to `core/src/market_core/envelopes.py`, exported from `market_core`; tombstone the old
+        module; every importer takes it from `market_core` with no re-export from
+        `market_fulfillment`: `kit/fulfillment`'s `__init__.py`, `db.py`, `fulfillment.py`,
+        `fulfillment_persistence.py`, `provider.py`, `results.py`, `settlement_repository.py`;
+        both providers and `vm_provisioning_adapter/fulfillment_results.py`;
+        `compute_provisioning/client.py` and `contracts.py`; the service's
+        `controllers/fulfillment_controller.py` and `services/fulfillment_convergence.py`; the
+        VM storefront's `services/capacity_client.py`, `fulfillment_resume_runtime.py`,
+        `fulfillment_service.py`; the bare-metal storefront's `fulfillment_service.py` and
+        `hosted_lifecycle.py`; and their tests (`kit/fulfillment/tests/unit/test_envelopes.py`
+        moves to `core/tests/unit/test_envelopes.py`). `kit/fulfillment/pyproject.toml` depends
+        on `arkhai-core`.
+  - [ ] 5B.8.A0.3 Compute contracts distribution (decision 8). New
+        `provisioning/compute/contracts/` (`arkhai-compute-provisioning-contracts`,
+        `compute_provisioning_contracts`; depends on `arkhai-core`, `arkhai-kit-identity`,
+        pydantic) with `Makefile`, `pyproject.toml`, `py.typed`, and tests. It receives
+        `compute_provisioning/contracts.py` whole, `hosts/models.py`, `jobs/models.py`,
+        `system_models.py`, `ConnectivityResult` (from
+        `provisioning/compute/ansible/src/compute_provisioning_ansible/runner.py`, which then
+        imports it), and the route-contract half of `compute_provisioning/client.py`
+        (`ProvisioningRouteContract`, `PROVISIONING_ROUTE_CONTRACTS` without the site's capacity
+        routes and without the pool, capacity-definition, host-import, and relay routes,
+        `_family_roles`, `ProvisioningRouteTable`, `assemble_provisioning_route_table`,
+        `route_contract_from_declaration`, `resolve_provisioning_route`,
+        `canonical_provisioning_request_body`). Tombstone the moved modules in
+        `compute_provisioning`; `compute_provisioning/__init__.py` stops exporting wire models
+        and drops the pool and capacity-definition re-exports. Every importer is repointed:
+        `compute_provisioning`'s own modules (`hosts/service.py`, `hosts/connection.py`,
+        `jobs/engine.py`, `jobs/executor.py`, `executor_leases.py`, `lease_lifecycle.py`,
+        `composition.py`, `app.py`), the Ansible distribution, both adapters, the service
+        (`middleware/auth.py`, `main.py`, every controller and service importing wire models),
+        and the tests that import them. The service's `main.py` assembles the table from the
+        family contracts, an adapter of `market_site.auth.CAPACITY_ROUTE_CONTRACTS`, the
+        resource-pool declarations, the Ansible host-import declaration, and the adapters'
+        declarations. Moved tests: `provisioning/compute/tests/unit/test_contracts.py`,
+        `test_job_contract_values.py`, `test_route_table.py` to
+        `provisioning/compute/contracts/tests/unit/`. Registered in the root `Makefile`
+        (`dist-compute-provisioning-contracts`, ahead of `dist-compute-provisioning`),
+        and `.github/workflows/publish-pypi.yml` and `docs/development/RELEASING.md` wherever
+        its siblings are listed; the service image derives its internal packages from the
+        lock, which `make check-packaging` confirms.
+  - [ ] 5B.8.A0.4 Compute client distribution (decision 8). New
+        `provisioning/compute/client/` (`arkhai-compute-provisioning-client`,
+        `compute_provisioning_client`; depends on the contracts, `arkhai-kit-identity`, httpx)
+        with `ComputeProvisioningClient` and `SyncComputeProvisioningClient` over one signing
+        base merged from the family client's request signing and VM's
+        `_ProvisioningClientBase`; one error hierarchy (`ComputeProvisioningError`,
+        `ComputeProvisioningJobError`, `ComputeProvisioningTimeoutError`); `authenticated_request`
+        in both variants; the polling helper; `ComputeProvisioningClientProtocol`. Methods:
+        exactly the routes the matrix gives the compute family and the provisioning service —
+        fulfillment, contract leases, admin jobs, hosts (no import), system health, status,
+        version, readiness, the worker controls, identity rotation. Family methods return
+        their contract models. Tombstone `compute_provisioning/client.py`.
+        `provisioning/compute/pyproject.toml` drops httpx if nothing else needs it. Parity:
+        `provisioning/compute/service/tests/unit/test_provisioning_client_contract.py` asserts
+        the two variants' public methods and signatures match.
+  - [ ] 5B.8.A0.5 Resource-pool contracts and client (decision 11). New
+        `kit/resource-pools-contracts/` (`arkhai-kit-resource-pools-contracts`,
+        `market_resource_pools_contracts`; pydantic and `arkhai-kit-capability-shape`)
+        receiving `kit/resource-pools/src/market_resource_pools/pools.py` and `hints.py`, plus
+        the pool route declarations as plain data (moved out of the family table). New
+        `kit/resource-pools-client/` (`arkhai-kit-resource-pools-client`,
+        `market_resource_pools_client`; the contracts only) with `ResourcePoolClient` and
+        `SyncResourcePoolClient` over any transport offering `authenticated_request`, and a
+        parity test in `kit/resource-pools-client/tests/unit/`. `hints.py` moves with the
+        models because their validators call it. `market_resource_pools` imports models and
+        hints from the contracts (`service.py`, `__init__.py`) and no longer exports them, so
+        every importer of a pool model or a hint function is repointed, re-verified by grep:
+        the service's `controllers/pools_controller.py`; `kit/fulfillment`'s `fulfillment.py`
+        and `scheduler.py`; `kit/site`'s `ledger.py`; `domains/apicredits/service`'s
+        `db/database.py`; the bare-metal storefront's `site_reading.py`; `domains/vms/listings`'
+        `listing_shapes.py`, `reconciler.py`, `pricing_resolution.py`,
+        `listing_cardinality_mode.py`, and `pool_descriptors.py`; the VM storefront's
+        `services/listing_sources.py` and `negotiation_runtime.py`; and their tests
+        (`kit/resource-pools`' `test_hints.py` and `test_pool_models.py` move to the contracts
+        package). Each repointed package depends on the contracts. Registered in `kit/Makefile`
+        (`dist-ci`, `test`).
+  - [ ] 5B.8.A0.6 Capacity-definition import in `kit/site-client` (decision 11): its own
+        request and response models in `market_site_client/models.py`, its route-table entry in
+        `client.py`, an import method on the site client, and
+        `kit/site/tests/unit/test_auth_route_parity.py` extended to compare the server's
+        contract for the route with the client's. The server's contract is a separate
+        `CAPACITY_DEFINITION_ROUTE_CONTRACTS` in `market_site.auth`, which the provisioning
+        service assembles and a standalone site never mounts.
+  - [ ] 5B.8.A0.7 VM and Ansible extension clients (decisions 8 and 4). `vm_provisioning_operator`
+        keeps `models.py` and `routes.py` (gaining the relay route declarations, moved from the
+        family table, and the relay models from `compute_provisioning/relays.py`, tombstoned);
+        `client.py` becomes `VmOperatorClient` and `SyncVmOperatorClient` over the family
+        client's `authenticated_request`: VM operations, host capacity, relays, and (until B)
+        VM's `/api/v1/leases` methods. The generic `ProvisioningClient` and
+        `SyncProvisioningClient` are deleted; `domains/vms/provisioning/client/pyproject.toml`
+        depends on the compute contracts and client only, dropping `arkhai-compute-provisioning`
+        and `arkhai-compute-provisioning-ansible`. The service's `relays_controller.py` and
+        relay services import relay models from `vm_provisioning_operator`. The Ansible
+        distribution gains `compute_provisioning_ansible/host_import.py` with the
+        `/api/v1/hosts/import` declaration and an `AnsibleHostImportClient` (async and sync)
+        over the family transport; `provisioning/compute/ansible/pyproject.toml` depends on the
+        compute client. `arkhai_bare_metal`'s `BareMetalLeaseClient` imports its transport
+        protocol from the compute client until B deletes it.
+  - [ ] 5B.8.A0.8 Callers. Storefronts: `domains/vms/storefront` (`services/capacity_client.py`,
+        `fulfillment_service.py`, `fulfillment_resume_runtime.py`, `system_service.py`, and
+        `tests/unit/test_fulfillment_service.py`) and `domains/bare_metal/storefront`
+        (`site_clients.py`, `fulfillment_service.py`, `hosted_lifecycle.py`) import from the
+        compute contracts and client, and their `pyproject.toml` drop `arkhai-compute-provisioning`
+        if grep finds nothing else imported from it. e2e: `e2e-tests/src/e2e_harness/provisioning_test_client.py`
+        assembles from the compute contracts and the domain declarations;
+        `tests/e2e/roles/scenarios/vms/conftest.py`, `host_registry.py`, `hosted/network.py`,
+        `test_multi_registry.py`, `test_pool_declared_offering_modes.py`, `test_vm_introduction.py`,
+        `scenarios/bare_metal/conftest.py`, `test_bare_metal_publication.py`,
+        `test_bare_metal_introduction.py`, and `tests/smoke/test_provisioning_smoke.py` use
+        `SyncComputeProvisioningClient` for family routes, `SyncResourcePoolClient` for pools,
+        `SiteCapacityClient` (through `asyncio.run`, as bare-metal e2e already does) for
+        capacity reads, and `SyncVmOperatorClient` only for VM operations and VM leases;
+        `e2e-tests/pyproject.toml` follows. Service integration and unit tests move to the new
+        clients' async variants: `integration/conftest.py`, `test_capacity_definitions_api.py`,
+        `test_hosts_api.py`, `test_host_capacity_derivation_api.py`, `test_leases_api.py`,
+        `test_pools_api.py`, `test_provisioning_client_endpoint_coverage.py`,
+        `test_test_controller.py`, `test_vms_api.py`, `test_fulfillment_api.py`,
+        `test_host_requirement_api.py`, `test_relays_api.py`, `test_bare_metal_mock_profile.py`,
+        `unit/models/test_jobs_models.py`, `unit/services/test_host_operations_service.py`,
+        `test_ledger_lease_lifecycle.py`, `test_vm_operations_service.py`,
+        `unit/test_import_boundaries.py`, `unit/test_lease_models.py`;
+        `provisioning/compute/tests/integration/test_fulfillment_client_opacity.py`.
+  - [ ] 5B.8.A0.9 Gate. The slice's suites plus `kit/fulfillment`, `kit/resource-pools` and its
+        two new packages, `kit/site`, `kit/site-client`, `core`, `domains/vms/listings`, both
+        storefronts, and the e2e unit suite pass; `make check-packaging` passes. A boundary
+        check in each new package's unit suite asserts its declared dependencies:
+        `compute_provisioning_contracts` imports no SQLAlchemy, FastAPI, or other
+        `compute_provisioning*` module; `market_resource_pools_client` imports no
+        `compute_provisioning*` or SQLAlchemy module.
+
+      **Slice A: the authorities at the root, and the job and host routes.**
+
+  - [ ] 5B.8.A.1 Authorities at the root (decision 5). `container.py` builds one
+        `HostAuthority` (codecs from `compute_provisioning_ansible`'s `SshConnectionCodec` with
+        the decryption key, capacity derivation, merged pool-change hooks) and one `JobEngine`
+        (the executor table, `host_authority.lookup`, the retry policy). `retry_policy_from`
+        moves from VM's `services/job_service.py` to
+        `provisioning/compute/service/src/compute_provisioning_service/services/job_retry.py`.
+        VM exports its relay pool-change hook as `HOST_POOL_CHANGE_HOOKS` from
+        `vm_provisioning_adapter/runtime.py`, merged by the root like `HOST_REQUIREMENT`. Both
+        `runtime.py` files take `host_authority` and `job_engine` as parameters and build
+        neither. VM's `services/job_service.py` is tombstoned in favour of
+        `services/job_submitter.py` (`VmJobSubmitter`: `VmJobParams` into an engine submission,
+        `default_host_id` passed as a value, no `config.Settings` import); the fulfillment
+        provider, `vm_operations_service.py`, and `host_operations_service.py` read jobs from
+        the engine. `app_runtime.py` runs `engine.process_job` and the engine's retry scheduler.
+        The container's `resolved_job_service` and `resolved_host_service` become
+        `resolved_job_engine` and `resolved_host_authority`. Tests:
+        `unit/services/test_job_service.py` becomes `test_job_submitter.py`; new
+        `provisioning/compute/service/tests/unit/test_authority_composition.py` asserts one
+        engine and one host authority reach both runtimes; `test_retry_scheduler.py` follows.
+  - [ ] 5B.8.A.2 Route services (decision 4). `compute_provisioning/route_errors.py` defines
+        `ProvisioningRouteError(status_code, detail)`; `jobs/executor_mock.py`'s
+        `MockRouteError` is folded into it, and both adapters' test controllers map it.
+        New `compute_provisioning/jobs/route_service.py` (`JobRouteService`: list, get, logs,
+        credentials, cancel; `JobTestRouteService`: summary, drain, wait) and
+        `compute_provisioning/hosts/route_service.py` (`HostRouteService`: CRUD, enable,
+        disable, connectivity through probes keyed by connection kind, refusing an unknown
+        kind with 422). New `compute_provisioning_ansible/host_import.py`'s
+        `AnsibleHostImportRouteService` over the host authority and `parse_inventory_ini`.
+  - [ ] 5B.8.A.3 Bindings. New service controllers `controllers/jobs_controller.py`,
+        `hosts_controller.py`, `test_jobs_controller.py` (mounted under the mock profile), and
+        `host_import_controller.py`, mounted from `main.py` and resolving collaborators from the
+        container. VM's `controllers/jobs_controller.py` is tombstoned; VM's
+        `controllers/hosts_controller.py` keeps only `GET /api/v1/hosts/{host}/capacity`; VM's
+        `controllers/test_controller.py` loses the shared `/test/jobs` routes; VM's
+        `services/host_operations_service.py` keeps the capacity check and loses connectivity.
+        The root builds the probe runner (`AnsibleRunner`, or `MockAnsibleRunner` under the mock
+        profile) and registers `ssh` → `probe_connectivity` over it. Both adapters'
+        `pyproject.toml` declare FastAPI and `fastapi-utils`, which they import.
+  - [ ] 5B.8.A.4 Drift guard and tests. New
+        `provisioning/compute/service/tests/unit/test_route_binding.py`: every route the app
+        mounts resolves to exactly one contract in the assembled table, and every contract to a
+        mounted route. Route services get unit tests in `provisioning/compute/tests/unit/`
+        (`test_job_route_service.py`, `test_host_route_service.py`) and
+        `provisioning/compute/ansible/tests/unit/test_host_import.py`; `test_hosts_api.py`,
+        `test_system_api.py`, and `test_test_controller.py` cover the bound routes through the
+        typed clients. Gate as above.
+
+      **Slice B: the lease surface and mode-agnostic release** (decisions 1–3, 9, and 7.3).
+
+  - [ ] 5B.8.B.1 Ledger (`kit/site/src/market_site/ledger.py`, `authority.py`):
+        `attach_lease` writes the lease tail once (first attachment only on an unleased held
+        reservation; an equal repeat returns it unchanged and never moves the end; a different
+        target or start refused; `releasing`, `release_failed`, `unmanaged` refused; a recorded
+        create handle never replaced); `truncate_lease` refuses `reserved`, `provisioning`,
+        `releasing`, `release_failed`, `unmanaged`, and a later end, and never sets the state.
+        Tests in `kit/site/tests/integration/test_ledger.py`.
+  - [ ] 5B.8.B.2 Lease contract and route service. `compute_provisioning_contracts`'
+        `LeaseRegistration` drops `offering_mode`; it gains `LeaseListResponse` and the
+        release-oversight request; the family table gains list and release-oversight with the
+        roles of decision 1 (register, get, terminate: seller and admin; list, oversight,
+        retry, force: admin), the default for an unlisted operation becomes seller and admin,
+        the dual-role set is removed, and `route_contract_from_declaration` refuses a
+        declaration without `admin`. New `compute_provisioning/leases.py` (`LeaseRouteService`:
+        register, get, list filtered by status and offering mode, terminate, release-oversight,
+        retry-release, force-release) over `ExecutorLeaseService` (no mode scoping, no update)
+        and `LeaseLifecycleService` (no `update_lease`). The service's
+        `controllers/leases_controller.py` binds it at `/api/v1/contract/leases`;
+        `compute_contract_controller.py` and `services/compute_contract_service.py` are
+        tombstoned. The client gains `list_leases` and `release_lease_oversight`.
+  - [ ] 5B.8.B.3 Release (decision 9, absorbing 7.3). `compute_provisioning/release.py`
+        receives `FulfillmentTeardownPort`, `FulfillmentServiceTeardownPort`, and the release
+        executor and status port from `vm_provisioning_adapter/release.py` (tombstoned) as
+        `FulfillmentReleaseExecutor` and `FulfillmentReleaseJobPort`, and loses
+        `ExecutorReleaseDispatcher` and `ReleaseJobDispatcher`. The executor decides by the
+        aggregate's state: `active` begins teardown; absent or `assigned` with provenance
+        proving no dispatch (no aggregate past `assigned`, no create handle on the reservation,
+        no job for the reservation — `JobEngine` gains `has_job_for_reservation`) abandons an
+        `assigned` aggregate through the settlement repository and returns a
+        nothing-delivered outcome the lifecycle finishes as a completed release;
+        `dispatch_pending` or `dispatching` returns a pending outcome; `failed`, or no proof,
+        returns an unreleasable outcome. `lease_lifecycle.py`: the watchdog and terminate move a
+        pending release to `releasing` with the fulfillment id as release handle; the
+        releasing pass begins teardown once the aggregate is `active`, records `release_failed`
+        if it ends `failed`, and skips the grace timeout while the create is in flight; the
+        `direct-release` sentinel and its branch go; failure reasons become `teardown_failed`
+        and `teardown_timeout`. `composition.py` drops `release_executor` from the contribution
+        and `release_dispatcher` from the composed result; `container.py` builds the one
+        executor and port. Tombstone
+        `bare_metal_provisioning_adapter/release.py`. Tests:
+        `provisioning/compute/tests/unit/test_release.py` (every aggregate state, the
+        provenance proof's three parts), `test_lease_lifecycle.py` (pending release survives a
+        restarted lifecycle; teardown begins at `active`; no grace timeout in flight),
+        `provisioning/compute/service/tests/unit/services/test_release_executors.py`,
+        `test_ledger_lease_lifecycle.py`, `integration/test_legacy_backfill_teardown.py`, and a
+        new `integration/test_lease_release_api.py` covering a bare-metal expiry through the
+        aggregate, a never-dispatched lease released directly, and a lease terminated while
+        its create is in flight.
+  - [ ] 5B.8.B.4 Deletions (decision 1). VM: `controllers/leases_controller.py` (tombstoned),
+        the lease route declarations in `vm_provisioning_operator/routes.py`, the `Lease*`
+        models in `vm_provisioning_operator/models.py`, and the extension client's lease
+        methods. Bare metal: `controllers/bare_metal_leases_controller.py`,
+        `services/bare_metal_lease_service.py` (tombstoned), `BARE_METAL_LEASE_ROUTES` and
+        `BareMetalLeaseClient` in `arkhai_bare_metal/provisioning_client.py`, `BareMetalLeaseView`
+        and `bare_metal_access_ref` in `arkhai_bare_metal`; `BareMetalLeaseCreate` renamed
+        `BareMetalAccessGrant` in the provider and operations service. Both `routers.py`
+        follow. Tests: `test_leases_api.py` becomes the family lease API test (list filters,
+        roles, write-once registration, no update route);
+        `integration/test_bare_metal_leases_api.py` and `unit/services/test_bare_metal_lease_service.py`
+        are tombstoned; `test_bare_metal_mock_profile.py` drives grants through
+        `begin_fulfillment`; `domains/bare_metal/tests/test_provisioning_client.py` keeps only
+        the test-route declarations.
+  - [ ] 5B.8.B.5 The VM storefront's uncommitted hold (decision 9).
+        `domains/vms/storefront/src/market_storefront/settlement_composition.py`'s
+        terminal-settlement path releases a `reserved` reservation through the capacity
+        runtime's `release` instead of truncating it; `admin_controller.py`'s interruption keeps
+        its 409 on refusal. Test: `tests/integration/test_abandon_truncation.py`.
+  - [ ] 5B.8.B.6 e2e. `scenarios/vms/conftest.py`'s `DealLease` reads leases through
+        `SyncComputeProvisioningClient` and backdates through `SiteCapacityClient.truncate_lease`
+        signed as admin; `test_full_deal.py`, `test_full_deal_buyer_cli.py`, and
+        `test_buy_oneshot_buyer_cli.py` follow. Gate as above, plus `kit/site` and the VM
+        storefront.
+
+      **Slice C: the system split and the last `container` reach** (decisions 4 and 7).
+
+  - [ ] 5B.8.C.1 Status. `compute_provisioning_contracts` gains `SystemStatusResponse`
+        (today's fields, `checks.execution`, `execution` with `mocked` and `executors`,
+        `components` with versioned details); `JobExecutorTable.executor_modes()` becomes
+        `mocked_by_offering_mode()`. New
+        `provisioning/compute/service/src/compute_provisioning_service/services/system_status.py`
+        (health, status, version; `resolve_identity_context` stays in the service's
+        `identity.py`) and `controllers/system_controller.py` binding health, status, version,
+        check-leases, and the convergence and lease-watchdog controls. The Ansible
+        distribution's `probes.py` becomes a readiness component
+        (`compute_provisioning_ansible/readiness.py`) reporting `ansible_version`, every Ansible
+        executor's playbook found in the table, and SSH key references, composed by the root;
+        `AnsibleReadinessResponse` and `InventoryInfo` go; the bundles' `readiness_checks`
+        become this contribution. The readiness route and its contract are removed; the client
+        drops `get_ansible_readiness`, and `get_system_status` returns `SystemStatusResponse`.
+        Tombstone VM's `services/system_service.py` and `controllers/system_controller.py`.
+  - [ ] 5B.8.C.2 Resource projections. The bundles carry a resource-projection contribution
+        (VM's `project_ansible_pool_defaults`, bare metal's `project_bare_metal_resource`);
+        `services/capacity_inventory.py` iterates it and imports neither runtime.
+  - [ ] 5B.8.C.3 Router factories. VM's `vms_controller.py`, `hosts_controller.py` (capacity),
+        and `test_controller.py`, and bare metal's `test_controller.py`, become router
+        factories taking zero-argument accessors; each adapter's `routers.py` exposes them;
+        `main.py` passes accessors resolving from the container. No adapter module imports
+        `compute_provisioning_service.container`.
+  - [ ] 5B.8.C.4 Boundary test. `provisioning/compute/service/tests/unit/test_import_boundaries.py`
+        allowlists (file, module) pairs: `container.py` and `main.py` the adapters' runtimes and
+        routers, `db/migrations.py` `legacy_backfill`, nothing else.
+  - [ ] 5B.8.C.5 Callers. e2e mock-mode checks read `execution.mocked`
+        (`scenarios/vms/test_full_deal.py`, `test_full_deal_buyer_cli.py`,
+        `test_buy_oneshot_buyer_cli.py`, `test_non_erc20_settlement.py`); `tests/smoke/test_provisioning_smoke.py`
+        asserts the status execution section and the Ansible component;
+        `docs/development/VALIDATION_RUNBOOK.md`'s `jq` checks `.execution.mocked == false` and
+        the Ansible component's `ready`. Tests: `test_system_api.py`,
+        `provisioning/compute/ansible/tests/unit/test_probes.py` (becoming `test_readiness.py`),
+        `test_job_executor_table.py`. Gate as above, plus the e2e unit suite.
 - [ ] 5B.9 Relays to VM: `relay_rebinding.py`, `relay_port_allocator.py`, and
       `relay_execution.py` from the service's `services/` into the VM adapter; the relay,
       relay-port-lease, and Ansible pool-configuration table metadata into VM-owned
-      metadata the service composes; the relay models and client methods from
-      `compute_provisioning` and their route contracts from the family table to VM;
-      VM's relay rebinding subscribes to the host authority's pool-change hook. Review
+      metadata the service composes (the relay models, route declarations, and client
+      methods already moved to `vm_provisioning_operator` in 5B.8.A0.7, and
+      `relays_controller.py` moves with the services into the VM adapter as an
+      accessor-taking router factory); VM's relay rebinding is the pool-change hook VM
+      exports since 5B.8.A.1. Review
       the relay routes' seller-only roles while moving them. VM's
       `ansible_pool_config_handler.py` then imports `AnsiblePoolConfig`, `Relay`, and
       relay rebinding from VM's own modules, not the service's.
 - [ ] 5B.10 Boundary check: remove `arkhai-compute-provisioning-service` from both
-      adapters' dependencies and `arkhai-vms-provisioning-adapter` from bare metal's; add
+      adapters' dependencies, and `arkhai-vms-provisioning-adapter` and the unused
+      `arkhai-vms-provisioning-operator-client` from bare metal's; add
       an import-boundary test asserting neither adapter imports
       `compute_provisioning_service` or the other adapter (including under
       `TYPE_CHECKING`), no neutral provisioning module imports
@@ -1147,7 +1482,11 @@ re-verifies them by grep before each move.
       as a top-level one does (`ARCHITECTURE.md`, "Family kits"). The boundary covers
       deployment configuration as well as Python: a check asserts no domain's compose
       files, profiles, or inventory settings name another domain's tree, and the
-      Ansible distribution names no domain's inventory group or playbook.
+      Ansible distribution names no domain's inventory group or playbook. The same test
+      asserts the thin distributions' boundaries: `compute_provisioning_contracts` and
+      `market_resource_pools_contracts` import no persistence, web-framework, or service
+      module, and neither client distribution imports a kit or service beyond its
+      contracts.
 - [ ] 5B.11 **Gate.** All provisioning-family suites, `make check-packaging`, comment
       hygiene; the VM lane and the bare-metal publication lane pass.
 - [ ] 5B.12 Job-backed fulfillment-provider helper: `compute_provisioning` gains the shared
@@ -1214,24 +1553,13 @@ paths and provider-neutral release in provisioning.
       `domains/bare_metal/buyer/src/arkhai_bare_metal_buyer/fulfillment.py`.
 - [ ] 7.2 Commit and register: `fulfillment_service.py` commits the reservation with the
       materialized lease window before scheduling, as `hosted_lifecycle.py` does, and
-      registers the lease (`offering_mode=bare_metal`, executor target, create job) once
-      fulfillment is active; `site_clients.py`'s `SelectedSiteFulfillmentClient` gains
-      `register_lease`, `terminate_lease`, and `get_lease`, routed by the reservation's
-      recorded site.
-- [ ] 7.3 Provider-neutral release: move `VmReleaseExecutor`, `FulfillmentTeardownPort`,
-      `FulfillmentServiceTeardownPort`, and `VmFulfillmentReleaseJobPort` from
-      `domains/vms/provisioning/adapter/src/vm_provisioning_adapter/release.py` into
-      `provisioning/compute/src/compute_provisioning/release.py` as
-      `FulfillmentReleaseExecutor` and `FulfillmentReleaseJobPort`; tombstone
-      `domains/bare_metal/provisioning/adapter/src/bare_metal_provisioning_adapter/release.py`
-      after moving `get_physical_host_id` to its remaining caller's module; both
-      adapters' `runtime.py` and `bundle.py` register the shared components;
-      `container.py`'s `_make_release_job_dispatcher` reads the aggregate for both modes.
-      Tests: `provisioning/compute/tests/unit/test_release.py`,
-      `provisioning/compute/service/tests/unit/services/test_release_executors.py`,
-      `test_ledger_lease_lifecycle.py`, and `integration/test_legacy_backfill_teardown.py`
-      updated; a bare-metal expiry case in `integration/test_bare_metal_leases_api.py`
-      showing the aggregate leaves `active` and capacity stays held until `torn_down`.
+      registers the lease (executor target and window; registration names no offering
+      mode since 5B.8.B.2) once fulfillment is active; `site_clients.py`'s
+      `SelectedSiteFulfillmentClient` gains `register_lease`, `terminate_lease`, and
+      `get_lease` over `compute_provisioning_client`, routed by the reservation's recorded
+      site.
+- [x] 7.3 **Migrated** to 5B.8.B.3 (`design.md`, "Controls and routes (5B.8)", decision
+      1): provider-neutral release lands with the mode-agnostic lease lifecycle.
 - [ ] 7.4 Teardown through lease termination: `fulfillment_service.py`'s teardown calls
       the site's contract lease terminate and returns the lease operation; `status()`
       no longer calls `capacity_client.site(...).release(...)`; the lifecycle records
@@ -1252,7 +1580,8 @@ paths and provider-neutral release in provisioning.
       lease, release only on callback); `test_hosted_lifecycle.py` (hosted dispatch
       unchanged); `test_site_clients.py`; `test_publication_cycle.py` (preview applies
       nothing); `test_app_composition.py`;
-      `domains/bare_metal/buyer/tests/test_buyer_composition.py`.
+      `domains/bare_metal/buyer/tests/test_buyer_composition.py`. The bare-metal expiry
+      through the aggregate is proven in 5B.8.B.3's `test_lease_release_api.py`.
 - [ ] 7.7 Restart integration tests (tasks 3.5, 3.6):
       `domains/bare_metal/storefront/tests/test_restart_recovery.py` rebuilds the
       production application over one database file with a loopback site
@@ -1363,7 +1692,11 @@ service code.
       executor table and the compute-family mock mechanism; "Release" states that every offering mode
       releases through the fulfillment aggregate and that storefront teardown goes
       through lease termination; the fulfillment-hook paragraph states that bare metal's
-      settle path starts fulfillment.
+      settle path starts fulfillment. From 5B.8: the compute family's packages gain the
+      contracts and client distributions, and kit layers the resource-pool contracts and
+      client; `VersionedEnvelope` is named among `arkhai-core`'s contents and leaves the
+      fulfillment kit's carrier list; "Release" says release follows the fulfillment
+      aggregate's state. The route-contract section was promoted during design.
 - [ ] 11.2 `docs/development/TESTING.md`: three lanes on images built once; the loop table
       gains the bare-metal publication preview; shared compute deal stages and the
       per-domain driver; the mock profile's per-adapter executors and rule routes; the
@@ -1372,8 +1705,13 @@ service code.
 - [ ] 11.3 `docs/development/DEPLOYMENT_AND_CONFIG.md`: the compose file list names the
       per-market overlays.
 - [ ] 11.4 Promote the deltas into `openspec/specs/test-compatibility/spec.md`,
-      `market-composition/spec.md`, `physical-provisioning/spec.md`, and
-      `storefront-publication/spec.md`.
+      `market-composition/spec.md`, `physical-provisioning/spec.md`,
+      `storefront-publication/spec.md`, `site-capacity/spec.md`, `fulfillment/spec.md`
+      (and its ownership list, which names versioned envelopes),
+      `compute-provisioning-contract/spec.md` (and its purpose statement, which names
+      action submission), and `resource-pool-management/spec.md`.
+- [ ] 11.5 `docs/development/RELEASING.md` and `docs/development/BUILD_AND_PACKAGING.md`
+      name the four new distributions wherever their siblings are listed.
 
 ## 2. Closeout
 
@@ -1399,7 +1737,12 @@ service code.
       Record the deferred classification of real-run failures (design: "Maintainer
       rulings on the 5B.6 implementation review", 4): structured terminal-failure
       evidence from the runner, so the transport, codec, and operator patterns classify
-      real failures rather than only mocked ones.
+      real failures rather than only mocked ones. Record the repository-wide "an
+      administrator can do everything" stance as an open gap beyond the provisioning
+      service, and route the findings under "Controls and routes (5B.8)" (`kit/site`'s own
+      router, VM's literal pool-override path, the site's duplicated server and client
+      contracts, bare metal's untyped mock-rule routes, the unreachable `provisioning`
+      state, path templates in the family contracts).
 - [ ] 2.7 **Campaign index currency.** Update this change's row and the Goal 3, 4, and 7
       graphs in `openspec/changes/README.md`, and the rows of
       `bare-metal-and-credits-domain-stacks`, `kit-owned-storefront-shell`,
@@ -1408,7 +1751,7 @@ service code.
 - [ ] 2.8 **Documentation citations.** Run
       `make check-doc-citations CHANGE=bare-metal-mock-provisioned-deal` and resolve
       every match, including references to the tombstoned compose overlay, escrow
-      helper, and release modules.
+      helper, release, compute-adapter, lease-controller, and client modules.
 - [ ] 2.9 **End-to-end pipeline.** Confirm all three lanes pass from one image build and
       record the run, its result, and the scenarios exercising this change: VM's
       `test_full_deal.py` on the shared stages, `test_bare_metal_mock_deal.py`, and
