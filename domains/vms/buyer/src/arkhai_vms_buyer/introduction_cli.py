@@ -32,6 +32,13 @@ from market_settlement_runtime import derive_obligation_ref
 from pydantic_core import to_jsonable_python
 
 from .buy_orchestrator import fetch_listing_dict
+from .common import (
+    resolve_discovery_timeout,
+    resolve_indexer_urls,
+    resolve_recovery_buyer_identity,
+    resolve_registry_api_keys,
+    resolve_registry_authorities,
+)
 from .buyer_client import negotiate_with_seller
 from .deal_helpers import (
     load_deal_context,
@@ -59,8 +66,6 @@ class IntroductionContext:
     def recover(
         self, run_id: str, config: str | None, *, deliver: bool
     ) -> RecoveredIntroductionRun:
-        from .common import resolve_recovery_buyer_identity
-
         sinks = load_buyer_delivery_sinks(config) if deliver else None
         identity = resolve_recovery_buyer_identity(run_id)
         deal = load_deal_context(run_id, signer=identity.signer)
@@ -110,13 +115,6 @@ class IntroductionContext:
 
 def _trusted_listing(listing_id: str, signer: Any) -> tuple[dict[str, Any], str, str]:
     """The listing from the first configured registry that holds it."""
-    from .common import (
-        resolve_discovery_timeout,
-        resolve_indexer_urls,
-        resolve_registry_api_keys,
-        resolve_registry_authorities,
-    )
-
     urls = resolve_indexer_urls()
     authorities = resolve_registry_authorities(urls)
     api_keys = resolve_registry_api_keys()

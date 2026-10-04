@@ -6,14 +6,14 @@ from types import SimpleNamespace
 
 import pytest
 import typer
-from core_buyer.introductions import IntroductionPayloadsDeleted
-
 from arkhai_vms_buyer import introduction_cli
+from arkhai_vms_buyer.cli import register
 from arkhai_vms_buyer.settlement_composition import buyer_settlement_registry
+from core_buyer.introductions import IntroductionPayloadsDeleted
+from market_core.schemas import derive_settlement_option_id
 
 
 def test_the_mechanism_commands_and_request_introduction_are_registered() -> None:
-    from arkhai_vms_buyer.cli import register
 
     app = typer.Typer()
     register(app)
@@ -41,7 +41,6 @@ def _listing(option: dict) -> dict:
 
 
 def _option(mechanism: str, rates: list) -> dict:
-    from market_core.schemas import derive_settlement_option_id
 
     params = {"profile": "default"}
     return {

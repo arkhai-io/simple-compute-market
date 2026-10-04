@@ -170,7 +170,10 @@ seller's contact is public configuration, so it is accepted in `config`. Each
 name. The sinks typed are those installed in the storefront's image that declare
 their settings model, found by discovery when the schema is generated: their secret
 settings are refused wherever the instance is named, a table named for one of them
-may not state another, and an instance of any other sink stays open.
+may not state another, and an instance of any other sink stays open. `sink` must be
+spelled exactly so: the delivery kit reads no other spelling, and the schema refuses
+`Sink` or `SINK` rather than let such an instance escape the typing that keeps
+secret settings out of the ConfigMap.
 `helm/fixtures/contact-exchange-values.yaml`
 is a test overlay enabling contact exchange for Bob with SMTP delivery to the
 `dev-env` chart's optional Mailpit (`dev-env.mailpit.enabled`), which a scenario

@@ -351,7 +351,17 @@ process that has no marketplace signer.
 ### Requirement: An instance's name does not misname its sink
 
 A sink instance whose name is an installed sink's name MUST instantiate that sink. An
-instance naming one sink and stating another MUST be refused when constructed.
+instance naming one sink and stating another MUST be refused when constructed. The
+key selecting an instance's sink is spelled exactly `sink`; a deployment schema MUST
+refuse any other spelling of it, since an instance spelling it differently selects no
+sink and would escape the typing that keeps its secret settings out of public
+configuration.
+
+#### Scenario: An instance spells the selecting key differently
+
+- **WHEN** a deployment's configuration gives an instance `Sink` or `SINK` instead
+  of `sink`
+- **THEN** the deployment schema refuses it, whatever settings sit beside it
 
 #### Scenario: A table named for one sink states another
 

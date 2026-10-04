@@ -5,16 +5,22 @@ from __future__ import annotations
 import json
 import smtplib
 import sys
+import time
 import urllib.error
 from pathlib import Path
 
 import pytest
-
 from market_delivery import DeliveryError, introduction_delivery_event
 from market_delivery.builtin.command_sink import build_command_sink
 from market_delivery.builtin.file_sink import build_file_sink
 from market_delivery.builtin.smtp_sink import build_smtp_sink
 from market_delivery.builtin.webhook_sink import build_webhook_sink
+from market_identity import (
+    Ed25519Signer,
+    TrustedIdentitySet,
+    VerificationCode,
+    verify_request,
+)
 
 HOSTILE = "; rm -rf / #$(whoami)`id`"
 
@@ -303,14 +309,6 @@ def test_smtp_settings_require_a_username_with_a_password() -> None:
 
 
 def test_a_signing_webhook_sends_a_request_the_receiver_can_verify(monkeypatch) -> None:
-    import time
-
-    from market_identity import (
-        Ed25519Signer,
-        TrustedIdentitySet,
-        VerificationCode,
-        verify_request,
-    )
 
     signer = Ed25519Signer(b"s" * 32)
     seen = {}

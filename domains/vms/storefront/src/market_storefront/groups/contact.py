@@ -15,7 +15,12 @@ contact_app = typer.Typer(
 
 
 def _contact_exchange() -> tuple[Any, Any]:
-    """This storefront's contact exchange and seller delivery, as the server builds them."""
+    """This storefront's contact exchange and seller delivery, as the server builds them.
+
+    The imports are deferred, as in the sibling settlement group: loading them
+    reads the storefront's configuration, which ``--help`` and every unrelated
+    command must not require.
+    """
     from market_settlement_runtime import SettlementSQLiteRepository
 
     from market_storefront.contact_exchange import (

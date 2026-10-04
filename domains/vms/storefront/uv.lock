@@ -755,6 +755,7 @@ rl = [
 [package.dev-dependencies]
 dev = [
     { name = "arkhai-vms-buyer" },
+    { name = "jsonschema" },
     { name = "nest-asyncio" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -819,6 +820,7 @@ provides-extras = ["rl", "jupyter", "lint"]
 [package.metadata.requires-dev]
 dev = [
     { name = "arkhai-vms-buyer", specifier = ">=0.5.0" },
+    { name = "jsonschema", specifier = ">=4.0" },
     { name = "nest-asyncio", specifier = ">=1.6.0,<2.0.0" },
     { name = "pytest", specifier = ">=8.3.4,<9.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.23.8,<1.0.0" },

@@ -46,6 +46,7 @@ from .common import (
     resolve_fresh_buyer_identity,
 )
 from .escrow_cli import escrow_app
+from .introduction_cli import IntroductionContext
 
 
 def _alkahest_command_group():
@@ -123,8 +124,6 @@ def _payer_command_context() -> PayerCommandContext:
 
 
 def _introduction_context() -> Any:
-    from .introduction_cli import IntroductionContext
-
     return IntroductionContext()
 
 

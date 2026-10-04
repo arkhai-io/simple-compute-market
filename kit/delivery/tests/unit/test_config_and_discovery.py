@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 import pytest
-
 from market_delivery import (
     ConfiguredSink,
+    DeclaredSink,
     DeliveryConfigurationError,
+    SinkSettings,
     build_delivery_sinks,
+    discover_sink_factories,
+    discover_sink_settings_models,
     load_delivery_config,
     validate_delivery_origins,
 )
+from market_delivery.builtin.smtp_sink import SmtpSinkSettings
+from market_delivery.builtin.webhook_sink import WebhookSinkSettings
 from market_delivery.discovery import discover_sink_factories
 
 
@@ -281,9 +286,6 @@ def test_signing_requires_a_signer() -> None:
 
 
 def test_installed_built_in_sinks_declare_their_settings_models() -> None:
-    from market_delivery import discover_sink_settings_models
-    from market_delivery.builtin.smtp_sink import SmtpSinkSettings
-    from market_delivery.builtin.webhook_sink import WebhookSinkSettings
 
     models, warnings = discover_sink_settings_models()
 
@@ -294,12 +296,6 @@ def test_installed_built_in_sinks_declare_their_settings_models() -> None:
 
 
 def test_a_plain_factory_plugin_installs_and_declares_nothing(monkeypatch) -> None:
-    from market_delivery import (
-        DeclaredSink,
-        SinkSettings,
-        discover_sink_factories,
-        discover_sink_settings_models,
-    )
 
     class Settings(SinkSettings):
         target: str
@@ -327,7 +323,6 @@ def test_a_plain_factory_plugin_installs_and_declares_nothing(monkeypatch) -> No
 
 
 def test_a_declared_sink_builds_like_its_factory() -> None:
-    from market_delivery import DeclaredSink, SinkSettings
 
     built = []
 

@@ -1,27 +1,29 @@
 from __future__ import annotations
-import json
-import tomllib
+
 import inspect
-from dataclasses import replace
+import json
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import Any, cast
 
 import market_settlement_runtime as settlement_runtime
 import pytest
+import tomllib
 from market_settlement_runtime import (
     ComparisonOperator,
     FieldDescriptor,
     MechanismReadiness,
     MechanismRegistration,
-    ReadinessBlocker,
     QueryValueType,
+    ReadinessBlocker,
+    SettlementClauseField,
     SettlementConfig,
     SettlementConfigurationError,
     SettlementConfigurationRegistry,
-    SettlementClauseField,
     SettlementPublicationClause,
     compile_settlement_publication_clause,
 )
+from market_settlement_runtime.configuration import _secret_values
 from market_settlement_runtime.ports import ConditionalEscrowClient
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
@@ -589,7 +591,6 @@ class _NeverPublishedSettings(BaseModel):
 
 
 def test_never_published_and_secret_items_are_withheld_individually() -> None:
-    from market_settlement_runtime.configuration import _secret_values
 
     withheld = _secret_values(
         _NeverPublishedSettings(

@@ -33,7 +33,7 @@ end-to-end scenario (`test_vm_introduction.py`) and the Helm fixture
 - [x] 1.2a Add `uuid` and `typer` to the permitted roots in
       `kit/contact-exchange/tests/unit/test_package_boundary.py`; the deny list is
       unchanged.
-      Done: the boundary test is an allow-list only; `pathlib`, `uuid`, and `typer` were added.
+      The boundary test is an allow-list; `pathlib`, `uuid`, and `typer` are on it.
 - [x] 1.2b Recorded: not `kit/storefront`, which hard-depends on Alkahest.
 - [x] 1.3 Recorded: VM only; API credits is out of scope (`design.md` decision 11).
 - [x] 1.4 The VM process resolves only mode `vm` for its services; the `bare_metal`
@@ -54,7 +54,7 @@ end-to-end scenario (`test_vm_introduction.py`) and the Helm fixture
       an authorizer, the retention service, the disclosures, and the redelivery read.
       Replaces `contact_settlement_config`, `introduction_retention`, and the
       disclosure wiring in `BM/runtime.py`.
-      Done: `ContactExchangeComposition` also yields `seller_view` for re-delivery.
+      `ContactExchangeComposition` also yields `seller_view`, the read re-delivery uses.
 - [x] 2.4 Export the new surface from `KC/__init__.py`.
 - [x] 2.5 Move bare metal onto it: `BM/introduction_routes.py` and
       `BM/runtime.py` reduce to composition; `BM/api.py` keeps routes and
@@ -91,8 +91,12 @@ end-to-end scenario (`test_vm_introduction.py`) and the Helm fixture
       both introduction routes, as it does for the hosted settlement routes.
 - [x] 3.6 Confirm composition is independent of backing in both directions.
 - [x] 3.7 **Integration.** `domains/vms/storefront/tests/integration/test_introduction_origins.py`
-      on the VM full-app harness (`domains/vms/storefront/tests/publication_app.py`,
-      composing contact exchange with a real settlement runtime), driving
+      on the VM publication harness (`domains/vms/storefront/tests/publication_app.py`),
+      an in-process composition: the production routers, middleware, and container
+      wiring over real SQLite, contact exchange with a real settlement runtime, and a
+      stand-in only for Alkahest artifact construction. It is not the storefront's own
+      app factory and lifespan; those, and the real buyer CLI against deployed
+      services, are exercised by the system runs in 6.3, 6.4, and 6.6. It drives
       `core_buyer`'s `IntroductionTransport` over loopback
       (`domains/vms/storefront/tests/loopback.py`): a published listing is negotiated
       to acceptance under the default policy chain, revealed and re-read with the
@@ -172,7 +176,8 @@ end-to-end scenario (`test_vm_introduction.py`) and the Helm fixture
       instantiate by `sink`.
 - [x] 4.3a `KD/builtin/webhook_sink.py`: `sign = true` signs with a signer passed by
       the sink-set builder; refused without one.
-      Done: the marketplace v2 header names are copied into the delivery kit, as eight packages already do, rather than adding a client dependency.
+      The marketplace v2 header names are restated in the delivery kit, as eight
+      packages already do, rather than adding a client dependency.
 - [x] 4.3b `kit/delivery-apprise/` (new distribution `arkhai-kit-delivery-apprise`,
       package `market_delivery_apprise`): an `apprise` sink with secret-marked `urls`,
       registered on the `market.delivery_sinks` entry point; README, tests, lock.
@@ -200,7 +205,8 @@ end-to-end scenario (`test_vm_introduction.py`) and the Helm fixture
 - [x] 4a.1 `KC/buyer_commands.py` (new): `create_contact_command_group(context_factory)`
       with `introduce` and `introduction [--deliver]`; the context supplies the
       transport, run recovery, and buyer sinks.
-      Done: mounted as `market settlement contact introduce` / `introduction`; bare metal's top-level copies are removed.
+      Mounted as `market settlement contact introduce` and `… introduction`; bare
+      metal's own copies are removed.
 - [x] 4a.2 Bare-metal buyer: mount the group through its settlement registry or
       settlement app in `domains/bare_metal/buyer/src/arkhai_bare_metal_buyer/cli.py`,
       remove `introduce` and `introduction`, keep `request-introduction`.
@@ -224,7 +230,9 @@ end-to-end scenario (`test_vm_introduction.py`) and the Helm fixture
       exchange and SMTP delivery to Mailpit for Bob, and Mailpit in `dev-env`;
       `helm/charts/storefront/tests/test_render.py` asserts the sections render intact
       and a secret-marked sink field is refused.
-      Done; the render cases need `helm` and are not yet run. The generated schema was checked with a draft-07 validator: the overlay passes and every refused delivery setting is refused.
+      The render cases pass in the 2026-10-04 Helm run (`helm/test-render.log`), and
+      the committed schema is validated against real documents by
+      `domains/vms/storefront/tests/unit/test_values_schema.py`.
 - [x] 4b.5 Both storefront images install `arkhai-kit-delivery-apprise`
       (`domains/vms/storefront/pyproject.toml`, `domains/bare_metal/storefront/pyproject.toml`).
 - [x] 4b.6 Version bumps and pins: `kit-contact-exchange` 0.2.0, `kit-delivery` 0.2.0,
@@ -234,7 +242,10 @@ end-to-end scenario (`test_vm_introduction.py`) and the Helm fixture
       `apicredits-storefront` 0.5.1; every exact pin of a bumped package updated; then
       `make lock`.
 
-      Done: also `kit-settlement-runtime` 0.2.0, `kit-config` 0.1.3, `kit-hosted-settlement` 0.1.5, `core-buyer` 0.3.3, all exact pins updated. Locks for the VM storefront and VM buyer must be regenerated where `download-r2.pytorch.org` is reachable.
+      Also bumped by later tasks: `kit-settlement-runtime` 0.2.0, `kit-config` 0.1.3,
+      `kit-hosted-settlement` 0.1.5, `core-buyer` 0.3.3, `kit-policy` 0.2.0,
+      `kit-negotiation-runtime` 0.2.1, `vms-negotiation` 0.3.0; every exact pin is
+      updated. Locks are regenerated; see 7.10.
 ## 5. Specification and documentation
 
 - [x] 5.1 Promote the `contact-exchange-settlement` delta into
@@ -328,18 +339,18 @@ edited.
       `None`, an unexpected origin, and a stale deal.
 - [x] 8.2 **VM transport contract.** Replace the hand-signed router test (now removed) with tests driving
       `core_buyer`'s `IntroductionTransport` (`start`, `read`, the deleted outcome, seller
-      signature verification) against the full VM app over loopback, as bare metal's
-      `test_http_introductions.py` does.
-- [x] 8.3 **Origin and retention at the full-app boundary.** Through the VM full-app
-      harness (`domains/vms/storefront/tests/publication_app.py`):
+      signature verification) against the VM publication harness over loopback, as
+      bare metal's `test_http_introductions.py` does against its app. See 3.7 for what
+      the harness is and is not.
+- [x] 8.3 **Origin and retention through typed clients.** Through the VM publication
+      harness (`domains/vms/storefront/tests/publication_app.py`, an in-process
+      composition; see 3.7):
       `test_introduction_origins.py` publishes, accepts, and reveals one listing and
       asserts its binding's site governed all three; two sites reveal their own
       contacts; a site with no contact publishes no option and refuses a reveal.
       `test_introduction_retention.py` covers the `/health` disclosure, admin deletion
       through its route and authentication, `introduction-retention` dry-run and
-      run-cycle, and read, start, and operator re-delivery after deletion. If the
-      harness's settlement runtime cannot drive the introduction obligation, stop and
-      raise it rather than substituting.
+      run-cycle, and read, start, and operator re-delivery after deletion.
 - [x] 8.4 **Delivery tests synchronize instead of sleeping.** `sinks_for` routing as
       plain unit tests; one background-dispatch test synchronized on an
       `asyncio.Event`, moved to `kit/delivery/tests/integration`.
@@ -386,6 +397,27 @@ edited.
       the delivery section in `core/buyer/tests/unit/test_delivery.py`; the registry
       smoke test authenticates as a buyer against the trusted registry authority.
 
+- [x] 8.10 **Pre-closeout review corrections.**
+      - A named delivery instance spelling `sink` differently (`Sink`, `SINK`) escaped
+        the generated schema's typing, so its secret settings could reach the
+        ConfigMap. `VM/values_schema.py` now selects a sink only by `sink` spelled
+        exactly and refuses every other spelling in every instance table, since the
+        delivery kit reads no other; both Helm schemas regenerated.
+        `domains/vms/storefront/tests/unit/test_values_schema.py` validates real
+        documents against the committed schema with `jsonschema` (added to the VM
+        storefront's dev group): secret webhook, SMTP, and Apprise settings are refused
+        however `sink` or the field is spelled, and public settings stay accepted.
+      - The buyer refused an amountless acceptance whenever the selected option had any
+        rate, though the negotiation protocol defines bargaining by an `amount` rate.
+        `core/buyer/src/core_buyer/negotiation_client.py` now refuses only for an
+        option with an `amount` rate; `core/buyer/tests/unit/test_settlement_acceptance.py`
+        covers an option with only a `nativeAmount` rate (accepted) and one with an
+        `amount` rate (refused).
+      - The VM system scenario reads `/health` through the storefront's typed client;
+        only Mailpit, an external service, is called directly.
+      - The VM introduction integration tests are described as in-process composition
+        integration, not full-app integration (3.7, 8.2, 8.3).
+
 ## 7. Closeout
 
 - [x] 7.1 **Comment hygiene.** Run `make check-comment-hygiene` and resolve every
@@ -395,21 +427,35 @@ edited.
       migrate function-level ones to module level where no genuine circular
       import or documented lazy-load reason exists. Verify against the real test
       suite; a promotion is exactly where a latent circular import surfaces.
+      Moved to module scope: the VM buyer's `request-introduction` and introduction
+      context imports (not circular in any import order), `introduction_cli`'s
+      `common` imports, the VM server's contact-exchange import, and every test-local
+      import this change added. Kept with a stated reason: the VM `settlement contact`
+      CLI group defers its imports so `--help` needs no configuration, as the sibling
+      settlement group does. Verified by the suites in 8.10.
 - [x] 7.3 **Documentation compliance.** Re-check accepted decisions against
       `openspec/README.md`'s placement table.
 - [x] 7.4 **Narrative compression.** Shorten completed-task notes to final
       behaviour, and any remaining open work. Decisions and their alternatives are
       recorded in `design.md`; do not restate their reasoning here.
-- [ ] 7.5 **Roadmap currency.** In `docs/development/ROADMAP.md`, remove this change's
+- [x] 7.5 **Roadmap currency.** In `docs/development/ROADMAP.md`, remove this change's
       rows from Goal 6's and Goal 7's gap tables and absorb the result into their
       current-state prose: contact exchange composed on VM, the contact resolved per
       origin, and delivery routed per origin. Keep the note beside Goal 6's unowned
       second-delivery-producer row current: the multi-origin routing refusal is
       unconditional, and a second producer revisits it.
-- [ ] 7.6 **Campaign index currency.** Update this change's row and its campaign's
+      Done: Goal 6 and Goal 7 gap rows removed and absorbed into their current-state
+      prose; the second-producer note states the routing rule without citing this
+      change.
+- [x] 7.6 **Campaign index currency.** Update this change's row and its campaign's
       dependency graph in `openspec/changes/README.md`, and
       `unbacked-bare-metal-listings`' blocker.
-- [ ] 7.7 **Promotion.** Complete the design-promotion record below.
+      Done: the row reads complete and ready to archive; the dependency graph marks
+      this change complete; `unbacked-bare-metal-listings` is no longer blocked on it,
+      in the index, its tasks, and its proposal.
+- [x] 7.7 **Promotion.** Complete the design-promotion record below.
+      Done: the record below names every accepted decision's permanent home, including
+      the two rules 8.10 promoted.
 - [x] 7.8 **Documentation citations.** Run
       `make check-doc-citations CHANGE=compose-contact-exchange-across-compute` and resolve every match.
       An unresolvable citation is a blocking defect under `AGENTS.md`'s
@@ -417,6 +463,9 @@ edited.
       target is a *tombstone*: a tombstoned file still exists on disk while
       its content is gone, so a plain existence test cannot fail on a
       rename-to-tombstone.
+      Passes for this change and for `unbacked-bare-metal-listings`. The repository-wide
+      check reports the same 11 misses it reported before this change, none in a file
+      this change touches.
 - [ ] 7.9 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and
       record the evidence: the run, its result, and the scenarios that
       exercise this change's behaviour. Green unit and integration suites do
@@ -426,11 +475,23 @@ edited.
       cannot run for a reason unrelated to this change, record that as an
       explicit blocker naming the cause and the change that owns it, and
       treat the validations it gates as unrun rather than passed.
+      Evidence: Actions run 37182810584 passed both lanes — VM 135, including all six
+      introduction stages (disclosure, backed and unbacked publication, the rate-bounded
+      query, the introduction-only listing, reveal through the buyer CLI, and Mailpit
+      delivery), with the seller accepting at round 0 (`unpriced_selection`) and
+      delivering to `seller-mail`; bare metal 16, including its introduction scenario.
+      The same six stages passed against a local Helm release on 2026-10-04 (6.6).
+      Owed: one VM-lane run on the final tree, since 8.10 changed the schema
+      generator, the buyer's amountless check, and the scenario's health read after
+      those runs.
 - [ ] 7.10 **Packaging.** Run `make check-packaging` and resolve every failure it
       reports: environment and image installs derive their internal packages from
       their locks, every lock is current, and every Python version selection reads
       the root declaration.
-
+      `check-uv-setup`, `check-python-version`, and `check-project-layout` pass on the
+      final tree, and every lock but one is current. Owed: regenerate
+      `domains/vms/storefront/uv.lock` for the `jsonschema` dev dependency 8.10 added,
+      which needs `download-r2.pytorch.org`, then rerun `make check-packaging`.
 ## Design promotion record
 
 | Accepted decision | Permanent location |
@@ -443,7 +504,9 @@ edited.
 | A seller's default policy accepts an exact unpriced selection | `openspec/specs/negotiation-protocol/spec.md` |
 | Buyer introduction commands are mechanism-owned and domain-mounted | `openspec/specs/contact-exchange-settlement/spec.md` |
 | Contact details are public configuration that is never published | `openspec/specs/contact-exchange-settlement/spec.md`; `docs/development/DEPLOYMENT_AND_CONFIG.md` |
+| The buyer accepts an amountless acceptance only for an option with no `amount` rate | `openspec/specs/negotiation-protocol/spec.md` |
+| `sink` is spelled exactly; a deployment schema refuses other spellings | `openspec/specs/introduction-delivery/spec.md`; `docs/development/DEPLOYMENT_AND_CONFIG.md` |
 | Webhook signing; instances never misname their sink; the Apprise plugin | `openspec/specs/introduction-delivery/spec.md`; `docs/development/DEPLOYMENT_AND_CONFIG.md` |
 | Helm deployment of contact exchange and delivery | `docs/development/DEPLOYMENT_AND_CONFIG.md`; `docs/development/VALIDATION_RUNBOOK.md` |
-| Roadmap currency | `docs/development/ROADMAP.md`, Goals 6 and 7 |
-| Campaign index currency | `openspec/changes/README.md` |
+| Roadmap currency | `docs/development/ROADMAP.md`, Goals 6 and 7: this change's gap rows removed and absorbed into current-state prose; the second-producer note restates the routing rule without citing this change |
+| Campaign index currency | `openspec/changes/README.md`: this change's row marked complete and ready to archive; `unbacked-bare-metal-listings` no longer blocked on it |

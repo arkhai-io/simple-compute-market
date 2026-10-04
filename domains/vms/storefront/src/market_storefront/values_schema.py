@@ -183,11 +183,37 @@ def _settlement_fragment(role: str) -> dict[str, Any]:
     }
 
 
+def _other_spellings(name: str) -> str:
+    """An anchored pattern for every letter-case spelling of ``name`` but itself.
+
+    Written out because the validators Helm ships use Go regular expressions,
+    which have no look-ahead to say "any case except this one".
+    """
+    spellings = {""}
+    for char in name:
+        spellings = {
+            prefix + variant
+            for prefix in spellings
+            for variant in {char.lower(), char.upper()}
+        }
+    spellings.discard(name)
+    return "^(?:" + "|".join(sorted(spellings)) + ")$"
+
+
+#: ``sink`` spelled any way but exactly. The delivery kit reads only ``sink``, so
+#: an instance spelling it differently selects no sink at the storefront -- and,
+#: unrefused here, would escape the typing that keeps a sink's secret settings
+#: out of public configuration. It is refused in every instance table.
+_MISSPELLED_SINK = {_other_spellings(SINK_KEY): False}
+
+
 def _sink_instance(sink: str, model: type[BaseModel], role: str) -> dict[str, Any]:
     """An instance of ``sink``: its settings, plus ``sink`` naming only it."""
     fragment = model_fragment(model, role=role)
     patterns = dict(fragment.get("patternProperties", {}))
-    patterns[any_case(SINK_KEY)] = {"const": sink}
+    patterns.pop(any_case(SINK_KEY), None)
+    patterns[f"^{SINK_KEY}$"] = {"const": sink}
+    patterns.update(_MISSPELLED_SINK)
     fragment["patternProperties"] = patterns
     return fragment
 
@@ -230,6 +256,7 @@ def _delivery_fragment(
         },
         "additionalProperties": {
             "type": "object",
+            "patternProperties": dict(_MISSPELLED_SINK),
             "dependencies": {SINK_KEY: {"anyOf": [*selected, untyped]}},
         },
     }

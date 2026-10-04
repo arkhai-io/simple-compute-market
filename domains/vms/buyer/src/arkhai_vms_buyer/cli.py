@@ -22,6 +22,7 @@ from . import negotiate_cli as negotiate_module
 from . import service_cli as service_module
 from . import settle_cli as settle_module
 from .config_cli import config_app
+from .introduction_cli import request_introduction
 from .listing_cli import listing_app
 from .logs_cli import logs_app
 from .settlement_composition import (
@@ -98,8 +99,6 @@ def register(app: typer.Typer) -> None:
         name="network",
         help="Join the operator's ZeroTier network and list peers.",
     )
-
-    from .introduction_cli import request_introduction
 
     app.command("request-introduction")(request_introduction)
     buy_module.register(app)

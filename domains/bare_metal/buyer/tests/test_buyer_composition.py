@@ -1,28 +1,33 @@
 from __future__ import annotations
 
-from pathlib import Path
 import json
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import typer
-from typer.testing import CliRunner
+from arkhai_bare_metal import BareMetalListing
+from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
+from arkhai_bare_metal_buyer import cli
 from arkhai_bare_metal_buyer.cli import (
+    _IntroductionContext,
     _json,
     _safe_projection,
     _validate_hosted_option_binding,
+    bare_metal_app,
+    bare_metal_listing_params,
     register_commands,
+    settlement_app,
 )
 from arkhai_bare_metal_buyer.config import load_bare_metal_buyer_config
-from arkhai_bare_metal_buyer.plugin import domain
-from market_core import DomainCapability
-from arkhai_bare_metal import BareMetalListing
-from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
-from registry_client import FilterSpecResponse
-from arkhai_bare_metal_buyer.cli import bare_metal_listing_params
-
 from arkhai_bare_metal_buyer.fulfillment import BareMetalFulfillmentTransport
+from arkhai_bare_metal_buyer.plugin import domain
+from core_buyer.introductions import IntroductionPayloadsDeleted
+from market_core import DomainCapability
 from market_identity import IdentityScheme, TrustedIdentitySet, create_signer
 from pydantic import BaseModel
+from registry_client import FilterSpecResponse
+from typer.testing import CliRunner
 
 PRINCIPAL = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 
@@ -175,7 +180,6 @@ def test_hosted_option_binding_compares_physical_host_identity() -> None:
         )
 
 def test_introduction_commands_are_registered() -> None:
-    from arkhai_bare_metal_buyer.cli import bare_metal_app, settlement_app
 
     names = {command.name for command in bare_metal_app.registered_commands}
     assert "request-introduction" in names
@@ -188,10 +192,6 @@ def test_introduction_commands_are_registered() -> None:
 
 def test_the_context_builds_sinks_before_recovering_the_deal(monkeypatch) -> None:
     """A misconfigured sink is refused before anything is revealed."""
-
-    from types import SimpleNamespace
-
-    from arkhai_bare_metal_buyer import cli
 
     order: list[str] = []
     deal = SimpleNamespace(
@@ -226,9 +226,6 @@ def test_the_context_builds_sinks_before_recovering_the_deal(monkeypatch) -> Non
 
 
 def test_the_deleted_outcome_is_the_transports() -> None:
-    from core_buyer.introductions import IntroductionPayloadsDeleted
-
-    from arkhai_bare_metal_buyer.cli import _IntroductionContext
 
     assert _IntroductionContext.deleted_error is IntroductionPayloadsDeleted
     deleted = IntroductionPayloadsDeleted(

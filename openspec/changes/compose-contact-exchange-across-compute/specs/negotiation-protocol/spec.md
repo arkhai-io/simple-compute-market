@@ -13,7 +13,10 @@ A seller's default negotiation policy MUST accept an exact selection of an
 advertised option that bargains no amount once the selection and the inventory
 behind it have passed the seller's guards, and no scalar bargaining policy MAY
 counter such a selection: a policy that waits for an amount the option never
-carries would counter it forever.
+carries would counter it forever. A buyer MUST accept a seller acceptance that
+carries no amount for such an option, and MUST refuse one that omits the amount for
+an option bargained through an `amount` rate; a rate on any other field does not
+make an option bargain an amount.
 
 #### Scenario: A non-scalar mechanism reaches acceptance
 
@@ -27,6 +30,13 @@ carries would counter it forever.
 - **WHEN** a buyer opens negotiation with an exact selection of an advertised option
   that bargains no amount, under the seller's default policy
 - **THEN** the seller accepts on the published option's terms rather than countering
+
+#### Scenario: The buyer distinguishes an amount rate from other rates
+
+- **WHEN** a seller accepts with no amount a selected option whose only rate is on a
+  field other than `amount`
+- **THEN** the buyer accepts the agreement
+- **AND** an amountless acceptance of an option with an `amount` rate is refused
 
 #### Scenario: A scalar mechanism keeps the guard
 

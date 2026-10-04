@@ -29,7 +29,7 @@ from e2e_harness.settings import settings
 from market_identity import IdentityScheme
 from market_pool_overrides import SyncPoolOverrideClient
 from registry_client.query import compile_resource_query
-from vm_provisioning_operator import PoolCreate
+from vm_provisioning_operator import PoolCreate, PoolUpdate
 
 from tests.e2e.roles.buyer_cli import _toml_quote, create_profiled_buyer_cli
 from tests.e2e.roles.helpers.domain_deal import require_state
@@ -184,12 +184,13 @@ def _json_line(text: str) -> dict[str, Any]:
 
 
 class TestStage00_DisclosureBeforeCommitment:
-    def test_00_readiness_discloses_the_retention_window(self, state: IntroductionState):
+    def test_00_readiness_discloses_the_retention_window(
+        self, storefront_admin_client, state: IntroductionState
+    ):
         """A buyer reads the retention window before handing over a contact."""
-        health = httpx.get(f"{str(settings.SELLER.API_URL).rstrip('/')}/health", timeout=10)
-        health.raise_for_status()
-        disclosure = (health.json().get("disclosures") or {}).get("introduction_retention")
-        assert disclosure and disclosure["scope"] == "introduction_record", health.json()
+        health = storefront_admin_client.get_health()
+        disclosure = health.disclosures.get("introduction_retention")
+        assert disclosure and disclosure["scope"] == "introduction_record", health
         state.disclosure = disclosure
 
 
@@ -370,7 +371,6 @@ class TestStage03_SellerDelivery:
 
 
 def _with_rate(pool: Any, amount: str) -> Any:
-    from vm_provisioning_operator import PoolUpdate
 
     tags = dict(pool.policy_tags or {})
     tags["asking_rates"] = {VM: [_rate(amount)]}

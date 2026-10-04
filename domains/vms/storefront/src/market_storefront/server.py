@@ -40,6 +40,10 @@ from market_storefront_kit import (
 )
 
 import market_storefront.container as _container
+from market_storefront.contact_exchange import (
+    build_vm_contact_exchange,
+    build_vm_introduction_delivery,
+)
 from market_storefront.domain_runtime import validate_vm_storefront_domain
 from market_storefront.middleware.admin_identity import (
     administrator_identity_middleware,
@@ -307,11 +311,6 @@ def _build_vm_services(
         sqlite_client=sqlite_client,
         capacity_runtime=capacity_runtime,
     )
-    from market_storefront.contact_exchange import (
-        build_vm_contact_exchange,
-        build_vm_introduction_delivery,
-    )
-
     known_origins = capacity_runtime.site_ids
     introduction_delivery = build_vm_introduction_delivery(
         known_origins=known_origins,

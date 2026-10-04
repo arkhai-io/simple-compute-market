@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from market_delivery import discover_sink_factories, discover_sink_settings_models
 from market_delivery_apprise import AppriseSinkSettings, build_apprise_sink
 
 
@@ -18,14 +19,12 @@ def test_urls_are_secret_settings() -> None:
 
 
 def test_the_sink_is_installed_under_its_name() -> None:
-    from market_delivery import discover_sink_factories
 
     factories, _ = discover_sink_factories()
     assert "apprise" in factories
 
 
 def test_the_sink_declares_its_settings_model() -> None:
-    from market_delivery import discover_sink_settings_models
 
     models, _ = discover_sink_settings_models()
     assert models["apprise"] is AppriseSinkSettings

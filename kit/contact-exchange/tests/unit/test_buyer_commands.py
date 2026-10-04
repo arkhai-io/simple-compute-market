@@ -7,6 +7,7 @@ from typing import Any
 
 import typer
 from market_contact_exchange import (
+    ContactSettlementConfig,
     RecoveredIntroductionRun,
     contact_accepted_obligation_builder,
     create_contact_command_group,
@@ -36,7 +37,6 @@ def _plan() -> tuple[dict[str, Any], str]:
         "rates": [],
         "params": params,
     }
-    from market_contact_exchange import ContactSettlementConfig
 
     artifacts = contact_accepted_obligation_builder(
         ContactSettlementConfig(),

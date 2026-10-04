@@ -611,9 +611,10 @@
                 "^[tT][iI][tT][lL][eE]$": {
                   "type": "string"
                 },
-                "^[sS][iI][nN][kK]$": {
+                "^sink$": {
                   "const": "apprise"
-                }
+                },
+                "^(?:SINK|SINk|SInK|SInk|SiNK|SiNk|SinK|Sink|sINK|sINk|sInK|sInk|siNK|siNk|sinK)$": false
               }
             },
             "^[cC][oO][mM][mM][aA][nN][dD]$": {
@@ -640,9 +641,10 @@
                 "^[sS][eE][nN][dD]$": {
                   "type": "string"
                 },
-                "^[sS][iI][nN][kK]$": {
+                "^sink$": {
                   "const": "command"
-                }
+                },
+                "^(?:SINK|SINk|SInK|SInk|SiNK|SiNk|SinK|Sink|sINK|sINk|sInK|sInk|siNK|siNk|sinK)$": false
               }
             },
             "^[fF][iI][lL][eE]$": {
@@ -663,9 +665,10 @@
                 "^[pP][aA][tT][hH]$": {
                   "type": "string"
                 },
-                "^[sS][iI][nN][kK]$": {
+                "^sink$": {
                   "const": "file"
-                }
+                },
+                "^(?:SINK|SINk|SInK|SInk|SiNK|SiNk|SinK|Sink|sINK|sINk|sInK|sInk|siNK|siNk|sinK)$": false
               }
             },
             "^[sS][mM][tT][pP]$": {
@@ -720,9 +723,10 @@
                 "^[sS][uU][bB][jJ][eE][cC][tT]_[pP][rR][eE][fF][iI][xX]$": {
                   "type": "string"
                 },
-                "^[sS][iI][nN][kK]$": {
+                "^sink$": {
                   "const": "smtp"
-                }
+                },
+                "^(?:SINK|SINk|SInK|SInk|SiNK|SiNk|SinK|Sink|sINK|sINk|sInK|sInk|siNK|siNk|sinK)$": false
               }
             },
             "^[wW][eE][bB][hH][oO][oO][kK]$": {
@@ -748,14 +752,18 @@
                 "^[sS][iI][gG][nN]$": {
                   "type": "boolean"
                 },
-                "^[sS][iI][nN][kK]$": {
+                "^sink$": {
                   "const": "webhook"
-                }
+                },
+                "^(?:SINK|SINk|SInK|SInk|SiNK|SiNk|SinK|Sink|sINK|sINk|sInK|sInk|siNK|siNk|sinK)$": false
               }
             }
           },
           "additionalProperties": {
             "type": "object",
+            "patternProperties": {
+              "^(?:SINK|SINk|SInK|SInk|SiNK|SiNk|SinK|Sink|sINK|sINk|sInK|sInk|siNK|siNk|sinK)$": false
+            },
             "dependencies": {
               "sink": {
                 "anyOf": [
@@ -778,9 +786,10 @@
                       "^[tT][iI][tT][lL][eE]$": {
                         "type": "string"
                       },
-                      "^[sS][iI][nN][kK]$": {
+                      "^sink$": {
                         "const": "apprise"
-                      }
+                      },
+                      "^(?:SINK|SINk|SInK|SInk|SiNK|SiNk|SinK|Sink|sINK|sINk|sInK|sInk|siNK|siNk|sinK)$": false
                     }
                   },
                   {
@@ -807,9 +816,10 @@
                       "^[sS][eE][nN][dD]$": {
                         "type": "string"
                       },
-                      "^[sS][iI][nN][kK]$": {
+                      "^sink$": {
                         "const": "command"
-                      }
+                      },
+                      "^(?:SINK|SINk|SInK|SInk|SiNK|SiNk|SinK|Sink|sINK|sINk|sInK|sInk|siNK|siNk|sinK)$": false
                     }
                   },
                   {
@@ -830,9 +840,10 @@
                       "^[pP][aA][tT][hH]$": {
                         "type": "string"
                       },
-                      "^[sS][iI][nN][kK]$": {
+                      "^sink$": {
                         "const": "file"
-                      }
+                      },
+                      "^(?:SINK|SINk|SInK|SInk|SiNK|SiNk|SinK|Sink|sINK|sINk|sInK|sInk|siNK|siNk|sinK)$": false
                     }
                   },
                   {
@@ -887,9 +898,10 @@
                       "^[sS][uU][bB][jJ][eE][cC][tT]_[pP][rR][eE][fF][iI][xX]$": {
                         "type": "string"
                       },
-                      "^[sS][iI][nN][kK]$": {
+                      "^sink$": {
                         "const": "smtp"
-                      }
+                      },
+                      "^(?:SINK|SINk|SInK|SInk|SiNK|SiNk|SinK|Sink|sINK|sINk|sInK|sInk|siNK|siNk|sinK)$": false
                     }
                   },
                   {
@@ -915,9 +927,10 @@
                       "^[sS][iI][gG][nN]$": {
                         "type": "boolean"
                       },
-                      "^[sS][iI][nN][kK]$": {
+                      "^sink$": {
                         "const": "webhook"
-                      }
+                      },
+                      "^(?:SINK|SINk|SInK|SInk|SiNK|SiNk|SinK|Sink|sINK|sINk|sInK|sInk|siNK|siNk|sinK)$": false
                     }
                   },
                   {

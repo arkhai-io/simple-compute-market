@@ -72,6 +72,8 @@ dev = [
     # The production VM buyer and its introduction client, which the
     # introduction integration tests drive over loopback.
     "arkhai-vms-buyer>=0.5.0",
+    # Validates documents against the generated Helm values schema.
+    "jsonschema>=4.0",
 ]
 
 [project.optional-dependencies]

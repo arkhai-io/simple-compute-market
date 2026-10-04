@@ -8,17 +8,21 @@ reach a chart without regenerating them (``make helm-values-schema``).
 
 from __future__ import annotations
 
+import ast
 import json
 import re
-import tomllib
 from pathlib import Path
 
+import market_storefront.values_schema as module
 import pytest
+import tomllib
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
-
+from jsonschema import Draft7Validator
+from market_delivery.builtin.file_sink import FileSinkSettings
 from market_storefront import values_schema
 from market_storefront.utils.config import IdentityConfigDeclaration
+from market_storefront.values_schema import _delivery_fragment, any_case
+from pydantic import BaseModel, ConfigDict, Field
 
 REPO = Path(__file__).resolve().parents[5]
 SCHEMAS = (
@@ -255,13 +259,14 @@ def test_secret_sink_settings_are_refused_however_the_instance_is_named(definiti
     webhook = next(
         choice
         for choice in choices["anyOf"]
-        if _field(choice, "sink") == {"const": "webhook"}
+        if choice["patternProperties"].get("^sink$") == {"const": "webhook"}
     )
     assert _withheld(webhook, "url")
 
 
 def test_a_table_named_for_a_sink_may_state_no_other(definition) -> None:
-    assert _field(_field(_delivery(definition), "webhook"), "sink") == {"const": "webhook"}
+    webhook = _field(_delivery(definition), "webhook")
+    assert webhook["patternProperties"]["^sink$"] == {"const": "webhook"}
 
 
 def test_an_instance_of_an_unshipped_sink_stays_open(definition) -> None:
@@ -274,9 +279,6 @@ def test_an_instance_of_an_unshipped_sink_stays_open(definition) -> None:
 def test_the_generator_names_no_sink() -> None:
     """Sinks reach the schema by discovery; importing one by name would make an
     optional plugin a hard dependency of the storefront."""
-    import ast
-
-    import market_storefront.values_schema as module
 
     tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
     imported = {
@@ -294,9 +296,6 @@ def test_the_generator_names_no_sink() -> None:
 
 
 def test_a_sink_without_a_declared_model_stays_open() -> None:
-    from market_delivery.builtin.file_sink import FileSinkSettings
-
-    from market_storefront.values_schema import _delivery_fragment, any_case
 
     fragment = _delivery_fragment("seller", sinks={"file": FileSinkSettings})
     (choices,) = fragment["additionalProperties"]["dependencies"].values()
@@ -305,3 +304,70 @@ def test_a_sink_without_a_declared_model_stays_open() -> None:
     # A table named for a sink with no declared model is not typed by name.
     assert any_case("file") in fragment["patternProperties"]
     assert any_case("webhook") not in fragment["patternProperties"]
+
+
+def _committed_definition() -> dict:
+    """The storefront configuration definition as the chart actually validates it."""
+    schema = json.loads(SCHEMAS[1].read_text(encoding="utf-8"))
+    return schema["definitions"]["storefrontServiceConfig"]
+
+
+def _accepts(delivery: dict) -> bool:
+
+    validator = Draft7Validator(_committed_definition())
+    return not list(validator.iter_errors({"Delivery": delivery}))
+
+
+_SECRET_URL = "https://hooks.invalid/token-in-the-path"
+
+
+@pytest.mark.parametrize(
+    "instance",
+    [
+        {"sink": "webhook", "url": _SECRET_URL},
+        {"sink": "webhook", "URL": _SECRET_URL},
+        {"Sink": "webhook", "URL": _SECRET_URL},
+        {"SINK": "webhook", "url": _SECRET_URL},
+        {"sInK": "webhook", "Url": _SECRET_URL},
+        {"sink": "smtp", "host": "mail", "sender": "s@x.invalid",
+         "recipients": ["r@x.invalid"], "Password": "p"},
+        {"Sink": "smtp", "host": "mail", "sender": "s@x.invalid",
+         "recipients": ["r@x.invalid"], "password": "p"},
+        {"sink": "apprise", "URLS": ["mailto://user:pass@mail.invalid"]},
+        {"SINK": "apprise", "urls": ["mailto://user:pass@mail.invalid"]},
+    ],
+)
+def test_a_secret_sink_setting_is_refused_however_either_key_is_spelled(instance) -> None:
+    """A named instance's secret settings never reach the ConfigMap, whatever the
+    spelling of ``sink`` or of the secret field."""
+    assert not _accepts({"enabled": ["west"], "west": instance})
+
+
+@pytest.mark.parametrize("spelling", ["Sink", "SINK", "sINK"])
+def test_any_spelling_of_sink_but_its_own_is_refused(spelling) -> None:
+    """The delivery kit reads only ``sink``; another spelling selects nothing and
+    would escape typing, so the chart refuses it even with no secret beside it."""
+    assert not _accepts({"enabled": ["audit"], "audit": {spelling: "file", "path": "/x"}})
+    assert not _accepts({"enabled": ["file"], "file": {spelling: "file", "path": "/x"}})
+
+
+def test_public_delivery_settings_are_accepted() -> None:
+    assert _accepts(
+        {
+            "enabled": ["seller-mail", "audit"],
+            "seller-mail": {
+                "sink": "smtp",
+                "host": "mailpit",
+                "port": 1025,
+                "sender": "storefront@seller.invalid",
+                "recipients": ["sales@seller.invalid"],
+            },
+            "audit": {"sink": "file", "path": "/var/log/introductions.jsonl"},
+            "origins": {"default": ["seller-mail", "audit"]},
+        }
+    )
+
+
+def test_an_instance_of_an_unshipped_sink_stays_open_when_spelled_correctly() -> None:
+    assert _accepts({"enabled": ["pager"], "pager": {"sink": "pager", "anything": 1}})
+

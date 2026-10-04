@@ -389,6 +389,17 @@ def _validated_party(
         raise RuntimeError(f"seller accept state has invalid {field}") from exc
 
 
+def _option_bargains_amount(option: SettlementOption) -> bool:
+    """Whether an advertised option is bargained through a scalar ``amount``.
+
+    The negotiation protocol defines scalar participation by an ``amount`` rate:
+    an option with only rates on other fields (a token bundle's
+    ``nativeAmount``, say), or with none, is take-it-or-leave-it, so its
+    acceptance carries no negotiated amount.
+    """
+    return any(rate.field == "amount" for rate in option.rates)
+
+
 def _validate_settlement_acceptance(
     *,
     reply: Mapping[str, Any],
@@ -462,7 +473,7 @@ def _validate_settlement_acceptance(
     if (
         agreed_amount is None
         and advertised_option is not None
-        and advertised_option.rates
+        and _option_bargains_amount(advertised_option)
     ):
         raise RuntimeError("seller accept state omitted the negotiated amount")
     if obligation.expiration_unix != expected_selection.expiration_unix:
