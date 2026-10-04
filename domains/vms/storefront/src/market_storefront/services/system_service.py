@@ -13,7 +13,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 import httpx
-from compute_provisioning import COMPUTE_PROVISIONING_CONTRACT_VERSION
+from compute_provisioning_contracts import COMPUTE_PROVISIONING_CONTRACT_VERSION
 from market_identity import Signer
 
 import market_storefront.container as _container

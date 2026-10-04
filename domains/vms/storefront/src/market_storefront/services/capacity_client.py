@@ -24,9 +24,11 @@ import logging
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
-from compute_provisioning import (
+from compute_provisioning_client import (
     ComputeProvisioningClient,
     ComputeProvisioningError,
+)
+from compute_provisioning_contracts import (
     FulfillmentAcceptanceResponse,
     FulfillmentRequestBody,
     FulfillmentScheduleRequest,
@@ -46,7 +48,7 @@ from market_capacity_publication import (
     PublicationBinding,
     publication_binding,
 )
-from market_fulfillment import VersionedEnvelope
+from market_core import VersionedEnvelope
 from market_site import dict_resource_satisfies_claim
 from market_site_client import SiteCapacityClient
 
@@ -289,7 +291,7 @@ async def capacity_binding_for_listing(
 # while schedule/begin/status/result live on the compute-provisioning
 # service's ``/fulfillment`` surface, reached through
 # ``ComputeProvisioningClient`` — a different wire contract
-# (``compute_provisioning.contracts``), already used for that service's
+# (``compute_provisioning_contracts``), already used for that service's
 # other domain-neutral surfaces (jobs, leases).
 # ---------------------------------------------------------------------------
 

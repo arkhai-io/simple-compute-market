@@ -29,7 +29,7 @@ from e2e_harness.settings import settings
 from market_identity import IdentityScheme
 from market_pool_overrides import SyncPoolOverrideClient
 from registry_client.query import compile_resource_query
-from vm_provisioning_operator import PoolCreate, PoolUpdate
+from market_resource_pools_contracts import PoolCreate, PoolUpdate
 
 from tests.e2e.roles.buyer_cli import _toml_quote, create_profiled_buyer_cli
 from tests.e2e.roles.helpers.domain_deal import require_state
@@ -198,6 +198,7 @@ class TestStage01_BackedAndUnbackedSupply:
     def test_01_both_pools_publish_at_an_asking_rate(
         self,
         provisioning_client,
+        resource_pool_client,
         site_capacity_admin_client,
         storefront_admin_client,
         state: IntroductionState,
@@ -217,11 +218,11 @@ class TestStage01_BackedAndUnbackedSupply:
             listing_shapes={VM: [SHAPE]},
             region=REGION,
         )
-        backed = provisioning_client.get_pool(state.backed_pool)
-        provisioning_client.patch_pool(state.backed_pool, _with_rate(backed, BACKED_RATE))
+        backed = resource_pool_client.get_pool(state.backed_pool)
+        resource_pool_client.patch_pool(state.backed_pool, _with_rate(backed, BACKED_RATE))
         # Unbacked supply: declared and advertised, never delivered, so no
         # executor stands behind it.
-        provisioning_client.create_pool(
+        resource_pool_client.create_pool(
             PoolCreate(
                 id=state.unbacked_pool,
                 label=state.unbacked_pool,

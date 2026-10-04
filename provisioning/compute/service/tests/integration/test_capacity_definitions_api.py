@@ -9,8 +9,8 @@ than through a test-local copy of the wire contract.
 from __future__ import annotations
 
 import pytest
-from compute_provisioning import PoolCreate
-from vm_provisioning_operator import ProvisioningError
+from market_resource_pools_contracts import PoolCreate
+from market_site_client import SiteCapacityAdminClientError
 
 from compute_provisioning_service.db.models import DefinitionDocumentImport
 from compute_provisioning_service import container as _container_module
@@ -47,9 +47,9 @@ async def test_an_import_declares_capacity_and_a_reimport_writes_nothing(
 ):
     client, _ = client_and_queue
 
-    first = await client.import_capacity_definitions(_DOCUMENT)
+    first = await client.site_admin.import_capacity_definitions(_DOCUMENT)
     _, version = await capacity.events()
-    second = await client.import_capacity_definitions(_DOCUMENT + "# reviewed\n")
+    second = await client.site_admin.import_capacity_definitions(_DOCUMENT + "# reviewed\n")
     _, version_after = await capacity.events()
 
     assert first.applied and first.diff.created == ["compute-kvm1"]
@@ -68,7 +68,7 @@ async def test_declarations_a_document_does_not_name_are_retained(
         "api-registered", pool_id="default", total_units=2, enabled=False
     )
 
-    await client.import_capacity_definitions(_DOCUMENT)
+    await client.site_admin.import_capacity_definitions(_DOCUMENT)
 
     resources = await _resources(capacity)
     assert set(resources) == {"api-registered", "compute-kvm1"}
@@ -80,7 +80,7 @@ async def test_an_explicit_import_leaves_the_startup_digest_alone(client_and_que
     last reconciled; an operator's import is not that document."""
     client, _ = client_and_queue
 
-    await client.import_capacity_definitions(_DOCUMENT)
+    await client.site_admin.import_capacity_definitions(_DOCUMENT)
 
     with _container_module.resolved_session_factory() as db:
         assert db.get(DefinitionDocumentImport, "capacity") is None
@@ -94,7 +94,7 @@ async def test_a_refused_import_reports_every_problem_and_applies_nothing(
     both reported, and the acceptable first entry is not applied either. The
     second carries a structural problem and is refused for it alone."""
     client, _ = client_and_queue
-    await client.create_pool(PoolCreate(
+    await client.pools.create_pool(PoolCreate(
         id="pool-b", label="Pool B", provider="ansible",
         policy_tags={"advertisable_modes": [], "capacity_backing": "backed"},
         provider_config={"playbook_path": "playbooks/vm-operations.yaml"},
@@ -110,8 +110,8 @@ async def test_a_refused_import_reports_every_problem_and_applies_nothing(
         + _entry("elsewhere", pool_id="no-such-pool")
         + _entry("held", pool_id="pool-b")
     )
-    with pytest.raises(ProvisioningError) as refused:
-        await client.import_capacity_definitions(document)
+    with pytest.raises(SiteCapacityAdminClientError) as refused:
+        await client.site_admin.import_capacity_definitions(document)
 
     assert refused.value.status_code == 422
     assert "unknown_pool" in str(refused.value)
@@ -120,8 +120,8 @@ async def test_a_refused_import_reports_every_problem_and_applies_nothing(
     assert "compute-kvm1" not in resources
     assert resources["held"]["pool_id"] == "default"
 
-    with pytest.raises(ProvisioningError) as malformed:
-        await client.import_capacity_definitions(
+    with pytest.raises(SiteCapacityAdminClientError) as malformed:
+        await client.site_admin.import_capacity_definitions(
             _DOCUMENT + "    total_units: 8\n"
         )
     assert malformed.value.status_code == 422
@@ -134,8 +134,8 @@ async def test_validate_only_reports_the_plan_and_problems_without_applying(
     client, _ = client_and_queue
     await capacity.register("holder", pool_id="default", total_units=1, host_id="kvm2")
 
-    clean = await client.import_capacity_definitions(_DOCUMENT, validate_only=True)
-    refused = await client.import_capacity_definitions(
+    clean = await client.site_admin.import_capacity_definitions(_DOCUMENT, validate_only=True)
+    refused = await client.site_admin.import_capacity_definitions(
         _DOCUMENT + _entry("newcomer", extra="    host_id: kvm2\n"),
         validate_only=True,
     )
@@ -157,7 +157,7 @@ async def test_a_structurally_invalid_document_is_not_checked_against_stored_sta
     client, _ = client_and_queue
     document = _DOCUMENT + "    total_units: 8\n" + _entry("elsewhere", pool_id="no-such-pool")
 
-    report = await client.import_capacity_definitions(document, validate_only=True)
+    report = await client.site_admin.import_capacity_definitions(document, validate_only=True)
 
     assert [(p.path, p.code) for p in report.problems] == [
         ("resources[0].total_units", "unknown_field"),

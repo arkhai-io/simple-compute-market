@@ -6,12 +6,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from compute_provisioning.contracts import (
-    COMPUTE_PROVISIONING_CONTRACT_VERSION,
-)
+from compute_provisioning_contracts import COMPUTE_PROVISIONING_CONTRACT_VERSION
 from market_identity import Ed25519Signer
 
-from market_fulfillment import VersionedEnvelope
+from market_core import VersionedEnvelope
 import market_storefront.container as container
 from market_storefront.services import fulfillment_service
 from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry

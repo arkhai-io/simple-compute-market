@@ -10,7 +10,6 @@ from compute_provisioning import (
     JobExecutor,
 )
 
-from vm_provisioning_adapter.compute_adapter import VmComputeAdapter
 from vm_provisioning_adapter.release import VmReleaseExecutor
 from vm_provisioning_adapter.routers import vm_router_mounts
 from vm_provisioning_adapter.services.ansible_fulfillment_provider import (
@@ -32,8 +31,8 @@ HOST_REQUIREMENT = MappingProxyType(
     {ANSIBLE_PROVIDER: AnsibleFulfillmentProvider.needs_host}
 )
 
-#: Every action a VM job runs, whether submitted through the compute contract,
-#: the operator VM and host routes, or fulfillment create and teardown.
+#: Every action a VM job runs, whether submitted through the operator VM and
+#: host routes or by fulfillment create and teardown.
 VM_JOB_ACTIONS = frozenset(
     {
         "create",
@@ -53,7 +52,6 @@ VM_JOB_ACTIONS = frozenset(
 
 def build_vm_adapter_bundle(
     *,
-    compute_adapter: VmComputeAdapter,
     release_executor: VmReleaseExecutor,
     fulfillment_provider: AnsibleFulfillmentProvider,
     pool_config_handler: AnsiblePoolConfigHandler,
@@ -65,8 +63,7 @@ def build_vm_adapter_bundle(
         name="vm",
         executors=(
             ExecutorAdapterContribution(
-                adapter=compute_adapter,
-                action_kinds=frozenset({"create"}),
+                offering_mode="vm",
                 release_executor=release_executor,
                 job_executors={action: job_executor for action in VM_JOB_ACTIONS},
             ),

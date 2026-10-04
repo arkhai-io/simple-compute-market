@@ -14,8 +14,8 @@ import logging
 import pytest
 
 from market_identity import Identity, TrustedIdentitySet, create_signer
-from vm_provisioning_operator import ProvisioningError, SyncProvisioningClient
-from compute_provisioning.hosts import ConnectionSubmission, HostCreate, HostUpdate
+from compute_provisioning_client import ComputeProvisioningError, SyncComputeProvisioningClient
+from compute_provisioning_contracts import ConnectionSubmission, HostCreate, HostUpdate
 
 log = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ log = logging.getLogger(__name__)
 def _client(
     provisioning_settings: dict,
     seller_settings: dict,
-) -> SyncProvisioningClient:
+) -> SyncComputeProvisioningClient:
     credential = provisioning_settings.get("admin_credential") or ""
     authority = provisioning_settings.get("authority_identifier") or ""
     if not credential or not authority:
@@ -32,11 +32,12 @@ def _client(
             "are required: provisioning authenticates each caller and signs its "
             "responses, so a smoke check needs both halves configured."
         )
-    return SyncProvisioningClient(
+    return SyncComputeProvisioningClient(
         provisioning_settings["api_url"],
         create_signer(
             str(provisioning_settings.get("admin_scheme") or "eip191"), str(credential)
         ),
+        "admin",
         TrustedIdentitySet(
             identities=(
                 Identity(
@@ -125,7 +126,7 @@ class TestProvisioningSmoke:
         with _client(provisioning_settings, seller_settings) as client:
             try:
                 reg = client.register_host(test_host)
-            except ProvisioningError as exc:
+            except ComputeProvisioningError as exc:
                 if exc.status_code != 409:
                     raise
                 log.info("smoke-test-host already exists - updating instead of inserting")

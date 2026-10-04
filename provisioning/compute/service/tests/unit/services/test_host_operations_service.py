@@ -5,13 +5,10 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from compute_provisioning.hosts import ConnectionEnvelope, ExecutionHost, ProtectedValue
 from compute_provisioning.hosts.service import HostNotFoundError
-from compute_provisioning.jobs import JobSubmitResponse
+from compute_provisioning_contracts import JobSubmitResponse
 from compute_provisioning_ansible import SshConnectionCodec
-from compute_provisioning_ansible.runner import (
-    AnsibleRunner,
-    ConnectivityResult,
-    MaterializedInventory,
-)
+from compute_provisioning_ansible.runner import AnsibleRunner, MaterializedInventory
+from compute_provisioning_contracts import ConnectivityResult
 from compute_provisioning_service.db.models import Host
 from cryptography.fernet import Fernet
 from market_config import encrypt_secret

@@ -18,6 +18,12 @@ FORBIDDEN_DOMAIN_MODULES = (
     "arkhai_bare_metal",
     "vm_provisioning_operator",
 )
+# Named exceptions, each a (service file, module) pair. The relay routes are
+# VM's but still served here; their controller reads VM's relay wire models
+# until relay administration is served by VM's adapter.
+ALLOWED_DOMAIN_IMPORTS = {
+    ("controllers/relays_controller.py", "vm_provisioning_operator.relays"),
+}
 
 
 def imported_modules(path: Path) -> set[str]:
@@ -34,7 +40,10 @@ def imported_modules(path: Path) -> set[str]:
 def test_generic_service_imports_only_domain_adapter_entrypoints():
     violations: list[str] = []
     for path in SERVICE_PACKAGE.rglob("*.py"):
+        relative = path.relative_to(SERVICE_PACKAGE).as_posix()
         for module in imported_modules(path):
+            if (relative, module) in ALLOWED_DOMAIN_IMPORTS:
+                continue
             if module.startswith(FORBIDDEN_DOMAIN_MODULES):
                 violations.append(f"{path.relative_to(SERVICE_PACKAGE)}: {module}")
                 continue

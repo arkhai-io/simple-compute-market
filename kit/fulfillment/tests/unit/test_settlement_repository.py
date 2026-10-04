@@ -13,7 +13,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from market_fulfillment.db import Base, SettlementRecordState
-from market_fulfillment.envelopes import envelope
+from market_core import envelope
 from market_fulfillment.provider import FulfillmentConflictError
 from market_fulfillment.settlement_repository import SettlementRepository
 from market_fulfillment.settlement_types import (

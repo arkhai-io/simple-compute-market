@@ -25,7 +25,7 @@ from arkhai_bare_metal import (
     BareMetalLeaseView,
 )
 from market_site.ledger import ALLOCATION_MODE_EXCLUSIVE
-from compute_provisioning.hosts import HostCreate
+from compute_provisioning_contracts import HostCreate
 
 from bare_metal_provisioning_adapter.services.mock_output import bare_metal_mock_output
 from compute_provisioning_ansible import MockAnsibleRunner
@@ -195,7 +195,7 @@ async def test_cancelling_a_held_grant_ends_its_execution_without_a_resume(
         bare_metal_runner.rules.wait_until_held("grant-gate"), timeout=5.0
     )
 
-    await provisioning_client.cancel_job(grant_job_id)
+    await provisioning_client.family.cancel_job(grant_job_id)
 
     await asyncio.wait_for(
         bare_metal_runner.rules.wait_until_released("grant-gate"), timeout=5.0

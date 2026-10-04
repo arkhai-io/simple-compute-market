@@ -20,7 +20,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session
 from sqlalchemy.schema import CreateTable
 
-from market_resource_pools.hints import (
+from market_resource_pools_contracts.hints import (
     ADVERTISABLE_MODES_POLICY_TAG,
     CAPACITY_BACKED,
     CAPACITY_BACKING_POLICY_TAG,

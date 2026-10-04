@@ -1241,7 +1241,7 @@ class TestStage08b_SettlementSubmittedAndJobQueued:
             f"{status_resp}"
         )
 
-        status = provisioning_client.get_fulfillment_status(fulfillment_id)
+        status = provisioning_client.get_fulfillment_status(fulfillment_id).model_dump(mode="json")
         assert status.get("state") == "dispatching", (
             f"Expected fulfillment dispatched but gated on the paused mock "
             f"rule, got: {status}"
@@ -1297,7 +1297,7 @@ class TestStage09a_ProvisioningCompletes:
         provisioning_test_client.drain(timeout=30)
         provisioning_client.advance_fulfillment_convergence_cycle()
 
-        status = provisioning_client.get_fulfillment_status(deal_state.fulfillment_id)
+        status = provisioning_client.get_fulfillment_status(deal_state.fulfillment_id).model_dump(mode="json")
         assert status.get("state") == "active", (
             f"Expected fulfillment to converge to active, got: {status}"
         )
@@ -1673,7 +1673,7 @@ class TestStage10b_LeaseCycleBeginsTeardown:
         assert lease.get("status") == "releasing", lease
         fulfillment_id = lease.get("fulfillment_id")
         assert fulfillment_id, lease
-        fulfillment = provisioning_client.get_fulfillment_status(fulfillment_id)
+        fulfillment = provisioning_client.get_fulfillment_status(fulfillment_id).model_dump(mode="json")
         assert fulfillment.get("state") == "teardown_dispatch_pending", fulfillment
         assert deal_state.deal_lease.resource_consumed(
             storefront_admin_client, deal_state.reserved_resource_id
@@ -1693,7 +1693,7 @@ class TestStage11a_TeardownDispatch:
         require_state(deal_state, "fulfillment_id", "reserved_resource_id")
         diagnostics = provisioning_client.advance_fulfillment_convergence_cycle()
         assert "before" in diagnostics and "after" in diagnostics
-        fulfillment = provisioning_client.get_fulfillment_status(deal_state.fulfillment_id)
+        fulfillment = provisioning_client.get_fulfillment_status(deal_state.fulfillment_id).model_dump(mode="json")
         assert fulfillment.get("state") == "tearing_down", fulfillment
         assert deal_state.deal_lease.resource_consumed(
             storefront_admin_client, deal_state.reserved_resource_id

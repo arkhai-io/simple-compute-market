@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
-from compute_provisioning.contracts import CredentialEnvelope, ResultEnvelope
+from compute_provisioning_contracts import CredentialEnvelope, ResultEnvelope
 from compute_provisioning.jobs import JobRun
 
 from .runner import AnsibleResult, InventoryTarget

@@ -11,8 +11,8 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from vm_provisioning_operator.models import VmActionRequest
-from compute_provisioning.jobs import JobSubmitResponse
-from compute_provisioning_ansible.runner import ConnectivityResult
+from compute_provisioning_contracts import JobSubmitResponse
+from compute_provisioning_contracts import ConnectivityResult
 from vm_provisioning_adapter.models.vm_request_model import build_simple_params
 from compute_provisioning.jobs.queue import AsyncJobQueue
 from compute_provisioning.hosts.service import HostNotFoundError

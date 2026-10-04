@@ -441,3 +441,35 @@ async def test_commit_requires_a_reservation_id(
 ) -> None:
     with pytest.raises(ValueError, match="capacity_reservation_id"):
         await capacity_client.commit(capacity_reservation_id=None)
+
+
+@pytest.mark.asyncio
+async def test_caller_role_is_signed_and_only_seller_or_admin_is_accepted(
+    signer_pair: tuple[Signer, Signer],
+) -> None:
+    """An operator signs as ``admin``; the default stays the seller's role."""
+    caller, authority = signer_pair
+    seen: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.headers["X-Market-Role"])
+        return httpx.Response(503)
+
+    for role in ("seller", "admin"):
+        client = SiteCapacityAdminClient(
+            "http://site-authority:8081",
+            caller,
+            TrustedIdentitySet(identities=(authority.identity,)),
+            transport=httpx.MockTransport(handler),
+            caller_role=role,
+        )
+        with pytest.raises(SiteCapacityAdminClientError):
+            await client.list_resources()
+    assert seen == ["seller", "admin"]
+    with pytest.raises(ValueError, match="caller_role"):
+        SiteCapacityClient(
+            "http://site-authority:8081",
+            caller,
+            TrustedIdentitySet(identities=(authority.identity,)),
+            caller_role="service",
+        )

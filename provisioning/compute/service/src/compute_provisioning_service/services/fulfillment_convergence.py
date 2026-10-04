@@ -15,8 +15,8 @@ from market_fulfillment import (
     ProviderOperationState,
     SettlementRecordState,
     SettlementResource,
-    VersionedEnvelope,
 )
+from market_core import VersionedEnvelope
 from market_fulfillment.provider import ProviderConfigInvalidError
 from market_fulfillment.settlement_repository import begin_sqlite_write_transaction
 

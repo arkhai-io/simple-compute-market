@@ -6,9 +6,9 @@ from market_fulfillment import (
     FULFILLMENT_RESULT_SCHEMA_VERSION,
     FulfillmentResultPayload,
     ProvisionedResourceOutput,
-    VersionedEnvelope,
     build_fulfillment_result_envelope,
 )
+from market_core import VersionedEnvelope
 
 
 def test_build_fulfillment_result_envelope_shape():

@@ -10,11 +10,8 @@ from compute_provisioning.hosts import ConnectionEnvelope, ExecutionHost, Protec
 from cryptography.fernet import Fernet
 from market_config import encrypt_secret
 
-from compute_provisioning_ansible import (
-    ConnectivityResult,
-    SshConnectionCodec,
-    ansible_readiness,
-)
+from compute_provisioning_ansible import SshConnectionCodec, ansible_readiness
+from compute_provisioning_contracts import ConnectivityResult
 from compute_provisioning_ansible.probes import (
     PROBE_INVENTORY_GROUP,
     collect_ssh_keys_from_hosts,

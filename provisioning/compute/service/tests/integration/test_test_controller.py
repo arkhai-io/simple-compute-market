@@ -30,6 +30,8 @@ from compute_provisioning_service.services.capacity_derivation import (
 )
 
 from .conftest import (
+    ProvisioningClients,
+    provisioning_clients,
     ADMIN_SIGNER,
     SERVICE_AUTHORITIES,
     SERVICE_SIGNER,
@@ -46,7 +48,6 @@ from compute_provisioning_service.services.principal_authority import (
 )
 
 from compute_provisioning_service import container as _container_module
-from vm_provisioning_operator import ProvisioningClient, ProvisioningError
 from compute_provisioning_service.db.database import create_db_engine
 from compute_provisioning_service.main import app
 from vm_provisioning_operator.models import CreateVmRequest
@@ -83,7 +84,7 @@ def db_engine(tmp_path):
 #
 # The canonical ProvisioningTestClient (e2e-tests/src/e2e_harness/) is sync-only.
 # This async variant is backed by the same ASGITransport as the main
-# ProvisioningClient so all calls share the in-process app.  No raw HTTP
+# the canonical clients so all calls share the in-process app.  No raw HTTP
 # calls appear in test bodies — all test code calls named methods here.
 # ---------------------------------------------------------------------------
 
@@ -107,7 +108,7 @@ async def client_and_queue(
     programmable_mock,
     monkeypatch,
     job_executor_table_for,
-) -> AsyncIterator[tuple[ProvisioningClient, AsyncJobQueue, MockAnsibleRunner, AsyncProvisioningTestClient]]:
+) -> AsyncIterator[tuple[ProvisioningClients, AsyncJobQueue, MockAnsibleRunner, AsyncProvisioningTestClient]]:
     _install_signed_asgi_transport(monkeypatch)
     mock_settings = MagicMock(
         default_host_id="kvm1",
@@ -151,7 +152,7 @@ async def client_and_queue(
             )
         ),
     )
-    from compute_provisioning.hosts import HostCreate
+    from compute_provisioning_contracts import HostCreate
     host_service.register_host(HostCreate(
         host_id=HOST,
         connection=ssh_connection(ssh_host="10.0.0.1", ssh_user="root", key_path="~/.ssh/id_ed25519"),
@@ -243,12 +244,7 @@ async def client_and_queue(
     )
 
     transport = ASGITransport(app=app)
-    prov_client = ProvisioningClient(
-        "http://test",
-        signer=ADMIN_SIGNER,
-        expected_authorities=SERVICE_AUTHORITIES,
-        transport=transport,
-    )
+    prov_client = provisioning_clients(transport)
     test_client = AsyncProvisioningTestClient(transport)
 
     yield prov_client, job_queue, programmable_mock, test_client
@@ -341,12 +337,12 @@ class TestJobSummary:
     async def test_summary_counts_after_job(self, client_and_queue):
         prov_client, job_queue, _, test_client = client_and_queue
         dispatched = _make_event_seam(job_queue)
-        submit = await prov_client.create_vm(HOST, CreateVmRequest(
+        submit = await prov_client.vm.create_vm(HOST, CreateVmRequest(
             vm_target="test-vm", vm_ram=2048, vm_vcpus=2,
             vm_disk_size="20G", ssh_pubkey="ssh-ed25519 AAAA test",
         ))
         await asyncio.wait_for(dispatched.wait(), timeout=5.0)
-        await prov_client.poll_until_complete(submit.job_id, timeout=10.0)
+        await prov_client.family.poll_until_complete(submit.job_id, timeout=10.0)
         body = await test_client.job_summary()
         assert body["total"] >= 1
         assert body["counts"].get("succeeded", 0) >= 1
@@ -365,7 +361,7 @@ class TestDrain:
     async def test_drain_waits_for_job_to_complete(self, client_and_queue):
         prov_client, job_queue, _, test_client = client_and_queue
         dispatched = _make_event_seam(job_queue)
-        await prov_client.create_vm(HOST, CreateVmRequest(
+        await prov_client.vm.create_vm(HOST, CreateVmRequest(
             vm_target="drain-vm", vm_ram=2048, vm_vcpus=2,
             vm_disk_size="20G", ssh_pubkey="ssh-ed25519 AAAA test",
         ))
@@ -382,7 +378,7 @@ class TestWaitForJob:
     async def test_wait_returns_terminal_status(self, client_and_queue):
         prov_client, job_queue, _, test_client = client_and_queue
         dispatched = _make_event_seam(job_queue)
-        submit = await prov_client.create_vm(HOST, CreateVmRequest(
+        submit = await prov_client.vm.create_vm(HOST, CreateVmRequest(
             vm_target="wait-vm", vm_ram=2048, vm_vcpus=2,
             vm_disk_size="20G", ssh_pubkey="ssh-ed25519 AAAA test",
         ))
@@ -400,7 +396,7 @@ class TestWaitForJob:
         prov_client, job_queue, mock, test_client = client_and_queue
         mock.add_rule(MockRule(rule_id="block-all", match={}, pause_before_result=True))
         dispatched = _make_event_seam(job_queue)
-        submit = await prov_client.create_vm(HOST, CreateVmRequest(
+        submit = await prov_client.vm.create_vm(HOST, CreateVmRequest(
             vm_target="timeout-vm", vm_ram=2048, vm_vcpus=2,
             vm_disk_size="20G", ssh_pubkey="ssh-ed25519 AAAA test",
         ))

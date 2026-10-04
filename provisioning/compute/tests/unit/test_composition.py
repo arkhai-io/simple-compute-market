@@ -1,32 +1,28 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 import pytest
 from compute_provisioning import (
     ExecutorAdapterBundle,
     ExecutorAdapterContribution,
+    JobExecutorTable,
     compose_adapter_bundles,
 )
 from market_fulfillment import (
     FulfillmentProvider,
     FulfillmentResult,
-    VersionedEnvelope,
     ProviderNotFoundError,
     ProviderOperationState,
     ProviderStatus,
 )
+from market_core import VersionedEnvelope
 
 
-@dataclass
-class FakeAdapter:
-    offering_mode: str
+class FakeJobExecutor:
+    async def execute(self, run):
+        raise NotImplementedError
 
-    def validate_parameters(self, action_kind, parameters):
-        return dict(parameters)
-
-    async def submit(self, envelope, validated_parameters):
-        return "job-1"
+    async def cancel(self, handle):
+        return None
 
 
 class FakeReleaseExecutor:
@@ -91,9 +87,9 @@ ANSIBLE_NEEDS_HOST = {"ansible": True}
 
 def contribution(kind: str, *actions: str) -> ExecutorAdapterContribution:
     return ExecutorAdapterContribution(
-        adapter=FakeAdapter(kind),
-        action_kinds=frozenset(actions),
+        offering_mode=kind,
         release_executor=FakeReleaseExecutor(),
+        job_executors={action: FakeJobExecutor() for action in actions},
     )
 
 
@@ -111,10 +107,10 @@ def test_composes_executor_and_provider_namespaces_independently():
             name="bare-metal",
             executors=(contribution("bare_metal", "grant_access"),),
         ),
-    ], host_requirement=ANSIBLE_NEEDS_HOST)
+    ], host_requirement=ANSIBLE_NEEDS_HOST, job_executors=JobExecutorTable())
 
-    assert composed.executor_registry.get("vm").offering_mode == "vm"
-    assert composed.executor_registry.get("bare_metal").offering_mode == "bare_metal"
+    assert composed.job_executors.resolve("vm", "create")
+    assert composed.job_executors.resolve("bare_metal", "grant_access")
     assert composed.provider_registry.require("ansible") is provider
     assert composed.pool_config_handlers["ansible"] is handler
     with pytest.raises(ProviderNotFoundError):
@@ -135,6 +131,7 @@ def test_duplicate_executor_identifies_both_bundles():
                 ),
             ],
             host_requirement=ANSIBLE_NEEDS_HOST,
+            job_executors=JobExecutorTable(),
         )
 
 
@@ -161,6 +158,7 @@ def test_duplicate_provider_identifies_both_bundles_independently_of_executors()
                 ),
             ],
             host_requirement=ANSIBLE_NEEDS_HOST,
+            job_executors=JobExecutorTable(),
         )
 
 
@@ -178,6 +176,7 @@ def test_provider_without_pool_config_handler_is_rejected_before_startup():
                 )
             ],
             host_requirement=ANSIBLE_NEEDS_HOST,
+            job_executors=JobExecutorTable(),
         )
 
 
@@ -198,11 +197,12 @@ def test_handler_identity_must_match_provider_identity():
                 )
             ],
             host_requirement=ANSIBLE_NEEDS_HOST,
+            job_executors=JobExecutorTable(),
         )
 
 
 def test_incomplete_executor_contribution_is_rejected_before_startup():
-    with pytest.raises(ValueError, match="declares no action kinds"):
+    with pytest.raises(ValueError, match="contributes no job executors"):
         compose_adapter_bundles(
             [
                 ExecutorAdapterBundle(
@@ -211,6 +211,7 @@ def test_incomplete_executor_contribution_is_rejected_before_startup():
                 )
             ],
             host_requirement=ANSIBLE_NEEDS_HOST,
+            job_executors=JobExecutorTable(),
         )
 
 
@@ -230,6 +231,7 @@ def test_duplicate_readiness_check_is_rejected():
                 ),
             ],
             host_requirement=ANSIBLE_NEEDS_HOST,
+            job_executors=JobExecutorTable(),
         )
 
 
@@ -266,6 +268,7 @@ def test_a_host_requirement_disagreeing_with_registered_providers_is_refused(
         compose_adapter_bundles(
             [_one_provider_bundle(FakeProvider())],
             host_requirement=host_requirement,
+            job_executors=JobExecutorTable(),
         )
 
 
@@ -274,29 +277,19 @@ def test_a_provider_that_declares_no_host_need_is_refused():
         compose_adapter_bundles(
             [_one_provider_bundle(UndeclaredProvider())],
             host_requirement=ANSIBLE_NEEDS_HOST,
+            job_executors=JobExecutorTable(),
         )
-
-
-class FakeJobExecutor:
-    async def execute(self, run):
-        raise NotImplementedError
-
-    async def cancel(self, handle):
-        return None
 
 
 def _with_jobs(kind: str, actions: tuple[str, ...], executor):
     return ExecutorAdapterContribution(
-        adapter=FakeAdapter(kind),
-        action_kinds=frozenset(actions[:1]),
+        offering_mode=kind,
         release_executor=FakeReleaseExecutor(),
         job_executors={action: executor for action in actions},
     )
 
 
 def test_composition_registers_job_executors_by_mode_and_action_and_freezes():
-    from compute_provisioning import JobExecutorTable
-
     vm_executor, bm_executor = FakeJobExecutor(), FakeJobExecutor()
     table = JobExecutorTable()
     composed = compose_adapter_bundles([
@@ -322,19 +315,16 @@ def test_composition_registers_job_executors_by_mode_and_action_and_freezes():
     assert table.resolve("bare_metal", "node_reclaim_access") is bm_executor
 
 
-def test_job_executors_without_a_table_are_refused():
-    with pytest.raises(ValueError, match="no job executor table"):
-        compose_adapter_bundles([
-            ExecutorAdapterBundle(
-                name="vm",
-                executors=(_with_jobs("vm", ("create",), FakeJobExecutor()),),
-            ),
-        ], host_requirement={})
+def test_a_non_canonical_offering_mode_is_refused():
+    with pytest.raises(ValueError, match="is not canonical"):
+        compose_adapter_bundles(
+            [ExecutorAdapterBundle(name="vm", executors=(contribution(" vm", "create"),))],
+            host_requirement={},
+            job_executors=JobExecutorTable(),
+        )
 
 
 def test_a_duplicate_job_executor_names_the_bundle():
-    from compute_provisioning import JobExecutorTable
-
     table = JobExecutorTable()
     table.register("vm", "create", FakeJobExecutor())
     with pytest.raises(ValueError, match="adapter bundle 'vm'.*duplicate job executor"):

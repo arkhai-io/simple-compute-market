@@ -11,7 +11,7 @@ from core_storefront import (
     fulfill_domain,
 )
 from arkhai_bare_metal import BareMetalListing, BareMetalTerms
-from market_fulfillment import VersionedEnvelope
+from market_core import VersionedEnvelope
 from market_identity import Ed25519Signer
 
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract

@@ -13,9 +13,9 @@ from market_capacity_publication import CapacityBinding
 from market_fulfillment import (
     FulfillmentResultPayload,
     ProvisionedResourceOutput,
-    VersionedEnvelope,
     build_fulfillment_result_envelope,
 )
+from market_core import VersionedEnvelope
 from market_identity import Ed25519Signer
 
 from market_storefront.domain_runtime import (

@@ -1,4 +1,8 @@
-"""Provider-neutral resource-pool administration."""
+"""Provider-neutral resource-pool administration.
+
+The pool wire models and declaration vocabulary are
+``market_resource_pools_contracts``; this package is the authority over them.
+"""
 
 from .asking_rates import (
     ACCEPTED_ASKING_RATE_PERIODS,
@@ -15,29 +19,6 @@ from .asking_rates import (
     validate_asking_rates,
 )
 from .db import DEFAULT_POOL_ID, ResourcePool
-from .hints import (
-    ADVERTISABLE_MODES_POLICY_TAG,
-    CAPACITY_BACKED,
-    CAPACITY_BACKING_POLICY_TAG,
-    CAPACITY_BACKING_VALUES,
-    CAPACITY_UNBACKED,
-    DELIVERABLE_MODES_POLICY_TAG,
-    LISTING_SHAPES_POLICY_TAG,
-    CapacityBacking,
-    MissingPoolDeclarationError,
-    PoolDeclarationError,
-    PoolDeclarationProblem,
-    PoolDeclarations,
-    declared_deliverable_modes,
-    pool_declaration_problems,
-    pool_delivers_offering_mode,
-    raw_listing_shapes,
-    resolve_pool_declarations,
-    validate_deliverable_modes,
-    validate_listing_shapes,
-    validate_pricing_rates,
-    validate_pool_declarations,
-)
 from .host_requirement import HostRequirement, pool_needs_host
 from .site_declarations import (
     POOL_ENABLEMENT_UNDECLARED,
@@ -46,18 +27,6 @@ from .site_declarations import (
     read_site_declarations,
 )
 from .pool_config_handler import PoolConfigHandler, PoolConfigValidationProblem
-from .pools import (
-    PoolCreate,
-    PoolImportDiff,
-    PoolImportRequest,
-    PoolImportResponse,
-    PoolListResponse,
-    PoolReplace,
-    PoolResponse,
-    PoolUpdate,
-    PoolValidateResponse,
-    PoolValidationProblem,
-)
 from .service import (
     DocumentValidationResult,
     PoolAlreadyExistsError,
@@ -69,25 +38,7 @@ from .service import (
 )
 
 __all__ = [
-    "ADVERTISABLE_MODES_POLICY_TAG",
-    "CAPACITY_BACKED",
-    "CAPACITY_BACKING_POLICY_TAG",
-    "CAPACITY_BACKING_VALUES",
-    "CAPACITY_UNBACKED",
     "DEFAULT_POOL_ID",
-    "DELIVERABLE_MODES_POLICY_TAG",
-    "LISTING_SHAPES_POLICY_TAG",
-    "CapacityBacking",
-    "MissingPoolDeclarationError",
-    "PoolDeclarationError",
-    "PoolDeclarationProblem",
-    "PoolDeclarations",
-    "declared_deliverable_modes",
-    "pool_declaration_problems",
-    "pool_delivers_offering_mode",
-    "raw_listing_shapes",
-    "resolve_pool_declarations",
-    "validate_pool_declarations",
     "pool_needs_host",
     "POOL_ENABLEMENT_UNDECLARED",
     "ResolvedPool",
@@ -98,25 +49,12 @@ __all__ = [
     "PoolAlreadyExistsError",
     "PoolConfigHandler",
     "PoolConfigValidationProblem",
-    "PoolCreate",
     "PoolDefinition",
-    "PoolImportDiff",
-    "PoolImportRequest",
-    "PoolImportResponse",
-    "PoolListResponse",
     "PoolNotFoundError",
-    "PoolReplace",
-    "PoolResponse",
-    "PoolUpdate",
-    "PoolValidateResponse",
     "PoolValidationError",
-    "PoolValidationProblem",
     "ReconciliationPlan",
     "ResourcePool",
     "ResourcePoolService",
-    "validate_deliverable_modes",
-    "validate_listing_shapes",
-    "validate_pricing_rates",
     "ACCEPTED_ASKING_RATE_PERIODS",
     "ASKING_RATE_SOURCE_HINT",
     "ASKING_RATE_SOURCE_NONE",

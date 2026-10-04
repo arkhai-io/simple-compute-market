@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from vm_provisioning_operator.models import CreateVmRequest, VmActionRequest
-from compute_provisioning.jobs import JobSubmitResponse
+from compute_provisioning_contracts import JobSubmitResponse
 from vm_provisioning_adapter.services.vm_operations_service import VmOperationsService
 
 

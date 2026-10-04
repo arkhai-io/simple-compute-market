@@ -6,10 +6,10 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from market_resource_pools import pool_delivers_offering_mode
+from market_resource_pools_contracts import pool_delivers_offering_mode
 
 from .db import SettlementRecord, SettlementRecordState
-from .envelopes import VersionedEnvelope
+from market_core import VersionedEnvelope
 from .fulfillment_persistence import FulfillmentTransaction, FulfillmentUnitOfWork
 from .provider import (
     CredentialFetchFailedError,

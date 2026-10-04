@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from market_resource_pools import ResourcePoolService
 
 from .db import SettlementRecordState
-from .envelopes import VersionedEnvelope
+from market_core import VersionedEnvelope
 from .provider import FulfillmentConflictError
 from .settlement_repository import SettlementRepository, begin_sqlite_write_transaction
 

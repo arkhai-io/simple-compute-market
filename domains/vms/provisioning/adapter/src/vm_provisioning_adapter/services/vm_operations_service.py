@@ -11,9 +11,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Optional
 
-from compute_provisioning.contracts import ExecutorActionEnvelope
+from compute_provisioning_contracts import ExecutorActionEnvelope
 from vm_provisioning_operator.models import CreateVmRequest, VmActionRequest
-from compute_provisioning.jobs import JobSubmitResponse
+from compute_provisioning_contracts import JobSubmitResponse
 from vm_provisioning_adapter.models.vm_request_model import build_create_params, build_simple_params
 from compute_provisioning.jobs.queue import AsyncJobQueue
 

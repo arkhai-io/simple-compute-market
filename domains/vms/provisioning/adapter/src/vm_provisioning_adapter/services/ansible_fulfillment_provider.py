@@ -6,7 +6,7 @@ import dataclasses
 import logging
 from typing import TYPE_CHECKING, Any, Callable
 
-from compute_provisioning.contracts import ExecutorActionEnvelope
+from compute_provisioning_contracts import ExecutorActionEnvelope
 from market_fulfillment import (
     CredentialFetchFailedError,
     ProvisionedResourceDescriptor,
@@ -20,8 +20,8 @@ from market_fulfillment import (
     ProviderStatus,
     SettlementResource,
     SettlementResult,
-    VersionedEnvelope,
 )
+from market_core import VersionedEnvelope
 from vm_provisioning_adapter.fulfillment_results import (
     VmConnectionInfo,
     VmFulfillmentCredential,

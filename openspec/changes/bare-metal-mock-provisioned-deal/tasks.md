@@ -1139,7 +1139,7 @@ re-verifies them by grep before each move.
       **Slice A0: the action surface goes, and contracts and clients move to their owners.**
       Changes no wire beyond removing the action surface.
 
-  - [ ] 5B.8.A0.1 Delete the generic action surface (decision 10). Remove
+  - [x] 5B.8.A0.1 Delete the generic action surface (decision 10). Remove
         `POST /api/v1/actions` and `GET /api/v1/jobs/{id}/contract`, `.../credentials`, and
         `.../cancel`: their contracts in `provisioning/compute/src/compute_provisioning/client.py`,
         their routes in
@@ -1165,7 +1165,7 @@ re-verifies them by grep before each move.
         `unit/services/test_provider_registry.py` keeps its provider cases. Spec:
         `physical-provisioning` "Validated executor registration" and
         `compute-provisioning-contract` are already amended in this change's deltas.
-  - [ ] 5B.8.A0.2 `VersionedEnvelope` to core (decision 8). Move
+  - [x] 5B.8.A0.2 `VersionedEnvelope` to core (decision 8). Move
         `kit/fulfillment/src/market_fulfillment/envelopes.py` (`VersionedEnvelope`, `envelope`)
         to `core/src/market_core/envelopes.py`, exported from `market_core`; tombstone the old
         module; every importer takes it from `market_core` with no re-export from
@@ -1179,7 +1179,7 @@ re-verifies them by grep before each move.
         `hosted_lifecycle.py`; and their tests (`kit/fulfillment/tests/unit/test_envelopes.py`
         moves to `core/tests/unit/test_envelopes.py`). `kit/fulfillment/pyproject.toml` depends
         on `arkhai-core`.
-  - [ ] 5B.8.A0.3 Compute contracts distribution (decision 8). New
+  - [x] 5B.8.A0.3 Compute contracts distribution (decision 8). New
         `provisioning/compute/contracts/` (`arkhai-compute-provisioning-contracts`,
         `compute_provisioning_contracts`; depends on `arkhai-core`, `arkhai-kit-identity`,
         pydantic) with `Makefile`, `pyproject.toml`, `py.typed`, and tests. It receives
@@ -1208,7 +1208,7 @@ re-verifies them by grep before each move.
         and `.github/workflows/publish-pypi.yml` and `docs/development/RELEASING.md` wherever
         its siblings are listed; the service image derives its internal packages from the
         lock, which `make check-packaging` confirms.
-  - [ ] 5B.8.A0.4 Compute client distribution (decision 8). New
+  - [x] 5B.8.A0.4 Compute client distribution (decision 8). New
         `provisioning/compute/client/` (`arkhai-compute-provisioning-client`,
         `compute_provisioning_client`; depends on the contracts, `arkhai-kit-identity`, httpx)
         with `ComputeProvisioningClient` and `SyncComputeProvisioningClient` over one signing
@@ -1223,7 +1223,7 @@ re-verifies them by grep before each move.
         `provisioning/compute/pyproject.toml` drops httpx if nothing else needs it. Parity:
         `provisioning/compute/service/tests/unit/test_provisioning_client_contract.py` asserts
         the two variants' public methods and signatures match.
-  - [ ] 5B.8.A0.5 Resource-pool contracts and client (decision 11). New
+  - [x] 5B.8.A0.5 Resource-pool contracts and client (decision 11). New
         `kit/resource-pools-contracts/` (`arkhai-kit-resource-pools-contracts`,
         `market_resource_pools_contracts`; pydantic and `arkhai-kit-capability-shape`)
         receiving `kit/resource-pools/src/market_resource_pools/pools.py` and `hints.py`, plus
@@ -1244,14 +1244,14 @@ re-verifies them by grep before each move.
         (`kit/resource-pools`' `test_hints.py` and `test_pool_models.py` move to the contracts
         package). Each repointed package depends on the contracts. Registered in `kit/Makefile`
         (`dist-ci`, `test`).
-  - [ ] 5B.8.A0.6 Capacity-definition import in `kit/site-client` (decision 11): its own
+  - [x] 5B.8.A0.6 Capacity-definition import in `kit/site-client` (decision 11): its own
         request and response models in `market_site_client/models.py`, its route-table entry in
         `client.py`, an import method on the site client, and
         `kit/site/tests/unit/test_auth_route_parity.py` extended to compare the server's
         contract for the route with the client's. The server's contract is a separate
         `CAPACITY_DEFINITION_ROUTE_CONTRACTS` in `market_site.auth`, which the provisioning
         service assembles and a standalone site never mounts.
-  - [ ] 5B.8.A0.7 VM and Ansible extension clients (decisions 8 and 4). `vm_provisioning_operator`
+  - [x] 5B.8.A0.7 VM and Ansible extension clients (decisions 8 and 4). `vm_provisioning_operator`
         keeps `models.py` and `routes.py` (gaining the relay route declarations, moved from the
         family table, and the relay models from `compute_provisioning/relays.py`, tombstoned);
         `client.py` becomes `VmOperatorClient` and `SyncVmOperatorClient` over the family
@@ -1266,7 +1266,7 @@ re-verifies them by grep before each move.
         over the family transport; `provisioning/compute/ansible/pyproject.toml` depends on the
         compute client. `arkhai_bare_metal`'s `BareMetalLeaseClient` imports its transport
         protocol from the compute client until B deletes it.
-  - [ ] 5B.8.A0.8 Callers. Storefronts: `domains/vms/storefront` (`services/capacity_client.py`,
+  - [x] 5B.8.A0.8 Callers. Storefronts: `domains/vms/storefront` (`services/capacity_client.py`,
         `fulfillment_service.py`, `fulfillment_resume_runtime.py`, `system_service.py`, and
         `tests/unit/test_fulfillment_service.py`) and `domains/bare_metal/storefront`
         (`site_clients.py`, `fulfillment_service.py`, `hosted_lifecycle.py`) import from the
@@ -1290,13 +1290,76 @@ re-verifies them by grep before each move.
         `test_ledger_lease_lifecycle.py`, `test_vm_operations_service.py`,
         `unit/test_import_boundaries.py`, `unit/test_lease_models.py`;
         `provisioning/compute/tests/integration/test_fulfillment_client_opacity.py`.
-  - [ ] 5B.8.A0.9 Gate. The slice's suites plus `kit/fulfillment`, `kit/resource-pools` and its
+  - [x] 5B.8.A0.9 Gate. The slice's suites plus `kit/fulfillment`, `kit/resource-pools` and its
         two new packages, `kit/site`, `kit/site-client`, `core`, `domains/vms/listings`, both
         storefronts, and the e2e unit suite pass; `make check-packaging` passes. A boundary
         check in each new package's unit suite asserts its declared dependencies:
         `compute_provisioning_contracts` imports no SQLAlchemy, FastAPI, or other
         `compute_provisioning*` module; `market_resource_pools_client` imports no
         `compute_provisioning*` or SQLAlchemy module.
+
+      Slice A0 done 2026-10-04. Order run: A0.1, A0.2, A0.5, A0.6, A0.3, A0.4, A0.7, A0.8,
+      A0.9 (the family table's assembly needs the pool, capacity-definition, host-import, and
+      relay declarations in their owners' packages first). Corrections to the plan are in
+      `design.md`, "Slice A0 implementation findings".
+      - A0.1: the four routes, their contracts and client methods, both `compute_adapter.py`,
+        and `compute_contract_service.py` (whole: it had no lease half) are deleted;
+        `ExecutorAdapterContribution` is `offering_mode`, `release_executor`, `job_executors`,
+        and `compose_adapter_bundles` requires the engine's executor table.
+        `UnsupportedExecutorActionError` stays, as the table's lookup error. The lease
+        controller keeps a private 409 error for a reservation recording no mode until B.
+        `test_fulfillment_api.py` reads dispatched job records from the composed engine.
+      - A0.2: `market_core.envelopes`; 29 importers repointed, no re-export; `kit/fulfillment`'s
+        boundary allowlist and this change's fulfillment "Dependency boundary" delta name
+        `market_core` and the pool contracts.
+      - A0.3: `provisioning/compute/contracts` (`contracts.py`, `hosts.py` with the neutral
+        `ConnectivityResult`, `jobs.py`, `system.py`, `routes.py`). The family table holds the
+        family's routes only. `compute_provisioning_service/route_table.py` assembles the
+        service's table (family, site capacity and capacity definitions with roles named,
+        pools, Ansible host import, adapters) and canonicalizes a site route by the site's rule.
+        `test_job_contract_values.py` stays; the other two moved test files were split by owner.
+      - A0.4: `provisioning/compute/client` (`ComputeProvisioningClient`,
+        `SyncComputeProvisioningClient` over one call spec per operation and one signing base;
+        `authenticated_request` with `route`, query, multipart, accepted statuses; system
+        routes return dicts until C). `compute_provisioning/client.py` deleted, httpx dropped.
+      - A0.5: `kit/resource-pools-contracts` (hints, pool models, route declarations) and
+        `kit/resource-pools-client`; `kit/resource-pools` no longer exports models or hints;
+        about 37 importers repointed.
+      - A0.6: `CAPACITY_DEFINITION_ROUTE_CONTRACTS` in `market_site.auth`; the site client's
+        import method, model copies, contract, and `caller_role`; parity test extended.
+      - A0.7: `vm_provisioning_operator` holds `VmOperatorClient`, `SyncVmOperatorClient`,
+        relay models, and relay declarations; the generic clients are deleted.
+        `compute_provisioning_ansible.host_import` holds the import declaration and its clients.
+        The service's relay controller imports VM's relay models under one named
+        import-boundary exception until 5B.9.
+      - A0.8: the service's integration suite drives every route through the canonical clients
+        (family, VM, pools, host import, site, site admin); both storefronts depend on the client
+        and not on `arkhai-compute-provisioning`; e2e uses the family sync client with VM, pool,
+        and site fixtures, and the harness test client for VM's test routes.
+      - A0.9 versions: arkhai-core 0.4.0; kit-fulfillment 0.4.0; kit-resource-pools 0.6.0;
+        kit-site 0.7.0; kit-site-client 0.7.0; compute-provisioning 0.9.0;
+        compute-provisioning-ansible 0.2.0; compute-provisioning-service 0.6.0;
+        vms-provisioning-adapter 0.6.0; bare-metal-provisioning-adapter 0.4.0;
+        vms-provisioning-operator-client 0.7.0; vms-listings 0.4.1; apicredits-service 0.4.1;
+        e2e-tests 0.1.1; new at 0.1.0: compute-provisioning-contracts,
+        compute-provisioning-client, kit-resource-pools-contracts, kit-resource-pools-client.
+        Exact pins moved, with patch bumps: kit-settlement-runtime 0.2.1,
+        kit-hosted-settlement 0.1.6, kit-contact-exchange 0.2.1, kit-config 0.1.4,
+        core-registry-client 0.12.1, core-registry 0.3.1, core-buyer 0.3.4, vms-buyer 0.5.1,
+        vms-storefront 0.9.1, bare-metal-buyer 0.4.1, bare-metal-storefront 0.7.1. Every lockable
+        project relocked; `domains/vms/storefront` and `domains/vms/buyer` hand-edited (PyTorch
+        index 403); `kit/policy` cannot lock here either, and nothing in its lock changed. The
+        bare-metal adapter's unused dependency on VM's client is removed; its dependency on VM's
+        adapter stays, because the service module it imports loads VM's adapter.
+      - A0.9 validation: core 182 (2 skipped) + 44 and buyer, registry, registry-client;
+        kit-fulfillment 172; pool contracts 143, pool authority 138, pool client 4; kit-site 261;
+        kit-site-client 48; compute contracts 40, client 29, family kit 103, Ansible 79;
+        service 676 unit and 286 integration; VM adapter 39; bare-metal adapter 22; bare-metal
+        domain 136; bare-metal storefront 227; API-credit service 65; settlement-runtime 116;
+        contact-exchange 123; config 140; bare-metal buyer 13; VM storefront 1101 unit and 345
+        integration (the two known `test_alkahest` failures); e2e unit 236 (the known task-10.1
+        failure), and the e2e and smoke suites collect (178). `make check-locks`, comment
+        hygiene, documentation citations, OpenSpec strict, and `make check-packaging` pass.
 
       **Slice A: the authorities at the root, and the job and host routes.**
 
@@ -1742,7 +1805,8 @@ service code.
       service, and route the findings under "Controls and routes (5B.8)" (`kit/site`'s own
       router, VM's literal pool-override path, the site's duplicated server and client
       contracts, bare metal's untyped mock-rule routes, the unreachable `provisioning`
-      state, path templates in the family contracts).
+      state, path templates in the family contracts, and published packages depending on
+      unpublished ones, the new thin packages among them).
 - [ ] 2.7 **Campaign index currency.** Update this change's row and the Goal 3, 4, and 7
       graphs in `openspec/changes/README.md`, and the rows of
       `bare-metal-and-credits-domain-stacks`, `kit-owned-storefront-shell`,

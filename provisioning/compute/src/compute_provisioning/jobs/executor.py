@@ -21,7 +21,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol, Union
 
-from compute_provisioning.contracts import (
+from compute_provisioning_contracts import (
     CredentialEnvelope,
     ProvisioningErrorEnvelope,
     ResultEnvelope,

@@ -30,7 +30,7 @@ from market_identity import Identity, TrustedIdentitySet, create_signer
 from market_pool_overrides import SyncPoolOverrideClient
 from market_settlement_runtime import derive_obligation_ref
 from storefront_client import SyncStorefrontClient
-from vm_provisioning_operator import PoolCreate
+from market_resource_pools_contracts import PoolCreate
 
 from tests.e2e.roles.helpers.domain_deal import require_state
 from tests.e2e.roles.scenarios.bare_metal.conftest import lane_setting

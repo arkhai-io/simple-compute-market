@@ -29,13 +29,11 @@ from sqlalchemy.pool import StaticPool
 
 from market_resource_pools import (
     PoolAlreadyExistsError,
-    PoolCreate,
     PoolNotFoundError,
-    PoolReplace,
-    PoolUpdate,
     PoolValidationError,
     ResourcePoolService,
 )
+from market_resource_pools_contracts import PoolCreate, PoolReplace, PoolUpdate
 from market_resource_pools.db import Base, ResourcePool
 from pydantic import ValidationError
 from sqlalchemy.orm import sessionmaker

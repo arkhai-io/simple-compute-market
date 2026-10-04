@@ -11,17 +11,19 @@ from functools import partial
 from typing import Any
 
 from alkahest_py import AlkahestClient
-from compute_provisioning import (
+from compute_provisioning_client import (
     ComputeProvisioningClient,
     ComputeProvisioningJobError,
     ComputeProvisioningTimeoutError,
+)
+from compute_provisioning_contracts import (
     FulfillmentRequestBody,
     FulfillmentScheduleRequest,
     LeaseRegistration,
     LeaseTermination,
 )
 from core_storefront.stage_log import stage_event
-from market_fulfillment import VersionedEnvelope
+from market_core import VersionedEnvelope
 
 from market_storefront.services.capacity_client import (
     build_capacity_client,

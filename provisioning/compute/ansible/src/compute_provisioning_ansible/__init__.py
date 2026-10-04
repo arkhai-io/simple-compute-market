@@ -37,7 +37,6 @@ from .probes import (
     ansible_readiness,
     probe_connectivity,
 )
-from .runner import ConnectivityResult
 
 #: The Ansible configuration every playbook the service runs is run under,
 #: exported as ``ANSIBLE_CONFIG`` unless a deployment names its own.
@@ -47,7 +46,6 @@ __all__ = [
     "DEFAULT_ANSIBLE_CONFIG",
     "AnsibleJobCodec",
     "AnsibleReadinessResponse",
-    "ConnectivityResult",
     "DefaultOutput",
     "FileInfo",
     "InventoryInfo",

@@ -1,6 +1,6 @@
 """Coverage for provisioning-client endpoints not exercised elsewhere.
 
-These tests use the public ProvisioningClient against the in-process FastAPI app
+These tests use the canonical typed clients against the in-process FastAPI app
 with lower provisioning layers mocked by the integration fixture.  That keeps
 the client wheel lightweight while making the service integration suite the
 contract authority for every public client operation.
@@ -18,7 +18,7 @@ from compute_provisioning_service import container as _container_module
 import pytest
 
 from vm_provisioning_operator.models import CreateVmRequest
-from compute_provisioning.hosts import HostCreate
+from compute_provisioning_contracts import HostCreate
 
 
 HOST = "kvm1"
@@ -26,7 +26,7 @@ VM_NAME = "agent-vm-01"
 
 
 async def _register_host(client) -> None:
-    await client.register_host(
+    await client.family.register_host(
         HostCreate(
             host_id=HOST,
             connection=ssh_connection(ssh_host="10.0.0.1", ssh_user="root", key_path="~/.ssh/id_ed25519"),
@@ -40,15 +40,15 @@ class TestVmClientEndpointCoverage:
         await _register_host(client)
 
         submissions = [
-            await client.list_vms(HOST),
-            await client.start_vm(HOST, VM_NAME),
-            await client.shutdown_vm(HOST, VM_NAME),
-            await client.reboot_vm(HOST, VM_NAME),
-            await client.destroy_vm(HOST, VM_NAME),
-            await client.undefine_vm(HOST, VM_NAME),
-            await client.monitor_vm(HOST, VM_NAME),
-            await client.reset_password(HOST, VM_NAME),
-            await client.check_capacity(HOST),
+            await client.vm.list_vms(HOST),
+            await client.vm.start_vm(HOST, VM_NAME),
+            await client.vm.shutdown_vm(HOST, VM_NAME),
+            await client.vm.reboot_vm(HOST, VM_NAME),
+            await client.vm.destroy_vm(HOST, VM_NAME),
+            await client.vm.undefine_vm(HOST, VM_NAME),
+            await client.vm.monitor_vm(HOST, VM_NAME),
+            await client.vm.reset_password(HOST, VM_NAME),
+            await client.vm.check_capacity(HOST),
         ]
 
         assert all(submit.status == "queued" for submit in submissions)
@@ -65,7 +65,7 @@ class TestHostClientEndpointCoverage:
             "ansible_ssh_private_key_file=~/.ssh/id_ed25519\n"
         )
 
-        result = await client.import_hosts_from_path(inventory, ssh_key_type="path")
+        result = await client.host_import.import_hosts_from_path(inventory, ssh_key_type="path")
 
         assert result.total == 1
         assert result.hosts[0].host_id == HOST
@@ -74,16 +74,16 @@ class TestHostClientEndpointCoverage:
 class TestJobClientEndpointCoverage:
     async def test_job_list_logs_and_cancel_use_client_contract(self, client_and_queue):
         client, _ = client_and_queue
-        submit = await client.create_vm(HOST, CreateVmRequest(vm_target=VM_NAME))
+        submit = await client.vm.create_vm(HOST, CreateVmRequest(vm_target=VM_NAME))
 
-        jobs = await client.list_jobs(limit=5)
+        jobs = await client.family.list_jobs(limit=5)
         assert jobs.total >= 1
         assert any(job.job_id == submit.job_id for job in jobs.jobs)
 
-        logs = await client.get_job_logs(submit.job_id)
+        logs = await client.family.get_job_logs(submit.job_id)
         assert logs.job_id == submit.job_id
 
-        cancel = await client.cancel_job(submit.job_id)
+        cancel = await client.family.cancel_job(submit.job_id)
         assert cancel["job_id"] == submit.job_id
         assert "status" in cancel
 
@@ -92,8 +92,8 @@ class TestSystemClientEndpointCoverage:
     async def test_lease_watchdog_pause_resume_use_client_contract(self, client_and_queue):
         client, _ = client_and_queue
 
-        paused = await client.pause_lease_watchdog()
-        resumed = await client.resume_lease_watchdog()
+        paused = await client.family.pause_lease_watchdog()
+        resumed = await client.family.resume_lease_watchdog()
 
         assert paused["paused"] is True
         assert resumed["paused"] is False
@@ -125,18 +125,17 @@ class TestCapacityClientEndpointCoverage:
         )
         assert committed is not None
 
-        snapshot = await client.capacity_snapshot()
-        reservations = await client.list_capacity_reservations(
-            escrow_uid="escrow-client-capacity"
-        )
-        reservation = await client.get_capacity_reservation(reserved["capacity_reservation_id"])
-        truncated = await client.truncate_capacity_lease(
-            reserved["capacity_reservation_id"],
-            datetime(2099, 1, 2, tzinfo=timezone.utc).isoformat(),
+        # An operator reads and truncates through the site client, signed as admin.
+        snapshot = await client.site.snapshot()
+        reservations = await client.site.list_reservations(escrow_uid="escrow-client-capacity")
+        reservation = await client.site.get_reservation(reserved["capacity_reservation_id"])
+        truncated = await client.site.truncate_lease(
+            capacity_reservation_id=reserved["capacity_reservation_id"],
+            lease_end_utc=datetime(2099, 1, 2, tzinfo=timezone.utc).isoformat(),
         )
 
         assert snapshot[0]["resource_id"] == "compute-kvm1-001"
-        assert reservations["total"] == 1
+        assert len(reservations) == 1
         assert reservation["capacity_reservation_id"] == reserved["capacity_reservation_id"]
         assert truncated["capacity_reservation_id"] == reserved["capacity_reservation_id"]
 
@@ -162,7 +161,7 @@ class TestLeaseClientEndpointCoverage:
         )
         assert reserved is not None
 
-        lease = await client.register_lease(
+        lease = await client.vm.register_lease(
             resource_id="compute-kvm1-001",
             capacity_reservation_id=reserved["capacity_reservation_id"],
             escrow_uid="escrow-client-terminate",
@@ -201,7 +200,7 @@ class TestLeaseClientEndpointCoverage:
             )
             db.commit()
 
-        terminated = await client.terminate_lease(lease["id"], reason="client coverage")
+        terminated = await client.vm.terminate_lease(lease["id"], reason="client coverage")
 
         assert terminated["id"] == lease["id"]
         assert terminated["status"] == "releasing"

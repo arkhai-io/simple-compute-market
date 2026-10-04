@@ -21,9 +21,9 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from compute_provisioning_service import container as _container_module
+from compute_provisioning_client import ComputeProvisioningError
 import pytest
 
-from vm_provisioning_operator import ProvisioningError
 
 
 def _future_dt(hours: int = 2) -> str:
@@ -69,7 +69,7 @@ async def _register(client, escrow_uid: str, **overrides) -> dict:
         "lease_end_utc": _future_dt(),
     }
     body.update(overrides)
-    return await client.register_lease(**body)
+    return await client.vm.register_lease(**body)
 
 
 def _create_active_fulfillment(capacity_reservation_id: str, *, fulfillment_id: str | None = None) -> str:
@@ -163,8 +163,8 @@ class TestCreateLease:
 
     async def test_create_unknown_reservation_returns_404(self, client_and_queue):
         client, _ = client_and_queue
-        with pytest.raises(ProvisioningError) as exc_info:
-            await client.register_lease(
+        with pytest.raises(ComputeProvisioningError) as exc_info:
+            await client.vm.register_lease(
                 resource_id="compute-kvm1-001",
                 capacity_reservation_id="not-a-ledger-reservation",
                 escrow_uid="escrow-ghost",
@@ -178,7 +178,7 @@ class TestCreateLease:
 class TestListLeases:
     async def test_empty_returns_empty_list(self, client_and_queue):
         client, _ = client_and_queue
-        result = await client.list_leases()
+        result = await client.vm.list_leases()
         assert result["total"] == 0
         assert result["leases"] == []
 
@@ -186,7 +186,7 @@ class TestListLeases:
         client, _ = client_and_queue
         await _register(client, "escrow-list-1")
         _reserve("escrow-no-lease")  # a bare hold has no lease tail
-        result = await client.list_leases()
+        result = await client.vm.list_leases()
         assert result["total"] == 1
         assert result["leases"][0]["escrow_uid"] == "escrow-list-1"
 
@@ -194,7 +194,7 @@ class TestListLeases:
         client, _ = client_and_queue
         await _register(client, "escrow-filter-1")
         await _register(client, "escrow-filter-2")
-        result = await client.list_leases(escrow_uid="escrow-filter-2")
+        result = await client.vm.list_leases(escrow_uid="escrow-filter-2")
         assert result["total"] == 1
         assert result["leases"][0]["escrow_uid"] == "escrow-filter-2"
 
@@ -203,26 +203,26 @@ class TestGetLease:
     async def test_get_by_id(self, client_and_queue):
         client, _ = client_and_queue
         lease = await _register(client, "escrow-get-1")
-        fetched = await client.get_lease(lease["id"])
+        fetched = await client.vm.get_lease(lease["id"])
         assert fetched["escrow_uid"] == "escrow-get-1"
         assert fetched["status"] == "active"
 
     async def test_get_nonexistent_returns_404(self, client_and_queue):
         client, _ = client_and_queue
-        with pytest.raises(ProvisioningError) as exc_info:
-            await client.get_lease("missing-lease")
+        with pytest.raises(ComputeProvisioningError) as exc_info:
+            await client.vm.get_lease("missing-lease")
         assert exc_info.value.status_code == 404
 
     async def test_get_by_escrow(self, client_and_queue):
         client, _ = client_and_queue
         lease = await _register(client, "escrow-by-escrow-1")
-        fetched = await client.get_lease_by_escrow("escrow-by-escrow-1")
+        fetched = await client.vm.get_lease_by_escrow("escrow-by-escrow-1")
         assert fetched["id"] == lease["id"]
 
     async def test_get_by_escrow_nonexistent_returns_404(self, client_and_queue):
         client, _ = client_and_queue
-        with pytest.raises(ProvisioningError) as exc_info:
-            await client.get_lease_by_escrow("escrow-missing")
+        with pytest.raises(ComputeProvisioningError) as exc_info:
+            await client.vm.get_lease_by_escrow("escrow-missing")
         assert exc_info.value.status_code == 404
 
 
@@ -240,11 +240,11 @@ class TestCheckLeasesEndpoint:
         )
         fulfillment_id = _create_active_fulfillment(lease["capacity_reservation_id"])
 
-        first = await client.check_leases()
+        first = await client.family.check_leases()
         assert first.get("checked", 0) >= 1
 
         _converge_fulfillment_teardown(fulfillment_id)
-        result = await client.check_leases()
+        result = await client.family.check_leases()
         assert result.get("released", 0) >= 1
 
         ledger = _container_module.resolved_capacity_ledger_service
@@ -261,7 +261,7 @@ class TestUpdateLease:
         lease = await _register(client, "escrow-patch-1")
         new_end = _future_dt(hours=4)
 
-        updated = await client.update_lease(lease["id"], lease_end_utc=new_end)
+        updated = await client.vm.update_lease(lease["id"], lease_end_utc=new_end)
 
         assert updated["id"] == lease["id"]
         assert updated["status"] == "active"  # state unchanged
@@ -279,7 +279,7 @@ class TestUpdateLease:
         client, _ = client_and_queue
         lease = await _register(client, "escrow-patch-release-handle")
 
-        updated = await client.update_lease(
+        updated = await client.vm.update_lease(
             lease["id"], release_job_id="fulfillment-corrected",
         )
 
@@ -294,7 +294,7 @@ class TestUpdateLease:
         client, _ = client_and_queue
         lease = await _register(client, "escrow-patch-2")
 
-        updated = await client.update_lease(
+        updated = await client.vm.update_lease(
             lease["id"], host_id="kvm2", vm_target="migrated-vm",
         )
 
@@ -321,7 +321,7 @@ class TestUpdateLease:
             generic_leases,
         )
 
-        updated = await client.update_lease(
+        updated = await client.vm.update_lease(
             lease["id"],
             host_id="kvm-generic",
             vm_target="generic-migrated-vm",
@@ -333,8 +333,8 @@ class TestUpdateLease:
 
     async def test_patch_nonexistent_lease_returns_404(self, client_and_queue):
         client, _ = client_and_queue
-        with pytest.raises(ProvisioningError) as exc_info:
-            await client.update_lease("no-such-lease", lease_end_utc=_future_dt())
+        with pytest.raises(ComputeProvisioningError) as exc_info:
+            await client.vm.update_lease("no-such-lease", lease_end_utc=_future_dt())
         assert exc_info.value.status_code == 404
 
     async def test_patch_backdated_lease_end_triggers_watchdog(self, client_and_queue):
@@ -345,8 +345,8 @@ class TestUpdateLease:
         lease = await _register(client, "escrow-patch-backdate")
         _create_active_fulfillment(lease["capacity_reservation_id"])
 
-        await client.update_lease(lease["id"], lease_end_utc=_past_dt())
-        result = await client.check_leases()
+        await client.vm.update_lease(lease["id"], lease_end_utc=_past_dt())
+        result = await client.family.check_leases()
 
         assert result.get("released", 0) + result.get("checked", 0) >= 1
         ledger = _container_module.resolved_capacity_ledger_service
@@ -373,8 +373,8 @@ class TestUpdateLease:
         lease = await _register(client, "escrow-release-job-id-on-api")
         _create_active_fulfillment(lease["capacity_reservation_id"])
 
-        await client.update_lease(lease["id"], lease_end_utc=_past_dt())
-        await client.check_leases()
+        await client.vm.update_lease(lease["id"], lease_end_utc=_past_dt())
+        await client.family.check_leases()
 
         ledger = _container_module.resolved_capacity_ledger_service
         reservation = ledger.get_reservation(lease["capacity_reservation_id"])
@@ -384,7 +384,7 @@ class TestUpdateLease:
                 "covers the releasing handle"
             )
 
-        published = await client.get_lease(lease["id"])
+        published = await client.vm.get_lease(lease["id"])
         assert published["status"] == "releasing", published
         assert published["release_job_id"] == reservation["release_job_id"], (
             "GET /api/v1/leases/{id} must publish the reservation's "
@@ -400,7 +400,7 @@ class TestReleaseOversight:
         client, _ = client_and_queue
         lease = await _register(client, "escrow-unmanaged-1")
 
-        unmanaged = await client.release_lease_oversight(
+        unmanaged = await client.vm.release_lease_oversight(
             lease["id"], reason="operator will manage manually",
         )
 
@@ -419,7 +419,7 @@ class TestReleaseOversight:
         lease = await _register(client, "escrow-unmanaged-event")
         _, version_before = ledger.events_after(0)
 
-        await client.release_lease_oversight(lease["id"], reason="manual ops")
+        await client.vm.release_lease_oversight(lease["id"], reason="manual ops")
 
         events, _ = ledger.events_after(version_before)
         kinds = [e["kind"] for e in events]
@@ -427,8 +427,8 @@ class TestReleaseOversight:
 
     async def test_release_oversight_nonexistent_returns_404(self, client_and_queue):
         client, _ = client_and_queue
-        with pytest.raises(ProvisioningError) as exc_info:
-            await client.release_lease_oversight("no-such-lease", reason="manual ops")
+        with pytest.raises(ComputeProvisioningError) as exc_info:
+            await client.vm.release_lease_oversight("no-such-lease", reason="manual ops")
         assert exc_info.value.status_code == 404
 
     async def test_release_oversight_releasing_returns_409(self, client_and_queue):
@@ -439,8 +439,8 @@ class TestReleaseOversight:
         # Manually transition to releasing (simulating watchdog having fired)
         ledger.begin_releasing(lease["capacity_reservation_id"], release_job_id="job-in-flight")
 
-        with pytest.raises(ProvisioningError) as exc_info:
-            await client.release_lease_oversight(lease["id"], reason="manual ops")
+        with pytest.raises(ComputeProvisioningError) as exc_info:
+            await client.vm.release_lease_oversight(lease["id"], reason="manual ops")
         assert exc_info.value.status_code == 409
 
 
@@ -458,7 +458,7 @@ class TestAdminLeaseRepair:
             failure_message="cleanup script missing",
         )
 
-        retried = await client.retry_lease_release(lease["id"], reason="operator retry")
+        retried = await client.vm.retry_lease_release(lease["id"], reason="operator retry")
 
         assert retried["status"] == "releasing"
         reservation = ledger.get_reservation(lease["capacity_reservation_id"])
@@ -469,18 +469,18 @@ class TestAdminLeaseRepair:
         client, _ = client_and_queue
         lease = await _register(client, "escrow-retry-active")
 
-        with pytest.raises(ProvisioningError) as exc_info:
-            await client.retry_lease_release(lease["id"], reason="operator retry")
+        with pytest.raises(ComputeProvisioningError) as exc_info:
+            await client.vm.retry_lease_release(lease["id"], reason="operator retry")
         assert exc_info.value.status_code == 409
 
     async def test_force_release_unmanaged_releases_capacity(self, client_and_queue):
         client, _ = client_and_queue
         lease = await _register(client, "escrow-force-unmanaged")
         ledger = _container_module.resolved_capacity_ledger_service
-        await client.release_lease_oversight(lease["id"], reason="manual ops")
+        await client.vm.release_lease_oversight(lease["id"], reason="manual ops")
         _, version_before = ledger.events_after(0)
 
-        released = await client.force_release_lease(
+        released = await client.vm.force_release_lease(
             lease["id"], reason="host inspected", evidence="VM absent",
         )
 
@@ -498,8 +498,8 @@ class TestAdminLeaseRepair:
         client, _ = client_and_queue
         reserved = _reserve("escrow-force-reserved")
 
-        with pytest.raises(ProvisioningError) as exc_info:
-            await client.force_release_lease(
+        with pytest.raises(ComputeProvisioningError) as exc_info:
+            await client.vm.force_release_lease(
                 reserved["capacity_reservation_id"], reason="not a lease yet",
             )
         assert exc_info.value.status_code == 409

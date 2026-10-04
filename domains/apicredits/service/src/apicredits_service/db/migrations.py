@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from market_identity import Identity, IdentityScheme
-from market_resource_pools.hints import (
+from market_resource_pools_contracts.hints import (
     ADVERTISABLE_MODES_POLICY_TAG,
     CAPACITY_BACKED,
     CAPACITY_BACKING_POLICY_TAG,

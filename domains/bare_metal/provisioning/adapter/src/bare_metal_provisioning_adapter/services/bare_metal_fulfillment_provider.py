@@ -15,7 +15,7 @@ from arkhai_bare_metal import (
     bare_metal_executor_ref,
     materialization_to_lease_create,
 )
-from compute_provisioning.contracts import ExecutorActionEnvelope
+from compute_provisioning_contracts import ExecutorActionEnvelope
 from market_fulfillment import (
     CredentialFetchFailedError,
     FulfillmentCreateFailedError,
@@ -29,8 +29,8 @@ from market_fulfillment import (
     ProvisionedResourceDescriptor,
     SettlementResource,
     SettlementResult,
-    VersionedEnvelope,
 )
+from market_core import VersionedEnvelope
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from bare_metal_provisioning_adapter.services.bare_metal_operations_service import (

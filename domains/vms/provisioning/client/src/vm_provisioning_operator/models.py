@@ -1,8 +1,8 @@
 """Typed request and response models for the Arkhai provisioning service REST API.
 
-These models are the direct VM operator HTTP contract. The host, job, and
-aggregate health and version models are compute provisioning's; callers import
-them from ``compute_provisioning``.
+These models are VM's own HTTP contract. The host, job, and aggregate health
+and version models are the compute family's, in
+``compute_provisioning_contracts``.
 
 Internal server-only types (``VmJobParams``, ``build_simple_params``,
 ``EvaluateJobRequest``, ``EvaluateJobResponse``) remain in the VM adapter and

@@ -49,7 +49,7 @@ class _EchoCodec:
         return AnsibleJobPlan(variables={"host_id": run.host.host_id}, limit=run.host.host_id)
 
     def interpret(self, run, host, output) -> AnsibleJobInterpretation:
-        from compute_provisioning.contracts import ResultEnvelope
+        from compute_provisioning_contracts import ResultEnvelope
 
         return AnsibleJobInterpretation(
             result=ResultEnvelope(

@@ -43,22 +43,22 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from compute_provisioning_service import container as _container_module
-from compute_provisioning import (
+from compute_provisioning_client import (
     ComputeProvisioningClient,
     ComputeProvisioningError,
-    FulfillmentRequestBody,
 )
+from compute_provisioning_contracts import FulfillmentRequestBody
 from compute_provisioning_service.main import app
 from .conftest import SERVICE_AUTHORITIES, STOREFRONT_SIGNER
 from market_fulfillment import (
     PhysicalSettlementRequest,
     SettlementRepository,
     SettlementResult,
-    VersionedEnvelope,
 )
-from market_resource_pools import PoolCreate, PoolUpdate
+from market_core import VersionedEnvelope
+from market_resource_pools_contracts import PoolCreate, PoolUpdate
 from market_site.router import make_capacity_router
-from compute_provisioning.hosts import HostCreate
+from compute_provisioning_contracts import HostCreate
 
 _PLAYBOOK_PATH = "playbooks/vm-operations.yaml"
 _PROVIDER_CONFIG = {"playbook_path": _PLAYBOOK_PATH, "extra_vars": {"region": "eu"}}
@@ -78,8 +78,8 @@ class FulfillmentApi:
     server accepts *those* bodies, and could then drift from the shipped client
     indefinitely while staying green — the failure `TESTING.md` names.
 
-    What remains here is argument shape and unwrapping, so the 26 call sites in
-    this file read as they did. Two methods still take the raw transport, and
+    What remains here is argument shape and unwrapping, so the call sites in
+    this file read as they did. The methods that still take the raw transport
     say why at their definitions.
     """
 
@@ -129,10 +129,17 @@ class FulfillmentApi:
             },
         )
 
-    async def get_job(self, job_id: str) -> dict:
-        resp = await self._http.get(f"/api/v1/jobs/{job_id}/contract")
-        assert resp.status_code == 200, resp.text
-        return resp.json()
+    @staticmethod
+    def dispatched_job(job_id: str) -> dict:
+        """The contract record of a job the provider dispatched.
+
+        The correlation it carries (``deal_ref``, ``idempotency_key``,
+        ``action_kind``) is the job authority's own state, which no route
+        serves; it is read from the engine the app composed, so it is the state
+        the app wrote.
+        """
+        engine = _container_module.resolved_job_service.engine
+        return engine.get_contract_job_record(job_id)
 
     async def status(self, fulfillment_id: str) -> httpx.Response:
         """Raw for the same reason as `begin_raw`: callers assert 404."""
@@ -318,7 +325,7 @@ class TestBeginPersistsPreparedCreateInput:
             record = SettlementRepository().get(db, capacity_reservation_id)
             job_id = record.provider_metadata["create_job_id"]
 
-        job = await fulfillment.get_job(job_id)
+        job = fulfillment.dispatched_job(job_id)
         assert job["deal_ref"] == {}
         assert job["idempotency_key"] == f"{capacity_reservation_id}:create"
         assert job["capacity_reservation_id"] == capacity_reservation_id
@@ -456,7 +463,7 @@ class TestTeardownPreparation:
         assert teardown_params["playbook_path"] == _PLAYBOOK_PATH
 
         # The job runs as soon as it is enqueued, against this registered host.
-        from compute_provisioning.hosts import HostCreate
+        from compute_provisioning_contracts import HostCreate
         from compute_provisioning_ansible import ssh_connection
 
         _container_module.resolved_host_service.register_host(HostCreate(
@@ -471,7 +478,7 @@ class TestTeardownPreparation:
         assert teardown_job_id
         assert teardown_job_id != provider_metadata["create_job_id"]
 
-        job = await fulfillment.get_job(teardown_job_id)
+        job = fulfillment.dispatched_job(teardown_job_id)
         assert job["deal_ref"] == {}
         assert job["idempotency_key"] == f"{capacity_reservation_id}:teardown"
         assert job["action_kind"] == "teardown"
@@ -687,7 +694,7 @@ class TestStatusAndResultQueries:
     ):
         # The create job runs to completion here, and it runs only against a
         # registered host record.
-        await client_and_queue[0].register_host(HostCreate(
+        await client_and_queue[0].family.register_host(HostCreate(
             host_id="kvm-fulfillment-1",
             connection=ssh_connection(ssh_host="10.0.0.1", ssh_user="root", key_path="/tmp/test-key"),
         ))

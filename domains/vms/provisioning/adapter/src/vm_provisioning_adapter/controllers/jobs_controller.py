@@ -21,10 +21,10 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi_utils.cbv import cbv
 
-from compute_provisioning.jobs import JobCredentialsResponse
+from compute_provisioning_contracts import JobCredentialsResponse
 
 from compute_provisioning_service import container as _container_module
-from compute_provisioning.jobs import (
+from compute_provisioning_contracts import (
     JobListResponse,
     JobLogsResponse,
     JobStatusResponse,

@@ -4,14 +4,14 @@ from types import SimpleNamespace
 
 import pytest
 from arkhai_bare_metal import BARE_METAL_OFFERING_MODE, NODE_GRANT_ACCESS_ACTION
-from compute_provisioning.contracts import ResultEnvelope
+from compute_provisioning_contracts import ResultEnvelope
 from market_fulfillment import (
     ProviderConfigInvalidError,
     ProviderOperationState,
     SettlementResource,
     SettlementResult,
-    VersionedEnvelope,
 )
+from market_core import VersionedEnvelope
 
 from bare_metal_provisioning_adapter.codec import BareMetalJobParams
 from bare_metal_provisioning_adapter.services.bare_metal_fulfillment_provider import (

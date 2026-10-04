@@ -22,7 +22,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, s
 from fastapi_utils.cbv import cbv
 
 from compute_provisioning_service import container as _container_module
-from compute_provisioning.hosts import (
+from compute_provisioning_contracts import (
     HostCreate,
     HostListResponse,
     HostResponse,
@@ -31,8 +31,8 @@ from compute_provisioning.hosts import (
 from compute_provisioning.hosts.service import HostAuthority, HostNotFoundError
 from compute_provisioning_ansible import parse_inventory_ini
 from vm_provisioning_operator.models import VmActionRequest
-from compute_provisioning.jobs import JobSubmitResponse
-from compute_provisioning_ansible.runner import ConnectivityResult
+from compute_provisioning_contracts import JobSubmitResponse
+from compute_provisioning_contracts import ConnectivityResult
 from vm_provisioning_adapter.services.host_operations_service import HostOperationsService
 
 router = APIRouter(prefix="/hosts", tags=["hosts"])

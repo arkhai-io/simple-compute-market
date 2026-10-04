@@ -33,11 +33,12 @@ from typing import Any
 
 from compute_provisioning.jobs.executor_mock import MockRule, MockRuleSet
 
+from compute_provisioning_contracts import ConnectivityResult
+
 from .runner import (
     AnsibleError,
     AnsibleResult,
     AnsibleRun,
-    ConnectivityResult,
     InventoryTarget,
     MaterializedInventory,
 )

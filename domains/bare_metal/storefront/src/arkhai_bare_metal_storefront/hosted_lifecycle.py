@@ -17,9 +17,12 @@ from arkhai_bare_metal import (
     bare_metal_digest,
     build_bare_metal_lease_ready_evidence,
 )
-from compute_provisioning import FulfillmentRequestBody, FulfillmentScheduleRequest
+from compute_provisioning_contracts import (
+    FulfillmentRequestBody,
+    FulfillmentScheduleRequest,
+)
 from market_core.schemas import SettlementObligation
-from market_fulfillment import VersionedEnvelope
+from market_core import VersionedEnvelope
 from market_hosted_settlement import hosted_projected_reason
 from market_identity import Identity
 from market_settlement_runtime import (

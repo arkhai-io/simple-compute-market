@@ -14,11 +14,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from .adapters import (
-    ExecutorAdapter,
-    ExecutorAdapterRegistry,
-    JobExecutorTable,
-)
+from .adapters import JobExecutorTable
 from .jobs.executor import JobExecutor
 from .app import ComputeProvisioningRouterMount
 from .release import ExecutorReleaseDispatcher, ExecutorReleasePort
@@ -27,15 +23,16 @@ from market_fulfillment import FulfillmentProvider, ProviderRegistry, provider_n
 
 @dataclass(frozen=True)
 class ExecutorAdapterContribution:
-    """One domain's executor adapter plus its declared lifecycle hooks."""
+    """What one offering mode contributes: its job executors and release hook.
 
-    adapter: ExecutorAdapter
-    action_kinds: frozenset[str]
+    ``job_executors`` maps each job action of the mode to what runs it. Work
+    reaches these executors only through fulfillment and the domain's own
+    operations; nothing submits an action to them from outside.
+    """
+
+    offering_mode: str
     release_executor: ExecutorReleasePort
-    # What runs each job action of this offering mode, keyed by action. Wider
-    # than ``action_kinds``, which names only what callers may submit through
-    # the compute contract; a job may run an action no contract call submits.
-    job_executors: Mapping[str, JobExecutor] = field(default_factory=dict)
+    job_executors: Mapping[str, JobExecutor]
 
 
 @dataclass(frozen=True)
@@ -52,30 +49,28 @@ class ExecutorAdapterBundle:
 
 @dataclass(frozen=True)
 class ComposedComputeAdapters:
-    executor_registry: ExecutorAdapterRegistry
     release_dispatcher: ExecutorReleaseDispatcher
     provider_registry: ProviderRegistry
     pool_config_handlers: Mapping[str, Any]
     router_mounts: tuple[ComputeProvisioningRouterMount, ...]
     readiness_checks: Mapping[str, Callable[[], Any]]
-    job_executors: JobExecutorTable | None = None
+    job_executors: JobExecutorTable
 
 
 def _validate_executor(bundle_name: str, contribution: ExecutorAdapterContribution) -> str:
-    adapter = contribution.adapter
-    offering_mode = str(getattr(adapter, "offering_mode", "") or "").strip()
+    offering_mode = str(contribution.offering_mode or "").strip()
     if not offering_mode:
         raise ValueError(f"adapter bundle {bundle_name!r} has an executor without offering_mode")
-    if not contribution.action_kinds:
+    if offering_mode != contribution.offering_mode:
         raise ValueError(
-            f"adapter bundle {bundle_name!r} executor {offering_mode!r} declares no action kinds"
+            f"adapter bundle {bundle_name!r} offering mode "
+            f"{contribution.offering_mode!r} is not canonical"
         )
-    for hook in ("validate_parameters", "submit"):
-        if not callable(getattr(adapter, hook, None)):
-            raise ValueError(
-                f"adapter bundle {bundle_name!r} executor {offering_mode!r} "
-                f"is missing required hook {hook!r}"
-            )
+    if not contribution.job_executors:
+        raise ValueError(
+            f"adapter bundle {bundle_name!r} executor {offering_mode!r} "
+            "contributes no job executors"
+        )
     if not callable(getattr(contribution.release_executor, "submit_release", None)):
         raise ValueError(
             f"adapter bundle {bundle_name!r} executor {offering_mode!r} "
@@ -190,23 +185,21 @@ def compose_adapter_bundles(
     bundles: tuple[ExecutorAdapterBundle, ...] | list[ExecutorAdapterBundle],
     *,
     host_requirement: Mapping[str, bool],
-    job_executors: JobExecutorTable | None = None,
+    job_executors: JobExecutorTable,
 ) -> ComposedComputeAdapters:
     """Compose bundles and reject ambiguous registrations before startup.
 
     ``host_requirement`` is the per-provider host need already handed to the
     site ledger and scheduler; it must match the registered providers exactly.
     ``job_executors`` is the table the job service was built with; every
-    bundle's job executors are registered into it under the same duplicate
-    refusal as contract actions, and it is frozen before composition returns.
+    bundle's job executors are registered into it, refusing a key registered
+    twice, and it is frozen before composition returns.
     """
 
     executor_owners: dict[str, str] = {}
-    action_owners: dict[tuple[str, str], str] = {}
     provider_owners: dict[str, str] = {}
     handler_owners: dict[str, str] = {}
     readiness_owners: dict[str, str] = {}
-    adapters: list[ExecutorAdapter] = []
     release_executors: dict[str, ExecutorReleasePort] = {}
     providers: dict[str, FulfillmentProvider] = {}
     pool_config_handlers: dict[str, Any] = {}
@@ -232,22 +225,7 @@ def compose_adapter_bundles(
                     f"bundles {previous!r} and {bundle_name!r}"
                 )
             executor_owners[offering_mode] = bundle_name
-            for action_kind in contribution.action_kinds:
-                key = (offering_mode, action_kind)
-                previous = action_owners.get(key)
-                if previous is not None:
-                    raise ValueError(
-                        f"duplicate executor/action {offering_mode!r}/{action_kind!r}: "
-                        f"bundles {previous!r} and {bundle_name!r}"
-                    )
-                action_owners[key] = bundle_name
-            adapters.append(contribution.adapter)
             release_executors[offering_mode] = contribution.release_executor
-            if contribution.job_executors and job_executors is None:
-                raise ValueError(
-                    f"adapter bundle {bundle_name!r} contributes job executors "
-                    "but composition was given no job executor table"
-                )
             for action, executor in contribution.job_executors.items():
                 try:
                     job_executors.register(offering_mode, action, executor)
@@ -307,11 +285,9 @@ def compose_adapter_bundles(
         routers.extend(bundle.router_mounts)
 
     _validate_host_requirement(providers, host_requirement)
-    if job_executors is not None:
-        job_executors.freeze()
+    job_executors.freeze()
 
     return ComposedComputeAdapters(
-        executor_registry=ExecutorAdapterRegistry(adapters),
         release_dispatcher=ExecutorReleaseDispatcher(release_executors),
         provider_registry=ProviderRegistry(providers),
         pool_config_handlers=pool_config_handlers,

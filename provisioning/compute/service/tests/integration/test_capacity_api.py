@@ -26,12 +26,13 @@ from market_site_client import (
 from arkhai_bare_metal.fixtures.publication_view import (
     validate_bare_metal_publication_view,
 )
-from compute_provisioning import PoolCreate
-from market_resource_pools import read_site_declarations, resolve_pool_declarations
+from market_resource_pools_contracts import PoolCreate
+from market_resource_pools import read_site_declarations
+from market_resource_pools_contracts import resolve_pool_declarations
 from market_site_client.fixtures.resource_pools import (
     validate_resource_pool_projection,
 )
-from compute_provisioning.hosts import HostCreate
+from compute_provisioning_contracts import HostCreate
 
 from .conftest import SERVICE_AUTHORITIES, STOREFRONT_SIGNER
 
@@ -122,7 +123,7 @@ class CapacityApi:
 
 async def _create_pool(provisioning_client, pool_id: str) -> None:
     """A declaration's pool must exist; create it through the operator client."""
-    await provisioning_client.create_pool(PoolCreate(
+    await provisioning_client.pools.create_pool(PoolCreate(
         id=pool_id, label=pool_id, provider="ansible",
         policy_tags={"advertisable_modes": [], "capacity_backing": "backed"},
         provider_config={"playbook_path": "playbooks/vm-operations.yaml"},
@@ -364,7 +365,7 @@ async def test_site_resource_pools_projection_surfaces_pool_metadata(
     than a direct DB insert on the write side or a raw HTTP call on the
     read side:
 
-    ProvisioningClient.create_pool(default_vm_* in provider_config)
+    ResourcePoolClient.create_pool(default_vm_* in provider_config)
         -> real /api/v1/pools API -> real AnsiblePoolConfigHandler -> DB
         -> resource-pool projection
         -> SiteCapacityClient.resource_pool_projection()
@@ -374,9 +375,9 @@ async def test_site_resource_pools_projection_surfaces_pool_metadata(
     reachable by writing directly to the database or reading an HTTP
     route by hand.
     """
-    from compute_provisioning import PoolCreate
+    from market_resource_pools_contracts import PoolCreate
     provisioning_client, _ = client_and_queue
-    await provisioning_client.create_pool(
+    await provisioning_client.pools.create_pool(
         PoolCreate(
             id="hetzner-eu",
             label="Hetzner EU",
@@ -431,18 +432,18 @@ async def test_site_resource_pools_projection_surfaces_region_sla_pricing_policy
     more keys inside the already-projected `policy_tags` dict (see the
     pool-metadata test above). Proves the full path:
 
-    ProvisioningClient.create_pool(policy_tags={region, sla, pricing})
+    ResourcePoolClient.create_pool(policy_tags={region, sla, pricing})
         -> real /api/v1/pools API -> real ResourcePoolService -> DB
         -> resource-pool projection
         -> SiteCapacityClient.resource_pool_projection()
     """
-    from compute_provisioning import PoolCreate
+    from market_resource_pools_contracts import PoolCreate
     from market_site_client import SiteCapacityClient
     from compute_provisioning_service.db.models import Host
     from compute_provisioning_service.container import container
 
     provisioning_client, _ = client_and_queue
-    await provisioning_client.create_pool(
+    await provisioning_client.pools.create_pool(
         PoolCreate(
             id="hetzner-eu",
             label="Hetzner EU",
@@ -494,7 +495,7 @@ async def test_site_resource_pools_projection_carries_listing_shapes_verbatim(
 ):
     """A pool's `listing_shapes` hint reaches the storefront exactly as stored:
     policy tags are projected verbatim, and the reading domain interprets them."""
-    from compute_provisioning import PoolCreate
+    from market_resource_pools_contracts import PoolCreate
 
     shapes = {
         "vm": [
@@ -504,7 +505,7 @@ async def test_site_resource_pools_projection_carries_listing_shapes_verbatim(
         ],
     }
     provisioning_client, _ = client_and_queue
-    await provisioning_client.create_pool(
+    await provisioning_client.pools.create_pool(
         PoolCreate(
             id="shaped",
             label="Shaped",
@@ -542,7 +543,7 @@ async def test_site_resource_pools_projection_declares_every_pool(
     of the projection, which the consumer cannot verify on its own.
     """
     provisioning_client, _ = client_and_queue
-    await provisioning_client.create_pool(PoolCreate(
+    await provisioning_client.pools.create_pool(PoolCreate(
         id="bare-metal-west",
         label="Bare metal west",
         provider="ansible",
@@ -585,7 +586,7 @@ async def test_the_projection_carries_both_declarations_as_storefronts_read_them
     authority behind it may.
     """
     provisioning_client, _ = client_and_queue
-    await provisioning_client.create_pool(PoolCreate(
+    await provisioning_client.pools.create_pool(PoolCreate(
         id="vm-backed",
         label="VM backed",
         provider="ansible",
@@ -596,7 +597,7 @@ async def test_the_projection_carries_both_declarations_as_storefronts_read_them
         },
         provider_config={"playbook_path": "playbooks/vm-operations.yaml"},
     ))
-    await provisioning_client.create_pool(PoolCreate(
+    await provisioning_client.pools.create_pool(PoolCreate(
         id="broker-unbacked",
         label="Broker",
         provider="ansible",
@@ -646,7 +647,7 @@ async def test_a_bare_metal_view_reaches_the_canonical_client_as_storefronts_rea
     and a declaration it disabled still carries its enablement beside the view.
     """
     provisioning_client, _ = client_and_queue
-    await provisioning_client.create_pool(PoolCreate(
+    await provisioning_client.pools.create_pool(PoolCreate(
         id="whole-host",
         label="Whole host",
         provider="bare_metal.ansible",
@@ -863,16 +864,16 @@ async def test_the_resource_pool_projection_publishes_declarations_not_hosts(
 ):
     """An INI host gains a derived declaration and is projected from it, with
     live availability; a host registered with no declaration is not projected
-    at all. Written through ProvisioningClient, read through
+    at all. Written through the canonical clients, read through
     SiteCapacityClient.resource_pool_projection."""
     provisioning_client, _ = client_and_queue
-    await provisioning_client.import_hosts_from_text(
+    await provisioning_client.host_import.import_hosts_from_text(
         "[kvm_hosts]\n"
         "kvm1  ansible_host=10.0.0.1  ansible_user=ubuntu  "
         "ansible_ssh_private_key_file=/keys/id  gpus=4  gpu_model=H200\n",
         ssh_key_type="path",
     )
-    await provisioning_client.register_host(HostCreate(
+    await provisioning_client.family.register_host(HostCreate(
         host_id="kvm2", connection=ssh_connection(ssh_host="10.0.0.2", ssh_user="ubuntu", key_path="/keys/id"), gpu_count=8,
     ))
     reserved = await capacity.reserve(
@@ -975,7 +976,7 @@ async def test_a_declaration_naming_no_host_reaches_the_resource_pool_projection
     connection identity. Registered and read through the canonical clients."""
     provisioning_client, _ = client_and_queue
     # The host record carries a GPU model; the declaration naming it does not.
-    await provisioning_client.register_host(HostCreate(
+    await provisioning_client.family.register_host(HostCreate(
         host_id="kvm1", connection=ssh_connection(ssh_host="10.0.0.1", ssh_user="ubuntu", public_host="203.0.113.10", key_path="/keys/id"), gpu_model="H100",
     ))
     await capacity.register(

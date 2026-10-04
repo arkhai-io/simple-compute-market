@@ -31,8 +31,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from compute_provisioning import ComputeProvisioningTimeoutError
-from market_fulfillment import VersionedEnvelope
+from compute_provisioning_client import ComputeProvisioningTimeoutError
+from market_core import VersionedEnvelope
 from market_storefront.services import fulfillment_service as fs
 from market_storefront.services import vm_fulfillment_service as vfs
 from tests.fulfillment_fixtures import (
@@ -318,7 +318,7 @@ class TestDoProvision:
             raising=False,
         )
 
-        from compute_provisioning import ComputeProvisioningJobError
+        from compute_provisioning_client import ComputeProvisioningJobError
 
         with pytest.raises(ComputeProvisioningJobError, match="provisioning failed"):
             await fs._do_provision(

@@ -41,8 +41,9 @@ from market_settlement_runtime import derive_obligation_ref
 from market_site_client import SiteCapacityAdminClient
 from registry_client import SyncRegistryClient
 from storefront_client import SyncStorefrontClient
-from compute_provisioning.hosts import ConnectionSubmission, HostCreate
-from vm_provisioning_operator import SyncProvisioningClient
+from compute_provisioning_contracts import ConnectionSubmission, HostCreate
+from compute_provisioning_client import SyncComputeProvisioningClient
+from e2e_harness.provisioning_test_client import ProvisioningTestClient
 
 from .authority import released_authority_client
 from .driver import (
@@ -406,9 +407,10 @@ class NetworkMarketplacePort:
         self._resource_id = f"{_RESOURCE_ID_PREFIX}-{uuid.uuid4().hex[:12]}"
         self._site_id = _capacity_site_id(self.storefront_config)
         self._host_id = self._resource_id
-        with SyncProvisioningClient(
+        with SyncComputeProvisioningClient(
             self.provisioning_url,
             self._admin_signer,
+            "admin",
             self._provisioning_trust,
         ) as provisioning_admin:
             provisioning_admin.register_host(
@@ -671,35 +673,27 @@ class NetworkMarketplacePort:
         )
 
     def _keep_refund_fulfillment_unresolved(self) -> None:
-        with SyncProvisioningClient(
+        with ProvisioningTestClient(
             self.provisioning_url,
-            self._admin_signer,
-            self._provisioning_trust,
+            signer=self._admin_signer,
+            expected_authorities=self._provisioning_trust,
         ) as client:
-            client._post(
-                "/test/mock-rules",
-                {
-                    "rule_id": "hosted-stripe-refund-unresolved",
-                    "match": {"vm_action": "create"},
-                    # Holding the job before its result keeps fulfillment
-                    # unresolved, and the release runs once funding is observed.
-                    # A profile that funds inside materialization never gets
-                    # there: the storefront polls this job within that same
-                    # request, so the call that would release it cannot run
-                    # until the call it is blocking returns. Resuming a held
-                    # job yields this same failure, so failing at once reaches
-                    # the identical state without the deadlock.
-                    "pause_before_result": not self._funds_within_materialization(),
-                    "fail_with": "protected refund keeps fulfillment unresolved",
-                },
+            client.add_mock_rule(
+                rule_id="hosted-stripe-refund-unresolved",
+                match={"vm_action": "create"},
+                # Holding the job before its result keeps fulfillment
+                # unresolved, and the release runs once funding is observed.
+                # A profile that funds inside materialization never gets
+                # there: the storefront polls this job within that same
+                # request, so the call that would release it cannot run
+                # until the call it is blocking returns. Resuming a held
+                # job yields this same failure, so failing at once reaches
+                # the identical state without the deadlock.
+                pause_before_result=not self._funds_within_materialization(),
+                fail_with="protected refund keeps fulfillment unresolved",
             )
-            evaluation = client._post(
-                "/test/evaluate-job",
-                {
-                    "host": self._host_id,
-                    "vm_target": "hosted-refund-unresolved",
-                    "vm_action": "create",
-                },
+            evaluation = client.evaluate_job(
+                self._host_id, vm_target="hosted-refund-unresolved", vm_action="create"
             )
         if evaluation.get("rule_matched") != "hosted-stripe-refund-unresolved":
             raise AssertionError("refund fulfillment failure is not active")
@@ -946,15 +940,12 @@ class NetworkMarketplacePort:
         # there is nothing paused to resume and asking would refuse.
         if self._funds_within_materialization():
             return
-        with SyncProvisioningClient(
+        with ProvisioningTestClient(
             self.provisioning_url,
-            self._admin_signer,
-            self._provisioning_trust,
+            signer=self._admin_signer,
+            expected_authorities=self._provisioning_trust,
         ) as client:
-            client._post(
-                "/test/mock-rules/hosted-stripe-refund-unresolved/resume",
-                {},
-            )
+            client.resume_rule("hosted-stripe-refund-unresolved")
 
     def complete_vm_fulfillment(self, settlement_ref: str) -> FulfillmentSnapshot:
         status = self._buyer_status(settlement_ref)

@@ -6,7 +6,7 @@ Coverage (per Architecture.md — Integration Tests jurisdiction):
   - Background job loop picks up the job (no sleeps — asyncio.Event seam)
   - AnsibleService.start_playbook called with correct host and action
   - Job transitions to succeeded in the DB
-  - ProvisioningClient.create_vm + poll_until_complete round-trips correctly
+  - ProvisioningClients.create_vm + poll_until_complete round-trips correctly
   - Client method signatures match the API contract end-to-end
 
 What is NOT covered here (unit test jurisdiction):
@@ -18,13 +18,14 @@ What is NOT covered here (unit test jurisdiction):
 from __future__ import annotations
 from compute_provisioning_ansible import ssh_connection
 
+from .conftest import ProvisioningClients
+from compute_provisioning_client import ComputeProvisioningError, ComputeProvisioningJobError
 import asyncio
 
 import pytest
 
-from vm_provisioning_operator import ProvisioningError, ProvisioningJobError
 from vm_provisioning_operator.models import CreateVmRequest
-from compute_provisioning.hosts import HostCreate
+from compute_provisioning_contracts import HostCreate
 from compute_provisioning_service import container as _container_module
 from compute_provisioning.jobs.queue import AsyncJobQueue
 
@@ -81,15 +82,15 @@ class TestHttpValidation:
 
     async def test_get_job_returns_404_for_unknown_id(self, client_and_queue):
         client, _ = client_and_queue
-        with pytest.raises(ProvisioningError) as exc_info:
-            await client.get_job("nonexistent-job-id")
+        with pytest.raises(ComputeProvisioningError) as exc_info:
+            await client.family.get_job("nonexistent-job-id")
         assert exc_info.value.status_code == 404
 
 
 class TestCreateVmViaClient:
-    """Round-trip tests using ProvisioningClient — verifies client ↔ API contract.
+    """Round-trip tests using ProvisioningClients — verifies client ↔ API contract.
 
-    All HTTP calls go through ProvisioningClient methods.  No route strings
+    All HTTP calls go through ProvisioningClients methods.  No route strings
     appear in test code.  The ``on_job_started`` seam synchronises tests
     against the background job loop without any sleeps.
     """
@@ -99,7 +100,7 @@ class TestCreateVmViaClient:
         # A job runs only against a registered host record, which is also
         # where the tenant-facing address in its result comes from.
         client, _ = client_and_queue
-        await client.register_host(HostCreate(
+        await client.family.register_host(HostCreate(
             host_id=HOST,
             connection=ssh_connection(ssh_host="10.0.0.1", ssh_user="root", key_path="/tmp/test-key"),
         ))
@@ -108,7 +109,7 @@ class TestCreateVmViaClient:
         client, job_queue = client_and_queue
         dispatched = _make_event_seam(job_queue)
 
-        submit = await client.create_vm(HOST, CreateVmRequest(vm_target=VM_NAME, vm_vcpus=2))
+        submit = await client.vm.create_vm(HOST, CreateVmRequest(vm_target=VM_NAME, vm_vcpus=2))
 
         assert submit.status == "queued"
         assert len(submit.job_id) > 0
@@ -119,10 +120,10 @@ class TestCreateVmViaClient:
         client, job_queue = client_and_queue
         dispatched = _make_event_seam(job_queue)
 
-        submit = await client.create_vm(HOST, CreateVmRequest(vm_target=VM_NAME))
+        submit = await client.vm.create_vm(HOST, CreateVmRequest(vm_target=VM_NAME))
         await asyncio.wait_for(dispatched.wait(), timeout=5.0)
 
-        final = await client.poll_until_complete(submit.job_id, timeout=5.0, poll_interval=0.05)
+        final = await client.family.poll_until_complete(submit.job_id, timeout=5.0, poll_interval=0.05)
 
         assert final.status == "succeeded"
         assert final.result is not None
@@ -131,9 +132,9 @@ class TestCreateVmViaClient:
         client, job_queue = client_and_queue
         dispatched = _make_event_seam(job_queue)
 
-        submit = await client.create_vm(HOST, CreateVmRequest(vm_target=VM_NAME))
+        submit = await client.vm.create_vm(HOST, CreateVmRequest(vm_target=VM_NAME))
         await asyncio.wait_for(dispatched.wait(), timeout=5.0)
-        final = await client.poll_until_complete(submit.job_id, timeout=5.0, poll_interval=0.05)
+        final = await client.family.poll_until_complete(submit.job_id, timeout=5.0, poll_interval=0.05)
 
         assert final.result.offering_mode == "vm"
         assert final.result.result_kind == "vm_create"
@@ -147,7 +148,7 @@ class TestCreateVmViaClient:
         client, job_queue = client_and_queue
         dispatched = _make_event_seam(job_queue)
 
-        submit = await client.create_vm(
+        submit = await client.vm.create_vm(
             HOST, CreateVmRequest(vm_target=VM_NAME, vm_ram=4096, vm_vcpus=4)
         )
         await asyncio.wait_for(dispatched.wait(), timeout=5.0)
@@ -155,7 +156,7 @@ class TestCreateVmViaClient:
         # dispatch seam fires when the job *starts*; a sleep here was racing
         # the playbook call it then asserts on, and `TESTING.md` prohibits
         # sleeps as background synchronisation for exactly that reason.
-        await client.poll_until_complete(submit.job_id, timeout=5.0, poll_interval=0.05)
+        await client.family.poll_until_complete(submit.job_id, timeout=5.0, poll_interval=0.05)
 
         fake_ansible.start_playbook.assert_called_once()
         call_kwargs = fake_ansible.start_playbook.call_args
@@ -174,7 +175,7 @@ class TestCreateVmViaClient:
         client, job_queue = client_and_queue
         dispatched = _make_event_seam(job_queue)
 
-        submit = await client.create_vm(
+        submit = await client.vm.create_vm(
             HOST,
             CreateVmRequest(
                 vm_target=VM_NAME,
@@ -183,7 +184,7 @@ class TestCreateVmViaClient:
             ),
         )
         await asyncio.wait_for(dispatched.wait(), timeout=5.0)
-        final = await client.poll_until_complete(
+        final = await client.family.poll_until_complete(
             submit.job_id, timeout=5.0, poll_interval=0.05
         )
 
@@ -201,7 +202,7 @@ class TestCreateVmViaClient:
         client, job_queue = client_and_queue
         dispatched = _make_event_seam(job_queue)
 
-        submit = await client.create_vm(
+        submit = await client.vm.create_vm(
             HOST,
             CreateVmRequest(
                 vm_target=VM_NAME,
@@ -210,7 +211,7 @@ class TestCreateVmViaClient:
             ),
         )
         await asyncio.wait_for(dispatched.wait(), timeout=5.0)
-        final = await client.poll_until_complete(
+        final = await client.family.poll_until_complete(
             submit.job_id, timeout=5.0, poll_interval=0.05
         )
 
@@ -225,11 +226,11 @@ class TestCreateVmViaClient:
         client, job_queue = client_and_queue
         dispatched = _make_event_seam(job_queue)
 
-        submit = await client.create_vm(HOST, CreateVmRequest(vm_target=VM_NAME))
+        submit = await client.vm.create_vm(HOST, CreateVmRequest(vm_target=VM_NAME))
         await asyncio.wait_for(dispatched.wait(), timeout=5.0)
-        await client.poll_until_complete(submit.job_id, timeout=5.0, poll_interval=0.05)
+        await client.family.poll_until_complete(submit.job_id, timeout=5.0, poll_interval=0.05)
 
-        creds = await client.get_job_credentials(submit.job_id)
+        creds = await client.family.get_job_credentials(submit.job_id)
         roles = {c.credential_kind for c in creds.credentials}
         assert roles == {"root", "tenant"}
 
@@ -238,7 +239,7 @@ class TestCreateVmViaClient:
         client, job_queue = client_and_queue
         dispatched = _make_event_seam(job_queue)
 
-        submit = await client.create_vm(HOST, CreateVmRequest(
+        submit = await client.vm.create_vm(HOST, CreateVmRequest(
             vm_target=VM_NAME,
             vm_ram=4096,
             vm_vcpus=4,
@@ -272,13 +273,13 @@ class TestDispatchRequiresARegisteredHost:
         client, job_queue = client_and_queue
         dispatched = _make_event_seam(job_queue)
 
-        submit = await client.create_vm(
+        submit = await client.vm.create_vm(
             "unregistered-kvm", CreateVmRequest(vm_target=VM_NAME)
         )
         await asyncio.wait_for(dispatched.wait(), timeout=5.0)
 
-        with pytest.raises(ProvisioningJobError, match="'unregistered-kvm' is not registered"):
-            await client.poll_until_complete(
+        with pytest.raises(ComputeProvisioningJobError, match="'unregistered-kvm' is not registered"):
+            await client.family.poll_until_complete(
                 submit.job_id, timeout=5.0, poll_interval=0.05
             )
         fake_ansible.start_playbook.assert_not_called()
@@ -288,17 +289,17 @@ class TestDispatchRequiresARegisteredHost:
         self, client_and_queue, fake_ansible
     ):
         client, job_queue = client_and_queue
-        await client.register_host(HostCreate(
+        await client.family.register_host(HostCreate(
             host_id="registered-kvm",
             connection=ssh_connection(ssh_host="192.0.2.10", ssh_user="root", key_path="/tmp/test-key"),
         ))
         dispatched = _make_event_seam(job_queue)
 
-        submit = await client.create_vm(
+        submit = await client.vm.create_vm(
             "registered-kvm", CreateVmRequest(vm_target=VM_NAME)
         )
         await asyncio.wait_for(dispatched.wait(), timeout=5.0)
-        final = await client.poll_until_complete(
+        final = await client.family.poll_until_complete(
             submit.job_id, timeout=5.0, poll_interval=0.05
         )
 

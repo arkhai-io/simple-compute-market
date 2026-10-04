@@ -19,7 +19,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .db import ProvisionedResource, SchedulingCursor, SettlementRecord, SettlementRecordState
-from .envelopes import VersionedEnvelope
+from market_core import VersionedEnvelope
 from .ids import new_fulfillment_id
 from .provider import FulfillmentConflictError
 from .recovery_diagnostics import RecoveryDiagnostics, RecoveryStateDiagnostics

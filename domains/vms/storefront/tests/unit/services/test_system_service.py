@@ -261,7 +261,9 @@ class TestGetHealthProvisioningContractPin:
     """
 
     async def test_reports_the_major_this_storefront_speaks(self, db):
-        from compute_provisioning import COMPUTE_PROVISIONING_CONTRACT_VERSION
+        from compute_provisioning_contracts import (
+            COMPUTE_PROVISIONING_CONTRACT_VERSION,
+        )
 
         svc = _make_service(db)
         result = await svc.get_health(include_registry=True)
@@ -273,7 +275,9 @@ class TestGetHealthProvisioningContractPin:
 
     async def test_survives_the_response_model(self, db):
         """Constructing the model is the assertion the route performs."""
-        from compute_provisioning import COMPUTE_PROVISIONING_CONTRACT_VERSION
+        from compute_provisioning_contracts import (
+            COMPUTE_PROVISIONING_CONTRACT_VERSION,
+        )
         from core_storefront.models.system_models import HealthResponse
 
         svc = _make_service(db)

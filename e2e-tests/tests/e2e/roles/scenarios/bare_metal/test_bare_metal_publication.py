@@ -31,7 +31,7 @@ import pytest
 from arkhai_bare_metal import derive_bare_metal_shape
 from market_pool_overrides import SyncPoolOverrideClient, pool_override_statuses
 from registry_client.query import compile_resource_query
-from vm_provisioning_operator import PoolCreate, PoolUpdate
+from market_resource_pools_contracts import PoolCreate, PoolUpdate
 
 from tests.e2e.roles.helpers.domain_deal import require_state
 from tests.e2e.roles.scenarios.bare_metal.conftest import lane_setting

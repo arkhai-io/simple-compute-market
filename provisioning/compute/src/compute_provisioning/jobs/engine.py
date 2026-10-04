@@ -33,12 +33,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from compute_provisioning.adapters import JobExecutorResolver, UnsupportedExecutorActionError
-from compute_provisioning.contracts import CredentialEnvelope, ExecutorActionEnvelope
+from compute_provisioning_contracts import CredentialEnvelope, ExecutorActionEnvelope
 from compute_provisioning.hosts.execution import ExecutionHost
 
 from .db import TERMINAL_JOB_STATUSES, JobCredential, JobRecord, JobStatus
 from .executor import JobRetryPolicy, JobRun, JobSuccess
-from .models import (
+from compute_provisioning_contracts import (
     JobCredentialsResponse,
     JobListResponse,
     JobLogsResponse,

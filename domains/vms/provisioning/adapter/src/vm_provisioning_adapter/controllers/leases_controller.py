@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi_utils.cbv import cbv
 
 from compute_provisioning_service import container as _container_module
-from compute_provisioning import lease_state_for_reservation_state
+from compute_provisioning_contracts import lease_state_for_reservation_state
 from market_site.ledger import parse_utc as _parse_utc
 from vm_provisioning_operator.models import (
     LeaseCreate,

@@ -10,7 +10,7 @@ from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from compute_provisioning.client import (
+from compute_provisioning_contracts import (
     IDENTITY_IDENTIFIER_HEADER,
     IDENTITY_SCHEME_HEADER,
     REQUEST_ID_HEADER,
@@ -19,7 +19,6 @@ from compute_provisioning.client import (
     SIGNATURE_VERSION_HEADER,
     TIMESTAMP_HEADER,
     ProvisioningRouteTable,
-    canonical_provisioning_request_body,
 )
 from fastapi import Request, status
 from fastapi.responses import JSONResponse, Response
@@ -44,6 +43,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from compute_provisioning_service.db.models import ProvisioningReplayReservation
 from compute_provisioning_service.identity import ProvisioningIdentityContext
+from compute_provisioning_service.route_table import canonical_request_body
 
 logger = logging.getLogger(__name__)
 
@@ -472,7 +472,7 @@ async def _request_body(request: Request) -> tuple[Any, str | None]:
         values = request.query_params.getlist(key)
         query[key] = values[0] if len(values) == 1 else values
     try:
-        return canonical_provisioning_request_body(
+        return canonical_request_body(
             request.method,
             request.url.path,
             body,

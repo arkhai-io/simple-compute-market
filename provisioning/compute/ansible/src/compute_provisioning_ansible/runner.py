@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from compute_provisioning.hosts import ExecutionHost
-from pydantic import BaseModel, Field
+from compute_provisioning_contracts import ConnectivityResult
 
 from .connection import PRIVATE_KEY, SSH_CONNECTION_KIND, SshConnectionCodec
 
@@ -196,18 +196,6 @@ def inventory_target(host: ExecutionHost) -> InventoryTarget:
         ssh_user=ssh.ssh_user,
         ssh_key_type=key_type,
         ssh_key_value=key_value,
-    )
-
-
-class ConnectivityResult(BaseModel):
-    """Result of running ``ansible -m ping`` against a single inventory host."""
-
-    host: str = Field(description="Host alias that was tested.")
-    reachable: bool = Field(
-        description="True if Ansible could authenticate and execute on the host."
-    )
-    detail: str = Field(
-        description="Ansible stdout on success, or the error message on failure."
     )
 
 
@@ -586,7 +574,6 @@ __all__ = [
     "AnsibleResult",
     "AnsibleRun",
     "AnsibleRunner",
-    "ConnectivityResult",
     "InventoryTarget",
     "GENERIC_SECRET_FIELDS",
     "MaterializedInventory",

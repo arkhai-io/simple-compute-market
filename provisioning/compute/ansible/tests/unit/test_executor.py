@@ -18,7 +18,7 @@ from unittest.mock import MagicMock
 
 import pytest
 import yaml
-from compute_provisioning.contracts import CredentialEnvelope, ResultEnvelope
+from compute_provisioning_contracts import CredentialEnvelope, ResultEnvelope
 from compute_provisioning.hosts import ConnectionEnvelope, ExecutionHost, ProtectedValue
 from compute_provisioning.jobs import JobFailure, JobRun, JobSuccess
 from cryptography.fernet import Fernet

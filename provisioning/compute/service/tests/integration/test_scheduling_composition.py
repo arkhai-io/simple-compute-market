@@ -19,7 +19,7 @@ from sqlalchemy.pool import StaticPool
 from compute_provisioning_service.container import Container
 from compute_provisioning_service.db.models import Base
 from market_fulfillment import FulfillmentBase, PhysicalSettlementRequest
-from market_resource_pools import PoolCreate
+from market_resource_pools_contracts import PoolCreate
 from market_resource_pools.db import Base as PoolsBase
 from market_site.db import Base as SiteBase
 

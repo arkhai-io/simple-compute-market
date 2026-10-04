@@ -2,7 +2,7 @@
 
 This client is **test infrastructure only** — it targets the ``/test/*``
 endpoints that are only mounted when ``ACTIVE_PROFILES`` includes ``mock``.
-It is intentionally separate from the canonical ``SyncProvisioningClient``
+It is intentionally separate from the canonical ``SyncComputeProvisioningClient``
 because the test controller is not part of the provisioning service's
 public API contract.
 
@@ -40,7 +40,7 @@ from typing import Any, Optional
 
 import httpx
 from arkhai_bare_metal import BARE_METAL_PROVISIONING_ROUTES
-from compute_provisioning import (
+from compute_provisioning_contracts import (
     assemble_provisioning_route_table,
     canonical_provisioning_request_body,
     resolve_provisioning_route_contract,

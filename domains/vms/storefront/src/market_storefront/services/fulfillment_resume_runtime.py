@@ -17,13 +17,16 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from compute_provisioning import FulfillmentRequestBody, FulfillmentScheduleRequest
+from compute_provisioning_contracts import (
+    FulfillmentRequestBody,
+    FulfillmentScheduleRequest,
+)
 from market_fulfillment import (
     FULFILLMENT_RESULT_KIND,
     FULFILLMENT_RESULT_SCHEMA_VERSION,
     FulfillmentResultPayload,
-    VersionedEnvelope,
 )
+from market_core import VersionedEnvelope
 
 from market_storefront.services.capacity_client import (
     build_capacity_client,

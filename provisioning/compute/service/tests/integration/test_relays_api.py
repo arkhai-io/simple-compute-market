@@ -17,13 +17,12 @@ from __future__ import annotations
 import pytest
 from httpx import ASGITransport
 
-from compute_provisioning import (
+from compute_provisioning_client import (
     ComputeProvisioningClient,
     ComputeProvisioningError,
-    RelayCreate,
-    RelayTokenRotate,
-    RelayUpdate,
 )
+from vm_provisioning_operator import VmOperatorClient
+from vm_provisioning_operator.relays import RelayCreate, RelayTokenRotate, RelayUpdate
 
 from compute_provisioning_service.main import app
 from .conftest import SERVICE_AUTHORITIES, STOREFRONT_SIGNER
@@ -58,7 +57,7 @@ async def relays(client_and_queue):
     """A client over the real app. `client_and_queue` builds the application
     and its container; this borrows that setup rather than rebuilding it."""
     async with _client(ASGITransport(app=app)) as client:
-        yield client
+        yield VmOperatorClient(client)
 
 
 class TestRelayAdministrationOverTheApi:

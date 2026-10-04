@@ -32,7 +32,7 @@ from fastapi_utils.cbv import cbv
 
 from compute_provisioning_service import container as _container_module
 from compute_provisioning_ansible import AnsibleReadinessResponse
-from compute_provisioning.system_models import HealthResponse, VersionResponse
+from compute_provisioning_contracts import HealthResponse, VersionResponse
 from vm_provisioning_adapter.services.system_service import SystemService
 
 _health_router = APIRouter(tags=["system"])

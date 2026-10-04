@@ -3,6 +3,7 @@ read/reserve/commit and operator resource registration/update.
 """
 
 from market_site_client.client import (  # noqa: F401
+    CAPACITY_DEFINITION_ROUTE_CONTRACTS,
     CAPACITY_ROUTE_CONTRACTS,
     CapacityRouteContract,
     SiteCapacityAdminClient,
@@ -12,4 +13,10 @@ from market_site_client.client import (  # noqa: F401
     SiteCapacityClientError,
     resolve_capacity_route,
 )
-from market_site_client.models import ResourceRegistration  # noqa: F401
+from market_site_client.models import (  # noqa: F401
+    CapacityDefinitionProblem,
+    CapacityDefinitionsDiff,
+    CapacityDefinitionsImportRequest,
+    CapacityDefinitionsImportResponse,
+    ResourceRegistration,
+)

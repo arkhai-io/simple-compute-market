@@ -24,10 +24,10 @@ from market_fulfillment import (
     SettlementRepository,
     SettlementRequirement,
     SettlementResource,
-    VersionedEnvelope,
 )
+from market_core import VersionedEnvelope
 from market_fulfillment.db import Base
-from market_fulfillment.envelopes import envelope
+from market_core import envelope
 from market_fulfillment.settlement_repository import begin_sqlite_write_transaction
 
 from compute_provisioning_service.services.fulfillment_convergence import (

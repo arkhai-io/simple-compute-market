@@ -30,7 +30,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from .hints import (
+from market_resource_pools_contracts.hints import (
     ADVERTISABLE_MODES_POLICY_TAG,
     CAPACITY_BACKED,
     CAPACITY_BACKING_POLICY_TAG,

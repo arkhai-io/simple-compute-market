@@ -19,7 +19,7 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
-from compute_provisioning.contracts import ProvisioningErrorEnvelope
+from compute_provisioning_contracts import ProvisioningErrorEnvelope
 from compute_provisioning.jobs import JobFailure, JobOutcome, JobRun, JobSuccess
 
 from .codec import AnsibleJobCodec, matches_any, write_extra_vars

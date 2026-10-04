@@ -4,11 +4,12 @@ build-backend = "hatchling.build"
 
 [project]
 name = "arkhai-apicredits-service"
-version = "0.4.0"
+version = "0.4.1"
 license = "MIT"
 description = "API-credits service: keys, credit grants, consumption, and the site quota ledger"
 requires-python = ">=3.12,<3.14"
 dependencies = [
+    "arkhai-kit-resource-pools-contracts>=0.1.0",
     "arkhai-kit-site>=0.4.0",
     "arkhai-kit-resource-pools>=0.3.0",
     "arkhai-kit-identity==0.3.0",

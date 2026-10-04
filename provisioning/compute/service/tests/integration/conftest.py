@@ -29,6 +29,7 @@ import hashlib
 import json
 import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import AsyncIterator
 from unittest.mock import AsyncMock, MagicMock
@@ -54,7 +55,7 @@ from compute_provisioning_service.services.relay_port_allocator import (
     RelayPortAllocator,
 )
 from compute_provisioning_service.services.relay_service import RelayService
-from vm_provisioning_operator import ProvisioningClient
+from vm_provisioning_operator import VmOperatorClient
 from bare_metal_provisioning_adapter.services.bare_metal_pool_config_handler import (
     BareMetalPoolConfigHandler,
 )
@@ -63,8 +64,11 @@ from compute_provisioning_service.db.database import create_session_factory
 from compute_provisioning_service.db.models import Base
 
 from arkhai_bare_metal import BareMetalLeaseClient
-from compute_provisioning.client import (
-    ComputeProvisioningClient,
+from compute_provisioning_ansible.host_import import AnsibleHostImportClient
+from compute_provisioning_client import ComputeProvisioningClient
+from market_resource_pools_client import ResourcePoolClient
+from market_site_client import SiteCapacityAdminClient, SiteCapacityClient
+from compute_provisioning_contracts import (
     IDENTITY_IDENTIFIER_HEADER,
     IDENTITY_SCHEME_HEADER,
     REQUEST_ID_HEADER,
@@ -72,9 +76,8 @@ from compute_provisioning.client import (
     SIGNATURE_HEADER,
     SIGNATURE_VERSION_HEADER,
     TIMESTAMP_HEADER,
-    canonical_provisioning_request_body,
-    resolve_provisioning_route_contract,
 )
+from compute_provisioning_service.route_table import canonical_request_body
 from compute_provisioning_service.identity import ProvisioningIdentityContext
 from compute_provisioning_service.middleware.auth import (
     SqlAlchemyProvisioningReplayStore,
@@ -94,6 +97,47 @@ SERVICE_AUTHORITIES = TrustedIdentitySet(
     identities=(SERVICE_SIGNER.identity,)
 )
 
+
+
+@dataclass(frozen=True)
+class ProvisioningClients:
+    """The canonical typed clients for every owner whose routes the service serves.
+
+    Each signs as the administrator and verifies the service's signed responses.
+    ``family`` is the compute family's client, and the domain, implementation,
+    and pool clients wrap its transport; the site clients sign the site's
+    capacity routes from the site's own contracts.
+    """
+
+    family: ComputeProvisioningClient
+    vm: VmOperatorClient
+    pools: ResourcePoolClient
+    host_import: AnsibleHostImportClient
+    site: SiteCapacityClient
+    site_admin: SiteCapacityAdminClient
+
+def provisioning_clients(transport) -> ProvisioningClients:
+    """Every canonical client over one in-process transport, signed as admin."""
+
+    family = ComputeProvisioningClient(
+        "http://test",
+        signer=ADMIN_SIGNER,
+        caller_role="admin",
+        expected_authorities=SERVICE_AUTHORITIES,
+        transport=transport,
+    )
+    return ProvisioningClients(
+        family=family,
+        vm=VmOperatorClient(family),
+        pools=ResourcePoolClient(family),
+        host_import=AnsibleHostImportClient(family),
+        site=SiteCapacityClient(
+            "http://test", ADMIN_SIGNER, SERVICE_AUTHORITIES, transport=transport, caller_role="admin"
+        ),
+        site_admin=SiteCapacityAdminClient(
+            "http://test", ADMIN_SIGNER, SERVICE_AUTHORITIES, transport=transport, caller_role="admin"
+        ),
+    )
 
 def _install_signed_asgi_transport(monkeypatch) -> None:
     original = ASGITransport.handle_async_request
@@ -120,17 +164,14 @@ def _install_signed_asgi_transport(monkeypatch) -> None:
         for key in sorted(set(request.url.params.keys())):
             values = request.url.params.get_list(key)
             query[key] = values[0] if len(values) == 1 else values
-        body = canonical_provisioning_request_body(
+        body = canonical_request_body(
             request.method,
             request.url.path,
             body,
             query=query,
         )
-        route, resource = resolve_provisioning_route_contract(
-            request.method,
-            request.url.path,
-            body,
-            table=provisioning_route_table,
+        route, resource = provisioning_route_table.resolve(
+            request.method, request.url.path, body
         )
         signer = ADMIN_SIGNER if route.required_role == "admin" else STOREFRONT_SIGNER
         authenticated = sign_request(
@@ -517,7 +558,7 @@ def fake_ansible() -> MagicMock:
     mock.write_inventory.return_value = MaterializedInventory(path=fake_inv_tmp)
 
     # check_connectivity_with_inventory — synchronous mock returning reachable
-    from compute_provisioning_ansible.runner import ConnectivityResult
+    from compute_provisioning_contracts import ConnectivityResult
     from unittest.mock import AsyncMock as _AsyncMock
     mock.check_connectivity_with_inventory = _AsyncMock(
         return_value=ConnectivityResult(host="kvm1", reachable=True, detail="mock ping ok")
@@ -535,7 +576,7 @@ async def client_and_queue(
     fake_ansible,
     bare_metal_runner,
     monkeypatch,
-) -> AsyncIterator[tuple[ProvisioningClient, AsyncJobQueue]]:
+) -> AsyncIterator[tuple[ProvisioningClients, AsyncJobQueue]]:
     """Yield an authenticated provisioning client and fresh async job queue."""
 
     _install_signed_asgi_transport(monkeypatch)
@@ -814,29 +855,9 @@ async def client_and_queue(
 
     _container_module.resolved_job_queue = job_queue
     _container_module.resolved_vm_operations_service = app.container.vm_operations_service()
-    from compute_provisioning import ExecutorAdapterRegistry
     from compute_provisioning.executor_leases import ExecutorLeaseService
-    from compute_provisioning_service.services.compute_contract_service import ComputeContractService
-    from vm_provisioning_adapter.compute_adapter import VmComputeAdapter
-    from bare_metal_provisioning_adapter.compute_adapter import BareMetalComputeAdapter
     _container_module.resolved_executor_lease_service = ExecutorLeaseService(
         site_authority
-    )
-    _container_module.resolved_compute_contract_service = ComputeContractService(
-        site_authority=site_authority,
-        job_service=job_service,
-        adapters=ExecutorAdapterRegistry(
-            [
-                VmComputeAdapter(
-                    site_authority,
-                    _container_module.resolved_vm_operations_service,
-                ),
-                BareMetalComputeAdapter(
-                    site_authority,
-                    bare_metal_operations_service,
-                ),
-            ]
-        ),
     )
     _container_module.resolved_host_operations_service = app.container.host_operations_service()
 
@@ -858,16 +879,11 @@ async def client_and_queue(
         if not {route.path for route in _test_router.routes} <= _mounted_paths:
             app.include_router(_test_router)
 
-    client = ProvisioningClient(
-        "http://test",
-        signer=ADMIN_SIGNER,
-        expected_authorities=SERVICE_AUTHORITIES,
-        transport=transport,
-    )
+    clients = provisioning_clients(transport)
     try:
-        yield client, job_queue
+        yield clients, job_queue
     finally:
-        await client.close()
+        await clients.family.close()
 
     processing_task.cancel()
     try:

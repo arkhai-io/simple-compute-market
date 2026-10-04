@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from .connection import ConnectionCodecs, ConnectionEnvelope
 from .db import Host
 from .execution import ExecutionHost
-from .models import ConnectionSubmission, ConnectionView, HostCreate, HostResponse, HostUpdate
+from compute_provisioning_contracts import ConnectionSubmission, ConnectionView, HostCreate, HostResponse, HostUpdate
 
 logger = logging.getLogger(__name__)
 

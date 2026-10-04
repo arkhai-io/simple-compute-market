@@ -20,7 +20,8 @@ from market_identity import Identity, TrustedIdentitySet, create_signer
 from market_site_client import SiteCapacityAdminClient
 from registry_client import SyncRegistryClient
 from storefront_client import SyncStorefrontClient
-from vm_provisioning_operator import SyncProvisioningClient
+from compute_provisioning_client import SyncComputeProvisioningClient
+from market_resource_pools_client import SyncResourcePoolClient
 
 from e2e_harness.settings import settings
 
@@ -85,13 +86,18 @@ def bare_metal_registry():
 
 @pytest.fixture(scope="module")
 def bare_metal_site_operator():
-    """The site's administrator, which declares and changes resource pools."""
-    client = SyncProvisioningClient(
+    """The site's administrator, which declares and changes resource pools.
+
+    Pool administration is the resource-pool authority's typed client over the
+    provisioning service's family client, signed as that service's admin.
+    """
+    client = SyncComputeProvisioningClient(
         lane_setting("site_url"),
         _signer("site_admin"),
+        "admin",
         _pinned("site_authority"),
     )
-    yield client
+    yield SyncResourcePoolClient(client)
     client.close()
 
 

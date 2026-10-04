@@ -55,9 +55,9 @@ from market_resource_pools import (
     DEFAULT_POOL_ID,
     HostRequirement,
     ResourcePool,
-    pool_delivers_offering_mode,
     pool_needs_host,
 )
+from market_resource_pools_contracts import pool_delivers_offering_mode
 
 from .declarations import CapacityDeclaration
 from .db import (

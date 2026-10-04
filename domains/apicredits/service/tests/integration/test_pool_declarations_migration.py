@@ -14,11 +14,8 @@ import json
 import logging
 
 import pytest
-from market_resource_pools import (
-    DEFAULT_POOL_ID,
-    ResourcePool,
-    resolve_pool_declarations,
-)
+from market_resource_pools import DEFAULT_POOL_ID, ResourcePool
+from market_resource_pools_contracts import resolve_pool_declarations
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool

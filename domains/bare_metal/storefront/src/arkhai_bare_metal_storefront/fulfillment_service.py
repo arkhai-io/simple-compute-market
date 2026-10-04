@@ -10,12 +10,12 @@ from arkhai_bare_metal import (
     BareMetalMaterialization,
     BareMetalReceipt,
 )
-from compute_provisioning import (
+from compute_provisioning_contracts import (
     FulfillmentRequestBody,
     FulfillmentScheduleRequest,
 )
 from core_storefront import StorefrontFulfillmentContext
-from market_fulfillment import VersionedEnvelope
+from market_core import VersionedEnvelope
 from market_identity import Identity
 
 from .claims import ClaimAttributesMissing, whole_machine_claim

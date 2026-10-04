@@ -26,6 +26,7 @@ from compute_provisioning_service.db.migrations import _apply_legacy_vm_lease_ba
 from compute_provisioning_service.services.fulfillment_convergence import (
     FulfillmentConvergenceWatchdog,
 )
+from market_core import VersionedEnvelope
 from market_fulfillment import (
     FulfillmentProvider,
     FulfillmentResult,

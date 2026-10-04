@@ -482,7 +482,7 @@ def test_scalar_non_erc20_settlement_reaches_ready(
     # claim lease is still live, which is the case straight after a pending
     # poll. See test_full_deal.py's stage 09a.
     provisioning_client.advance_fulfillment_convergence_cycle()
-    fulfillment_status = provisioning_client.get_fulfillment_status(fulfillment_id)
+    fulfillment_status = provisioning_client.get_fulfillment_status(fulfillment_id).model_dump(mode="json")
     assert fulfillment_status.get("state") == "active", fulfillment_status
 
     wait = storefront_admin_client.wait_for_settlement(escrow_uid, timeout=60.0)

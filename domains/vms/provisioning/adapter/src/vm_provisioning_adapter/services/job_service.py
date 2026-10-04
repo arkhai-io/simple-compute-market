@@ -18,12 +18,12 @@ import dataclasses
 from sqlalchemy.orm import Session, sessionmaker
 
 from compute_provisioning import JobExecutorResolver
-from compute_provisioning.contracts import ExecutorActionEnvelope
-from compute_provisioning.jobs import (
+from compute_provisioning_contracts import ExecutorActionEnvelope
+from compute_provisioning.jobs import JobRetryPolicy
+from compute_provisioning_contracts import (
     JobCredentialsResponse,
     JobListResponse,
     JobLogsResponse,
-    JobRetryPolicy,
     JobStatusResponse,
     JobSubmitResponse,
 )

@@ -20,12 +20,12 @@ from arkhai_bare_metal import (
     BareMetalLeaseCreate,
     BareMetalLeaseView,
 )
-from compute_provisioning import ComputeProvisioningError
+from compute_provisioning_client import ComputeProvisioningError
 from market_site.ledger import ALLOCATION_MODE_EXCLUSIVE
 from compute_provisioning_service.db.models import JobRecord
 from compute_provisioning_ansible.runner import AnsibleResult
 from compute_provisioning.jobs.queue import AsyncJobQueue
-from compute_provisioning.hosts import HostCreate
+from compute_provisioning_contracts import HostCreate
 
 
 GRANT_STDOUT = """\
@@ -216,7 +216,7 @@ async def test_generic_market_lease_terminate_dispatches_bare_metal_reclaim(
         )
     )
 
-    terminated = await provisioning_client.terminate_lease(
+    terminated = await provisioning_client.vm.terminate_lease(
         lease.capacity_reservation_id
     )
 
@@ -277,7 +277,7 @@ async def test_bare_metal_grant_and_reclaim_jobs_succeed_with_executor_playbook(
     reservation = ledger.get_reservation(lease.capacity_reservation_id)
     grant_job_id = reservation["create_job_id"]
     await asyncio.wait_for(grant_dispatched.wait(), timeout=5.0)
-    grant_job = await provisioning_client.poll_until_complete(
+    grant_job = await provisioning_client.family.poll_until_complete(
         grant_job_id,
         timeout=5.0,
         poll_interval=0.05,
@@ -293,11 +293,11 @@ async def test_bare_metal_grant_and_reclaim_jobs_succeed_with_executor_playbook(
     assert first_playbook["limit"] == "bm-node-1"
 
     reclaim_dispatched = _make_event_seam(job_queue)
-    await provisioning_client.terminate_lease(lease.capacity_reservation_id)
+    await provisioning_client.vm.terminate_lease(lease.capacity_reservation_id)
     reservation = ledger.get_reservation(lease.capacity_reservation_id)
     release_job_id = reservation["release_job_id"]
     await asyncio.wait_for(reclaim_dispatched.wait(), timeout=5.0)
-    reclaim_job = await provisioning_client.poll_until_complete(
+    reclaim_job = await provisioning_client.family.poll_until_complete(
         release_job_id,
         timeout=5.0,
         poll_interval=0.05,

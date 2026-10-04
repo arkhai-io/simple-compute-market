@@ -25,7 +25,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from compute_provisioning.client import (
+from compute_provisioning_contracts import (
     IDENTITY_IDENTIFIER_HEADER,
     IDENTITY_SCHEME_HEADER,
     REQUEST_ID_HEADER,
@@ -33,14 +33,13 @@ from compute_provisioning.client import (
     SIGNATURE_HEADER,
     SIGNATURE_VERSION_HEADER,
     TIMESTAMP_HEADER,
-    PROVISIONING_ROUTE_TABLE,
-    resolve_provisioning_route,
 )
 from compute_provisioning_service.db.models import (
     Base,
     ProvisioningReplayReservation,
 )
 from compute_provisioning_service.identity import ProvisioningIdentityContext
+from compute_provisioning_service.route_table import assemble_service_route_table
 from compute_provisioning_service.middleware.auth import (
     SqlAlchemyProvisioningReplayStore,
     ProvisioningAuthMiddleware,
@@ -48,10 +47,16 @@ from compute_provisioning_service.middleware.auth import (
 
 _ADMIN_SIGNER = Ed25519Signer(b"\x13" * 32)
 
+# The table the service assembles, so site routes authenticate as they do there.
+_ROUTE_TABLE = assemble_service_route_table()
+
+
+def _resolve(method, path, body):
+    contract, resource = _ROUTE_TABLE.resolve(method, path, body)
+    return contract.operation, resource
+
 
 _MUTATIONS = (
-    ("/api/v1/actions", {"capacity_reservation_id": "reservation-1"}),
-    ("/api/v1/jobs/job-1/contract/cancel", {}),
     ("/api/v1/contract/leases", {"capacity_reservation_id": "reservation-1"}),
     ("/api/v1/contract/leases/reservation-1/terminate", {}),
     ("/api/v1/contract/leases/reservation-1/retry-release", {}),
@@ -108,17 +113,13 @@ def _app(storefront, authority):
         identity_provider=lambda: identity,
         replay_store_provider=lambda: replay,
         principal_authority_provider=lambda: _PrincipalAuthority(storefront),
-        route_table=PROVISIONING_ROUTE_TABLE,
+        route_table=_ROUTE_TABLE,
     )
 
     async def mutation(_: Request):
         calls["count"] += 1
         return {"ok": True, "count": calls["count"]}
 
-    app.add_api_route("/api/v1/actions", mutation, methods=["POST"])
-    app.add_api_route(
-        "/api/v1/jobs/{job_id}/contract/cancel", mutation, methods=["POST"]
-    )
     app.add_api_route("/api/v1/contract/leases", mutation, methods=["POST"])
     for suffix in ("terminate", "retry-release", "force-release"):
         app.add_api_route(
@@ -152,7 +153,7 @@ def _headers(
     role: str = "seller",
     method: str = "POST",
 ) -> dict[str, str]:
-    operation, resource = resolve_provisioning_route(method, path, body)
+    operation, resource = _resolve(method, path, body)
     authenticated = sign_request(
         signer=signer,
         envelope=RequestEnvelope(
@@ -178,7 +179,7 @@ def _headers(
 
 
 def _verified_response(response, authority: Identity, path: str, body: dict):
-    operation, resource = resolve_provisioning_route("POST", path, body)
+    operation, resource = _resolve("POST", path, body)
     principal = Identity(
         scheme=response.headers[IDENTITY_SCHEME_HEADER],
         identifier=response.headers[IDENTITY_IDENTIFIER_HEADER],

@@ -48,7 +48,7 @@ from bare_metal_provisioning_adapter.routers import (  # noqa: E402
     bare_metal_route_contracts,
     bare_metal_router_mounts,
 )
-from compute_provisioning import assemble_provisioning_route_table  # noqa: E402
+from compute_provisioning_service.route_table import assemble_service_route_table  # noqa: E402
 from compute_provisioning_service.controllers.compute_contract_controller import ComputeContractController  # noqa: E402
 from compute_provisioning_service.controllers.capacity_definitions_controller import CapacityDefinitionsController  # noqa: E402
 from compute_provisioning_service.controllers.pools_controller import PoolController  # noqa: E402
@@ -181,10 +181,10 @@ def _capacity_pool_directory() -> dict[str, dict[str, object]]:
 
 
 
-# Every route the composed adapters mount, with the family kit's own: what the
+# Every route this service mounts, from every owner that declares one: what the
 # authentication middleware admits. Each adapter contributes its declarations
 # beside its routers.
-provisioning_route_table = assemble_provisioning_route_table(
+provisioning_route_table = assemble_service_route_table(
     vm_route_contracts(),
     bare_metal_route_contracts(),
 )

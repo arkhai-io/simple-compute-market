@@ -1,7 +1,7 @@
 """
 Integration tests for the system API endpoints.
 
-All calls go through ProvisioningClient methods — no route strings in test code.
+All calls go through the family client's methods — no route strings in test code.
 
 Coverage:
   - GET /health — fast liveness probe (api, database, job_processor checks only)
@@ -17,14 +17,16 @@ What is NOT covered here (unit test jurisdiction):
 
 from __future__ import annotations
 
-from compute_provisioning import (
+from compute_provisioning_contracts import (
     COMPUTE_PROVISIONING_CONTRACT_VERSION,
     SUPPORTED_COMPUTE_PROVISIONING_MAJOR_VERSIONS,
 )
+from .conftest import ProvisioningClients
+from compute_provisioning_client import ComputeProvisioningError
 import pytest
 
 class TestHealthEndpoint:
-    """GET /health — fast liveness probe via ProvisioningClient.get_health().
+    """GET /health — fast liveness probe via ComputeProvisioningClient.get_health().
 
     The health endpoint performs only local checks (api, database, job_processor).
     It must never make outbound HTTP calls — that would make it unsuitable as a
@@ -34,7 +36,7 @@ class TestHealthEndpoint:
     async def test_returns_status_and_checks(self, client_and_queue):
         """Response always contains 'status' and 'checks' keys."""
         client, _ = client_and_queue
-        resp = await client.get_health()
+        resp = await client.family.get_health()
         assert isinstance(resp, dict), f"Expected dict, got {type(resp)}"
         assert "status" in resp, f"Missing 'status' in health response: {resp}"
         assert "checks" in resp, f"Missing 'checks' in health response: {resp}"
@@ -42,7 +44,7 @@ class TestHealthEndpoint:
     async def test_local_checks_present(self, client_and_queue):
         """Health response includes api, database, and job_processor checks."""
         client, _ = client_and_queue
-        resp = await client.get_health()
+        resp = await client.family.get_health()
         checks = resp.get("checks", {})
         assert "api" in checks, f"Missing 'api' check: {checks}"
         assert "database" in checks, f"Missing 'database' check: {checks}"
@@ -51,13 +53,13 @@ class TestHealthEndpoint:
     async def test_api_check_is_ok(self, client_and_queue):
         """checks.api is always 'ok' when the service is reachable."""
         client, _ = client_and_queue
-        resp = await client.get_health()
+        resp = await client.family.get_health()
         assert resp["checks"].get("api") == "ok"
 
     async def test_database_check_is_ok(self, client_and_queue):
         """checks.database is 'ok' against the in-memory test DB."""
         client, _ = client_and_queue
-        resp = await client.get_health()
+        resp = await client.family.get_health()
         assert resp["checks"].get("database") == "ok", (
             f"Database check failed: {resp['checks'].get('database')}"
         )
@@ -69,7 +71,7 @@ class TestHealthEndpoint:
         not the fast liveness probe.
         """
         client, _ = client_and_queue
-        resp = await client.get_health()
+        resp = await client.family.get_health()
         checks = resp.get("checks", {})
         assert "storefront" not in checks, (
             "storefront check must not appear in /health — it makes an outbound "
@@ -101,7 +103,7 @@ class TestSystemStatus:
     async def test_returns_status_and_checks(self, client_and_queue):
         """Response always contains 'status' and 'checks' keys."""
         client, _ = client_and_queue
-        resp = await client.get_system_status()
+        resp = await client.family.get_system_status()
         assert isinstance(resp, dict), f"Expected dict, got {type(resp)}"
         assert "status" in resp, f"Missing 'status' in status response: {resp}"
         assert "checks" in resp, f"Missing 'checks' in status response: {resp}"
@@ -119,7 +121,7 @@ class TestSystemStatus:
         which is exactly how this first shipped.
         """
         client, _ = client_and_queue
-        resp = await client.get_system_status()
+        resp = await client.family.get_system_status()
         pin = resp.get("provisioning_contract_version")
         majors = resp.get("provisioning_contract_supported_majors")
         assert pin == COMPUTE_PROVISIONING_CONTRACT_VERSION, (
@@ -136,7 +138,7 @@ class TestSystemStatus:
     async def test_storefront_check_is_present(self, client_and_queue):
         """checks.storefront is present in the diagnostic status."""
         client, _ = client_and_queue
-        resp = await client.get_system_status()
+        resp = await client.family.get_system_status()
         checks = resp.get("checks", {})
         assert "storefront" in checks, (
             f"Missing 'storefront' check in /api/v1/system/status: {checks}"
@@ -145,7 +147,7 @@ class TestSystemStatus:
     async def test_storefront_auth_check_is_present(self, client_and_queue):
         """checks.storefront_auth is present in the diagnostic status."""
         client, _ = client_and_queue
-        resp = await client.get_system_status()
+        resp = await client.family.get_system_status()
         checks = resp.get("checks", {})
         assert "storefront_auth" in checks, (
             f"Missing 'storefront_auth' check in /api/v1/system/status: {checks}"
@@ -154,7 +156,7 @@ class TestSystemStatus:
     async def test_lease_watchdog_check_is_present(self, client_and_queue):
         """checks.lease_watchdog is present in the diagnostic status."""
         client, _ = client_and_queue
-        resp = await client.get_system_status()
+        resp = await client.family.get_system_status()
         checks = resp.get("checks", {})
         assert "lease_watchdog" in checks, (
             f"Missing 'lease_watchdog' check in /api/v1/system/status: {checks}"
@@ -163,7 +165,7 @@ class TestSystemStatus:
     async def test_storefront_check_has_valid_value(self, client_and_queue):
         """checks.storefront value is one of the documented domain values."""
         client, _ = client_and_queue
-        resp = await client.get_system_status()
+        resp = await client.family.get_system_status()
         value = resp["checks"].get("storefront", "")
         # Also allow http_N responses
         assert (
@@ -178,7 +180,7 @@ class TestSystemStatus:
     async def test_storefront_auth_check_has_valid_value(self, client_and_queue):
         """checks.storefront_auth value is one of the documented domain values."""
         client, _ = client_and_queue
-        resp = await client.get_system_status()
+        resp = await client.family.get_system_status()
         value = resp["checks"].get("storefront_auth", "")
         assert (
             value in self._AUTH_VALUES
@@ -192,7 +194,7 @@ class TestSystemStatus:
     async def test_lease_watchdog_check_has_valid_value(self, client_and_queue):
         """checks.lease_watchdog value is one of: running, paused, disabled."""
         client, _ = client_and_queue
-        resp = await client.get_system_status()
+        resp = await client.family.get_system_status()
         value = resp["checks"].get("lease_watchdog", "")
         assert value in self._WATCHDOG_VALUES, (
             f"checks.lease_watchdog={value!r} is not a documented value. "
@@ -206,7 +208,7 @@ class TestSystemStatus:
         to prevent background timer cycles. The status endpoint reflects this.
         """
         client, _ = client_and_queue
-        resp = await client.get_system_status()
+        resp = await client.family.get_system_status()
         assert resp["checks"].get("lease_watchdog") == "disabled", (
             f"Expected lease_watchdog='disabled' in test environment "
             f"(lease_watchdog_enabled=False in mock_settings), "
@@ -221,7 +223,7 @@ class TestSystemStatus:
         the connectivity probe actually runs (rather than returning 'unconfigured').
         """
         client, _ = client_and_queue
-        resp = await client.get_system_status()
+        resp = await client.family.get_system_status()
         storefront_val = resp["checks"].get("storefront")
         # URL is configured, so must not be 'unconfigured'
         assert storefront_val != "unconfigured", (
@@ -244,7 +246,7 @@ class TestSystemStatus:
         to /health. The status endpoint focuses on connectivity diagnostics.
         """
         client, _ = client_and_queue
-        resp = await client.get_system_status()
+        resp = await client.family.get_system_status()
         checks = resp.get("checks", {})
         assert "api" not in checks, (
             "checks.api should not appear in /api/v1/system/status — it belongs in /health."
@@ -260,8 +262,8 @@ class TestSystemStatus:
         reports storefront connectivity issues.
         """
         client, _ = client_and_queue
-        health = await client.get_health()
-        status = await client.get_system_status()
+        health = await client.family.get_health()
+        status = await client.family.get_system_status()
 
         # Health should be ok (local checks pass in test env)
         assert health.get("status") == "ok", (
@@ -274,12 +276,12 @@ class TestSystemStatus:
 
 
 class TestAnsibleReadiness:
-    """GET /api/v1/system/ansible/readiness via ProvisioningClient."""
+    """GET /api/v1/system/ansible/readiness via ComputeProvisioningClient."""
 
     async def test_returns_200_with_expected_top_level_fields(self, client_and_queue):
         """Endpoint returns a dict with the documented top-level keys."""
         client, _ = client_and_queue
-        resp = await client.get_ansible_readiness()
+        resp = await client.family.get_ansible_readiness()
         assert isinstance(resp, dict)
         assert "playbook" in resp, f"Missing 'playbook' key in response: {resp}"
         assert "inventory" in resp, f"Missing 'inventory' key in response: {resp}"
@@ -290,7 +292,7 @@ class TestAnsibleReadiness:
     async def test_playbook_has_exists_field(self, client_and_queue):
         """playbook sub-object always has an 'exists' boolean field."""
         client, _ = client_and_queue
-        resp = await client.get_ansible_readiness()
+        resp = await client.family.get_ansible_readiness()
         playbook = resp.get("playbook", {})
         assert isinstance(playbook, dict), f"Expected playbook to be a dict, got: {playbook!r}"
         assert "exists" in playbook, f"Missing 'exists' in playbook: {playbook}"
@@ -299,7 +301,7 @@ class TestAnsibleReadiness:
     async def test_playbook_has_path_field(self, client_and_queue):
         """playbook sub-object always has a 'path' string field."""
         client, _ = client_and_queue
-        resp = await client.get_ansible_readiness()
+        resp = await client.family.get_ansible_readiness()
         playbook = resp.get("playbook", {})
         assert "path" in playbook, f"Missing 'path' in playbook: {playbook}"
         assert isinstance(playbook["path"], str)
@@ -307,7 +309,7 @@ class TestAnsibleReadiness:
     async def test_inventory_source_is_database(self, client_and_queue):
         """Inventory is sourced from the DB (not an INI file on disk)."""
         client, _ = client_and_queue
-        resp = await client.get_ansible_readiness()
+        resp = await client.family.get_ansible_readiness()
         inventory = resp.get("inventory", {})
         assert isinstance(inventory, dict), f"Expected inventory dict, got: {inventory!r}"
         assert inventory.get("source") == "database", (
@@ -318,7 +320,7 @@ class TestAnsibleReadiness:
     async def test_inventory_has_host_count(self, client_and_queue):
         """inventory.host_count reflects enabled hosts in the DB (0 on fresh DB)."""
         client, _ = client_and_queue
-        resp = await client.get_ansible_readiness()
+        resp = await client.family.get_ansible_readiness()
         inventory = resp.get("inventory", {})
         host_count = inventory.get("host_count")
         # May be None if HostService isn't wired, or 0 on a fresh DB — both valid
@@ -329,7 +331,7 @@ class TestAnsibleReadiness:
     async def test_ssh_keys_is_list(self, client_and_queue):
         """ssh_keys is always a list (empty on fresh DB with no hosts)."""
         client, _ = client_and_queue
-        resp = await client.get_ansible_readiness()
+        resp = await client.family.get_ansible_readiness()
         ssh_keys = resp.get("ssh_keys")
         assert isinstance(ssh_keys, list), (
             f"Expected ssh_keys to be a list, got {ssh_keys!r}"
@@ -342,8 +344,8 @@ class TestAnsibleReadiness:
         health. Only /health returns 503 on degraded state.
         """
         client, _ = client_and_queue
-        # If this raises ProvisioningError the status was not 200
-        resp = await client.get_ansible_readiness()
+        # If this raises ComputeProvisioningError the status was not 200
+        resp = await client.family.get_ansible_readiness()
         assert resp is not None
 
 

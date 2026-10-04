@@ -14,7 +14,6 @@ from compute_provisioning_ansible.runner import AnsibleRunner
 from compute_provisioning_service.services.relay_rebinding import check_host_pool_change
 from vm_provisioning_adapter.bundle import HOST_REQUIREMENT, build_vm_adapter_bundle
 from vm_provisioning_adapter.codec import GoldenImageCredentials, VmAnsibleCodec
-from vm_provisioning_adapter.compute_adapter import VmComputeAdapter
 from vm_provisioning_adapter.release import VmFulfillmentReleaseJobPort, VmReleaseExecutor
 from compute_provisioning_service.services.relay_port_allocator import (
     RelayPortAllocator,
@@ -79,12 +78,8 @@ class VmProvisioningRuntime:
     def readiness(self) -> dict[str, bool]:
         return {"ansible_service": self.ansible_service is not None}
 
-    def adapter_bundle(self, site_authority):
+    def adapter_bundle(self):
         return build_vm_adapter_bundle(
-            compute_adapter=VmComputeAdapter(
-                site_authority,
-                self.vm_operations_service,
-            ),
             release_executor=VmReleaseExecutor(
                 settlement_repository=self.settlement_repository,
                 session_factory=self.session_factory,

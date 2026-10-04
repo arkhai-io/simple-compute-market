@@ -19,9 +19,9 @@ from arkhai_bare_metal import (
     NODE_RECLAIM_ACCESS_ACTION,
     bare_metal_executor_ref,
 )
-from compute_provisioning.contracts import ExecutorActionEnvelope
+from compute_provisioning_contracts import ExecutorActionEnvelope
 from compute_provisioning.hosts.service import HostAuthority
-from compute_provisioning.jobs import JobSubmitResponse
+from compute_provisioning_contracts import JobSubmitResponse
 from compute_provisioning.jobs.engine import JobEngine
 from compute_provisioning.jobs.queue import AsyncJobQueue
 from bare_metal_provisioning_adapter.codec import BareMetalJobParams, reclaim_policy_from

@@ -6,7 +6,8 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from market_fulfillment import ProvisionedResourceDescriptor, VersionedEnvelope
+from market_fulfillment import ProvisionedResourceDescriptor
+from market_core import VersionedEnvelope
 
 VM_FULFILLMENT_RESULT_KIND = "vm.fulfillment.result.v1"
 VM_FULFILLMENT_RESULT_SCHEMA_VERSION = 1

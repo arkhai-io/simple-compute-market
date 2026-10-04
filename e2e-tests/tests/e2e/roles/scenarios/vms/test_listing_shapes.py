@@ -152,8 +152,8 @@ class TestStage00_Setup:
         assert shape_state.paused
 
     def test_00b_pool_states_a_shape_and_its_declaration_every_dimension(
-        self, provisioning_client, site_capacity_admin_client, storefront_admin_client,
-        shape_state,
+        self, provisioning_client, resource_pool_client, site_capacity_admin_client,
+        storefront_admin_client, shape_state,
     ):
         require_state(shape_state, "paused")
         provision_e2e_executor(
@@ -172,7 +172,7 @@ class TestStage00_Setup:
             # The region the listing advertises; see the module docstring.
             region=REGION,
         )
-        pool_row = provisioning_client.get_pool(E2E_LISTING_SHAPES_POOL_ID)
+        pool_row = resource_pool_client.get_pool(E2E_LISTING_SHAPES_POOL_ID)
         assert pool_row.policy_tags["listing_shapes"] == {"vm": [SHAPE]}
         assert pool_row.policy_tags["region"] == REGION
         sites = refresh_storefront_projections(storefront_admin_client)
@@ -294,12 +294,10 @@ class TestStage04_Buy:
 
 class TestStage05_Commitment:
     def test_05a_the_reservation_holds_every_declared_quantity(
-        self, provisioning_client, shape_state
+        self, site_capacity, shape_state
     ):
         require_state(shape_state, "escrow_uid")
-        reservations = provisioning_client.list_capacity_reservations(
-            escrow_uid=shape_state.escrow_uid
-        ).get("reservations") or []
+        reservations = site_capacity.list_reservations(escrow_uid=shape_state.escrow_uid)
         assert reservations, f"no reservation for escrow {shape_state.escrow_uid}"
         # The claim requests exactly the shape's quantities: no more, and no
         # dimension the shape omits.

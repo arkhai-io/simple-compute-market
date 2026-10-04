@@ -20,7 +20,9 @@ from pydantic import BaseModel, Field
 
 from compute_provisioning.hosts import ExecutionHost
 
-from .runner import ConnectivityResult, inventory_target
+from compute_provisioning_contracts import ConnectivityResult
+
+from .runner import inventory_target
 
 #: The inventory group a connectivity probe lists its one host under. A ping
 #: names the host itself, so the group only has to exist.

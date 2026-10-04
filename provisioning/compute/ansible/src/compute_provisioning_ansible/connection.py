@@ -18,11 +18,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from compute_provisioning.hosts import (
-    ConnectionEnvelope,
-    ConnectionSubmission,
-    ProtectedValue,
-)
+from compute_provisioning.hosts import ConnectionEnvelope, ProtectedValue
+from compute_provisioning_contracts import ConnectionSubmission
 from market_config import decrypt_secret, encrypt_secret
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 

@@ -1168,7 +1168,8 @@ the service), and the executor table (created empty, filled and frozen by
 sibling. VM's `AnsibleJobService` shrinks to VM submission (`VmJobParams` into an engine
 submission, with `default_host_id` passed as a value, so its `Settings` import goes) and is
 renamed to say so (`VmJobSubmitter`); every other caller reads the engine.
-`ComputeContractService` consumes `JobEngine` directly, and the lifespan runs the engine's
+~~`ComputeContractService` consumes `JobEngine` directly~~ (superseded by decision 10: the
+contract service is deleted with the action surface), and the lifespan runs the engine's
 queue handler and retry scheduler. The maintainer's instruction that
 `ReleaseJobDispatcher`'s bare-metal entry consume the engine is met by removing the
 dispatcher with the fold of 7.3. A composition unit test asserts one engine and one host
@@ -1426,6 +1427,30 @@ asked for seven corrections, each verified in code and discussed with the mainta
 - "An administrator can do everything" holds only on the provisioning service's route
   table; the repository-wide stance is a roadmap gap.
 - Path templates in the family route contracts (decision 4, option 2).
+- Published packages depend on unpublished ones (found in A0): `arkhai-compute-provisioning-service`
+  and the VM storefront depended on `arkhai-compute-provisioning`, and `kit-site` depends on
+  `kit-resource-pools`, none of which `.github/workflows/publish-pypi.yml` publishes. After A0
+  the storefronts, `kit-site`, VM listings, and the API-credit service depend on the new thin
+  packages, which are unpublished too, so the gap keeps its shape; the thin packages are the
+  natural ones to publish. Outside this change.
+
+**Slice A0 implementation findings (2026-10-04).** Verified in code during A0; each corrects
+the plan, not a decision above. The first two, and the publishing gap above, were reviewed
+with the maintainer at the A0 checkpoint's start; the rest are open for review.
+
+| Finding | Resolution |
+|---|---|
+| `UnsupportedExecutorActionError` is the job executor table's lookup error, which the engine catches to fail a job | Kept beside the table; only the adapter registry's names went |
+| `ComputeContractService` had no lease half: the lease routes call the lease services from the controller | The service is deleted whole in A0.1; the controller keeps a private error for a reservation recording no mode (still 409) until B |
+| `test_job_contract_values.py` tests `JobRetryPolicy`, `ConnectionEnvelope`, and `ExecutionHost`, which stay in the family kit | Not moved; `test_contracts.py` and `test_route_table.py` were split by owner instead: contract tests to the contracts package, client-signing tests (and `test_fulfillment_client_opacity.py`) to the client package, the event-sink test to `test_events.py`, the two site-route cases to the service's route-table test |
+| The family table's assembly needs the pool, capacity-definition, host-import, and relay declarations to exist in their owners' packages | A0.5 and A0.6 ran before A0.3; the slice's content is unchanged |
+| The site's canonical body differs from the family's for its query-bearing routes | The service canonicalizes a site route with `market_site.auth.canonical_site_request_body` and every other route with the family's (`compute_provisioning_service/route_table.py`); the family contracts carry no capacity paths |
+| The site client always signed as `seller`, while decision 2 has e2e backdate through it as admin and capacity-definition import is admin-only | Both site clients take `caller_role` (`seller` by default) |
+| Site contracts admit `admin` by rule rather than by name | Translated into named roles when the service assembles them, so `capacity_reserve` and the other seller routes now admit `admin` on this service too, as the administrator ruling intends; relay declarations admit seller and admin (seller-only before, by the family default) |
+| VM's and Ansible's extension clients need only the transport's `authenticated_request` | They depend on the contracts and duck-type the transport, as `kit/pool-overrides` does, not on the client distribution |
+| The service's import-boundary test forbids `vm_provisioning_operator`, while its relay controller reads VM's relay models until 5B.9 | A named (file, module) allowlist entry, the mechanism C.4 plans, for that one import |
+| System status, health, readiness, and worker controls return dicts in VM's client, and callers index them | The family client keeps dicts for those until C types status as `SystemStatusResponse`; fulfillment, lease, job, host, and version methods return contract models |
+| The bare-metal adapter declared dependencies on VM's adapter and VM's client it never imports | Both removed |
 
 ### Implementation-review fixes for Sections 4–5
 
@@ -1602,6 +1627,9 @@ stack's two registries and stays in the VM lane.
 ## Superseded decisions
 
 Superseded by "Controls and routes (5B.8)" and its design review (2026-10-04):
+
+- **`ComputeContractService` consuming `JobEngine`** (decision 5) → decision 10: the contract
+  service is deleted with the action surface.
 
 - **`BareMetalLeaseClient` and the contributed bare-metal lease routes** ("Implementation-review
   fixes for Sections 4–5") → decision 1: the bare-metal lease surface is deleted.

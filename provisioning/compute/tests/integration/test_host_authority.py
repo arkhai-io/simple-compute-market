@@ -19,11 +19,9 @@ from sqlalchemy.pool import StaticPool
 from compute_provisioning.hosts import (
     ConnectionCodecs,
     ConnectionEnvelope,
-    ConnectionSubmission,
-    HostCreate,
-    HostUpdate,
     ProtectedValue,
 )
+from compute_provisioning_contracts import ConnectionSubmission, HostCreate, HostUpdate
 from compute_provisioning.hosts.db import Base as HostsBase
 from compute_provisioning.hosts.db import Host
 from compute_provisioning.hosts.service import (

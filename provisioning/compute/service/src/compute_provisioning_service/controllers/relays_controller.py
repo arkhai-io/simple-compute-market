@@ -27,7 +27,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi_utils.cbv import cbv
 
-from compute_provisioning import (
+from vm_provisioning_operator.relays import (
     RelayCreate,
     RelayListResponse,
     RelayResponse,

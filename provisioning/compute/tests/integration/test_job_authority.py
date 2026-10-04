@@ -10,7 +10,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from compute_provisioning import JobExecutorTable
-from compute_provisioning.contracts import (
+from compute_provisioning_contracts import (
     CredentialEnvelope,
     ExecutorActionEnvelope,
     ProvisioningErrorEnvelope,

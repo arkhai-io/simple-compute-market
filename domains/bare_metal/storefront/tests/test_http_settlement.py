@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from storefront_client import StorefrontClient, StorefrontClientError
 from storefront_client.models import SettleResponse, SettleStatusResponse
 from market_core.schemas import SettlementPlan
-from market_fulfillment import VersionedEnvelope
+from market_core import VersionedEnvelope
 from market_settlement_runtime import derive_obligation_ref
 from market_identity import (
     EMPTY_BODY,

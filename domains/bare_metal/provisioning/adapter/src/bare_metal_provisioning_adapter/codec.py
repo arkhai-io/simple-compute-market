@@ -18,7 +18,7 @@ from arkhai_bare_metal import (
     NODE_GRANT_ACCESS_ACTION,
     NODE_RECLAIM_ACCESS_ACTION,
 )
-from compute_provisioning.contracts import ResultEnvelope
+from compute_provisioning_contracts import ResultEnvelope
 from compute_provisioning.jobs import JobRun
 from compute_provisioning_ansible import AnsibleJobInterpretation, AnsibleJobPlan
 from compute_provisioning_ansible.runner import (

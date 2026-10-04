@@ -15,7 +15,6 @@ from bare_metal_provisioning_adapter.bundle import (
     build_bare_metal_adapter_bundle,
 )
 from bare_metal_provisioning_adapter.codec import BareMetalAnsibleCodec
-from bare_metal_provisioning_adapter.compute_adapter import BareMetalComputeAdapter
 from bare_metal_provisioning_adapter.release import BareMetalReleaseExecutor
 from bare_metal_provisioning_adapter.services.bare_metal_lease_service import (
     BareMetalLeaseService,
@@ -63,12 +62,8 @@ class BareMetalProvisioningRuntime:
             return self.ansible_service
         return None
 
-    def adapter_bundle(self, site_authority):
+    def adapter_bundle(self):
         return build_bare_metal_adapter_bundle(
-            compute_adapter=BareMetalComputeAdapter(
-                site_authority,
-                self.operations_service,
-            ),
             release_executor=BareMetalReleaseExecutor(
                 release_delegate=(
                     self.operations_service.reclaim_access_for_reservation

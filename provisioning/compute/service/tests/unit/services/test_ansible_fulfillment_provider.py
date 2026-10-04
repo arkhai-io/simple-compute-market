@@ -15,8 +15,8 @@ from market_fulfillment import (
     ProviderOperationState,
     SettlementResource,
     SettlementResult,
-    VersionedEnvelope,
 )
+from market_core import VersionedEnvelope
 from vm_provisioning_adapter.models.jobs_model import VmJobParams
 from vm_provisioning_adapter.services.ansible_fulfillment_provider import (
     AnsibleFulfillmentProvider,

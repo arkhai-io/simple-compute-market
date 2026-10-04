@@ -8,8 +8,8 @@ import pytest
 from market_fulfillment import (
     FulfillmentConflictError,
     SettlementRecordState,
-    VersionedEnvelope,
 )
+from market_core import VersionedEnvelope
 from market_fulfillment.fulfillment_persistence import SqlAlchemyFulfillmentTransaction
 from market_fulfillment.settlement_repository import begin_sqlite_write_transaction
 
@@ -185,7 +185,8 @@ def test_begin_teardown_unknown_fulfillment_id_raises_lookup_error():
 
 @pytest.fixture
 def ledger_services(tmp_path):
-    from market_resource_pools import PoolCreate, ResourcePoolService
+    from market_resource_pools import ResourcePoolService
+    from market_resource_pools_contracts import PoolCreate
     from market_resource_pools.db import Base as PoolsBase
     from market_site.db import Base as SiteBase
     from market_site.ledger import CapacityLedgerService
@@ -347,7 +348,8 @@ def contended_ledger_services(tmp_path):
     timeout so a self-deadlock fails this test in about a second instead of
     the 30s the provisioning service is configured for.
     """
-    from market_resource_pools import PoolCreate, ResourcePoolService
+    from market_resource_pools import ResourcePoolService
+    from market_resource_pools_contracts import PoolCreate
     from market_resource_pools.db import Base as PoolsBase
     from market_site.db import Base as SiteBase
     from market_site.ledger import CapacityLedgerService

@@ -6,7 +6,7 @@ from typing import Any, Mapping
 
 from sqlalchemy.orm import Session
 
-from compute_provisioning import PoolConfigValidationProblem
+from market_resource_pools import PoolConfigValidationProblem
 from market_config import decrypt_secret
 from compute_provisioning_service.db.models import AnsiblePoolConfig, Relay
 from compute_provisioning_service.services.relay_rebinding import (

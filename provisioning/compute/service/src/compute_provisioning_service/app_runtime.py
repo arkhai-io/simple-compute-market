@@ -85,7 +85,6 @@ def resolve_request_path_services() -> None:
         container.bare_metal_mock_executor()
     )
     _container_module.resolved_executor_lease_service = container.executor_lease_service()
-    _container_module.resolved_compute_contract_service = container.compute_contract_service()
     _container_module.resolved_resource_pool_service = container.resource_pool_service()
     _container_module.resolved_relay_port_allocator = container.relay_port_allocator()
     _container_module.resolved_relay_service = RelayService(

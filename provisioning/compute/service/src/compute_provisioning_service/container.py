@@ -33,7 +33,6 @@ from compute_provisioning_service.middleware.auth import (
 )
 from compute_provisioning.jobs.queue import AsyncJobQueue
 from compute_provisioning import compose_adapter_bundles
-from compute_provisioning_service.services.compute_contract_service import ComputeContractService
 from compute_provisioning_service.services.deal_event_sink import (
     SqlAlchemyCapacityReleaseOutbox,
     StorefrontLifecycleEventSink,
@@ -99,12 +98,8 @@ def _runtime_value(runtime, name):
 
 
 
-def _vm_bundle(runtime, site_authority):
-    return runtime.adapter_bundle(site_authority)
-
-
-def _bare_metal_bundle(runtime, site_authority):
-    return runtime.adapter_bundle(site_authority)
+def _adapter_bundle(runtime):
+    return runtime.adapter_bundle()
 
 
 def _system_service(runtime, lease_lifecycle_service, fulfillment_convergence_watchdog):
@@ -168,14 +163,6 @@ def _make_release_job_dispatcher(vm_runtime, job_service):
             "vm": vm_runtime.release_job_port(),
             "bare_metal": job_service,
         },
-    )
-
-
-def _make_compute_contract_service(site_authority, job_service, composed_adapters):
-    return ComputeContractService(
-        site_authority=site_authority,
-        job_service=job_service,
-        adapters=composed_adapters.executor_registry,
     )
 
 
@@ -362,16 +349,10 @@ class Container(containers.DeclarativeContainer):
         name=providers.Object("mock_executor"),
     )
 
-    vm_adapter_bundle = providers.Singleton(
-        _vm_bundle,
-        runtime=vm_runtime,
-        site_authority=site_authority,
-    )
+    vm_adapter_bundle = providers.Singleton(_adapter_bundle, runtime=vm_runtime)
 
     bare_metal_adapter_bundle = providers.Singleton(
-        _bare_metal_bundle,
-        runtime=bare_metal_runtime,
-        site_authority=site_authority,
+        _adapter_bundle, runtime=bare_metal_runtime
     )
 
     composed_adapters = providers.Singleton(
@@ -444,13 +425,6 @@ class Container(containers.DeclarativeContainer):
         _make_release_job_dispatcher,
         vm_runtime=vm_runtime,
         job_service=job_service,
-    )
-
-    compute_contract_service = providers.Factory(
-        _make_compute_contract_service,
-        site_authority=site_authority,
-        job_service=job_service,
-        composed_adapters=composed_adapters,
     )
 
     fulfillment_unit_of_work = providers.Singleton(
@@ -561,7 +535,6 @@ resolved_bare_metal_lease_service: Any | None = None
 resolved_bare_metal_operations_service: Any | None = None
 resolved_bare_metal_mock_executor: Any | None = None
 resolved_executor_lease_service: "ExecutorLeaseService | None" = None
-resolved_compute_contract_service = None
 resolved_resource_pool_service: "ResourcePoolService | None" = None
 resolved_relay_service: Any | None = None
 resolved_relay_port_allocator: Any | None = None

@@ -2,9 +2,9 @@ from sqlalchemy import create_engine, Engine
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import StaticPool
 
-from market_resource_pools import (
+from market_resource_pools import ResourcePool
+from market_resource_pools_contracts import (
     PoolDeclarationError,
-    ResourcePool,
     resolve_pool_declarations,
 )
 

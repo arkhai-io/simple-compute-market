@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from sqlalchemy import text
 
-from compute_provisioning import (
+from compute_provisioning_contracts import (
     COMPUTE_PROVISIONING_CONTRACT_VERSION,
     SUPPORTED_COMPUTE_PROVISIONING_MAJOR_VERSIONS,
 )
