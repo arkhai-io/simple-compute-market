@@ -555,19 +555,19 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-negotiation-runtime"
-version = "0.2.0"
+version = "0.2.1"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-policy" },
 ]
 wheels = [
-    { path = "arkhai_kit_negotiation_runtime-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_kit_negotiation_runtime-0.2.1-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-policy"
-version = "0.1.1"
+version = "0.2.0"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "arkhai-kit-identity" },
@@ -575,7 +575,7 @@ dependencies = [
     { name = "typer" },
 ]
 wheels = [
-    { path = "arkhai_kit_policy-0.1.1-py3-none-any.whl" },
+    { path = "arkhai_kit_policy-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -729,7 +729,7 @@ pools = [
 
 [[package]]
 name = "arkhai-vms-negotiation"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "arkhai-kit-alkahest" },
@@ -737,7 +737,7 @@ dependencies = [
     { name = "arkhai-vms-listings" },
 ]
 wheels = [
-    { path = "arkhai_vms_negotiation-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_vms_negotiation-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]
