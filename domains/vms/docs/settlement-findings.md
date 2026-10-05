@@ -1,5 +1,11 @@
 # VM settlement repair replay
 
+Base: `49b9fff3`. Tested production revision: `559a34e0` on `fix-vm`.
+The final runnable replay passed 105 buyer and 270 storefront checks, the
+malformed-evidence diagnostic, controlled payment first use and comment hygiene.
+This packet is nonvisual implementation/re-drive evidence, not a new independent
+audit or live deployment qualification.
+
 Target: checkout-owned VM buyer/storefront wheels and controlled in-process
 entry points. No deployed service, inherited deployment selector or external
 credential is required. Tests use synthetic canonical principals and fresh
