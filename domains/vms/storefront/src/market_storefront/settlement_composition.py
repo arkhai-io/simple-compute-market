@@ -262,8 +262,8 @@ def _settlement_plan_obligations(
     *,
     domain: MarketDomainContract,
     context: StorefrontSettlementBuildContext,
+    stage: Any,
 ) -> tuple[dict[str, Any], ...]:
-    stage = resolve_proposal_stage(domain.settlement.seller_stages, context.proposal)
     artifacts = build_domain_settlement_artifacts(
         domain, context, build_plan=stage.build_plan
     )
@@ -318,12 +318,14 @@ async def prepare_vm_settlement(
 
     provision = normalize_vm_provision_terms(thread.get("provision_terms"))
     proposal_raw = thread.get("buyer_escrow_proposal")
-
-    if not isinstance(proposal_raw, dict):
-        raise ValueError(
-            f"Negotiation {negotiation_id} has no persisted accepted escrow proposal"
-        )
-    proposal = EscrowProposal.model_validate(proposal_raw)
+    raw = thread.get("agreement_bytes")
+    if not isinstance(raw, bytes):
+        raise ValueError("accepted Agreement bytes are unavailable")
+    agreement = json.loads(raw)
+    stage = resolve_proposal_stage(
+        domain.settlement.seller_stages, proposal_raw, agreement=agreement,
+    )
+    proposal = EscrowProposal.model_validate(stage.accepted_proposal(thread))
     accepted_chain = proposal.chain_name
     if chain_name != accepted_chain:
         raise ValueError("settlement chain does not match accepted terms")
@@ -348,7 +350,7 @@ async def prepare_vm_settlement(
 
     buyer_principal = Identity.model_validate(thread.get("buyer_principal"))
     obligations = _settlement_plan_obligations(
-        domain=domain,
+        domain=domain, stage=stage,
         context=StorefrontSettlementBuildContext(
             binding=thread_binding.binding,
             negotiation_id=negotiation_id,
@@ -375,11 +377,6 @@ async def prepare_vm_settlement(
     )
 
     proposal_chain = accepted_chain
-    raw = thread.get("agreement_bytes")
-    if not isinstance(raw, bytes):
-        raise ValueError("accepted Agreement bytes are unavailable")
-    agreement = json.loads(raw)
-    stage = domain.settlement.seller_stages[agreement["settlement"]["mechanism"]]
     evidence = stage.verified_evidence(
         raw=raw,
         order=dict(order),

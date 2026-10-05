@@ -122,11 +122,12 @@ def round_zero_opening_guard(
     if isinstance(proposal, dict) and proposal.get("settlement_selection") is not None:
         try:
             selection = proposal["settlement_selection"]
-            if not isinstance(selection, dict) or set(selection) != {
-                "mechanism",
-                "option_id",
-                "expiration_unix",
-            }:
+            if (
+                not isinstance(selection, dict)
+                or not {"mechanism", "option_id", "expiration_unix"}.issubset(selection)
+                or set(selection) - {"mechanism", "option_id", "expiration_unix", "params"}
+                or (selection.get("params") is not None and not isinstance(selection["params"], dict))
+            ):
                 raise ValueError("selection has invalid fields")
             mechanism = selection["mechanism"]
             option_id = selection["option_id"]

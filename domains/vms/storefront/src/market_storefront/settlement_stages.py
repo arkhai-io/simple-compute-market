@@ -6,7 +6,7 @@ import hashlib
 import json
 import logging
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -17,6 +17,8 @@ from domains.vms.settlement import (
     token_resource_from_accepted_escrow,
 )
 from domains.vms.settlement.fulfillment import reconcile_or_submit_compute_fulfillment
+from domains.vms.settlement.proposals import escrow_proposal_from_accepted_entry
+from core_storefront import build_domain_settlement_artifacts
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 from market_arkhai_payments import (
@@ -28,9 +30,6 @@ from market_arkhai_payments import (
 from market_core import SettlementEvidence, SettlementStageTable
 from market_core.schemas import (
     EscrowProposal,
-    RateValue,
-    SettlementOption,
-    derive_settlement_option_id,
 )
 from market_identity import Identity
 
@@ -82,41 +81,24 @@ class VmAlkahestSellerStage:
             if isinstance(clause.mechanism_input.get("chain"), str)
         }
 
-    def proposal_option(
-        self, proposal: Mapping[str, Any], listing: Mapping[str, Any]
+    def accepted_artifacts(
+        self, *, domain: Any, context: Any, listing: Mapping[str, Any],
+        selection: Any, option: Mapping[str, Any], build_selection: Callable,
     ) -> dict[str, Any]:
-        entries = listing.get("accepted_escrows") or []
-        if isinstance(entries, str):
-            entries = json.loads(entries)
-        entry = next(
-            (
-                dict(item)
-                for item in entries
-                if item.get("chain_name") == proposal.get("chain_name")
-                and item.get("escrow_address") == proposal.get("escrow_address")
-            ),
-            None,
+        entry = option.get("params", {}).get("accepted_escrow")
+        if not isinstance(entry, Mapping):
+            raise ValueError("selected Alkahest option has no accepted escrow")
+        proposal = escrow_proposal_from_accepted_entry(
+            listing=dict(listing), entry=dict(entry),
+            expiration_unix=selection.expiration_unix,
         )
-        if entry is None:
-            raise ValueError("accepted escrow is not advertised by listing")
-        literals = entry.get("literal_fields") or {}
-        asset = str(
-            literals.get("token")
-            or literals.get("asset")
-            or entry.get("asset")
-            or "native"
+        artifacts = build_domain_settlement_artifacts(
+            domain, replace(context, proposal=proposal), build_plan=self.build_plan,
         )
-        rates = [RateValue.model_validate(rate) for rate in entry.get("rates") or []]
-        params = {"accepted_escrow": entry}
-        return SettlementOption(
-            option_id=derive_settlement_option_id(
-                mechanism=self.mechanism, asset=asset, rates=rates, params=params
-            ),
-            mechanism=self.mechanism,
-            asset=asset,
-            rates=rates,
-            params=params,
-        ).model_dump(mode="json")
+        return {
+            **dict(artifacts.supplemental),
+            "settlement_plan": dict(artifacts.settlement_plan),
+        }
 
     def verified_evidence(
         self, *, raw: bytes, order: dict, source: dict, chain_configs: dict
@@ -164,7 +146,7 @@ class VmAlkahestSellerStage:
         chain_name = source["chain_name"]
         if client is None:
             client = composition.evidence_clients.get(chain_name)
-        proposal = EscrowProposal.model_validate(thread["buyer_escrow_proposal"])
+        proposal = EscrowProposal.model_validate(self.accepted_proposal(thread))
         if (
             source["escrow_uid"] != evidence.settlement_ref
             or proposal.chain_name != chain_name
@@ -257,8 +239,24 @@ class VmAlkahestSellerStage:
             capacity=build_capacity_runtime(lambda: db),
         )
 
-    def accepted_data(self, agreement: Any, payments_stage: Any) -> dict[str, Any]:
-        return {}
+    def accepted_data(
+        self, agreement: Any, payments_stage: Any, *, artifacts: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        return {"accepted_escrow_proposal": artifacts["accepted_escrow_proposal"]}
+
+    def accepted_proposal(self, thread: Mapping[str, Any]) -> dict[str, Any]:
+        raw = thread.get("agreement_bytes")
+        if not isinstance(raw, bytes):
+            raise ValueError("accepted Agreement bytes are unavailable")
+        agreement = json.loads(raw)
+        selected = agreement.get("settlement")
+        if not isinstance(selected, Mapping) or selected.get("mechanism") != self.mechanism:
+            raise ValueError("accepted Agreement does not select Alkahest")
+        data = thread.get("settlement_data") or {}
+        proposal = data.get("accepted_escrow_proposal") or thread.get("buyer_escrow_proposal")
+        if not isinstance(proposal, dict) or "chain_name" not in proposal:
+            raise ValueError("accepted negotiation has no persisted accepted escrow proposal")
+        return proposal
 
     async def start(
         self,
@@ -315,12 +313,10 @@ class VmAlkahestSellerStage:
                 detail="SSH public key does not match accepted provision terms",
             )
 
-        proposal = thread.get("buyer_escrow_proposal")
-        if not isinstance(proposal, dict):
-            raise HTTPException(
-                status_code=409,
-                detail="accepted negotiation has no settlement selection",
-            )
+        try:
+            proposal = self.accepted_proposal(thread)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         selection = proposal.get("settlement_selection")
         mechanism = self.mechanism
         if isinstance(selection, Mapping) and selection.get("mechanism") != mechanism:
@@ -394,7 +390,12 @@ class VmPaymentsSellerStage:
     def publication_chains(self, clauses: Any) -> set[str]:
         return set()
 
-    def accepted_data(self, agreement: Any, payments_stage: Any) -> dict[str, Any]:
+    def accepted_artifacts(self, *, build_selection: Callable, **_: Any) -> dict[str, Any]:
+        return build_selection()
+
+    def accepted_data(
+        self, agreement: Any, payments_stage: Any, *, artifacts: Mapping[str, Any],
+    ) -> dict[str, Any]:
         if payments_stage is None:
             raise ValueError("payments_settlement_unavailable")
         return {
@@ -620,14 +621,22 @@ def vm_seller_stages(build_plan: Callable[..., Any]) -> SettlementStageTable[Any
     )
 
 
-def resolve_proposal_stage(stages: SettlementStageTable[Any], proposal: Any) -> Any:
-    """Decode the legacy Alkahest carrier only at the settlement boundary."""
+def resolve_proposal_stage(
+    stages: SettlementStageTable[Any], proposal: Any, *, agreement: Any = None,
+) -> Any:
+    """Require an explicit selection, or the exact accepted Agreement on recovery."""
     selection = (
         proposal.get("settlement_selection") if isinstance(proposal, Mapping) else None
     )
+    accepted = agreement.get("settlement") if isinstance(agreement, Mapping) else None
     mechanism = (
-        selection.get("mechanism") if isinstance(selection, Mapping) else "alkahest.v1"
+        selection.get("mechanism") if isinstance(selection, Mapping)
+        else accepted.get("mechanism") if isinstance(accepted, Mapping) else None
     )
+    if not isinstance(mechanism, str) or not mechanism:
+        raise ValueError("settlement_mechanism_required")
+    if isinstance(accepted, Mapping) and accepted.get("mechanism") != mechanism:
+        raise ValueError("settlement_selection_differs_from_agreement")
     try:
         return stages[mechanism]
     except KeyError as exc:

@@ -95,10 +95,9 @@ def test_selected_stage_controls_fresh_prices_and_proposal(negotiation, monkeypa
     assert result.exit_code == 4, (result.output, result.exception)
     assert negotiation["initial_price"] == expected
     assert negotiation["max_price"] == expected * 1.5
-    if mechanism == "alkahest.v1":
-        assert negotiation["escrow_proposal"].chain_name == "anvil"
-    else:
-        assert negotiation["escrow_proposal"] is None
+    assert negotiation["escrow_proposal"] is None
+    assert negotiation["settlement_selection"].mechanism == mechanism
+    if mechanism == "arkhai.payments.v1":
         assert negotiation["settlement_selection"].params == {"payer_account": "11111111-1111-4111-8111-111111111111"}
 
 

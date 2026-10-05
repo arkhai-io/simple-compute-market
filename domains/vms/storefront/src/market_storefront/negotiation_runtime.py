@@ -14,7 +14,6 @@ from core_storefront import (
     StorefrontDomainBinding,
     StorefrontDomainRegistry,
     StorefrontSettlementBuildContext,
-    build_domain_settlement_artifacts,
 )
 from domains.vms.listings import (
     determine_strategy_from_order,
@@ -278,47 +277,6 @@ def build_vm_accepted_artifacts(
     return artifacts
 
 
-def _build_accepted_escrow_artifacts(
-    *,
-    domain: MarketDomainContract,
-    capacity_binding: CapacityBinding,
-    negotiation_id: str,
-    listing_id: str,
-    proposal: Mapping[str, Any] | None,
-    agreed_amount: int,
-    duration_seconds: int,
-    buyer_principal: Identity,
-    seller_principal: Identity,
-    uses_scalar_amount: bool,
-) -> dict[str, Any]:
-    artifacts = build_domain_settlement_artifacts(
-        domain,
-        StorefrontSettlementBuildContext(
-            binding=StorefrontDomainBinding(
-                offering_mode=capacity_binding.offering_mode,
-                domain_identity=domain.identity,
-                contract_major=domain.contract_version.major,
-                contract_minor=domain.contract_version.minor,
-            ),
-            negotiation_id=negotiation_id,
-            listing_id=listing_id,
-            site_id=capacity_binding.site_id,
-            proposal=proposal,
-            agreed_amount=agreed_amount,
-            duration_seconds=duration_seconds,
-            buyer_principal=buyer_principal,
-            seller_principal=seller_principal,
-            uses_scalar_amount=uses_scalar_amount,
-            seller_wallet_address=get_evm_wallet_address() or None,
-            chain_config_paths=_chain_config_paths(),
-        ),
-        build_plan=resolve_proposal_stage(domain.settlement.seller_stages, proposal).build_plan,
-    )
-    return {
-        **dict(artifacts.supplemental),
-        "settlement_plan": dict(artifacts.settlement_plan),
-    }
-
 
 def _accepted_vm_service_terms(
     *,
@@ -460,50 +418,52 @@ def _accepted_settlement_artifacts(
     seller_principal: Identity,
     provision_terms: Any,
 ) -> dict[str, Any]:
-    if isinstance(proposal, Mapping) and isinstance(
-        proposal.get("settlement_selection"), Mapping
-    ):
-        selection = SettlementSelection.model_validate(proposal["settlement_selection"])
-        options = listing.get("settlement_options") or []
-        if isinstance(options, str):
-            options = json.loads(options)
-        option = next(
-            (
-                item
-                for item in options
-                if isinstance(item, Mapping)
-                and item.get("option_id") == selection.option_id
-                and item.get("mechanism") == selection.mechanism
-            ),
-            None,
-        )
-        if option is None:
-            raise OfferUnfulfillableError("settlement_selection_not_exact")
-        return _accepted_selection_artifacts(
-            dispatch,
-            selection=selection.model_dump(),
-            option=option,
-            agreed_amount=agreed_amount,
-            duration_seconds=duration_seconds,
-            listing=listing,
-            provision_terms=provision_terms,
-            buyer_principal=buyer_principal,
-            seller_principal=seller_principal,
-        )
-    artifacts = _build_accepted_escrow_artifacts(
-        domain=domain,
-        capacity_binding=capacity_binding,
-        negotiation_id=negotiation_id,
-        listing_id=listing_id,
-        proposal=proposal,
-        agreed_amount=agreed_amount,
-        duration_seconds=duration_seconds,
-        uses_scalar_amount=uses_scalar_amount,
-        buyer_principal=buyer_principal,
-        seller_principal=seller_principal,
+    try:
+        stage = resolve_proposal_stage(domain.settlement.seller_stages, proposal)
+    except ValueError as exc:
+        raise OfferUnfulfillableError(str(exc)) from exc
+    selection = SettlementSelection.model_validate(proposal["settlement_selection"])
+    options = listing.get("settlement_options") or []
+    if isinstance(options, str):
+        options = json.loads(options)
+    option = next(
+        (
+            item for item in options
+            if isinstance(item, Mapping)
+            and item.get("option_id") == selection.option_id
+            and item.get("mechanism") == selection.mechanism
+        ),
+        None,
     )
-    stage = resolve_proposal_stage(domain.settlement.seller_stages, proposal)
-    artifacts["_agreement_settlement_option"] = stage.proposal_option(proposal, listing)
+    if option is None:
+        raise OfferUnfulfillableError("settlement_selection_not_exact")
+    context = StorefrontSettlementBuildContext(
+        binding=StorefrontDomainBinding(
+            offering_mode=capacity_binding.offering_mode,
+            domain_identity=domain.identity,
+            contract_major=domain.contract_version.major,
+            contract_minor=domain.contract_version.minor,
+        ),
+        negotiation_id=negotiation_id, listing_id=listing_id,
+        site_id=capacity_binding.site_id, proposal=proposal,
+        agreed_amount=agreed_amount, duration_seconds=duration_seconds,
+        buyer_principal=buyer_principal, seller_principal=seller_principal,
+        uses_scalar_amount=uses_scalar_amount,
+        seller_wallet_address=get_evm_wallet_address() or None,
+        chain_config_paths=_chain_config_paths(),
+    )
+    artifacts = stage.accepted_artifacts(
+        domain=domain, context=context, listing=listing, selection=selection,
+        option=option,
+        build_selection=lambda: _accepted_selection_artifacts(
+            dispatch, selection=selection.model_dump(), option=option,
+            agreed_amount=agreed_amount, duration_seconds=duration_seconds,
+            listing=listing, provision_terms=provision_terms,
+            buyer_principal=buyer_principal, seller_principal=seller_principal,
+        ),
+    )
+    artifacts["settlement_selection"] = selection.model_dump(mode="json", exclude_none=True)
+    artifacts["_agreement_settlement_option"] = dict(option)
     return artifacts
 
 
@@ -607,7 +567,7 @@ def _build_response_artifacts(
             raise OfferUnfulfillableError("accepted_settlement_unavailable")
         try:
             stage = domain.settlement.seller_stages[agreement.settlement.mechanism]
-            data = stage.accepted_data(agreement, payments_stage)
+            data = stage.accepted_data(agreement, payments_stage, artifacts=artifacts)
         except (KeyError, ValueError) as exc:
             raise OfferUnfulfillableError(str(exc)) from exc
         if data:
@@ -618,30 +578,15 @@ def _build_response_artifacts(
         return {}
     proposal = state.get("accepted_escrow_proposal")
     if isinstance(proposal, Mapping):
-        artifacts = _accepted_settlement_artifacts(
-            dispatch,
-            domain=domain,
-            capacity_binding=acceptance.binding,
-            negotiation_id=acceptance.negotiation_id,
-            listing_id=acceptance.listing_id,
-            proposal=proposal,
-            listing=acceptance.listing_record,
-            provision_terms=acceptance.terms.decoded,
-            agreed_amount=acceptance.agreed_amount,
-            duration_seconds=acceptance.agreement.duration_seconds,
-            uses_scalar_amount=acceptance.uses_scalar_amount,
-            buyer_principal=acceptance.buyer_principal,
-            seller_principal=acceptance.seller_principal,
-        )
-        return {key: artifacts[key] for key in ("accepted_escrow_proposal", "settlement_selection")
-                if artifacts.get(key) is not None}
+        return {"accepted_escrow_proposal": dict(proposal)}
     selection = state.get("accepted_settlement_selection")
     option = state.get("accepted_settlement_option")
     if isinstance(selection, Mapping) and isinstance(option, Mapping):
-        artifacts = _accepted_selection_artifacts(
-            dispatch,
-            selection=selection,
-            option=option,
+        artifacts = _accepted_settlement_artifacts(
+            dispatch, domain=domain, capacity_binding=acceptance.binding,
+            negotiation_id=acceptance.negotiation_id, listing_id=acceptance.listing_id,
+            proposal={"settlement_selection": selection},
+            uses_scalar_amount=acceptance.uses_scalar_amount,
             agreed_amount=acceptance.agreed_amount,
             duration_seconds=acceptance.agreement.duration_seconds,
             buyer_principal=acceptance.buyer_principal,

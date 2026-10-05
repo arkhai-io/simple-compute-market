@@ -29,8 +29,6 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from domains.vms.settlement import escrow_proposal_from_accepted_entry
-
 from . import common
 from .arkhai_payments import (
     AgreedTerms,
@@ -135,11 +133,7 @@ class AlkahestBuyerStage:
         return initial_price, max_price
 
     def proposal(self, match, selected):
-        return escrow_proposal_from_accepted_entry(
-            listing=match,
-            entry=self.accepted_entry(selected),
-            expiration_unix=selected.selection.expiration_unix,
-        )
+        return selected.selection
 
     def enrich_deal(self, deal):
         if deal.accepted_escrow_proposal is not None:

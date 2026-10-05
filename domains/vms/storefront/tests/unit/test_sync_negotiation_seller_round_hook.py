@@ -13,7 +13,7 @@ from core_storefront.domain_registry import (
 )
 from domains.vms.negotiation.storefront_round import SellerRoundResult
 from market_capacity_publication import CapacityBinding, CapacityRuntime, CapacitySite
-from market_core.schemas import EscrowProposal, ProvisionTerms
+from market_core.schemas import EscrowProposal, ProvisionTerms, RateValue, SettlementOption, derive_settlement_option_id
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from market_negotiation_runtime import OfferUnfulfillableError
 from market_policy.identity import Identity
@@ -151,6 +151,7 @@ async def db(tmp_path, monkeypatch):
             "resource_id": "resource-hook",
             "virtualization_type": "vm",
         },
+        settlement_options=[_option().model_dump(mode="json")],
         accepted_escrows=[
             {
                 "chain_name": "anvil",
@@ -180,6 +181,25 @@ async def db(tmp_path, monkeypatch):
     )
     assert await client.load_listing_binding(listing_id="L-hook") == listing_binding
     return client
+
+
+def _option() -> SettlementOption:
+    entry = {
+        "chain_name": "anvil", "escrow_address": _ESCROW,
+        "literal_fields": {"token": _TOKEN, "recipient": _RECIPIENT},
+        "rates": [{"field": "amount", "per": "hour", "value": "100"}],
+    }
+    body = {"mechanism": "alkahest.v1", "asset": _TOKEN,
+            "rates": [RateValue(field="amount", per="hour", value=100)],
+            "params": {"accepted_escrow": entry}}
+    return SettlementOption(option_id=derive_settlement_option_id(**body), **body)
+
+
+def _selected_proposal(amount: int) -> dict:
+    return {"fields": {"amount": amount}, "settlement_selection": {
+        "mechanism": "alkahest.v1", "option_id": _option().option_id,
+        "expiration_unix": 1_800_000_000,
+    }}
 
 
 def _proposal(amount: int) -> EscrowProposal:
@@ -506,7 +526,7 @@ async def test_negotiation_runtime_continuation_uses_injected_seller_round_hook(
         our_listing_id="L-hook",
         buyer_principal=_BUYER,
         seller_principal=_SELLER,
-        proposal=_proposal(50),
+        proposal=_selected_proposal(50),
         provision_terms=ProvisionTerms(
             kind="compute.v1",
             version=1,
@@ -542,7 +562,7 @@ async def test_negotiation_runtime_continuation_uses_injected_seller_round_hook(
         sqlite_client=db,
         neg_id=opened["negotiation_id"],
         buyer_action="counter",
-        buyer_proposal=_proposal(100).model_dump(),
+        buyer_proposal=_selected_proposal(100),
         buyer_reason=None,
         buyer_principal=_BUYER,
         actor_principal=_BUYER,
@@ -551,6 +571,9 @@ async def test_negotiation_runtime_continuation_uses_injected_seller_round_hook(
 
     assert response["action"] == "accept"
     assert response["accepted_escrow_proposal"]["fields"]["amount"] == "100"
+    thread = await db.load_negotiation_thread_row(negotiation_id=opened["negotiation_id"])
+    assert thread["settlement_data"]["accepted_escrow_proposal"] == response["accepted_escrow_proposal"]
+    assert _DOMAIN.settlement.seller_stages["alkahest.v1"].accepted_proposal(thread) == response["accepted_escrow_proposal"]
     assert seen["history"][-1].sender == "them"
     assert seen["history"][-1].proposal["fields"]["amount"] == 100
     assert seen["has_policy_inputs"] is False
