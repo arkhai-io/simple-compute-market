@@ -23,7 +23,7 @@ class SettlementRepository:
         with sqlite3.connect(self.db_path, timeout=30) as conn:
             conn.execute("BEGIN IMMEDIATE")
             old = conn.execute(
-                "SELECT mechanism, agreement_digest, settlement_ref, evidence "
+                "SELECT mechanism, agreement_digest, settlement_ref, evidence, status "
                 "FROM api_credit_settlement_evidence WHERE negotiation_id = ?",
                 (evidence.negotiation_id,),
             ).fetchone()
@@ -33,6 +33,10 @@ class SettlementRepository:
                 if old[2] is not None and old[2] != evidence.settlement_ref:
                     raise ValueError("settlement evidence changed established reference")
                 old_payload = json.loads(old[3])
+                if old[4] == "verified" and (
+                    evidence.status != "verified" or old_payload != payload
+                ):
+                    raise ValueError("verified settlement evidence is immutable")
                 if old_payload["delivery"] != payload["delivery"]:
                     raise ValueError("settlement evidence changed accepted delivery inputs")
             conn.execute(

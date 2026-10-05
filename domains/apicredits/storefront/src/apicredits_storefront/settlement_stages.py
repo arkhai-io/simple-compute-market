@@ -444,26 +444,42 @@ class PaymentSellerStage:
         if progress and progress["status"] in {"ready", "failed"}:
             return progress
         old = await db.load_settlement_evidence(negotiation_id=reference)
-        order = await db.load_listing(listing_id=agreement.listing_id)
-        if not order:
-            raise ValueError("accepted credit listing is unavailable")
-        evidence = settlement_evidence(agreement, raw, reference=payment_ref, status="pending", source=data, order=order)
-        if old:
-            evidence = replace(evidence, evidence={**dict(evidence.evidence), "delivery": dict(old.evidence["delivery"])})
-        await db.save_settlement_evidence(evidence)
+        if old and old.status == "verified":
+            old.validate_identity(
+                negotiation_id=reference, mechanism=agreement.settlement.mechanism,
+                settlement_ref=payment_ref,
+            )
+            source = dict(old.evidence["source"])
+            receipt = source.pop("receipt", None)
+            if (
+                old.evidence["agreement_digest"] != hashlib.sha256(raw).hexdigest()
+                or source != data
+                or not verify_receipt(receipt, config.service_identity, mandate=mandate, agreement_json=agreement_json)
+            ):
+                raise ValueError("payments evidence does not prove this Agreement")
+            evidence = old
+        else:
+            order = await db.load_listing(listing_id=agreement.listing_id)
+            if not order:
+                raise ValueError("accepted credit listing is unavailable")
+            evidence = settlement_evidence(agreement, raw, reference=payment_ref, status="pending", source=data, order=order)
+            if old:
+                evidence = replace(evidence, evidence={**dict(evidence.evidence), "delivery": dict(old.evidence["delivery"])})
+            await db.save_settlement_evidence(evidence)
         await db.save_issuance_progress(negotiation_id=reference, public_ref=reference, status="provisioning")
         with payments_client_for_owner(config, policy.option.payee_account) as client:
-            try:
-                snapshot = await asyncio.to_thread(client.poll, payment_ref, timeout=30.0, interval=0.5)
-            except PaymentsPollTimeout:
-                return await db.load_issuance_progress(reference=reference)
-            receipt = snapshot.snapshot.receipt
-            if not verify_receipt(receipt, config.service_identity, mandate=mandate, agreement_json=agreement_json):
-                raise ValueError("payments receipt does not prove this Agreement")
-            evidence = replace(evidence, status="verified", evidence={
-                **dict(evidence.evidence), "source": {**data, "receipt": receipt.model_dump(mode="json") if hasattr(receipt, "model_dump") else receipt},
-            })
-            await db.save_settlement_evidence(evidence)
+            if evidence.status != "verified":
+                try:
+                    snapshot = await asyncio.to_thread(client.poll, payment_ref, timeout=30.0, interval=0.5)
+                except PaymentsPollTimeout:
+                    return await db.load_issuance_progress(reference=reference)
+                receipt = snapshot.snapshot.receipt
+                if not verify_receipt(receipt, config.service_identity, mandate=mandate, agreement_json=agreement_json):
+                    raise ValueError("payments receipt does not prove this Agreement")
+                evidence = replace(evidence, status="verified", evidence={
+                    **dict(evidence.evidence), "source": {**data, "receipt": receipt.model_dump(mode="json", by_alias=True, exclude_none=True) if hasattr(receipt, "model_dump") else receipt},
+                })
+                await db.save_settlement_evidence(evidence)
             await asyncio.to_thread(client.ensure_agreement_attached, payment_ref, agreement_json,
                                     PaymentsOptionParams.model_validate(agreement.settlement.params))
             result = await composition.domain.fulfillment.fulfill(
