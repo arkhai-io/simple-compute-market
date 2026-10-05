@@ -9,6 +9,7 @@ the provision terms, exactly like the VM lease duration.
 
 from __future__ import annotations
 
+import json
 from typing import Any, Optional
 
 import typer
@@ -422,8 +423,8 @@ def register(credits_app: typer.Typer) -> None:
         expected_seller_principals = (
             resume_point.publisher_principals
             if resume_point is not None
-            else TrustedIdentitySet.model_validate(
-                (listing_dict or {}).get("publisher_principals"),
+            else TrustedIdentitySet.model_validate_json(
+                json.dumps((listing_dict or {}).get("publisher_principals")),
             )
         )
         publisher_id = (
