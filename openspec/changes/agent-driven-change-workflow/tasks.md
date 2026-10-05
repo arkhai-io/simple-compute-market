@@ -64,7 +64,14 @@ to repair by hand.
       refuses to start while a dependency gating design is unlanded, checks for
       drift since an earlier design, and leaves `tasks.md` to planning.
 - [ ] 3.2 Pilot: resolve `capacity-shape-envelope`'s open questions; the owner
-      judges depth against a browser session on the same questions.
+      judges depth against a browser session on the same questions. First
+      response compared: the skill matched the browser session on every shared
+      point and raised a conceptual error, a guidance violation, and a false
+      claim the browser missed; the browser alone raised a double-claimed call
+      site and separate reporting of inadmissible shapes. Amended the skill at
+      the owner's direction: open with a summary of the change, then
+      corrections, then each decision as context, alternatives, and a
+      recommendation with its reason.
 - [ ] 3.3 Pilot: design `add-full-stack-ci-job` from its proposal.
 
 ## 4. Change review

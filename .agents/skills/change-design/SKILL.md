@@ -48,28 +48,39 @@ if it is not already. This is the only edit before the design is settled.
 
 ## 3. Open the discussion
 
-Start with your own summary of the problem, in your own words: what is wrong or
-missing today, for whom, and what evidence in the code shows it. If the
-change's framing of the problem looks wrong, say so first — a well-designed
-solution to a misread problem is the costliest outcome.
+Open in three parts, in this order.
 
-Then list every open decision, numbered, including ones the documents treat as
-settled but the code contradicts. For each:
+**Summary.** Summarize the change as it stands: its purpose, its scope and
+non-goals, and the design it proposes. Then give your own reading of the
+problem — what is wrong or missing today, for whom, and what evidence in the
+code shows it. The owner checks your understanding here before reading
+anything that rests on it.
 
-- **The question**, stated so the owner can answer it without rereading the change.
-- **The options** actually available, including doing nothing and deferring.
-- **The trade-offs** of each: what it costs, what it constrains later, which
-  layer or authority boundary it touches (`ARCHITECTURE.md` vocabulary), what
-  it does to wire, persistence, and deployment compatibility.
-- **Your recommendation** and the reason, and what would change your mind.
+**Corrections.** List, numbered, every place the change's account of the code,
+the guidance, or its own documents is wrong or contradicts itself, each with
+the evidence. A correction is a fact, not a question. If the change misreads
+the problem itself, lead with that — a well-designed solution to a misread
+problem is the costliest outcome.
+
+**Decisions.** List every open decision, numbered, including ones the
+documents treat as settled but the code or a correction reopens. For each:
+
+- **Context.** Recap what the design currently says or assumes on this point,
+  and the code, guidance, or correction that bears on it, so the owner can
+  decide without rereading the change.
+- **Alternatives.** Each option actually available, including doing nothing
+  and deferring, with its trade-offs: what it costs, what it constrains later,
+  which layer or authority boundary it touches (`ARCHITECTURE.md` vocabulary),
+  and what it does to wire, persistence, and deployment compatibility.
+- **Recommendation.** Which option you recommend and why, and what would change
+  your mind.
+
+When some decisions shape the rest, say which to settle first.
 
 Depth is the point of this phase. Do not compress options you think are wrong
 into a sentence, and do not drop a question because you are confident of its
 answer; the owner decides what is obvious. Use diagrams where structure is the
 question.
-
-Separate findings about the design from decisions it needs: an error in the
-change's account of the code is a correction, not a question.
 
 ## 4. Iterate
 
