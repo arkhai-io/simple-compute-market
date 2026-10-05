@@ -37,6 +37,7 @@ from market_storefront.settlement_composition import (
 )
 from market_storefront.settlement_stages import vm_seller_stages
 from market_storefront.utils.sqlite_client import SQLiteClient
+from tests.fulfillment_fixtures import vm_delivery_evidence
 
 _BUYER_SIGNER = Ed25519Signer(b"\x31" * 32)
 _SELLER_SIGNER = Ed25519Signer(b"\x32" * 32)
@@ -187,15 +188,8 @@ def _prepared(db: SQLiteClient, *, escrow_uid: str = "0xescrow") -> PreparedSett
         mechanism_receipt={"verified": True},
         fulfillment_input=StorefrontSettlementFulfillmentInput(
             buyer_principal=_BUYER,
-            settlement_evidence=SettlementEvidence(
-                negotiation_id="neg-1",
-                mechanism="alkahest.v1",
-                settlement_ref=escrow_uid,
-                status="verified",
-                evidence={
-                    "schema": "vm.settlement-evidence.v1",
-                    "agreement_sha256": "0" * 64,
-                },
+            settlement_evidence=vm_delivery_evidence(
+                negotiation_id="neg-1", settlement_ref=escrow_uid,
             ),
             thread_binding=StorefrontThreadBinding(
                 negotiation_id="neg-1",

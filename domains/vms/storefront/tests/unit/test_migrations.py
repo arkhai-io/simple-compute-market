@@ -23,6 +23,8 @@ from market_storefront.domain_runtime import build_vm_storefront_domain, build_v
 from market_storefront.utils.sqlite_client import SQLiteClient
 from market_storefront.utils import sqlite_client as sqlite_module
 
+from tests.fulfillment_fixtures import vm_delivery_evidence
+
 from market_storefront.utils.migrations import (
     _migrate_rename_compute_capacity_pools,
 )
@@ -373,7 +375,10 @@ async def test_evidence_and_delivery_bindings_survive_restart_without_payment_es
     await db.save_vm_settlement_evidence(pending)
     with pytest.raises(ValueError, match="requires verified"):
         await db.insert_vm_delivery(negotiation_id="payment-1")
-    verified = replace(pending, status="verified")
+    verified = replace(
+        vm_delivery_evidence(negotiation_id="payment-1", settlement_ref="transaction-1"),
+        mechanism=pending.mechanism,
+    )
     await db.save_vm_settlement_evidence(verified)
     assert await db.insert_vm_delivery(negotiation_id="payment-1")
     await db.update_vm_delivery(negotiation_id="payment-1", fulfillment_id="physical-1")
