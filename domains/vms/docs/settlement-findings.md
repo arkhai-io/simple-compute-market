@@ -38,3 +38,23 @@ ENABLE_EVENT_QUEUE=true AGENT_WALLET_ADDRESS='' .venv/bin/python -m pytest \
 Focused suite: **22 passed** (one existing Pydantic schema-shadow warning).
 Replay refuses the original poisoned record with `ValueError: verified VM
 evidence requires a sha256 Agreement digest`; `temporary_database_removed=True`.
+
+## Established reference conflict (review F5)
+
+Evidence reuse raises `VmSettlementEvidenceConflict`, distinct from missing
+accepted state. The Alkahest seller entry maps it to HTTP 409, preserving the
+original evidence and leaving delivery untouched.
+
+Proving test: `test_settlement_reference_conflict.py` drives the settlement
+controller through real repository rejection of a second escrow UID for the
+same negotiation. Missing-state ValueErrors still retain their existing 404.
+
+```sh
+cd domains/vms/storefront
+ENABLE_EVENT_QUEUE=true AGENT_WALLET_ADDRESS='' .venv/bin/python -m pytest \
+  tests/unit/test_settlement_reference_conflict.py \
+  tests/unit/test_settlement_start_authority.py \
+  tests/unit/test_settlement_composition.py -q
+```
+
+Focused suite: **17 passed** (one existing agent-ID configuration warning).

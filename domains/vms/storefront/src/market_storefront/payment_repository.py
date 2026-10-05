@@ -15,6 +15,10 @@ from market_core import SettlementEvidence
 from market_storefront.services.vm_fulfillment_planner import build_vm_fulfillment_plan
 
 
+class VmSettlementEvidenceConflict(ValueError):
+    """An accepted negotiation or established reference cannot be retargeted."""
+
+
 def add_vm_settlement_records(conn: Any) -> None:
     if conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='vm_payment_records'"
@@ -129,7 +133,7 @@ class VmSettlementRepository:
                             and (current[3] != evidence.status or current[4] != wire)
                         )
                     ):
-                        raise ValueError(
+                        raise VmSettlementEvidenceConflict(
                             "settlement evidence conflicts with accepted Agreement"
                         )
                     conn.execute(

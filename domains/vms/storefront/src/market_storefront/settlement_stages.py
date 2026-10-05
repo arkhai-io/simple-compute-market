@@ -38,6 +38,7 @@ from market_storefront.failure_actions import (
     FulfillmentFailureContext,
     apply_fulfillment_failure_policy,
 )
+from market_storefront.payment_repository import VmSettlementEvidenceConflict
 from market_storefront.models.settle_models import (
     VmPaymentsSettleRequest,
     VmSettleRequest,
@@ -372,6 +373,8 @@ class VmAlkahestSellerStage:
             )
         except EscrowVerificationError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except VmSettlementEvidenceConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except Exception as exc:
