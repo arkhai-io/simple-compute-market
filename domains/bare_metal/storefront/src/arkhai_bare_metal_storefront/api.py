@@ -421,15 +421,12 @@ async def settle_status(
 ) -> BareMetalSettleStatusResponse:
     runtime = _runtime(request)
     try:
-        escrow = await runtime.db.load_escrow(escrow_uid=escrow_uid)
         record = await runtime.db.load_bare_metal_settlement_record_by_ref(
             settlement_ref=escrow_uid
         )
-        if escrow is None and record is None:
+        if record is None:
             raise SettlementRequestError("settlement not found", status_code=404)
-        negotiation_id = str(
-            escrow["negotiation_id"] if escrow is not None else record["negotiation_id"]
-        )
+        negotiation_id = str(record["negotiation_id"])
         thread = await runtime.db.load_negotiation_thread_row(
             negotiation_id=negotiation_id
         )

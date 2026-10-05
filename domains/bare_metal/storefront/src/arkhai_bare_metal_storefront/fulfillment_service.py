@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
@@ -17,6 +18,9 @@ from compute_provisioning import (
 from core_storefront import StorefrontFulfillmentContext
 from market_fulfillment import VersionedEnvelope
 from market_identity import Identity
+from market_core import SettlementEvidence
+from .settlement_evidence import EvidencePayload
+from .settlement_stages import SettlementRequestError
 
 if TYPE_CHECKING:
     from .sqlite_client import SQLiteClient
@@ -34,6 +38,7 @@ class BareMetalFulfillmentService:
     db: SQLiteClient
     capacity_client: Any
     fulfillment_client: Any
+    read_verified_evidence: Callable[..., Awaitable[SettlementEvidence]]
 
     async def _owned_context(
         self,
@@ -62,30 +67,37 @@ class BareMetalFulfillmentService:
             raise BareMetalFulfillmentError("bare-metal negotiation is not accepted")
         return context
 
-    async def _verified_escrow(
-        self,
-        *,
-        negotiation_id: str,
-        escrow_uid: str,
-    ) -> None:
-        escrow = await self.db.load_escrow(escrow_uid=escrow_uid)
+    async def _verified_evidence(
+        self, *, negotiation_id: str, buyer_principal: Identity, context: dict[str, Any]
+    ) -> tuple[SettlementEvidence, Any]:
+        try:
+            evidence = await self.read_verified_evidence(
+                negotiation_id=negotiation_id, buyer_principal=buyer_principal
+            )
+            payload = EvidencePayload.model_validate(dict(evidence.evidence))
+        except (SettlementRequestError, ValueError) as exc:
+            raise BareMetalFulfillmentError(str(exc)) from exc
+        delivery = payload.delivery
         if (
-            escrow is not None
-            and escrow.get("negotiation_id") == negotiation_id
-            and escrow.get("status") == "settlement_verified"
-        ):
-            return
-        record = await self.db.load_bare_metal_settlement_record(
-            negotiation_id=negotiation_id
-        )
-        if (
-            record is None
-            or record.get("status") != "settlement_verified"
-            or record.get("settlement_ref") != escrow_uid
+            evidence.negotiation_id != negotiation_id
+            or evidence.status != "settlement_verified"
+            or not evidence.settlement_ref
+            or delivery is None
         ):
             raise BareMetalFulfillmentError(
                 "bare-metal settlement is not authoritatively verified"
             )
+        if (
+            delivery.site_id != context["site_id"]
+            or delivery.physical_resource_id != context["physical_resource_id"]
+            or delivery.pool_id != context.get("pool_id")
+            or delivery.terms.machine_id != context["machine_id"]
+            or delivery.terms.physical_host_id != context["physical_host_id"]
+        ):
+            raise BareMetalFulfillmentError(
+                "settlement evidence conflicts with the trusted resource binding"
+            )
+        return evidence, delivery.terms
 
     async def _recover_reservation(
         self,
@@ -131,39 +143,16 @@ class BareMetalFulfillmentService:
             negotiation_id=negotiation_id,
             buyer_principal=buyer_principal,
         )
-        if escrow_uid is None:
-            record = await self.db.load_bare_metal_settlement_record(
-                negotiation_id=negotiation_id
-            )
-            if record is not None and record.get("status") == "settlement_verified":
-                escrow_uid = str(record["settlement_ref"])
-            else:
-                primary = await self.db.load_primary_escrow_for_negotiation(
-                    negotiation_id=negotiation_id
-                )
-                if (
-                    primary is not None
-                    and primary.get("status") == "settlement_verified"
-                ):
-                    escrow_uid = str(primary["escrow_uid"])
-        if not escrow_uid:
-            raise BareMetalFulfillmentError(
-                "accepted bare-metal settlement is not verified"
-            )
-        await self._verified_escrow(
+        evidence, terms = await self._verified_evidence(
             negotiation_id=negotiation_id,
-            escrow_uid=escrow_uid,
+            buyer_principal=buyer_principal,
+            context=context,
         )
-        terms = await self.db.load_bare_metal_terms(negotiation_id=negotiation_id)
-        if terms is None:
-            raise BareMetalFulfillmentError("accepted bare-metal terms are missing")
-        if (
-            terms.machine_id != context["machine_id"]
-            or terms.physical_host_id != context["physical_host_id"]
-        ):
+        if escrow_uid is not None and escrow_uid != evidence.settlement_ref:
             raise BareMetalFulfillmentError(
-                "accepted terms conflict with the trusted resource binding"
+                "requested settlement reference conflicts with verified evidence"
             )
+        escrow_uid = evidence.settlement_ref
 
         lifecycle = await self.db.ensure_bare_metal_fulfillment_lifecycle(
             negotiation_id=negotiation_id,
@@ -346,13 +335,26 @@ class BareMetalFulfillmentService:
         negotiation_id: str,
         buyer_principal: Identity,
     ) -> dict[str, Any]:
-        await self._owned_context(
+        context = await self._owned_context(
             negotiation_id=negotiation_id,
             buyer_principal=buyer_principal,
         )
         lifecycle = await self.db.load_bare_metal_fulfillment_lifecycle(
             negotiation_id=negotiation_id
         )
+        evidence, _ = await self._verified_evidence(
+            negotiation_id=negotiation_id,
+            buyer_principal=buyer_principal,
+            context=context,
+        )
+        if lifecycle is not None and (
+            lifecycle["escrow_uid"] != evidence.settlement_ref
+            or lifecycle["site_id"] != context["site_id"]
+            or lifecycle["physical_resource_id"] != context["physical_resource_id"]
+        ):
+            raise BareMetalFulfillmentError(
+                "physical lifecycle conflicts with verified evidence"
+            )
         if lifecycle is None:
             raise BareMetalFulfillmentError(
                 "bare-metal fulfillment not found",
@@ -543,13 +545,24 @@ async def fulfill_bare_metal(
         raise BareMetalFulfillmentError(
             "fulfillment context conflicts with the durable negotiation binding"
         )
+    reader = (
+        context.domain_input.get("read_verified_evidence")
+        if isinstance(context.domain_input, Mapping)
+        else None
+    )
+    if not callable(reader):
+        raise BareMetalFulfillmentError(
+            "bare-metal fulfillment requires the caller-owned settlement boundary"
+        )
     service = BareMetalFulfillmentService(
         db=context.ports.repository,
         capacity_client=context.ports.capacity_client,
         fulfillment_client=context.ports.fulfillment_client,
+        read_verified_evidence=reader,
     )
-    return await service.begin(
+    lifecycle = await service.begin(
         negotiation_id=context.negotiation_id,
-        escrow_uid=context.escrow_uid,
+        escrow_uid=context.settlement_ref,
         buyer_principal=context.buyer_principal,
     )
+    return {**lifecycle, "settlement_ref": lifecycle["escrow_uid"]}

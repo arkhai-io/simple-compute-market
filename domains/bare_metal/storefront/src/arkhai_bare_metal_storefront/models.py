@@ -131,4 +131,4 @@ class BareMetalSettleStatusResponse(BaseModel):
     buyer_principal: Identity
     seller_principal: Identity
     obligation_ref: str | None = None
-    fulfillment_available: Literal[True] = True
+    fulfillment_available: bool = True

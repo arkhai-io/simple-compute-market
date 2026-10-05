@@ -34,13 +34,19 @@ from market_contact_exchange import (
     insert_introduction,
     load_introduction,
 )
-from market_core import MarketDomainContract, validate_domain_contract
+from market_core import (
+    MarketDomainContract,
+    SettlementEvidence,
+    validate_domain_contract,
+)
+from market_core.schemas import Agreement
 from market_identity import Identity
 from market_settlement_runtime import settlement_migrations
 from pydantic import BaseModel
 
 from .domain_runtime import get_market_domain_contract
 from .migrations import BARE_METAL_STOREFRONT_MIGRATIONS
+from .settlement_evidence import EvidencePayload
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -73,6 +79,17 @@ class SQLiteClient(CoreSQLiteClient):
             local_listing_principal=local_listing_principal,
             expected_legacy_sellers=expected_legacy_sellers,
         )
+        with sqlite3.connect(self.db_path) as conn:
+            columns = {
+                row[1]
+                for row in conn.execute(
+                    "PRAGMA table_info(bare_metal_settlement_records)"
+                )
+            }
+        if "evidence_json" not in columns:
+            raise RuntimeError(
+                "bare-metal settlement schema requires an explicit database reset"
+            )
 
     def _domain_migrations(self) -> tuple[MigrationLike, ...]:
         return (
@@ -198,6 +215,16 @@ class SQLiteClient(CoreSQLiteClient):
             raise ValueError("settlement data is only valid for accepted agreements")
         settlement_data_json = None
         agreement_sha256 = None
+        accepted_evidence_json = None
+        if agreement_bytes is not None:
+            agreement = Agreement.model_validate_json(agreement_bytes)
+            if agreement.settlement is None:
+                raise ValueError("accepted Agreement has no selected settlement")
+            settlement_mechanism = agreement.settlement.mechanism
+            agreement_sha256 = hashlib.sha256(agreement_bytes).hexdigest()
+            accepted_evidence_json = EvidencePayload(
+                agreement_sha256=agreement_sha256
+            ).model_dump_json()
         if settlement_data is not None:
             if agreement_bytes is None:
                 raise ValueError("settlement data requires retained Agreement bytes")
@@ -308,17 +335,18 @@ class SQLiteClient(CoreSQLiteClient):
                         negotiation_id,
                     ),
                 )
-                if settlement_data_json is not None:
+                if accepted_evidence_json is not None:
                     assert settlement_mechanism is not None
                     assert agreement_sha256 is not None
                     conn.execute(
                         "INSERT OR IGNORE INTO bare_metal_settlement_records("
                         "negotiation_id, mechanism, agreement_sha256, "
-                        "status) VALUES (?, ?, ?, 'accepted')",
+                        "status, evidence_json) VALUES (?, ?, ?, 'accepted', ?)",
                         (
                             negotiation_id,
                             settlement_mechanism,
                             agreement_sha256,
+                            accepted_evidence_json,
                         ),
                     )
                     stored = conn.execute(
@@ -815,10 +843,10 @@ class SQLiteClient(CoreSQLiteClient):
     @staticmethod
     def _decode_bare_metal_settlement_record(row: sqlite3.Row) -> dict[str, Any]:
         record = dict(row)
-        receipt_json = record.pop("receipt_json")
-        record["receipt"] = (
-            json.loads(receipt_json) if receipt_json is not None else None
-        )
+        payload = EvidencePayload.model_validate_json(record.pop("evidence_json"))
+        if payload.agreement_sha256 != record["agreement_sha256"]:
+            raise RuntimeError("settlement evidence changed its Agreement binding")
+        record["evidence"] = payload.model_dump(mode="json")
         return record
 
     async def load_bare_metal_settlement_record(
@@ -863,62 +891,72 @@ class SQLiteClient(CoreSQLiteClient):
 
         return await asyncio.to_thread(_load)
 
-    async def mark_bare_metal_settlement_verified(
-        self,
-        *,
-        negotiation_id: str,
-        settlement_ref: str,
-        mechanism: str,
-        agreement_sha256: str,
-        receipt: Mapping[str, Any],
-    ) -> dict[str, Any]:
-        receipt_json = json.dumps(
-            dict(receipt),
-            ensure_ascii=False,
-            separators=(",", ":"),
-            sort_keys=True,
-            allow_nan=False,
-        )
+    async def save_bare_metal_settlement_evidence(
+        self, evidence: SettlementEvidence
+    ) -> None:
+        payload = EvidencePayload.model_validate(dict(evidence.evidence))
+        if evidence.status == "settlement_verified" and not evidence.settlement_ref:
+            raise ValueError("verified settlement requires a reference")
+        encoded = payload.model_dump_json()
 
-        def _save() -> dict[str, Any]:
+        def _save() -> None:
             conn = sqlite3.connect(self.db_path)
             conn.row_factory = sqlite3.Row
             try:
-                with conn:
-                    conn.execute(
-                        "UPDATE bare_metal_settlement_records SET settlement_ref = ?, "
-                        "status = 'settlement_verified', receipt_json = ?, "
-                        "updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now') "
-                        "WHERE negotiation_id = ? AND mechanism = ? "
-                        "AND agreement_sha256 = ? "
-                        "AND status IN ('accepted', 'settlement_verified')",
-                        (
-                            settlement_ref,
-                            receipt_json,
-                            negotiation_id,
-                            mechanism,
-                            agreement_sha256,
-                        ),
-                    )
+                conn.execute("BEGIN IMMEDIATE")
                 row = conn.execute(
                     "SELECT * FROM bare_metal_settlement_records WHERE negotiation_id = ?",
-                    (negotiation_id,),
+                    (evidence.negotiation_id,),
                 ).fetchone()
                 if row is None:
                     raise RuntimeError("accepted settlement record is missing")
-                record = self._decode_bare_metal_settlement_record(row)
+                stored = self._decode_bare_metal_settlement_record(row)
                 if (
-                    record["mechanism"] != mechanism
-                    or record["agreement_sha256"] != agreement_sha256
-                    or record["settlement_ref"] != settlement_ref
-                    or record["status"] != "settlement_verified"
-                    or record["receipt"] != dict(receipt)
+                    stored["mechanism"] != evidence.mechanism
+                    or stored["agreement_sha256"] != payload.agreement_sha256
+                    or (
+                        stored["settlement_ref"] is not None
+                        and stored["settlement_ref"] != evidence.settlement_ref
+                    )
+                    or (
+                        stored["status"] == "settlement_verified"
+                        and (
+                            evidence.status != stored["status"]
+                            or stored["evidence"] != payload.model_dump(mode="json")
+                        )
+                    )
                 ):
                     raise RuntimeError(
                         "settlement evidence conflicts with accepted state"
                     )
-                return record
+                accepted = conn.execute(
+                    "SELECT agreement_bytes FROM negotiation_threads WHERE negotiation_id = ?",
+                    (evidence.negotiation_id,),
+                ).fetchone()
+                if (
+                    accepted is None
+                    or hashlib.sha256(accepted[0]).hexdigest()
+                    != payload.agreement_sha256
+                ):
+                    raise RuntimeError(
+                        "settlement evidence is bound to another Agreement"
+                    )
+                conn.execute(
+                    "UPDATE bare_metal_settlement_records SET settlement_ref = ?, status = ?, "
+                    "evidence_json = ?, updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now') "
+                    "WHERE negotiation_id = ?",
+                    (
+                        evidence.settlement_ref,
+                        evidence.status,
+                        encoded,
+                        evidence.negotiation_id,
+                    ),
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
             finally:
                 conn.close()
 
-        return await asyncio.to_thread(_save)
+        await asyncio.to_thread(_save)

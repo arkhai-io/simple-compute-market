@@ -6,9 +6,33 @@ import json
 import sqlite3
 import time
 import uuid
+import copy
+
+import pytest
+from market_core.schemas import RateValue, SettlementOption, derive_settlement_option_id
+from market_arkhai_payments import (
+    Mandate,
+    SignedReceipt,
+    PaymentsPollTimeout,
+    transaction_id,
+)
+from contextlib import contextmanager
+from arkhai_bare_metal_storefront.models import BareMetalSettleRequest
+from arkhai_bare_metal_storefront.fulfillment_service import BareMetalFulfillmentError
+from market_arkhai_payments.canonical import jcs_sha256
+from market_identity import Ed25519Signer, SignatureProof
+from market_identity.canonical import _frame
+from core_storefront.models.negotiation_models import NegotiateNewRequest
+from arkhai_bare_metal_storefront.arkhai_payments import BareMetalArkhaiPaymentsStage
+from arkhai_bare_metal_storefront.settlement_composition import (
+    BareMetalStorefrontSettlementComposition,
+)
 
 from fastapi.testclient import TestClient
-from market_core.schemas import SettlementPlan
+from market_core.schemas import SettlementPlan, EscrowProposal
+from arkhai_bare_metal_storefront.negotiation_service import BareMetalNegotiationService
+from arkhai_bare_metal_storefront.settlement_stages import legacy_alkahest_option
+from datetime import datetime, timezone
 from market_fulfillment import VersionedEnvelope
 from market_settlement_runtime import derive_obligation_ref
 from market_identity import (
@@ -175,6 +199,39 @@ async def _accepted_runtime(
         accepted_escrows=[],
     )
     negotiation_id = "neg-accepted"
+    proposal = EscrowProposal(
+        chain_name="anvil",
+        escrow_address=ESCROW_ADDRESS,
+        fields={"amount": "100"},
+        expiration_unix=int(time.time()) + 3600,
+    )
+    listing = await db.load_listing(listing_id="listing-1")
+    now = datetime.now(timezone.utc)
+    agreement = BareMetalNegotiationService._agreement(
+        negotiation_id=negotiation_id,
+        listing_id="listing-1",
+        listing=listing,
+        buyer_principal=BUYER_SIGNER.identity,
+        seller_principal=SELLER_SIGNER.identity,
+        settlement=legacy_alkahest_option(
+            proposal,
+            _plan(
+                proposal=proposal,
+                buyer_principal=BUYER_SIGNER.identity,
+                seller_principal=SELLER_SIGNER.identity,
+            )["settlement_plan"],
+        ),
+        amount=100,
+        duration_seconds=3600,
+        start_utc=now,
+        accepted_at=now,
+        provision_terms={
+            "kind": "bare_metal.v1",
+            "duration_seconds": 3600,
+            "ssh_public_key": "ssh-ed25519 persisted-key",
+        },
+        settlement_plan=None,
+    )
     await db.persist_bare_metal_opening(
         negotiation_id=negotiation_id,
         listing_id="listing-1",
@@ -187,12 +244,8 @@ async def _accepted_runtime(
             duration_seconds=3600,
             ssh_public_key="ssh-ed25519 persisted-key",
         ),
-        proposal={
-            "chain_name": "anvil",
-            "escrow_address": ESCROW_ADDRESS,
-            "fields": {"amount": "100"},
-            "expiration_unix": int(time.time()) + 3600,
-        },
+        proposal=proposal.model_dump(mode="json"),
+        agreement_bytes=agreement.model_dump_json(exclude_none=True).encode(),
         buyer_amount=100,
         seller_action="accept",
         seller_amount=100,
@@ -431,10 +484,8 @@ async def test_status_fails_closed_without_canonical_verified_adoption(
             headers=_headers("settle_status", ESCROW_UID, method="GET"),
         )
 
-    assert response.status_code == 409
-    assert response.json()["detail"] == (
-        "verified settlement lifecycle is inconsistent"
-    )
+    assert response.status_code == 404
+    assert response.json()["detail"] == "settlement not found"
 
 
 class _FulfillmentSite:
@@ -565,6 +616,15 @@ async def test_http_fulfillment_restarts_on_recorded_site_and_redacts_result(
     }
 
     with TestClient(_app(runtime)) as client:
+        unverified = client.post(
+            "/api/v1/fulfillments/begin",
+            json=begin_body,
+            headers=_headers(
+                "bare_metal_fulfillment_begin", negotiation_id, begin_body
+            ),
+        )
+        assert unverified.status_code == 409
+        assert capacity.reserve_calls == [] and provisioning.begin_calls == []
         settled = client.post(
             f"/api/v1/settle/{ESCROW_UID}",
             json=settle_body,
@@ -669,3 +729,209 @@ async def test_http_fulfillment_restarts_on_recorded_site_and_redacts_result(
         "provider_metadata",
     ):
         assert forbidden not in serialized_result
+
+
+def _signed_payment_receipt(mandate: Mandate, signer: Ed25519Signer) -> SignedReceipt:
+    wire = mandate.model_dump(mode="json", by_alias=True, exclude_none=True)
+    receipt = {
+        "transaction": transaction_id(mandate),
+        "deal": wire["deal"],
+        "from": wire["from"],
+        "to": wire["to"],
+        "ledger": "controlled-ledger-approval",
+        "parts": [
+            {
+                "asset": wire["parts"][0]["asset"],
+                "gross": wire["parts"][0]["amount"],
+                "fee": "0",
+                "net": wire["parts"][0]["amount"],
+                "hold": wire["parts"][0]["hold"],
+            }
+        ],
+        "approvedAt": int(time.time()),
+        "issuer": signer.identity.model_dump(mode="json"),
+    }
+    proof = SignatureProof.from_bytes(
+        signer.identity.scheme,
+        signer.sign(_frame(("arkhai.payments.receipt.v1", jcs_sha256(receipt)))),
+    )
+    return SignedReceipt.model_validate(
+        {"receipt": receipt, "proof": proof.model_dump(mode="json")}
+    )
+
+
+async def test_payment_evidence_gates_replay_and_rechecks_receipt_after_restart(
+    tmp_path, monkeypatch
+):
+    buyer = Ed25519Signer(bytes.fromhex("66" * 32))
+    seller = Ed25519Signer(bytes.fromhex("77" * 32))
+    domain = get_market_domain_contract()
+    db = SQLiteClient(str(tmp_path / "payment.db"), domain=domain)
+    receipt_signer = Ed25519Signer(bytes.fromhex("55" * 32))
+    composition = BareMetalStorefrontSettlementComposition.from_raw_config(
+        {
+            "priority": ["arkhai.payments.v1"],
+            "arkhai_payments": {
+                "enabled": True,
+                "service_url": "http://127.0.0.1:3180",
+                "development_auth": True,
+                "service_identity": receipt_signer.identity.model_dump(mode="json"),
+                "fee_bps": 0,
+                "dispute_authority": "00000000-0000-4000-8000-000000000013",
+            },
+        }
+    )
+    params = {
+        "payee_account": "00000000-0000-4000-8000-000000000012",
+        "asset": "USD/2",
+        "window": "PT1H",
+        "deposit_agreement": False,
+    }
+    rates = [RateValue(field="amount", per="hour", value=100)]
+    option = SettlementOption(
+        option_id=derive_settlement_option_id(
+            mechanism="arkhai.payments.v1", asset="USD/2", rates=rates, params=params
+        ),
+        mechanism="arkhai.payments.v1",
+        asset="USD/2",
+        rates=rates,
+        params=params,
+    )
+    await db.upsert_bare_metal_listing(
+        listing_id="listing-payment",
+        status="open",
+        created_at="now",
+        updated_at="now",
+        seller_principal=seller.identity,
+        storefront_url="http://seller:8000",
+        site_id="site-a",
+        pool_id="pool-a",
+        physical_resource_id="resource-1",
+        listing={
+            "kind": "bare_metal.v1",
+            "machine_id": "machine-1",
+            "physical_host_id": "host-1",
+            "access_methods": ["ssh"],
+        },
+        accepted_escrows=[],
+        settlement_options=[option.model_dump(mode="json")],
+    )
+    capacity, provisioning = _CapacityClient(), _ProvisioningClient()
+    runtime = BareMetalStorefrontRuntime(
+        db=db,
+        domain=domain,
+        seller_principal=seller.identity,
+        admin_principals=TrustedIdentitySet(identities=(ADMIN_SIGNER.identity,)),
+        storefront_url="http://seller:8000",
+        marketplace_signer=seller,
+        settlement_composition=composition,
+        capacity_client=capacity,
+        fulfillment_client=provisioning,
+    )
+    outcome = await runtime.negotiation_service().open(
+        request=NegotiateNewRequest(
+            listing_id="listing-payment",
+            buyer_principal=buyer.identity,
+            buyer_agent_url="https://buyer.example",
+            provision_terms={
+                "kind": "bare_metal.v1",
+                "version": 1,
+                "payload": {
+                    "duration_seconds": 3600,
+                    "ssh_public_key": "ssh-ed25519 payment-key",
+                },
+            },
+            settlement_selection={
+                "mechanism": option.mechanism,
+                "option_id": option.option_id,
+                "params": {"payer_account": "00000000-0000-4000-8000-000000000011"},
+            },
+            proposal={"fields": {"amount": "100"}},
+        ),
+        buyer_principal=buyer.identity,
+    )
+    negotiation_id = outcome.negotiation_id
+    mandate = Mandate.model_validate(outcome.settlement_data)
+    signed_receipt = _signed_payment_receipt(mandate, receipt_signer)
+    available = False
+
+    class ReceiptClient:
+        def poll(self, *args, **kwargs):
+            if not available:
+                raise PaymentsPollTimeout("controlled pending payment")
+            return SimpleNamespace(snapshot=SimpleNamespace(receipt=signed_receipt))
+
+    @contextmanager
+    def receipt_client(self, owner_account):
+        yield ReceiptClient()
+
+    monkeypatch.setattr(BareMetalArkhaiPaymentsStage, "_client", receipt_client)
+    request = BareMetalSettleRequest(
+        negotiation_id=negotiation_id, buyer_principal=buyer.identity
+    )
+    delivery = runtime.fulfillment_service()
+    pending = await runtime.settlement_service().verify(
+        escrow_uid=negotiation_id, request=request, buyer_principal=buyer.identity
+    )
+    assert pending.status == "settlement_pending"
+    with pytest.raises(BareMetalFulfillmentError, match="not authoritatively verified"):
+        await delivery.begin(
+            negotiation_id=negotiation_id, buyer_principal=buyer.identity
+        )
+    assert capacity.reserve_calls == [] and provisioning.begin_calls == []
+    available = True
+    verified = await runtime.settlement_service().verify(
+        escrow_uid=negotiation_id, request=request, buyer_principal=buyer.identity
+    )
+    assert verified.status == "settlement_verified"
+    first = await delivery.begin(
+        negotiation_id=negotiation_id, buyer_principal=buyer.identity
+    )
+
+    original = await runtime.settlement_service().verified_evidence(
+        negotiation_id=negotiation_id, buyer_principal=buyer.identity
+    )
+    for change in (
+        {"mechanism": "alkahest.v1"},
+        {"settlement_ref": "changed-reference"},
+        {"evidence": {**dict(original.evidence), "agreement_sha256": "a" * 64}},
+        {"evidence": {**dict(original.evidence), "source": {"receipt": {}}}},
+    ):
+        with pytest.raises(RuntimeError, match="conflicts"):
+            await db.save_bare_metal_settlement_evidence(replace(original, **change))
+        assert (
+            await runtime.settlement_service().verified_evidence(
+                negotiation_id=negotiation_id, buyer_principal=buyer.identity
+            )
+            == original
+        )
+
+    restarted = replace(runtime, db=SQLiteClient(db.db_path, domain=domain))
+    repeated = await restarted.fulfillment_service().begin(
+        negotiation_id=negotiation_id, buyer_principal=buyer.identity
+    )
+    ready = await restarted.fulfillment_service().status(
+        negotiation_id=negotiation_id, buyer_principal=buyer.identity
+    )
+    assert repeated == first
+    assert ready["state"] == "active"
+    assert (
+        await restarted.db.load_bare_metal_result(negotiation_id=negotiation_id)
+    ).host is None
+    assert len(capacity.reserve_calls) == len(provisioning.begin_calls) == 1
+
+    corrupt = copy.deepcopy(dict(original.evidence))
+    corrupt["source"]["receipt"]["proof"]["value"] = "A" * 86
+    with sqlite3.connect(db.db_path) as conn:
+        conn.execute(
+            "UPDATE bare_metal_settlement_records SET evidence_json=? WHERE negotiation_id=?",
+            (json.dumps(corrupt), negotiation_id),
+        )
+        assert conn.execute("SELECT count(*) FROM escrows").fetchone()[0] == 0
+    with pytest.raises(
+        BareMetalFulfillmentError, match="stored payment receipt is invalid"
+    ):
+        await restarted.fulfillment_service().status(
+            negotiation_id=negotiation_id, buyer_principal=buyer.identity
+        )
+    assert len(capacity.reserve_calls) == len(provisioning.begin_calls) == 1

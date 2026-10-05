@@ -29,8 +29,11 @@ def test_storefront_contract_validates_current_bare_metal_capabilities() -> None
     assert callable(contract.storefront.run_negotiation_policy)
     assert contract.has_capability(DomainCapability.SETTLEMENT)
     assert contract.settlement is not None
-    assert callable(contract.settlement.verify)
-    assert callable(contract.settlement.build_plan)
+    assert set(contract.settlement.seller_stages) == {
+        "alkahest.v1",
+        "arkhai.payments.v1",
+        "contact-exchange.v1",
+    }
 
     assert contract.has_capability(DomainCapability.FULFILLMENT)
     assert contract.fulfillment is not None
@@ -93,7 +96,9 @@ def test_settlement_hook_consumes_common_context(monkeypatch) -> None:
         chain_config_paths={"base": "/config/base.json"},
     )
 
-    artifacts = build_domain_settlement_artifacts(contract, context)
+    artifacts = build_domain_settlement_artifacts(
+        contract, context, build_plan=domain_runtime._build_settlement_from_context
+    )
 
     assert artifacts.supplemental == {"accepted_escrow_terms": []}
     assert calls == [

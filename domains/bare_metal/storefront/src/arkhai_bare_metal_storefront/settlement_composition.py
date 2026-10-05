@@ -8,9 +8,26 @@ from types import MappingProxyType
 from typing import Any
 
 from core_storefront.publication_runner import PublicationPayload
-from market_alkahest import create_alkahest_registration
-from market_contact_exchange import create_contact_exchange_registration
+from market_core import SettlementStageTable
 from market_core.schemas import SettlementOption
+from .settlement_stages import (
+    ALKAHEST_MECHANISM,
+    ContactStage,
+    PaymentStage,
+    SellerStage,
+    alkahest_resources,
+    verify_alkahest,
+    revalidate_alkahest,
+    verify_payment,
+    revalidate_payment,
+    verify_contact,
+    revalidate_contact,
+)
+from market_alkahest import create_alkahest_registration
+from market_contact_exchange import (
+    MECHANISM as CONTACT_MECHANISM,
+    create_contact_exchange_registration,
+)
 from market_settlement_runtime import (
     MechanismReadiness,
     SettlementConfig,
@@ -21,24 +38,43 @@ from market_settlement_runtime import (
 from market_arkhai_payments import (
     ARKHAI_PAYMENTS_CONFIG_KEY,
     ARKHAI_PAYMENTS_MECHANISM,
-    ArkhaiPaymentsConfig,
     create_arkhai_payments_registration,
+    ArkhaiPaymentsConfig,
 )
 
 from .arkhai_payments import BareMetalArkhaiPaymentsStage
 
-ALKAHEST_MECHANISM = "alkahest.v1"
+
+SELLER_STAGES = SettlementStageTable(
+    {
+        ALKAHEST_MECHANISM: SellerStage(
+            create_alkahest_registration,
+            verify_alkahest,
+            revalidate_alkahest,
+            True,
+            alkahest_resources,
+        ),
+        ARKHAI_PAYMENTS_MECHANISM: PaymentStage(
+            create_arkhai_payments_registration,
+            verify_payment,
+            revalidate_payment,
+            True,
+        ),
+        CONTACT_MECHANISM: ContactStage(
+            create_contact_exchange_registration,
+            verify_contact,
+            revalidate_contact,
+            False,
+        ),
+    }
+)
 
 
 def build_bare_metal_settlement_registry() -> SettlementConfigurationRegistry:
     """Install the supported mechanisms through their shared facades."""
 
     return SettlementConfigurationRegistry(
-        (
-            create_alkahest_registration(),
-            create_contact_exchange_registration(),
-            create_arkhai_payments_registration(),
-        )
+        tuple(stage.registration_factory() for stage in SELLER_STAGES.values())
     )
 
 
@@ -50,7 +86,13 @@ class BareMetalStorefrontSettlementComposition:
     config: SettlementConfig
     resources: Mapping[str, Any] = field(default_factory=dict, repr=False)
 
+    seller_stages: SettlementStageTable[Any] = SELLER_STAGES
+
     def __post_init__(self) -> None:
+        if any(
+            mechanism not in self.seller_stages for mechanism in self.config.priority
+        ):
+            raise ValueError("enabled settlement mechanism has no seller stage")
         self.registry.validate(self.config, role="seller")
         object.__setattr__(self, "resources", MappingProxyType(dict(self.resources)))
 
@@ -77,17 +119,18 @@ class BareMetalStorefrontSettlementComposition:
         if section is None:
             return None
         config = ArkhaiPaymentsConfig.model_validate(section)
-        if not config.enabled:
-            return None
         return BareMetalArkhaiPaymentsStage(config=config)
 
     def settlement_data_dispatch(
         self,
-    ) -> dict[str, Callable[[Mapping[str, Any]], Mapping[str, Any]]]:
-        stage = self.arkhai_payments_stage()
-        if stage is None:
-            return {}
-        return {ARKHAI_PAYMENTS_MECHANISM: stage.mandate_for_agreement}
+    ) -> dict[str, Callable[[Mapping[str, Any]], Mapping[str, Any] | None]]:
+        payment_stage = self.arkhai_payments_stage()
+        return {
+            mechanism: lambda agreement, entry=entry: entry.accepted_data(
+                agreement, payment_stage
+            )
+            for mechanism, entry in self.seller_stages.items()
+        }
 
     async def readiness(
         self,
@@ -185,7 +228,8 @@ class BareMetalStorefrontSettlementComposition:
             str, Callable[[Mapping[str, Any], Mapping[str, Any]], Any] | None
         ] = {}
         for mechanism_id in self.config.priority:
-            registration = self.registry.registration(mechanism_id)
+            entry = self.seller_stages[mechanism_id]
+            registration = entry.registration_factory()
             if registration.accepted_obligation_builder is None:
                 dispatch[mechanism_id] = None
                 continue

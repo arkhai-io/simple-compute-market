@@ -318,8 +318,8 @@ def _add_bare_metal_settlement_records(conn: sqlite3.Connection) -> None:
           mechanism TEXT NOT NULL,
           agreement_sha256 TEXT NOT NULL,
           settlement_ref TEXT UNIQUE,
-          status TEXT NOT NULL CHECK (status IN ('accepted', 'settlement_verified')),
-          receipt_json TEXT,
+          status TEXT NOT NULL CHECK (status IN ('accepted', 'settlement_verified', 'failed')),
+          evidence_json TEXT NOT NULL CHECK (json_valid(evidence_json)),
           created_at TEXT NOT NULL
             DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
           updated_at TEXT NOT NULL
