@@ -58,3 +58,18 @@ ENABLE_EVENT_QUEUE=true AGENT_WALLET_ADDRESS='' .venv/bin/python -m pytest \
 ```
 
 Focused suite: **17 passed** (one existing agent-ID configuration warning).
+
+## Neutral introducing migration (review F6, VM)
+
+Migration `20261001_011_vm_settlement_records` names the evidence/delivery
+schema it creates. The introducing migration was edited in place; there is no
+adoption or compatibility migration. Existing databases require the campaign's
+explicit disposable-database reset.
+
+```sh
+cd domains/vms/storefront
+.venv/bin/python -m pytest tests/unit/test_migrations.py -q
+```
+
+Fresh bootstrap, rerun and restart suite: **7 passed** (one existing agent-ID
+configuration warning).
