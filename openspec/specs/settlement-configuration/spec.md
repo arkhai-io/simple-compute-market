@@ -196,4 +196,3 @@ Disabling publication or selection for a mechanism MUST NOT reinterpret accepted
 
 - **WHEN** a previously accepted Agreement is resumed after its registration is disabled for new work
 - **THEN** its existing entry resumes that exact mechanism and operation identity without advertising it for fresh work
-

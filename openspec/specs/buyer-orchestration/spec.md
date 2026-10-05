@@ -257,4 +257,3 @@ VM, bare-metal, and API-credit buyers selecting `arkhai.payments.v1` MUST retain
 
 - **WHEN** a verified payment has issued credits but the buyer did not observe credentials
 - **THEN** it retrieves the same grant through the authenticated seller boundary rather than approving or issuing again
-

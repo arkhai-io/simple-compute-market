@@ -109,4 +109,3 @@ The storefront MUST persist accepted-Agreement-bound SettlementEvidence and nego
 
 - **WHEN** preparation has verified the authoritative escrow and saved matching delivery facts
 - **THEN** delivery consumes those facts without a second preparation inside terminal failure handling
-

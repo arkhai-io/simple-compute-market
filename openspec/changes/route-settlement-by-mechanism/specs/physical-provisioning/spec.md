@@ -58,4 +58,3 @@ Bare-metal settlement stages MUST persist accepted-Agreement-bound SettlementEvi
 
 - **WHEN** recovery finds reclaim or collection in progress or completed, a non-ready mechanism status, or chain evidence no longer matching the accepted obligation
 - **THEN** it refuses before reservation, fulfillment, access or teardown effects
-

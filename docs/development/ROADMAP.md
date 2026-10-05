@@ -211,16 +211,25 @@ Restoring a non-zero hold default is `billable-capacity-reservations`' own work:
 
 **Current state.** `alkahest.v1` and `arkhai.payments.v1` are peer registrations in VM, bare-metal, and API-credit compositions. Shared configuration owns readiness, publication options, and buyer compatibility, not a universal escrow API. Negotiation emits exact Agreement bytes; the selected settlement stage produces evidence consumed by domain provisioning. Arkhai payments stores the seller-derived mandate in shared negotiation `settlement_data`, approves and polls a deterministic transaction, and gates provisioning or issuance on a verified signed receipt. It creates no settlement plan or obligation and runs no servicing daemon. `fiat.stripe.v1` and its hosted client, funding profiles, setup, and recovery commands are not part of the installed system.
 
-Alkahest and `contact-exchange.v1` retain the shared obligation journal and escrow-oriented carriers. Contact exchange completes a bare-metal deal by durable authenticated introduction: rateless options, a scalar-declining registration, a non-financial obligation, and a persisted reveal surface. Core carries public options, accepted Agreements, and opaque stage data; each supporting domain owns the translation into delivery.
+Alkahest and `contact-exchange.v1` retain the shared obligation journal and escrow-oriented carriers. Contact exchange completes a bare-metal deal by durable authenticated introduction: rateless options, a scalar-declining registration, a non-financial obligation, and a persisted reveal surface. Core carries public options, accepted Agreements, immutable role-stage tables
+and opaque seller evidence. Agreement-selected entries own revalidation and
+continuations; common VM/bare-metal delivery and credit issuance consume
+validated facts without concrete-mechanism switches. Buyer recovery retains
+exact accepted inputs and opaque references, not seller SettlementEvidence.
+Domain evidence/progress records are separate from genuine escrow servicing.
 
 Each recipient can deliver its revealed introduction: each side hands its own copy of the reveal to sinks its operator configured locally, through an installed-plugin contract that grows a destination by installing a package rather than editing the marketplace. `kit/delivery` owns a mechanism-neutral event, the sink protocol, discovery, and four protocol-thin built-ins (file, local program, webhook, mail); the seller dispatches off the reveal's critical path from the introduction route service, the buyer dispatches inline after printing. Delivery is never authoritative — the durable, re-readable reveal is what makes best-effort delivery safe — and the mechanism kit has no delivery dependency because dispatch is injected.
 
-Current limits: escrow claimant, expiration, and condition fields remain in existing core carriers, and `kit/settlement-runtime` remains shared by Alkahest and contact exchange. Moving those escrow semantics fully into Alkahest is a separate refactor. The legacy `/api/v1/settle/{escrow_uid}` family remains the Alkahest surface; VM payment provisioning progress may occupy a local `escrows` row under negotiation ID without becoming a chain obligation.
+Current limits: escrow claimant, expiration, and condition fields remain in existing core carriers, and `kit/settlement-runtime` remains shared by Alkahest and contact exchange. Moving those escrow semantics fully into Alkahest is a separate refactor. The legacy `/api/v1/settle/{escrow_uid}` family remains the Alkahest surface.
+Payment evidence and delivery/issuance progress no longer occupy escrow rows.
+Standalone API-credit negotiation still bypasses the buyer table, and accepted
+bare-metal contact reveal/re-read still depends on current enablement; these
+specific inventory failures remain with settlement dispatch closeout.
 
 | Open gap | Owned by |
 |---|---|
 | Live Arkhai payment and domain delivery qualification | [`settle-through-arkhai-payments`](../../openspec/changes/settle-through-arkhai-payments/) |
-| Domains dispatch settlement through scattered mechanism-ID comparisons and an escrow-or-not branch in core | [`route-settlement-by-mechanism`](../../openspec/changes/route-settlement-by-mechanism/) |
+| Standalone API-credit negotiation's Alkahest-only path and disabled-contact accepted reveal/re-read still bypass the declared admission/recovery boundary | [`route-settlement-by-mechanism`](../../openspec/changes/route-settlement-by-mechanism/) |
 | Isolate escrow carriers and the conditional-escrow port fully within Alkahest | [`move-escrow-into-alkahest`](../../openspec/changes/move-escrow-into-alkahest/) |
 | Escrow fields in listing, registry and storefront-client wire formats | [`drop-escrow-from-shared-wire`](../../openspec/changes/drop-escrow-from-shared-wire/) |
 | Cross-domain contact-exchange composition beyond bare metal; contact-payload retention automation | Unowned — needs a new change; background in [`contact-exchange-settlement-mechanism`](../../openspec/changes/archive/2026-08-19-contact-exchange-settlement-mechanism/) |

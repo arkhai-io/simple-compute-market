@@ -1,5 +1,8 @@
 # Joined settlement closeout — independent audit
 
+Post-repair joined validation and final task disposition: [final.md](final.md).
+This document preserves the independent observations at the revision below.
+
 Tested production revision: `66d83b9f` (`settlement-dispatch-campaign`), in checkout-owned `closeout-verify`. Mode: auditing; this assignment explicitly includes production control-flow inspection and named test surfaces. No product repairs or new permanent tests were made. This is backend/CLI/library evidence, not a rendered journey.
 
 ## Predictions, recorded before execution

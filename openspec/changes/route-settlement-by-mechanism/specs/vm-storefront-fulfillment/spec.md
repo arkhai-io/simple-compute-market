@@ -94,4 +94,3 @@ VM settlement evidence and payment delivery checkpoints/claims MUST be domain-ow
 
 - **WHEN** a write proposes verified evidence without a SHA-256 Agreement digest, authoritative source, or supported validated `vm.delivery-facts` version 1 payload
 - **THEN** storage refuses before freezing an authoritative record or creating delivery progress
-
