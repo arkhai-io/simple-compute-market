@@ -11,35 +11,16 @@ from core_storefront import (
     StorefrontSettlementBuildContext,
     build_domain_settlement_artifacts,
 )
-from market_core import DomainCapability, validate_domain_contract
+from market_core import validate_domain_contract
 from market_identity import Ed25519Signer
 
 
-def test_storefront_contract_validates_current_bare_metal_capabilities() -> None:
+def test_storefront_contract_validates() -> None:
     contract = get_market_domain_contract()
 
     assert contract is BARE_METAL_STOREFRONT_DOMAIN
     assert validate_domain_contract(contract) is contract
     assert str(contract.identity) == BARE_METAL_SCHEMA_KIND
-    assert contract.has_capability(DomainCapability.PUBLICATION)
-    assert contract.publication is not None
-    assert callable(contract.publication.source_factory)
-    assert contract.has_capability(DomainCapability.STOREFRONT)
-    assert contract.storefront is not None
-    assert callable(contract.storefront.run_negotiation_policy)
-    assert contract.has_capability(DomainCapability.SETTLEMENT)
-    assert contract.settlement is not None
-    assert set(contract.settlement.seller_stages) == {
-        "alkahest.v1",
-        "arkhai.payments.v1",
-        "contact-exchange.v1",
-    }
-
-    assert contract.has_capability(DomainCapability.FULFILLMENT)
-    assert contract.fulfillment is not None
-    assert callable(contract.fulfillment.fulfill)
-    assert not contract.has_capability(DomainCapability.COMPUTE_PROVISIONING)
-    assert contract.capability(DomainCapability.COMPUTE_PROVISIONING) is None
 
 
 def test_storefront_contract_retains_bare_metal_codecs() -> None:

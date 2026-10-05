@@ -1,6 +1,6 @@
 # Bare-metal Alkahest recovery gate — repair evidence
 
-Scope: verify F1 and review F8 from the joined settlement closeout. Base: `49b9fff39c87a92b746f6c43279c01910a575436`; branch: `fix-baremetal`. Tested production source is the source in this packet's commit. This is a controlled backend self-check, not independent acceptance or live chain/hardware qualification. Visual: false; screenshots: none.
+Scope: verify F1 and review F8 from the joined settlement closeout. Base: `49b9fff39c87a92b746f6c43279c01910a575436`; branch: `fix-baremetal`. Tested production revision: `f29d6a32`. Review F8 changes only tests and this packet. This is a controlled backend self-check, not independent acceptance or live chain/hardware qualification. Visual: false; screenshots: none.
 
 ## Setup
 
@@ -44,11 +44,18 @@ refused= SettlementRequestError verified settlement is no longer active
 
 The prior `reclaimed_journal_authorized_by_revalidation=True` observation is no longer produced. The isolated replay has no chain or hardware effects; the production recovery tests prove the protected-effect boundary and authoritative-source check.
 
+## Review F8 — held
+
+Removed the literal seller-stage set assertion and the surrounding callable, non-None and capability-declaration assertions from `tests/test_domain_runtime.py`. The contract validation smoke, bare-metal codecs and accepted-artifact adapter checks remain; no replacement declaration-restating test was added. This intentionally removes assertions about the chosen declarations, not a production behavior or failure gate.
+
+The domain-runtime and application-composition suites passed **11 checks** after this removal. The production recovery entry was also re-driven: **10 passed, 6 deselected**, and the non-editable installed-wheel reclaimed-state replay again refused with the same result above.
+
 ## Validation
 
 - `make dist`, storefront `reinit`, non-editable storefront wheel install: passed.
 - Affected HTTP settlement, fulfillment service and settlement-plan suites: **26 passed**.
-- The existing 15-suite bare-metal focused group: **90 passed**, including the ten new recovery cases; these are overlapping measurements, not additive counts.
+- The existing 15-suite bare-metal focused group on the F1 revision: **90 passed**, including the ten new recovery cases.
+- Final F8 domain-runtime/application-composition check: **11 passed**; final F1 recovery-only re-drive: **10 passed**. These are overlapping measurements, not additive counts.
 - `make check-comment-hygiene` and `git diff --check`: passed. No new imports, dependencies or schema changes.
 
 Reproduce affected suites:
@@ -56,6 +63,7 @@ Reproduce affected suites:
 ```sh
 cd domains/bare_metal/storefront
 uv run --no-sync pytest tests/test_http_settlement.py tests/test_fulfillment_service.py tests/test_settlement.py -q
+uv run --no-sync pytest tests/test_domain_runtime.py tests/test_app_composition.py -q
 uv run --no-sync pytest tests/test_selection_dispatch.py tests/test_negotiation.py tests/test_domain_runtime.py tests/test_settlement.py tests/test_migrations.py tests/test_persistence.py tests/test_escrow_identity_backfill.py tests/test_fulfillment_service.py tests/test_site_clients.py tests/test_import_boundaries.py tests/test_http_settlement.py tests/test_http_negotiation.py tests/test_http_introductions.py tests/test_introduction_delivery.py tests/test_app_composition.py -q
 ```
 
