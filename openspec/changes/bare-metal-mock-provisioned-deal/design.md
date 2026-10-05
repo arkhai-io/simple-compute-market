@@ -1728,6 +1728,23 @@ place where they stated the overturned rule.
      - The site authority port's by-escrow lookup loses its compute callers. The ledger's
        `get_reservation_by_escrow` stays for the API-credit service.
 
+**Slice B implementation findings (2026-10-05).** Found while implementing slice B. Each
+either settles a detail the review left open or records a gap; the first two refine the
+review's point 4 and are reflected in the spec deltas.
+
+| Finding | Resolution |
+|---|---|
+| `record_release_success` is implemented with the ledger's `release`, so once the guard is consulted there, force-release would be guarded too | A release to `force_released`, the operator's recorded override, does not consult the guard; every other release does. `record_release_success` is therefore the lifecycle's guarded release, and the site authority port needs no separate `release` (B.1 had planned one) |
+| Point 4 said the guard abandons an `assigned` aggregate and then checks the proof. A refusal would then have written, breaking "a refused reclaim changes nothing" | The guard checks the proof first, then abandons by compare-and-set (`abandon_if_assigned` became a conditional update reporting whether it abandoned), and refuses if the aggregate moved. Equally race-free: a job or a create handle exists only after an aggregate has left `assigned` |
+| The old contract controller answered a lifecycle state refusal with 422 | `LeaseRouteService` answers it with 409, as the ledger's refusals are answered; a missing lease is 404 |
+| The grace timeout is anchored at the lease's end, and the releasing pass reads a lease in the cycle that begins its teardown | A lease whose end is further in the past than the grace period (after watchdog downtime, or a long in-flight create) is marked `teardown_timeout` in the cycle its teardown begins; retry-release later adopts the teardown. The old lifecycle behaved the same way. A fix needs the reservation to record when it began releasing, a schema change; open for the maintainer, and recorded for closeout |
+| Bare metal's fulfillment provider never implemented `resolve_executor_job_id`, so a bare-metal reservation never recorded its create handle | Implemented, as VM's provider does; the guard's create-handle proof and `LeaseView.create_job_id` now hold for bare metal |
+| `BareMetalLeaseView` had one more user than B.4 listed: `receipt_from_lease_view`, which adapted only that view and had no caller but its own test | Deleted with the view |
+| The service's integration harness composed its own ledger without the guard and its fulfillment orchestrator with VM's provider only, and its fulfillment unit of work recorded no create handle | The harness composes as production does: the release guard, both providers, and the capacity ledger in the unit of work. A shared helper (`tests/integration/bare_metal_deal.py`) sets a bare-metal deal up through scheduling and `begin`, so grants in tests go through fulfillment |
+| `services/compute_contract_service.py`, which B.2 planned to tombstone | Already deleted in A0 |
+| B.3 placed the release tests in the family kit's unit suite | The guard, executor, and status port read three real tables inside one transaction, so their tests are library integration (`provisioning/compute/tests/integration/test_release.py`); the lifecycle's decisions over scripted ports stay unit tests |
+| The VM storefront's test site released any reservation | Its fake site models the guard (`delivered`), so the terminal-settlement tests show a hold released and a delivered lease truncated |
+
 ### Implementation-review fixes for Sections 4–5
 
 Decided with the maintainer after the 2026-10-02 implementation review. The successful

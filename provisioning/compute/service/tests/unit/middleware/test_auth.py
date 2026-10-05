@@ -59,8 +59,6 @@ def _resolve(method, path, body):
 _MUTATIONS = (
     ("/api/v1/contract/leases", {"capacity_reservation_id": "reservation-1"}),
     ("/api/v1/contract/leases/reservation-1/terminate", {}),
-    ("/api/v1/contract/leases/reservation-1/retry-release", {}),
-    ("/api/v1/contract/leases/reservation-1/force-release", {}),
     ("/api/v1/fulfillment/schedule", {"capacity_reservation_id": "reservation-1"}),
     ("/api/v1/fulfillment/begin", {"capacity_reservation_id": "reservation-1"}),
     ("/api/v1/fulfillment/fulfillment-1/begin-teardown", {}),
@@ -227,6 +225,31 @@ def test_every_mutation_is_body_bound_and_response_signed(
     assert response.status_code == 200
     assert calls["count"] == 1
     assert _verified_response(response, authority.identity, path, body).verified
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/v1/contract/leases/reservation-1/retry-release",
+        "/api/v1/contract/leases/reservation-1/force-release",
+    ],
+)
+def test_the_operator_s_release_controls_admit_the_administrator_only(identities, path):
+    storefront, authority = identities
+    client, calls = _app(storefront, authority)
+
+    as_seller = client.post(
+        path, json={}, headers=_headers(storefront, path, {}, request_id="seller")
+    )
+    as_admin = client.post(
+        path,
+        json={},
+        headers=_headers(_ADMIN_SIGNER, path, {}, request_id="admin", role="admin"),
+    )
+
+    assert as_seller.status_code == 403
+    assert as_admin.status_code == 200
+    assert calls["count"] == 1
 
 
 def test_wrong_role_principal_and_body_fail_before_dispatch(identities):

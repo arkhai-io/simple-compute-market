@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-vms-provisioning-operator-client"
-version = "0.7.0"
+version = "0.8.0"
 license = "MIT"
 description = "VM's provisioning route declarations, wire models, and typed client."
 requires-python = ">=3.12"

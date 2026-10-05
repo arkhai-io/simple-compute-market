@@ -83,8 +83,21 @@ PROVISIONING_ROUTE_CONTRACTS = (
     ),
     ProvisioningRouteContract(
         "GET",
+        re.compile(r"/api/v1/contract/leases"),
+        "provisioning_lease_list",
+    ),
+    ProvisioningRouteContract(
+        "GET",
         re.compile(r"/api/v1/contract/leases/(?P<reservation_id>[^/]+)"),
         "provisioning_lease_get",
+        path_resource="reservation_id",
+    ),
+    ProvisioningRouteContract(
+        "POST",
+        re.compile(
+            r"/api/v1/contract/leases/(?P<reservation_id>[^/]+)/release-oversight"
+        ),
+        "provisioning_lease_release_oversight",
         path_resource="reservation_id",
     ),
     ProvisioningRouteContract(
@@ -182,20 +195,17 @@ PROVISIONING_ROUTE_CONTRACTS = (
 
 )
 
-DUAL_ROLE_PROVISIONING_OPERATIONS = frozenset(
-    {
-        # Reads of a fulfillment's state: the seller owns the fulfillment and
-        # the operator administers the service that runs it, and both have a
-        # legitimate question to ask of its status. The mutating fulfillment
-        # routes -- schedule, begin, teardown -- stay seller-only.
-        "provisioning_fulfillment_status",
-        "provisioning_fulfillment_result",
-    }
-)
-
-
+# Operations only the administrator may call. Every other family route admits
+# the seller and the administrator: the administrator can do everything on this
+# service. A storefront addresses its own leases by reservation id, so the lease
+# list, which shows every storefront's leases, and the operator's release
+# controls are the administrator's alone.
 ADMIN_PROVISIONING_OPERATIONS = frozenset(
     {
+        "provisioning_lease_list",
+        "provisioning_lease_release_oversight",
+        "provisioning_lease_retry_release",
+        "provisioning_lease_force_release",
         "provisioning_system_status",
         "provisioning_system_health",
         "provisioning_system_version",
@@ -232,11 +242,9 @@ PROVISIONING_ROLES = frozenset({"seller", "admin"})
 def _family_roles(operation: str) -> tuple[str, ...]:
     """The roles of one of the family's own routes, from its operation sets."""
 
-    if operation in DUAL_ROLE_PROVISIONING_OPERATIONS:
-        return ("seller", "admin")
     if operation in ADMIN_PROVISIONING_OPERATIONS:
         return ("admin",)
-    return ("seller",)
+    return ("seller", "admin")
 
 
 # The family's own routes, each carrying its roles as every contract in a
@@ -269,7 +277,8 @@ def route_contract_from_declaration(
     whole path must match), ``operation``, ``roles``, and optionally
     ``path_resource`` (a group name, or a list of them joined with ``/``),
     ``body_resource``, and ``optional_body_resource``. A declaration must name
-    its roles, because the family's operation sets know no domain's routes.
+    its roles, because the family's operation sets know no domain's routes,
+    and every route the provisioning service serves admits the administrator.
     """
 
     if isinstance(declaration, ProvisioningRouteContract):
@@ -301,6 +310,11 @@ def route_contract_from_declaration(
         raise ValueError(
             f"route {contract.operation!r} must name its roles from "
             f"{sorted(PROVISIONING_ROLES)} without repetition"
+        )
+    if "admin" not in roles:
+        raise ValueError(
+            f"route {contract.operation!r} must admit admin: every route the "
+            "provisioning service serves admits the administrator"
         )
     return contract
 

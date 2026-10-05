@@ -17,21 +17,21 @@ from typing import Any
 from .adapters import JobExecutorTable
 from .jobs.executor import JobExecutor
 from .app import ComputeProvisioningRouterMount
-from .release import ExecutorReleaseDispatcher, ExecutorReleasePort
 from market_fulfillment import FulfillmentProvider, ProviderRegistry, provider_needs_host
 
 
 @dataclass(frozen=True)
 class ExecutorAdapterContribution:
-    """What one offering mode contributes: its job executors and release hook.
+    """What one offering mode contributes: its job executors.
 
     ``job_executors`` maps each job action of the mode to what runs it. Work
     reaches these executors only through fulfillment and the domain's own
-    operations; nothing submits an action to them from outside.
+    operations; nothing submits an action to them from outside. A mode
+    contributes nothing to release: every mode's lease is released through its
+    fulfillment aggregate, whose provider the pool already names.
     """
 
     offering_mode: str
-    release_executor: ExecutorReleasePort
     job_executors: Mapping[str, JobExecutor]
 
 
@@ -49,7 +49,6 @@ class ExecutorAdapterBundle:
 
 @dataclass(frozen=True)
 class ComposedComputeAdapters:
-    release_dispatcher: ExecutorReleaseDispatcher
     provider_registry: ProviderRegistry
     pool_config_handlers: Mapping[str, Any]
     router_mounts: tuple[ComputeProvisioningRouterMount, ...]
@@ -70,11 +69,6 @@ def _validate_executor(bundle_name: str, contribution: ExecutorAdapterContributi
         raise ValueError(
             f"adapter bundle {bundle_name!r} executor {offering_mode!r} "
             "contributes no job executors"
-        )
-    if not callable(getattr(contribution.release_executor, "submit_release", None)):
-        raise ValueError(
-            f"adapter bundle {bundle_name!r} executor {offering_mode!r} "
-            "is missing required release hook 'submit_release'"
         )
     return offering_mode
 
@@ -200,7 +194,6 @@ def compose_adapter_bundles(
     provider_owners: dict[str, str] = {}
     handler_owners: dict[str, str] = {}
     readiness_owners: dict[str, str] = {}
-    release_executors: dict[str, ExecutorReleasePort] = {}
     providers: dict[str, FulfillmentProvider] = {}
     pool_config_handlers: dict[str, Any] = {}
     routers: list[ComputeProvisioningRouterMount] = []
@@ -225,7 +218,6 @@ def compose_adapter_bundles(
                     f"bundles {previous!r} and {bundle_name!r}"
                 )
             executor_owners[offering_mode] = bundle_name
-            release_executors[offering_mode] = contribution.release_executor
             for action, executor in contribution.job_executors.items():
                 try:
                     job_executors.register(offering_mode, action, executor)
@@ -288,7 +280,6 @@ def compose_adapter_bundles(
     job_executors.freeze()
 
     return ComposedComputeAdapters(
-        release_dispatcher=ExecutorReleaseDispatcher(release_executors),
         provider_registry=ProviderRegistry(providers),
         pool_config_handlers=pool_config_handlers,
         router_mounts=tuple(routers),

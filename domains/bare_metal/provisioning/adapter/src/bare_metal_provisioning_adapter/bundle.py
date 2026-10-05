@@ -11,7 +11,6 @@ from compute_provisioning import (
     JobExecutor,
 )
 
-from bare_metal_provisioning_adapter.release import BareMetalReleaseExecutor
 from bare_metal_provisioning_adapter.routers import bare_metal_router_mounts
 from bare_metal_provisioning_adapter.services.bare_metal_fulfillment_provider import (
     BareMetalFulfillmentProvider,
@@ -35,7 +34,6 @@ HOST_REQUIREMENT = MappingProxyType(
 
 def build_bare_metal_adapter_bundle(
     *,
-    release_executor: BareMetalReleaseExecutor,
     fulfillment_provider: BareMetalFulfillmentProvider,
     pool_config_handler: BareMetalPoolConfigHandler,
     job_executor: JobExecutor,
@@ -51,7 +49,6 @@ def build_bare_metal_adapter_bundle(
         executors=(
             ExecutorAdapterContribution(
                 offering_mode="bare_metal",
-                release_executor=release_executor,
                 job_executors={
                     NODE_GRANT_ACCESS_ACTION: job_executor,
                     NODE_RECLAIM_ACCESS_ACTION: job_executor,

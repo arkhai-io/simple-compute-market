@@ -82,9 +82,17 @@ class FakeLifecycleDb:
 
 
 class FakeSite:
-    def __init__(self, reservation=None, *, reservations=None) -> None:
+    def __init__(self, reservation=None, *, reservations=None, release=None) -> None:
         self.reservation = reservation
         self.reservations = list(reservations or [])
+        #: What the site answers a release with: the released reservation, or
+        #: ``None`` when its release guard refuses.
+        self.release_answer = release
+        self.released: list[str] = []
+
+    async def release(self, *, capacity_reservation_id, deal_ref=None):
+        self.released.append(capacity_reservation_id)
+        return self.release_answer
 
     async def list_reservations(self):
         return list(self.reservations)
@@ -527,3 +535,50 @@ async def test_reclaim_blocks_when_fulfillment_authority_is_unreachable() -> Non
 
     with pytest.raises(RuntimeError, match="fulfillment unavailable"):
         await guard(settlement, "worker-a")
+
+
+def _teardown_without_fulfillment(release_answer):
+    """A reclaimed deal whose reservation no fulfillment ever began on."""
+    settlement = record(mechanism="fiat.stripe.v1", mechanism_status="reclaimed")
+    db = FakeLifecycleDb(settlement)
+    db.lifecycle.financial_state = "reclaimed"
+    db.lifecycle.capacity_reservation_id = "reservation-a"
+    site = FakeSite(release=release_answer)
+    lifecycle = BareMetalHostedLifecycleCallbacks(
+        db=db,
+        runtime=FakeRuntime(),
+        local_principal=SELLER,
+        capacity_client=FakeCapacityClient(site),
+        fulfillment_client=FakeFulfillmentClient("assigned"),
+        publish_evidence=NoPhysicalEffects(),
+    )
+    lifecycle.capacity_client.reservation_sites = {"reservation-a": "site-a"}
+    return settlement, db, site, lifecycle
+
+
+@pytest.mark.asyncio
+async def test_a_reservation_no_fulfillment_began_on_is_released_at_teardown() -> None:
+    settlement, db, site, lifecycle = _teardown_without_fulfillment(
+        {"capacity_reservation_id": "reservation-a", "state": "released"}
+    )
+
+    await lifecycle.teardown_lease(settlement.obligation_ref)
+
+    assert site.released == ["reservation-a"]
+    assert {"obligation_ref": settlement.obligation_ref, "teardown_state": "released"} in (
+        db.advances
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_release_the_site_refuses_leaves_the_lease_unreleased() -> None:
+    """The site frees capacity only when fulfillment proves nothing was
+    dispatched; a refusal means one began that this lifecycle never recorded,
+    so teardown is not recorded as done and is retried."""
+    settlement, db, site, lifecycle = _teardown_without_fulfillment(None)
+
+    with pytest.raises(BareMetalHostedLifecycleError, match="refused to release"):
+        await lifecycle.teardown_lease(settlement.obligation_ref)
+
+    assert site.released == ["reservation-a"]
+    assert not any(advance.get("teardown_state") == "released" for advance in db.advances)

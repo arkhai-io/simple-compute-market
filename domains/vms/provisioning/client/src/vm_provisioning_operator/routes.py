@@ -82,67 +82,6 @@ VM_PROVISIONING_ROUTES = (
         "roles": ("admin",),
         "path_resource": ("host", "vm_name"),
     },
-    {
-        "method": "GET",
-        "path": r"/api/v1/leases/?",
-        "operation": "provisioning_leases_list",
-        "roles": ("admin",),
-    },
-    {
-        "method": "POST",
-        "path": r"/api/v1/leases/?",
-        "operation": "provisioning_lease_create",
-        "roles": ("admin",),
-    },
-    {
-        "method": "GET",
-        "path": r"/api/v1/leases/by-escrow/(?P<escrow_uid>[^/]+)",
-        "operation": "provisioning_lease_by_escrow",
-        "roles": ("admin",),
-        "path_resource": "escrow_uid",
-    },
-    {
-        "method": "GET",
-        "path": r"/api/v1/leases/(?P<lease_id>[^/]+)",
-        "operation": "provisioning_lease_admin_get",
-        "roles": ("admin",),
-        "path_resource": "lease_id",
-    },
-    {
-        "method": "PATCH",
-        "path": r"/api/v1/leases/(?P<lease_id>[^/]+)",
-        "operation": "provisioning_lease_update",
-        "roles": ("admin",),
-        "path_resource": "lease_id",
-    },
-    {
-        "method": "POST",
-        "path": r"/api/v1/leases/(?P<lease_id>[^/]+)/terminate",
-        "operation": "provisioning_lease_admin_terminate",
-        "roles": ("admin",),
-        "path_resource": "lease_id",
-    },
-    {
-        "method": "POST",
-        "path": r"/api/v1/leases/(?P<lease_id>[^/]+)/release-oversight",
-        "operation": "provisioning_lease_release_oversight",
-        "roles": ("admin",),
-        "path_resource": "lease_id",
-    },
-    {
-        "method": "POST",
-        "path": r"/api/v1/admin/leases/(?P<lease_id>[^/]+)/retry-release",
-        "operation": "provisioning_lease_admin_retry_release",
-        "roles": ("admin",),
-        "path_resource": "lease_id",
-    },
-    {
-        "method": "POST",
-        "path": r"/api/v1/admin/leases/(?P<lease_id>[^/]+)/force-release",
-        "operation": "provisioning_lease_admin_force_release",
-        "roles": ("admin",),
-        "path_resource": "lease_id",
-    },
     # Relay administration. Ordered so the token, enable, and disable
     # sub-resources match before the bare relay id pattern, which would
     # otherwise swallow them and authenticate a rotation as an ordinary read.

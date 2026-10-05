@@ -86,9 +86,15 @@ class ResultEnvelope(BaseModel):
 
 
 class LeaseRegistration(VersionedContractModel):
+    """A lease's tail, registered once on its capacity reservation.
+
+    It names no offering mode: the mode is the reservation's, recorded when its
+    capacity was claimed. A storefront registers the window its commit
+    returned, since a registered lease keeps that window.
+    """
+
     capacity_reservation_id: str
     deal_ref: dict[str, Any]
-    offering_mode: str
     executor_target: str
     lease_start_utc: datetime | None = None
     lease_end_utc: datetime
@@ -96,10 +102,22 @@ class LeaseRegistration(VersionedContractModel):
 
 
 class LeaseView(LeaseRegistration):
+    offering_mode: str
     status: LeaseState
     release_job_id: str | None = None
     failure_reason: str | None = None
     failure_message: str | None = None
+
+
+class LeaseListResponse(BaseModel):
+    leases: list[LeaseView]
+    total: int
+
+
+class LeaseReleaseOversight(VersionedContractModel):
+    """Hand a leased reservation to an operator: the lifecycle stops releasing it."""
+
+    reason: str = Field(min_length=1)
 
 
 class LeaseTermination(VersionedContractModel):

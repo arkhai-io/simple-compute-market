@@ -62,9 +62,7 @@ from .provision_terms import (
     make_bare_metal_provision_terms,
 )
 from .provisioning_client import (
-    BARE_METAL_LEASES_PATH,
     BARE_METAL_PROVISIONING_ROUTES,
-    BareMetalLeaseClient,
 )
 from .schema import (
     BARE_METAL_ACCESS_ACTIONS,
@@ -77,8 +75,7 @@ from .schema import (
     PHYSICAL_HOST_ID_REF_KEY,
     SSH_ACCESS_METHOD,
     BareMetalAccessResult,
-    BareMetalLeaseCreate,
-    BareMetalLeaseView,
+    BareMetalAccessGrant,
     BareMetalAskingRate,
     BareMetalListing,
     BareMetalMaterialization,
@@ -86,8 +83,7 @@ from .schema import (
     BareMetalReceipt,
     BareMetalTerms,
     bare_metal_executor_ref,
-    materialization_to_lease_create,
-    receipt_from_lease_view,
+    materialization_to_access_grant,
 )
 from .storefront_publication import (
     CANDIDATE,
@@ -156,11 +152,8 @@ __all__ = [
     "BareMetalAccessResult",
     "BareMetalLeaseReadyEvidence",
     "BareMetalLeaseReadyResult",
-    "BARE_METAL_LEASES_PATH",
     "BARE_METAL_PROVISIONING_ROUTES",
-    "BareMetalLeaseClient",
-    "BareMetalLeaseCreate",
-    "BareMetalLeaseView",
+    "BareMetalAccessGrant",
     "BareMetalAskingRate",
     "BareMetalListing",
     "BareMetalBuyerDemand",
@@ -191,8 +184,7 @@ __all__ = [
     "validate_accepted_hosted_plan",
     "derive_bare_metal_fulfillment_identity",
     "make_bare_metal_provision_terms",
-    "materialization_to_lease_create",
-    "receipt_from_lease_view",
+    "materialization_to_access_grant",
     "recheck_bare_metal_listing_source",
     "trusted_bare_metal_projection",
     "validate_buyer_selection",

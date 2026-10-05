@@ -49,7 +49,6 @@ from bare_metal_provisioning_adapter.routers import (  # noqa: E402
     bare_metal_router_mounts,
 )
 from compute_provisioning_service.route_table import assemble_service_route_table  # noqa: E402
-from compute_provisioning_service.controllers.compute_contract_controller import ComputeContractController  # noqa: E402
 from compute_provisioning_service.controllers.capacity_definitions_controller import CapacityDefinitionsController  # noqa: E402
 from compute_provisioning_service.controllers.pools_controller import PoolController  # noqa: E402
 from compute_provisioning_service.controllers.relays_controller import RelayController  # noqa: E402
@@ -58,6 +57,7 @@ from compute_provisioning_service.controllers import (  # noqa: E402
     host_import_controller,
     hosts_controller,
     jobs_controller,
+    leases_controller,
     test_jobs_controller,
 )
 from market_site.router import make_capacity_router  # noqa: E402
@@ -240,7 +240,7 @@ app = build_compute_provisioning_app(
         ComputeProvisioningRouterMount(jobs_controller.router, "/api/v1"),
         ComputeProvisioningRouterMount(host_import_controller.router, "/api/v1"),
         ComputeProvisioningRouterMount(hosts_controller.router, "/api/v1"),
-        ComputeProvisioningRouterMount(ComputeContractController.make_router(), "/api/v1"),
+        ComputeProvisioningRouterMount(leases_controller.router, "/api/v1"),
         ComputeProvisioningRouterMount(PoolController.make_router(), "/api/v1"),
         ComputeProvisioningRouterMount(CapacityDefinitionsController.make_router(), "/api/v1"),
         ComputeProvisioningRouterMount(RelayController.make_router(), "/api/v1"),

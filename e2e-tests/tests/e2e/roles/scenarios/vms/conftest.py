@@ -663,6 +663,15 @@ class SiteCapacity:
     def reserve(self, *, claim: dict, deal_ref: dict) -> dict | None:
         return asyncio.run(self._client().reserve(claim=claim, deal_ref=deal_ref))
 
+    def truncate_lease(self, capacity_reservation_id: str, lease_end_utc: str) -> dict | None:
+        """End a leased reservation's lease early; ``None`` if the site refuses."""
+        return asyncio.run(
+            self._client().truncate_lease(
+                capacity_reservation_id=capacity_reservation_id,
+                lease_end_utc=lease_end_utc,
+            )
+        )
+
 
 @pytest.fixture(scope="module")
 def site_capacity() -> SiteCapacity:
@@ -982,13 +991,15 @@ class DealLease:
     in the ledger with a deal-scoped capacity-released event to the
     storefront.
 
-    ``status`` and ``release_job_id`` come from the authoritative compute
-    provisioning lease contract.  For VM release, ``release_job_id`` is the
-    durable fulfillment id rather than an Ansible queue job id.
+    ``status`` and ``release_job_id`` come from the compute family's lease
+    contract, read through the family client. ``release_job_id`` is the
+    durable fulfillment id: release goes through the fulfillment aggregate.
+    The lease's end moves only through the site's truncation, which is how
+    the scenario back-dates it.
     """
 
     def __init__(self, provisioning_client, escrow_uid: str) -> None:
-        self._leases = SyncVmOperatorClient(provisioning_client)
+        self._leases = provisioning_client
         self._site = SiteCapacity()
         self.escrow_uid = escrow_uid
         self.is_ledger = True
@@ -1004,7 +1015,7 @@ class DealLease:
         """Current lease fields from the public compute lease contract."""
         lease = self._leases.get_lease(self.lease_id)
         row = self._site.get_reservation(self.lease_id)
-        data = lease.model_dump(mode="json") if hasattr(lease, "model_dump") else dict(lease)
+        data = lease.model_dump(mode="json")
         return {
             "id": data.get("capacity_reservation_id") or self.lease_id,
             "escrow_uid": row.get("escrow_uid"),
@@ -1019,11 +1030,14 @@ class DealLease:
     def backdate(self, lease_end_utc: str) -> dict:
         """Move the lease end into the past so the next watchdog cycle fires.
 
-        Uses PATCH /api/v1/leases/{id} (update_lease) to update the ledger
-        reservation's lease_end_utc directly.  Returns the refreshed normalized
-        lease view.
+        Truncates the lease at the site, signed as admin: truncation is the
+        only operation that moves a registered lease's end, and only earlier.
+        Returns the refreshed normalized lease view.
         """
-        self._leases.update_lease(self.lease_id, lease_end_utc=lease_end_utc)
+        truncated = self._site.truncate_lease(self.lease_id, lease_end_utc)
+        assert truncated is not None, (
+            f"the site refused to truncate lease {self.lease_id!r} to {lease_end_utc!r}"
+        )
         return self.refresh()
 
     def resource_consumed(self, storefront_admin_client, resource_id: str) -> bool:

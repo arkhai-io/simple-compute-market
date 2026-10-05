@@ -308,7 +308,7 @@ def test_attach_executor_job_swallows_a_ledger_failure(ledger_services):
     """
     ledger, _ = ledger_services
     broken = MagicMock()
-    broken.update_lease_fields_in_session.side_effect = RuntimeError(
+    broken.record_create_handle_in_session.side_effect = RuntimeError(
         "ledger unavailable"
     )
     tx = SqlAlchemyFulfillmentTransaction(
@@ -317,7 +317,7 @@ def test_attach_executor_job_swallows_a_ledger_failure(ledger_services):
 
     tx.attach_executor_job("reservation-1", "ansible-job-7")
 
-    broken.update_lease_fields_in_session.assert_called_once()
+    broken.record_create_handle_in_session.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

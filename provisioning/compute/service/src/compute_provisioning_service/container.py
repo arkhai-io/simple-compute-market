@@ -19,7 +19,12 @@ from compute_provisioning_ansible import (
     probe_connectivity,
 )
 from compute_provisioning_ansible.runner import AnsibleRunner
-from compute_provisioning.release import ReleaseJobDispatcher
+from compute_provisioning.leases import LeaseRouteService
+from compute_provisioning.release import (
+    FulfillmentReleaseExecutor,
+    FulfillmentReleaseGuard,
+    FulfillmentReleaseStatusPort,
+)
 from market_resource_pools import ResourcePoolService
 from market_site.authority import LedgerSiteAuthority
 from market_site.ledger import CapacityLedgerService
@@ -211,42 +216,19 @@ def _pool_config_handlers(composed_adapters):
     return dict(composed_adapters.pool_config_handlers)
 
 
-def _release_dispatcher(composed_adapters):
-    return composed_adapters.release_dispatcher
-
-
-def _make_release_job_dispatcher(vm_runtime, job_engine):
-    """Route release-job status reads: VM through the fulfillment
-    aggregate, bare-metal through the shared job queue, unchanged.
-
-    ``vm_runtime.release_job_port()`` is used rather than reading it off
-    ``composed_adapters`` because ``ReleaseJobPort`` has no place in the
-    generic ``ExecutorAdapterBundle`` contract -- it is specific to
-    ``LeaseLifecycleService``'s polling loop, not a fulfillment-provider or
-    executor-adapter concern the bundle already models.
-    """
-
-    return ReleaseJobDispatcher(
-        {
-            "vm": vm_runtime.release_job_port(),
-            "bare_metal": job_engine,
-        },
-    )
-
-
 def _make_lease_lifecycle(
     cfg,
     site_authority,
-    release_dispatcher,
-    release_jobs,
+    release_executor,
+    release_status,
     lifecycle_event_sink,
     capacity_release_outbox,
 ):
     return LeaseLifecycleService(
         cfg,
         site_authority,
-        executor_release=release_dispatcher,
-        release_jobs=release_jobs,
+        release_executor=release_executor,
+        release_status=release_status,
         capacity_released_notifier=(
             lambda reservation: notify_storefront_capacity_released(
                 cfg, reservation, sink=lifecycle_event_sink
@@ -296,14 +278,10 @@ class Container(containers.DeclarativeContainer):
     # composition never imports concrete request/action/provider models.
     # ------------------------------------------------------------------
 
-    # Declared here, ahead of vm_runtime, because VmReleaseExecutor and
-    # VmFulfillmentReleaseJobPort (built inside vm_runtime) need it to
-    # resolve a reservation's fulfillment_id. Also supplies the concrete
-    # SettlementAbandonmentHook implementation the ledger calls when it
-    # reclaims capacity that might belong to a not-yet-dispatched
-    # settlement assignment (a lapsed hold, a terminal release, or a
-    # negotiation-driven resize) -- market_site defines the hook protocol
-    # but cannot import market_fulfillment to implement it.
+    # Declared ahead of the ledger: the release guard the ledger consults on
+    # every capacity reclaim reads the fulfillment aggregate through it.
+    # market_site defines the guard protocol but cannot import
+    # market_fulfillment to implement it.
     settlement_repository = providers.Singleton(SettlementRepository)
 
     fulfillment_teardown_port = providers.Singleton(DeferredFulfillmentTeardownPort)
@@ -321,9 +299,11 @@ class Container(containers.DeclarativeContainer):
         # rather than hardcoded in kit/site so the ledger stays domain-neutral.
         unit_claim_keys=("units", "gpu_count"),
         mirror_dimension="gpu_count",
-        settlement_abandonment_hook=providers.Callable(
-            lambda repository: repository.abandon_if_assigned,
-            repository=settlement_repository,
+        # Capacity returns only on fulfillment's proof that nothing remains
+        # delivered, whoever asks the site to free it.
+        release_guard=providers.Singleton(
+            FulfillmentReleaseGuard,
+            settlement_repository=settlement_repository,
         ),
     )
 
@@ -368,8 +348,6 @@ class Container(containers.DeclarativeContainer):
         config=config,
         session_factory=session_factory,
         job_queue_provider=providers.Object(_resolved_job_queue),
-        settlement_repository=settlement_repository,
-        teardown_port=fulfillment_teardown_port,
         host_authority=host_authority,
         job_engine=job_engine,
         job_executors=job_executor_table,
@@ -403,16 +381,10 @@ class Container(containers.DeclarativeContainer):
 
     bare_metal_runtime = providers.Singleton(
         build_bare_metal_runtime,
-        site_authority=site_authority,
         job_engine=job_engine,
         job_queue_provider=providers.Object(_resolved_job_queue),
         config=config,
         host_authority=host_authority,
-    )
-    bare_metal_lease_service = providers.Callable(
-        _runtime_value,
-        runtime=bare_metal_runtime,
-        name=providers.Object("lease_service"),
     )
     bare_metal_operations_service = providers.Callable(
         _runtime_value,
@@ -492,15 +464,16 @@ class Container(containers.DeclarativeContainer):
         composed_adapters=composed_adapters,
     )
 
-    release_dispatcher = providers.Singleton(
-        _release_dispatcher,
-        composed_adapters=composed_adapters,
+    release_executor = providers.Singleton(
+        FulfillmentReleaseExecutor,
+        settlement_repository=settlement_repository,
+        session_factory=session_factory,
+        teardown_port=fulfillment_teardown_port,
     )
 
-    release_job_dispatcher = providers.Singleton(
-        _make_release_job_dispatcher,
-        vm_runtime=vm_runtime,
-        job_engine=job_engine,
+    release_status = providers.Singleton(
+        FulfillmentReleaseStatusPort,
+        teardown_port=fulfillment_teardown_port,
     )
 
     fulfillment_unit_of_work = providers.Singleton(
@@ -544,10 +517,16 @@ class Container(containers.DeclarativeContainer):
         _make_lease_lifecycle,
         cfg=config,
         site_authority=site_authority,
-        release_dispatcher=release_dispatcher,
-        release_jobs=release_job_dispatcher,
+        release_executor=release_executor,
+        release_status=release_status,
         lifecycle_event_sink=lifecycle_event_sink,
         capacity_release_outbox=capacity_release_outbox,
+    )
+
+    lease_route_service = providers.Singleton(
+        LeaseRouteService,
+        leases=executor_lease_service,
+        lifecycle=lease_lifecycle_service,
     )
 
     lease_watchdog = providers.Singleton(
@@ -608,10 +587,10 @@ resolved_lease_lifecycle_service: "LeaseLifecycleService | None" = None
 resolved_lease_watchdog: "LeaseWatchdog | None" = None
 resolved_fulfillment_convergence_watchdog: "FulfillmentConvergenceWatchdog | None" = None
 resolved_capacity_ledger_service: "CapacityLedgerService | None" = None
-resolved_bare_metal_lease_service: Any | None = None
 resolved_bare_metal_operations_service: Any | None = None
 resolved_bare_metal_mock_executor: Any | None = None
 resolved_executor_lease_service: "ExecutorLeaseService | None" = None
+resolved_lease_route_service: "LeaseRouteService | None" = None
 resolved_resource_pool_service: "ResourcePoolService | None" = None
 resolved_relay_service: Any | None = None
 resolved_relay_port_allocator: Any | None = None

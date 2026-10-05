@@ -33,8 +33,8 @@ class FakeOperations:
         self.create.append((lease, contract))
         return SimpleNamespace(job_id="job-create")
 
-    async def reclaim_access(self, reservation, *, contract=None):
-        self.teardown.append((reservation, contract))
+    async def reclaim_access(self, grant, *, contract=None):
+        self.teardown.append((grant, contract))
         return SimpleNamespace(job_id="job-teardown")
 
 
@@ -176,15 +176,13 @@ async def test_selected_resource_drives_idempotent_grant_result_and_teardown():
         {},
     )
     torn_down = await provider.dispatch_teardown(teardown)
-    reservation, teardown_contract = operations.teardown[0]
-    assert reservation["executor_target"] == "machine-1"
-    assert reservation["executor_ref"] == {
-        "physical_host_id": "physical-host-1",
-        "ssh_public_key": "ssh-ed25519 buyer",
-        "access_method": "ssh",
-        "ssh_user": "arkhai-e726d1da85038f5c",
-    }
-    assert reservation["access_ref"] == lease.access_ref
+    # The reclaim names the access the aggregate froze at acceptance, now
+    # carrying the job that granted it.
+    grant, teardown_contract = operations.teardown[0]
+    assert grant.model_dump(exclude={"create_job_id"}) == lease.model_dump(
+        exclude={"create_job_id"}
+    )
+    assert grant.create_job_id == "job-create"
     assert teardown_contract.idempotency_key == "reservation-1:reclaim-access"
     assert torn_down.provider_metadata["current_job_id"] == "job-teardown"
 
@@ -255,3 +253,10 @@ async def test_a_mock_profile_grant_reads_as_the_buyers_access_result():
     assert payload["access_grant_ref"] == "job-create"
     assert payload["status"] == "success"
     assert payload["timestamp"]
+
+
+def test_the_grant_job_is_the_create_handle_the_reservation_records():
+    provider, _ = _provider()
+
+    assert provider.resolve_executor_job_id({"create_job_id": "job-create"}) == "job-create"
+    assert provider.resolve_executor_job_id({}) is None

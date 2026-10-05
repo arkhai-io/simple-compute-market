@@ -20,7 +20,12 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from compute_provisioning.lease_lifecycle import LeaseLifecycleService
-from compute_provisioning.release import ExecutorReleaseDispatcher, ReleaseJobDispatcher
+from compute_provisioning.release import (
+    FulfillmentReleaseExecutor,
+    FulfillmentReleaseGuard,
+    FulfillmentReleaseStatusPort,
+    FulfillmentServiceTeardownPort,
+)
 from compute_provisioning_service.db.database import run_migrations
 from compute_provisioning_service.db.migrations import _apply_legacy_vm_lease_backfill
 from market_fulfillment import (
@@ -34,12 +39,6 @@ from market_fulfillment import (
 from market_resource_pools import ResourcePoolService
 from market_site.authority import LedgerSiteAuthority
 from market_site.ledger import CapacityLedgerService
-from vm_provisioning_adapter.release import (
-    VM_OFFERING_MODE,
-    FulfillmentServiceTeardownPort,
-    VmFulfillmentReleaseJobPort,
-    VmReleaseExecutor,
-)
 from vm_provisioning_adapter.codec import VmAnsibleCodec
 from vm_provisioning_adapter.services.ansible_fulfillment_provider import (
     AnsibleFulfillmentProvider,
@@ -155,25 +154,21 @@ def test_pre_cutover_vm_lease_backfills_and_tears_down_to_release():
             repository=settlement_repository,
         ),
     )
-    ledger = CapacityLedgerService(session_factory=session_factory)
-    executor_release = ExecutorReleaseDispatcher({
-        VM_OFFERING_MODE: VmReleaseExecutor(
-            settlement_repository=settlement_repository,
-            session_factory=session_factory,
-            teardown_port=FulfillmentServiceTeardownPort(lambda: fulfillment_service),
-        ),
-    })
-    release_jobs = ReleaseJobDispatcher({
-        VM_OFFERING_MODE: VmFulfillmentReleaseJobPort(
-            teardown_port=FulfillmentServiceTeardownPort(lambda: fulfillment_service),
-        ),
-    })
+    ledger = CapacityLedgerService(
+        session_factory=session_factory,
+        release_guard=FulfillmentReleaseGuard(settlement_repository),
+    )
+    teardown_port = FulfillmentServiceTeardownPort(lambda: fulfillment_service)
     settings = _settings()
     lease_lifecycle = LeaseLifecycleService(
         settings=settings,
         site_authority=LedgerSiteAuthority(ledger),
-        executor_release=executor_release,
-        release_jobs=release_jobs,
+        release_executor=FulfillmentReleaseExecutor(
+            settlement_repository=settlement_repository,
+            session_factory=session_factory,
+            teardown_port=teardown_port,
+        ),
+        release_status=FulfillmentReleaseStatusPort(teardown_port),
         capacity_released_notifier=_successful_notification,
     )
 

@@ -14,7 +14,7 @@ from typing import Any
 
 from arkhai_bare_metal import (
     BARE_METAL_OFFERING_MODE,
-    BareMetalLeaseCreate,
+    BareMetalAccessGrant,
     NODE_GRANT_ACCESS_ACTION,
     NODE_RECLAIM_ACCESS_ACTION,
     bare_metal_executor_ref,
@@ -25,8 +25,6 @@ from compute_provisioning_contracts import JobSubmitResponse
 from compute_provisioning.jobs.engine import JobEngine
 from compute_provisioning.jobs.queue import AsyncJobQueue
 from bare_metal_provisioning_adapter.codec import BareMetalJobParams, reclaim_policy_from
-from bare_metal_provisioning_adapter.services.bare_metal_lease_service import bare_metal_access_ref
-from bare_metal_provisioning_adapter.release import get_physical_host_id
 
 
 def _access_value(access_ref: dict[str, Any] | None, *keys: str) -> str | None:
@@ -64,7 +62,7 @@ class BareMetalOperationsService:
 
     async def grant_access(
         self,
-        body: BareMetalLeaseCreate,
+        body: BareMetalAccessGrant,
         *,
         contract: JobActionRequest | None = None,
         operation_id: str | None = None,
@@ -105,27 +103,16 @@ class BareMetalOperationsService:
             operation_id=resolved_operation_id,
         )
 
-    async def reclaim_access_for_reservation(
-        self, reservation: dict[str, Any],
-    ) -> str | None:
-        if not reservation.get("executor_target"):
-            return None
-        try:
-            submit = await self.reclaim_access(reservation)
-        except BareMetalHostValidationError:
-            return None
-        return submit.job_id
-
     async def reclaim_access(
         self,
-        reservation: dict[str, Any],
+        grant: BareMetalAccessGrant,
         *,
         contract: JobActionRequest | None = None,
         operation_id: str | None = None,
     ) -> JobSubmitResponse:
-        host_id = str(reservation.get("executor_target") or "")
-        self._validate_host(host_id)
-        access_ref = bare_metal_access_ref(reservation)
+        """Reclaim exactly the access ``grant`` gave, on the same host."""
+        self._validate_host(grant.host_id)
+        access_ref = dict(grant.access_ref or {})
         resolved_operation_id = operation_id
         if resolved_operation_id is None and contract is not None:
             resolved_operation_id = _stable_operation_id(
@@ -135,23 +122,26 @@ class BareMetalOperationsService:
         if resolved_operation_id is None:
             resolved_operation_id = _stable_operation_id(
                 NODE_RECLAIM_ACCESS_ACTION,
-                reservation.get("capacity_reservation_id"),
-                reservation.get("escrow_uid"),
-                host_id,
-                get_physical_host_id(reservation),
+                grant.capacity_reservation_id,
+                grant.escrow_uid,
+                grant.host_id,
+                grant.physical_host_id,
             )
         return await self._submit(
             BareMetalJobParams(
                 action=NODE_RECLAIM_ACCESS_ACTION,
-                host_id=host_id,
-                executor_ref=reservation.get("executor_ref"),
-                escrow_uid=reservation.get("escrow_uid"),
-                physical_host_id=get_physical_host_id(reservation),
+                host_id=grant.host_id,
+                executor_ref=bare_metal_executor_ref(
+                    grant.physical_host_id,
+                    access_ref=access_ref or None,
+                ),
+                escrow_uid=grant.escrow_uid,
+                physical_host_id=grant.physical_host_id,
                 ssh_user=_access_value(access_ref, "ssh_user", "user"),
                 ssh_public_key=_access_value(
                     access_ref, "ssh_public_key", "ssh_pubkey", "public_key",
                 ),
-                access_ref=access_ref,
+                access_ref=access_ref or None,
                 reclaim_policy=self._reclaim_policy,
             ),
             contract=contract,

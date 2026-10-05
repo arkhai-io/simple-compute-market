@@ -15,31 +15,14 @@ class SiteAuthorityPort(Protocol):
 
     def get_reservation(self, capacity_reservation_id: str) -> dict[str, Any] | None: ...
 
-    def get_reservation_by_escrow(self, escrow_uid: str) -> dict[str, Any] | None: ...
-
     def attach_lease_reservation(
         self,
         *,
-        capacity_reservation_id: str | None = None,
-        escrow_uid: str | None = None,
-        offering_mode: str | None = None,
-        executor_target: str | None = None,
-        executor_ref: dict[str, Any] | None = None,
-        lease_start_utc: str | None = None,
-        lease_end_utc: str | None = None,
-        create_job_id: str | None = None,
-    ) -> dict[str, Any] | None: ...
-
-    def update_reservation_fields(
-        self,
         capacity_reservation_id: str,
-        *,
-        offering_mode: str | None = None,
-        executor_target: str | None = None,
+        executor_target: str,
         executor_ref: dict[str, Any] | None = None,
         lease_start_utc: str | None = None,
         lease_end_utc: str | None = None,
-        release_job_id: str | None = None,
         create_job_id: str | None = None,
     ) -> dict[str, Any] | None: ...
 
@@ -82,13 +65,7 @@ class SiteAuthorityLedger(Protocol):
 
     def get_reservation(self, capacity_reservation_id: str) -> dict[str, Any] | None: ...
 
-    def get_reservation_by_escrow(self, escrow_uid: str) -> dict[str, Any] | None: ...
-
     def attach_lease(self, **fields: Any) -> dict[str, Any] | None: ...
-
-    def update_lease_fields(
-        self, capacity_reservation_id: str, **fields: Any
-    ) -> dict[str, Any] | None: ...
 
     def begin_releasing(
         self, capacity_reservation_id: str, *, release_job_id: str | None = None
@@ -132,16 +109,11 @@ class LedgerSiteAuthority:
     def get_reservation(self, capacity_reservation_id: str) -> dict[str, Any] | None:
         return self._ledger.get_reservation(capacity_reservation_id)
 
-    def get_reservation_by_escrow(self, escrow_uid: str) -> dict[str, Any] | None:
-        return self._ledger.get_reservation_by_escrow(escrow_uid)
-
     def attach_lease_reservation(
         self,
         *,
-        capacity_reservation_id: str | None = None,
-        escrow_uid: str | None = None,
-        offering_mode: str | None = None,
-        executor_target: str | None = None,
+        capacity_reservation_id: str,
+        executor_target: str,
         executor_ref: dict[str, Any] | None = None,
         lease_start_utc: str | None = None,
         lease_end_utc: str | None = None,
@@ -149,35 +121,10 @@ class LedgerSiteAuthority:
     ) -> dict[str, Any] | None:
         return self._ledger.attach_lease(
             capacity_reservation_id=capacity_reservation_id,
-            escrow_uid=escrow_uid,
-            offering_mode=offering_mode,
             executor_target=executor_target,
             executor_ref=executor_ref,
             lease_start_utc=lease_start_utc,
             lease_end_utc=lease_end_utc,
-            create_job_id=create_job_id,
-        )
-
-    def update_reservation_fields(
-        self,
-        capacity_reservation_id: str,
-        *,
-        offering_mode: str | None = None,
-        executor_target: str | None = None,
-        executor_ref: dict[str, Any] | None = None,
-        lease_start_utc: str | None = None,
-        lease_end_utc: str | None = None,
-        release_job_id: str | None = None,
-        create_job_id: str | None = None,
-    ) -> dict[str, Any] | None:
-        return self._ledger.update_lease_fields(
-            capacity_reservation_id,
-            offering_mode=offering_mode,
-            executor_target=executor_target,
-            executor_ref=executor_ref,
-            lease_start_utc=lease_start_utc,
-            lease_end_utc=lease_end_utc,
-            release_job_id=release_job_id,
             create_job_id=create_job_id,
         )
 
@@ -210,6 +157,10 @@ class LedgerSiteAuthority:
         reason: str | None = None,
         message: str | None = None,
     ) -> dict[str, Any] | None:
+        """Free the reservation's capacity; ``None`` if the release guard refuses.
+
+        A forced release is the operator's override and is not guarded.
+        """
         return self._ledger.release(
             capacity_reservation_id=capacity_reservation_id,
             state="force_released" if forced else "released",

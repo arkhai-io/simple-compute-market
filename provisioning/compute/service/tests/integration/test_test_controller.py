@@ -185,7 +185,6 @@ async def client_and_queue(
     from vm_provisioning_adapter.services.vm_operations_service import (
         VmOperationsService,
     )
-    from market_fulfillment import SettlementRepository
 
     def _unused_fulfillment_service_provider():
         raise RuntimeError(
@@ -212,8 +211,6 @@ async def client_and_queue(
             job_submitter=job_submitter,
             job_queue_provider=lambda: job_queue,
         ),
-        settlement_repository=SettlementRepository(),
-        teardown_port=object(),
     )
 
     app.container.vm_runtime.override(vm_runtime)

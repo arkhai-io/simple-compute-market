@@ -1,6 +1,13 @@
-from __future__ import annotations
-from dataclasses import fields
+"""Lease registration and reads over a fake site authority.
 
+The site's write-once rules are the ledger's and are proven against real SQLite
+in ``kit/site``; this covers what the lease registry adds: which reservations
+count as leases, and that registration names no offering mode and no deal.
+"""
+
+from __future__ import annotations
+
+from dataclasses import fields
 from datetime import datetime, timezone
 
 import pytest
@@ -8,28 +15,29 @@ import pytest
 from compute_provisioning.executor_leases import (
     ExecutorLeaseRegistration,
     ExecutorLeaseService,
-    ExecutorLeaseUpdate,
     lease_datetime_value,
 )
 from compute_provisioning.lease_lifecycle import LeaseNotFoundError
 
 
-class FakeSiteResources:
+class FakeSiteAuthority:
     def __init__(self) -> None:
         self.reservations = {
-            "alloc-1": {
-                "capacity_reservation_id": "alloc-1",
-                "escrow_uid": "0x1",
-                "state": "held",
-            },
-            "alloc-2": {
-                "capacity_reservation_id": "alloc-2",
-                "escrow_uid": "0x2",
-                "state": "held",
-                "lease_end_utc": "2099-01-01T00:00:00+00:00",
+            "hold": {"capacity_reservation_id": "hold", "state": "reserved"},
+            "vm": {
+                "capacity_reservation_id": "vm",
+                "state": "leased",
                 "offering_mode": "vm",
+                "lease_end_utc": "2099-01-01T00:00:00+00:00",
+            },
+            "bm": {
+                "capacity_reservation_id": "bm",
+                "state": "leased",
+                "offering_mode": "bare_metal",
+                "lease_end_utc": "2099-01-01T00:00:00+00:00",
             },
         }
+        self.attached: list[dict] = []
 
     def list_reservations(self, *, state=None):
         return list(self.reservations.values())
@@ -37,130 +45,58 @@ class FakeSiteResources:
     def get_reservation(self, capacity_reservation_id):
         return self.reservations.get(capacity_reservation_id)
 
-    def get_reservation_by_escrow(self, escrow_uid):
-        for reservation in self.reservations.values():
-            if reservation.get("escrow_uid") == escrow_uid:
-                return reservation
-        return None
-
     def attach_lease_reservation(self, **kwargs):
-        capacity_reservation_id = kwargs.get("capacity_reservation_id")
-        if capacity_reservation_id:
-            reservation = self.reservations.get(capacity_reservation_id)
-        else:
-            reservation = self.get_reservation_by_escrow(kwargs.get("escrow_uid"))
+        self.attached.append(kwargs)
+        reservation = self.reservations.get(kwargs["capacity_reservation_id"])
         if reservation is None:
             return None
-        reservation.update(
-            {key: value for key, value in kwargs.items() if value is not None}
-        )
-        reservation["state"] = "leased"
-        return reservation
-
-    def update_reservation_fields(self, capacity_reservation_id, **kwargs):
-        reservation = self.reservations.get(capacity_reservation_id)
-        if reservation is None:
-            return None
-        reservation.update(
-            {key: value for key, value in kwargs.items() if value is not None}
-        )
+        reservation.update({key: value for key, value in kwargs.items() if value is not None})
         return reservation
 
 
-def test_compute_lease_metadata_is_offering_mode_neutral():
-    registration_fields = {field.name for field in fields(ExecutorLeaseRegistration)}
-    update_fields = {field.name for field in fields(ExecutorLeaseUpdate)}
+def test_a_registration_names_no_offering_mode_and_no_deal():
+    """The mode is the reservation's, recorded when its capacity was claimed,
+    and a lease is addressed by its reservation, never by a deal's identity."""
+    names = {field.name for field in fields(ExecutorLeaseRegistration)}
 
-    assert {"offering_mode", "executor_target", "executor_ref"} <= registration_fields
-    assert "vm_host" not in registration_fields
-    assert "vm_target" not in registration_fields
-    assert "vm_host" not in update_fields
-    assert "vm_target" not in update_fields
+    assert not {"offering_mode", "escrow_uid", "deal_ref"} & names
 
 
 def test_lease_datetime_value_serializes_datetimes():
-    assert lease_datetime_value(
-        datetime(2099, 1, 1, 0, 0, tzinfo=timezone.utc)
-    ) == "2099-01-01T00:00:00+00:00"
+    value = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    assert lease_datetime_value(value) == value.isoformat()
+    assert lease_datetime_value("2026-01-01 00:00") == "2026-01-01 00:00"
+    assert lease_datetime_value(None) is None
 
 
-def test_register_executor_lease_attaches_metadata():
-    site = FakeSiteResources()
-    service = ExecutorLeaseService(site, offering_mode="bare_metal")
+def test_registration_passes_the_tail_to_the_site():
+    site = FakeSiteAuthority()
 
-    lease = service.register_lease(
+    attached = ExecutorLeaseService(site).register_lease(
         ExecutorLeaseRegistration(
-            capacity_reservation_id="alloc-1",
-            escrow_uid="0x1",
-            offering_mode="bare_metal",
-            executor_target="machine-1",
-            executor_ref={"physical_host_id": "host-1"},
+            capacity_reservation_id="vm",
+            executor_target="tenant-1",
             lease_end_utc=datetime(2099, 1, 1, tzinfo=timezone.utc),
-            create_job_id="grant-1",
+            create_job_id="job-1",
         )
     )
 
-    assert lease["state"] == "leased"
-    assert lease["offering_mode"] == "bare_metal"
-    assert lease["executor_target"] == "machine-1"
-    assert lease["create_job_id"] == "grant-1"
+    assert attached["executor_target"] == "tenant-1"
+    assert site.attached[0]["lease_end_utc"] == "2099-01-01T00:00:00+00:00"
 
 
-def test_register_executor_lease_can_attach_by_escrow():
-    site = FakeSiteResources()
-    service = ExecutorLeaseService(site, offering_mode="bare_metal")
-
-    lease = service.register_lease(
-        ExecutorLeaseRegistration(
-            escrow_uid="0x1",
-            offering_mode="bare_metal",
-            executor_target="machine-1",
-            lease_end_utc="2099-01-01T00:00:00+00:00",
+def test_registration_on_no_live_reservation_is_not_found():
+    with pytest.raises(LeaseNotFoundError):
+        ExecutorLeaseService(FakeSiteAuthority()).register_lease(
+            ExecutorLeaseRegistration(capacity_reservation_id="missing", executor_target="t")
         )
-    )
-
-    assert lease["capacity_reservation_id"] == "alloc-1"
-    assert lease["offering_mode"] == "bare_metal"
 
 
-def test_update_executor_lease_uses_generic_authority_fields():
-    site = FakeSiteResources()
-    service = ExecutorLeaseService(site, offering_mode="vm")
+def test_every_mode_s_leases_are_listed_and_a_hold_is_not_a_lease():
+    service = ExecutorLeaseService(FakeSiteAuthority())
 
-    updated = service.update_lease(
-        "alloc-2",
-        ExecutorLeaseUpdate(
-            executor_target="migrated-vm",
-            executor_ref={"host_id": "kvm-2"},
-            lease_end_utc=datetime(2099, 2, 1, tzinfo=timezone.utc),
-            release_job_id="remove-2",
-        ),
-    )
-
-    assert updated["offering_mode"] == "vm"
-    assert updated["executor_target"] == "migrated-vm"
-    assert updated["executor_ref"] == {"host_id": "kvm-2"}
-    assert updated["lease_end_utc"] == "2099-02-01T00:00:00+00:00"
-    assert updated["release_job_id"] == "remove-2"
-
-
-def test_update_executor_lease_preserves_not_found_and_kind_filter():
-    service = ExecutorLeaseService(FakeSiteResources(), offering_mode="bare_metal")
-
+    assert {lease["capacity_reservation_id"] for lease in service.list_leases()} == {"vm", "bm"}
+    assert service.get_lease("bm")["offering_mode"] == "bare_metal"
     with pytest.raises(LeaseNotFoundError):
-        service.update_lease(
-            "alloc-2",
-            ExecutorLeaseUpdate(offering_mode="vm"),
-        )
-    with pytest.raises(LeaseNotFoundError):
-        service.update_lease("missing", ExecutorLeaseUpdate())
-
-
-def test_list_and_get_leases_filter_by_offering_mode():
-    service = ExecutorLeaseService(FakeSiteResources(), offering_mode="vm")
-
-    assert [lease["capacity_reservation_id"] for lease in service.list_leases()] == ["alloc-2"]
-    assert service.get_lease("alloc-2")["offering_mode"] == "vm"
-
-    with pytest.raises(LeaseNotFoundError):
-        service.get_lease("alloc-1")
+        service.get_lease("hold")

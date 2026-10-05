@@ -37,8 +37,11 @@ from compute_provisioning_contracts import (
     JobLogsResponse,
     JobStatusResponse,
     LeaseForceRelease,
+    LeaseListResponse,
     LeaseRegistration,
+    LeaseReleaseOversight,
     LeaseRetryRelease,
+    LeaseState,
     LeaseTermination,
     LeaseView,
     ProvisioningRouteContract,
@@ -126,6 +129,18 @@ def _register_lease(registration: LeaseRegistration) -> _Call:
 
 def _get_lease(capacity_reservation_id: str) -> _Call:
     return _Call("GET", f"/api/v1/contract/leases/{capacity_reservation_id}", parse=_model(LeaseView))
+
+
+def _list_leases(status: LeaseState | None, offering_mode: str | None) -> _Call:
+    return _Call(
+        "GET",
+        "/api/v1/contract/leases",
+        query={
+            "status": status.value if status is not None else None,
+            "offering_mode": offering_mode,
+        },
+        parse=_model(LeaseListResponse),
+    )
 
 
 def _lease_action(capacity_reservation_id: str, action: str, body: Any) -> _Call:
@@ -248,8 +263,18 @@ class ComputeProvisioningClientProtocol(Protocol):
 
     async def register_lease(self, registration: LeaseRegistration, *, request_id: str | None = None) -> LeaseView: ...
     async def get_lease(self, capacity_reservation_id: str, *, request_id: str | None = None) -> LeaseView: ...
+    async def list_leases(
+        self,
+        *,
+        status: LeaseState | None = None,
+        offering_mode: str | None = None,
+        request_id: str | None = None,
+    ) -> LeaseListResponse: ...
     async def terminate_lease(
         self, capacity_reservation_id: str, request: LeaseTermination, *, request_id: str | None = None
+    ) -> LeaseView: ...
+    async def release_lease_oversight(
+        self, capacity_reservation_id: str, request: LeaseReleaseOversight, *, request_id: str | None = None
     ) -> LeaseView: ...
     async def retry_lease_release(
         self, capacity_reservation_id: str, request: LeaseRetryRelease, *, request_id: str | None = None
@@ -411,6 +436,24 @@ class ComputeProvisioningClient(SigningBase):
         self, capacity_reservation_id: str, *, request_id: str | None = None
     ) -> LeaseView:
         return await self._run(_get_lease(capacity_reservation_id), request_id)
+
+    async def list_leases(
+        self,
+        *,
+        status: LeaseState | None = None,
+        offering_mode: str | None = None,
+        request_id: str | None = None,
+    ) -> LeaseListResponse:
+        """Every lease at the site, filtered by status and offering mode (administrator)."""
+        return await self._run(_list_leases(status, offering_mode), request_id)
+
+    async def release_lease_oversight(
+        self, capacity_reservation_id: str, request: LeaseReleaseOversight, *, request_id: str | None = None
+    ) -> LeaseView:
+        """Hand a leased reservation to an operator (administrator)."""
+        return await self._run(
+            _lease_action(capacity_reservation_id, "release-oversight", request), request_id
+        )
 
     async def terminate_lease(
         self, capacity_reservation_id: str, request: LeaseTermination, *, request_id: str | None = None
@@ -674,6 +717,24 @@ class SyncComputeProvisioningClient(SigningBase):
 
     def get_lease(self, capacity_reservation_id: str, *, request_id: str | None = None) -> LeaseView:
         return self._run(_get_lease(capacity_reservation_id), request_id)
+
+    def list_leases(
+        self,
+        *,
+        status: LeaseState | None = None,
+        offering_mode: str | None = None,
+        request_id: str | None = None,
+    ) -> LeaseListResponse:
+        """Every lease at the site, filtered by status and offering mode (administrator)."""
+        return self._run(_list_leases(status, offering_mode), request_id)
+
+    def release_lease_oversight(
+        self, capacity_reservation_id: str, request: LeaseReleaseOversight, *, request_id: str | None = None
+    ) -> LeaseView:
+        """Hand a leased reservation to an operator (administrator)."""
+        return self._run(
+            _lease_action(capacity_reservation_id, "release-oversight", request), request_id
+        )
 
     def terminate_lease(
         self, capacity_reservation_id: str, request: LeaseTermination, *, request_id: str | None = None

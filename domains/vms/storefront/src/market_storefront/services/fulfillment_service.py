@@ -347,6 +347,16 @@ def _provisioning_client(*, timeout: float) -> ComputeProvisioningClient:
     )
 
 
+def _recorded_utc(value: str) -> datetime:
+    """A lease time as the site recorded it: ISO 8601, or minute precision."""
+    text = value.strip().replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        parsed = datetime.strptime(text, "%Y-%m-%d %H:%M")
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
 async def _register_vm_lease_with_settings(
     *,
     resource_id: str | None = None,
@@ -365,22 +375,16 @@ async def _register_vm_lease_with_settings(
     # have a physical resource identity in hand before it can register a
     # lease at all would reintroduce physical-node pinning into what is
     # meant to be a pool-scoped capacity negotiation.
-    lease_end_dt = datetime.strptime(lease_end_utc, "%Y-%m-%d %H:%M").replace(
-        tzinfo=timezone.utc,
-    )
     async with _provisioning_client(timeout=10) as client:
         await client.register_lease(
             LeaseRegistration(
                 capacity_reservation_id=capacity_reservation_id or resource_id,
                 deal_ref={"escrow_uid": escrow_uid},
-                offering_mode="vm",
                 executor_target=vm_target,
                 lease_start_utc=(
-                    datetime.fromisoformat(lease_start_utc.replace("Z", "+00:00"))
-                    if lease_start_utc
-                    else None
+                    _recorded_utc(lease_start_utc) if lease_start_utc else None
                 ),
-                lease_end_utc=lease_end_dt,
+                lease_end_utc=_recorded_utc(lease_end_utc),
             )
         )
 

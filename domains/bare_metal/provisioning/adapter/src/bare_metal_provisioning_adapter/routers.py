@@ -19,13 +19,6 @@ def bare_metal_mock_router():
 
 
 def bare_metal_router_mounts() -> tuple[ComputeProvisioningRouterMount, ...]:
-    from bare_metal_provisioning_adapter.controllers.bare_metal_leases_controller import (
-        BareMetalLeasesController,
-    )
-
-    return (
-        ComputeProvisioningRouterMount(
-            BareMetalLeasesController.make_router(),
-            "/api/v1",
-        ),
-    )
+    """Bare metal mounts no operator routes: its leases are the family's, and
+    access is granted only through fulfillment."""
+    return ()

@@ -864,7 +864,7 @@ class BareMetalHostedLifecycleCallbacks:
         if reservation_id is None:
             return
         if lifecycle.fulfillment_id is None:
-            await self.capacity_client.site(
+            released = await self.capacity_client.site(
                 lifecycle.accepted_binding.option.facts.site_id
             ).release(
                 capacity_reservation_id=reservation_id,
@@ -873,6 +873,15 @@ class BareMetalHostedLifecycleCallbacks:
                     "hosted_obligation_ref": obligation_ref,
                 },
             )
+            if released is None:
+                # The site frees capacity only when fulfillment proves nothing
+                # was dispatched for it. A refusal here means a fulfillment
+                # began that this lifecycle never recorded, so its capacity
+                # stays held for the site's own release path.
+                raise BareMetalHostedLifecycleError(
+                    "the site refused to release the reservation; a fulfillment "
+                    "may have begun"
+                )
             self.capacity_client.reservation_sites.pop(reservation_id, None)
             await self.db.advance_bare_metal_hosted_lifecycle(
                 obligation_ref=obligation_ref,

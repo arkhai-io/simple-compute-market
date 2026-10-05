@@ -561,19 +561,42 @@ def _split_claim_requirement(
     return claim.get("resource_type"), attributes
 
 
-class SettlementAbandonmentHook(Protocol):
-    """React to a reservation losing its capacity hold, within the caller's transaction.
+class CapacityReleaseGuard(Protocol):
+    """Decide, inside the reclaiming transaction, whether capacity may be freed.
+
+    The ledger consults it, with its own session, wherever it reclaims a
+    reservation's capacity: a lapsed TTL hold, a release, and a resize's
+    supersede step. Whether anything was delivered against a reservation is
+    known to the composition, not to the site, so the composition supplies the
+    proof: ``True`` permits the reclaim, and the guard may write in the session
+    (abandoning a settlement assignment nothing dispatched, say) when it
+    permits; ``False`` refuses it and must write nothing, so a refused reclaim
+    changes nothing. A guard never commits the session.
 
     ``market_site`` must not import ``market_fulfillment`` (see
-    ``openspec/specs/fulfillment/spec.md#dependency-boundary``), so this
-    protocol lets ``CapacityLedgerService`` listing_resource every capacity-reclaiming
-    site a chance to react without knowing what "settlement" or
-    "fulfillment" mean. The concrete implementation is supplied by
-    ``market_fulfillment`` at composition time and decides on its own
-    whether there is anything to do; the ledger calls it unconditionally.
+    ``openspec/specs/fulfillment/spec.md#dependency-boundary``), so the
+    protocol names no fulfillment type.
     """
 
-    def __call__(self, db: Session, capacity_reservation_id: str) -> None: ...
+    def __call__(self, db: Session, capacity_reservation_id: str) -> bool: ...
+
+
+# Lease registration's states: a first registration on these records the tail.
+_REGISTRABLE_STATES = frozenset(
+    {
+        ReservationState.reserved.value,
+        ReservationState.provisioning.value,
+        ReservationState.leased.value,
+    }
+)
+# The lifecycle's own states, which neither registration nor a commit may undo.
+_REGISTRATION_REFUSED_STATES = frozenset(
+    {
+        ReservationState.releasing.value,
+        ReservationState.release_failed.value,
+        ReservationState.unmanaged.value,
+    }
+)
 
 
 class CapacityLedgerService:
@@ -586,7 +609,7 @@ class CapacityLedgerService:
         required_attributes: Sequence[str] = (),
         unit_claim_keys: Sequence[str] = _DEFAULT_UNIT_CLAIM_KEYS,
         mirror_dimension: str = _DEFAULT_MIRROR_DIMENSION,
-        settlement_abandonment_hook: SettlementAbandonmentHook | None = None,
+        release_guard: CapacityReleaseGuard | None = None,
         host_requirement: HostRequirement | None = None,
     ) -> None:
         """``required_attributes`` is an optional coarse local eligibility
@@ -607,14 +630,12 @@ class CapacityLedgerService:
         ``unit_claim_keys``: the VM composition passes ``"gpu_count"``, and
         the domain-neutral default is ``"units"``.
 
-        ``settlement_abandonment_hook``, if supplied, is called
-        unconditionally, in the same open transaction, from every internal
-        path that can strand a reservation's fulfillment-scheduling state
-        while reclaiming its capacity: a lapsed TTL hold
-        (``_expire_stale_holds``), a terminal release (``release``), and a
-        negotiation-driven resize's supersede step (``resize_reservation``).
-        Whether there is anything to react to is entirely the hook's
-        decision, not this service's.
+        ``release_guard``, if supplied, is consulted in the same open
+        transaction on every path that reclaims a reservation's capacity: a
+        lapsed TTL hold (``_expire_stale_holds``), a release (``release``),
+        and a resize's supersede step (``resize_reservation``). A refusal
+        leaves the reservation and its capacity as they were. With no guard,
+        every reclaim is permitted.
 
         ``host_requirement`` maps each fulfillment provider identity to whether
         its delivery needs a host. When supplied, a declaration that names no
@@ -629,7 +650,7 @@ class CapacityLedgerService:
         self._required_attributes = tuple(required_attributes)
         self._unit_claim_keys = tuple(unit_claim_keys)
         self._mirror_dimension = mirror_dimension
-        self._settlement_abandonment_hook = settlement_abandonment_hook
+        self._release_guard = release_guard
         # Re-entrant and held across READS too: the service's SQLite
         # engine is a StaticPool — every session shares one connection,
         # so an unserialized read interleaving with a write transaction
@@ -1366,8 +1387,14 @@ class CapacityLedgerService:
         """Confirm a reservation into an active lease.
 
         Idempotent: committing an already-leased reservation records the
-        derived lease window and clears any TTL hold. ``lease_end_utc=None``
-        commits an open-ended hold (no lease tail — the watchdog never sees it).
+        derived lease window and clears any TTL hold, until a lease is
+        registered on it. Once registered (an executor target is recorded), a
+        commit returns the reservation unchanged, whatever window it names: the
+        lease's window then moves only through ``truncate_lease``. A
+        reservation the lease lifecycle is releasing, has failed to release, or
+        has handed to an operator is refused, so a commit cannot undo what the
+        lifecycle recorded. ``lease_end_utc=None`` commits an open-ended hold
+        (no lease tail — the watchdog never sees it).
 
         ``resource_id`` is used only when ``capacity_reservation_id`` is
         omitted — it selects which currently-held reservation to commit by
@@ -1393,11 +1420,19 @@ class CapacityLedgerService:
             )
             if reservation is None:
                 return None
-            if reservation.state not in HELD_RESERVATION_STATES:
+            if (
+                reservation.state not in HELD_RESERVATION_STATES
+                or reservation.state in _REGISTRATION_REFUSED_STATES
+            ):
                 raise CapacityConflictError(
                     f"reservation {reservation.capacity_reservation_id} is "
                     f"{reservation.state}; cannot commit"
                 )
+            if (
+                reservation.state == ReservationState.leased.value
+                and reservation.executor_target is not None
+            ):
+                return self._reservation_payload(reservation)
             reservation.state = ReservationState.leased.value
             if window_end is not None:
                 reservation.lease_end_utc = str(lease_end_utc)
@@ -1426,7 +1461,12 @@ class CapacityLedgerService:
         failure_reason: str | None = None,
         failure_message: str | None = None,
     ) -> dict[str, Any] | None:
-        """Return a held/leased reservation's capacity to the pool."""
+        """Return a held reservation's capacity to the pool, if the guard permits.
+
+        Returns ``None`` when no reservation matches, when it is not held, and
+        when the release guard refuses; a refusal changes nothing. A release to
+        ``force_released`` is an operator's override and is not guarded.
+        """
         escrow_uid = dict(deal_ref or {}).get("escrow_uid")
         with self.serialized(), self._session_factory() as db:
             reservation = self._find_reservation(
@@ -1436,21 +1476,25 @@ class CapacityLedgerService:
             )
             if reservation is None:
                 return None
-            # Capacity reclamation always offers fulfillment a chance to
-            # reconcile an assigned settlement, including idempotent retries
-            # after the reservation is already terminal. The hook owns the
-            # fulfillment-state decision and never commits this session.
-            if self._settlement_abandonment_hook is not None:
-                self._settlement_abandonment_hook(
-                    db, reservation.capacity_reservation_id
-                )
             if reservation.state in {
                 ReservationState.released.value,
                 ReservationState.force_released.value,
             }:
+                # An idempotent retry still offers the guard the reservation,
+                # so an assignment stranded by an earlier release is abandoned;
+                # its answer cannot un-release anything.
+                self._release_permitted(db, reservation.capacity_reservation_id)
                 db.commit()
                 return self._reservation_payload(reservation)
             if reservation.state not in HELD_RESERVATION_STATES:
+                return None
+            # A forced release is the operator's recorded override after
+            # verifying the host themselves; every other release needs the
+            # guard's proof.
+            if (
+                state != ReservationState.force_released.value
+                and not self._release_permitted(db, reservation.capacity_reservation_id)
+            ):
                 return None
             reservation.state = state
             reservation.released_at = datetime.now(timezone.utc).isoformat()
@@ -1541,6 +1585,8 @@ class CapacityLedgerService:
                 or old_reservation.state not in HELD_RESERVATION_STATES
             ):
                 return None
+            if not self._release_permitted(db, old_capacity_reservation_id):
+                return None
             old_backing_resource_id = self._backing_resource_id(
                 db, old_capacity_reservation_id
             )
@@ -1611,13 +1657,6 @@ class CapacityLedgerService:
                     ),
                 )
             )
-            if self._settlement_abandonment_hook is not None:
-                # Same transaction as the release/reserve above: an old
-                # settlement assignment is marked abandoned synchronously
-                # here rather than waiting for the lease-lifecycle
-                # watchdog's next sweep to notice the old reservation is
-                # gone.
-                self._settlement_abandonment_hook(db, old_capacity_reservation_id)
             db.commit()
             available_after = {
                 key: available.get(key, Decimal(0)) - requested.get(key, Decimal(0))
@@ -1636,14 +1675,26 @@ class CapacityLedgerService:
         capacity_reservation_id: str,
         lease_end_utc: str,
     ) -> dict[str, Any] | None:
-        """End a lease early; injected compute lifecycle observes the new expiry."""
+        """End a leased reservation's lease early; injected compute lifecycle observes it.
+
+        Only a ``leased`` reservation's end moves, and only earlier (or to the
+        same end): an uncommitted hold is released rather than truncated, a
+        lease the lifecycle is releasing, has failed to release, or has handed
+        to an operator keeps the state the lifecycle recorded, and extending a
+        lease is a deliberate operation of its own. Every refusal returns
+        ``None``, as for a reservation that does not exist; the state is never
+        changed.
+        """
         with self.serialized(), self._session_factory() as db:
             reservation = self._find_reservation(
                 db, capacity_reservation_id=capacity_reservation_id
             )
-            if reservation is None or reservation.state not in HELD_RESERVATION_STATES:
+            if reservation is None or reservation.state != ReservationState.leased.value:
                 return None
-            reservation.state = ReservationState.leased.value
+            current_end = parse_utc(reservation.lease_end_utc)
+            new_end = parse_utc(str(lease_end_utc))
+            if new_end is None or (current_end is not None and new_end > current_end):
+                return None
             reservation.lease_end_utc = str(lease_end_utc)
             db.add(
                 CapacityEvent(
@@ -1663,35 +1714,58 @@ class CapacityLedgerService:
     def attach_lease(
         self,
         *,
-        capacity_reservation_id: str | None = None,
-        escrow_uid: str | None = None,
-        offering_mode: str | None = None,
-        executor_target: str | None = None,
+        capacity_reservation_id: str,
+        executor_target: str,
         executor_ref: Mapping[str, Any] | None = None,
         lease_start_utc: str | None = None,
         lease_end_utc: str | None = None,
         create_job_id: str | None = None,
     ) -> dict[str, Any] | None:
-        """Record the lease tail on an existing held reservation.
+        """Record a reservation's lease tail once.
 
-        The ledger-mode replacement for registering a ``vm_leases`` row:
-        the reservation and its lease are one record, so the watchdog
-        tears down and releases in one local transaction. Emits no
-        capacity event — availability already moved at commit time.
-        Returns None when no held reservation matches (the caller falls
-        back to the legacy lease table).
+        The tail is the executor target and reference, the lease window, and
+        the create handle. Commit already leaves a reservation ``leased`` with
+        its window; registration is recorded by its executor target:
+
+        - the first registration on a ``reserved``, ``provisioning``, or
+          ``leased`` reservation records the tail and leaves it ``leased``;
+        - a repeat naming the same target and start returns the record
+          unchanged, and never moves the end, so a re-registration with a
+          deal's original window cannot undo a truncation;
+        - a repeat naming a different target or start is refused, because
+          changing the executor identity could redirect teardown;
+        - a ``releasing``, ``release_failed``, or ``unmanaged`` reservation is
+          refused, so registration cannot undo what the lifecycle recorded;
+        - a recorded create handle is never replaced.
+
+        Refusals raise ``CapacityConflictError``; ``None`` means no such live
+        reservation. Emits no capacity event: availability moved at commit.
         """
         with self.serialized(), self._session_factory() as db:
             reservation = self._find_reservation(
-                db,
-                capacity_reservation_id=capacity_reservation_id,
-                escrow_uid=None if capacity_reservation_id else escrow_uid,
+                db, capacity_reservation_id=capacity_reservation_id
             )
-            if reservation is None or reservation.state not in HELD_RESERVATION_STATES:
+            if reservation is None:
                 return None
+            if reservation.state in _REGISTRATION_REFUSED_STATES:
+                raise CapacityConflictError(
+                    f"reservation {capacity_reservation_id!r} is {reservation.state!r}; "
+                    "its lease cannot be registered"
+                )
+            if reservation.state not in _REGISTRABLE_STATES:
+                return None
+            if reservation.executor_target is not None:
+                same_start = lease_start_utc is None or parse_utc(
+                    str(lease_start_utc)
+                ) == parse_utc(reservation.lease_start_utc)
+                if reservation.executor_target != executor_target or not same_start:
+                    raise CapacityConflictError(
+                        f"reservation {capacity_reservation_id!r} already has a lease "
+                        "registered with another target or start"
+                    )
+                return self._reservation_payload(reservation)
             self._sync_executor_fields(
                 reservation,
-                offering_mode=offering_mode,
                 executor_target=executor_target,
                 executor_ref=executor_ref,
             )
@@ -1699,10 +1773,8 @@ class CapacityLedgerService:
                 reservation.lease_start_utc = str(lease_start_utc)
             if lease_end_utc:
                 reservation.lease_end_utc = str(lease_end_utc)
-            if create_job_id:
+            if create_job_id and not reservation.create_job_id:
                 reservation.create_job_id = create_job_id
-            if escrow_uid and not reservation.escrow_uid:
-                reservation.escrow_uid = escrow_uid
             reservation.state = ReservationState.leased.value
             db.commit()
             return self._reservation_payload(reservation)
@@ -1750,76 +1822,24 @@ class CapacityLedgerService:
             db.commit()
             return self._reservation_payload(reservation)
 
-    def update_lease_fields(
-        self,
-        capacity_reservation_id: str,
-        *,
-        offering_mode: str | None = None,
-        executor_target: str | None = None,
-        executor_ref: Mapping[str, Any] | None = None,
-        lease_start_utc: str | None = None,
-        lease_end_utc: str | None = None,
-        release_job_id: str | None = None,
-        create_job_id: str | None = None,
-    ) -> dict[str, Any] | None:
-        """Update lease-tail fields on a non-terminal reservation.
-
-        Unlike ``attach_lease``, this operates on any non-terminal state
-        (including ``releasing``) and never changes the reservation state.
-        Returns ``None`` when the reservation does not exist or is already
-        terminal.  Used by the operator PATCH endpoint to update expiry time,
-        host coordinates, or job references without driving a state transition.
-
-        Opens and commits its own transaction. A caller that must land this
-        write inside a transaction it already holds open should use
-        ``update_lease_fields_in_session`` against that session, not this
-        method: on SQLite a second session cannot take the writer slot the
-        caller itself is holding, so this form would wait out the busy
-        timeout and then fail with ``database is locked``.
-        """
-        with self.serialized(), self._session_factory() as db:
-            result = self.update_lease_fields_in_session(
-                db,
-                capacity_reservation_id,
-                offering_mode=offering_mode,
-                executor_target=executor_target,
-                executor_ref=executor_ref,
-                lease_start_utc=lease_start_utc,
-                lease_end_utc=lease_end_utc,
-                release_job_id=release_job_id,
-                create_job_id=create_job_id,
-            )
-            db.commit()
-            return result
-
-    def update_lease_fields_in_session(
+    def record_create_handle_in_session(
         self,
         db: Session,
         capacity_reservation_id: str,
-        *,
-        offering_mode: str | None = None,
-        executor_target: str | None = None,
-        executor_ref: Mapping[str, Any] | None = None,
-        lease_start_utc: str | None = None,
-        lease_end_utc: str | None = None,
-        release_job_id: str | None = None,
-        create_job_id: str | None = None,
+        create_job_id: str,
     ) -> dict[str, Any] | None:
-        """Session-scoped core of ``update_lease_fields``.
+        """Record the job that creates a reservation's workload, once.
+
+        A recorded handle is never replaced: it is evidence of what was
+        dispatched against the reservation. Returns ``None`` when the
+        reservation does not exist or is terminal.
 
         Does not commit and does not take the ledger lock: the caller owns the
-        transaction boundary and decides when this write lands relative to its
-        own. Exists so a caller that has already written on another
-        repository's behalf -- and therefore holds SQLite's single writer slot
-        -- can record lease-tail fields inside that same transaction instead of
-        contending with itself from a second session.
-
-        Validation precedes every mutation for all argument combinations:
-        ``_sync_executor_fields`` performs both of its raising checks before
-        either of its assignments, and nothing after it raises. A raise
-        therefore leaves ``db`` exactly as it was found, so a best-effort
-        caller may swallow the exception without rolling back its own writes
-        and without wrapping this in a savepoint.
+        transaction. A caller that has already written on another repository's
+        behalf holds SQLite's single writer slot, so it records the handle in
+        that same session rather than contending with itself from a second one.
+        Nothing here raises after a write, so a best-effort caller may swallow
+        an exception without rolling back its own writes.
         """
         reservation = db.get(CapacityReservation, capacity_reservation_id)
         terminal = {
@@ -1829,21 +1849,7 @@ class CapacityLedgerService:
         }
         if reservation is None or reservation.state in terminal:
             return None
-        self._sync_executor_fields(
-            reservation,
-            offering_mode=offering_mode,
-            executor_target=executor_target,
-            executor_ref=executor_ref,
-        )
-        if lease_start_utc is not None:
-            reservation.lease_start_utc = str(lease_start_utc)
-        if lease_end_utc is not None:
-            reservation.lease_end_utc = str(lease_end_utc)
-        self._set_release_job_id(
-            reservation,
-            release_job_id=release_job_id,
-        )
-        if create_job_id is not None:
+        if not reservation.create_job_id:
             reservation.create_job_id = create_job_id
         return self._reservation_payload(reservation)
 
@@ -2018,6 +2024,12 @@ class CapacityLedgerService:
             else None
         )
 
+    def _release_permitted(self, db: Session, capacity_reservation_id: str) -> bool:
+        """Whether the composition's guard permits freeing this reservation."""
+        if self._release_guard is None:
+            return True
+        return bool(self._release_guard(db, capacity_reservation_id))
+
     def _backing_resource_id(
         self, db: Session, capacity_reservation_id: str
     ) -> str | None:
@@ -2042,7 +2054,8 @@ class CapacityLedgerService:
 
         Runs lazily ahead of reads and reserves so expired holds never
         block capacity; each lapse emits a "released" event in the same
-        transaction.
+        transaction. A lapse the release guard refuses keeps its hold for a
+        later sweep.
         """
         now = datetime.now(timezone.utc)
         stale = (
@@ -2058,6 +2071,8 @@ class CapacityLedgerService:
             expires = parse_utc(reservation.hold_expires_at)
             if expires is None or expires > now:
                 continue
+            if not self._release_permitted(db, reservation.capacity_reservation_id):
+                continue
             reservation.state = ReservationState.released.value
             reservation.released_at = now.isoformat()
             reservation.failure_reason = "hold_expired"
@@ -2069,10 +2084,6 @@ class CapacityLedgerService:
                     ),
                 )
             )
-            if self._settlement_abandonment_hook is not None:
-                self._settlement_abandonment_hook(
-                    db, reservation.capacity_reservation_id
-                )
             lapsed = True
             logger.info(
                 "[CAPACITY] TTL hold expired for reservation %s (resource=%s)",
@@ -2538,21 +2549,12 @@ class CapacityLedgerService:
     def _sync_executor_fields(
         reservation: CapacityReservation,
         *,
-        offering_mode: str | None = None,
         executor_target: str | None = None,
         executor_ref: Mapping[str, Any] | None = None,
     ) -> None:
         if reservation.offering_mode is None:
             raise CapacityConflictError(
                 "reservation has no explicit requested executor identity"
-            )
-        if (
-            offering_mode is not None
-            and reservation.offering_mode != offering_mode
-        ):
-            raise CapacityConflictError(
-                f"reservation offering_mode is {reservation.offering_mode!r}, "
-                f"not {offering_mode!r}"
             )
         if executor_target is not None:
             reservation.executor_target = executor_target

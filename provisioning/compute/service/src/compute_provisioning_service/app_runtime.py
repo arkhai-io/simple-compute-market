@@ -78,7 +78,6 @@ def resolve_request_path_services() -> None:
         container.fulfillment_convergence_watchdog()
     )
     _container_module.resolved_capacity_ledger_service = container.capacity_ledger_service()
-    _container_module.resolved_bare_metal_lease_service = container.bare_metal_lease_service()
     _container_module.resolved_bare_metal_operations_service = (
         container.bare_metal_operations_service()
     )
@@ -86,6 +85,7 @@ def resolve_request_path_services() -> None:
         container.bare_metal_mock_executor()
     )
     _container_module.resolved_executor_lease_service = container.executor_lease_service()
+    _container_module.resolved_lease_route_service = container.lease_route_service()
     _container_module.resolved_resource_pool_service = container.resource_pool_service()
     _container_module.resolved_relay_port_allocator = container.relay_port_allocator()
     _container_module.resolved_relay_service = RelayService(

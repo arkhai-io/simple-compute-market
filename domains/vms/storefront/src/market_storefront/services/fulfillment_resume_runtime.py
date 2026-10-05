@@ -37,6 +37,7 @@ from market_storefront.services.fulfillment_service import (
 )
 from market_storefront.services.vm_fulfillment_service import (
     _lease_window_strings,
+    committed_lease_window,
     persist_escrow_fields_with_retry,
 )
 from market_storefront.utils.sqlite_client import SQLiteClient
@@ -71,11 +72,17 @@ async def _refresh_capacity_lease(
     lease_end_utc: str,
     capacity_client: Any,
     site_id: str,
-) -> None:
+) -> tuple[str | None, str] | None:
+    """Commit the deal's window and return the window the site recorded.
+
+    Once the lease is registered, the site keeps its recorded window whatever
+    this commit names, so the returned window, not the one computed here, is
+    what a registration must repeat. ``None`` when the commit did not happen.
+    """
     if capacity_client is None or not reservation_id or not resource_id:
-        return
+        return None
     try:
-        await capacity_client.commit(
+        committed = await capacity_client.commit(
             resource_id=resource_id,
             capacity_reservation_id=reservation_id,
             lease_start_utc=lease_start_utc,
@@ -87,6 +94,8 @@ async def _refresh_capacity_lease(
         logger.exception(
             "[FULFILLMENT_RESUME] Lease refresh failed for escrow %s", escrow_uid
         )
+        return None
+    return committed_lease_window(committed)
 
 
 async def _store_fulfillment_credentials(
@@ -134,7 +143,7 @@ async def _register_recovered_vm_lease(
     resource_id: str,
     vm_host: Any,
     vm_target: Any,
-    lease_start_utc: str,
+    lease_start_utc: str | None,
     lease_end_utc: str,
 ) -> None:
     if not (
@@ -290,7 +299,7 @@ async def converge_post_physical_delivery(
         start_utc=context.get("start_utc"),
         duration_seconds=int(context.get("duration_seconds") or 3600),
     )
-    await _refresh_capacity_lease(
+    committed_window = await _refresh_capacity_lease(
         escrow_uid=escrow_uid,
         reservation_id=reservation_id,
         resource_id=resource_id,
@@ -305,16 +314,17 @@ async def converge_post_physical_delivery(
         credential_listing_id=context.get("seller_order_id") or listing_id,
         authentication=authentication,
     )
-    await _register_recovered_vm_lease(
-        register_lease=register_lease,
-        escrow_uid=escrow_uid,
-        reservation_id=reservation_id,
-        resource_id=resource_id,
-        vm_host=connection_details.get("host"),
-        vm_target=request.get("vm_target"),
-        lease_start_utc=lease_start_utc,
-        lease_end_utc=lease_end_utc,
-    )
+    if committed_window is not None:
+        await _register_recovered_vm_lease(
+            register_lease=register_lease,
+            escrow_uid=escrow_uid,
+            reservation_id=reservation_id,
+            resource_id=resource_id,
+            vm_host=connection_details.get("host"),
+            vm_target=request.get("vm_target"),
+            lease_start_utc=committed_window[0],
+            lease_end_utc=committed_window[1],
+        )
     connection_json = json.dumps(connection_details, sort_keys=True)
     if (
         register_lease is None

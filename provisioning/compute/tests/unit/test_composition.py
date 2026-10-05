@@ -25,11 +25,6 @@ class FakeJobExecutor:
         return None
 
 
-class FakeReleaseExecutor:
-    async def submit_release(self, reservation):
-        return f"release-{reservation['capacity_reservation_id']}"
-
-
 class FakeProvider(FulfillmentProvider):
     needs_host = True
 
@@ -88,7 +83,6 @@ ANSIBLE_NEEDS_HOST = {"ansible": True}
 def contribution(kind: str, *actions: str) -> ExecutorAdapterContribution:
     return ExecutorAdapterContribution(
         offering_mode=kind,
-        release_executor=FakeReleaseExecutor(),
         job_executors={action: FakeJobExecutor() for action in actions},
     )
 
@@ -284,7 +278,6 @@ def test_a_provider_that_declares_no_host_need_is_refused():
 def _with_jobs(kind: str, actions: tuple[str, ...], executor):
     return ExecutorAdapterContribution(
         offering_mode=kind,
-        release_executor=FakeReleaseExecutor(),
         job_executors={action: executor for action in actions},
     )
 

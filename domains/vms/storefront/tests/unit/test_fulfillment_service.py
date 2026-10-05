@@ -349,7 +349,8 @@ async def test_vm_lease_registration_uses_common_compute_model(monkeypatch):
         )
     assert registration.capacity_reservation_id == "reservation-1"
     assert registration.deal_ref == {"escrow_uid": "escrow-1"}
-    assert registration.offering_mode == "vm"
+    # The mode is the reservation's, recorded at claim; registration names none.
+    assert "offering_mode" not in type(registration).model_fields
     assert registration.executor_target == "tenant-1"
     assert captured["client_kwargs"]["caller_role"] == "seller"
     assert captured["client_kwargs"]["signer"] is _TEST_STOREFRONT_SIGNER

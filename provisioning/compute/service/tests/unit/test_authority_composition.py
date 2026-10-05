@@ -13,6 +13,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from compute_provisioning.release import (
+    FulfillmentReleaseExecutor,
+    FulfillmentReleaseGuard,
+    FulfillmentReleaseStatusPort,
+)
+
 from compute_provisioning_service.container import Container
 from vm_provisioning_adapter.runtime import HOST_POOL_CHANGE_HOOKS
 
@@ -49,9 +55,22 @@ def test_the_host_authority_carries_every_adapter_s_pool_change_hooks():
     assert set(HOST_POOL_CHANGE_HOOKS) <= set(host_authority._pool_change_hooks)
 
 
-def test_the_bare_metal_release_status_reads_the_one_engine():
+def test_release_is_composed_once_for_every_offering_mode():
+    """The ledger is held to the fulfillment release guard, and the one lease
+    lifecycle releases every mode through the fulfillment executor and status
+    port, which share the container's teardown port."""
     container = _container()
 
-    dispatcher = container.release_job_dispatcher()
+    ledger = container.capacity_ledger_service()
+    executor = container.release_executor()
+    status = container.release_status()
+    # The lifecycle itself needs the service's signing identity to build, so
+    # its wiring is read from its provider rather than resolved here.
+    lifecycle_inputs = container.lease_lifecycle_service.kwargs
 
-    assert dispatcher._jobs["bare_metal"] is container.job_engine()
+    assert isinstance(ledger._release_guard, FulfillmentReleaseGuard)
+    assert isinstance(executor, FulfillmentReleaseExecutor)
+    assert isinstance(status, FulfillmentReleaseStatusPort)
+    assert lifecycle_inputs["release_executor"] is container.release_executor
+    assert lifecycle_inputs["release_status"] is container.release_status
+    assert executor._teardown_port is container.fulfillment_teardown_port()

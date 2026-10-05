@@ -15,10 +15,6 @@ from bare_metal_provisioning_adapter.bundle import (
     build_bare_metal_adapter_bundle,
 )
 from bare_metal_provisioning_adapter.codec import BareMetalAnsibleCodec
-from bare_metal_provisioning_adapter.release import BareMetalReleaseExecutor
-from bare_metal_provisioning_adapter.services.bare_metal_lease_service import (
-    BareMetalLeaseService,
-)
 from bare_metal_provisioning_adapter.services.bare_metal_operations_service import (
     BareMetalOperationsService,
 )
@@ -32,7 +28,6 @@ from bare_metal_provisioning_adapter.services.bare_metal_pool_config_handler imp
 
 @dataclass
 class BareMetalProvisioningRuntime:
-    lease_service: BareMetalLeaseService
     operations_service: BareMetalOperationsService
     fulfillment_provider: BareMetalFulfillmentProvider
     pool_config_handler: BareMetalPoolConfigHandler
@@ -64,11 +59,6 @@ class BareMetalProvisioningRuntime:
 
     def adapter_bundle(self):
         return build_bare_metal_adapter_bundle(
-            release_executor=BareMetalReleaseExecutor(
-                release_delegate=(
-                    self.operations_service.reclaim_access_for_reservation
-                ),
-            ),
             fulfillment_provider=self.fulfillment_provider,
             pool_config_handler=self.pool_config_handler,
             job_executor=self.job_executor(),
@@ -83,7 +73,6 @@ def project_bare_metal_resource(raw_view: Mapping[str, Any]) -> dict[str, Any]:
 
 def build_bare_metal_runtime(
     *,
-    site_authority,
     job_engine,
     job_queue_provider: Callable[[], Any],
     config,
@@ -109,7 +98,6 @@ def build_bare_metal_runtime(
         reclaim_policy=getattr(config, "bare_metal_reclaim_policy", None),
     )
     return BareMetalProvisioningRuntime(
-        lease_service=BareMetalLeaseService(site_authority=site_authority),
         operations_service=operations_service,
         fulfillment_provider=BareMetalFulfillmentProvider(
             operations_service=operations_service,

@@ -15,7 +15,7 @@ import enum
 import uuid
 
 from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
-from sqlalchemy.orm import declarative_base, relationship
+from sqlalchemy.orm import Session, declarative_base, relationship
 from sqlalchemy.sql import func
 
 Base = declarative_base()
@@ -92,4 +92,27 @@ class JobCredential(Base):
     job = relationship("JobRecord", back_populates="credentials")
 
 
-__all__ = ["Base", "JobCredential", "JobRecord", "JobStatus", "TERMINAL_JOB_STATUSES"]
+def job_bound_to_reservation(db: Session, capacity_reservation_id: str) -> bool:
+    """Whether any job was submitted for this capacity reservation.
+
+    Fulfillment is the only path that binds a job to a reservation, so a
+    reservation with none had nothing dispatched for it. Reads through the
+    caller's session, so a caller already holding a write transaction asks
+    inside it rather than contending for SQLite's writer slot.
+    """
+    return (
+        db.query(JobRecord.id)
+        .filter(JobRecord.capacity_reservation_id == capacity_reservation_id)
+        .first()
+        is not None
+    )
+
+
+__all__ = [
+    "Base",
+    "JobCredential",
+    "JobRecord",
+    "JobStatus",
+    "TERMINAL_JOB_STATUSES",
+    "job_bound_to_reservation",
+]

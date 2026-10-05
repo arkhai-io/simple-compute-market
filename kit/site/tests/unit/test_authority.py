@@ -21,16 +21,8 @@ class FakeLedger:
         self.calls.append(("get_reservation", {"capacity_reservation_id": capacity_reservation_id}))
         return self.reservation
 
-    def get_reservation_by_escrow(self, escrow_uid):
-        self.calls.append(("get_reservation_by_escrow", {"escrow_uid": escrow_uid}))
-        return self.reservation
-
     def attach_lease(self, **kwargs):
         self.calls.append(("attach_lease", kwargs))
-        return {**self.reservation, **kwargs}
-
-    def update_lease_fields(self, capacity_reservation_id, **kwargs):
-        self.calls.append(("update_lease_fields", {"capacity_reservation_id": capacity_reservation_id, **kwargs}))
         return {**self.reservation, **kwargs}
 
     def begin_releasing(self, capacity_reservation_id, **kwargs):
@@ -65,40 +57,25 @@ def test_authority_delegates_reservation_queries_and_anonymous_events():
     assert "deal_ref" not in events[0]
 
 
-def test_authority_maps_generic_vm_executor_metadata_only_at_ledger_boundary():
-    """CapacityReservation carries no VM-domain-specific column names --
-    the adapter passes offering_mode/executor_target/executor_ref straight
-    through to the ledger unchanged, with no legacy host_id/vm_target
-    synthesis. Physical placement identity (host_id) and lease-target
-    identity (vm_target) both live in the generic executor_ref/
-    executor_target fields, matching bare-metal's pattern.
-    """
+def test_registration_passes_the_executor_identity_through_and_names_no_mode():
+    """The adapter passes executor_target/executor_ref straight through, with
+    no host_id/vm_target synthesis. A registration names no offering mode: the
+    mode is the reservation's, recorded when its capacity was claimed. No port
+    operation rewrites lease fields after registration."""
     ledger = FakeLedger()
     authority = LedgerSiteAuthority(ledger)
 
     attached = authority.attach_lease_reservation(
         capacity_reservation_id="alloc-1",
-        offering_mode="vm",
         executor_target="tenant-vm",
         executor_ref={"host_id": "kvm-1"},
-    )
-    updated = authority.update_reservation_fields(
-        "alloc-1",
-        offering_mode="vm",
-        executor_target="tenant-vm-2",
-        executor_ref={"host_id": "kvm-2"},
     )
 
     assert attached["executor_ref"]["host_id"] == "kvm-1"
     assert attached["executor_target"] == "tenant-vm"
-    assert updated["executor_ref"]["host_id"] == "kvm-2"
-    assert updated["executor_target"] == "tenant-vm-2"
-    assert "host_id" not in inspect.signature(
-        authority.attach_lease_reservation
-    ).parameters
-    assert "vm_target" not in inspect.signature(
-        authority.update_reservation_fields
-    ).parameters
+    parameters = inspect.signature(authority.attach_lease_reservation).parameters
+    assert not {"host_id", "offering_mode", "escrow_uid"} & set(parameters)
+    assert not hasattr(authority, "update_reservation_fields")
 
 
 def test_authority_exposes_semantic_release_operations():

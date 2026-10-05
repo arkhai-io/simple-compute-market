@@ -71,6 +71,9 @@ class FakeSite:
         self.verifiable = True
         #: ``(method, path)`` of every request that reached the site.
         self.requests: list[tuple[str, str]] = []
+        #: Reservations fulfillment delivered against: the site's release
+        #: guard refuses to free them, as the provisioning service's does.
+        self.delivered: set[str] = set()
 
     def add_resource(
         self,
@@ -306,6 +309,8 @@ class FakeSite:
                     None,
                 )
             if reservation is None or reservation["state"] == "released":
+                return httpx.Response(200, json={"reservation": None})
+            if reservation["capacity_reservation_id"] in self.delivered:
                 return httpx.Response(200, json={"reservation": None})
             reservation["state"] = "released"
             reservation["failure_reason"] = body.get("failure_reason")

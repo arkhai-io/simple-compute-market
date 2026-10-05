@@ -377,25 +377,33 @@ class SettlementRepository:
     # Abandonment hook
     # ------------------------------------------------------------------
 
-    def abandon_if_assigned(self, db: Session, capacity_reservation_id: str) -> None:
-        """Transition an ``assigned`` aggregate to ``abandoned``, or no-op.
+    def abandon_if_assigned(self, db: Session, capacity_reservation_id: str) -> bool:
+        """Transition an ``assigned`` aggregate to ``abandoned``; report whether it did.
 
-        This is the concrete implementation ``market_site.CapacityLedgerService``
-        invokes (through a ``Protocol`` it defines, referencing no
-        fulfillment types) whenever it reclaims capacity that might belong
-        to a reservation with a not-yet-dispatched settlement assignment --
-        a lapsed TTL hold, a terminal release, or a negotiation-driven
-        resize's supersede step. It is called unconditionally by those
-        callers; whether there is anything to abandon is entirely this
-        method's decision, not theirs.
+        A conditional update on the current state, so it holds across
+        sessions and processes: an aggregate that a concurrent ``begin``
+        moved past ``assigned`` is left as it is, and ``False`` says so. Once
+        abandoned, nothing can dispatch the aggregate. The caller owns the
+        transaction; capacity reclaim calls this through the site's release
+        guard, inside the transaction that frees the capacity.
         """
 
-        record = self.get(db, capacity_reservation_id)
-        if record is None or record.state != SettlementRecordState.assigned.value:
-            return
-        validate_transition(record.state, SettlementRecordState.abandoned.value)
-        record.state = SettlementRecordState.abandoned.value
+        validate_transition(
+            SettlementRecordState.assigned.value, SettlementRecordState.abandoned.value
+        )
+        changed = (
+            db.query(SettlementRecord)
+            .filter(
+                SettlementRecord.capacity_reservation_id == capacity_reservation_id,
+                SettlementRecord.state == SettlementRecordState.assigned.value,
+            )
+            .update(
+                {SettlementRecord.state: SettlementRecordState.abandoned.value},
+                synchronize_session="fetch",
+            )
+        )
         db.flush()
+        return bool(changed)
 
     # ------------------------------------------------------------------
     # Recovery claims

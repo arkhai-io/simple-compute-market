@@ -17,7 +17,6 @@ from compute_provisioning_service.services.relay_rebinding import (
 )
 from vm_provisioning_adapter.bundle import HOST_REQUIREMENT, build_vm_adapter_bundle
 from vm_provisioning_adapter.codec import GoldenImageCredentials, VmAnsibleCodec
-from vm_provisioning_adapter.release import VmFulfillmentReleaseJobPort, VmReleaseExecutor
 from compute_provisioning_service.services.relay_port_allocator import (
     RelayPortAllocator,
 )
@@ -52,8 +51,6 @@ class VmProvisioningRuntime:
     job_submitter: VmJobSubmitter
     vm_operations_service: VmOperationsService
     host_operations_service: HostOperationsService
-    settlement_repository: Any
-    teardown_port: Any
     job_executors: Any = None
 
     def job_executor(self) -> AnsibleJobExecutor:
@@ -80,19 +77,11 @@ class VmProvisioningRuntime:
 
     def adapter_bundle(self):
         return build_vm_adapter_bundle(
-            release_executor=VmReleaseExecutor(
-                settlement_repository=self.settlement_repository,
-                session_factory=self.session_factory,
-                teardown_port=self.teardown_port,
-            ),
             fulfillment_provider=self.fulfillment_provider(),
             pool_config_handler=self.pool_config_handler,
             job_executor=self.job_executor(),
             readiness_check=self.readiness,
         )
-
-    def release_job_port(self) -> VmFulfillmentReleaseJobPort:
-        return VmFulfillmentReleaseJobPort(self.teardown_port)
 
     def system_service(
         self,
@@ -161,8 +150,6 @@ def build_vm_runtime(
     config,
     session_factory,
     job_queue_provider: Callable[[], Any],
-    settlement_repository,
-    teardown_port: Any,
     host_authority: HostAuthority,
     job_engine: JobEngine,
     job_executors: JobExecutorResolver,
@@ -216,7 +203,5 @@ def build_vm_runtime(
             job_submitter=job_submitter,
             job_queue_provider=job_queue_provider,
         ),
-        settlement_repository=settlement_repository,
-        teardown_port=teardown_port,
         job_executors=job_executors,
     )

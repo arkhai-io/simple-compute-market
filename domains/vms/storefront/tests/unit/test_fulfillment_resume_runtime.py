@@ -178,7 +178,15 @@ async def test_post_physical_convergence_records_ready_and_claim():
         store_credential=AsyncMock(),
         update_listing=AsyncMock(),
     )
-    capacity = SimpleNamespace(commit=AsyncMock())
+    # The lease was registered before this pass, so the site keeps its
+    # recorded window and returns it, not the one this pass computed.
+    recorded = {
+        "capacity_reservation_id": "reservation-1",
+        "state": "leased",
+        "lease_start_utc": "2026-01-01T00:00:00+00:00",
+        "lease_end_utc": "2026-01-01 01:00",
+    }
+    capacity = SimpleNamespace(commit=AsyncMock(return_value=recorded))
     register = AsyncMock()
     submit = AsyncMock(return_value="attestation-1")
     bind_fulfillment = AsyncMock()
@@ -229,8 +237,8 @@ async def test_post_physical_convergence_records_ready_and_claim():
         escrow_uid="escrow-1",
         vm_host="kvm-1",
         vm_target="tenant-1",
-        lease_start_utc=capacity.commit.await_args.kwargs["lease_start_utc"],
-        lease_end_utc=capacity.commit.await_args.kwargs["lease_end_utc"],
+        lease_start_utc=recorded["lease_start_utc"],
+        lease_end_utc=recorded["lease_end_utc"],
     )
     assert any(
         call.kwargs.get("status") == "ready"
@@ -305,3 +313,24 @@ async def test_hosted_deal_is_not_swept_by_the_chain_convergence_loop(tmp_path):
     remote.schedule_resource.assert_not_awaited()
     remote.begin_fulfillment.assert_not_awaited()
     remote.get_fulfillment_status.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_post_physical_convergence_registers_nothing_when_the_commit_fails():
+    """Without a window the site recorded there is nothing a registration may
+    repeat; the next pass registers once a commit succeeds."""
+    from market_storefront.services.fulfillment_resume_runtime import _refresh_capacity_lease
+
+    capacity = SimpleNamespace(commit=AsyncMock(side_effect=RuntimeError("site down")))
+
+    window = await _refresh_capacity_lease(
+        escrow_uid="escrow-1",
+        reservation_id="reservation-1",
+        resource_id="resource-1",
+        lease_start_utc="2026-01-01T00:00:00+00:00",
+        lease_end_utc="2026-01-01 01:00",
+        capacity_client=capacity,
+        site_id="site-1",
+    )
+
+    assert window is None

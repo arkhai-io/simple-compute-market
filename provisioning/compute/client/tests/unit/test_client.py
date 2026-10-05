@@ -24,7 +24,6 @@ from compute_provisioning_client import (
     ComputeProvisioningAuthenticationError,
 )
 from compute_provisioning_contracts import (
-    FulfillmentRequestBody,
     resolve_provisioning_route,
 )
 
@@ -33,8 +32,6 @@ _ROUTES = (
     ("POST", "/api/v1/contract/leases", {"capacity_reservation_id": "reservation-1"}),
     ("GET", "/api/v1/contract/leases/reservation-1", EMPTY_BODY),
     ("POST", "/api/v1/contract/leases/reservation-1/terminate", {}),
-    ("POST", "/api/v1/contract/leases/reservation-1/retry-release", {}),
-    ("POST", "/api/v1/contract/leases/reservation-1/force-release", {}),
     ("POST", "/api/v1/fulfillment/schedule", {"capacity_reservation_id": "reservation-1"}),
     ("POST", "/api/v1/fulfillment/begin", {"capacity_reservation_id": "reservation-1"}),
     ("POST", "/api/v1/fulfillment/fulfillment-1/begin-teardown", {}),
@@ -146,6 +143,16 @@ def _signed_transport(
     return httpx.MockTransport(handler)
 
 
+# Routes only the administrator may call: the lease list and the operator's
+# release controls.
+_ADMIN_ROUTES = (
+    ("GET", "/api/v1/contract/leases", EMPTY_BODY),
+    ("POST", "/api/v1/contract/leases/reservation-1/release-oversight", {}),
+    ("POST", "/api/v1/contract/leases/reservation-1/retry-release", {}),
+    ("POST", "/api/v1/contract/leases/reservation-1/force-release", {}),
+)
+
+
 @pytest.mark.parametrize(
     ("caller", "authority"),
     (
@@ -153,11 +160,16 @@ def _signed_transport(
         (Eip191Signer(b"\x21" * 32), Eip191Signer(b"\x22" * 32)),
     ),
 )
-@pytest.mark.parametrize(("method", "path", "body"), _ROUTES)
+@pytest.mark.parametrize(
+    ("role", "method", "path", "body"),
+    [("seller", *route) for route in _ROUTES]
+    + [("admin", *route) for route in _ROUTES + _ADMIN_ROUTES],
+)
 @pytest.mark.asyncio
 async def test_client_signs_every_route_and_pins_signed_responses(
     caller,
     authority,
+    role,
     method,
     path,
     body,
@@ -165,11 +177,11 @@ async def test_client_signs_every_route_and_pins_signed_responses(
     async with ComputeProvisioningClient(
         "http://provisioner",
         signer=caller,
-        caller_role="seller",
+        caller_role=role,
         expected_authorities=TrustedIdentitySet(
             identities=(authority.identity,)
         ),
-        transport=_signed_transport(caller, authority),
+        transport=_signed_transport(caller, authority, expected_role=role),
     ) as client:
         assert await client.authenticated_request(
             method,
@@ -271,7 +283,7 @@ async def test_client_exact_retry_fresh_signs_and_changed_reuse_fails_closed(
 
 
 @pytest.mark.asyncio
-async def test_admin_client_calls_two_proof_rotation_route_only():
+async def test_rotation_is_the_administrator_s_and_a_seller_cannot_sign_it():
     admin = Ed25519Signer(b"\x13" * 32)
     authority = Ed25519Signer(b"\x11" * 32)
     replacement = Eip191Signer(b"\x23" * 32)
@@ -306,17 +318,19 @@ async def test_admin_client_calls_two_proof_rotation_route_only():
             rotation,
             request_id="rotate-1",
         ) == {"ok": True}
+    async with ComputeProvisioningClient(
+        "http://provisioner",
+        signer=admin,
+        caller_role="seller",
+        expected_authorities=TrustedIdentitySet(
+            identities=(authority.identity,)
+        ),
+        transport=_signed_transport(admin, authority),
+    ) as seller:
         with pytest.raises(ComputeProvisioningAuthenticationError):
-            await client.begin_fulfillment(
-                FulfillmentRequestBody(
-                    capacity_reservation_id="alloc-1",
-                    market="vms",
-                    fulfillment_request={
-                        "kind": "vm.fulfillment.request",
-                        "schema_version": 1,
-                        "payload": {},
-                    },
-                ),
+            await seller.rotate_trusted_principal(
+                "admin",
+                rotation,
                 request_id="wrong-role",
             )
 

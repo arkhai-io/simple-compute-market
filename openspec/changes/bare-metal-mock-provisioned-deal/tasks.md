@@ -1560,7 +1560,7 @@ re-verifies them by grep before each move.
       corrections. A first draft of B.1's ledger and authority changes is in the previous
       session's working notes; it predates points 2 and 4.
 
-  - [ ] 5B.8.B.1 Ledger and lease windows (points 1, 2, and 4).
+  - [x] 5B.8.B.1 Ledger and lease windows (points 1, 2, and 4).
         - `kit/site/src/market_site/ledger.py`:
           - `attach_lease(*, capacity_reservation_id, executor_target, executor_ref=None,
             lease_start_utc=None, lease_end_utc=None, create_job_id=None)` registers by
@@ -1621,7 +1621,7 @@ re-verifies them by grep before each move.
             `test_fulfillment_service.py`, `test_fulfillment_provisioning.py`, and
             `test_fulfill_vm_obligation_error_handling.py`: registration uses the committed
             window, and a failed commit skips registration.
-  - [ ] 5B.8.B.2 Lease contract and route service.
+  - [x] 5B.8.B.2 Lease contract and route service.
         - Contracts (`compute_provisioning_contracts`): `LeaseRegistration` drops
           `offering_mode`, and `LeaseView` declares it, reporting the reservation's mode.
           New `LeaseListResponse` and the release-oversight request.
@@ -1655,7 +1655,7 @@ re-verifies them by grep before each move.
           - the client's parity test;
           - the service's `tests/unit/test_route_binding.py` and
             `tests/integration/test_compute_contract_api.py`.
-  - [ ] 5B.8.B.3 Release (decision 9 and points 3 and 4, absorbing 7.3).
+  - [x] 5B.8.B.3 Release (decision 9 and points 3 and 4, absorbing 7.3).
         - `compute_provisioning/release.py`:
           - It receives `FulfillmentTeardownPort` and `FulfillmentServiceTeardownPort` from
             `vm_provisioning_adapter/release.py`, and loses `ExecutorReleaseDispatcher` and
@@ -1720,7 +1720,7 @@ re-verifies them by grep before each move.
             - a lease terminated while its create is in flight;
             - a site release refused for an `active` aggregate;
             - a `failed` aggregate ending `release_failed`.
-  - [ ] 5B.8.B.4 Deletions (decision 1; point 5).
+  - [x] 5B.8.B.4 Deletions (decision 1; point 5).
         - VM:
           - `controllers/leases_controller.py` (tombstoned);
           - the lease route declarations in `vm_provisioning_operator/routes.py`;
@@ -1749,7 +1749,7 @@ re-verifies them by grep before each move.
           - `test_schema.py` follows the rename;
           - the service's `tests/unit/test_lease_models.py` loses the deleted models;
           - `tests/integration/conftest.py` loses `BareMetalLeaseClient`.
-  - [ ] 5B.8.B.5 Storefronts (decision 9 and point 4).
+  - [x] 5B.8.B.5 Storefronts (decision 9 and point 4).
         - VM:
           - `domains/vms/storefront/src/market_storefront/settlement_composition.py`'s
             terminal-settlement path asks the capacity runtime to `release` the reservation,
@@ -1767,7 +1767,7 @@ re-verifies them by grep before each move.
             a delivered lease is truncated;
           - the bare-metal storefront's `tests/test_hosted_lifecycle.py`: a refused release
             leaves the lifecycle unreleased.
-  - [ ] 5B.8.B.6 e2e.
+  - [x] 5B.8.B.6 e2e.
         - `scenarios/vms/conftest.py`'s `DealLease` reads leases through
           `SyncComputeProvisioningClient`, and backdates through
           `SiteCapacityClient.truncate_lease` signed as admin.
@@ -1775,6 +1775,82 @@ re-verifies them by grep before each move.
           `test_buy_oneshot_buyer_cli.py` follow.
         - Gate as above, plus `kit/site`, `kit/fulfillment`, both storefronts, and the
           API-credit service (which composes the site ledger without a guard).
+
+      Slice B done 2026-10-05 (`design.md`, "Slice B implementation findings", for what
+      implementation settled or found).
+      - B.1:
+        - The ledger registers a lease once by executor target; `commit` refuses the
+          lifecycle's states and leaves a registered window alone; truncation moves only a
+          leased end, only earlier.
+        - `CapacityReleaseGuard` replaces the abandonment hook at all three reclaim sites,
+          and a forced release is not guarded, so `record_release_success` is the guarded
+          release and the port gained no separate `release`.
+        - The field writer narrowed to `record_create_handle_in_session`.
+        - The VM storefront registers with the window `commit` returned, and skips
+          registration when that commit fails.
+      - B.2:
+        - The lease contracts drop the offering mode and gain the list and the
+          release-oversight request; the route table admits seller and admin by default,
+          admin only for the list and release controls, and refuses a declaration without
+          admin.
+        - `compute_provisioning/leases.py` (`LeaseRouteService`, 404 and 409) is bound by
+          the service's `controllers/leases_controller.py`; the client gained `list_leases`
+          and `release_lease_oversight`.
+        - `services/compute_contract_service.py` was already gone (A0).
+      - B.3:
+        - `compute_provisioning/release.py`: `FulfillmentReleaseGuard` (proof, then
+          compare-and-set), `FulfillmentReleaseExecutor` (a typed decision per aggregate
+          state), and `FulfillmentReleaseStatusPort`; `jobs/db.py`'s
+          `job_bound_to_reservation`.
+        - The lease lifecycle acts on decisions, with neutral failure reasons
+          (`teardown_failed`, `teardown_timeout`, `fulfillment_failed`, `release_unproven`).
+        - The dispatchers, the per-bundle release contribution, and both adapters'
+          `release.py` are gone.
+        - `kit/fulfillment`'s `abandon_if_assigned` reports whether it abandoned.
+        - Bare metal's provider records its grant job as the create handle.
+      - B.4:
+        - VM's and bare metal's lease surfaces are deleted;
+          `BareMetalLeaseCreate` is now `BareMetalAccessGrant`, and `reclaim_access` takes the
+          grant.
+        - `BareMetalLeaseView` and `receipt_from_lease_view` are deleted.
+      - B.5: the VM storefront releases first and truncates on refusal; bare metal's hosted
+        teardown treats a refused release as not released.
+      - B.6: `DealLease` reads through the family client and backdates through the site's
+        truncation as admin.
+      - Tests:
+        - New: the family lease API test (`test_leases_api.py`, rewritten);
+          `test_lease_release_api.py`; the family kit's integration `test_release.py`,
+          `test_lease_route_service.py`, and rewritten lifecycle and lease-registry unit
+          tests; the service's `test_ledger_lease_lifecycle.py` over the production guard.
+        - The bare-metal mock-profile tests grant through fulfillment, via
+          `tests/integration/bare_metal_deal.py`, and the service's integration harness
+          composes the guard, both providers, and create-handle recording as production
+          does.
+      - Versions:
+        - kit-site 0.8.0, kit-fulfillment 0.5.0;
+        - compute-provisioning-contracts 0.4.0, compute-provisioning-client 0.3.0,
+          compute-provisioning 0.12.0, compute-provisioning-service 0.9.0;
+        - vms-provisioning-adapter 0.8.0, bare-metal-provisioning-adapter 0.6.0,
+          vms-provisioning-operator-client 0.8.0, bare-metal 0.7.0;
+        - vms-storefront 0.10.0, bare-metal-storefront 0.8.0 (the VM storefront's exact pin
+          moved), e2e-tests 0.1.2;
+        - floors raised where a consumer needs the new behaviour.
+      - Validation:
+        - `kit/site` 269 and `kit/fulfillment` 172;
+        - compute contracts 50, client 49, family kit 167, Ansible 84;
+        - VM adapter 39 and bare-metal adapter 23; bare-metal domain package 132;
+        - bare-metal storefront 229;
+        - provisioning service 836 unit and 279 integration;
+        - VM storefront by frozen sync: 1102 unit and 346 integration (the two known
+          `test_alkahest` failures need Node and Anvil);
+        - e2e: unit 236 (the one known failure is 10.1's), and the VM scenarios collect.
+        - The root `make test` aggregate passes its 44 suites, failing only where this
+          environment cannot run a suite (`kit/policy`, the VM storefront, and the VM buyer
+          cannot reinit from the PyTorch index; the API-credit middleware needs Cargo).
+        - `make check-packaging`, comment hygiene, documentation citations, and OpenSpec
+          strict validation pass.
+        - Not yet run through the end-to-end pipeline: the next verification covers A.6
+          and B together.
 
       **Slice C: the system split and the last `container` reach** (decisions 4 and 7).
 
@@ -2112,8 +2188,9 @@ service code.
       router, VM's literal pool-override path, the site's duplicated server and client
       contracts, bare metal's untyped mock-rule routes, the unreachable `provisioning`
       state, path templates in the family contracts, the uncalled
-      `find_active_lease_by_vm_target`, and a lease truncated before registration remaining
-      extendable).
+      `find_active_lease_by_vm_target`, a lease truncated before registration remaining
+      extendable, and the grace timeout anchored at a lease's end rather than at when its
+      release began).
 - [ ] 2.7 **Campaign index currency.** Update this change's row and the Goal 3, 4, and 7
       graphs in `openspec/changes/README.md`, and the rows of
       `bare-metal-and-credits-domain-stacks`, `kit-owned-storefront-shell`,

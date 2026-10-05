@@ -473,7 +473,14 @@ async def test_generated_vm_target_survives_context_fulfillment_and_lease_regist
             "vm_host": "host-1",
             "site": "site-1",
         }),
-        commit=AsyncMock(),
+        # Commit returns the reservation with the window the site recorded,
+        # which the lease is then registered with.
+        commit=AsyncMock(return_value={
+            "capacity_reservation_id": "reservation-1",
+            "state": "leased",
+            "lease_start_utc": "2026-01-01T00:00:00+00:00",
+            "lease_end_utc": "2026-01-01 01:00",
+        }),
     )
     observed: dict[str, str] = {}
 
@@ -568,7 +575,14 @@ async def test_post_provision_commit_and_lease_registration_do_not_require_resou
             # No resource_id/vm_host -- the real opaque-reservation shape.
             "site": "site-1",
         }),
-        commit=AsyncMock(),
+        # Commit returns the reservation with the window the site recorded,
+        # which the lease is then registered with.
+        commit=AsyncMock(return_value={
+            "capacity_reservation_id": "reservation-1",
+            "state": "leased",
+            "lease_start_utc": "2026-01-01T00:00:00+00:00",
+            "lease_end_utc": "2026-01-01 01:00",
+        }),
     )
 
     async def provision_vm(

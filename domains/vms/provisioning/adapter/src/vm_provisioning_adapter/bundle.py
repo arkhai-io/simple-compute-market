@@ -10,7 +10,6 @@ from compute_provisioning import (
     JobExecutor,
 )
 
-from vm_provisioning_adapter.release import VmReleaseExecutor
 from vm_provisioning_adapter.routers import vm_router_mounts
 from vm_provisioning_adapter.services.ansible_fulfillment_provider import (
     AnsibleFulfillmentProvider,
@@ -52,7 +51,6 @@ VM_JOB_ACTIONS = frozenset(
 
 def build_vm_adapter_bundle(
     *,
-    release_executor: VmReleaseExecutor,
     fulfillment_provider: AnsibleFulfillmentProvider,
     pool_config_handler: AnsiblePoolConfigHandler,
     job_executor: JobExecutor,
@@ -64,7 +62,6 @@ def build_vm_adapter_bundle(
         executors=(
             ExecutorAdapterContribution(
                 offering_mode="vm",
-                release_executor=release_executor,
                 job_executors={action: job_executor for action in VM_JOB_ACTIONS},
             ),
         ),

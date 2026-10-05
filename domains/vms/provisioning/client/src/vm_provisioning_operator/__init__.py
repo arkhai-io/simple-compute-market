@@ -7,14 +7,6 @@ VM's typed client wraps that client's transport.
 from vm_provisioning_operator.client import SyncVmOperatorClient, VmOperatorClient
 from vm_provisioning_operator.models import (
     CreateVmRequest,
-    LeaseCreate,
-    LeaseForceReleaseRequest,
-    LeaseListResponse,
-    LeaseReleaseOversightRequest,
-    LeaseResponse,
-    LeaseRetryReleaseRequest,
-    LeaseTerminateRequest,
-    LeaseUpdate,
     VmActionRequest,
 )
 from vm_provisioning_operator.relays import (
@@ -33,14 +25,6 @@ __all__ = [
     "VmOperatorClient",
     "CreateVmRequest",
     "VmActionRequest",
-    "LeaseCreate",
-    "LeaseUpdate",
-    "LeaseTerminateRequest",
-    "LeaseReleaseOversightRequest",
-    "LeaseRetryReleaseRequest",
-    "LeaseForceReleaseRequest",
-    "LeaseResponse",
-    "LeaseListResponse",
     "RelayCreate",
     "RelayListResponse",
     "RelayResponse",

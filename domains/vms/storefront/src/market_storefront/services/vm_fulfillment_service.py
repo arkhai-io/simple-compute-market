@@ -96,6 +96,20 @@ def _parse_start_utc(start_utc: str | None) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
+def committed_lease_window(
+    committed: dict[str, Any] | None,
+) -> tuple[str | None, str] | None:
+    """The lease window a site commit recorded, as ``(start, end)``.
+
+    ``None`` when the commit returned no reservation or no lease end, in which
+    case there is no recorded window to register.
+    """
+    if not isinstance(committed, dict) or not committed.get("lease_end_utc"):
+        return None
+    start = committed.get("lease_start_utc")
+    return (str(start) if start else None, str(committed["lease_end_utc"]))
+
+
 def _lease_window_strings(
     *,
     start_utc: str | None,
@@ -560,6 +574,11 @@ async def fulfill_vm_obligation(
         duration_seconds=duration_seconds,
     )
 
+    # The window the lease is registered with is the one the site recorded at
+    # this commit: once a lease is registered, a commit leaves its window alone
+    # and a registration naming another start is refused, so registering a
+    # window the site never recorded could only be refused later.
+    committed_window: tuple[str | None, str] | None = None
     if reserved_capacity_reservation_id:
         # capacity_reservation_id is the durable identity commit() actually
         # needs; resource_id is accepted only for a resource-id-only lookup
@@ -571,7 +590,7 @@ async def fulfill_vm_obligation(
         # skip the lease-window refresh for every ordinary pool-scoped
         # reservation, which is the common case, not an edge case.
         try:
-            await capacity.commit(
+            committed = await capacity.commit(
                 binding,
                 resource_id=reserved_resource_id,
                 capacity_reservation_id=reserved_capacity_reservation_id,
@@ -579,6 +598,7 @@ async def fulfill_vm_obligation(
                 lease_end_utc=lease_end_utc,
                 idempotency_ref=escrow_uid,
             )
+            committed_window = committed_lease_window(committed)
         except Exception as lease_err:
             logger.warning(
                 "[LOCAL DB] Failed to mark reservation %s as leased after provisioning: %s",
@@ -625,7 +645,18 @@ async def fulfill_vm_obligation(
                 cred_err,
             )
 
-    if reserved_capacity_reservation_id and vm_target and escrow_uid:
+    if (
+        reserved_capacity_reservation_id
+        and vm_target
+        and escrow_uid
+        and committed_window is None
+    ):
+        logger.warning(
+            "[LEASE] Reservation %s recorded no lease window at commit; "
+            "the lease is not registered",
+            reserved_capacity_reservation_id,
+        )
+    elif reserved_capacity_reservation_id and vm_target and escrow_uid:
         # register_lease's downstream LeaseRegistration call does not read
         # resource_id/vm_host at all (executor_ref self-heals from the
         # commit-time-written reservation.vm_host instead -- see
@@ -642,8 +673,8 @@ async def fulfill_vm_obligation(
                 escrow_uid=escrow_uid,
                 vm_host=reserved_vm_host,
                 vm_target=vm_target,
-                lease_start_utc=lease_start_utc,
-                lease_end_utc=lease_end_utc,
+                lease_start_utc=committed_window[0],
+                lease_end_utc=committed_window[1],
             )
             logger.info(
                 "[LEASE] Registered lease with provisioning service "

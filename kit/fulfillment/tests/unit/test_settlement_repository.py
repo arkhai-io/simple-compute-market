@@ -1054,7 +1054,7 @@ def test_concurrent_sqlite_acceptance_returns_one_fulfillment_identity(tmp_path,
 
 
 # ----------------------------------------------------------------------
-# capacity-reclamation abandonment hook
+# abandonment: a compare-and-set the site's release guard relies on
 # ----------------------------------------------------------------------
 
 def test_abandon_if_assigned_transitions_only_assigned_rows(session_factory, repo):
@@ -1063,10 +1063,10 @@ def test_abandon_if_assigned_transitions_only_assigned_rows(session_factory, rep
                       scheduling_requirements=_requirement(), resource=_resource())
         db.commit()
     with session_factory() as db:
-        repo.abandon_if_assigned(db, "missing")
-        repo.abandon_if_assigned(db, "cr-abandon")
+        assert repo.abandon_if_assigned(db, "missing") is False
+        assert repo.abandon_if_assigned(db, "cr-abandon") is True
         assert repo.get(db, "cr-abandon").state == SettlementRecordState.abandoned.value
-        repo.abandon_if_assigned(db, "cr-abandon")
+        assert repo.abandon_if_assigned(db, "cr-abandon") is False
         db.commit()
     with session_factory() as db:
         assert repo.get(db, "cr-abandon").state == SettlementRecordState.abandoned.value
@@ -1093,5 +1093,5 @@ def test_abandon_if_assigned_preserves_post_assignment_state(session_factory, re
         record.state = SettlementRecordState.dispatch_pending.value
         db.commit()
     with session_factory() as db:
-        repo.abandon_if_assigned(db, "cr-dispatch")
+        assert repo.abandon_if_assigned(db, "cr-dispatch") is False
         assert repo.get(db, "cr-dispatch").state == SettlementRecordState.dispatch_pending.value

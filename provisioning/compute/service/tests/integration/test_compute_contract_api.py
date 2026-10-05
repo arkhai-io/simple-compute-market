@@ -70,9 +70,8 @@ def _leased_bare_metal_reservation() -> dict:
         lease_end_utc=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
         idempotency_ref="escrow-bare-contract",
     )
-    return app.container.site_authority().update_reservation_fields(
+    return ledger.attach_lease(
         capacity_reservation_id=committed["capacity_reservation_id"],
-        offering_mode="bare_metal",
         executor_target="bm-contract-1",
         executor_ref={"physical_host_id": "physical-contract-1"},
     )
@@ -97,26 +96,11 @@ async def test_a_lease_retains_its_action_target_alongside_the_mode(
     }
 
 
-async def test_contract_lease_view_serializes_every_reachable_reservation_state():
-    """`_lease_view`'s `status=str(reservation.get("state"))`
-    passed market_site's raw `ReservationState` values straight through
-    into `LeaseView.status: LeaseState`, whose members didn't cover them
-    -- most immediately, a freshly-registered lease is always raw state
-    `"leased"`, which `LeaseState` didn't have at all, so
-    `ComputeProvisioningClient.register_lease` (what the VM storefront
-    actually calls) failed with a 422 on every call. Confirms every
-    `ReservationState` member now round-trips through `_lease_view` into a
-    valid `LeaseState`, and specifically that `"leased"` maps to
-    `"active"`, matching `leases_controller._LEASE_STATUS`'s mapping for
-    the VM-domain-branded lease surface.
-    """
+async def test_the_lease_view_serializes_every_reachable_reservation_state():
+    """Every ``ReservationState`` member projects onto a ``LeaseState``, and a
+    freshly registered lease, raw state ``"leased"``, reads as ``"active"``."""
+    from compute_provisioning.leases import lease_view as _lease_view
     from compute_provisioning_contracts import LeaseState
-    from compute_provisioning_service.controllers.compute_contract_controller import (
-        _lease_view,
-    )
-    from vm_provisioning_adapter.controllers.leases_controller import (
-        _lease_view as _vm_lease_view,
-    )
     from market_site.db import ReservationState
 
     expected = {
@@ -140,14 +124,6 @@ async def test_contract_lease_view_serializes_every_reachable_reservation_state(
             "lease_end_utc": "2099-01-01T00:00:00Z",
         })
         assert view.status == want, f"{raw_state!r} should map to {want!r}"
-        vm_view = _vm_lease_view({
-            "capacity_reservation_id": "reservation-1",
-            "offering_mode": "vm",
-            "resource_id": "resource-1",
-            "state": raw_state,
-            "lease_end_utc": "2099-01-01T00:00:00Z",
-        })
-        assert vm_view.status == want.value
 
 
 @pytest.mark.asyncio
@@ -271,7 +247,6 @@ async def test_contract_register_lease_never_sends_executor_ref_and_it_self_heal
         registration = LeaseRegistration(
             capacity_reservation_id=reservation["capacity_reservation_id"],
             deal_ref={"escrow_uid": "escrow-contract"},
-            offering_mode="vm",
             executor_target="tenant-self-heal",
             lease_end_utc=datetime.now(timezone.utc) + timedelta(hours=1),
         )

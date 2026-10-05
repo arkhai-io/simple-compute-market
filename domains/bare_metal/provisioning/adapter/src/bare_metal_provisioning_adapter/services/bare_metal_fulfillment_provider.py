@@ -8,12 +8,11 @@ from typing import Any, Literal
 from arkhai_bare_metal import (
     BARE_METAL_OFFERING_MODE,
     BareMetalAccessResult,
-    BareMetalLeaseCreate,
+    BareMetalAccessGrant,
     BareMetalMaterialization,
     NODE_GRANT_ACCESS_ACTION,
     NODE_RECLAIM_ACCESS_ACTION,
-    bare_metal_executor_ref,
-    materialization_to_lease_create,
+    materialization_to_access_grant,
 )
 from compute_provisioning.jobs import JobActionRequest
 from market_fulfillment import (
@@ -60,7 +59,7 @@ class BareMetalPreparedOperation(BaseModel):
 
     capacity_reservation_id: str = Field(min_length=1)
     action: Literal["create", "teardown"]
-    lease: BareMetalLeaseCreate
+    lease: BareMetalAccessGrant
 
 
 class BareMetalFulfillmentMetadata(BaseModel):
@@ -240,7 +239,7 @@ class BareMetalFulfillmentProvider(FulfillmentProvider):
             resource=resource,
             materialization=materialization,
         )
-        lease = materialization_to_lease_create(
+        lease = materialization_to_access_grant(
             materialization,
             capacity_reservation_id=capacity_reservation_id,
         )
@@ -316,7 +315,7 @@ class BareMetalFulfillmentProvider(FulfillmentProvider):
             raise ProviderConfigInvalidError(
                 "fulfillment metadata physical_host_id does not match the selected resource"
             )
-        lease = BareMetalLeaseCreate(
+        lease = BareMetalAccessGrant(
             capacity_reservation_id=settlement_result.capacity_reservation_id,
             escrow_uid=metadata.escrow_uid,
             settlement_obligation_ref=metadata.settlement_obligation_ref,
@@ -355,19 +354,7 @@ class BareMetalFulfillmentProvider(FulfillmentProvider):
                 action_kind=NODE_RECLAIM_ACCESS_ACTION,
                 idempotency_key=f"{operation.capacity_reservation_id}:reclaim-access",
             )
-            response = await self._operations.reclaim_access(
-                {
-                    "capacity_reservation_id": operation.capacity_reservation_id,
-                    lease.settlement_identity_kind: lease.settlement_identity,
-                    "executor_target": lease.host_id,
-                    "access_ref": lease.access_ref,
-                    "executor_ref": bare_metal_executor_ref(
-                        lease.physical_host_id,
-                        access_ref=lease.access_ref,
-                    ),
-                },
-                contract=contract,
-            )
+            response = await self._operations.reclaim_access(lease, contract=contract)
             return FulfillmentResult(
                 BareMetalFulfillmentMetadata(
                     create_job_id=lease.create_job_id or response.job_id,
@@ -387,6 +374,18 @@ class BareMetalFulfillmentProvider(FulfillmentProvider):
             raise
         except Exception as exc:
             raise FulfillmentTeardownFailedError(str(exc)) from exc
+
+    def resolve_executor_job_id(
+        self, provider_metadata: dict[str, Any]
+    ) -> str | None:
+        """The grant job this fulfillment dispatched, recorded on its reservation.
+
+        Read defensively rather than through ``BareMetalFulfillmentMetadata``: a
+        partially written row from a failed dispatch yields no handle rather than
+        a validation error inside the acknowledging transaction.
+        """
+        job_id = (provider_metadata or {}).get("create_job_id")
+        return str(job_id) if job_id else None
 
     def resolve_provisioned_resources(
         self, provider_metadata: dict[str, Any]

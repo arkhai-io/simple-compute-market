@@ -36,6 +36,31 @@ def test_every_family_route_carries_its_roles() -> None:
     assert all(contract.roles for contract in PROVISIONING_ROUTE_CONTRACTS)
 
 
+def test_every_family_route_admits_the_administrator() -> None:
+    assert all("admin" in contract.allowed_roles for contract in PROVISIONING_ROUTE_CONTRACTS)
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "roles"),
+    [
+        ("POST", "/api/v1/contract/leases", ("seller", "admin")),
+        ("GET", "/api/v1/contract/leases/r-1", ("seller", "admin")),
+        ("POST", "/api/v1/contract/leases/r-1/terminate", ("seller", "admin")),
+        ("GET", "/api/v1/contract/leases", ("admin",)),
+        ("POST", "/api/v1/contract/leases/r-1/release-oversight", ("admin",)),
+        ("POST", "/api/v1/contract/leases/r-1/retry-release", ("admin",)),
+        ("POST", "/api/v1/contract/leases/r-1/force-release", ("admin",)),
+    ],
+)
+def test_the_lease_routes_admit_their_roles(method, path, roles) -> None:
+    """A storefront registers, reads, and terminates its own leases by
+    reservation id; the list and the release controls are the operator's."""
+    body = {"capacity_reservation_id": "r-1"} if path.endswith("/leases") and method == "POST" else {}
+    contract, _ = PROVISIONING_ROUTE_TABLE.resolve(method, path, body)
+
+    assert contract.allowed_roles == roles
+
+
 def test_the_family_table_names_no_domain_route() -> None:
     for method, path in (
         ("GET", "/api/v1/bare-metal/leases/"),
@@ -113,6 +138,11 @@ def test_a_declaration_must_name_its_roles(roles) -> None:
 
     with pytest.raises(ValueError, match="must name its roles"):
         route_contract_from_declaration(declaration)
+
+
+def test_a_declaration_that_does_not_admit_the_administrator_is_refused() -> None:
+    with pytest.raises(ValueError, match="must admit admin"):
+        route_contract_from_declaration({**_LEASE_GET, "roles": ("seller",)})
 
 
 def test_a_declaration_with_an_unknown_key_is_refused() -> None:

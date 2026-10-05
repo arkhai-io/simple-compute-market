@@ -1,7 +1,7 @@
 """Typed VM methods over the compute provisioning client's transport.
 
 The family client names no domain's routes. VM's operations, its host capacity
-check, relay administration, and VM's lease routes are VM's, so these clients
+check, and relay administration are VM's, so these clients
 wrap any transport offering ``authenticated_request`` -- the family's async or
 sync client -- and name each route's declaration from ``routes``, the same
 declarations the provisioning service assembles into the table its request
@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Any, Optional, Protocol
 
 from compute_provisioning_contracts import JobSubmitResponse
@@ -132,93 +131,6 @@ def _set_relay_enabled(relay_id: str, enabled: bool) -> _Call:
     )
 
 
-def _iso(value: datetime | str) -> str:
-    return value.isoformat() if hasattr(value, "isoformat") else str(value)
-
-
-def _register_lease(
-    resource_id: str,
-    escrow_uid: str,
-    host_id: str,
-    vm_target: str,
-    lease_end_utc: datetime | str,
-    lease_start_utc: datetime | str | None,
-    create_job_id: str | None,
-    capacity_reservation_id: str | None,
-) -> _Call:
-    body: dict[str, Any] = {
-        "resource_id": resource_id,
-        "escrow_uid": escrow_uid,
-        "host_id": host_id,
-        "vm_target": vm_target,
-        "lease_end_utc": _iso(lease_end_utc),
-    }
-    if capacity_reservation_id is not None:
-        body["capacity_reservation_id"] = capacity_reservation_id
-    if lease_start_utc is not None:
-        body["lease_start_utc"] = _iso(lease_start_utc)
-    if create_job_id is not None:
-        body["create_job_id"] = create_job_id
-    return _Call("provisioning_lease_create", "POST", "/api/v1/leases/", body)
-
-
-def _list_leases(status: str | None, host_id: str | None, escrow_uid: str | None) -> _Call:
-    query = {"status": status, "host_id": host_id, "escrow_uid": escrow_uid}
-    return _Call(
-        "provisioning_leases_list",
-        "GET",
-        "/api/v1/leases/",
-        query={key: value for key, value in query.items() if value is not None},
-    )
-
-
-def _get_lease(lease_id: str) -> _Call:
-    return _Call("provisioning_lease_admin_get", "GET", f"/api/v1/leases/{lease_id}")
-
-
-def _get_lease_by_escrow(escrow_uid: str) -> _Call:
-    return _Call("provisioning_lease_by_escrow", "GET", f"/api/v1/leases/by-escrow/{escrow_uid}")
-
-
-def _update_lease(lease_id: str, fields: dict[str, Any]) -> _Call:
-    return _Call("provisioning_lease_update", "PATCH", f"/api/v1/leases/{lease_id}", fields)
-
-
-def _terminate_lease(lease_id: str, fields: dict[str, Any]) -> _Call:
-    return _Call("provisioning_lease_admin_terminate", "POST", f"/api/v1/leases/{lease_id}/terminate", fields)
-
-
-def _release_oversight(lease_id: str, reason: str) -> _Call:
-    return _Call(
-        "provisioning_lease_release_oversight",
-        "POST",
-        f"/api/v1/leases/{lease_id}/release-oversight",
-        {"reason": reason},
-    )
-
-
-def _retry_release(lease_id: str, reason: str | None, max_retries: int | None) -> _Call:
-    body = {key: value for key, value in (("reason", reason), ("max_retries", max_retries)) if value is not None}
-    return _Call(
-        "provisioning_lease_admin_retry_release",
-        "POST",
-        f"/api/v1/admin/leases/{lease_id}/retry-release",
-        body,
-    )
-
-
-def _force_release(lease_id: str, reason: str, evidence: str | None) -> _Call:
-    body: dict[str, Any] = {"reason": reason}
-    if evidence is not None:
-        body["evidence"] = evidence
-    return _Call(
-        "provisioning_lease_admin_force_release",
-        "POST",
-        f"/api/v1/admin/leases/{lease_id}/force-release",
-        body,
-    )
-
-
 class VmOperatorClient:
     """VM's provisioning routes over an async signing transport."""
 
@@ -284,55 +196,6 @@ class VmOperatorClient:
     async def set_relay_enabled(self, relay_id: str, enabled: bool) -> RelayResponse:
         return await self._run(_set_relay_enabled(relay_id, enabled))
 
-    # VM's lease routes.
-
-    async def register_lease(
-        self,
-        *,
-        resource_id: str,
-        escrow_uid: str,
-        host_id: str,
-        vm_target: str,
-        lease_end_utc: datetime | str,
-        lease_start_utc: datetime | str | None = None,
-        create_job_id: str | None = None,
-        capacity_reservation_id: str | None = None,
-    ) -> dict:
-        return await self._run(
-            _register_lease(
-                resource_id, escrow_uid, host_id, vm_target, lease_end_utc,
-                lease_start_utc, create_job_id, capacity_reservation_id,
-            )
-        )
-
-    async def list_leases(
-        self, *, status: str | None = None, host_id: str | None = None, escrow_uid: str | None = None
-    ) -> dict:
-        return await self._run(_list_leases(status, host_id, escrow_uid))
-
-    async def get_lease(self, lease_id: str) -> dict:
-        return await self._run(_get_lease(lease_id))
-
-    async def get_lease_by_escrow(self, escrow_uid: str) -> dict:
-        return await self._run(_get_lease_by_escrow(escrow_uid))
-
-    async def update_lease(self, lease_id: str, **fields: Any) -> dict:
-        return await self._run(_update_lease(lease_id, fields))
-
-    async def terminate_lease(self, lease_id: str, **fields: Any) -> dict:
-        return await self._run(_terminate_lease(lease_id, fields))
-
-    async def release_lease_oversight(self, lease_id: str, *, reason: str) -> dict:
-        return await self._run(_release_oversight(lease_id, reason))
-
-    async def retry_lease_release(
-        self, lease_id: str, *, reason: str | None = None, max_retries: int | None = None
-    ) -> dict:
-        return await self._run(_retry_release(lease_id, reason, max_retries))
-
-    async def force_release_lease(self, lease_id: str, *, reason: str, evidence: str | None = None) -> dict:
-        return await self._run(_force_release(lease_id, reason, evidence))
-
 
 class SyncVmOperatorClient:
     """VM's provisioning routes over a sync signing transport."""
@@ -396,55 +259,6 @@ class SyncVmOperatorClient:
 
     def set_relay_enabled(self, relay_id: str, enabled: bool) -> RelayResponse:
         return self._run(_set_relay_enabled(relay_id, enabled))
-
-    # VM's lease routes.
-
-    def register_lease(
-        self,
-        *,
-        resource_id: str,
-        escrow_uid: str,
-        host_id: str,
-        vm_target: str,
-        lease_end_utc: datetime | str,
-        lease_start_utc: datetime | str | None = None,
-        create_job_id: str | None = None,
-        capacity_reservation_id: str | None = None,
-    ) -> dict:
-        return self._run(
-            _register_lease(
-                resource_id, escrow_uid, host_id, vm_target, lease_end_utc,
-                lease_start_utc, create_job_id, capacity_reservation_id,
-            )
-        )
-
-    def list_leases(
-        self, *, status: str | None = None, host_id: str | None = None, escrow_uid: str | None = None
-    ) -> dict:
-        return self._run(_list_leases(status, host_id, escrow_uid))
-
-    def get_lease(self, lease_id: str) -> dict:
-        return self._run(_get_lease(lease_id))
-
-    def get_lease_by_escrow(self, escrow_uid: str) -> dict:
-        return self._run(_get_lease_by_escrow(escrow_uid))
-
-    def update_lease(self, lease_id: str, **fields: Any) -> dict:
-        return self._run(_update_lease(lease_id, fields))
-
-    def terminate_lease(self, lease_id: str, **fields: Any) -> dict:
-        return self._run(_terminate_lease(lease_id, fields))
-
-    def release_lease_oversight(self, lease_id: str, *, reason: str) -> dict:
-        return self._run(_release_oversight(lease_id, reason))
-
-    def retry_lease_release(
-        self, lease_id: str, *, reason: str | None = None, max_retries: int | None = None
-    ) -> dict:
-        return self._run(_retry_release(lease_id, reason, max_retries))
-
-    def force_release_lease(self, lease_id: str, *, reason: str, evidence: str | None = None) -> dict:
-        return self._run(_force_release(lease_id, reason, evidence))
 
 
 __all__ = ["SyncVmOperatorClient", "VmOperatorClient"]

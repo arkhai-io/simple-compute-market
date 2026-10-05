@@ -62,12 +62,16 @@ def test_every_bound_mutation_contract_is_reachable(contract):
 
 
 def test_family_routes_name_their_roles():
-    """Fulfillment reads admit the operator; its mutations and system routes do not mix."""
+    """Every family route admits the administrator; a seller's routes admit the
+    seller too, and system routes are the administrator's alone."""
     routes = {contract.operation: contract for contract in PROVISIONING_ROUTE_CONTRACTS}
 
-    for operation in ("provisioning_fulfillment_status", "provisioning_fulfillment_result"):
+    for operation in (
+        "provisioning_fulfillment_status",
+        "provisioning_fulfillment_result",
+        "provisioning_fulfillment_begin",
+    ):
         assert routes[operation].allowed_roles == ("seller", "admin")
-    assert routes["provisioning_fulfillment_begin"].allowed_roles == ("seller",)
     assert routes["provisioning_system_status"].allowed_roles == ("admin",)
 
 

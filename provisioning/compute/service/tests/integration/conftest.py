@@ -55,6 +55,15 @@ from compute_provisioning_service.services.relay_port_allocator import (
     RelayPortAllocator,
 )
 from compute_provisioning_service.services.relay_service import RelayService
+from compute_provisioning.executor_leases import ExecutorLeaseService
+from compute_provisioning.leases import LeaseRouteService
+from compute_provisioning.release import (
+    FulfillmentReleaseExecutor,
+    FulfillmentReleaseGuard,
+    FulfillmentReleaseStatusPort,
+    FulfillmentServiceTeardownPort,
+)
+from market_fulfillment import SettlementRepository
 from vm_provisioning_operator import VmOperatorClient
 from bare_metal_provisioning_adapter.services.bare_metal_pool_config_handler import (
     BareMetalPoolConfigHandler,
@@ -63,7 +72,6 @@ from compute_provisioning_service.db.database import create_session_factory
 
 from compute_provisioning_service.db.models import Base
 
-from arkhai_bare_metal import BareMetalLeaseClient
 from compute_provisioning_ansible.host_import import AnsibleHostImportClient
 from compute_provisioning_client import ComputeProvisioningClient
 from market_resource_pools_client import ResourcePoolClient
@@ -631,6 +639,9 @@ async def client_and_queue(
         session_factory=session_factory,
         unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count",
         host_requirement=host_requirement,
+        # The release guard exactly as the production container composes it,
+        # so capacity is freed here only on the proof it needs there.
+        release_guard=FulfillmentReleaseGuard(SettlementRepository()),
     )
 
     host_authority = HostAuthority(
@@ -690,9 +701,6 @@ async def client_and_queue(
     from market_site.authority import LedgerSiteAuthority
     site_authority = LedgerSiteAuthority(capacity_ledger_service)
 
-    from bare_metal_provisioning_adapter.services.bare_metal_lease_service import BareMetalLeaseService
-    bare_metal_lease_service = BareMetalLeaseService(site_authority)
-
     from bare_metal_provisioning_adapter.services.bare_metal_operations_service import BareMetalOperationsService
     bare_metal_operations_service = BareMetalOperationsService(
         jobs=job_engine,
@@ -704,7 +712,6 @@ async def client_and_queue(
     from market_fulfillment import (
         FulfillmentOrchestrator,
         ProviderRegistry,
-        SettlementRepository,
         SqlAlchemyFulfillmentUnitOfWork,
     )
     from vm_provisioning_adapter.services.ansible_fulfillment_provider import (
@@ -728,39 +735,27 @@ async def client_and_queue(
     fulfillment_unit_of_work = SqlAlchemyFulfillmentUnitOfWork(
         session_factory=session_factory,
         pool_service=resource_pool_service,
+        # As production composes it: a dispatch records its create handle on
+        # the reservation, which the release guard reads as provenance.
+        capacity_ledger=capacity_ledger_service,
+    )
+    from bare_metal_provisioning_adapter.services.bare_metal_fulfillment_provider import (
+        BareMetalFulfillmentProvider,
     )
     fulfillment_service = FulfillmentOrchestrator(
-        provider_registry=ProviderRegistry({"ansible": ansible_fulfillment_provider}),
+        provider_registry=ProviderRegistry(
+            {
+                "ansible": ansible_fulfillment_provider,
+                "bare_metal.ansible": BareMetalFulfillmentProvider(
+                    operations_service=bare_metal_operations_service,
+                    job_service=job_engine,
+                ),
+            }
+        ),
         unit_of_work=fulfillment_unit_of_work,
     )
 
-    from compute_provisioning.release import ExecutorReleaseDispatcher, ReleaseJobDispatcher
-    from vm_provisioning_adapter.release import (
-        VM_OFFERING_MODE,
-        FulfillmentServiceTeardownPort,
-        VmFulfillmentReleaseJobPort,
-        VmReleaseExecutor,
-    )
-    from bare_metal_provisioning_adapter.release import (
-        BARE_METAL_OFFERING_MODE,
-        BareMetalReleaseExecutor,
-    )
-    release_dispatcher = ExecutorReleaseDispatcher({
-        BARE_METAL_OFFERING_MODE: BareMetalReleaseExecutor(
-            release_delegate=bare_metal_operations_service.reclaim_access_for_reservation,
-        ),
-        VM_OFFERING_MODE: VmReleaseExecutor(
-            settlement_repository=SettlementRepository(),
-            session_factory=session_factory,
-            teardown_port=FulfillmentServiceTeardownPort(lambda: fulfillment_service),
-        ),
-    })
-    release_job_dispatcher = ReleaseJobDispatcher({
-        VM_OFFERING_MODE: VmFulfillmentReleaseJobPort(
-            teardown_port=FulfillmentServiceTeardownPort(lambda: fulfillment_service),
-        ),
-        BARE_METAL_OFFERING_MODE: job_engine,
-    })
+    teardown_port = FulfillmentServiceTeardownPort(lambda: fulfillment_service)
 
     from compute_provisioning.lease_lifecycle import LeaseLifecycleService
     from compute_provisioning_service.services.deal_event_sink import (
@@ -771,8 +766,12 @@ async def client_and_queue(
     lease_lifecycle_service = LeaseLifecycleService(
         settings=mock_settings,
         site_authority=site_authority,
-        release_jobs=release_job_dispatcher,
-        executor_release=release_dispatcher,
+        release_executor=FulfillmentReleaseExecutor(
+            settlement_repository=SettlementRepository(),
+            session_factory=session_factory,
+            teardown_port=teardown_port,
+        ),
+        release_status=FulfillmentReleaseStatusPort(teardown_port),
         capacity_released_notifier=AsyncMock(return_value=True),
         capacity_release_outbox=capacity_release_outbox,
     )
@@ -802,8 +801,6 @@ async def client_and_queue(
             job_submitter=job_submitter,
             job_queue_provider=lambda: job_queue,
         ),
-        settlement_repository=SettlementRepository(),
-        teardown_port=FulfillmentServiceTeardownPort(lambda: fulfillment_service),
     )
 
     system_service = SystemService(
@@ -824,7 +821,6 @@ async def client_and_queue(
     app.container.host_authority.override(host_authority)
     app.container.connectivity_probes.override(connectivity_probes)
     app.container.site_authority.override(site_authority)
-    app.container.bare_metal_lease_service.override(bare_metal_lease_service)
     app.container.bare_metal_operations_service.override(bare_metal_operations_service)
     app.container.lease_lifecycle_service.override(lease_lifecycle_service)
     app.container.capacity_ledger_service.override(capacity_ledger_service)
@@ -844,7 +840,6 @@ async def client_and_queue(
     _container_module.resolved_system_service = system_service
     _container_module.resolved_host_authority = host_authority
     _container_module.resolved_connectivity_probes = connectivity_probes
-    _container_module.resolved_bare_metal_lease_service = bare_metal_lease_service
     _container_module.resolved_bare_metal_operations_service = bare_metal_operations_service
     _container_module.resolved_bare_metal_mock_executor = (
         bare_metal_runner if isinstance(bare_metal_runner, MockAnsibleRunner) else None
@@ -871,9 +866,10 @@ async def client_and_queue(
 
     _container_module.resolved_job_queue = job_queue
     _container_module.resolved_vm_operations_service = app.container.vm_operations_service()
-    from compute_provisioning.executor_leases import ExecutorLeaseService
-    _container_module.resolved_executor_lease_service = ExecutorLeaseService(
-        site_authority
+    executor_lease_service = ExecutorLeaseService(site_authority)
+    _container_module.resolved_executor_lease_service = executor_lease_service
+    _container_module.resolved_lease_route_service = LeaseRouteService(
+        executor_lease_service, lease_lifecycle_service
     )
     _container_module.resolved_host_operations_service = app.container.host_operations_service()
 
@@ -920,28 +916,10 @@ async def client_and_queue(
     app.container.host_authority.reset_override()
     app.container.connectivity_probes.reset_override()
     app.container.site_authority.reset_override()
-    app.container.bare_metal_lease_service.reset_override()
     app.container.bare_metal_operations_service.reset_override()
     app.container.lease_lifecycle_service.reset_override()
     app.container.capacity_ledger_service.reset_override()
     app.container.fulfillment_service.reset_override()
-
-
-@pytest_asyncio.fixture
-async def bare_metal_leases(client_and_queue) -> AsyncIterator[BareMetalLeaseClient]:
-    """The typed bare-metal lease client over the canonical provisioning client.
-
-    It signs as the administrator and verifies the service's signed responses,
-    so the route contract, authorization, and wire shape are all exercised.
-    """
-    async with ComputeProvisioningClient(
-        "http://test",
-        signer=ADMIN_SIGNER,
-        caller_role="admin",
-        expected_authorities=SERVICE_AUTHORITIES,
-        transport=ASGITransport(app=app),
-    ) as provisioning:
-        yield BareMetalLeaseClient(provisioning)
 
 
 @pytest_asyncio.fixture

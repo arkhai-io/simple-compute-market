@@ -157,87 +157,13 @@ class TestCapacityClientEndpointCoverage:
         reservation = await client.site.get_reservation(reserved["capacity_reservation_id"])
         truncated = await client.site.truncate_lease(
             capacity_reservation_id=reserved["capacity_reservation_id"],
-            lease_end_utc=datetime(2099, 1, 2, tzinfo=timezone.utc).isoformat(),
+            lease_end_utc=datetime(2098, 12, 31, tzinfo=timezone.utc).isoformat(),
         )
 
         assert snapshot[0]["resource_id"] == "compute-kvm1-001"
         assert len(reservations) == 1
         assert reservation["capacity_reservation_id"] == reserved["capacity_reservation_id"]
         assert truncated["capacity_reservation_id"] == reserved["capacity_reservation_id"]
-
-
-class TestLeaseClientEndpointCoverage:
-    async def test_terminate_lease_uses_client_contract(self, client_and_queue):
-        client, _ = client_and_queue
-        ledger = _container_module.resolved_capacity_ledger_service
-        if "compute-kvm1-001" not in {r["resource_id"] for r in ledger.list_resources()}:
-            ledger.register_resource(
-                resource_id="compute-kvm1-001",
-                total_units=8,
-                host_id=HOST, attributes={},
-                pool_id="default",
-            )
-        reserved = ledger.reserve(
-            claim={
-                "offering_mode": "vm",
-                "gpu_count": 1,
-                "host_id": HOST,
-            },
-            deal_ref={"escrow_uid": "escrow-client-terminate"},
-        )
-        assert reserved is not None
-
-        lease = await client.vm.register_lease(
-            resource_id="compute-kvm1-001",
-            capacity_reservation_id=reserved["capacity_reservation_id"],
-            escrow_uid="escrow-client-terminate",
-            host_id=HOST,
-            vm_target=VM_NAME,
-            lease_end_utc=datetime(2099, 1, 1, tzinfo=timezone.utc),
-        )
-
-        from market_fulfillment import SettlementRecord, SettlementRecordState
-
-        session_factory = _container_module.resolved_session_factory
-        with session_factory() as db:
-            db.add(
-                SettlementRecord(
-                    capacity_reservation_id=reserved["capacity_reservation_id"],
-                    fulfillment_id="fulfillment-client-terminate",
-                    market="vms",
-                    scheduling_requirements={"resource_kind": "vm"},
-                    settlement_resource_id=HOST,
-                    pool_id="pool-1",
-                    provider="ansible",
-                    resource_host_id=HOST, resource_attributes={},
-                    fulfillment_request={
-                        "kind": "vm.fulfillment.request",
-                        "schema_version": 1,
-                        "payload": {},
-                    },
-                    prepared_teardown_operation={
-                        "kind": "vm.ansible.teardown.v1",
-                        "schema_version": 1,
-                        "payload": {},
-                    },
-                    provider_metadata={"current_job_id": "job-1"},
-                    state=SettlementRecordState.active.value,
-                )
-            )
-            db.commit()
-
-        terminated = await client.vm.terminate_lease(lease["id"], reason="client coverage")
-
-        assert terminated["id"] == lease["id"]
-        assert terminated["status"] == "releasing"
-
-        # Confirm terminate_lease actually drove the
-        # fulfillment aggregate into durable teardown, not just that the
-        # reservation-ledger view reports "releasing" -- the two are
-        # separate state machines now, joined only by VmReleaseExecutor.
-        with session_factory() as db:
-            record = db.get(SettlementRecord, reserved["capacity_reservation_id"])
-            assert record.state == SettlementRecordState.teardown_dispatch_pending.value
 
 
 class TestBareMetalTestRouteCoverage:

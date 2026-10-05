@@ -764,7 +764,15 @@ def _terminal_requires_lease_truncation(record: Any, outcome: str) -> bool:
 async def truncate_lease_for_terminal_settlement(
     *, agreement_ref: str | None, reason: str | None = None, sqlite_client: Any
 ) -> dict[str, Any] | None:
-    """End capacity service through the agreement's durable reservation binding."""
+    """End capacity service through the agreement's durable reservation binding.
+
+    Asks the site to release the reservation first: an uncommitted hold, or a
+    lease nothing was delivered against, is released at once. The site's
+    release guard refuses a lease fulfillment delivered, which is then
+    truncated to now so its lifecycle tears it down at expiry. A reservation
+    neither releasable nor leased (already releasing, say) is left to the
+    lifecycle that holds it.
+    """
     if not agreement_ref:
         return None
 
@@ -789,6 +797,21 @@ async def truncate_lease_for_terminal_settlement(
             raise RuntimeError("terminal settlement has no durable listing binding")
         binding = await capacity_binding_for_listing(sqlite_client, listing_id)
         capacity = build_capacity_runtime(lambda: sqlite_client)
+        released = await capacity.release(
+            binding,
+            capacity_reservation_id=reservation_id,
+            failure_reason=reason or "settlement_terminal",
+        )
+        if released is not None:
+            stage_event(
+                "claims",
+                "capacity_released_after_abandonment",
+                agreement_ref=agreement_ref,
+                capacity_reservation_id=reservation_id,
+                reason=reason,
+                site=released.get("site"),
+            )
+            return released
         lease_end = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
         truncated = await capacity.truncate_lease(
             binding,
@@ -815,7 +838,7 @@ async def truncate_lease_for_terminal_settlement(
         return truncated
     except Exception:
         logger.exception(
-            "[SETTLEMENT] Could not truncate lease for agreement %s",
+            "[SETTLEMENT] Could not end capacity service for agreement %s",
             agreement_ref,
         )
         raise
