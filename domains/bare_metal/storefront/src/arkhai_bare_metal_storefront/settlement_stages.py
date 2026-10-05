@@ -167,6 +167,10 @@ async def verify_alkahest(
     escrow_uid: str,
     request: Any,
 ) -> Any:
+    if not service.seller_wallet:
+        raise SettlementRequestError(
+            "Alkahest settlement is not configured", status_code=503
+        )
     existing = await service.db.load_escrow(escrow_uid=escrow_uid)
     terms, listing = await service.physical_terms(thread, request.negotiation_id)
     agreed_amount = thread["agreed_price"]
