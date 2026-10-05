@@ -29,13 +29,24 @@ to repair by hand.
 
 ## 2. Index format
 
-- [ ] 2.1 Replace every change table's status cell in `openspec/changes/README.md`
+- [x] 2.1 Replace every change table's status cell in `openspec/changes/README.md`
       with `Status`, `Depends on`, and `Notes` columns, checking each row against
       its own change's `proposal.md`, `design.md`, and `tasks.md` rather than
       transcribing its prose, and naming the gated phase of every dependency that
       gates earlier than implementation. List for the owner every row whose
-      recorded state the change does not support.
-- [ ] 2.2 Rewrite the index's status definitions to the phase-and-state vocabulary
+      recorded state the change does not support. 88 rows migrated by a
+      fresh-context agent and checked mechanically (vocabulary, dependency
+      targets). Rows the change files contradicted were corrected, among them
+      `bare-metal-mock-provisioned-deal` (recorded "not planned", 55 tasks done)
+      and `repair-storefront-alkahest-configuration` (recorded "implemented",
+      tasks open). By owner decision every change not already implementing is
+      `ready for design`, and external-verification waits are `blocked in
+      closeout` (see `design.md`). Dependencies inferred from proposals were added
+      where the old cells omitted them. Contradictions between two changes' own
+      dependency claims are left for each change's design review, recorded in
+      `Notes` where the migration noticed them. Index prose that contradicted the
+      rows was corrected, and a pre-existing malformed table repaired.
+- [x] 2.2 Rewrite the index's status definitions to the phase-and-state vocabulary
       and the `Depends on` rule.
 - [x] 2.3 Amend part 6 (campaign index currency) of
       `openspec/README.md#plan-closeout-requirements` with the dependency-landing
@@ -45,11 +56,13 @@ to repair by hand.
 
 ## 3. Design discussion
 
-- [ ] 3.1 Write the `change-design` skill: the context preload, numbered open
+- [x] 3.1 Write the `change-design` skill: the context preload, numbered open
       questions with options, trade-offs, and a recommendation, no file edits until
       the owner settles the design, then decisions recorded in `design.md` and
       `proposal.md` amended when scope moves; it moves the index row to `in design`
-      when discussion starts.
+      when discussion starts. Written at `.agents/skills/change-design/`; it also
+      refuses to start while a dependency gating design is unlanded, checks for
+      drift since an earlier design, and leaves `tasks.md` to planning.
 - [ ] 3.2 Pilot: resolve `capacity-shape-envelope`'s open questions; the owner
       judges depth against a browser session on the same questions.
 - [ ] 3.3 Pilot: design `add-full-stack-ci-job` from its proposal.

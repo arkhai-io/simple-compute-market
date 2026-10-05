@@ -427,6 +427,15 @@ owner rather than carried across. Representative mappings:
 | "active; depends on X and Y" | `ready for implementation`; `Depends on`: X, Y — reverified when they land |
 | "**archived** 2026-09-28. Promoted to …" | `archived`; the promotion summary to `Notes` |
 
+The migration itself overrides that mapping in two ways, at the owner's direction.
+Every change not already implementing starts at `ready for design`, even one whose
+plan exists: at the time of migration each such change is blocked, stale, or about to
+go stale, and the safe entry to the workflow is a design review against the codebase
+as it now is. And a change whose local work is complete but whose remaining
+verification needs an external input — real hardware, protected Stripe inputs, a
+signed external release — is `blocked in closeout`, since what remains is evidence
+rather than implementation.
+
 ### Browser delivery rules leave the shared guidance
 
 `AGENTS.md` loses its "Generated implementation artifacts" section and its
