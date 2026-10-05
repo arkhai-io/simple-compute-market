@@ -28,14 +28,12 @@ class BareMetalArkhaiPaymentsBuyer:
     config: ArkhaiPaymentsConfig
     payer_account: str
 
-    def approve(
+    def validate_acceptance(
         self,
         *,
         agreement: Any,
         settlement_data: Mapping[str, Any],
-        timeout: float = 300.0,
-        interval: float = 1.0,
-    ) -> str:
+    ) -> tuple[Mandate, dict[str, Any]]:
         agreement_wire = (
             agreement.model_dump(mode="json", exclude_none=True)
             if hasattr(agreement, "model_dump")
@@ -77,6 +75,19 @@ class BareMetalArkhaiPaymentsBuyer:
         )
         raw_mandate = Mandate.model_validate(settlement_data)
         mandate = check(raw_mandate, agreement_wire, policy)
+        return mandate, agreement_wire
+
+    def approve(
+        self,
+        *,
+        agreement: Any,
+        settlement_data: Mapping[str, Any],
+        timeout: float = 300.0,
+        interval: float = 1.0,
+    ) -> str:
+        mandate, agreement_wire = self.validate_acceptance(
+            agreement=agreement, settlement_data=settlement_data
+        )
         transaction = transaction_id(mandate)
         service_identity = self.config.service_identity
         if service_identity is None:
