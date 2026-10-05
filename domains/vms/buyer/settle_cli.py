@@ -38,7 +38,7 @@ def run_settle_from_log(
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
     log = open_run_log(run_id, signer=signer, profile_id=identity.profile_id)
-    log.event("settle_resumed", run_id=run_id)
+    log.event("settle_resumed")
     return stage.resume(BuyerResumeContext(
         run_id=run_id, deal=deal, log=log, signer=signer,
         resolve_seller_principals=make_deal_publisher_trust_resolver(run_id, deal, signer),
