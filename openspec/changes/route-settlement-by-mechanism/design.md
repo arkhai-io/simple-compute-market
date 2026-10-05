@@ -158,6 +158,16 @@ This is implementation self-check evidence, not independent or live domain
 qualification. Domain evidence schemas, seller revalidation and joined
 qualification remain with their assigned sections. Roadmap closeout is 8.7.
 
+## VM seller implementation boundary
+
+Tasks 2.2–2.3 use `VmSettlementRepository` in the existing `payment_repository.py` owner. `vm_settlement_evidence` stores negotiation, mechanism, exact Agreement digest, established reference, status and versioned source/delivery payload. `vm_delivery_records` independently stores negotiation-scoped immutable request/context, physical identities, phases, private results and expiring claims. The introducing migration and fresh table definition are edited in place; databases containing the former payment table are refused and require an explicit reset.
+
+Seller stages supply `vm.delivery-facts` version 1: accepted order/provision terms, normalized required attributes, lease start/end and funding expiry, plus accepted Alkahest lease bytes/condition anchor or payment receipt identity/holds/hold end. Genuine Alkahest escrow and obligation records remain separate. The scoped repository adapter lets existing delivery helpers use their coordinate keywords without reading or writing payment escrow rows.
+
+Task 2.4 must consume these facts directly, remove remaining planner/recovery/delivery mechanism switches, and return Alkahest revalidation, attestation and claim binding to the selected entry. Payment receipt checking is entry-owned already, but common recovery still selects that gate through its old switch. Recovery retains genuine Alkahest context discovery only when no delivery row exists; no payment sentinel or adoption path remains. Task 2.5 follows after that refactor; the existing controlled example is mechanically adapted and self-driven now. Task 2.6 owns promotion to the VM fulfillment and physical-provisioning spec/architecture destinations above.
+
+Fresh-wheel self-checks and replay setup are in [`VM seller evidence`](../../../docs/attachments/vm-seller-evidence/index.md). No live qualification or independent acceptance is claimed.
+
 ## Planning validation
 
 - `openspec validate route-settlement-by-mechanism --strict`: passed.
