@@ -425,6 +425,12 @@ field asserts, and the runners at
 `domains/apicredits/middleware/typescript/test/conformanceRunner.ts`,
 and `domains/apicredits/middleware/rust/tests/conformance.rs`.
 
+## Private Service Dependencies
+
+This repository is public, and every test target it runs in public CI or a public build MUST pass without credentials for a private repository, image or package. A scenario that needs a private Arkhai service lives in that service's repository, which may depend on SCM's public artifacts. SCM tests the client side only, against the service's published contract (schemas and test vectors) and a test double at the client kit's boundary.
+
+**Current example:** complete deals settled through the Arkhai payments service run in the private `arkhai-io/arkhai-payments` repository. Here, `kit/arkhai-payments` checks conformance against that repository's published vectors.
+
 ## Offline Review Validation
 
 Review validation packages a scoped wheelhouse rather than copying a

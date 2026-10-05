@@ -78,14 +78,11 @@ No adapter implementation in this change; independent after section 1. Its home 
 - [ ] 7.1 After review record in `openspec/specs/market-composition/architecture.md#settlement-runtime-composition` and `openspec/specs/settlement-configuration/architecture.md#registration-and-ownership` that compatible kits can opt into a stage convention, it lives in a kit chosen when first implemented, and it is not required for contact/seller-first/fused stages. Verify the deltas require no convention protocol or adapter and no new module/dependency was created speculatively; record adapter extraction as deferred in `design.md`.
 - [ ] 7.2 Recheck core/domain imports with existing `core/tests/unit/test_carrier_purity.py`, VM `test_architecture_imports.py` and bare-metal `test_import_boundaries.py`; verify a stage can use its own kit API without conforming to the proposed convention. Check documentation placement and compress the completed convention notes; no runtime tests/build are owed for a docs-only convention disposition.
 
-## 9. Payment end-to-end scenarios
+## 9. Payment end-to-end coverage
 
-Owner: one worker after sections 2–5 land. Mirrors the Alkahest complete-deal scenarios with settlement through the Arkhai payments service.
+The complete-deal scenarios that settle through the live Arkhai payments service live in the private payments repository (issue `scm-complete-deal-e2e` in `arkhai-io/arkhai-payments`), which may depend on public SCM artifacts; public SCM CI must not depend on the private service. Here, `kit/arkhai-payments` keeps its conformance checks against the payments repository's published test vectors, and domain tests use a payments-client test double at the kit boundary.
 
-- [ ] 9.1 Add the payments service and its Formance ledger to the e2e compose stack, behind a profile so the Alkahest stack runs without it. Run the service in development mode (header auth, operator test funds) with a fixed receipt key whose public half the storefronts are configured to trust. The payments service is a separate private repository, so decide and record how the stack obtains its image (published private image, or a build from a sibling checkout) and what an e2e run without access does: skip with a readiness reason, never mock.
-- [ ] 9.2 Add readiness checks alongside `00g Alkahest configured`: payments service healthy, ledger reachable, storefront configured for `arkhai.payments.v1`.
-- [ ] 9.3 Add `arkhai.payments.v1` complete-deal scenarios for VM (from `test_full_deal_buyer_cli.py`), API credits (from `test_credits_deal_buyer_cli.py`) and bare metal (from `test_bare_metal_deal.py`): fund the buyer through test funds, negotiate, approve, seller verifies the signed receipt, deliver, and assert one delivery after a repeated settle. Assert the ledger side through the service's balance and transaction reads (payer debited, payee hold, fee), not storefront internals. Share stage helpers with the Alkahest scenarios where the phases match; keep payment-specific phases separate rather than branching inside one test.
-- [ ] 9.4 Run the new scenarios and the existing Alkahest scenarios on the same stack and record both results in the change's evidence.
+- [ ] 9.1 Confirm the payments-client test doubles used by domain tests still match the kit's typed client after sections 2–5, and that the kit's vector conformance tests pass.
 
 ## 8. Joined validation and plan closeout
 
