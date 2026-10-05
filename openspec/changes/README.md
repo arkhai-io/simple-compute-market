@@ -4,6 +4,7 @@ This index groups active OpenSpec changes by delivery sequence. It is a planning
 
 Statuses here describe readiness, not merely whether a checklist exists:
 
+- **planned** — planning artifacts are complete; implementation has not started;
 - **active** — implementation may proceed subject to dependencies in the change;
 - **blocked** — retain design/specification, but do not begin blocked implementation;
 - **deferred** — no implementation checklist until the recorded activation condition is met.
@@ -107,7 +108,7 @@ and [`contact-exchange-settlement-mechanism`](archive/2026-08-19-contact-exchang
 | Change | Status | Acceptance boundary |
 |---|---|---|
 | [`settle-through-arkhai-payments`](settle-through-arkhai-payments/) | implemented §2–§3; verification and closeout active; §1 deferred | Exact Agreements feed `arkhai.payments.v1` as a peer of Alkahest in VM, bare-metal, and API-credit domains. Signed receipts gate provisioning/issuance; shared negotiation settlement data stores mandates. `fiat.stripe.v1` and `kit/hosted-settlement` are absent; the escrow-carrier refactor is deferred. Supersedes the hosted-fiat changes built on them ([overview](settle-through-arkhai-payments/overview.html)) |
-| [`route-settlement-by-mechanism`](route-settlement-by-mechanism/) | design phase; not yet planned | Each domain declares one table per role from mechanism ID to a domain-owned settle stage. Core buyer orchestration dispatches on the Agreement's mechanism instead of on whether an escrow proposal exists. Stages produce domain settlement evidence keyed by negotiation ID, and stages after settlement stop comparing mechanism IDs. Arkhai evidence leaves the `escrows` rows |
+| [`route-settlement-by-mechanism`](route-settlement-by-mechanism/) | planned | Each domain declares one table per role from mechanism ID to a domain-owned settle stage. Core buyer orchestration dispatches on the Agreement's mechanism instead of on whether an escrow proposal exists. Stages produce domain settlement evidence keyed by negotiation ID, and stages after settlement stop comparing mechanism IDs. Arkhai evidence leaves the `escrows` rows |
 | [`move-escrow-into-alkahest`](move-escrow-into-alkahest/) | design phase; depends on `route-settlement-by-mechanism` | The escrow fields in `SettlementObligation` and buyer orchestration become Alkahest's `settlement_data`. The servicing runtime becomes a library used internally by Alkahest and contact exchange. `MechanismRegistration` shrinks to publication, readiness and compatibility, with typed resources. The legacy no-`SettlementOption` path is deleted. Takes over the deferred §1 of `settle-through-arkhai-payments` |
 | [`drop-escrow-from-shared-wire`](drop-escrow-from-shared-wire/) | design phase; depends on `move-escrow-into-alkahest` | Listings, registry and storefront-client describe settlement only through `settlement_options` and namespaced clause fields. Hosted registries are rebuilt; this breaks the wire format |
 

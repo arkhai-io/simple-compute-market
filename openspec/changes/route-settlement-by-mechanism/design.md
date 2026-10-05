@@ -62,7 +62,7 @@ Do not implement that convention or adapters in this change. The current adapter
 
 Inventory at base `331768160ba5528634aefd75b09ef89efe742918`: search `core/` and `domains/` for the requested IDs/constants and `accepted_escrow_proposal`, excluding `.venv`, `build` and tests; inspect executable comparisons, then check aliases such as `ALKAHEST_MECHANISM` and the funding-gate map. Tests, literals/defaults, help examples and generic equality between selected and advertised IDs are not concrete-mechanism dispatch.
 
-There are **50 concrete-ID comparison sites in 26 production files**: **23 T** (table-owned composition/admission hooks), **14 E** (evidence/issuance-authorization reads, including deleting compatibility fallback), **13 M** (mechanism-owned validation inside a stage). The map in `prepare_credit_issuance_request` is one additional E dispatch site with two ID keys, not a comparison. There are **23 explicit accepted-proposal absence/presence comparisons**: one T dispatch, eleven M stage/materialization guards and eleven carrier-projection guards left unchanged for the later wire/carrier changes. A comparison spanning several source lines counts once.
+There are **50 concrete-ID comparison sites in 26 production files**: **23 T** (table-owned composition/admission hooks), **14 E** (evidence/issuance-authorization reads, including deleting compatibility fallback), **13 M** (mechanism-owned validation inside a stage). The map in `prepare_credit_issuance_request` is one additional E dispatch site with two ID keys, not a comparison. The first-pass accepted-proposal comparison scan finds **23 directly spelled None checks**: one T dispatch, eleven M stage/materialization guards and eleven carrier-projection guards. Alias/type-test sites are classified below separately, including the VM acceptance-artifact shape branch. A comparison spanning several source lines counts once; carrier parsing is not settlement dispatch.
 
 Paths below abbreviate package roots, not ownership:
 
@@ -101,6 +101,12 @@ Accepted-proposal guards by file:
 - M x10: API-credit `buyer/deal_helpers.py` (1), `buyer/settle_cli.py` (1); VM `buyer/deal_helpers.py` (1), `buyer/escrow_cli.py` (3), `buyer/settle_cli.py` (3), `negotiation/policies.py` (1). Keep/move these within Alkahest materialization or the existing namespaced raw Alkahest utility, never use them to select settlement.
 - Carrier projection x11: core buyer `negotiation_client.py` (1), `orchestration.py` (1); API-credit buyer `buyer_client.py` (2), `negotiate_cli.py` (1), storefront `negotiation_runtime.py` (1); VM buyer `buyer_client.py` (2), `buy_cli.py` (1), `negotiate_cli.py` (1), storefront `negotiation_runtime.py` (1). These serialize/decode an optional existing field; they do not choose a mechanism and remain opaque.
 
+Alias/type-test follow-up:
+
+- T: VM storefront `negotiation_runtime.py:_build_response_artifacts` chooses escrow-artifact construction from `isinstance(proposal, Mapping)`. Bind that construction to its Alkahest entry; retain the existing flat-wire coercion that resolves the selected mechanism, not an escrow-presence settlement fallback.
+- M: VM/API-credit `buyer/settle_cli.py:_accepted_proposal_chain` and VM `buyer/escrow_cli.py` proposal dictionaries are Alkahest-owned field readers. API-credit/VM `negotiation/policies.py` accepted-proposal dictionary guards are materialization/projection within the existing legacy acceptance adapter; they do not authorize delivery.
+- Carrier: core buyer `negotiation_client.py:parse_accepted_terms_from_reply` checks the `raw_esc` dictionary solely to decode an optional field. `deal_helpers.py`'s two captured-proposal blocks validate presence, dictionary shape and transcript consistency; keep these fail-closed parsing checks, not mechanism choices.
+
 The second pass also found mechanism-specific typed allowlists/defaults in API-credit `settlement/credits_client.py`, service `models/keys_model.py` and `db/migrations.py`; remove them with the authorization/grant rewrite. The existing declarations in bare-metal `settlement_composition.py` become its table, not extra registries. Core `schemas.py` flat-escrow coercion, `core_storefront/escrow_identity.py` backfill, VM `publication_migration.py`, raw escrow commands, and field-presence/transcript consistency checks are existing carrier/Alkahest compatibility surfaces, not new dispatch: retain them for the explicitly out-of-scope carrier/wire work. No contact-ID comparison was found outside kits; its supported seller entry and fused evidence handoff still have to survive composition.
 
 ## Execution and first use
@@ -108,6 +114,12 @@ The second pass also found mechanism-specific typed allowlists/defaults in API-c
 Land shared core carriers/dispatch first. VM, bare-metal, API-credit storefront/buyer, and credits-service work then have disjoint file ownership. The credits-service worker owns the domain client DTO/digest; the API-credit storefront worker consumes it and depends on that interface before final validation. Domain workers own their evidence migrations and repositories; the evidence-storage section is a contract checklist, not a competing worker on those files.
 
 Use fresh disposable databases and installed internal wheels. First use is the existing accepted-run `market settle --from <run>` surface for VM/API credits, the bare-metal purchase/result surface, and the existing controlled seller settlement/typed-credit-client paths. Preserve Alkahest and contact behavior as well as wallet-free payment dispatch. Check deployed readiness before complete-deal scenarios. A controlled local example establishes wiring only, not live ledger/hardware qualification; unavailable external prerequisites are reported rather than replaced with a mock success.
+
+## Planning validation
+
+- `openspec validate route-settlement-by-mechanism --strict`: passed.
+- `make check-comment-hygiene`: passed on the planning checkout.
+- All named test-suite files exist; implementation suites and live deployment lanes are planned, not claimed as run.
 
 ## Open Questions
 
