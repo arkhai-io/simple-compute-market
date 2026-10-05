@@ -8,7 +8,6 @@ import logging
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from typing import Any
-from types import SimpleNamespace
 
 from market_alkahest import AlkahestConditionalEscrowClient, create_alkahest_registration
 from market_alkahest.proposals import accepted_escrow_artifacts_from_proposal
@@ -574,35 +573,35 @@ class AlkahestSellerStage:
         # the continuation from accepted state and durable progress.
         lock = self._delivery_locks.setdefault(prepared.agreement_ref, asyncio.Lock())
         async with lock:
-            db = prepared.fulfillment_input.sqlite_client
+            params = prepared.fulfillment_input
+            db = params.sqlite_client
+            if db is None:
+                raise ValueError("settlement repository is unavailable")
+            evidence = await db.load_settlement_evidence(negotiation_id=params.negotiation_id)
+            if evidence is None:
+                raise ValueError("settlement source evidence is unavailable")
+            credit_delivery(evidence)
+            thread = await db.load_negotiation_thread_row(negotiation_id=params.negotiation_id)
+            agreement, raw = accepted_agreement(thread)
+            evidence.validate_identity(
+                negotiation_id=prepared.agreement_ref, mechanism=agreement.settlement.mechanism,
+                settlement_ref=prepared.mechanism_ref,
+            )
+            if evidence.evidence["agreement_digest"] != hashlib.sha256(raw).hexdigest():
+                raise ValueError("settlement evidence differs from accepted Agreement")
             progress = await db.load_issuance_progress(reference=prepared.mechanism_ref)
             if progress is not None and progress["status"] == "ready":
                 return FulfillmentOutcome(
                     status="fulfilled", fulfillment_ref=progress["fulfillment_uid"],
                     public_result={"connection_details": progress["public_result"].get("connection_details")},
                 )
-            params = prepared.fulfillment_input
-            db = params.sqlite_client
-            if db is None:
-                raise ValueError("settlement repository is unavailable")
-            thread = await db.load_negotiation_thread_row(negotiation_id=params.negotiation_id)
-            agreement, _raw = accepted_agreement(thread)
-            stage = self
             try:
-                await stage.prepare(
-                    sqlite_client=db, local_principal=prepared.local_principal,
-                    escrow_uid=prepared.mechanism_ref, negotiation_id=params.negotiation_id,
-                    mechanism_client=mechanism_client, chain_name=params.chain_name,
-                    request=SimpleNamespace(buyer_principal=params.buyer_principal),
-                    composition=params.composition,
-                )
-                evidence = await db.load_settlement_evidence(negotiation_id=params.negotiation_id)
                 composition = params.composition
                 fulfillment = composition.domain.fulfillment
                 result = await fulfillment.fulfill(
-                    evidence=evidence, retry_uncertain=stage.retry_uncertain, db=db, credits_client=composition.credits_client,
+                    evidence=evidence, retry_uncertain=self.retry_uncertain, db=db, credits_client=composition.credits_client,
                 )
-                result = await stage.continue_delivery(
+                result = await self.continue_delivery(
                     result, evidence=evidence, client=mechanism_client, composition=composition,
                 )
             except Exception as exc:

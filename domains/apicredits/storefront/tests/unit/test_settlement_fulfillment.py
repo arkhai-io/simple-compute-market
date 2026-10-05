@@ -647,7 +647,7 @@ async def test_settlement_coordinator_verifies_issues_and_stores_credentials(set
     from apicredits_storefront.settlement_stages import project_progress
     projection = await project_progress(db, progress, owner=_BUYER_PRINCIPAL)
     assert projection["tenant_credentials"]["secret"] == "ak_new.s3cret"
-    assert len(verified) == 2
+    assert len(verified) == 1
     assert int(verified[0]["agreed_price"]) == 300
     assert all(call["escrow_uid"] == "0xdeal" for call in verified)
     assert issued[0].negotiation_id == neg_id
@@ -671,6 +671,46 @@ async def test_settlement_coordinator_verifies_issues_and_stores_credentials(set
     )
     assert again["status"] == "ready"
     assert len(issued) == 1
+
+
+async def test_verified_prepare_delivers_when_further_chain_reads_are_unavailable(
+    settled_db, monkeypatch,
+):
+    db, neg_id = settled_db
+    from apicredits_storefront import settlement_stages
+
+    chain_reads = []
+    issued = []
+
+    async def verify(**kwargs):
+        chain_reads.append(kwargs)
+        if len(chain_reads) > 1:
+            raise ConnectionError("chain transport unavailable after verification")
+        return 0
+
+    async def issue(self, request):
+        issued.append(request)
+        return _issuance_result(request)
+
+    async def attest(_payload, _escrow_uid):
+        return "0xfulfill"
+
+    monkeypatch.setattr(settlement_stages, "verify_escrow_for_settlement", verify)
+    monkeypatch.setattr(CreditsServiceClient, "submit_credit_issuance", issue)
+    completed = asyncio.Event()
+    _, _, coordinator = _build_settlement_composition(db, on_outcome=completed.set)
+    await coordinator.start(
+        escrow_uid="0xverified", negotiation_id=neg_id,
+        mechanism_client=SimpleNamespace(string_obligation=SimpleNamespace(do_obligation=attest)),
+        chain_name="anvil", request=_settlement_request(neg_id),
+    )
+    await asyncio.wait_for(completed.wait(), timeout=5)
+
+    assert (await db.load_issuance_progress(reference="0xverified"))["status"] == "ready"
+    assert (await db.load_escrow(escrow_uid="0xverified"))["status"] == "ready"
+    assert (await db.load_settlement_evidence(negotiation_id=neg_id)).status == "verified"
+    assert len(issued) == 1
+    assert len(chain_reads) == 1
 
 
 async def test_ready_progress_recovers_into_shared_servicing(
