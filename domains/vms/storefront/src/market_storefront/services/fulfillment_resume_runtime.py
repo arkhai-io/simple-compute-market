@@ -10,7 +10,6 @@ writes are logged for operator reconciliation.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import logging
 import uuid
@@ -19,7 +18,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from compute_provisioning import FulfillmentRequestBody, FulfillmentScheduleRequest
-from market_arkhai_payments import Mandate, SignedReceipt, transaction_id
 from market_fulfillment import (
     FULFILLMENT_RESULT_KIND,
     FULFILLMENT_RESULT_SCHEMA_VERSION,
@@ -568,35 +566,14 @@ async def converge_escrow_once(
         return False
     payments = context.get("settlement_mechanism") == "arkhai.payments.v1"
     if payments:
-        record = await sqlite_client.load_vm_payment_record(
-            negotiation_id=str(escrow.get("negotiation_id") or "")
-        )
-        if record is None or not record.get("receipt"):
-            raise RuntimeError("payment receipt is not verified")
-        thread = await sqlite_client.load_negotiation_thread_row(
-            negotiation_id=str(escrow["negotiation_id"])
-        )
-        raw = thread.get("agreement_bytes") if thread else None
+        negotiation_id = str(escrow.get("negotiation_id") or "")
+        record = await sqlite_client.load_vm_settlement_evidence(negotiation_id=negotiation_id)
+        thread = await sqlite_client.load_negotiation_thread_row(negotiation_id=negotiation_id)
         composition = _container.resolved_settlement_composition
-        stage = composition.arkhai_payments_stage if composition else None
-        if not isinstance(raw, bytes) or stage is None:
-            raise RuntimeError("accepted payment Agreement or verifier is unavailable")
-        agreement = json.loads(raw)
-        data = thread.get("settlement_data") if thread else None
-        if not isinstance(data, dict):
-            raise RuntimeError("accepted payment mandate is unavailable")
-        mandate_wire = data.get("mandate")
-        mandate = Mandate.model_validate(mandate_wire)
-        if (
-            record["agreement_sha256"] != hashlib.sha256(raw).hexdigest()
-            or record["transaction_id"] != transaction_id(mandate)
-            or mandate_wire != stage.mandate_for_agreement(agreement)
-            or not stage.receipt_matches(
-                SignedReceipt.model_validate(record["receipt"]),
-                agreement=agreement, mandate=mandate,
-            )
-        ):
-            raise RuntimeError("payment evidence does not match accepted Agreement")
+        if record is None or thread is None or composition is None:
+            raise RuntimeError("accepted settlement evidence or verifier is unavailable")
+        stage = composition.seller_stages[record.mechanism]
+        stage.revalidate(evidence=record, thread=thread, verifier=composition.arkhai_payments_stage)
     elif not escrow.get("chain_name"):
         return False
     raw_context = json.loads(escrow["fulfillment_context"])
@@ -724,11 +701,22 @@ async def resume_incomplete_fulfillments_once(
             await composition.worker.wake(obligation_ref)
 
     progressed = 0
-    for escrow in await db.list_incomplete_primary_escrows(limit=limit):
+    work = []
+    for row in await db.list_incomplete_primary_escrows(limit=limit):
+        if await db.load_vm_delivery(negotiation_id=row["negotiation_id"]) is None:
+            work.append((row, db))
+    for row in await db.list_incomplete_vm_deliveries(limit=limit):
+        evidence = await db.load_vm_settlement_evidence(negotiation_id=row["negotiation_id"])
+        if evidence is None or evidence.status != "verified":
+            continue
+        delivery_db = db.vm_delivery_repository(row["negotiation_id"])
+        projected = await delivery_db.load_escrow(escrow_uid=evidence.settlement_ref)
+        work.append((projected, delivery_db))
+    for escrow, delivery_db in work:
         lease_until = (
             datetime.now(timezone.utc) + timedelta(seconds=lease_seconds)
         ).isoformat()
-        claimed = await db.claim_escrow_convergence(
+        claimed = await delivery_db.claim_escrow_convergence(
             escrow_uid=str(escrow["escrow_uid"]), owner=worker, lease_until=lease_until
         )
         if not claimed:
@@ -750,7 +738,7 @@ async def resume_incomplete_fulfillments_once(
                     continue
             if await converge_escrow_once(
                 escrow,
-                sqlite_client=db,
+                sqlite_client=delivery_db,
                 fulfillment_client=remote,
                 capacity_client=capacity,
                 register_lease=register_lease,
@@ -767,7 +755,7 @@ async def resume_incomplete_fulfillments_once(
                 escrow.get("escrow_uid"),
             )
         finally:
-            await db.release_escrow_convergence(
+            await delivery_db.release_escrow_convergence(
                 escrow_uid=str(escrow["escrow_uid"]), owner=worker
             )
     return progressed

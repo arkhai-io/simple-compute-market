@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from market_core import SettlementEvidence
 from unittest.mock import AsyncMock
 
 import pytest
@@ -13,13 +14,23 @@ from tests.fulfillment_fixtures import (
 @pytest.mark.asyncio
 async def test_known_fulfillment_resumes_without_schedule_or_begin(tmp_path):
     lifecycle = await make_vm_lifecycle_fixture(tmp_path / "known.db")
-    await lifecycle.db.update_escrow(
+    evidence = SettlementEvidence(
+        negotiation_id="neg-1", mechanism="alkahest.v1", settlement_ref="escrow-1", status="verified",
+        evidence={"schema": "vm.settlement-evidence.v1", "agreement_sha256": "1" * 64,
+                  "source": {"chain_name": "anvil", "escrow_address": "0x" + "11" * 20}},
+    )
+    await lifecycle.db.save_vm_settlement_evidence(evidence)
+    await lifecycle.db.insert_vm_delivery(negotiation_id="neg-1")
+    original = await lifecycle.db.load_escrow(escrow_uid="escrow-1")
+    delivery = lifecycle.db.vm_delivery_repository("neg-1")
+    await delivery.update_escrow(escrow_uid="escrow-1", fulfillment_context=original["fulfillment_context"])
+    await delivery.update_escrow(
         escrow_uid="escrow-1",
         capacity_reservation_id="reservation-1",
         settlement_resource_id="resource-1",
         fulfillment_id="fulfillment-1",
     )
-    db = lifecycle.reopen()
+    db = lifecycle.reopen().vm_delivery_repository("neg-1")
     remote = SimpleNamespace(
         schedule_resource=AsyncMock(),
         begin_fulfillment=AsyncMock(),

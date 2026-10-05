@@ -16,7 +16,6 @@ from core_storefront.domain_registry import (
     StorefrontDomainRegistration,
     StorefrontDomainRegistry,
 )
-from market_alkahest import create_alkahest_registration
 from domains.vms.negotiation.storefront_round import default_seller_round_hook
 from market_core import (
     DomainCapability,
@@ -32,6 +31,7 @@ from market_core import (
 
 from market_storefront.negotiation_runtime import build_vm_accepted_artifacts
 from market_storefront.services.fulfillment_service import fulfill_compute_obligation
+from market_storefront.settlement_stages import vm_seller_stages
 
 VM_STOREFRONT_DOMAIN_IDENTITY = DomainIdentity("compute.v1")
 _REQUIRED_VM_STOREFRONT_CAPABILITIES = frozenset(
@@ -63,6 +63,11 @@ def _build_vm_settlement_plan(
     )
 
 
+def build_vm_seller_stages():
+    """Bind the VM seller declaration without reconstructing a domain contract."""
+    return vm_seller_stages(_build_vm_settlement_plan)
+
+
 async def _fulfill_vm_context(
     *,
     context: StorefrontFulfillmentContext,
@@ -82,10 +87,12 @@ async def _fulfill_vm_context(
     missing = tuple(key for key in required if raw.get(key) is None)
     if missing:
         raise ValueError("VM fulfillment input is missing " + ", ".join(missing))
+    if context.settlement_evidence.status != "verified":
+        raise ValueError("VM delivery requires verified settlement evidence")
     result = await fulfill_compute_obligation(
         sqlite_client=context.ports.repository,
         client=context.ports.fulfillment_client,
-        escrow_uid=context.escrow_uid,
+        escrow_uid=context.settlement_ref,
         ssh_public_key=str(raw["ssh_public_key"]),
         order=raw["order"],
         duration_seconds=int(raw["duration_seconds"]),
@@ -105,7 +112,7 @@ async def _fulfill_vm_context(
         physical_resource_id = offer_resource.get("resource_id")
     return {
         "negotiation_id": context.negotiation_id,
-        "escrow_uid": context.escrow_uid,
+        "settlement_ref": context.settlement_ref,
         "site_id": context.site_id,
         "state": str(result.get("status") or "failed"),
         "physical_resource_id": physical_resource_id,
@@ -133,8 +140,7 @@ def build_vm_storefront_domain() -> MarketDomainContract:
                 run_negotiation_policy=default_seller_round_hook,
             ),
             settlement=ImmutableSettlementCapability(
-                verify=create_alkahest_registration().settlement_verifier,
-                build_plan=_build_vm_settlement_plan,
+                seller_stages=build_vm_seller_stages(),
             ),
             fulfillment=ImmutableFulfillmentCapability(
                 fulfill=_fulfill_vm_context,

@@ -8,7 +8,6 @@ import logging
 import time
 from typing import Any
 
-from arkhai_vms import normalize_vm_provision_terms
 from core_storefront.models.settle_models import (
     EvaluateSettleRequest,
     EvaluateSettleResponse,
@@ -32,7 +31,6 @@ from market_storefront.models.settle_models import (
 )
 from market_storefront.services.admin_settle_service import AdminSettleService
 from market_storefront.settlement_composition import serialize_settlement_job
-from market_storefront.utils.escrow_verification import EscrowVerificationError
 
 logger = logging.getLogger(__name__)
 
@@ -76,127 +74,20 @@ class SettleController:
         agreement_raw = thread.get("agreement_bytes")
         agreement = json.loads(agreement_raw) if isinstance(agreement_raw, bytes) else {}
         selected = agreement.get("settlement") or {}
-        if selected.get("mechanism") == "arkhai.payments.v1":
-            if not isinstance(body, VmPaymentsSettleRequest) or escrow_uid != body.negotiation_id:
-                raise HTTPException(status_code=400, detail="Arkhai settlement uses negotiation ID only")
-            composition = _container.resolved_settlement_composition
-            coordinator = getattr(composition, "payments_coordinator", None)
-            if coordinator is None:
-                raise HTTPException(status_code=503, detail="Arkhai settlement is unavailable")
-            if auth.exact_retry and auth.recorded_outcome is None:
-                raise HTTPException(status_code=409, detail="request retry is pending")
-            try:
-                result = await coordinator.start(body.negotiation_id, thread)
-            except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
-            except Exception as exc:
-                raise HTTPException(status_code=503, detail="payments service is unavailable") from exc
-            payload = serialize_settlement_job(result) if "created_at" in result else dict(result)
-            payload["buyer_principal"] = Identity.model_validate(thread["buyer_principal"]).model_dump(mode="json")
-            payload["seller_principal"] = composition.local_principal.model_dump(mode="json")
-            return JSONResponse(content=payload, status_code=200 if result.get("status") in ("ready", "failed") else 202)
-        if not isinstance(body, VmSettleRequest):
-            raise HTTPException(status_code=400, detail="Alkahest settlement requires EVM inputs")
-        if auth.exact_retry:
-            if auth.recorded_outcome is None:
-                raise HTTPException(status_code=409, detail="request retry is pending")
-            status_code, payload = auth.recorded_outcome
-            return JSONResponse(content=payload, status_code=status_code)
-
-        persisted_negotiation_id = str(
-            thread.get("negotiation_id") or body.negotiation_id
-        )
-        existing = await self._db.load_escrow(escrow_uid=escrow_uid)
-        if (
-            existing is not None
-            and existing.get("negotiation_id") != persisted_negotiation_id
-        ):
-            raise HTTPException(
-                status_code=403,
-                detail="escrow does not match persisted negotiation binding",
-            )
-        try:
-            persisted_buyer = Identity.model_validate(thread.get("buyer_principal"))
-            provision = normalize_vm_provision_terms(thread.get("provision_terms"))
-        except (TypeError, ValueError) as exc:
-            raise HTTPException(
-                status_code=409,
-                detail="accepted negotiation terms are invalid",
-            ) from exc
-        accepted_ssh_public_key = provision.ssh_public_key
-        if not accepted_ssh_public_key.strip():
-            raise HTTPException(
-                status_code=409,
-                detail="accepted provision terms have no SSH public key",
-            )
-        if body.ssh_public_key != accepted_ssh_public_key:
-            raise HTTPException(
-                status_code=403,
-                detail="SSH public key does not match accepted provision terms",
-            )
-
-        proposal = thread.get("buyer_escrow_proposal")
-        if not isinstance(proposal, dict):
-            raise HTTPException(
-                status_code=409,
-                detail="accepted negotiation has no settlement selection",
-            )
-        selection = proposal.get("settlement_selection")
-        mechanism = (
-            selection.get("mechanism") if isinstance(selection, dict) else "alkahest.v1"
-        )
-        if mechanism != "alkahest.v1":
-            raise HTTPException(
-                status_code=400,
-                detail="this route accepts only alkahest.v1",
-            )
-        accepted_chain = proposal.get("chain_name")
-        if not isinstance(accepted_chain, str) or not accepted_chain:
-            raise HTTPException(
-                status_code=409,
-                detail="accepted settlement terms have no chain",
-            )
-        if body.chain_name != accepted_chain:
-            raise HTTPException(
-                status_code=403,
-                detail="settlement chain does not match accepted terms",
-            )
-
         composition = _container.resolved_settlement_composition
         if composition is None:
-            raise HTTPException(
-                status_code=503, detail="settlement runtime is unavailable"
-            )
-        mechanism_client = composition.mechanism_clients.get(mechanism)
-        if mechanism_client is None:
-            raise HTTPException(
-                status_code=400,
-                detail=f"settlement mechanism {mechanism!r} is not configured",
-            )
-        if accepted_chain not in _container.configured_chain_names():
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"chain {accepted_chain!r} not configured on this storefront — "
-                    f"available chains: {sorted(_container.configured_chain_names())}"
-                ),
-            )
+            raise HTTPException(status_code=503, detail="settlement runtime is unavailable")
         try:
-            result = await composition.coordinator.start(
-                escrow_uid=escrow_uid,
-                negotiation_id=persisted_negotiation_id,
-                mechanism_client=mechanism_client,
-                chain_name=accepted_chain,
-                request=None,
-            )
-        except EscrowVerificationError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except Exception as exc:
-            logger.error("[SETTLE] settlement start failed: %s", exc, exc_info=True)
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
-
+            stage = composition.seller_stages[selected.get("mechanism")]
+        except KeyError as exc:
+            raise HTTPException(status_code=400, detail="accepted settlement mechanism is unsupported") from exc
+        started = await stage.start(
+            reference=escrow_uid, body=body, thread=thread, auth=auth,
+            composition=composition, db=self._db, configured_chains=_container,
+        )
+        if isinstance(started, JSONResponse):
+            return started
+        result, persisted_buyer = started
         serialized = (
             serialize_settlement_job(result)
             if "created_at" in result
@@ -224,7 +115,7 @@ class SettleController:
         escrow_uid: str,
         request: Request,
     ) -> SettleStatusResponse:
-        job = await self._db.load_escrow(escrow_uid=escrow_uid)
+        job = await self._db.load_vm_settlement_job(reference=escrow_uid)
         if not job:
             raise HTTPException(
                 status_code=404, detail=f"No settlement job for escrow {escrow_uid}"
@@ -329,7 +220,7 @@ class AdminSettleController:
         start = time.monotonic()
         deadline = start + timeout
         while True:
-            job = await self._db.load_escrow(escrow_uid=escrow_uid) or {}
+            job = await self._db.load_vm_settlement_job(reference=escrow_uid) or {}
             status = job.get("status", "unknown")
             elapsed_ms = int((time.monotonic() - start) * 1000)
             remaining = deadline - time.monotonic()
