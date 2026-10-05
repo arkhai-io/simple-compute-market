@@ -949,6 +949,8 @@ def _demands_for_publication_clauses(
     *,
     wallet_address: str,
 ) -> list[dict[str, Any]]:
+    # Domain runtime imports process-global operator configuration; load it
+    # only for publication, not help or pure payload construction.
     from .domain_runtime import build_vm_seller_stages
 
     stages = build_vm_seller_stages()

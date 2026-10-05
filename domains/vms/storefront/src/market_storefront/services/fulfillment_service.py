@@ -73,8 +73,8 @@ async def _do_provision(
     not enter the generic fulfillment request.
 
     ``on_job_submitted`` runs once ``begin_fulfillment`` returns a durable
-    ``fulfillment_id`` but before polling starts, mirroring the legacy job-id
-    hook this replaces.
+    ``fulfillment_id`` but before polling starts, so recovery can retain the
+    accepted physical identity even if foreground polling is interrupted.
     """
     delivery = await sqlite_client.load_vm_delivery(negotiation_id=negotiation_id)
     if delivery is None or not delivery.get("negotiation_id"):

@@ -24,13 +24,18 @@ from core_buyer.orchestration import (
 )
 from core_buyer.orchestrator import BuyConfig
 from core_buyer.run_log import read_run
+from market_alkahest.schemas import EscrowProposal, EscrowTerms
 from market_identity import Signer
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
 from .deal_helpers import load_deal_context
-from .escrow_client import looks_like_propagation_lag
+from .escrow_client import (
+    looks_like_propagation_lag,
+    make_buyer_payment_escrow_terms_fn,
+    make_create_escrow_fn,
+)
 from .payments import configured_payer_account, settle_api_credit_payment
 from .settlement_composition import buyer_stage, resolve_buyer_settlement_policy
 
@@ -304,13 +309,6 @@ def run_settle_from_log(
             header.add_row("Escrow UID", resolved_uid + " (skip create)")
         console.print(Panel(header, title="market credits settle", border_style="cyan"))
         if not resolved_uid:
-            from market_alkahest.schemas import EscrowProposal, EscrowTerms
-
-            from .escrow_client import (
-                make_buyer_payment_escrow_terms_fn,
-                make_create_escrow_fn,
-            )
-
             log.event(
                 "escrow_create_start",
                 terms={

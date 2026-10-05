@@ -213,8 +213,8 @@ async def _build_vm_fulfillment_context(
 ) -> tuple[Any, dict[str, Any]]:
     """Build the immutable VM request from the verified stage output."""
     plan = build_vm_fulfillment_plan(evidence=evidence)
-    # Resolve this optional composition setting lazily: fulfillment_service
-    # binds this helper's operational callbacks and imports this module.
+    # fulfillment_service imports this module's operational callbacks; loading
+    # its connectivity helper at module scope would create an import cycle.
     from market_storefront.services.fulfillment_service import (
         _connectivity_settings_from_storefront_config,
     )
