@@ -399,6 +399,54 @@ async def revalidate_alkahest(
     ]
     if len(adopted) != 1 or adopted[0].fulfillment_ref is not None:
         raise SettlementRequestError("verified settlement lifecycle is inconsistent")
+    obligation = adopted[0]
+    if (
+        obligation.reclaim_state != "pending"
+        or obligation.mechanism_status != "ready"
+        or obligation.collection_state != "pending"
+    ):
+        raise SettlementRequestError("verified settlement is no longer active")
+
+    # The journal records adoption, not current chain authority. Recheck the
+    # accepted escrow before any physical recovery can consume this evidence.
+    if not service.seller_wallet:
+        raise SettlementRequestError(
+            "Alkahest settlement is not configured", status_code=503
+        )
+    proposal = EscrowProposal.model_validate(thread.get("buyer_escrow_proposal"))
+    client = service.chain_clients.get(proposal.chain_name)
+    if client is None:
+        raise SettlementRequestError(
+            f"settlement chain {proposal.chain_name!r} is unavailable",
+            status_code=503,
+        )
+    terms, listing = await service.physical_terms(thread, record["negotiation_id"])
+    try:
+        matched_index = await service.verify_escrow(
+            escrow_uid=record["settlement_ref"],
+            seller_wallet=service.seller_wallet,
+            agreed_price=int(thread["agreed_price"]),
+            agreed_duration_seconds=terms.duration_seconds,
+            listing=listing,
+            alkahest_client=client,
+            chain_name=proposal.chain_name,
+            alkahest_address_config_path=service.chain_config_paths.get(
+                proposal.chain_name,
+            ),
+            escrow_proposal=proposal,
+        )
+    except SettlementRequestError:
+        raise
+    except Exception as exc:
+        raise SettlementRequestError(
+            "stored escrow source is invalid", status_code=400
+        ) from exc
+    if (
+        isinstance(matched_index, bool)
+        or not isinstance(matched_index, int)
+        or matched_index != obligation.obligation_index
+    ):
+        raise SettlementRequestError("stored escrow source matches another obligation")
 
 
 async def revalidate_contact(

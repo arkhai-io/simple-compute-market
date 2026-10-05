@@ -302,7 +302,7 @@ async def test_settlement_is_verified_idempotently_without_fulfillment_claims(
         marketplace_signer=runtime.marketplace_signer,
         seller_evm_address=runtime.seller_evm_address,
         plan_builder=_plan,
-        chain_clients={},
+        chain_clients={"anvil": object()},
         chain_config_paths={"anvil": None},
         escrow_verifier=verifier,
     )
@@ -338,7 +338,8 @@ async def test_settlement_is_verified_idempotently_without_fulfillment_claims(
     assert status.json() == expected
     assert conflict.status_code == 409
     assert conflict.json()["detail"] == "negotiation already has a primary escrow"
-    assert len(calls) == 1
+    assert len(calls) == 2
+    assert calls[1]["alkahest_client"] is restarted.chain_clients["anvil"]
     assert calls[0]["agreed_duration_seconds"] == 3600
     assert calls[0]["agreed_price"] == 100
     assert "ssh_public_key" not in body
@@ -591,6 +592,119 @@ class _ProvisioningClient:
             capacity_reservation_id="reservation-a",
             state="teardown_dispatch_pending",
         )
+
+
+@pytest.mark.parametrize(
+    "reclaim_state,mechanism_status,collection_state",
+    [
+        ("succeeded", "ready", "pending"),
+        ("in_progress", "ready", "pending"),
+        ("manual_required", "ready", "pending"),
+        ("pending", "reclaimed", "pending"),
+        ("pending", "expired", "pending"),
+        ("pending", "failed", "pending"),
+        ("pending", "ready", "succeeded"),
+    ],
+)
+async def test_alkahest_recovery_refuses_non_active_journal_before_physical_effects(
+    tmp_path, reclaim_state, mechanism_status, collection_state
+):
+    calls = []
+
+    async def verifier(**kwargs):
+        calls.append(kwargs)
+        return 1
+
+    path = str(tmp_path / "storefront.db")
+    runtime, negotiation_id = await _accepted_runtime(path, verifier)
+    capacity, provisioning = _CapacityClient(), _ProvisioningClient()
+    runtime = replace(
+        runtime, capacity_client=capacity, fulfillment_client=provisioning
+    )
+    verified = await runtime.settlement_service().verify(
+        escrow_uid=ESCROW_UID,
+        request=BareMetalSettleRequest(**_settle_body(negotiation_id)),
+        buyer_principal=BUYER_SIGNER.identity,
+    )
+    aggregate = await runtime.settlement_runtime.get_status(negotiation_id)
+    obligation = next(
+        item for item in aggregate.obligations
+        if item.obligation_ref == verified.obligation_ref
+    )
+    changed = obligation.model_copy(update={
+        "reclaim_state": reclaim_state,
+        "mechanism_status": mechanism_status,
+        "collection_state": collection_state,
+    })
+    assert await runtime.settlement_repository.save_settlement_obligation(
+        changed.model_dump(mode="json"), expected_version=obligation.version
+    )
+    restarted = replace(runtime, db=SQLiteClient(path, domain=runtime.domain))
+    with pytest.raises(BareMetalFulfillmentError, match="no longer active"):
+        await restarted.fulfillment_service().begin(
+            negotiation_id=negotiation_id, buyer_principal=BUYER_SIGNER.identity
+        )
+    assert await restarted.db.load_bare_metal_fulfillment_lifecycle(
+        negotiation_id=negotiation_id
+    ) is None
+    assert capacity.reserve_calls == []
+    assert provisioning.begin_calls == []
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("invalid_index", [None, 0, True])
+async def test_alkahest_recovery_rechecks_chain_before_physical_effects(
+    tmp_path, invalid_index
+):
+    calls = []
+    source_valid = True
+
+    async def verifier(**kwargs):
+        calls.append(kwargs)
+        if not source_valid:
+            if invalid_index is None:
+                raise ValueError("escrow revoked on chain")
+            return invalid_index
+        return 1
+
+    path = str(tmp_path / "storefront.db")
+    runtime, negotiation_id = await _accepted_runtime(path, verifier)
+    capacity, provisioning = _CapacityClient(), _ProvisioningClient()
+    runtime = replace(
+        runtime, capacity_client=capacity, fulfillment_client=provisioning
+    )
+    await runtime.settlement_service().verify(
+        escrow_uid=ESCROW_UID,
+        request=BareMetalSettleRequest(**_settle_body(negotiation_id)),
+        buyer_principal=BUYER_SIGNER.identity,
+    )
+    restarted = replace(runtime, db=SQLiteClient(path, domain=runtime.domain))
+    source_valid = False
+    with pytest.raises(BareMetalFulfillmentError, match="stored escrow source"):
+        await restarted.fulfillment_service().begin(
+            negotiation_id=negotiation_id, buyer_principal=BUYER_SIGNER.identity
+        )
+    assert await restarted.db.load_bare_metal_fulfillment_lifecycle(
+        negotiation_id=negotiation_id
+    ) is None
+    assert capacity.reserve_calls == []
+    assert provisioning.begin_calls == []
+
+    source_valid = True
+    first = await restarted.fulfillment_service().begin(
+        negotiation_id=negotiation_id, buyer_principal=BUYER_SIGNER.identity
+    )
+    repeated = await restarted.fulfillment_service().begin(
+        negotiation_id=negotiation_id, buyer_principal=BUYER_SIGNER.identity
+    )
+    assert repeated == first
+    assert len(capacity.reserve_calls) == len(provisioning.begin_calls) == 1
+    assert len(calls) == 4
+    assert all(call["escrow_uid"] == ESCROW_UID for call in calls)
+    assert all(call["agreed_price"] == 100 for call in calls)
+    assert all(call["agreed_duration_seconds"] == 3600 for call in calls)
+    assert calls[-1]["alkahest_client"] is restarted.chain_clients["anvil"]
+    assert calls[-1]["escrow_proposal"].escrow_address == ESCROW_ADDRESS
 
 
 async def test_http_fulfillment_restarts_on_recorded_site_and_redacts_result(
