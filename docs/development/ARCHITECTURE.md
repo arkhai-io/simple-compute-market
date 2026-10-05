@@ -42,7 +42,7 @@ Production permits independently operated registries and seller stacks. Buyers m
 
 ## Composition from above and below
 
-A behavior belongs in the market core when it is invariant across listing schemas. Shared carriers define only what at least two of buyer, seller, and registry read: settlement options and the accepted Agreement. Mechanism status, servicing, refunds, and provisioning translations belong to their owning kits and domain compositions. Behavior that varies by schema is supplied from below through injected domain or kit hooks.
+A behavior belongs in the market core when it is invariant across listing schemas. Shared carriers define settlement options, the accepted Agreement, immutable role-stage tables and settlement evidence. The table declares support without prescribing a mechanism API; evidence carries negotiation, mechanism, opaque reference, domain status and domain payload without interpreting financial state. Mechanism status, servicing, refunds, and provisioning translations belong to their owning kits and domain compositions. Behavior that varies by schema is supplied from below through injected domain or kit hooks.
 
 The schema-opaque market composition is:
 
@@ -52,7 +52,7 @@ evidence  = settle(agreement)
 result    = provision(evidence)
 ```
 
-Core owns schema-opaque carriers and role structure around these phases: signed transport, round sequencing, persistence mechanics, and deterministic handoffs. Domain packages own listing vocabulary, message content, validation, deterministic interpretation of terms, fulfillment requirements, and result vocabulary. Kit packages own reusable mechanisms and authorities, including obligation servicing and stateless payment clients and the shared storefront application/lifecycle shell. Composition roots wire concrete domain and kit implementations into role packages.
+Core owns schema-opaque carriers and role structure around these phases: signed transport, round sequencing, persistence mechanics, and deterministic handoffs. The phases are handoffs, not a fixed actor order; seller-first and fused stages are valid. Accepted dispatch uses the Agreement's mechanism through an explicit role table, never proposal presence or a default escrow helper. The selected entry owns source revalidation and mechanism-specific continuations. Domain packages own listing vocabulary, message content, validation, deterministic interpretation of terms, fulfillment requirements, and result vocabulary. Kit packages own reusable mechanisms and authorities, including obligation servicing and stateless payment clients and the shared storefront application/lifecycle shell. Composition roots wire concrete domain and kit implementations into role packages.
 
 Each domain-owned storefront validates one immutable `MarketDomainContract` at its composition boundary before constructing persistence, services, workers, or the HTTP application. The validated object is carried through common listing/negotiation/artifact bindings and lifecycle contexts. Domain contributions expose that contract through `market.storefront_contributions`; shared core dispatch resolves only the frozen domain identity/version and never guesses from a payload or imports the domain.
 
@@ -89,7 +89,7 @@ kit capabilities
 core carrier and role contracts
 ```
 
-Core carrier packages must not import domain vocabulary. Domain packages may implement core hook shapes but should not make core depend on a concrete market. Composition roots own wiring and may depend on all lower layers.
+Core carrier packages must not import domain vocabulary or concrete mechanism implementations. `market_core.settlement` ships the dependency-light `SettlementStageTable[StageT]` and `SettlementEvidence` exports with `py.typed`. Kits and domains may depend downward on these carriers; core does not require callable stages, shared stage methods or a kit lifecycle adapter. Domain packages may implement core hook shapes but should not make core depend on a concrete market. Composition roots own wiring and may depend on all lower layers.
 
 ### Kit layers
 
@@ -205,10 +205,10 @@ reinterpret accepted work.
 Settlement retains domain-neutral `StorefrontSettlementFulfillmentInput`: the
 immutable thread binding, buyer principal, schema-opaque domain input, and any
 fulfillment anchor. When servicing reaches delivery, core adds the accepted
-escrow identity and caller-owned authority ports to form
+settlement evidence and caller-owned authority ports to form
 `StorefrontFulfillmentContext`, then invokes the fulfillment hook on the exact
 contract resolved from the binding. Core validates that the returned
-negotiation, escrow, and site identities did not change. The VM hook alone
+negotiation, settlement reference, and site identities did not change. The VM hook alone
 translates the opaque domain input into VM executor arguments. Core and kit
 therefore own lifecycle and dispatch while each domain owns payload meaning
 and concrete fulfillment; a missing hook fails closed rather than becoming a
@@ -450,7 +450,7 @@ The selected settlement stage consumes the exact Agreement and produces its own 
 
 `arkhai.payments.v1` is a stateless peer of Alkahest in VM, bare-metal, and API-credit compositions. Shared registration, typed configuration, and owner-scoped client provision live in `kit/arkhai-payments`'s `settlement_config.py`. Seller acceptance returns the derived mandate in opaque `settlement_data`, persisted next to exact `agreement_bytes` in `negotiation_threads`. Buyer `payer_account` travels in selection params and Agreement `settlement_params`, separately from marketplace identity.
 
-The kit defines `deal = sha256(JCS(agreement))` and transaction ID `sha256(JCS(mandate))`. Hold intervals round up and approval expiry rounds down without rewriting fractional Agreement timestamps. The buyer validates/approves the mandate and polls that ID; its seller settle call carries only the negotiation ID. The seller loads accepted state, polls the same transaction, and verifies the signed receipt against the mandate before provisioning or issuing. Pending is retryable, completed delivery is idempotent, and nonterminal domain progress is re-driven. `make_settle_hook` routes a selected outcome with no escrow proposal to the domain's `agreement_settlement` hook.
+The kit defines `deal = sha256(JCS(agreement))` and transaction ID `sha256(JCS(mandate))`. Hold intervals round up and approval expiry rounds down without rewriting fractional Agreement timestamps. The buyer validates/approves the mandate and polls that ID; its seller settle call carries only the negotiation ID. The seller loads accepted state, polls the same transaction, and verifies the signed receipt against the mandate before provisioning or issuing. Pending is retryable, completed delivery is idempotent, and nonterminal domain progress is re-driven. `make_settle_hook` dispatches the exact accepted outcome through the injected buyer-role table using `Agreement.settlement.mechanism`. Missing entries fail before effects; an escrow helper is reachable only from an explicitly bound entry.
 
 The payments service owns the ledger, fees, hold release, disputes, and cash providers. The kit has no servicing daemon, ledger, plan, or obligation; refund calls `reverse`. Domain receipt and delivery journals are local recovery state, not financial authority.
 

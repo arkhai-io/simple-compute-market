@@ -8,7 +8,7 @@ Define the dependency direction and role/domain/plugin boundaries that keep mark
 
 ### Requirement: Schema-opaque core orchestration
 
-Core role packages MUST own discovery and negotiation control flow without importing a concrete market domain or settlement mechanism. Core MUST expose the accepted Agreement and settlement-option carriers but MUST NOT impose a shared settlement-stage API or escrow lifecycle on mechanism and domain compositions.
+Core role packages MUST own discovery and negotiation control flow without importing a concrete market domain or settlement mechanism. Core MUST expose the accepted Agreement, settlement-option carriers, a mechanism-to-stage table carrier and SettlementEvidence, but MUST NOT impose a shared mechanism-stage API, actor order or escrow lifecycle on mechanism and domain compositions.
 
 #### Scenario: Installing core without a domain plugin
 
@@ -377,7 +377,7 @@ A domain composition that supports Arkhai payments MUST register `arkhai.payment
 
 ### Requirement: Deals compose negotiate, settle, and provision stages
 
-A deal MUST flow from negotiation to a selected settlement stage and then to domain provisioning. Negotiation MUST pass its exact accepted Agreement to the selected settlement stage. That stage MUST return its own settlement evidence; the domain's provisioning stage MUST consume that evidence and translate it into the domain's internal paid or ready form. A domain MUST compose only mechanism stages it supports, and each stage MUST understand its predecessor's output rather than a shared escrow adapter API. Settlement and provisioning MAY be fused when one mechanism provides both, as `contact-exchange.v1` does.
+A deal MUST pass its exact accepted Agreement to a selected domain settlement stage. Core MUST NOT prescribe the actors' order or require separate buyer-confirm and seller-verify steps. That stage MUST return its own SettlementEvidence; protected delivery MUST consume verified evidence rather than compare mechanism IDs or infer payment from an escrow's presence. A domain MUST compose only mechanism stages it supports, and each stage MUST understand its predecessor's output rather than a shared escrow adapter API. Settlement and provisioning MAY be fused when one mechanism provides both, as `contact-exchange.v1` does.
 
 #### Scenario: Arkhai payment gates domain provisioning
 
@@ -405,12 +405,49 @@ A deal MUST flow from negotiation to a selected settlement stage and then to dom
 
 ### Requirement: Buyer dispatch preserves Agreement-only settlement
 
-`make_settle_hook` MUST route a selected negotiation outcome with no escrow proposal to the composing domain's `agreement_settlement` stage. Core MUST pass the outcome unchanged and MUST NOT infer escrow terms, synthesize an obligation, or select a replacement mechanism.
+Core buyer settlement MUST select the composing domain's role-table entry using `Agreement.settlement.mechanism` and pass the accepted outcome unchanged. It MUST NOT choose a path from escrow-proposal presence, infer escrow terms, synthesize an obligation or select a replacement mechanism. A missing accepted entry MUST fail before settlement effects.
 
 #### Scenario: Payments outcome has no escrow proposal
 
-- **WHEN** an accepted outcome has a settlement selection and no escrow proposal
-- **THEN** the injected Agreement settlement stage receives the exact outcome
+- **WHEN** an accepted Agreement selects a declared payment stage, with or without a stray escrow proposal
+- **THEN** that payment entry receives the exact outcome and no Alkahest fallback is invoked
+
+### Requirement: One settlement declaration per domain role
+
+Each settlement-capable domain role MUST declare one immutable table from canonical mechanism ID to domain-owned stage. Core MUST require only the table and evidence carrier, not shared stage methods. Fresh admission MUST expose only supported entries.
+
+#### Scenario: Role support differs
+
+- **WHEN** a domain's seller supports several stages but its buyer supports one
+- **THEN** each role exposes exactly its declared support and neither inherits another role's stage or default
+
+#### Scenario: Composition is incomplete
+
+- **WHEN** a settlement-capable role supplies no valid table or duplicate/invalid entry identities
+- **THEN** composition rejects it before publication, negotiation or settlement effects
+
+### Requirement: Core evidence shape and domain payload ownership
+
+SettlementEvidence MUST carry `negotiation_id`, `mechanism`, opaque `settlement_ref`, domain-defined `status` and domain-owned `evidence`. Core MUST preserve identities and validate shared shape without interpreting the payload, prescribing status transitions or treating a mechanism ID as delivery permission. Stages MUST keep credentials out of evidence.
+
+#### Scenario: Evidence crosses the domain delivery boundary
+
+- **WHEN** a selected stage hands evidence to delivery
+- **THEN** the accepted negotiation and established reference remain unchanged and only the domain interprets its validated payload
+
+#### Scenario: Buyer progress is not seller authorization
+
+- **WHEN** a buyer reports local settlement completion but the seller has not verified authoritative evidence
+- **THEN** seller protected delivery remains blocked
+
+### Requirement: Mechanism continuation stays stage-owned
+
+Mechanism-specific post-delivery attestation, claim binding, compensation and source-evidence revalidation MUST remain in the selected stage's continuation. Core MUST NOT prescribe a common actor sequence or continuation API. Recovery MUST resolve the stage from accepted state, not current priority or serialized executable objects.
+
+#### Scenario: A stage requires seller action first
+
+- **WHEN** a domain composes a supporting stage whose first effect belongs to the seller
+- **THEN** core dispatches its role entry without requiring a prior buyer deposit, confirmation or escrow proposal
 
 ## Evidence
 
