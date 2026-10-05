@@ -25,8 +25,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from compute_provisioning_service.db.database import run_migrations
-from compute_provisioning_service.db.models import Relay, RelayPortLease
-from compute_provisioning_service.services.relay_port_allocator import (
+from vm_provisioning_adapter.db import Relay, RelayPortLease
+from vm_provisioning_adapter.services.relay_port_allocator import (
     RelayPortAllocator,
     RelayWindowExhaustedError,
 )

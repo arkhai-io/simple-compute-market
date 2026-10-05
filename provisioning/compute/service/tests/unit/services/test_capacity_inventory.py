@@ -15,7 +15,7 @@ import pytest
 
 from bare_metal_provisioning_adapter.inventory_views import BareMetalPublicationViews
 from compute_provisioning import InventoryViews, compose_inventory_views
-from compute_provisioning_service.db.models import AnsiblePoolConfig
+from vm_provisioning_adapter.db import AnsiblePoolConfig
 from compute_provisioning_service.services.capacity_inventory import (
     load_capacity_pool_metadata,
     load_capacity_resource_inventory,

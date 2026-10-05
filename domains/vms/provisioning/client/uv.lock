@@ -52,7 +52,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms-provisioning-operator-client"
-version = "0.8.0"
+version = "0.9.0"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-compute-provisioning-contracts" },

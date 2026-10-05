@@ -59,10 +59,6 @@ from compute_provisioning_service.services.deal_event_sink import (
 )
 from compute_provisioning_service.services.capacity_reservation_watchdog import CapacityReservationWatchdog
 from compute_provisioning_service.services.fulfillment_convergence import FulfillmentConvergenceWatchdog
-from compute_provisioning_service.services.relay_port_allocator import (
-    RelayPortAllocator,
-    release_fulfillment_ports,
-)
 from compute_provisioning_service.services.job_retry import retry_policy_from
 from compute_provisioning_service.services.system_status import (
     StatusComponentProvider,
@@ -229,11 +225,7 @@ def _make_terminal_hooks():
     release guard and fulfillment convergence, the two writers that make a
     fulfillment record terminal.
     """
-    hooks = FulfillmentTerminalHooks()
-    # The relay-port release belongs to the relay administration this service
-    # holds, so the service registers it itself.
-    hooks.register(release_fulfillment_ports)
-    return hooks
+    return FulfillmentTerminalHooks()
 
 
 def _compose_adapters(
@@ -416,6 +408,11 @@ class Container(containers.DeclarativeContainer):
         runtime=vm_runtime,
         name=providers.Object("host_operations_service"),
     )
+    relay_service = providers.Callable(
+        _runtime_value,
+        runtime=vm_runtime,
+        name=providers.Object("relay_service"),
+    )
 
     site_authority = providers.Singleton(
         LedgerSiteAuthority,
@@ -584,11 +581,6 @@ class Container(containers.DeclarativeContainer):
         settings=config,
     )
 
-    relay_port_allocator = providers.Singleton(
-        RelayPortAllocator,
-        session_factory,
-    )
-
     fulfillment_convergence_watchdog = providers.Singleton(
         FulfillmentConvergenceWatchdog,
         session_factory=session_factory,
@@ -650,7 +642,6 @@ resolved_executor_lease_service: "ExecutorLeaseService | None" = None
 resolved_lease_route_service: "LeaseRouteService | None" = None
 resolved_resource_pool_service: "ResourcePoolService | None" = None
 resolved_relay_service: Any | None = None
-resolved_relay_port_allocator: Any | None = None
 resolved_physical_settlement_scheduler: "PhysicalSettlementScheduler | None" = None
 resolved_fulfillment_service: "FulfillmentOrchestrator | None" = None
 resolved_capacity_reservation_watchdog: "CapacityReservationWatchdog | None" = None

@@ -82,44 +82,46 @@ VM_PROVISIONING_ROUTES = (
         "roles": ("admin",),
         "path_resource": ("host", "vm_name"),
     },
-    # Relay administration. Ordered so the token, enable, and disable
-    # sub-resources match before the bare relay id pattern, which would
-    # otherwise swallow them and authenticate a rotation as an ordinary read.
-    {"method": "GET", "path": r"/api/v1/relays/?$", "operation": "provisioning_relays_list", "roles": ("seller", "admin")},
+    # Relay administration, the administrator's alone: relays are operator
+    # infrastructure, and no storefront administers them. Ordered so the
+    # token, enable, and disable sub-resources match before the bare relay id
+    # pattern, which would otherwise swallow them and authenticate a rotation
+    # as an ordinary read.
+    {"method": "GET", "path": r"/api/v1/relays/?$", "operation": "provisioning_relays_list", "roles": ("admin",)},
     {
         "method": "POST",
         "path": r"/api/v1/relays/(?P<relay_id>[^/]+)/token",
         "operation": "provisioning_relay_rotate_token",
-        "roles": ("seller", "admin"),
+        "roles": ("admin",),
         "path_resource": "relay_id",
     },
     {
         "method": "POST",
         "path": r"/api/v1/relays/(?P<relay_id>[^/]+)/enable",
         "operation": "provisioning_relay_enable",
-        "roles": ("seller", "admin"),
+        "roles": ("admin",),
         "path_resource": "relay_id",
     },
     {
         "method": "POST",
         "path": r"/api/v1/relays/(?P<relay_id>[^/]+)/disable",
         "operation": "provisioning_relay_disable",
-        "roles": ("seller", "admin"),
+        "roles": ("admin",),
         "path_resource": "relay_id",
     },
     {
         "method": "GET",
         "path": r"/api/v1/relays/(?P<relay_id>[^/]+)",
         "operation": "provisioning_relay_get",
-        "roles": ("seller", "admin"),
+        "roles": ("admin",),
         "path_resource": "relay_id",
     },
-    {"method": "POST", "path": r"/api/v1/relays/?$", "operation": "provisioning_relay_create", "roles": ("seller", "admin")},
+    {"method": "POST", "path": r"/api/v1/relays/?$", "operation": "provisioning_relay_create", "roles": ("admin",)},
     {
         "method": "PATCH",
         "path": r"/api/v1/relays/(?P<relay_id>[^/]+)",
         "operation": "provisioning_relay_update",
-        "roles": ("seller", "admin"),
+        "roles": ("admin",),
         "path_resource": "relay_id",
     },
     {

@@ -8,8 +8,8 @@ from sqlalchemy.orm import Session
 
 from market_resource_pools import PoolConfigValidationProblem
 from market_config import decrypt_secret
-from compute_provisioning_service.db.models import AnsiblePoolConfig, Relay
-from compute_provisioning_service.services.relay_rebinding import (
+from vm_provisioning_adapter.db import AnsiblePoolConfig, Relay
+from vm_provisioning_adapter.services.relay_rebinding import (
     check_pool_relay_change,
 )
 from vm_provisioning_adapter.requirement_delegates import (

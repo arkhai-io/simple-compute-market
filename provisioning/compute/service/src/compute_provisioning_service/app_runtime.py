@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
 import os
 
 from compute_provisioning_ansible import parse_inventory_ini
@@ -15,18 +14,10 @@ from compute_provisioning_service import container as _container_module
 from compute_provisioning_service.config import settings
 from compute_provisioning_service.container import container
 from compute_provisioning_service.db.migrations import check_schema_version
-from compute_provisioning import fulfillment_is_terminal
 from compute_provisioning.jobs.queue import AsyncJobQueue
 from compute_provisioning_service.services.definition_documents import (
     DefinitionDocumentImporter,
 )
-from compute_provisioning_service.services.relay_definitions import (
-    relay_definitions_document,
-)
-from compute_provisioning_service.services.relay_port_allocator import (
-    FULFILLMENT_OWNER_KIND,
-)
-from compute_provisioning_service.services.relay_service import RelayService
 
 from compute_provisioning_ansible import DEFAULT_ANSIBLE_CONFIG
 
@@ -97,11 +88,7 @@ def resolve_request_path_services() -> None:
     _container_module.resolved_executor_lease_service = container.executor_lease_service()
     _container_module.resolved_lease_route_service = container.lease_route_service()
     _container_module.resolved_resource_pool_service = container.resource_pool_service()
-    _container_module.resolved_relay_port_allocator = container.relay_port_allocator()
-    _container_module.resolved_relay_service = RelayService(
-        session_factory=_container_module.resolved_session_factory,
-        settings=settings,
-    )
+    _container_module.resolved_relay_service = container.relay_service()
     _container_module.resolved_physical_settlement_scheduler = (
         container.physical_settlement_scheduler()
     )
@@ -195,16 +182,11 @@ def import_capacity_definitions_if_configured() -> None:
 
 
 def _definition_documents():
-    """The relay document this service imports, then every contributed kind."""
-    relays = relay_definitions_document(
-        relay_service=_container_module.resolved_relay_service,
-        settings=settings,
-        path=getattr(settings, "resolved_relay_definitions_path", None),
-    )
+    """Every contributed document kind, in composition order."""
     contributed = _container_module.resolved_definition_documents
     if contributed is None:
         raise RuntimeError("contributed definition documents are not composed")
-    return (relays, *contributed)
+    return contributed
 
 
 def _definition_importer(contributed=()) -> DefinitionDocumentImporter:
@@ -254,18 +236,6 @@ def startup_steps() -> tuple[ComputeProvisioningStartupStep, ...]:
         ),
         ComputeProvisioningStartupStep("create-job-queue", create_job_queue),
     )
-
-
-def _fulfillment_is_terminal(owner_kind: str, owner_id: str) -> bool:
-    """Whether a port lease's owner has finished, for reconciliation to act on.
-
-    Supplied to the allocator rather than queried inside it: what makes a
-    fulfillment terminal belongs to fulfillment, not to port accounting.
-    """
-    if owner_kind != FULFILLMENT_OWNER_KIND:
-        return False
-    with _container_module.resolved_session_factory() as db:
-        return fulfillment_is_terminal(db, owner_id)
 
 
 def background_tasks() -> tuple[ComputeProvisioningBackgroundTask, ...]:
@@ -341,37 +311,6 @@ def background_tasks() -> tuple[ComputeProvisioningBackgroundTask, ...]:
         logger.info(
             "Capacity reservation watchdog disabled "
             "(capacity_reservation_watchdog_enabled=false)"
-        )
-
-    # Relay port reconciliation — the backstop beneath release, which is
-    # attached to the settlement record's terminal transition. This recovers
-    # leases whose owner reached terminal by a path that bypassed it.
-    relay_reconcile_enabled = bool(
-        getattr(settings, "relay_port_reconciliation_enabled", True)
-    )
-    if relay_reconcile_enabled:
-        relay_poll = float(
-            getattr(settings, "relay_port_reconciliation_poll_interval_seconds", 300)
-        )
-        relay_grace = float(
-            getattr(settings, "relay_port_reconciliation_grace_seconds", 3600)
-        )
-        tasks.append(
-            ComputeProvisioningBackgroundTask(
-                "relay-port-reconciliation",
-                lambda: _container_module.resolved_relay_port_allocator.run_reconciliation(
-                    is_owner_terminal=_fulfillment_is_terminal,
-                    poll_interval_seconds=relay_poll,
-                    grace=timedelta(seconds=relay_grace),
-                ),
-                "Relay port reconciliation started (interval=%ds grace=%ds)",
-                (int(relay_poll), int(relay_grace)),
-            )
-        )
-    else:
-        logger.info(
-            "Relay port reconciliation disabled "
-            "(relay_port_reconciliation_enabled=false)"
         )
 
     # Fulfillment convergence watchdog retries durable dispatch work and

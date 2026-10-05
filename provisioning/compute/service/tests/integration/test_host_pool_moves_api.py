@@ -23,7 +23,7 @@ from market_resource_pools_contracts import PoolCreate
 from vm_provisioning_operator.relays import RelayCreate
 
 from compute_provisioning_service import container as _container_module
-from compute_provisioning_service.db.models import RelayPortLease
+from vm_provisioning_adapter.db import RelayPortLease
 
 _RELAY_POOL = "relay-pool"
 _PLAIN_POOL = "plain-pool"

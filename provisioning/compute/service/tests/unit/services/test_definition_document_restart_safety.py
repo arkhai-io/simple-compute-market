@@ -30,7 +30,8 @@ from sqlalchemy.orm import sessionmaker
 from compute_provisioning_service import app_runtime
 from compute_provisioning_service import container as _container_module
 from compute_provisioning_service.db.database import run_migrations
-from compute_provisioning_service.services.relay_service import RelayService
+from vm_provisioning_adapter.runtime import VmProvisioningRuntime
+from vm_provisioning_adapter.services.relay_service import RelayService
 
 _PLAYBOOK_PATH = "/configured/playbook.yaml"
 _INVENTORY_GROUP = "kvm_hosts"
@@ -72,7 +73,7 @@ class _Deployment:
         self.settings = SimpleNamespace(
             ssh_decryption_key=_KEY,
             relay_token="bootstrap-token",
-            resolved_relay_definitions_path=self.document,
+            relay_definitions_path=str(self.document),
             resolved_pool_definitions_path=None,
         )
 
@@ -101,10 +102,13 @@ class _Deployment:
             _container_module, "resolved_relay_service", relay_service, raising=False
         )
         monkeypatch.setattr(app_runtime, "settings", self.settings, raising=False)
-        # No adapter contributes a document here: the relay document is the
-        # one under test.
+        # The relay document exactly as VM's runtime contributes it, over this
+        # deployment's configuration and relay service.
+        relays = VmProvisioningRuntime.relay_definitions(
+            SimpleNamespace(config=self.settings, relay_service=relay_service)
+        )
         monkeypatch.setattr(
-            _container_module, "resolved_definition_documents", (), raising=False
+            _container_module, "resolved_definition_documents", (relays,), raising=False
         )
         app_runtime.import_contributed_definitions_if_configured()
         return relay_service
@@ -147,7 +151,7 @@ class TestARestartDoesNotRevertAdministration:
         relays = deployment.restart(monkeypatch)
 
         with deployment.session_factory() as db:
-            from compute_provisioning_service.db.models import Relay
+            from vm_provisioning_adapter.db import Relay
 
             stored = db.get(Relay, "site-a").relay_token_encrypted
         assert (
@@ -219,7 +223,7 @@ class TestAnEditedDocumentStillReconciles:
         deployment.restart(monkeypatch)
 
         with deployment.session_factory() as db:
-            from compute_provisioning_service.db.models import Relay
+            from vm_provisioning_adapter.db import Relay
 
             stored = db.get(Relay, "site-a").relay_token_encrypted
         assert (

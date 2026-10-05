@@ -5,6 +5,8 @@ from __future__ import annotations
 from types import MappingProxyType
 
 from compute_provisioning import (
+    ComputeProvisioningBackgroundTask,
+    DefinitionDocumentContribution,
     ExecutorAdapterBundle,
     ExecutorAdapterContribution,
     JobExecutor,
@@ -16,6 +18,9 @@ from vm_provisioning_adapter.services.ansible_fulfillment_provider import (
 )
 from vm_provisioning_adapter.services.ansible_pool_config_handler import (
     AnsiblePoolConfigHandler,
+)
+from vm_provisioning_adapter.services.relay_port_allocator import (
+    release_fulfillment_ports,
 )
 
 
@@ -54,7 +59,12 @@ def build_vm_adapter_bundle(
     fulfillment_provider: AnsibleFulfillmentProvider,
     pool_config_handler: AnsiblePoolConfigHandler,
     job_executor: JobExecutor,
+    definition_documents: tuple[DefinitionDocumentContribution, ...] = (),
+    background_tasks: tuple[ComputeProvisioningBackgroundTask, ...] = (),
 ) -> ExecutorAdapterBundle:
+    """VM's contribution. Its relay ports are returned whenever a fulfillment
+    record becomes terminal; the relay document and the port reconciliation
+    are built by the runtime from its configuration."""
     return ExecutorAdapterBundle(
         name="vm",
         executors=(
@@ -66,4 +76,7 @@ def build_vm_adapter_bundle(
         fulfillment_providers={ANSIBLE_PROVIDER: fulfillment_provider},
         pool_config_handlers={ANSIBLE_PROVIDER: pool_config_handler},
         inventory_views=(AnsiblePoolDefaultsViews(provider=ANSIBLE_PROVIDER),),
+        fulfillment_terminal_hooks=(release_fulfillment_ports,),
+        definition_documents=definition_documents,
+        background_tasks=background_tasks,
     )

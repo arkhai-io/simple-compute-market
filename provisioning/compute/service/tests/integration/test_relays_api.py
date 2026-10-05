@@ -25,16 +25,17 @@ from vm_provisioning_operator import VmOperatorClient
 from vm_provisioning_operator.relays import RelayCreate, RelayTokenRotate, RelayUpdate
 
 from compute_provisioning_service.main import app
-from .conftest import SERVICE_AUTHORITIES, STOREFRONT_SIGNER
+from .conftest import ADMIN_SIGNER, SERVICE_AUTHORITIES
 
 pytestmark = pytest.mark.anyio
 
 
 def _client(transport):
+    """The operator's client: relay administration is the administrator's alone."""
     return ComputeProvisioningClient(
         "http://testserver",
-        signer=STOREFRONT_SIGNER,
-        caller_role="seller",
+        signer=ADMIN_SIGNER,
+        caller_role="admin",
         expected_authorities=SERVICE_AUTHORITIES,
         transport=transport,
     )
@@ -133,7 +134,7 @@ class TestRebindingOverTheApi:
 
     def _lease_on(self, relay_id: str, *, port: int = 6100, host: str = "kvm1"):
         from compute_provisioning_service import container as _container_module
-        from compute_provisioning_service.db.models import RelayPortLease
+        from vm_provisioning_adapter.db import RelayPortLease
 
         session_factory = _container_module.resolved_session_factory
         with session_factory() as db, db.begin():
@@ -153,7 +154,7 @@ class TestRebindingOverTheApi:
         from datetime import datetime, timezone
 
         from compute_provisioning_service import container as _container_module
-        from compute_provisioning_service.db.models import RelayPortLease
+        from vm_provisioning_adapter.db import RelayPortLease
 
         session_factory = _container_module.resolved_session_factory
         with session_factory() as db, db.begin():

@@ -882,7 +882,7 @@ class TestRelayPortLifecycleOverTheApi:
         one pool is a conflict, not a race.
         """
         from compute_provisioning_service import container as _container_module
-        from compute_provisioning_service.services.relay_service import RelayService
+        from vm_provisioning_adapter.services.relay_service import RelayService
 
         relays: RelayService = _container_module.resolved_relay_service
         # The container outlives a single test in this module, and relays live
@@ -911,8 +911,13 @@ class TestRelayPortLifecycleOverTheApi:
     @staticmethod
     def _held_ports() -> list[int]:
         from compute_provisioning_service import container as _container_module
+        from vm_provisioning_adapter.services.relay_port_allocator import (
+            RelayPortAllocator,
+        )
 
-        allocator = _container_module.resolved_relay_port_allocator
+        # Port accounting is durable: any allocator over the service's database
+        # reads what the fulfillment path leased.
+        allocator = RelayPortAllocator(_container_module.resolved_session_factory)
         return allocator.held_ports("site-a")
 
     async def test_validation_takes_no_port(self, fulfillment: FulfillmentApi):
@@ -970,7 +975,7 @@ class TestRelayPortLifecycleOverTheApi:
         await fulfillment.begin(capacity_reservation_id, "vms", _fulfillment_request())
 
         from compute_provisioning_service import container as _container_module
-        from compute_provisioning_service.db.models import RelayPortLease
+        from vm_provisioning_adapter.db import RelayPortLease
 
         session_factory = _container_module.resolved_session_factory
         with session_factory() as db:

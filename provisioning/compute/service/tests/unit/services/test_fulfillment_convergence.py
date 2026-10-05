@@ -1274,10 +1274,10 @@ async def test_run_cycle_emits_one_zero_value_diagnostics_event_when_empty(
 
 
 def _relay_and_lease(session_factory, *, owner_id="cr-1", port=6100):
-    from compute_provisioning_service.db.models import Relay, RelayPortLease
-    from compute_provisioning_service.db.models import Base as ServiceBase
+    from vm_provisioning_adapter.db import Base as VmBase
+    from vm_provisioning_adapter.db import Relay, RelayPortLease
 
-    ServiceBase.metadata.create_all(session_factory.kw["bind"])
+    VmBase.metadata.create_all(session_factory.kw["bind"])
     with session_factory() as db:
         db.add(
             Relay(
@@ -1302,7 +1302,7 @@ def _relay_and_lease(session_factory, *, owner_id="cr-1", port=6100):
 
 
 def _held(session_factory) -> list[int]:
-    from compute_provisioning_service.db.models import RelayPortLease
+    from vm_provisioning_adapter.db import RelayPortLease
 
     with session_factory() as db:
         return sorted(
@@ -1316,7 +1316,7 @@ def _held(session_factory) -> list[int]:
 def _relay_hooks():
     """The terminal effects as the container composes them: the relay-port release."""
     from compute_provisioning import FulfillmentTerminalHooks
-    from compute_provisioning_service.services.relay_port_allocator import (
+    from vm_provisioning_adapter.services.relay_port_allocator import (
         release_fulfillment_ports,
     )
 
@@ -1512,13 +1512,11 @@ async def test_a_failing_terminal_effect_leaves_the_record_as_it_was(
 
 
 def _terminality(session_factory, repo, monkeypatch):
-    from compute_provisioning_service import app_runtime
-    from compute_provisioning_service import container as _container_module
-
-    monkeypatch.setattr(
-        _container_module, "resolved_session_factory", session_factory, raising=False
+    from vm_provisioning_adapter.services.relay_port_allocator import (
+        fulfillment_lease_owner_is_terminal,
     )
-    return app_runtime._fulfillment_is_terminal
+
+    return fulfillment_lease_owner_is_terminal(session_factory)
 
 
 @pytest.mark.parametrize(

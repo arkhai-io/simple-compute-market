@@ -31,18 +31,18 @@ from sqlalchemy.pool import StaticPool
 from compute_provisioning_service.db.database import run_migrations
 from compute_provisioning_service.db.models import (
     DefinitionDocumentImport,
-    Relay,
     ResourcePool,
 )
-from compute_provisioning_service.services.relay_definitions import (
+from vm_provisioning_adapter.db import Relay
+from vm_provisioning_adapter.services.relay_definitions import (
     RelayDefinitionError,
     import_relay_definitions,
     parse_relay_definitions,
 )
-from compute_provisioning_service.services.relay_rebinding import (
+from vm_provisioning_adapter.services.relay_rebinding import (
     RelayRebindingRefused,
 )
-from compute_provisioning_service.services.relay_service import (
+from vm_provisioning_adapter.services.relay_service import (
     RelayEndpointConflictError,
     RelayNotFoundError,
     RelayService,
@@ -467,7 +467,7 @@ class TestRebinding:
 
     def _make_lease(self, session_factory, *, relay_id="site-a",
                     pool_id="gpu-pool", host="kvm1"):
-        from compute_provisioning_service.db.models import RelayPortLease
+        from vm_provisioning_adapter.db import RelayPortLease
 
         with session_factory() as db, db.begin():
             db.add(
@@ -510,7 +510,7 @@ class TestRebinding:
         assert "Disable the pool" in message
 
     def test_a_relay_can_move_once_drained(self, session_factory, relays):
-        from compute_provisioning_service.db.models import RelayPortLease
+        from vm_provisioning_adapter.db import RelayPortLease
         from datetime import datetime, timezone
 
         self._relay_with_lease(session_factory, relays)
@@ -573,7 +573,7 @@ class TestRebinding:
     def test_a_token_can_be_rotated_once_drained(self, session_factory, relays):
         from datetime import datetime, timezone
 
-        from compute_provisioning_service.db.models import RelayPortLease
+        from vm_provisioning_adapter.db import RelayPortLease
 
         self._relay_with_lease(session_factory, relays)
         with session_factory() as db, db.begin():
@@ -607,7 +607,7 @@ class TestExecutionTimeTokenResolution:
     """
 
     def _resolver(self, session_factory, settings):
-        from compute_provisioning_service.services.relay_execution import (
+        from vm_provisioning_adapter.services.relay_execution import (
             RelayExecutionResolver,
         )
 
@@ -694,7 +694,7 @@ class TestExecutionTimeTokenResolution:
     def test_an_unusable_relay_fails_the_job(
         self, relays, session_factory, settings, break_it, expected
     ):
-        from compute_provisioning_service.services.relay_execution import (
+        from vm_provisioning_adapter.services.relay_execution import (
             RelayUnusableAtExecutionError,
         )
 
@@ -707,7 +707,7 @@ class TestExecutionTimeTokenResolution:
         assert expected in str(excinfo.value)
 
     def test_a_vanished_relay_fails_the_job(self, session_factory, settings):
-        from compute_provisioning_service.services.relay_execution import (
+        from vm_provisioning_adapter.services.relay_execution import (
             RelayUnusableAtExecutionError,
         )
 

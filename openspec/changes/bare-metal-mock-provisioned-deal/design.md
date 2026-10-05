@@ -1821,6 +1821,15 @@ onto terminal hooks, behaviour-neutral (the service still contributes the relay 
 itself until B); **5B.9.B** moves the code, tables, controller, and tests to VM and
 narrows the roles.
 
+**5B.9.B implementation findings (2026-10-05).**
+
+| Finding | Resolution |
+|---|---|
+| With the relay code moved, VM's adapter imports no service module, so its runtime dependency on the service had no reason left (bare metal's went in slice C for the same reason) | Removed; 5B.10 keeps the boundary test and the deployment-level checks |
+| The service's dependency on VM's operator client existed only for the relay routes' wire models | Removed from its runtime dependencies; the integration suite, which drives VM's routes through `VmOperatorClient`, declares it in the dev group |
+| The relay unit tests the plan would run under VM's adapter target build their databases through the service's migrations | They stay in the service's suite, which already hosts VM's tests; VM's adapter target is unchanged |
+| The restart-safety tests imported the relay document through the service, which no longer builds it | They take it from VM's runtime (`relay_definitions`), so they exercise the contribution as composed |
+
 ### Implementation-review fixes for Sections 4–5
 
 Decided with the maintainer after the 2026-10-02 implementation review. The successful

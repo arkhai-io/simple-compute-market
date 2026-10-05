@@ -29,11 +29,13 @@ from market_resource_pools_contracts.hints import (
 from market_site.db import CapacityBucket
 
 from compute_provisioning_service.db.models import (
-    AnsiblePoolConfig,
-    Base,
     DEFAULT_POOL_ID,
     ResourcePool,
 )
+# VM's tables are VM's metadata, held in this database; this history creates and
+# evolves them.
+from vm_provisioning_adapter.db import AnsiblePoolConfig
+from vm_provisioning_adapter.db import Base as VmBase
 
 logger = logging.getLogger(__name__)
 
@@ -962,7 +964,7 @@ def _migrate_resource_pools_and_hosts_pool_id(
     from market_resource_pools.db import Base as PoolsBase
 
     PoolsBase.metadata.tables["resource_pools"].create(bind=engine, checkfirst=True)
-    Base.metadata.tables["ansible_pool_configs"].create(bind=engine, checkfirst=True)
+    VmBase.metadata.tables["ansible_pool_configs"].create(bind=engine, checkfirst=True)
 
     with Session(engine) as session:
         exists = (

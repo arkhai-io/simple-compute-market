@@ -27,7 +27,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from compute_provisioning_service.db.database import run_migrations
-from compute_provisioning_service.db.models import AnsiblePoolConfig, Relay, RelayPortLease
+from vm_provisioning_adapter.db import AnsiblePoolConfig, Relay, RelayPortLease
 
 
 _PLAYBOOK_PATH = "/configured/playbook.yaml"

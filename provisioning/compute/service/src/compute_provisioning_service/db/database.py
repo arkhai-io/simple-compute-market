@@ -52,18 +52,19 @@ def run_migrations(
     migrations haven't been applied. See ARCHITECTURE.md § Schema Migration
     Execution.
     """
-    # Resource-pool tables must be created before this service's own Base:
-    # ansible_pool_configs (on Base) has a ForeignKey("resource_pools.id"),
-    # and SQLAlchemy's cross-metadata FK resolution during create_all needs
-    # the referenced table to already exist.
+    # Resource-pool tables must be created before VM's: ansible_pool_configs
+    # has a ForeignKey to resource_pools, and SQLAlchemy's cross-metadata FK
+    # resolution during create_all needs the referenced table to exist.
     from sqlalchemy import inspect
     from compute_provisioning.hosts.db import Base as HostsBase
     from compute_provisioning.jobs.db import Base as JobsBase
     from market_fulfillment.db import Base as FulfillmentBase
     from market_resource_pools.db import Base as PoolsBase
     from market_site.db import Base as SiteBase
+    from vm_provisioning_adapter.db import Base as VmBase
 
     PoolsBase.metadata.create_all(bind=engine)
+    VmBase.metadata.create_all(bind=engine)
     HostsBase.metadata.create_all(bind=engine)
     JobsBase.metadata.create_all(bind=engine)
     Base.metadata.create_all(bind=engine)

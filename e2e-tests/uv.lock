@@ -795,14 +795,14 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms-provisioning-operator-client"
-version = "0.8.0"
+version = "0.9.0"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "arkhai-compute-provisioning-contracts" },
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_vms_provisioning_operator_client-0.8.0-py3-none-any.whl" },
+    { path = "arkhai_vms_provisioning_operator_client-0.9.0-py3-none-any.whl" },
 ]
 
 [[package]]

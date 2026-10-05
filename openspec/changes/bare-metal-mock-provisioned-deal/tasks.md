@@ -1093,7 +1093,7 @@ re-verifies them by grep before each move.
       `domains/bare_metal/provisioning/iac`, with `provisioning/compute/service/Dockerfile`
       and `settings.toml` following. Deleting `bare_metal_mock_executor.py`, replaced by
       bare metal's contributed default output, moves to slice C of 5B.6.
-- [ ] 5B.8 Controls and routes. Decided with the maintainer on 2026-10-04: `design.md`,
+- [x] 5B.8 Controls and routes. Decided with the maintainer on 2026-10-04: `design.md`,
       "Controls and routes (5B.8)", decisions 1–11, including the same day's design
       review. Four slices, A0 → A → B → C, each its own checkpoint. A slice ends with the
       provisioning-family suites green (`provisioning/compute`, its Ansible distribution,
@@ -2181,8 +2181,12 @@ re-verifies them by grep before each move.
           The root `make -k test` aggregate passes its 44 suites, failing only where this
           environment cannot run a suite; the four locks its reinit rewrites were
           restored. `make check-locks`, `make check-packaging`, comment hygiene,
-          documentation citations, and OpenSpec strict validation pass. Not yet run end
-          to end.
+          documentation citations, and OpenSpec strict validation pass.
+        - End-to-end (run 37338996200, on the C.8 checkpoint: service 0.11.0, VM adapter
+          0.9.0): the bare-metal lane passed 16 and the VM lane 135, nothing failed or
+          skipped, and neither lane's service logs show a traceback, a 5xx, a 401, or a
+          403. Provisioning's status answered 200 throughout, so the stricter readiness
+          rule leaves the mocked lane ready; expired leases were released.
 
       Slice C done 2026-10-05 (`design.md`, "Slice C design review", for the rulings and
       the plan corrections).
@@ -2281,7 +2285,7 @@ re-verifies them by grep before each move.
           (00c, 00c2, 00e, 00h, and the buyer-CLI equivalents) passed, provisioning's
           status answered 200 throughout, expired leases were released, and "Failed to
           schedule VM expiry" no longer appears.
-- [ ] 5B.9 Relays to VM. Amended 2026-10-05 before implementation, after the design review
+- [x] 5B.9 Relays to VM. Amended 2026-10-05 before implementation, after the design review
       (`design.md`, "Relays to VM (5B.9)", points A–D): the relay code, its tables, and its
       routes move to VM's adapter, behind three contribution seams the move needs. Two
       slices, each its own checkpoint, gated like 5B.8's.
@@ -2359,7 +2363,7 @@ re-verifies them by grep before each move.
           its reinit rewrites were restored. `make check-locks`, `make check-packaging`,
           comment hygiene, documentation citations, and OpenSpec strict validation pass.
           End-to-end: run 37334863741 (slice C's record) included 9.A.
-  - [ ] 5B.9.B The move (points A–D).
+  - [x] 5B.9.B The move (points A–D).
         - VM adapter (`domains/vms/provisioning/adapter/src/vm_provisioning_adapter/`):
           - new `db.py`: VM's metadata with `Relay`, `RelayPortLease`, and
             `AnsiblePoolConfig`;
@@ -2390,16 +2394,56 @@ re-verifies them by grep before each move.
           `test_pool_offering_mode_migration.py`; `integration/conftest.py`,
           `test_relays_api.py`, `test_capacity_api.py`, `test_fulfillment_api.py`,
           `test_host_pool_moves_api.py`, `test_pool_declaration_startup.py`,
-          `test_pools_api.py`, `test_test_controller.py`), and VM's adapter target runs the
-          relay files it hosts; `test_relays_api.py` gains the seller's refusal.
+          `test_pools_api.py`, `test_test_controller.py`). The plan had VM's adapter
+          target run the relay files the service hosts; they build their databases
+          through the service's migrations, so they stay in the service's suite. The
+          seller's refusal is a middleware case over the assembled table, since the
+          typed client will not sign a role the contract does not admit.
         - Spec delta (`physical-provisioning`): fulfillment terminal effects run in the
           terminal transaction, and relay administration admits only the administrator.
         - When done, update `relay-vm-access-without-a-dashboard` (its "Pending move" note
           and its open tasks) to the relay code's new paths, as the reconciliation of
           2026-10-05 recorded there.
-- [ ] 5B.10 Boundary check: remove `arkhai-compute-provisioning-service` from both
-      adapters' dependencies, and `arkhai-vms-provisioning-adapter` and the unused
-      `arkhai-vms-provisioning-operator-client` from bare metal's; add
+        Done 2026-10-05 (`design.md`, "Relays to VM (5B.9)", "5B.9.B implementation
+        findings").
+        - VM's adapter holds `db.py` (`Relay`, `RelayPortLease`, `AnsiblePoolConfig`) and
+          the five relay services; `controllers/relays_controller.py` is the router factory
+          `make_relays_router`, mounted through `vm_router_mounts(relay_service=…)`. The
+          runtime builds one port allocator and the relay service; the bundle contributes
+          `release_fulfillment_ports` as a terminal hook, the `relays` document kind (its
+          path resolved by VM from the unchanged `relay_definitions_path`), and the
+          reconciliation task, whose predicate (`fulfillment_lease_owner_is_terminal`)
+          reads the family kit's `fulfillment_is_terminal`. VM's adapter imports no service
+          module, and its dependency on the service is gone.
+        - The service: `db/models.py` loses the three models; `db/database.py` creates VM's
+          metadata after the pool tables; `db/migrations.py` reads VM's models (two new
+          allowlisted pairs; the relay controller's exception is gone); `container.py`,
+          `app_runtime.py`, `main.py`, and `config.py` lose the relay wiring, and the
+          terminal-effect registry starts empty. Its runtime dependency on VM's operator
+          client is gone.
+        - The relay route declarations admit only `admin`.
+        - `relay-vm-access-without-a-dashboard`'s pending-move note now records the new
+          paths; none of its open tasks named a moved file.
+        - Tests: the service-hosted relay, pool-configuration, convergence, inventory, and
+          database tests import VM's modules and create VM's metadata; the relay API suite
+          signs as the administrator; `unit/middleware/test_auth.py` refuses a
+          seller-signed relay request and admits the administrator's, over the table
+          `main.py` assembles; the fulfillment API's port checks read the leases through
+          an allocator over the service's database.
+        - Versions: vms-provisioning-adapter 0.10.0 (its family-kit floor 0.14.0),
+          vms-provisioning-operator-client 0.9.0, compute-provisioning-service 0.12.0 (its
+          adapter floors 0.10.0); VM's adapter and client, the service, and e2e-tests
+          relocked.
+        - Validation: family kit 203; VM adapter target 45; bare-metal adapter 31;
+          provisioning service 870 unit and 277 integration; e2e unit 236 (the known 10.1
+          failure), and 178 e2e and smoke tests collect. The root `make -k test` aggregate
+          passes its 44 suites, failing only where this environment cannot run a suite;
+          the four locks its reinit rewrites were restored. `make check-locks`,
+          `make check-packaging`, comment hygiene, documentation citations, and OpenSpec
+          strict validation pass. Not yet run end to end.
+- [ ] 5B.10 Boundary check. Amended 2026-10-05: the dependency removals this task named
+      are done (bare metal's in 5B.8.C, VM's in 5B.9.B), each when its adapter stopped
+      importing the service; what remains is the check. Add
       an import-boundary test asserting neither adapter imports
       `compute_provisioning_service` or the other adapter (including under
       `TYPE_CHECKING`), no neutral provisioning module imports

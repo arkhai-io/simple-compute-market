@@ -196,13 +196,18 @@ to provide — and the property section 9's seeding must not quietly take back.
       question: a relay with live leases cannot simply be removed, and
       refusing, disabling, or cascading a release are all defensible. Task
       1A.7 is the gate.
-**Pending move (2026-10-05).** `bare-metal-mock-provisioned-deal` task 5B.9 moves
-the relay code from the provisioning service into the VM adapter: `relay_rebinding.py`,
-`relay_port_allocator.py`, and `relay_execution.py` from the service's `services/`, the
-relay, relay-port-lease, and Ansible pool-configuration table metadata, and
-`relays_controller.py` (as an accessor-taking router factory). That task updates this
-change's open tasks to the new paths when it is done; until then, the paths below are
-the current ones.
+**Moved (2026-10-05).** `bare-metal-mock-provisioned-deal` task 5B.9 moved the relay
+code from the provisioning service into the VM adapter
+(`domains/vms/provisioning/adapter/src/vm_provisioning_adapter/`): the relay services
+(`relay_service.py`, `relay_definitions.py`, `relay_rebinding.py`,
+`relay_port_allocator.py`, `relay_execution.py`) under `services/`; the `Relay`,
+`RelayPortLease`, and `AnsiblePoolConfig` models in `db.py`; and the relays controller as
+the router factory `controllers/relays_controller.py`. The release on a fulfillment's
+terminal transition is now VM's contributed terminal effect
+(`release_fulfillment_ports`), which fulfillment convergence and the release guard run;
+the relay definitions document and the port reconciliation are VM's contributions too.
+The relay routes admit only the administrator. Completed tasks below keep the paths they
+were done at; the open ones name none of the moved files.
 
 - [ ] 1A.7 **Decide and record** the deletion semantics in `design.md` once
       section 2's reconciliation behaviour is settled, then implement the

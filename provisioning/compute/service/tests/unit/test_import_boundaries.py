@@ -21,16 +21,17 @@ DOMAIN_MODULES = (
 )
 # Every place the generic service may name a domain, as (service file, module)
 # pairs. The composition root builds the adapters' runtimes and mounts their
-# routers; the legacy VM lease conversion is VM's migration. The relay routes
-# are VM's but still served here, so their controller reads VM's relay wire
-# models until relay administration is served by VM's adapter.
+# routers. The service's database holds VM's tables, so schema creation creates
+# VM's metadata, and the migration history, which created and evolved those
+# tables, reads VM's models and its legacy lease conversion.
 ALLOWED_DOMAIN_IMPORTS = {
     ("container.py", "vm_provisioning_adapter.runtime"),
     ("container.py", "bare_metal_provisioning_adapter.runtime"),
     ("main.py", "vm_provisioning_adapter.routers"),
     ("main.py", "bare_metal_provisioning_adapter.routers"),
+    ("db/database.py", "vm_provisioning_adapter.db"),
+    ("db/migrations.py", "vm_provisioning_adapter.db"),
     ("db/migrations.py", "vm_provisioning_adapter.legacy_backfill"),
-    ("controllers/relays_controller.py", "vm_provisioning_operator.relays"),
 }
 
 

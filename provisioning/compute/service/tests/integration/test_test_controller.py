@@ -170,6 +170,8 @@ async def client_and_queue(
     job_queue = AsyncJobQueue(max_concurrent=2)
 
     from vm_provisioning_adapter.runtime import VmProvisioningRuntime
+    from vm_provisioning_adapter.services.relay_port_allocator import RelayPortAllocator
+    from vm_provisioning_adapter.services.relay_service import RelayService
     from vm_provisioning_adapter.services.ansible_pool_config_handler import (
         AnsiblePoolConfigHandler,
     )
@@ -205,6 +207,8 @@ async def client_and_queue(
             job_submitter=job_submitter,
             job_queue_provider=lambda: job_queue,
         ),
+        relay_port_allocator=RelayPortAllocator(session_factory),
+        relay_service=RelayService(session_factory=session_factory, settings=mock_settings),
     )
 
     app.container.vm_runtime.override(vm_runtime)

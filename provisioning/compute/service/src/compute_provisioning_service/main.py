@@ -31,7 +31,6 @@ from compute_provisioning_service.services.capacity_inventory import (
 from compute_provisioning_service.route_table import assemble_service_route_table
 from compute_provisioning_service.controllers.capacity_definitions_controller import CapacityDefinitionsController
 from compute_provisioning_service.controllers.pools_controller import PoolController
-from compute_provisioning_service.controllers.relays_controller import RelayController
 from compute_provisioning_service.controllers.fulfillment_controller import FulfillmentController
 from compute_provisioning_service.controllers.system_controller import make_system_routers
 from compute_provisioning_service.services.system_status import SERVICE_VERSION
@@ -274,6 +273,7 @@ app = build_compute_provisioning_app(
         *vm_router_mounts(
             vm_operations=lambda: _container_module.resolved_vm_operations_service,
             host_operations=lambda: _container_module.resolved_host_operations_service,
+            relay_service=lambda: _container_module.resolved_relay_service,
         ),
         ComputeProvisioningRouterMount(jobs_controller.router, "/api/v1"),
         ComputeProvisioningRouterMount(host_import_controller.router, "/api/v1"),
@@ -281,7 +281,6 @@ app = build_compute_provisioning_app(
         ComputeProvisioningRouterMount(leases_controller.router, "/api/v1"),
         ComputeProvisioningRouterMount(PoolController.make_router(), "/api/v1"),
         ComputeProvisioningRouterMount(CapacityDefinitionsController.make_router(), "/api/v1"),
-        ComputeProvisioningRouterMount(RelayController.make_router(), "/api/v1"),
         ComputeProvisioningRouterMount(FulfillmentController.make_router(), "/api/v1"),
         ComputeProvisioningRouterMount(
             make_capacity_router(

@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from compute_provisioning_service.db.models import AnsiblePoolConfig
+from vm_provisioning_adapter.db import AnsiblePoolConfig
 
 #: The pool view this projection produces.
 VM_ANSIBLE_POOL_DEFAULTS_VIEW = "vm.ansible_pool_defaults.v1"

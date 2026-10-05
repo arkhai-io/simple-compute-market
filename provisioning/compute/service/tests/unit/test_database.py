@@ -10,7 +10,13 @@ from compute_provisioning_service.db.migrations import (
     _migrate_drop_job_contract_version,
     check_schema_version,
 )
-from compute_provisioning_service.db.models import JobRecord, AnsiblePoolConfig, DEFAULT_POOL_ID, Host, ResourcePool
+from compute_provisioning_service.db.models import (
+    JobRecord,
+    DEFAULT_POOL_ID,
+    Host,
+    ResourcePool,
+)
+from vm_provisioning_adapter.db import AnsiblePoolConfig
 from market_site.ledger import CapacityLedgerService
 
 

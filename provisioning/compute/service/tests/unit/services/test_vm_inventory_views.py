@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from compute_provisioning_service.db.models import AnsiblePoolConfig
+from vm_provisioning_adapter.db import AnsiblePoolConfig
 from vm_provisioning_adapter.inventory_views import (
     VM_ANSIBLE_POOL_DEFAULTS_VIEW,
     AnsiblePoolDefaultsViews,

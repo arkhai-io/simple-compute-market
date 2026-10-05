@@ -40,6 +40,7 @@ from compute_provisioning_service.db.models import (
 )
 from compute_provisioning_service.identity import ProvisioningIdentityContext
 from compute_provisioning_service.route_table import assemble_service_route_table
+from vm_provisioning_adapter.routers import vm_route_contracts
 from compute_provisioning_service.middleware.auth import (
     SqlAlchemyProvisioningReplayStore,
     ProvisioningAuthMiddleware,
@@ -89,7 +90,7 @@ def identities(request):
     return _signer(request.param, 17), _signer(request.param, 23)
 
 
-def _app(storefront, authority):
+def _app(storefront, authority, route_table=_ROUTE_TABLE):
     engine = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -111,7 +112,7 @@ def _app(storefront, authority):
         identity_provider=lambda: identity,
         replay_store_provider=lambda: replay,
         principal_authority_provider=lambda: _PrincipalAuthority(storefront),
-        route_table=_ROUTE_TABLE,
+        route_table=route_table,
     )
 
     async def mutation(_: Request):
@@ -150,8 +151,10 @@ def _headers(
     request_id: str = "request-1",
     role: str = "seller",
     method: str = "POST",
+    route_table=_ROUTE_TABLE,
 ) -> dict[str, str]:
-    operation, resource = _resolve(method, path, body)
+    contract, resource = route_table.resolve(method, path, body)
+    operation = contract.operation
     authenticated = sign_request(
         signer=signer,
         envelope=RequestEnvelope(
@@ -250,6 +253,49 @@ def test_the_operator_s_release_controls_admit_the_administrator_only(identities
     assert as_seller.status_code == 403
     assert as_admin.status_code == 200
     assert calls["count"] == 1
+
+
+@pytest.mark.parametrize(
+    ("path", "body"),
+    [
+        ("/api/v1/relays/", {"id": "site-a"}),
+        ("/api/v1/relays/site-a/token", {"token": "t"}),
+        ("/api/v1/relays/site-a/disable", {}),
+    ],
+)
+def test_relay_administration_admits_the_administrator_only(identities, path, body):
+    """Relays are operator infrastructure: a storefront's signed request is
+    refused before it reaches relay administration. Signed by hand, because
+    the typed client refuses to sign a role the contract does not admit."""
+    storefront, authority = identities
+    table = assemble_service_route_table(vm_route_contracts())
+    client, calls = _app(storefront, authority, route_table=table)
+    client.app.add_api_route(path, _counting(calls), methods=["POST"])
+
+    as_seller = client.post(
+        path,
+        json=body,
+        headers=_headers(storefront, path, body, request_id="seller", route_table=table),
+    )
+    as_admin = client.post(
+        path,
+        json=body,
+        headers=_headers(
+            _ADMIN_SIGNER, path, body, request_id="admin", role="admin", route_table=table
+        ),
+    )
+
+    assert as_seller.status_code == 403
+    assert as_admin.status_code == 200
+    assert calls["count"] == 1
+
+
+def _counting(calls):
+    async def mutation(_: Request):
+        calls["count"] += 1
+        return {"ok": True, "count": calls["count"]}
+
+    return mutation
 
 
 def test_wrong_role_principal_and_body_fail_before_dispatch(identities):

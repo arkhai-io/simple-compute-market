@@ -51,10 +51,10 @@ from market_identity import (
 )
 
 from compute_provisioning_service import container as _container_module
-from compute_provisioning_service.services.relay_port_allocator import (
+from vm_provisioning_adapter.services.relay_port_allocator import (
     RelayPortAllocator,
 )
-from compute_provisioning_service.services.relay_service import RelayService
+from vm_provisioning_adapter.services.relay_service import RelayService
 from compute_provisioning.executor_leases import ExecutorLeaseService
 from compute_provisioning.leases import LeaseRouteService
 from compute_provisioning.release import (
@@ -431,9 +431,12 @@ ok: [kvm1] => {
 
 
 def _initialize_test_database(engine):
-    # resource_pools must exist before Base's ansible_pool_configs FK resolves.
+    # resource_pools must exist before VM's ansible_pool_configs FK resolves.
     from market_resource_pools.db import Base as PoolsBase
     PoolsBase.metadata.create_all(bind=engine)
+    # VM's relay and pool-configuration tables ride VM's own metadata.
+    from vm_provisioning_adapter.db import Base as VmBase
+    VmBase.metadata.create_all(bind=engine)
     # The host registry rides the host authority's own metadata.
     from compute_provisioning.hosts.db import Base as HostsBase
     HostsBase.metadata.create_all(bind=engine)
@@ -736,6 +739,13 @@ async def client_and_queue(
     # Fresh queue per test — caller can inject on_job_started via fixture params
     job_queue = AsyncJobQueue(max_concurrent=2)
 
+    # VM's relay administration and its one port allocator, as VM's runtime
+    # builds them: the relay table is the thing under test in the relay suite,
+    # and the allocator is what fulfillment leases through and the terminal
+    # effect releases through.
+    relay_port_allocator = RelayPortAllocator(session_factory)
+    relay_service = RelayService(session_factory=session_factory, settings=mock_settings)
+
     ansible_fulfillment_provider = AnsibleFulfillmentProvider(
         job_submitter=job_submitter,
         jobs=job_engine,
@@ -745,7 +755,7 @@ async def client_and_queue(
         # relay-backed fulfillment is rejected as invalid provider
         # configuration — which reads as a bad request rather than as a
         # harness that cannot reach the path.
-        port_allocator=RelayPortAllocator(session_factory),
+        port_allocator=relay_port_allocator,
     )
     fulfillment_unit_of_work = SqlAlchemyFulfillmentUnitOfWork(
         session_factory=session_factory,
@@ -838,6 +848,8 @@ async def client_and_queue(
             job_submitter=job_submitter,
             job_queue_provider=lambda: job_queue,
         ),
+        relay_port_allocator=relay_port_allocator,
+        relay_service=relay_service,
     )
 
     from compute_provisioning_service.services.fulfillment_convergence import (
@@ -907,15 +919,7 @@ async def client_and_queue(
     _container_module.resolved_lease_lifecycle_service = lease_lifecycle_service
     _container_module.resolved_capacity_ledger_service = capacity_ledger_service
     _container_module.resolved_resource_pool_service = resource_pool_service
-    # Relay administration and port accounting. Real services over the test
-    # session factory: the relay table is the thing under test in the relay
-    # suite, and the allocator is what the convergence path releases through.
-    _container_module.resolved_relay_service = RelayService(
-        session_factory=session_factory, settings=mock_settings
-    )
-    _container_module.resolved_relay_port_allocator = RelayPortAllocator(
-        session_factory
-    )
+    _container_module.resolved_relay_service = relay_service
     _container_module.resolved_physical_settlement_scheduler = (
         physical_settlement_scheduler
     )

@@ -35,14 +35,18 @@ def vm_router_mounts(
     *,
     vm_operations: Callable[[], Any],
     host_operations: Callable[[], Any],
+    relay_service: Callable[[], Any],
 ) -> tuple[ComputeProvisioningRouterMount, ...]:
-    """VM's operator routes: VM operations and the host capacity check."""
+    """VM's operator routes: VM operations, the host capacity check, and relay
+    administration."""
     from vm_provisioning_adapter.controllers.hosts_controller import (
         make_host_capacity_router,
     )
+    from vm_provisioning_adapter.controllers.relays_controller import make_relays_router
     from vm_provisioning_adapter.controllers.vms_controller import make_vms_router
 
     return (
         ComputeProvisioningRouterMount(make_host_capacity_router(host_operations), "/api/v1"),
         ComputeProvisioningRouterMount(make_vms_router(vm_operations), "/api/v1"),
+        ComputeProvisioningRouterMount(make_relays_router(relay_service), "/api/v1"),
     )

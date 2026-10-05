@@ -13,7 +13,8 @@ from compute_provisioning_service.db.migrations import (
     SchemaDriftError,
     _migrate_executor_identities_and_pool_modes,
 )
-from compute_provisioning_service.db.models import JobRecord, AnsiblePoolConfig
+from compute_provisioning_service.db.models import JobRecord
+from vm_provisioning_adapter.db import AnsiblePoolConfig
 from market_fulfillment.db import SettlementRecord
 from market_resource_pools import DEFAULT_POOL_ID, ResourcePool
 from market_site.db import (

@@ -21,6 +21,7 @@ from compute_provisioning_service.db.models import Base
 from market_fulfillment import FulfillmentBase, PhysicalSettlementRequest
 from market_resource_pools_contracts import PoolCreate
 from market_resource_pools.db import Base as PoolsBase
+from vm_provisioning_adapter.db import Base as VmBase
 from market_site.db import Base as SiteBase
 
 
@@ -40,6 +41,7 @@ def _build_container():
     )
     Base.metadata.create_all(bind=engine)
     PoolsBase.metadata.create_all(bind=engine)
+    VmBase.metadata.create_all(bind=engine)
     SiteBase.metadata.create_all(bind=engine)
     FulfillmentBase.metadata.create_all(bind=engine)
     session_factory = sessionmaker(bind=engine)
