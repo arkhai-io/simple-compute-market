@@ -90,25 +90,11 @@ def load_deal_context(run_id: str, *, signer):
         signer=signer,
         refresh_publisher_principals=_publisher_trust_refresh(signer),
     )
-    if deal.accepted_escrow_proposal is not None:
-        from market_alkahest.schemas import (
-            accepted_recipient_address,
-            accepted_token_address,
-        )
+    # The table's adapters consume ChainSettings from this module, so resolve
+    # their composition after the recovery helpers have finished importing.
+    from .settlement_composition import buyer_stage
 
-        recipient = accepted_recipient_address(deal.accepted_escrow_proposal)
-        if recipient:
-            deal.seller_wallet_address = recipient
-        token = accepted_token_address(deal.accepted_escrow_proposal)
-        if token:
-            deal.token_contract = token
-    if deal.settlement_plan is not None and not deal.accepted_escrow_terms:
-        from market_alkahest.plans import escrow_terms_from_settlement_plan
-
-        deal.accepted_escrow_terms = [
-            terms.model_dump()
-            for terms in escrow_terms_from_settlement_plan(deal.settlement_plan)
-        ]
+    buyer_stage(accepted_settlement_mechanism(deal)).enrich_deal(deal)
     return deal
 
 

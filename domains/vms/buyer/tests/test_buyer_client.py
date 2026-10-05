@@ -22,6 +22,7 @@ import pytest
 from arkhai_vms import VmProvisionTerms, make_vm_provision_terms
 from identity_helpers import (
     BUYER_SIGNER,
+    alkahest_option,
     seller_principals,
     signed_response_headers,
 )
@@ -81,12 +82,12 @@ def _example_option() -> SettlementOption:
     }
     return SettlementOption(
         option_id=derive_settlement_option_id(
-            mechanism="example.payment.v1",
+            mechanism="alkahest.v1",
             asset="usd",
             rates=rates,
             params=params,
         ),
-        mechanism="example.payment.v1",
+        mechanism="alkahest.v1",
         asset="usd",
         rates=rates,
         params=params,
@@ -129,6 +130,7 @@ def _example_accept_reply(
             "fields": {"amount": amount},
         },
         "settlement_selection": selection.model_dump(mode="json"),
+        "accepted_escrow_proposal": _escrow_proposal().model_dump(mode="json"),
         "settlement_plan": {
             "buyer_principal": buyer.model_dump(mode="json"),
             "seller_principal": seller.model_dump(mode="json"),
@@ -214,6 +216,10 @@ def _with_accepted_agreement(req, body):
         option = _example_option()
         if selected.option_id == option.option_id and selected.mechanism == option.mechanism:
             settlement = option
+    if settlement is None:
+        settlement = alkahest_option()
+    body = dict(body)
+    body.setdefault("accepted_escrow_proposal", _escrow_proposal().model_dump(mode="json"))
     buyer = BUYER_SIGNER.identity
     seller = seller_principals().identities[0]
     asset = settlement.asset if settlement is not None else (
@@ -342,7 +348,7 @@ def test_round_0_example_selection_is_pinned_and_returned(mock_urlopen):
     assert seen_body["proposal"]["settlement_selection"] == selection.model_dump()
     assert outcome.settlement_selection == selection
     assert outcome.settlement_plan is not None
-    assert outcome.settlement_plan.obligations[0].mechanism == "example.payment.v1"
+    assert outcome.settlement_plan.obligations[0].mechanism == "alkahest.v1"
 
 
 @patch("core_buyer.negotiation_client.urllib.request.urlopen")

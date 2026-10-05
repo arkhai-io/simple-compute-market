@@ -5,7 +5,7 @@ import json
 import time
 from typing import Any
 
-from market_core.schemas import Agreement
+from market_core.schemas import Agreement, SettlementOption, derive_settlement_option_id
 from market_identity import (
     Ed25519Signer,
     ResponseEnvelope,
@@ -21,6 +21,30 @@ SELLER_TRUST = TrustedIdentitySet(identities=(SELLER_SIGNER.identity,))
 
 def seller_principals() -> TrustedIdentitySet:
     return SELLER_TRUST
+
+def alkahest_option(proposal: dict[str, Any] | None = None) -> SettlementOption:
+    params = {"accepted_escrow": proposal or {}}
+    token = (proposal or {}).get("fields", {}).get("token") or "usd"
+    return SettlementOption(
+        option_id=derive_settlement_option_id(
+            mechanism="alkahest.v1", asset=token, rates=[], params=params,
+        ),
+        mechanism="alkahest.v1", asset=token, rates=[], params=params,
+    )
+
+
+def accepted_alkahest_agreement(negotiation_id, listing_id, amount, provision, proposal):
+    option = alkahest_option(proposal.model_dump(mode="json"))
+    return Agreement(
+        negotiation_id=negotiation_id, listing_id=listing_id, listing_hash="0" * 64,
+        buyer=BUYER_SIGNER.identity.model_dump(mode="json"),
+        seller=SELLER_SIGNER.identity.model_dump(mode="json"),
+        settlement=option, asset=option.asset, amount=amount,
+        duration_seconds=provision.duration_seconds,
+        provision_terms=provision.model_dump(mode="json"),
+        start_utc="2025-01-01T00:00:00Z", accepted_at="2025-01-01T00:00:00Z",
+    )
+
 
 def with_accepted_agreement(request: Any, body: dict[str, Any]) -> dict[str, Any]:
     if body.get("action") != "accept" or body.get("agreement") is not None:
@@ -40,6 +64,11 @@ def with_accepted_agreement(request: Any, body: dict[str, Any]) -> dict[str, Any
     accepted_at = "2025-01-01T00:00:00Z"
     if not isinstance(start_utc, str) or start_utc.strip().lower() in {"", "now"}:
         start_utc = accepted_at
+    body = dict(body)
+    body.setdefault("accepted_escrow_proposal", {
+        "chain_name": "anvil", "escrow_address": "0x" + "cd" * 20,
+        "fields": {}, "expiration_unix": 1_800_000_000,
+    })
     proposal = body.get("proposal")
     fields = proposal.get("fields") if isinstance(proposal, dict) else None
     amount = int(fields.get("amount", 0)) if isinstance(fields, dict) else 0
@@ -51,6 +80,8 @@ def with_accepted_agreement(request: Any, body: dict[str, Any]) -> dict[str, Any
         listing_hash="0" * 64,
         buyer=buyer,
         seller=seller,
+        settlement=alkahest_option(body.get("accepted_escrow_proposal")),
+        asset=alkahest_option(body.get("accepted_escrow_proposal")).asset,
         amount=amount,
         duration_seconds=int(duration),
         start_utc=start_utc,
