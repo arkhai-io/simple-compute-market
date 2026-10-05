@@ -7,11 +7,11 @@ from dataclasses import replace
 from typing import Any
 
 from arkhai_vms.domain_runtime import market_domain
-from core_storefront.domain_plugins import StorefrontDomainContribution
 from core_storefront.domain_lifecycle import (
     StorefrontFulfillmentContext,
     StorefrontSettlementBuildContext,
 )
+from core_storefront.domain_plugins import StorefrontDomainContribution
 from core_storefront.domain_registry import (
     StorefrontDomainRegistration,
     StorefrontDomainRegistry,
@@ -77,33 +77,14 @@ async def _fulfill_vm_context(
     raw = context.domain_input
     if not isinstance(raw, Mapping):
         raise TypeError("VM fulfillment requires a domain_input mapping")
-    required = (
-        "ssh_public_key",
-        "order",
-        "duration_seconds",
-        "listing_id",
-        "settlement_mechanism",
-    )
-    missing = tuple(key for key in required if raw.get(key) is None)
-    if missing:
-        raise ValueError("VM fulfillment input is missing " + ", ".join(missing))
-    if context.settlement_evidence.status != "verified":
-        raise ValueError("VM delivery requires verified settlement evidence")
     result = await fulfill_compute_obligation(
         sqlite_client=context.ports.repository,
-        client=context.ports.fulfillment_client,
-        escrow_uid=context.settlement_ref,
-        ssh_public_key=str(raw["ssh_public_key"]),
-        order=raw["order"],
-        duration_seconds=int(raw["duration_seconds"]),
-        start_utc=raw.get("start_utc"),
-        listing_id=str(raw["listing_id"]),
-        negotiation_id=context.negotiation_id,
+        evidence=context.settlement_evidence,
         site_id=context.site_id,
-        settlement_mechanism=str(raw["settlement_mechanism"]),
+        failure_policy=raw.get("failure_policy"),
     )
     result = dict(result or {})
-    order = raw["order"] if isinstance(raw["order"], Mapping) else {}
+    order = context.settlement_evidence.evidence["delivery"]["payload"]["order"]
     offer_resource = order.get("offer_resource")
     if not isinstance(offer_resource, Mapping):
         offer_resource = {}
@@ -118,13 +99,13 @@ async def _fulfill_vm_context(
         "physical_resource_id": physical_resource_id,
         "capacity_reservation_id": result.get("capacity_reservation_id"),
         "settlement_resource_id": result.get("settlement_resource_id"),
-        "fulfillment_id": result.get("fulfillment_uid")
-        or result.get("fulfillment_id"),
+        "fulfillment_id": result.get("fulfillment_uid") or result.get("fulfillment_id"),
         "failure_reason": result.get("message")
         if result.get("status") != "fulfilled"
         else None,
         "domain_result": result,
     }
+
 
 def build_vm_storefront_domain() -> MarketDomainContract:
     """Construct the ordinary VM contract used by the storefront executable."""
@@ -192,9 +173,7 @@ def validate_vm_storefront_domain(domain: object) -> MarketDomainContract:
             "VM storefront requires domain "
             f"{VM_STOREFRONT_DOMAIN_IDENTITY!s}, got {validated.identity!s}"
         )
-    missing = (
-        _REQUIRED_VM_STOREFRONT_CAPABILITIES - validated.declared_capabilities
-    )
+    missing = _REQUIRED_VM_STOREFRONT_CAPABILITIES - validated.declared_capabilities
     if missing:
         names = ", ".join(sorted(capability.value for capability in missing))
         raise DomainContractValidationError(

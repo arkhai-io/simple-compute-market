@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -10,27 +11,21 @@ from market_storefront.services.vm_fulfillment_planner import (
 from market_storefront.services.vm_job_spec_service import (
     build_provisioning_job_spec,
 )
+from tests.fulfillment_fixtures import vm_delivery_evidence
 
 
 @pytest.mark.parametrize("order", [None, "", "not-json", {}, "{}"])
 def test_fulfillment_plan_rejects_missing_or_malformed_order(order):
     with pytest.raises(ValueError, match="valid, non-empty settlement order"):
-        build_vm_fulfillment_plan(order=order, duration_seconds=3600)
-
-
-def test_fulfillment_plan_rejects_unknown_settlement_mechanism():
-    with pytest.raises(ValueError, match="Unsupported settlement mechanism"):
         build_vm_fulfillment_plan(
-            order={
-                "listing_id": "listing-unknown",
-                "offer_resource": {
-                    "resource_id": "unknown-resource",
-                    "gpu_model": "H100",
-                    "gpu_count": 1,
-                },
-            },
-            duration_seconds=3600,
-            settlement_mechanism="unknown.v1",
+            evidence=vm_delivery_evidence(order=order if order is not None else {})
+        )
+
+
+def test_fulfillment_plan_rejects_unverified_evidence():
+    with pytest.raises(ValueError, match="verified settlement evidence"):
+        build_vm_fulfillment_plan(
+            evidence=replace(vm_delivery_evidence(), status="pending")
         )
 
 
