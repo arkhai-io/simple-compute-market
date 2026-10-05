@@ -329,7 +329,7 @@ class CreditsServiceClient:
     async def rollback_issuance(
         self,
         *,
-        escrow_uid: str,
+        settlement_ref: str,
         issuance: dict[str, Any],
         key_mode: str,
     ) -> dict[str, Any]:
@@ -351,15 +351,15 @@ class CreditsServiceClient:
             await self.adjust_key_balance(
                 key_id,
                 delta=-quantity,
-                reason=f"rollback:{escrow_uid}",
+                reason=f"rollback:{settlement_ref}",
             )
             out["rolled_back"] = True
         except Exception as exc:
             out["reason"] = f"adjust_failed: {exc}"
             logger.warning(
-                "[ISSUANCE] rollback adjust failed for %s (escrow %s): %s",
+                "[ISSUANCE] rollback adjust failed for %s (settlement %s): %s",
                 key_id,
-                escrow_uid,
+                settlement_ref,
                 exc,
             )
         if key_mode == "new":
@@ -369,9 +369,9 @@ class CreditsServiceClient:
             except Exception as exc:
                 out["revoked"] = False
                 logger.warning(
-                    "[ISSUANCE] rollback revoke failed for %s (escrow %s): %s",
+                    "[ISSUANCE] rollback revoke failed for %s (settlement %s): %s",
                     key_id,
-                    escrow_uid,
+                    settlement_ref,
                     exc,
                 )
         return out

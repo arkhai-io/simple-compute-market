@@ -104,7 +104,7 @@ async def fulfill_api_credits_obligation(
 ) -> dict[str, Any]:
     """Issue credits from verified purchase evidence; stage continuations own attestation."""
     delivery = credit_delivery(evidence)
-    escrow_uid = evidence.settlement_ref
+    settlement_ref = evidence.settlement_ref
     offer_resource = delivery.offer_resource
     quantity, key_mode = delivery.quantity, delivery.key_mode
     listing_id = delivery.listing_id
@@ -124,7 +124,8 @@ async def fulfill_api_credits_obligation(
             try:
                 await apply_failure_policy(
                     capacity_reservation_id=capacity_reservation_id,
-                    escrow_uid=escrow_uid,
+                    settlement_ref=settlement_ref,
+                    negotiation_id=evidence.negotiation_id,
                     listing_id=listing_id,
                     resource_id=resource_id,
                     reason=reason,
@@ -134,14 +135,14 @@ async def fulfill_api_credits_obligation(
             except Exception as policy_err:
                 logger.warning(
                     "[FULFILLMENT_POLICY] Failed to apply issuance failure "
-                    "policy for escrow %s: %s",
-                    escrow_uid,
+                    "policy for settlement %s: %s",
+                    settlement_ref,
                     policy_err,
                 )
         stage_event(
             "provision",
             "failed",
-            escrow_uid=escrow_uid,
+            settlement_ref=settlement_ref,
             listing_id=listing_id,
             resource_id=resource_id,
             error=message,
@@ -149,7 +150,7 @@ async def fulfill_api_credits_obligation(
         return {
             "status": "error",
             "message": message,
-            "escrow_uid": escrow_uid,
+            "settlement_ref": settlement_ref,
         }
 
     service_name = str(offer_resource.get("service_name") or "")
@@ -174,7 +175,7 @@ async def fulfill_api_credits_obligation(
             stage_event(
                 "provision",
                 "issuance_retryable",
-                escrow_uid=escrow_uid,
+                settlement_ref=settlement_ref,
                 listing_id=listing_id,
                 resource_id=resource_id,
                 error=str(error),
@@ -182,7 +183,7 @@ async def fulfill_api_credits_obligation(
             return {
                 "status": "pending",
                 "message": f"Issuance remains retryable: {error}",
-                "escrow_uid": escrow_uid,
+                "settlement_ref": settlement_ref,
             }
         return await _fail(error.reason, f"Issuance refused: {error}")
     except Exception as error:
@@ -190,7 +191,7 @@ async def fulfill_api_credits_obligation(
             stage_event(
                 "provision",
                 "issuance_retryable",
-                escrow_uid=escrow_uid,
+                settlement_ref=settlement_ref,
                 listing_id=listing_id,
                 resource_id=resource_id,
                 error=str(error),
@@ -198,7 +199,7 @@ async def fulfill_api_credits_obligation(
             return {
                 "status": "pending",
                 "message": f"Issuance remains retryable: {error}",
-                "escrow_uid": escrow_uid,
+                "settlement_ref": settlement_ref,
             }
         return await _fail("issuance_unreachable", f"Issuance failed: {error}")
 
@@ -206,7 +207,7 @@ async def fulfill_api_credits_obligation(
     stage_event(
         "provision",
         "credits_issued",
-        escrow_uid=escrow_uid,
+        settlement_ref=settlement_ref,
         listing_id=listing_id,
         resource_id=resource_id,
         key_id=issued_key_id,
@@ -228,7 +229,7 @@ async def fulfill_api_credits_obligation(
         "provision",
         "fulfilled",
         listing_id=listing_id,
-        escrow_uid=escrow_uid,
+        settlement_ref=settlement_ref,
         fulfillment_uid=fulfillment_uid,
         resource_id=resource_id,
         key_id=issued_key_id,
@@ -244,7 +245,7 @@ async def fulfill_api_credits_obligation(
     return {
         "status": "fulfilled",
         "message": "API-token obligation fulfilled",
-        "escrow_uid": escrow_uid,
+        "settlement_ref": settlement_ref,
         "fulfillment_uid": fulfillment_uid,
         "connection_details": payload,
         "tenant_credentials": credentials,

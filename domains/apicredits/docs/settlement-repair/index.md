@@ -35,6 +35,23 @@ Production coordinator test: `storefront/tests/unit/test_settlement_fulfillment.
 
 After rebuilding wheels and storefront reinit, the same focused command above passed **19 checks** (13 fulfillment/coordinator, 4 payment recovery, 2 issuance/private repository). No separate API-credit verification diagnostic exists in the closeout packet; this coordinator replay is the F2 reproduction surface.
 
+## Review F6 — neutral issuance/failure/rollback references
+
+Common issuance results and stage events, failure-policy kwargs/context, and `CreditsServiceClient.rollback_issuance` now use `settlement_ref`. Failure context also carries `negotiation_id`; capacity release uses that accepted identity in `deal_ref`, matching VM failure actions, while retaining the exact held reservation ID. Genuine Alkahest verification/rows, the site ledger's existing correlation API and unchanged public settlement wire DTOs retain their escrow names.
+
+Production fulfillment test: `storefront/tests/unit/test_settlement_fulfillment.py::test_payment_refusal_releases_hold_using_negotiation_not_transaction` drives the real fulfillment/failure-policy composition with SQLite and controlled credits/capacity I/O. It observes refusal, exact hold release under the negotiation ID rather than the distinct transaction reference, neutral failure-event correlation, listing-reopen dispatch, and hold cleanup. Existing client HTTP rollback tests retain adjust/revoke ordering and use the renamed parameter. No compatibility alias was added. Touched capacity/publication imports are module-level; real consumer suites found no import cycle.
+
+Final validation after `make dist`, buyer/storefront/service reinit and domain `uv sync --dev --find-links ../../.dist --reinstall`:
+
+| Scope | Passed |
+|---|---:|
+| Storefront seven existing focused files plus payment recovery integration | 64 |
+| Domain typed credits client/HTTP/issuance evidence | 25 |
+| Buyer five focused composition/credential/negotiation/listing/plugin files | 17 |
+| Credits authority real typed-client HTTP `src/tests/unit/test_api.py` | 3 |
+
+**109 passing checks.** Commands use the focused file sets in `docs/attachments/apicredits-dispatch/index.md`, adding `storefront/tests/integration/test_payment_recovery.py`. F1 adds 4 checks, F2 adds 1 coordinator check, F6 adds 1 failure-recovery check. Final first-use replay on all three repairs again observed credits `/health=200`, pending grants 0, lost-ack grants 1, final grants 2, balance 5, payment escrows 0, payment polls 3, private owner-only retrieval, and temporary database cleanup. Final comment hygiene and `git diff --check` passed.
+
 ## Tooling and limits
 
 Reinit lock churn is already owned by [#257](https://github.com/arkhai-io/simple-compute-market/issues/257); only generated lock changes are restored, not tested environments. Existing Pydantic schema-shadowing warnings remain owned by [#259](https://github.com/arkhai-io/simple-compute-market/issues/259). These packages declare no static typing target. Live payment-ledger qualification is not represented by synthetic receipt I/O. Visual: false; screenshots: none. No external resources remain.

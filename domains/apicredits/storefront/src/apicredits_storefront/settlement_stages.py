@@ -648,7 +648,7 @@ class AlkahestSellerStage:
             return {**result, "fulfillment_uid": fulfillment_uid}
         except Exception as exc:
             rollback = await composition.credits_client.rollback_issuance(
-                escrow_uid=evidence.settlement_ref,
+                settlement_ref=evidence.settlement_ref,
                 issuance={"key_id": issuance.key_id, "quantity": issuance.quantity},
                 key_mode=issuance.key_mode,
             )
