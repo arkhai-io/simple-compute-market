@@ -1854,7 +1854,12 @@ re-verifies them by grep before each move.
           - The root aggregate passes its 44 suites, failing only where this environment
             cannot run a suite. `make check-packaging`, comment hygiene, documentation
             citations, and OpenSpec strict validation pass.
-          - Not yet run end to end.
+          - End-to-end (run 37298149909, with A.6, B, B.7, and B.8): the bare-metal lane
+            passed 16 and the VM lane 135, nothing failed or skipped. The VM lease stages
+            ran through the family surface for the first time: four leases registered, the
+            escrow lookups found their reservations, and each expired lease went
+            `releasing` under its fulfillment and was released on a later cycle with the
+            storefront notified; none timed out.
       Slice B done 2026-10-05 (`design.md`, "Slice B implementation findings", for what
       implementation settled or found).
       - B.1:
@@ -1929,8 +1934,8 @@ re-verifies them by grep before each move.
         - `make check-packaging`, comment hygiene, documentation citations, and OpenSpec
           strict validation pass.
         - End-to-end, first run (with A.6): the bare-metal lane passed 16; the VM lane
-          failed 4, all from no lease being registered, fixed by B.7. B.7 has not yet run
-          through the pipeline.
+          failed 4, all from no lease being registered (5B.8.B.7, and the escrow record in
+          5B.8.B.8). Second run, with B.7 and B.8: both lanes green (5B.8.B.8's validation).
 
       **Slice C: the system split and the last `container` reach** (decisions 4 and 7).
 
@@ -2270,8 +2275,12 @@ service code.
       router, VM's literal pool-override path, the site's duplicated server and client
       contracts, bare metal's untyped mock-rule routes, the unreachable `provisioning`
       state, path templates in the family contracts, the uncalled
-      `find_active_lease_by_vm_target`, and a commit before registration still able to
-      re-record a truncated window).
+      `find_active_lease_by_vm_target`, a commit before registration still able to
+      re-record a truncated window, and the VM storefront's `schedule_shutdown` hook, wired
+      to `fulfillment_service.py`'s `_do_shutdown`, which always raises because no
+      expiry-scheduling endpoint exists, so every VM deal logs "Failed to schedule VM
+      expiry" while the lease watchdog does the expiry; seen in every end-to-end run since
+      slice A).
 - [ ] 2.7 **Campaign index currency.** Update this change's row and the Goal 3, 4, and 7
       graphs in `openspec/changes/README.md`, and the rows of
       `bare-metal-and-credits-domain-stacks`, `kit-owned-storefront-shell`,
