@@ -151,10 +151,19 @@ deference to the reviewer is visible rather than the default. Every finding is
 presented to the owner, ordered by lens with `direction` first, then by severity.
 Nothing is applied until the owner has recorded a disposition.
 
-On each disposition, one line is appended to a local, untracked ledger outside the
-change directory, so it survives archival: the change, review kind, lens, basis,
-severity, the agent's position, the owner's disposition, and a one-line summary.
-The ledger is the input to the owner's periodic guidance reviews.
+On each disposition, one line is appended to the change's
+`interventions.jsonl`: the review kind, lens, basis, severity, the agent's
+position, the owner's disposition, and a one-line summary of the finding. Unlike
+`reviews/`, the ledger is tracked. It sits in the change directory so it travels
+with the change through archival, and it must be tracked to do so reliably: a
+change worked in its own worktree loses every untracked file when the worktree is
+removed, and an archive commit carries only what Git knows about. The ledgers
+across active and archived changes are the input to the owner's periodic guidance
+reviews, which therefore have to run before an archived change is pruned.
+
+A ledger line is public, like everything else in the change. It summarizes a
+finding about this repository and the owner's response to it, and carries nothing
+the public-repository rules exclude.
 
 ### Design discussion is written for depth, and preloads context
 
@@ -169,37 +178,98 @@ asks for a discussion, not an action: numbered open questions, each with the
 options considered, their trade-offs, and a recommendation, and it edits no file
 until the owner says the design is settled.
 
-### Validation before review is a make target plus a reporting step
+### Validation runs on the committed slice, before its review
 
-The local half of the sequence — `make lock`, `make check-packaging`, `make test` —
-becomes one target that stops at the first failure and writes a summary. The
-remote half triggers the end-to-end workflow and fetches its logs. The validation
-skill runs both, reads the end-to-end logs for the failing scenario rather than
-only the exit status, and writes `reviews/NN-validation.md`, which the reviewer
-reads as evidence. A failure stops the review: there is no point reviewing an
-implementation whose own checks have not passed, unless the owner asks for one.
+An implementation slice is committed, unreviewed, when its tasks are done; review
+findings land as later commits. Validation therefore always describes a commit,
+and the end-to-end workflow — which runs against the pushed branch — needs the
+branch pushed. Pushing the change's own branch is part of validation and needs no
+separate approval; force-pushing and pushing any other branch are not.
 
-### The index has a status vocabulary and a campaign priority
+The local half — `make lock`, `make check-packaging`, `make test` — becomes one
+target that stops at the first failure and writes a summary. The remote half pushes
+the branch, triggers the end-to-end workflow, and fetches its logs. The Helm half runs
+`make build-dev`, then `make deploy` and `make forward` in `helm/`, then
+`make test-module` in `e2e-tests/` against the forwarded services, and always
+`make unforward` afterwards. It is owed when a slice touches `helm/`, an image
+build input, or a service's configuration surface, and optional otherwise. The validation skill reads failing scenarios from the
+logs rather than reporting only an exit status, and writes `reviews/NN-validation.md`,
+which the reviewer reads as evidence. A failure stops the review unless the owner
+asks for one anyway.
+
+`make fetch-e2e-logs` selects the newest `e2e.yml` run whose head branch is the
+current branch, among the latest hundred. Runs on different branches therefore do
+not interfere, and the workflow's per-ref concurrency group cancels an older run on
+the same branch. Two gaps make it unsafe to call immediately after `make run-e2e`:
+dispatch is asynchronous, so the new run may not be listed yet and the previous,
+already finished run on the branch is fetched in its place; and nothing checks that
+the run tested the commit being validated. Selection matches the run's head commit
+to the local `HEAD` and waits, with a bound, for that run to appear.
+
+### The index states each change's phase and whether it can proceed
 
 The orchestrator this change prepares for has to decide what may start next from
-`openspec/changes/README.md`, and most status cells today are sentences. Every
-change row gets a `Status` column holding exactly one of:
+`openspec/changes/README.md`, and most status cells today are sentences. A single
+word such as `active` cannot carry that decision: it reads as "someone is working
+on this" while being used to mean "the design is ready", and it erases the
+difference between a change waiting for design and one waiting for a plan, which
+are separate steps run by separate skills.
 
-| Status | Meaning |
+A status therefore names the phase a change is at and its state within it. The
+phases, in order, are `design`, `planning`, `implementation`, and `closeout`:
+
+| State | Meaning |
 |---|---|
-| `proposed` | Design not settled; no implementation plan |
-| `active` | Planned; implementation may begin |
-| `implementing` | Implementation under way |
-| `blocked` | Must not proceed; the notes name what it waits on |
-| `deferred` | No plan until a recorded activation condition is met |
-| `complete` | Implemented and closed out; awaiting archival |
-| `archived` | Archived; row kept while the campaign references it |
+| `ready for <phase>` | The previous phase is finished and nothing in the change itself prevents this one starting |
+| `in <phase>` | The phase has started and is not finished |
+| `blocked in <phase>` | The phase cannot proceed for a reason that is not another change: an external input, real hardware, a pending owner decision. `Notes` names it |
 
-The sentence moves to a `Notes` column. Priority is a single ordered list of
+Three statuses fall outside the grid: `ready for archival` (closeout finished),
+`deferred` (no work until a recorded activation condition holds, named in
+`Notes`), and `archived`.
+
+A dependency on another change is not written into the status. Each row gets a
+`Depends on` column listing the changes that must reach `ready for archival` or
+`archived` before it may begin implementation. A dependency that gates only part
+of a change — a single task — is named in `Notes` instead, since it does not hold
+the change as a whole. The campaign dependency graphs remain as illustration; the
+column is authoritative.
+
+A change held by a dependency may be designed, reviewed, and planned meanwhile, but
+the design it reaches rests on a codebase its dependency is about to change. When
+a dependency lands, every dependent's design is reverified before implementation
+begins, however far the dependent had progressed. The landing change does this
+through its own campaign index currency step at closeout: it removes itself from
+each dependent's `Depends on` and sets each dependent that had not begun
+implementation to `ready for design`. A design review of that dependent then checks
+it against the codebase as the dependency left it, and the dependent moves on to
+planning only once that review is triaged. This keeps the reverification tied to a
+closeout step that already runs, rather than to anyone remembering it.
+
+`blocked in design` means the design cannot proceed without a decision from the
+owner.
+
+Explanatory prose moves to a `Notes` column. Priority is a single ordered list of
 campaigns at the top of the index — roadmap goals, lesser goals, and the
 independent changes as one entry. Within a campaign, order comes from its
 dependency graph. Priority is not assigned per change, and it lives in the index
 rather than in `ROADMAP.md`, whose requirement forbids delivery sequencing.
+
+Rewriting the existing rows is not a transcription. Several cells describe a state
+their change's `tasks.md` no longer supports, so each row is checked against its
+own change, and rows whose recorded state cannot be confirmed are listed for the
+owner rather than carried across. Representative mappings:
+
+| Today | Becomes |
+|---|---|
+| "design phase; not planned", "design-gated" | `ready for design` or `in design` |
+| "design decided; not planned" | `ready for planning` |
+| "planned; no blocking dependency", "active; independent" | `ready for implementation` |
+| "Sections 0–1 complete; Section 2 planned" | `in implementation` |
+| "implemented and promoted; validation and closeout remain" | `ready for closeout` or `in closeout` |
+| "local work complete, qualification externally blocked" | `blocked in implementation`; `Notes`: the external input |
+| "active; depends on X and Y" | `ready for implementation`; `Depends on`: X, Y — reverified when they land |
+| "**archived** 2026-09-28. Promoted to …" | `archived`; the promotion summary to `Notes` |
 
 ### Browser delivery rules leave the shared guidance
 
@@ -215,28 +285,15 @@ enforced by `make check-comment-hygiene`. No skill names `docs/prompts/`.
   snapshot and a diff by hand; a harness reviewer chooses what to read. The review
   skill names the diff command and the documents to read before answering, and the
   pilot compares its findings with what the browser process produced.
-- **Running the end-to-end workflow requires a pushed branch.** Pushing is visible
-  outside the machine. See Open Questions.
-- **The ledger is local.** It is lost with the working copy, and is not shared
-  across machines. Accepted: it is the owner's working data, and a public
-  repository is the wrong home for it.
+- **Ledgers are pruned with their archives.** Archived changes are pruned once
+  nothing references them. Accepted: the owner's guidance reviews run monthly,
+  well inside the time an archive survives, and Git history keeps every ledger.
 - **Symlinked skills on platforms without symlinks.** Accepted: every current
   contributor platform supports them, and the Stripe skills already depend on them.
 
 ## Open Questions
 
-- **Authority to push.** Should the validation skill push the branch to run the
-  end-to-end workflow, or stop and ask each time?
-- **Helm end-to-end.** Which command builds images and runs the end-to-end suite
-  against the Helm charts, and when is it owed rather than optional?
-- **End-to-end run correlation.** `make run-e2e` does not report the run it
-  started; confirm how `make fetch-e2e-logs` selects the run when several are in
-  flight on different branches.
-- **Ledger location.** Proposed: `.scm-local/agent-workflow/interventions.jsonl`,
-  in the existing untracked scratch directory.
-- **Mapping existing index statuses.** Rows such as "design-gated" and "local work
-  complete, qualification externally blocked" need a decided mapping; proposed
-  `proposed` and `blocked` respectively, with the detail in `Notes`.
+None.
 
 ## Pilot
 

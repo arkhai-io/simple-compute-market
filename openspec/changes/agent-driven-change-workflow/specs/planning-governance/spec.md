@@ -3,22 +3,41 @@
 ### Requirement: Active-change index status vocabulary
 
 Every change row in the active-change index at `openspec/changes/README.md` MUST
-state its status as exactly one of `proposed`, `active`, `implementing`, `blocked`,
-`deferred`, `complete`, or `archived`, in a column holding nothing else. Any
-explanation of that status — what a blocked change waits on, which sections are
-done, what a deferred change's activation condition is — MUST be carried in a
-separate column. A `blocked` or `deferred` status MUST be accompanied by that
-explanation.
+state its status in a column holding nothing else, as exactly one of: `ready for
+<phase>`, `in <phase>`, or `blocked in <phase>`, where `<phase>` is one of
+`design`, `planning`, `implementation`, or `closeout`; or `ready for archival`,
+`deferred`, or `archived`. A `blocked in <phase>` status MUST be used only for a
+reason that is not another change, and that reason, and a deferred change's
+activation condition, MUST be stated in a separate explanatory column.
+
+Each row MUST list, in a `Depends on` column, every other change that must reach
+`ready for archival` or `archived` before it may begin implementation. A dependency
+on another change MUST NOT be expressed through the status. When a change reaches
+`ready for archival`, its closeout MUST remove it from every dependent's
+`Depends on` and MUST set each dependent that has not begun implementation to
+`ready for design`, so that its design is reverified against the codebase the
+dependency left before it is implemented.
 
 #### Scenario: A reader or agent asks what may start
 
 - **WHEN** a contributor or an agent reads the index to find work that may begin
-- **THEN** it can select rows by status value alone, without interpreting prose
+- **THEN** it selects rows whose status begins `ready for`, excluding a `ready for
+  implementation` row with any listed dependency, without interpreting prose
 
-#### Scenario: A change is blocked
+#### Scenario: A dependency lands
 
-- **WHEN** a change's row records the status `blocked`
-- **THEN** the same row names what it is blocked on in its explanation column
+- **WHEN** a change that another row depends on completes closeout, and that
+  dependent has a reviewed design and a plan but has not begun implementation
+- **THEN** the completing change removes itself from the dependent's `Depends on`
+  and sets the dependent to `ready for design`, and the dependent's design is
+  reviewed again before it is planned or implemented
+
+#### Scenario: Local work waits on an external input
+
+- **WHEN** a change cannot finish implementation until an input outside the
+  repository is available
+- **THEN** its status is `blocked in implementation` and its explanatory column
+  names the input
 
 ### Requirement: Campaign priority order
 
@@ -40,13 +59,20 @@ Reviews, review triage, and validation reports produced while a change is worked
 MUST be written under that change's `reviews/` directory, MUST NOT be tracked by
 version control, and MUST NOT be cited by permanent documentation. Anything durable
 in them MUST reach permanent documentation through the ordinary promotion path
-before archival.
+before archival. A change's intervention ledger is not a review record: it is
+tracked, stays in the change directory, and is archived with the change.
 
 #### Scenario: A review finding changes the design
 
 - **WHEN** a review finding leads to an accepted design decision
 - **THEN** the decision is recorded in the change's `design.md` and promoted at
   closeout, and nothing permanent cites the review file
+
+#### Scenario: A change is archived after reviews
+
+- **WHEN** a change that was reviewed is archived
+- **THEN** its `reviews/` directory is gone and its intervention ledger is in the
+  archived change directory
 
 ### Requirement: Harness-neutral agent skills
 

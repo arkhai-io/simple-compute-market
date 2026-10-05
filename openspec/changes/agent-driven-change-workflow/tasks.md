@@ -12,16 +12,23 @@ section depends on it. Sections 3 onward record the pilot evidence that proves t
 - [ ] 1.4 Add `make check-agent-skills`: every skill is present for every harness,
       every link resolves, and no harness directory holds a copy of a skill that
       has a shared source. Wire it into the existing check aggregate.
-- [ ] 1.5 Add `openspec/changes/*/reviews/` and the ledger path to `.gitignore`.
+- [ ] 1.5 Add `reviews/` directories under `openspec/changes/`, archived ones
+      included, to `.gitignore`.
 
 ## 2. Index format and priority
 
-- [ ] 2.1 Add the `Status` / `Notes` column split to every change table in
-      `openspec/changes/README.md`, mapping each existing status into the
-      vocabulary and moving its prose into `Notes`; record the mapping of any
-      non-obvious status in `design.md`.
-- [ ] 2.2 Rewrite the index's status definitions to the vocabulary.
+- [ ] 2.1 Replace every change table's status cell in `openspec/changes/README.md`
+      with `Status`, `Depends on`, and `Notes` columns, checking each row against
+      its own change's `proposal.md`, `design.md`, and `tasks.md` rather than
+      transcribing its prose. List for the owner every row whose recorded state
+      the change does not support.
+- [ ] 2.2 Rewrite the index's status definitions to the phase-and-state vocabulary
+      and the `Depends on` rule.
 - [ ] 2.3 Add the campaign priority list at the top of the index.
+- [ ] 2.4 Amend part 6 (campaign index currency) of
+      `openspec/README.md#plan-closeout-requirements`: a completing change removes
+      itself from every dependent's `Depends on` and returns each dependent that
+      has not begun implementation to `ready for design`.
 
 ## 3. Change review
 
@@ -42,7 +49,8 @@ section depends on it. Sections 3 onward record the pilot evidence that proves t
 
 - [ ] 4.1 Write the `change-triage` skill: a position with evidence on every
       finding, every finding presented ordered by lens then severity, owner
-      dispositions recorded in the triage file, one ledger line per disposition,
+      dispositions recorded in the triage file, one line per disposition appended
+      to the change's tracked `interventions.jsonl`,
       accepted outcomes folded into `design.md` or `tasks.md`.
 - [ ] 4.2 Pilot: triage the 3.4 review.
 
@@ -59,10 +67,15 @@ section depends on it. Sections 3 onward record the pilot evidence that proves t
 
 - [ ] 6.1 Add a `make` target running `make lock`, `make check-packaging`, and
       `make test`, stopping at the first failure with a summary.
-- [ ] 6.2 Write the `change-validate` skill: the local target, the end-to-end
-      workflow and its logs, the Helm end-to-end run when owed, diagnosis of a
-      failing scenario from its logs, and `reviews/NN-validation.md`.
-- [ ] 6.3 Pilot: validate the first implementation slice of
+- [ ] 6.2 Make end-to-end log fetching select the run whose head commit is the
+      local `HEAD`, waiting with a bound for a just-dispatched run to appear,
+      instead of the newest run on the branch.
+- [ ] 6.3 Write the `change-validate` skill: the local target; pushing the
+      change's own branch, the end-to-end workflow, and its logs; the Helm half
+      (`make build-dev`, `helm/` deploy and forward, `e2e-tests/` test-module,
+      unforward) when owed; diagnosis of a failing scenario from its logs; and
+      `reviews/NN-validation.md`.
+- [ ] 6.4 Pilot: validate the first implementation slice of
       `capacity-shape-envelope`, then run an implementation review and triage on it.
 
 ## 7. Implementation
@@ -70,7 +83,8 @@ section depends on it. Sections 3 onward record the pilot evidence that proves t
 - [ ] 7.1 Write the `change-implement` skill: one `tasks.md` section per slice,
       preserving completed tasks, stopping for design when discovered code
       invalidates the plan, comment rules stated locally, ending with
-      `change-validate`. Decide whether it wraps or replaces `openspec-apply-change`.
+      committing the finished slice unreviewed, then `change-validate`. Decide
+      whether it wraps or replaces `openspec-apply-change`.
 - [ ] 7.2 Pilot: implement `capacity-shape-envelope` through its remaining
       sections, with a pre-closeout review and triage.
 
