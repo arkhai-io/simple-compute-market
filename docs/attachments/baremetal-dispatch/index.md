@@ -1,6 +1,6 @@
 # Bare-metal settlement dispatch — implementation evidence
 
-Tested code: `355f6de7` on `baremetal-dispatch`, base `1fd0a4cd`. These are implementation self-checks, not independent acceptance or live payment/hardware qualification.
+Tested code: `4d079333` on `baremetal-dispatch`, base `1fd0a4cd`. These are implementation self-checks, not independent acceptance or live payment/hardware qualification.
 
 ## Setup and first use
 
