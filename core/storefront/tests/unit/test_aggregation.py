@@ -82,17 +82,11 @@ class FakeSite:
 
     async def commit(self, *, resource_id, capacity_reservation_id=None,
                      lease_start_utc=None, lease_duration_seconds=None,
-                     lease_end_utc=None, idempotency_ref=None) -> dict:
+                     lease_end_utc=None, idempotency_ref=None) -> None:
         self._check()
         if capacity_reservation_id not in self.reservations:
             raise LookupError(f"unknown reservation {capacity_reservation_id}")
         self.committed.append(capacity_reservation_id)
-        return {
-            "capacity_reservation_id": capacity_reservation_id,
-            "state": "leased",
-            "lease_start_utc": lease_start_utc,
-            "lease_end_utc": lease_end_utc,
-        }
 
     async def release(self, *, capacity_reservation_id=None, deal_ref=None, **extra):
         self._check()
@@ -206,15 +200,13 @@ async def test_writes_route_to_the_owning_site():
     )
     capacity_reservation_id = reserved["capacity_reservation_id"]
 
-    committed = await client.commit(
+    await client.commit(
         resource_id=reserved["resource_id"],
         capacity_reservation_id=capacity_reservation_id,
         lease_start_utc="2099-01-01T00:00:00Z",
         lease_end_utc="2099-01-01 01:00",
     )
     assert a.committed == [capacity_reservation_id]
-    # The owning site's recorded reservation, tagged with the site.
-    assert (committed["site"], committed["lease_end_utc"]) == ("dc-a", "2099-01-01 01:00")
 
     truncated = await client.truncate_lease(
         capacity_reservation_id=capacity_reservation_id, lease_end_utc="2026-01-01 00:00",

@@ -157,13 +157,8 @@ class SiteCapacityAuthority(Protocol):
         lease_start_utc: str | None = None,
         lease_end_utc: str | None = None,
         idempotency_ref: str | None = None,
-    ) -> dict[str, Any] | None:
-        """Confirm a reservation into an active lease; the reservation as recorded.
-
-        The returned reservation carries the window the authority recorded,
-        which is not always the one named: once a lease is registered on the
-        reservation, a commit leaves its window alone. A caller that registers
-        a lease after committing registers this window.
+    ) -> None:
+        """Confirm a reservation into an active lease.
 
         ``resource_id`` is optional: the opaque capacity-reservation
         boundary does not guarantee a caller has one (``reserve()``'s

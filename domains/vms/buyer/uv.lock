@@ -396,7 +396,7 @@ dev = [
 
 [[package]]
 name = "arkhai-vms-listings"
-version = "0.4.1"
+version = "0.4.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-alkahest" },
@@ -406,7 +406,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_vms_listings-0.4.1-py3-none-any.whl" },
+    { path = "arkhai_vms_listings-0.4.0-py3-none-any.whl" },
 ]
 
 [[package]]

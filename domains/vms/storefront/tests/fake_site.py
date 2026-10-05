@@ -71,12 +71,6 @@ class FakeSite:
         self.verifiable = True
         #: ``(method, path)`` of every request that reached the site.
         self.requests: list[tuple[str, str]] = []
-        #: Reservations fulfillment delivered against: the site's release
-        #: guard refuses to free them, as the provisioning service's does.
-        self.delivered: set[str] = set()
-        #: Reservations with a registered lease: a commit leaves their window
-        #: alone and answers with the one recorded, as the site does.
-        self.registered: set[str] = set()
 
     def add_resource(
         self,
@@ -290,8 +284,6 @@ class FakeSite:
             reservation = self.reservations.get(capacity_reservation_id)
             if reservation is None:
                 return httpx.Response(404, json={"detail": "not found"})
-            if capacity_reservation_id in self.registered:
-                return httpx.Response(200, json={"reservation": reservation})
             reservation["state"] = "leased"
             reservation["lease_start_utc"] = body.get("lease_start_utc")
             reservation["lease_end_utc"] = body.get("lease_end_utc")
@@ -314,8 +306,6 @@ class FakeSite:
                     None,
                 )
             if reservation is None or reservation["state"] == "released":
-                return httpx.Response(200, json={"reservation": None})
-            if reservation["capacity_reservation_id"] in self.delivered:
                 return httpx.Response(200, json={"reservation": None})
             reservation["state"] = "released"
             reservation["failure_reason"] = body.get("failure_reason")
