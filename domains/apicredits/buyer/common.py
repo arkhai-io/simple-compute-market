@@ -6,6 +6,8 @@ chain selection, registry binding, and API-credit flags remain domain-owned.
 
 from __future__ import annotations
 
+import json
+
 import typer
 from collections.abc import Callable
 from typing import Any
@@ -213,7 +215,7 @@ def make_run_publisher_principals_refresh(
             raise RuntimeError("publisher refresh changed listing subject binding")
         value: Any = listing.get("publisher_principals")
         try:
-            return TrustedIdentitySet.model_validate(value)
+            return TrustedIdentitySet.model_validate_json(json.dumps(value))
         except (TypeError, ValueError) as exc:
             raise RuntimeError(
                 "publisher refresh returned invalid principal trust",
