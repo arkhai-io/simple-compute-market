@@ -1,5 +1,8 @@
-Each leaf skill is proven on the pilot, `capacity-shape-envelope`, before a later
-section depends on it. Sections 3 onward record the pilot evidence that proves them.
+Skills are written in the order the workflow uses them, and each is proven on a
+pilot before the next is written. `capacity-shape-envelope` runs the whole
+sequence; `add-full-stack-ci-job` proves design and planning from a bare proposal.
+A pilot task records what the skill produced and what, if anything, the owner had
+to repair by hand.
 
 ## 1. Shared skill source
 
@@ -15,111 +18,137 @@ section depends on it. Sections 3 onward record the pilot evidence that proves t
 - [ ] 1.5 Add `reviews/` directories under `openspec/changes/`, archived ones
       included, to `.gitignore`.
 
-## 2. Index format and priority
+## 2. Index format
 
 - [ ] 2.1 Replace every change table's status cell in `openspec/changes/README.md`
       with `Status`, `Depends on`, and `Notes` columns, checking each row against
       its own change's `proposal.md`, `design.md`, and `tasks.md` rather than
-      transcribing its prose. List for the owner every row whose recorded state
-      the change does not support.
+      transcribing its prose, and naming the gated phase of every dependency that
+      gates earlier than implementation. List for the owner every row whose
+      recorded state the change does not support.
 - [ ] 2.2 Rewrite the index's status definitions to the phase-and-state vocabulary
       and the `Depends on` rule.
-- [ ] 2.3 Add the campaign priority list at the top of the index.
-- [ ] 2.4 Amend part 6 (campaign index currency) of
-      `openspec/README.md#plan-closeout-requirements`: a completing change removes
-      itself from every dependent's `Depends on` and returns each dependent that
-      has not begun implementation to `ready for design`.
+- [ ] 2.3 Amend part 6 (campaign index currency) of
+      `openspec/README.md#plan-closeout-requirements` with the dependency-landing
+      step: remove the completing change from every dependent's `Depends on`,
+      return each dependent not yet implementing to `ready for design`, and record
+      reverification as owed on a `blocked in` dependent rather than overwriting it.
 
-## 3. Change review
+## 3. Design discussion
 
-- [ ] 3.1 Write the finding schema: lens, basis, severity, claim, cited evidence,
-      suggested action.
-- [ ] 3.2 Write the `change-review` skill, taking the review kind (`design`,
+- [ ] 3.1 Write the `change-design` skill: the context preload, numbered open
+      questions with options, trade-offs, and a recommendation, no file edits until
+      the owner settles the design, then decisions recorded in `design.md` and
+      `proposal.md` amended when scope moves.
+- [ ] 3.2 Pilot: resolve `capacity-shape-envelope`'s open questions; the owner
+      judges depth against a browser session on the same questions.
+- [ ] 3.3 Pilot: design `add-full-stack-ci-job` from its proposal.
+
+## 4. Planning
+
+- [ ] 4.1 Write the `change-plan` skill on top of `openspec-update-change`: tasks
+      from the settled design, completed tasks preserved and amended rather than
+      replaced, the files each accepted decision touches, the validation each
+      section owes, each decision's permanent destination, and the closeout task.
+- [ ] 4.2 Pilot: amend `capacity-shape-envelope`'s existing plan to its settled
+      design.
+- [ ] 4.3 Pilot: plan `add-full-stack-ci-job` from nothing.
+
+## 5. Change review
+
+- [ ] 5.1 Write the `change-review` skill, taking the review kind (`design`,
       `implementation`, `pre-closeout`, `closeout`) and the change: documents to
       read first, the diff to inspect, the questions per kind tagged by lens,
-      prompting for the `direction` lens as design discussion, reading earlier
-      reviews and triage from `reviews/`, and writing prose and structured findings.
-- [ ] 3.3 Add `make review CHANGE=<change> KIND=<kind>`, running the skill in Codex
-      non-interactively with a read-only sandbox and writing the next numbered
-      files into `reviews/`.
-- [ ] 3.4 Pilot: a design review of `capacity-shape-envelope`, compared against a
-      browser-process review of the same design for missed or extra findings.
+      prompting for the `direction` lens as design discussion and for the
+      compliance lenses as exhaustive cited checking, reading earlier reviews and
+      triage from `reviews/`, and producing one Markdown review whose findings
+      carry lens, basis, severity, and evidence in the fixed field layout.
+- [ ] 5.2 Add `make review CHANGE=<change> KIND=<kind>`, running the skill in Codex
+      non-interactively with a read-only sandbox and capturing its final message
+      as the next numbered file in `reviews/`.
+- [ ] 5.3 Pilot: design review of `capacity-shape-envelope`, also run through the
+      browser process. Passes if no `blocking` or `should` browser finding the
+      owner accepts is absent from the harness review.
 
-## 4. Review triage and the intervention ledger
+## 6. Review triage and the intervention ledger
 
-- [ ] 4.1 Write the `change-triage` skill: a position with evidence on every
+- [ ] 6.1 Write the `change-triage` skill: a position with evidence on every
       finding, every finding presented ordered by lens then severity, owner
       dispositions recorded in the triage file, one line per disposition appended
-      to the change's tracked `interventions.jsonl`,
-      accepted outcomes folded into `design.md` or `tasks.md`.
-- [ ] 4.2 Pilot: triage the 3.4 review.
-
-## 5. Design discussion
-
-- [ ] 5.1 Write the `change-design` skill: the context preload, numbered open
-      questions with options, trade-offs, and a recommendation, no file edits until
-      the design is settled, then decisions recorded in `design.md` and
-      `proposal.md` amended when scope moves.
-- [ ] 5.2 Pilot: resolve `capacity-shape-envelope`'s open questions, compared
-      against a browser session on the same questions for depth.
-
-## 6. Pre-review validation
-
-- [ ] 6.1 Add a `make` target running `make lock`, `make check-packaging`, and
-      `make test`, stopping at the first failure with a summary.
-- [ ] 6.2 Make end-to-end log fetching select the run whose head commit is the
-      local `HEAD`, waiting with a bound for a just-dispatched run to appear,
-      instead of the newest run on the branch.
-- [ ] 6.3 Write the `change-validate` skill: the local target; pushing the
-      change's own branch, the end-to-end workflow, and its logs; the Helm half
-      (`make build-dev`, `helm/` deploy and forward, `e2e-tests/` test-module,
-      unforward) when owed; diagnosis of a failing scenario from its logs; and
-      `reviews/NN-validation.md`.
-- [ ] 6.4 Pilot: validate the first implementation slice of
-      `capacity-shape-envelope`, then run an implementation review and triage on it.
+      to the change's tracked `interventions.jsonl`, and accepted outcomes folded
+      into `design.md` or `tasks.md`.
+- [ ] 6.2 Pilot: triage the 5.3 review.
 
 ## 7. Implementation
 
 - [ ] 7.1 Write the `change-implement` skill: one `tasks.md` section per slice,
       preserving completed tasks, stopping for design when discovered code
-      invalidates the plan, comment rules stated locally, ending with
-      committing the finished slice unreviewed, then `change-validate`. Decide
-      whether it wraps or replaces `openspec-apply-change`.
-- [ ] 7.2 Pilot: implement `capacity-shape-envelope` through its remaining
-      sections, with a pre-closeout review and triage.
+      invalidates the plan, comment rules stated locally, and ending with
+      `make lock` and `make check-packaging` before committing the finished slice
+      unreviewed. Decide whether it wraps or replaces `openspec-apply-change`.
+- [ ] 7.2 Pilot: implement the first section of `capacity-shape-envelope`.
 
-## 8. Closeout and archival
+## 8. Pre-review validation
 
-- [ ] 8.1 Write the `change-closeout` skill over the ten parts of
+- [ ] 8.1 Add a `make` target running `make check-packaging` and `make test`,
+      failing if the worktree is not clean before or after, and stopping at the
+      first failure with a summary.
+- [ ] 8.2 Add `make check-push-ready`: refuse a detached `HEAD`, a dirty worktree,
+      `main` or `dev`, and an upstream named differently from the local branch;
+      report and never repair.
+- [ ] 8.3 Make end-to-end log fetching select the run whose head commit is the
+      local `HEAD`, waiting with a bound for a just-dispatched run to appear,
+      instead of the newest run on the branch, with tests for both gaps.
+- [ ] 8.4 Write the `change-validate` skill: the local target; when owed, the Helm
+      part (`make -C helm test-render` with the VM storefront environment present,
+      `make build-dev`, `helm/` deploy and forward, `e2e-tests/` test-module,
+      unforward); `make check-push-ready`, pushing exactly `HEAD` unforced, the
+      end-to-end workflow, and its logs; diagnosis of a failing scenario from its
+      logs; and `reviews/NN-validation.md`.
+- [ ] 8.5 Pilot: validate the 7.2 slice, then run an implementation review and
+      triage on it with the section 5 and 6 skills.
+
+## 9. Closeout and archival
+
+- [ ] 9.1 Write the `change-closeout` skill over the ten parts of
       `openspec/README.md#plan-closeout-requirements`, running each mechanical part
       and reporting the parts that need judgement.
-- [ ] 8.2 Write the `change-ship` skill: archival, deleting `reviews/`, and drafting
-      the commit message and pull request description from the proposal, the
-      promotion record, and the validation evidence.
-- [ ] 8.3 Pilot: close out, closeout-review, triage, and archive
-      `capacity-shape-envelope`.
+- [ ] 9.2 Write the `change-ship` skill: archival with the intervention ledger kept
+      and `reviews/` deleted, and drafting the commit message and pull request
+      description from the proposal, the promotion record, and the validation
+      evidence.
+- [ ] 9.3 Pilot: implement `capacity-shape-envelope`'s remaining sections, then
+      pre-closeout review and triage, closeout, closeout review and triage, and
+      archival.
 
-## 9. Shared guidance
+## 10. Shared guidance
 
-- [ ] 9.1 Remove the "Generated implementation artifacts" section and the fileset
+- [ ] 10.1 Remove the "Generated implementation artifacts" section and the fileset
       wording from `AGENTS.md`, and the tombstone item from the
-      `openspec/README.md` completion checklist.
-- [ ] 9.2 Document the leaf skills, the review flow, and the ledger in
-      `docs/agents/`, linked from `AGENTS.md`'s "Agent skills" section.
-- [ ] 9.3 Confirm no committed skill refers to `docs/prompts/`.
+      `openspec/README.md` completion checklist. Confirm the browser session
+      prompts still carry the whole tombstone convention, including that no
+      tombstone survives into production code or permanent documentation.
+- [ ] 10.2 Write `docs/agents/change-workflow.md`: invoking each leaf skill and
+      `make review`, the review file layout, and the ledger; link it from
+      `AGENTS.md`'s "Agent skills" section.
+- [ ] 10.3 Confirm no committed skill refers to `docs/prompts/`.
 
-## 10. Closeout
+## 11. Closeout
 
-- [ ] 10.1 Comment hygiene: `make check-comment-hygiene`.
-- [ ] 10.2 Import placement: confirm no Python import was added or touched.
-- [ ] 10.3 Documentation compliance: re-check this change's decisions against
+- [ ] 11.1 Comment hygiene: `make check-comment-hygiene`.
+- [ ] 11.2 Import placement: review the imports this change added or touched,
+      including in `scripts/fetch-e2e-logs.py`.
+- [ ] 11.3 Documentation compliance: re-check this change's decisions against
       `openspec/README.md`'s placement rules.
-- [ ] 10.4 Narrative compression of completed-task notes.
-- [ ] 10.5 Roadmap currency: record that no roadmap goal is affected, or update it.
-- [ ] 10.6 Campaign index currency: this change's row and the priority list.
-- [ ] 10.7 Documentation citations: `make check-doc-citations CHANGE=agent-driven-change-workflow`.
-- [ ] 10.8 Packaging: `make check-packaging`.
-- [ ] 10.9 End-to-end pipeline: record the run, or record that this change alters
-      no pipeline behaviour.
-- [ ] 10.10 Promotion: complete the design-promotion record, including the four
-      `planning-governance` requirements and the `docs/agents/` documentation.
+- [ ] 11.4 Narrative compression of completed-task notes.
+- [ ] 11.5 Roadmap currency: record that no roadmap goal is affected, or update it.
+- [ ] 11.6 Campaign index currency: this change's row, including the
+      dependency-landing step for any dependent.
+- [ ] 11.7 Documentation citations: `make check-doc-citations CHANGE=agent-driven-change-workflow`.
+- [ ] 11.8 Packaging: `make check-packaging`.
+- [ ] 11.9 End-to-end pipeline: record a passing run and the scenarios it covers,
+      or an explicit blocker naming its cause and owner.
+- [ ] 11.10 Promotion: complete the design-promotion record against the proposal's
+      knowledge-to-promote list — `change-workflow` spec and architecture
+      companion, the three `planning-governance` requirements, closeout part 6,
+      `AGENTS.md`, and `docs/agents/change-workflow.md`.
