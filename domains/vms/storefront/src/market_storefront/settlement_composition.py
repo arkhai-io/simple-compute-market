@@ -49,11 +49,11 @@ from market_settlement_runtime import (
 
 from market_storefront.arkhai_payments import VmArkhaiPaymentsStage
 from market_storefront.payment_settlement import VmPaymentsCoordinator
-from market_storefront.settlement_stages import resolve_proposal_stage
 from market_storefront.services.capacity_client import (
     build_capacity_runtime,
     capacity_binding_for_listing,
 )
+from market_storefront.settlement_stages import resolve_proposal_stage
 from market_storefront.utils import config as storefront_config
 from market_storefront.utils import escrow_verification
 
@@ -98,13 +98,13 @@ class VmSettlementComposition:
             role="seller",
             resources=self.mechanism_resources,
         )
-        return tuple(status for status in statuses if status.mechanism in self.seller_stages)
+        return tuple(
+            status for status in statuses if status.mechanism in self.seller_stages
+        )
 
     def accepted_obligation_dispatch(
         self,
-    ) -> dict[
-        str, Callable[[Mapping[str, Any], Mapping[str, Any]], Any] | None
-    ]:
+    ) -> dict[str, Callable[[Mapping[str, Any], Mapping[str, Any]], Any] | None]:
         """Curried registry dispatch for every enabled obligation-building mechanism."""
 
         dispatch: dict[
@@ -161,11 +161,15 @@ class VmSettlementComposition:
         if compiled is not None:
             for clause in compiled:
                 if clause.mechanism not in self.seller_stages:
-                    raise ValueError(f"settlement publication mechanism {clause.mechanism!r} is unsupported")
+                    raise ValueError(
+                        f"settlement publication mechanism {clause.mechanism!r} is unsupported"
+                    )
             for mechanism, stage in self.seller_stages.items():
                 readiness_resources = {
                     **readiness_resources,
-                    **stage.readiness_inputs([clause for clause in compiled if clause.mechanism == mechanism]),
+                    **stage.readiness_inputs(
+                        [clause for clause in compiled if clause.mechanism == mechanism]
+                    ),
                 }
 
         readiness = await self.configuration_registry.ordered_readiness(
@@ -173,7 +177,9 @@ class VmSettlementComposition:
             role="seller",
             resources=readiness_resources,
         )
-        readiness = tuple(status for status in readiness if status.mechanism in self.seller_stages)
+        readiness = tuple(
+            status for status in readiness if status.mechanism in self.seller_stages
+        )
         accepted_escrows: list[dict[str, Any]] = []
         settlement_options: list[dict[str, Any]] = []
         statuses = {status.mechanism: status for status in readiness}
@@ -228,9 +234,12 @@ class VmSettlementComposition:
 
 
 def build_storefront_settlement_registry() -> SettlementConfigurationRegistry:
-    return SettlementConfigurationRegistry((
-        create_alkahest_registration(), create_arkhai_payments_registration(),
-    ))
+    return SettlementConfigurationRegistry(
+        (
+            create_alkahest_registration(),
+            create_arkhai_payments_registration(),
+        )
+    )
 
 
 def build_storefront_publication_clause_compiler() -> Callable[
@@ -255,7 +264,9 @@ def _settlement_plan_obligations(
     context: StorefrontSettlementBuildContext,
 ) -> tuple[dict[str, Any], ...]:
     stage = resolve_proposal_stage(domain.settlement.seller_stages, context.proposal)
-    artifacts = build_domain_settlement_artifacts(domain, context, build_plan=stage.build_plan)
+    artifacts = build_domain_settlement_artifacts(
+        domain, context, build_plan=stage.build_plan
+    )
     obligations = artifacts.settlement_plan["obligations"]
     return tuple(dict(item) for item in obligations)
 
@@ -370,10 +381,17 @@ async def prepare_vm_settlement(
     agreement = json.loads(raw)
     stage = domain.settlement.seller_stages[agreement["settlement"]["mechanism"]]
     evidence = stage.verified_evidence(
-        raw=raw, order=dict(order), chain_configs=storefront_config.CHAINS,
-        source={"escrow_uid": escrow_uid, "chain_name": accepted_chain,
-                "escrow_address": proposal.escrow_address, "obligation_ref": obligation_ref,
-                "obligation_index": obligation_index, "expiration_unix": proposal.expiration_unix},
+        raw=raw,
+        order=dict(order),
+        chain_configs=storefront_config.CHAINS,
+        source={
+            "escrow_uid": escrow_uid,
+            "chain_name": accepted_chain,
+            "escrow_address": proposal.escrow_address,
+            "obligation_ref": obligation_ref,
+            "obligation_index": obligation_index,
+            "expiration_unix": proposal.expiration_unix,
+        },
     )
     await sqlite_client.save_vm_settlement_evidence(evidence)
 
@@ -433,11 +451,23 @@ async def reserve_vm_settlement_start(
     await context.sqlite_client.save_vm_settlement_evidence(evidence)
     await context.sqlite_client.insert_vm_delivery(negotiation_id=negotiation_id)
     if inserted:
+        start_utc = (
+            evidence.evidence.get("delivery", {}).get("payload", {}).get("start_utc")
+        )
+        start = (
+            datetime.fromisoformat(start_utc.replace("Z", "+00:00"))
+            if start_utc
+            else datetime.now(timezone.utc)
+        )
         claimed = await context.sqlite_client.claim_vm_delivery(
-            negotiation_id=negotiation_id, owner=context.convergence_owner,
-            lease_until=(datetime.now(timezone.utc) + timedelta(
-                seconds=float(storefront_config.settings.provisioning.timeout) + 60,
-            )).isoformat(),
+            negotiation_id=negotiation_id,
+            owner=context.convergence_owner,
+            lease_until=(
+                max(start, datetime.now(timezone.utc))
+                + timedelta(
+                    seconds=float(storefront_config.settings.provisioning.timeout) + 60,
+                )
+            ).isoformat(),
         )
         if not claimed:
             return row
@@ -457,6 +487,7 @@ async def fulfill_vm_settlement(
     *,
     sqlite_client: Any,
     mechanism_client: Any,
+    bind_fulfillment_fn: Any = None,
 ) -> FulfillmentOutcome:
     fulfillment_input = prepared.fulfillment_input
     if not isinstance(fulfillment_input, StorefrontSettlementFulfillmentInput):
@@ -469,13 +500,20 @@ async def fulfill_vm_settlement(
         raise TypeError("VM settlement provision input is missing")
     if not isinstance(listing_id, str) or not isinstance(order, dict):
         raise TypeError("VM settlement listing input is missing")
-    selected_obligation = prepared.obligations[prepared.selected_obligation_index]
-    delivery_client = mechanism_client
     delivery_anchor = prepared.mechanism_ref
     if not delivery_anchor:
         raise ValueError("settlement fulfillment anchor is unavailable")
-    if fulfillment_input.settlement_evidence is None or fulfillment_input.settlement_evidence.status != "verified":
+    if (
+        fulfillment_input.settlement_evidence is None
+        or fulfillment_input.settlement_evidence.status != "verified"
+    ):
         raise ValueError("VM fulfillment requires verified settlement evidence")
+    evidence = fulfillment_input.settlement_evidence
+    thread = await sqlite_client.load_negotiation_thread_row(
+        negotiation_id=evidence.negotiation_id
+    )
+    agreement = json.loads(thread["agreement_bytes"])
+    stage = domain.settlement.seller_stages[agreement["settlement"]["mechanism"]]
     lifecycle = await fulfill_domain(
         domain,
         StorefrontFulfillmentContext(
@@ -483,17 +521,14 @@ async def fulfill_vm_settlement(
             settlement_evidence=fulfillment_input.settlement_evidence,
             buyer_principal=fulfillment_input.buyer_principal,
             ports=StorefrontFulfillmentPorts(
-                repository=sqlite_client.vm_delivery_repository(fulfillment_input.negotiation_id),
+                repository=sqlite_client,
                 capacity_client=None,
-                fulfillment_client=delivery_client,
+                fulfillment_client=None,
             ),
             domain_input={
-                "ssh_public_key": provision.ssh_public_key,
-                "order": order,
-                "duration_seconds": provision.duration_seconds,
-                "start_utc": provision.start_utc,
-                "listing_id": listing_id,
-                "settlement_mechanism": str(selected_obligation.get("mechanism") or ""),
+                "failure_policy": partial(
+                    stage.delivery_failed, evidence=evidence, db=sqlite_client
+                )
             },
         ),
     )
@@ -512,7 +547,17 @@ async def fulfill_vm_settlement(
             private_result=result,
             reason=result.get("message") or f"status={result.get('status')!r}",
         )
-    fulfillment_uid = lifecycle.fulfillment_id or result.get("fulfillment_uid")
+    delivery = await sqlite_client.load_vm_delivery(
+        negotiation_id=evidence.negotiation_id
+    )
+    fulfillment_uid = await stage.continue_delivery(
+        evidence=evidence,
+        db=sqlite_client,
+        delivery=delivery,
+        connection_json=result["connection_details"],
+        client=mechanism_client,
+        bind=bind_fulfillment_fn,
+    )
     if not isinstance(fulfillment_uid, str) or not fulfillment_uid.strip():
         return FulfillmentOutcome(
             status="failed",
@@ -558,10 +603,14 @@ async def persist_vm_settlement_outcome(
         status="ready" if outcome.status == "fulfilled" else "failed",
         fulfillment_uid=outcome.fulfillment_ref,
         connection_details=private.get("connection_details"),
-        tenant_credentials=json.dumps(private["tenant_credentials"]) if private.get("tenant_credentials") is not None else None,
+        tenant_credentials=json.dumps(private["tenant_credentials"])
+        if private.get("tenant_credentials") is not None
+        else None,
         reason=outcome.reason,
     )
-    await context.sqlite_client.release_vm_delivery(negotiation_id=context.negotiation_id, owner=context.convergence_owner)
+    await context.sqlite_client.release_vm_delivery(
+        negotiation_id=context.negotiation_id, owner=context.convergence_owner
+    )
     if outcome.status == "fulfilled":
         await context.sqlite_client.update_escrow(
             escrow_uid=context.escrow_uid,
@@ -609,7 +658,7 @@ def serialize_settlement_job(row: Mapping[str, Any]) -> dict[str, Any]:
         "created_at": row.get("created_at"),
         "updated_at": row.get("updated_at"),
     }
-    for field in (
+    for key in (
         "obligation_ref",
         "fulfillment_uid",
         "fulfillment_id",
@@ -619,9 +668,9 @@ def serialize_settlement_job(row: Mapping[str, Any]) -> dict[str, Any]:
         "connection_details",
         "reason",
     ):
-        value = row.get(field)
+        value = row.get(key)
         if value is not None:
-            out[field] = value
+            out[key] = value
     if row.get("is_primary") is not None:
         out["is_primary"] = bool(row["is_primary"])
     tenant_credentials = row.get("tenant_credentials")
@@ -864,6 +913,13 @@ def build_vm_settlement_composition(
             await worker.wake(context.obligation_ref)
         return existing
 
+    async def bind_delivery_claim(*, obligation_ref: str, fulfillment_ref: str) -> None:
+        await runtime.bind_fulfillment(
+            obligation_ref,
+            fulfillment_ref,
+            local_principal=marketplace_signer.identity,
+        )
+
     coordinator = SettlementJobCoordinator(
         runtime,
         prepare=partial(
@@ -877,6 +933,7 @@ def build_vm_settlement_composition(
             fulfill_vm_settlement,
             domain,
             sqlite_client=sqlite_client,
+            bind_fulfillment_fn=bind_delivery_claim,
         ),
         persist_outcome=persist_vm_settlement_outcome,
         wake_servicing=wake_servicing,
@@ -900,7 +957,10 @@ def build_vm_settlement_composition(
         configuration_registry=registry,
         mechanism_resources=mechanism_resources,
         arkhai_payments_stage=payments_stage,
-        payments_coordinator=VmPaymentsCoordinator(domain=domain, db=sqlite_client, stage=payments_stage)
-        if payments_stage is not None else None,
+        payments_coordinator=VmPaymentsCoordinator(
+            domain=domain, db=sqlite_client, stage=payments_stage
+        )
+        if payments_stage is not None
+        else None,
     )
     return composition

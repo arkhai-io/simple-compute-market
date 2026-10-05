@@ -1,12 +1,14 @@
+from functools import partial
 from types import SimpleNamespace
-from market_core import SettlementEvidence
 from unittest.mock import AsyncMock
 
 import pytest
 
-from market_storefront.services.fulfillment_resume_runtime import converge_escrow_once
+from market_storefront.services.fulfillment_resume_runtime import converge_delivery_once
+from market_storefront.settlement_stages import VmAlkahestSellerStage
 from tests.fulfillment_fixtures import (
     make_vm_lifecycle_fixture,
+    vm_delivery_evidence,
     vm_fulfillment_result,
 )
 
@@ -14,23 +16,14 @@ from tests.fulfillment_fixtures import (
 @pytest.mark.asyncio
 async def test_known_fulfillment_resumes_without_schedule_or_begin(tmp_path):
     lifecycle = await make_vm_lifecycle_fixture(tmp_path / "known.db")
-    evidence = SettlementEvidence(
-        negotiation_id="neg-1", mechanism="alkahest.v1", settlement_ref="escrow-1", status="verified",
-        evidence={"schema": "vm.settlement-evidence.v1", "agreement_sha256": "1" * 64,
-                  "source": {"chain_name": "anvil", "escrow_address": "0x" + "11" * 20}},
-    )
-    await lifecycle.db.save_vm_settlement_evidence(evidence)
-    await lifecycle.db.insert_vm_delivery(negotiation_id="neg-1")
-    original = await lifecycle.db.load_escrow(escrow_uid="escrow-1")
-    delivery = lifecycle.db.vm_delivery_repository("neg-1")
-    await delivery.update_escrow(escrow_uid="escrow-1", fulfillment_context=original["fulfillment_context"])
-    await delivery.update_escrow(
-        escrow_uid="escrow-1",
+    delivery = lifecycle.db
+    await delivery.update_vm_delivery(
+        negotiation_id="neg-1",
         capacity_reservation_id="reservation-1",
         settlement_resource_id="resource-1",
         fulfillment_id="fulfillment-1",
     )
-    db = lifecycle.reopen().vm_delivery_repository("neg-1")
+    db = lifecycle.reopen()
     remote = SimpleNamespace(
         schedule_resource=AsyncMock(),
         begin_fulfillment=AsyncMock(),
@@ -44,11 +37,16 @@ async def test_known_fulfillment_resumes_without_schedule_or_begin(tmp_path):
             )
         ),
     )
-    escrow = await db.load_escrow(escrow_uid="escrow-1")
+    escrow = await db.load_vm_delivery(negotiation_id="neg-1")
     assert escrow is not None
 
     assert (
-        await converge_escrow_once(escrow, sqlite_client=db, fulfillment_client=remote)
+        await converge_delivery_once(
+            escrow,
+            evidence=lifecycle.evidence,
+            sqlite_client=db,
+            fulfillment_client=remote,
+        )
         is True
     )
     remote.schedule_resource.assert_not_awaited()
@@ -63,7 +61,7 @@ async def test_known_fulfillment_resumes_without_schedule_or_begin(tmp_path):
         capacity_reservation_id="reservation-1",
         site_id="site-1",
     )
-    persisted = await db.load_escrow(escrow_uid="escrow-1")
+    persisted = await db.load_vm_delivery(negotiation_id="neg-1")
     assert persisted is not None
     assert persisted["fulfillment_phase"] == "physical_result_recorded"
 
@@ -71,8 +69,8 @@ async def test_known_fulfillment_resumes_without_schedule_or_begin(tmp_path):
 @pytest.mark.asyncio
 async def test_active_result_must_match_persisted_fulfillment_identity(tmp_path):
     lifecycle = await make_vm_lifecycle_fixture(tmp_path / "mismatched-result.db")
-    await lifecycle.db.update_escrow(
-        escrow_uid="escrow-1",
+    await lifecycle.db.update_vm_delivery(
+        negotiation_id="neg-1",
         capacity_reservation_id="reservation-1",
         settlement_resource_id="resource-1",
         fulfillment_id="fulfillment-1",
@@ -88,12 +86,13 @@ async def test_active_result_must_match_persisted_fulfillment_identity(tmp_path)
             )
         ),
     )
-    escrow = await db.load_escrow(escrow_uid="escrow-1")
+    escrow = await db.load_vm_delivery(negotiation_id="neg-1")
     assert escrow is not None
 
     with pytest.raises(RuntimeError, match="disagrees with active lifecycle"):
-        await converge_escrow_once(
+        await converge_delivery_once(
             escrow,
+            evidence=lifecycle.evidence,
             sqlite_client=db,
             fulfillment_client=remote,
         )
@@ -104,7 +103,7 @@ async def test_missing_identifiers_replay_exact_persisted_request(tmp_path):
     request = {
         "kind": "vm.fulfillment.request",
         "schema_version": 1,
-        "payload": {"vm_target": "tenant-fixed", "ssh_pubkey": "ssh-ed25519 AAA"},
+        "payload": {"vm_target": "tenant-fixed", "ssh_pubkey": "ssh-ed25519 test"},
     }
     lifecycle = await make_vm_lifecycle_fixture(
         tmp_path / "replay.db",
@@ -135,12 +134,13 @@ async def test_missing_identifiers_replay_exact_persisted_request(tmp_path):
             return_value=SimpleNamespace(state="dispatching", failure_message=None)
         ),
     )
-    escrow = await db.load_escrow(escrow_uid="escrow-1")
+    escrow = await db.load_vm_delivery(negotiation_id="neg-1")
     assert escrow is not None
 
     assert (
-        await converge_escrow_once(
+        await converge_delivery_once(
             escrow,
+            evidence=lifecycle.evidence,
             sqlite_client=db,
             fulfillment_client=remote,
             capacity_client=capacity,
@@ -150,8 +150,8 @@ async def test_missing_identifiers_replay_exact_persisted_request(tmp_path):
 
     capacity.reserve.assert_awaited_once_with(
         claim={"gpu_count": 1, "executor_kind": "vm"},
-        deal_ref={"listing_id": "listing-1", "escrow_uid": "escrow-1"},
-        lease_start_utc=None,
+        deal_ref={"listing_id": "listing-1", "negotiation_id": "neg-1"},
+        lease_start_utc="2026-01-01T00:00:00+00:00",
         lease_duration_seconds=7200,
         site="site-1",
     )
@@ -170,7 +170,7 @@ async def test_missing_identifiers_replay_exact_persisted_request(tmp_path):
         capacity_reservation_id="reservation-1",
         site_id="site-1",
     )
-    persisted = await db.load_escrow(escrow_uid="escrow-1")
+    persisted = await db.load_vm_delivery(negotiation_id="neg-1")
     assert persisted is not None
     assert persisted["capacity_reservation_id"] == "reservation-1"
     assert persisted["settlement_resource_id"] == "resource-1"
@@ -180,11 +180,15 @@ async def test_missing_identifiers_replay_exact_persisted_request(tmp_path):
 
 @pytest.mark.asyncio
 async def test_post_physical_convergence_records_ready_and_claim():
+    from functools import partial
+
     from market_storefront.services.fulfillment_resume_runtime import (
         converge_post_physical_delivery,
     )
+    from market_storefront.settlement_stages import VmAlkahestSellerStage
 
     db = SimpleNamespace(
+        update_vm_delivery=AsyncMock(),
         update_escrow=AsyncMock(),
         store_credential=AsyncMock(),
         update_listing=AsyncMock(),
@@ -194,7 +198,6 @@ async def test_post_physical_convergence_records_ready_and_claim():
     submit = AsyncMock(return_value="attestation-1")
     bind_fulfillment = AsyncMock()
     escrow = {
-        "escrow_uid": "escrow-1",
         "negotiation_id": "neg-1",
         "obligation_ref": "obligation-1",
         "chain_name": "base-sepolia",
@@ -213,16 +216,22 @@ async def test_post_physical_convergence_records_ready_and_claim():
     }
     assert (
         await converge_post_physical_delivery(
-            escrow=escrow,
+            delivery=escrow,
             context=context,
             sqlite_client=db,
             capacity_client=capacity,
             connection_details={"host": "kvm-1", "vm_name": "tenant-1"},
             authentication={"tenant": {"password": "secret", "key_type": "ed25519"}},
             register_lease=register,
-            submit_fulfillment=submit,
-            bind_fulfillment_fn=bind_fulfillment,
-            alkahest_client=object(),
+            evidence=vm_delivery_evidence(),
+            continuation=partial(
+                VmAlkahestSellerStage(None).continue_delivery,
+                evidence=vm_delivery_evidence(),
+                db=db,
+                submit=submit,
+                bind=bind_fulfillment,
+                client=object(),
+            ),
             site_id="site-1",
         )
         is True
@@ -237,7 +246,7 @@ async def test_post_physical_convergence_records_ready_and_claim():
     register.assert_awaited_once_with(
         resource_id="resource-1",
         capacity_reservation_id="reservation-1",
-        escrow_uid="escrow-1",
+        negotiation_id="neg-1",
         vm_host="kvm-1",
         vm_target="tenant-1",
         lease_start_utc=capacity.commit.await_args.kwargs["lease_start_utc"],
@@ -246,7 +255,7 @@ async def test_post_physical_convergence_records_ready_and_claim():
     assert any(
         call.kwargs.get("status") == "ready"
         and call.kwargs.get("fulfillment_phase") == "complete"
-        for call in db.update_escrow.await_args_list
+        for call in db.update_vm_delivery.await_args_list
     )
     bind_fulfillment.assert_awaited_once_with(
         obligation_ref="obligation-1",
@@ -261,27 +270,33 @@ async def test_ambiguous_onchain_recovery_never_blindly_resubmits():
     )
 
     db = SimpleNamespace(
-        update_escrow=AsyncMock(),
+        update_vm_delivery=AsyncMock(),
         store_credential=AsyncMock(),
         update_listing=AsyncMock(),
     )
     submit = AsyncMock(side_effect=RuntimeError("query unavailable"))
     escrow = {
-        "escrow_uid": "escrow-1",
+        "negotiation_id": "neg-1",
         "capacity_reservation_id": "reservation-1",
         "settlement_resource_id": "resource-1",
         "fulfillment_phase": "onchain_submission_started",
     }
     with pytest.raises(RuntimeError, match="query unavailable"):
         await converge_post_physical_delivery(
-            escrow=escrow,
+            delivery=escrow,
             context={"fulfillment_request": {"payload": {}}},
             sqlite_client=db,
             capacity_client=SimpleNamespace(commit=AsyncMock()),
             connection_details={},
             authentication=None,
-            submit_fulfillment=submit,
-            alkahest_client=object(),
+            evidence=vm_delivery_evidence(),
+            continuation=partial(
+                VmAlkahestSellerStage(None).continue_delivery,
+                evidence=vm_delivery_evidence(),
+                db=db,
+                submit=submit,
+                client=object(),
+            ),
             site_id="site-1",
         )
     assert submit.await_args.kwargs["allow_submit"] is False

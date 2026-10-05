@@ -16,6 +16,7 @@ from domains.vms.settlement import (
     encode_compute_lease,
     token_resource_from_accepted_escrow,
 )
+from domains.vms.settlement.fulfillment import reconcile_or_submit_compute_fulfillment
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 from market_arkhai_payments import (
@@ -25,17 +26,31 @@ from market_arkhai_payments import (
     transaction_id,
 )
 from market_core import SettlementEvidence, SettlementStageTable
-from market_core.schemas import RateValue, SettlementOption, derive_settlement_option_id
+from market_core.schemas import (
+    EscrowProposal,
+    RateValue,
+    SettlementOption,
+    derive_settlement_option_id,
+)
 from market_identity import Identity
 
+from market_storefront.failure_actions import (
+    FulfillmentFailureContext,
+    apply_fulfillment_failure_policy,
+)
 from market_storefront.models.settle_models import (
     VmPaymentsSettleRequest,
     VmSettleRequest,
 )
+from market_storefront.services.capacity_client import build_capacity_runtime
 from market_storefront.services.vm_job_spec_service import (
     compute_capacity_claim_from_order,
 )
-from market_storefront.utils.escrow_verification import EscrowVerificationError
+from market_storefront.utils import config
+from market_storefront.utils.escrow_verification import (
+    EscrowVerificationError,
+    verify_escrow_for_settlement,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -132,6 +147,113 @@ class VmAlkahestSellerStage:
                 condition_anchor=source["escrow_uid"],
                 funding_expires=source.get("expiration_unix"),
             ),
+        )
+
+    async def recover_evidence(
+        self,
+        *,
+        evidence: SettlementEvidence,
+        thread: dict,
+        composition: Any,
+        db: Any,
+        client: Any = None,
+    ) -> None:
+        validate_accepted_evidence(evidence, thread)
+        source = evidence.evidence["source"]
+        chain_name = source["chain_name"]
+        if client is None:
+            client = composition.evidence_clients.get(chain_name)
+        proposal = EscrowProposal.model_validate(thread["buyer_escrow_proposal"])
+        if (
+            source["escrow_uid"] != evidence.settlement_ref
+            or proposal.chain_name != chain_name
+            or proposal.escrow_address != source["escrow_address"]
+        ):
+            raise ValueError("Alkahest source differs from accepted settlement")
+        facts = evidence.evidence["delivery"]["payload"]
+        index = await verify_escrow_for_settlement(
+            escrow_uid=evidence.settlement_ref,
+            seller_wallet=config.get_evm_wallet_address(),
+            agreed_price=int(thread["agreed_price"]),
+            agreed_duration_seconds=facts["duration_seconds"],
+            listing=facts["order"],
+            alkahest_client=client,
+            chain_name=chain_name,
+            alkahest_address_config_path=config.CHAINS[
+                chain_name
+            ].alkahest_address_config_path,
+            escrow_proposal=proposal,
+        )
+        if index != source["obligation_index"]:
+            raise ValueError("Alkahest recovered obligation changed")
+
+    async def continue_delivery(
+        self,
+        *,
+        evidence: SettlementEvidence,
+        db: Any,
+        delivery: dict,
+        connection_json: str,
+        client: Any = None,
+        submit: Any = None,
+        bind: Any = None,
+        composition: Any = None,
+    ) -> str:
+        source = evidence.evidence["source"]
+        if client is None and composition is not None:
+            client = composition.evidence_clients.get(source["chain_name"])
+        fulfillment_uid = delivery.get("fulfillment_uid")
+        if not fulfillment_uid:
+            ambiguous = (
+                delivery.get("fulfillment_phase") == "onchain_submission_started"
+            )
+            # This write must succeed before the external effect. Otherwise a
+            # restart could blindly submit again after an unrecorded success.
+            if not ambiguous:
+                await db.update_vm_delivery(
+                    negotiation_id=evidence.negotiation_id,
+                    fulfillment_phase="onchain_submission_started",
+                )
+            fulfillment_uid = await (submit or reconcile_or_submit_compute_fulfillment)(
+                client=client,
+                escrow_uid=evidence.settlement_ref,
+                connection_details=connection_json,
+                allow_submit=not ambiguous,
+            )
+            await db.update_vm_delivery(
+                negotiation_id=evidence.negotiation_id,
+                fulfillment_uid=str(fulfillment_uid),
+                fulfillment_phase="onchain_fulfilled",
+            )
+        if not fulfillment_uid or not source.get("obligation_ref"):
+            raise ValueError("Alkahest delivery has no immutable claim binding")
+        if bind is not None:
+            await bind(
+                obligation_ref=source["obligation_ref"],
+                fulfillment_ref=str(fulfillment_uid),
+            )
+        elif composition is not None:
+            await composition.runtime.bind_fulfillment(
+                source["obligation_ref"],
+                str(fulfillment_uid),
+                local_principal=composition.local_principal,
+            )
+            await composition.worker.wake(source["obligation_ref"])
+        await db.update_escrow(
+            escrow_uid=evidence.settlement_ref,
+            status="ready",
+            fulfillment_uid=str(fulfillment_uid),
+            connection_details=connection_json,
+        )
+        return str(fulfillment_uid)
+
+    async def delivery_failed(
+        self, *, evidence: SettlementEvidence, db: Any, **fields: Any
+    ) -> None:
+        await apply_fulfillment_failure_policy(
+            db,
+            FulfillmentFailureContext(**fields, escrow_uid=evidence.settlement_ref),
+            capacity=build_capacity_runtime(lambda: db),
         )
 
     def accepted_data(self, agreement: Any, payments_stage: Any) -> dict[str, Any]:
@@ -235,11 +357,16 @@ class VmAlkahestSellerStage:
                     f"available chains: {sorted(_container.configured_chain_names())}"
                 ),
             )
+        client = composition.evidence_clients.get(accepted_chain)
+        if client is None:
+            raise HTTPException(
+                status_code=503, detail="accepted chain client is unavailable"
+            )
         try:
             result = await composition.coordinator.start(
                 escrow_uid=escrow_uid,
                 negotiation_id=persisted_negotiation_id,
-                mechanism_client=mechanism_client,
+                mechanism_client=client,
                 chain_name=accepted_chain,
                 request=None,
             )
@@ -311,9 +438,46 @@ class VmPaymentsSellerStage:
             facts=facts,
         )
 
+    async def recover_evidence(
+        self,
+        *,
+        evidence: SettlementEvidence,
+        thread: dict,
+        composition: Any,
+        db: Any,
+        client: Any = None,
+    ) -> None:
+        self.revalidate(
+            evidence=evidence, thread=thread, verifier=composition.arkhai_payments_stage
+        )
+
+    async def continue_delivery(
+        self,
+        *,
+        evidence: SettlementEvidence,
+        db: Any,
+        delivery: dict,
+        connection_json: str,
+        **_: Any,
+    ) -> str:
+        identity = delivery.get("fulfillment_id")
+        if not identity:
+            raise ValueError("physical fulfillment has no durable identity")
+        return str(identity)
+
+    async def delivery_failed(
+        self, *, evidence: SettlementEvidence, db: Any, **fields: Any
+    ) -> None:
+        await apply_fulfillment_failure_policy(
+            db,
+            FulfillmentFailureContext(**fields),
+            capacity=build_capacity_runtime(lambda: db),
+        )
+
     def revalidate(
         self, *, evidence: SettlementEvidence, thread: Mapping[str, Any], verifier: Any
     ) -> None:
+        validate_accepted_evidence(evidence, thread)
         raw = thread.get("agreement_bytes")
         if not isinstance(raw, bytes) or verifier is None:
             raise ValueError("accepted payment Agreement or verifier is unavailable")
@@ -370,6 +534,26 @@ class VmPaymentsSellerStage:
                 status_code=503, detail="payments service is unavailable"
             ) from exc
         return result, Identity.model_validate(thread["buyer_principal"])
+
+
+def validate_accepted_evidence(
+    evidence: SettlementEvidence, thread: Mapping[str, Any]
+) -> None:
+    raw = thread.get("agreement_bytes")
+    if not isinstance(raw, bytes):
+        raise ValueError("accepted Agreement bytes are unavailable")
+    agreement = json.loads(raw)
+    if (
+        evidence.status != "verified"
+        or evidence.negotiation_id != agreement["negotiation_id"]
+        or evidence.mechanism != agreement["settlement"]["mechanism"]
+        or evidence.evidence.get("agreement_sha256") != hashlib.sha256(raw).hexdigest()
+    ):
+        raise ValueError("settlement evidence differs from accepted Agreement")
+    facts = evidence.evidence["delivery"]["payload"]
+    for key in ("listing_id", "provision_terms", "duration_seconds", "start_utc"):
+        if facts[key] != agreement[key]:
+            raise ValueError("delivery facts differ from accepted Agreement")
 
 
 def delivery_facts(

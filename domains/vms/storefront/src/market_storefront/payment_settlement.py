@@ -7,6 +7,7 @@ import json
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
+from functools import partial
 from typing import Any
 
 from arkhai_vms import normalize_vm_provision_terms
@@ -134,23 +135,25 @@ class VmPaymentsCoordinator:
         evidence: Any,
     ) -> None:
         owner = self.owner
-        delivery = self.db.vm_delivery_repository(negotiation_id)
-        reference = evidence.settlement_ref
+        delivery = self.db
+        entry = self.domain.settlement.seller_stages[
+            agreement["settlement"]["mechanism"]
+        ]
         start = datetime.fromisoformat(agreement["start_utc"].replace("Z", "+00:00"))
         until = max(start, datetime.now(timezone.utc)) + timedelta(
             seconds=float(config.settings.provisioning.timeout) + 60
         )
-        claimed = await delivery.claim_escrow_convergence(
-            escrow_uid=reference, owner=owner, lease_until=until.isoformat()
+        claimed = await delivery.claim_vm_delivery(
+            negotiation_id=negotiation_id, owner=owner, lease_until=until.isoformat()
         )
         if not claimed:
             return
         try:
-            row = await delivery.load_escrow(escrow_uid=reference)
+            row = await delivery.load_vm_delivery(negotiation_id=negotiation_id)
             if row.get("fulfillment_context"):
                 # Resume the durable request instead of allocating a second VM.
-                await delivery.release_escrow_convergence(
-                    escrow_uid=reference, owner=owner
+                await delivery.release_vm_delivery(
+                    negotiation_id=negotiation_id, owner=owner
                 )
                 await resume_incomplete_fulfillments_once(sqlite_client=self.db)
                 return
@@ -169,20 +172,26 @@ class VmPaymentsCoordinator:
                         fulfillment_client=None,
                     ),
                     domain_input={
-                        "ssh_public_key": provision.ssh_public_key,
-                        "order": dict(listing),
-                        "duration_seconds": agreement["duration_seconds"],
-                        "start_utc": agreement["start_utc"],
-                        "listing_id": agreement["listing_id"],
-                        "settlement_mechanism": "arkhai.payments.v1",
+                        "failure_policy": partial(
+                            entry.delivery_failed, evidence=evidence, db=delivery
+                        )
                     },
                 ),
             )
             private = dict(result.domain_result or {})
-            await delivery.update_escrow(
-                escrow_uid=reference,
+            fulfillment_uid = None
+            if result.state == "fulfilled":
+                row = await delivery.load_vm_delivery(negotiation_id=negotiation_id)
+                fulfillment_uid = await entry.continue_delivery(
+                    evidence=evidence,
+                    db=delivery,
+                    delivery=row,
+                    connection_json=private.get("connection_details"),
+                )
+            await delivery.update_vm_delivery(
+                negotiation_id=negotiation_id,
                 status="ready" if result.state == "fulfilled" else "failed",
-                fulfillment_uid=result.fulfillment_id,
+                fulfillment_uid=fulfillment_uid,
                 connection_details=private.get("connection_details"),
                 tenant_credentials=json.dumps(private["tenant_credentials"])
                 if private.get("tenant_credentials") is not None
@@ -196,4 +205,6 @@ class VmPaymentsCoordinator:
                 "VM payment provisioning interrupted for %s", negotiation_id
             )
         finally:
-            await delivery.release_escrow_convergence(escrow_uid=reference, owner=owner)
+            await delivery.release_vm_delivery(
+                negotiation_id=negotiation_id, owner=owner
+            )

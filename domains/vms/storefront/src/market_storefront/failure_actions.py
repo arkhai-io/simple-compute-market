@@ -12,8 +12,8 @@ from domains.vms.listings.reconciler import (
     closed_available_listing_ids,
     mark_derived_listings_open,
 )
-from market_settlement_runtime import FailurePolicy
 from market_identity import Identity
+from market_settlement_runtime import FailurePolicy
 
 from market_storefront.utils.config import (
     get_evm_wallet_address,
@@ -31,6 +31,7 @@ DEFAULT_FAILURE_ACTIONS = ("release_capacity", "emit_event")
 class FulfillmentFailureContext:
     capacity_reservation_id: str | None = None
     escrow_uid: str | None = None
+    negotiation_id: str | None = None
     listing_id: str | None = None
     provider_id: str | None = None
     provider_job_id: str | None = None
@@ -86,6 +87,7 @@ def _failure_payload(
     return {
         "capacity_reservation_id": ctx.capacity_reservation_id,
         "escrow_uid": ctx.escrow_uid,
+        "negotiation_id": ctx.negotiation_id,
         "listing_id": ctx.listing_id,
         "provider_id": ctx.provider_id,
         "provider_job_id": ctx.provider_job_id,
@@ -273,6 +275,7 @@ async def _release_capacity(
 ) -> FulfillmentFailurePolicyResult:
     """Release failed capacity at the listing's exact recorded site."""
     from market_capacity_publication import capacity_availability, remote_site_clients
+
     from market_storefront.services.capacity_client import (
         build_capacity_runtime,
         capacity_binding_for_listing,
@@ -288,7 +291,13 @@ async def _release_capacity(
     reservation = await runtime.release(
         binding,
         capacity_reservation_id=str(ctx.capacity_reservation_id or ""),
-        deal_ref={"escrow_uid": ctx.escrow_uid} if ctx.escrow_uid else None,
+        deal_ref=(
+            {"negotiation_id": ctx.negotiation_id}
+            if ctx.negotiation_id
+            else {"escrow_uid": ctx.escrow_uid}
+            if ctx.escrow_uid
+            else None
+        ),
         failure_reason=ctx.reason,
         failure_message=ctx.message,
     )

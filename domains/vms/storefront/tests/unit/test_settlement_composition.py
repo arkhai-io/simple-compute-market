@@ -15,10 +15,9 @@ from core_storefront.domain_registry import (
     StorefrontThreadBinding,
     build_storefront_derivation_key,
 )
-from market_identity import Ed25519Signer
 from market_core import SettlementEvidence
 from market_core.schemas import Agreement, SettlementOption, derive_settlement_option_id
-from market_storefront.settlement_stages import vm_seller_stages
+from market_identity import Ed25519Signer
 from market_settlement_runtime import PreparedSettlement, derive_obligation_ref
 
 from market_storefront.domain_runtime import (
@@ -36,6 +35,7 @@ from market_storefront.settlement_composition import (
     reserve_vm_settlement_start,
     serialize_settlement_job,
 )
+from market_storefront.settlement_stages import vm_seller_stages
 from market_storefront.utils.sqlite_client import SQLiteClient
 
 _BUYER_SIGNER = Ed25519Signer(b"\x31" * 32)
@@ -131,15 +131,36 @@ async def _persist_accepted_negotiation(
         provision_terms=_ACCEPTED_PROVISION,
         binding=thread_binding,
     )
-    params = {"accepted_escrow": {"chain_name": "anvil", "escrow_address": "0x" + "11" * 20,
-                                "literal_fields": {"token": "0x" + "22" * 20}, "rates": []}}
-    option_body = {"mechanism": "alkahest.v1", "asset": "0x" + "22" * 20, "rates": [], "params": params}
-    option = SettlementOption(option_id=derive_settlement_option_id(**option_body), **option_body)
+    params = {
+        "accepted_escrow": {
+            "chain_name": "anvil",
+            "escrow_address": "0x" + "11" * 20,
+            "literal_fields": {"token": "0x" + "22" * 20},
+            "rates": [],
+        }
+    }
+    option_body = {
+        "mechanism": "alkahest.v1",
+        "asset": "0x" + "22" * 20,
+        "rates": [],
+        "params": params,
+    }
+    option = SettlementOption(
+        option_id=derive_settlement_option_id(**option_body), **option_body
+    )
     agreement = Agreement(
-        negotiation_id=negotiation_id, listing_id=listing_id, listing_hash="0" * 64,
-        buyer=_BUYER.model_dump(mode="json"), seller=_SELLER.model_dump(mode="json"),
-        settlement=option, amount=42, asset=option.asset, duration_seconds=3600,
-        start_utc="2026-01-01T00:00:00Z", accepted_at="2026-01-01T00:00:00Z", provision_terms=_ACCEPTED_PROVISION,
+        negotiation_id=negotiation_id,
+        listing_id=listing_id,
+        listing_hash="0" * 64,
+        buyer=_BUYER.model_dump(mode="json"),
+        seller=_SELLER.model_dump(mode="json"),
+        settlement=option,
+        amount=42,
+        asset=option.asset,
+        duration_seconds=3600,
+        start_utc="2026-01-01T00:00:00Z",
+        accepted_at="2026-01-01T00:00:00Z",
+        provision_terms=_ACCEPTED_PROVISION,
     )
     await db.commit_agreed_terms(
         negotiation_id=negotiation_id,
@@ -167,8 +188,14 @@ def _prepared(db: SQLiteClient, *, escrow_uid: str = "0xescrow") -> PreparedSett
         fulfillment_input=StorefrontSettlementFulfillmentInput(
             buyer_principal=_BUYER,
             settlement_evidence=SettlementEvidence(
-                negotiation_id="neg-1", mechanism="alkahest.v1", settlement_ref=escrow_uid,
-                status="verified", evidence={"schema": "vm.settlement-evidence.v1", "agreement_sha256": "0" * 64},
+                negotiation_id="neg-1",
+                mechanism="alkahest.v1",
+                settlement_ref=escrow_uid,
+                status="verified",
+                evidence={
+                    "schema": "vm.settlement-evidence.v1",
+                    "agreement_sha256": "0" * 64,
+                },
             ),
             thread_binding=StorefrontThreadBinding(
                 negotiation_id="neg-1",
@@ -243,7 +270,9 @@ async def test_prepare_pins_the_exact_verified_obligation(tmp_path, monkeypatch)
     assert domain.settlement is not None
     domain = replace(
         domain,
-        settlement=replace(domain.settlement, seller_stages=vm_seller_stages(build_plan)),
+        settlement=replace(
+            domain.settlement, seller_stages=vm_seller_stages(build_plan)
+        ),
     )
     db = SQLiteClient(
         db_path=str(tmp_path / "injected-plan.db"),
@@ -415,7 +444,28 @@ async def test_fulfillment_keeps_private_delivery_out_of_public_runtime_result(
         db_path=str(tmp_path / "injected-fulfillment.db"),
         registry=build_vm_storefront_registry(domain),
     )
+    await _persist_accepted_negotiation(
+        db, negotiation_id="neg-1", listing_id="listing-1", proposal=None
+    )
     prepared = _prepared(db)
+    evidence = prepared.fulfillment_input.settlement_evidence
+    prepared = replace(
+        prepared,
+        fulfillment_input=replace(
+            prepared.fulfillment_input,
+            settlement_evidence=replace(
+                evidence,
+                evidence={
+                    **evidence.evidence,
+                    "source": {
+                        "obligation_ref": prepared.projection_context.obligation_ref
+                    },
+                },
+            ),
+        ),
+    )
+    await reserve_vm_settlement_start(prepared, "0xescrow", "neg-1")
+    await db.update_vm_delivery(negotiation_id="neg-1", fulfillment_uid="0xfulfillment")
 
     outcome = await fulfill_vm_settlement(
         domain,
