@@ -8,7 +8,6 @@ import logging
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from typing import Any
-from types import SimpleNamespace
 
 from market_alkahest import AlkahestConditionalEscrowClient, create_alkahest_registration
 from market_alkahest.proposals import accepted_escrow_artifacts_from_proposal
@@ -444,26 +443,42 @@ class PaymentSellerStage:
         if progress and progress["status"] in {"ready", "failed"}:
             return progress
         old = await db.load_settlement_evidence(negotiation_id=reference)
-        order = await db.load_listing(listing_id=agreement.listing_id)
-        if not order:
-            raise ValueError("accepted credit listing is unavailable")
-        evidence = settlement_evidence(agreement, raw, reference=payment_ref, status="pending", source=data, order=order)
-        if old:
-            evidence = replace(evidence, evidence={**dict(evidence.evidence), "delivery": dict(old.evidence["delivery"])})
-        await db.save_settlement_evidence(evidence)
+        if old and old.status == "verified":
+            old.validate_identity(
+                negotiation_id=reference, mechanism=agreement.settlement.mechanism,
+                settlement_ref=payment_ref,
+            )
+            source = dict(old.evidence["source"])
+            receipt = source.pop("receipt", None)
+            if (
+                old.evidence["agreement_digest"] != hashlib.sha256(raw).hexdigest()
+                or source != data
+                or not verify_receipt(receipt, config.service_identity, mandate=mandate, agreement_json=agreement_json)
+            ):
+                raise ValueError("payments evidence does not prove this Agreement")
+            evidence = old
+        else:
+            order = await db.load_listing(listing_id=agreement.listing_id)
+            if not order:
+                raise ValueError("accepted credit listing is unavailable")
+            evidence = settlement_evidence(agreement, raw, reference=payment_ref, status="pending", source=data, order=order)
+            if old:
+                evidence = replace(evidence, evidence={**dict(evidence.evidence), "delivery": dict(old.evidence["delivery"])})
+            await db.save_settlement_evidence(evidence)
         await db.save_issuance_progress(negotiation_id=reference, public_ref=reference, status="provisioning")
         with payments_client_for_owner(config, policy.option.payee_account) as client:
-            try:
-                snapshot = await asyncio.to_thread(client.poll, payment_ref, timeout=30.0, interval=0.5)
-            except PaymentsPollTimeout:
-                return await db.load_issuance_progress(reference=reference)
-            receipt = snapshot.snapshot.receipt
-            if not verify_receipt(receipt, config.service_identity, mandate=mandate, agreement_json=agreement_json):
-                raise ValueError("payments receipt does not prove this Agreement")
-            evidence = replace(evidence, status="verified", evidence={
-                **dict(evidence.evidence), "source": {**data, "receipt": receipt.model_dump(mode="json") if hasattr(receipt, "model_dump") else receipt},
-            })
-            await db.save_settlement_evidence(evidence)
+            if evidence.status != "verified":
+                try:
+                    snapshot = await asyncio.to_thread(client.poll, payment_ref, timeout=30.0, interval=0.5)
+                except PaymentsPollTimeout:
+                    return await db.load_issuance_progress(reference=reference)
+                receipt = snapshot.snapshot.receipt
+                if not verify_receipt(receipt, config.service_identity, mandate=mandate, agreement_json=agreement_json):
+                    raise ValueError("payments receipt does not prove this Agreement")
+                evidence = replace(evidence, status="verified", evidence={
+                    **dict(evidence.evidence), "source": {**data, "receipt": receipt.model_dump(mode="json", by_alias=True, exclude_none=True) if hasattr(receipt, "model_dump") else receipt},
+                })
+                await db.save_settlement_evidence(evidence)
             await asyncio.to_thread(client.ensure_agreement_attached, payment_ref, agreement_json,
                                     PaymentsOptionParams.model_validate(agreement.settlement.params))
             result = await composition.domain.fulfillment.fulfill(
@@ -558,35 +573,35 @@ class AlkahestSellerStage:
         # the continuation from accepted state and durable progress.
         lock = self._delivery_locks.setdefault(prepared.agreement_ref, asyncio.Lock())
         async with lock:
-            db = prepared.fulfillment_input.sqlite_client
+            params = prepared.fulfillment_input
+            db = params.sqlite_client
+            if db is None:
+                raise ValueError("settlement repository is unavailable")
+            evidence = await db.load_settlement_evidence(negotiation_id=params.negotiation_id)
+            if evidence is None:
+                raise ValueError("settlement source evidence is unavailable")
+            credit_delivery(evidence)
+            thread = await db.load_negotiation_thread_row(negotiation_id=params.negotiation_id)
+            agreement, raw = accepted_agreement(thread)
+            evidence.validate_identity(
+                negotiation_id=prepared.agreement_ref, mechanism=agreement.settlement.mechanism,
+                settlement_ref=prepared.mechanism_ref,
+            )
+            if evidence.evidence["agreement_digest"] != hashlib.sha256(raw).hexdigest():
+                raise ValueError("settlement evidence differs from accepted Agreement")
             progress = await db.load_issuance_progress(reference=prepared.mechanism_ref)
             if progress is not None and progress["status"] == "ready":
                 return FulfillmentOutcome(
                     status="fulfilled", fulfillment_ref=progress["fulfillment_uid"],
                     public_result={"connection_details": progress["public_result"].get("connection_details")},
                 )
-            params = prepared.fulfillment_input
-            db = params.sqlite_client
-            if db is None:
-                raise ValueError("settlement repository is unavailable")
-            thread = await db.load_negotiation_thread_row(negotiation_id=params.negotiation_id)
-            agreement, _raw = accepted_agreement(thread)
-            stage = self
             try:
-                await stage.prepare(
-                    sqlite_client=db, local_principal=prepared.local_principal,
-                    escrow_uid=prepared.mechanism_ref, negotiation_id=params.negotiation_id,
-                    mechanism_client=mechanism_client, chain_name=params.chain_name,
-                    request=SimpleNamespace(buyer_principal=params.buyer_principal),
-                    composition=params.composition,
-                )
-                evidence = await db.load_settlement_evidence(negotiation_id=params.negotiation_id)
                 composition = params.composition
                 fulfillment = composition.domain.fulfillment
                 result = await fulfillment.fulfill(
-                    evidence=evidence, retry_uncertain=stage.retry_uncertain, db=db, credits_client=composition.credits_client,
+                    evidence=evidence, retry_uncertain=self.retry_uncertain, db=db, credits_client=composition.credits_client,
                 )
-                result = await stage.continue_delivery(
+                result = await self.continue_delivery(
                     result, evidence=evidence, client=mechanism_client, composition=composition,
                 )
             except Exception as exc:
@@ -633,7 +648,7 @@ class AlkahestSellerStage:
             return {**result, "fulfillment_uid": fulfillment_uid}
         except Exception as exc:
             rollback = await composition.credits_client.rollback_issuance(
-                escrow_uid=evidence.settlement_ref,
+                settlement_ref=evidence.settlement_ref,
                 issuance={"key_id": issuance.key_id, "quantity": issuance.quantity},
                 key_mode=issuance.key_mode,
             )

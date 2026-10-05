@@ -9,6 +9,7 @@ from dataclasses import replace
 from datetime import datetime
 from functools import partial
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from apicredits_storefront.settlement_models import ApiCreditsSettleRequest
@@ -233,7 +234,7 @@ async def test_chain_failure_after_issuance_rolls_back(monkeypatch, tmp_path):
         composition=composition,
     )
     assert result["status"] == "error"
-    assert rollbacks and rollbacks[0]["escrow_uid"] == "neg-chain"
+    assert rollbacks and rollbacks[0]["settlement_ref"] == "neg-chain"
     assert rollbacks[0]["key_mode"] == "new"
     assert [e[1] for e in events] == ["credits_issued", "fulfilled"]
 
@@ -406,7 +407,8 @@ async def test_failure_policy_injects_ordered_quota_event_and_webhook_handlers(
     result = await fulfillment_service.build_api_credit_failure_policy().apply(
         object(),
         {
-            "escrow_uid": "0xfailed",
+            "settlement_ref": "payment-failed",
+            "negotiation_id": "neg-failed",
             "state": None,
             "reopened_listing_ids": [],
         },
@@ -423,6 +425,61 @@ async def test_failure_policy_injects_ordered_quota_event_and_webhook_handlers(
         "sent",
     ]
     assert result.context["state"] is None
+
+
+async def test_payment_refusal_releases_hold_using_negotiation_not_transaction(
+    tmp_path, monkeypatch,
+):
+    from apicredits_storefront import container
+    from apicredits_storefront.services import fulfillment_service
+    from apicredits_storefront.utils.sqlite_client import SQLiteClient
+
+    db = SQLiteClient(str(tmp_path / "failure.db"))
+    now = datetime.now().isoformat()
+    await db.upsert_listing(
+        listing_id="L-tok", status="closed", created_at=now, updated_at=now,
+        offer_resource=dict(_OFFER), fulfillment_resource=None, max_duration_seconds=None,
+        storefront_url="http://seller:8002", seller_principal=_SELLER_PRINCIPAL,
+    )
+    await db.save_capacity_hold(
+        negotiation_id="neg-refused", listing_id="L-tok",
+        capacity_reservation_id="alloc-refused",
+        payload={"capacity_reservation_id": "alloc-refused", "resource_id": "svc-quota"},
+    )
+    capacity = SimpleNamespace(
+        release=AsyncMock(return_value={
+            "capacity_reservation_id": "alloc-refused", "resource_id": "svc-quota",
+        }),
+        availability=AsyncMock(return_value={"svc-quota": 100}),
+    )
+    reopen = AsyncMock(return_value=["L-tok"])
+    events, stage_event = _events()
+    monkeypatch.setattr(fulfillment_service, "build_capacity_runtime", lambda _factory: capacity)
+    monkeypatch.setattr(fulfillment_service, "reopen_token_listings_after_capacity_change", reopen)
+    monkeypatch.setattr(fulfillment_service, "get_sqlite_client", lambda: db)
+    monkeypatch.setattr(fulfillment_service, "stage_event", stage_event)
+    monkeypatch.setattr(fulfillment_service, "_configured_failure_actions", lambda: ("release_capacity", "emit_event"))
+    monkeypatch.setattr(container, "resolved_failure_policy", fulfillment_service.build_api_credit_failure_policy())
+    credits = SimpleNamespace(submit_credit_issuance=AsyncMock(
+        side_effect=CreditsServiceError("quota_exhausted", "no units", status_code=409),
+    ))
+
+    result = await fulfillment_service.fulfill_credit_obligation(
+        evidence=replace(_evidence("neg-refused"), settlement_ref="payment-transaction"),
+        db=db, credits_client=credits,
+    )
+
+    assert result["status"] == "error"
+    release_args = capacity.release.await_args
+    assert release_args.kwargs["capacity_reservation_id"] == "alloc-refused"
+    assert release_args.kwargs["deal_ref"] == {"negotiation_id": "neg-refused"}
+    assert release_args.kwargs["failure_reason"] == "quota_exhausted"
+    assert await db.load_capacity_hold(negotiation_id="neg-refused") is None
+    reopen.assert_awaited_once()
+    failure = next(fields for stage, event, fields in events if stage == "fulfillment" and event == "failed")
+    assert failure["settlement_ref"] == "payment-transaction"
+    assert failure["negotiation_id"] == "neg-refused"
+    assert result["settlement_ref"] == "payment-transaction"
 
 
 # ---------------------------------------------------------------------------
@@ -647,7 +704,7 @@ async def test_settlement_coordinator_verifies_issues_and_stores_credentials(set
     from apicredits_storefront.settlement_stages import project_progress
     projection = await project_progress(db, progress, owner=_BUYER_PRINCIPAL)
     assert projection["tenant_credentials"]["secret"] == "ak_new.s3cret"
-    assert len(verified) == 2
+    assert len(verified) == 1
     assert int(verified[0]["agreed_price"]) == 300
     assert all(call["escrow_uid"] == "0xdeal" for call in verified)
     assert issued[0].negotiation_id == neg_id
@@ -671,6 +728,46 @@ async def test_settlement_coordinator_verifies_issues_and_stores_credentials(set
     )
     assert again["status"] == "ready"
     assert len(issued) == 1
+
+
+async def test_verified_prepare_delivers_when_further_chain_reads_are_unavailable(
+    settled_db, monkeypatch,
+):
+    db, neg_id = settled_db
+    from apicredits_storefront import settlement_stages
+
+    chain_reads = []
+    issued = []
+
+    async def verify(**kwargs):
+        chain_reads.append(kwargs)
+        if len(chain_reads) > 1:
+            raise ConnectionError("chain transport unavailable after verification")
+        return 0
+
+    async def issue(self, request):
+        issued.append(request)
+        return _issuance_result(request)
+
+    async def attest(_payload, _escrow_uid):
+        return "0xfulfill"
+
+    monkeypatch.setattr(settlement_stages, "verify_escrow_for_settlement", verify)
+    monkeypatch.setattr(CreditsServiceClient, "submit_credit_issuance", issue)
+    completed = asyncio.Event()
+    _, _, coordinator = _build_settlement_composition(db, on_outcome=completed.set)
+    await coordinator.start(
+        escrow_uid="0xverified", negotiation_id=neg_id,
+        mechanism_client=SimpleNamespace(string_obligation=SimpleNamespace(do_obligation=attest)),
+        chain_name="anvil", request=_settlement_request(neg_id),
+    )
+    await asyncio.wait_for(completed.wait(), timeout=5)
+
+    assert (await db.load_issuance_progress(reference="0xverified"))["status"] == "ready"
+    assert (await db.load_escrow(escrow_uid="0xverified"))["status"] == "ready"
+    assert (await db.load_settlement_evidence(negotiation_id=neg_id)).status == "verified"
+    assert len(issued) == 1
+    assert len(chain_reads) == 1
 
 
 async def test_ready_progress_recovers_into_shared_servicing(

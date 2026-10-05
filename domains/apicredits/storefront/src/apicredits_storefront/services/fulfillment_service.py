@@ -19,6 +19,13 @@ from market_settlement_runtime import FailurePolicy
 from apicredits_storefront.services.credits_service_client import (
     get_credits_service_client,
 )
+from apicredits_storefront.services.capacity_client import (
+    build_capacity_runtime,
+    capacity_binding_from_offer,
+)
+from apicredits_storefront.services.publication_service import (
+    reopen_token_listings_after_capacity_change,
+)
 from apicredits_storefront.utils.config import settings
 from apicredits_storefront.utils.sqlite_client import get_sqlite_client
 
@@ -36,14 +43,6 @@ async def _release_capacity_handler(
     db: Any,
     context: dict[str, Any],
 ) -> dict[str, Any]:
-    from apicredits_storefront.services.capacity_client import (
-        build_capacity_runtime,
-        capacity_binding_from_offer,
-    )
-    from apicredits_storefront.services.publication_service import (
-        reopen_token_listings_after_capacity_change,
-    )
-
     listing_id = str(context.get("listing_id") or "")
     row = await db.load_listing(listing_id=listing_id)
     if row is None:
@@ -54,7 +53,7 @@ async def _release_capacity_handler(
         binding,
         capacity_reservation_id=context.get("capacity_reservation_id"),
         deal_ref=(
-            {"escrow_uid": context["escrow_uid"]} if context.get("escrow_uid") else None
+            {"negotiation_id": context["negotiation_id"]} if context.get("negotiation_id") else None
         ),
         failure_reason=context.get("reason"),
         failure_message=context.get("message"),
@@ -127,7 +126,8 @@ def build_api_credit_failure_policy() -> FailurePolicy:
 async def _apply_fulfillment_failure_policy_adapter(
     *,
     capacity_reservation_id: str | None,
-    escrow_uid: str,
+    settlement_ref: str | None,
+    negotiation_id: str,
     listing_id: str | None,
     resource_id: str | None,
     reason: str,
@@ -143,7 +143,8 @@ async def _apply_fulfillment_failure_policy_adapter(
         get_sqlite_client(),
         {
             "capacity_reservation_id": capacity_reservation_id,
-            "escrow_uid": escrow_uid,
+            "settlement_ref": settlement_ref,
+            "negotiation_id": negotiation_id,
             "listing_id": listing_id,
             "resource_id": resource_id,
             "reason": reason,

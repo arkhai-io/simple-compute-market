@@ -125,7 +125,7 @@ async def test_rollback_adjusts_then_revokes_new_key():
         transport=httpx.MockTransport(handler),
     )
     result = await client.rollback_issuance(
-        escrow_uid="e",
+        settlement_ref="payment-1",
         issuance={"key_id": "k", "quantity": 3},
         key_mode="new",
     )

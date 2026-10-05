@@ -165,7 +165,7 @@ async def test_rollback_issuance_adjusts_and_revokes_a_new_key():
 
     client = _client(handle)
     result = await client.rollback_issuance(
-        escrow_uid="esc-1",
+        settlement_ref="payment-1",
         issuance={"key_id": "k1", "quantity": 10},
         key_mode="new",
     )
@@ -186,7 +186,7 @@ async def test_rollback_issuance_does_not_revoke_an_existing_key():
 
     client = _client(handle)
     await client.rollback_issuance(
-        escrow_uid="esc-1",
+        settlement_ref="payment-1",
         issuance={"key_id": "k1", "quantity": 10},
         key_mode="existing",
     )
@@ -201,7 +201,7 @@ async def test_rollback_issuance_is_a_no_op_with_nothing_to_roll_back():
 
     client = _client(handle)
     result = await client.rollback_issuance(
-        escrow_uid="esc-1",
+        settlement_ref="payment-1",
         issuance={},
         key_mode="new",
     )
