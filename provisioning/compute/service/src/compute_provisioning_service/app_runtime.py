@@ -15,10 +15,16 @@ from compute_provisioning_service import container as _container_module
 from compute_provisioning_service.config import settings
 from compute_provisioning_service.container import container
 from compute_provisioning_service.db.migrations import check_schema_version
-from market_fulfillment.db import SettlementRecord, SettlementRecordState
+from compute_provisioning import fulfillment_is_terminal
 from compute_provisioning.jobs.queue import AsyncJobQueue
 from compute_provisioning_service.services.definition_documents import (
     DefinitionDocumentImporter,
+)
+from compute_provisioning_service.services.relay_definitions import (
+    relay_definitions_document,
+)
+from compute_provisioning_service.services.relay_port_allocator import (
+    FULFILLMENT_OWNER_KIND,
 )
 from compute_provisioning_service.services.relay_service import RelayService
 
@@ -69,6 +75,9 @@ def resolve_request_path_services() -> None:
     _container_module.resolved_ansible_service = container.ansible_service()
     _container_module.resolved_system_status_service = container.system_status_service()
     _container_module.resolved_inventory_views = container.inventory_views()
+    composed = container.composed_adapters()
+    _container_module.resolved_definition_documents = composed.definition_documents
+    _container_module.resolved_background_tasks = composed.background_tasks
     _container_module.resolved_host_authority = container.host_authority()
     _container_module.resolved_connectivity_probes = container.connectivity_probes()
     _container_module.resolved_vm_operations_service = container.vm_operations_service()
@@ -161,8 +170,8 @@ def seed_inventory_if_empty() -> None:
         )
 
 
-def import_relay_definitions_if_configured() -> None:
-    _definition_importer().import_relay_definitions()
+def import_contributed_definitions_if_configured() -> None:
+    _definition_importer(contributed=_definition_documents()).import_contributed_definitions()
 
 
 def import_pool_definitions_if_configured() -> None:
@@ -185,12 +194,25 @@ def import_capacity_definitions_if_configured() -> None:
     _definition_importer().import_capacity_definitions()
 
 
-def _definition_importer() -> DefinitionDocumentImporter:
+def _definition_documents():
+    """The relay document this service imports, then every contributed kind."""
+    relays = relay_definitions_document(
+        relay_service=_container_module.resolved_relay_service,
+        settings=settings,
+        path=getattr(settings, "resolved_relay_definitions_path", None),
+    )
+    contributed = _container_module.resolved_definition_documents
+    if contributed is None:
+        raise RuntimeError("contributed definition documents are not composed")
+    return (relays, *contributed)
+
+
+def _definition_importer(contributed=()) -> DefinitionDocumentImporter:
     return DefinitionDocumentImporter(
         session_factory=_container_module.resolved_session_factory,
         settings=settings,
         pool_service=_container_module.resolved_resource_pool_service,
-        relay_service=_container_module.resolved_relay_service,
+        contributed=contributed,
         capacity_ledger=_container_module.resolved_capacity_ledger_service,
     )
 
@@ -213,11 +235,12 @@ def startup_steps() -> tuple[ComputeProvisioningStartupStep, ...]:
             "resolve-request-path-services",
             resolve_request_path_services,
         ),
-        # Relays before pools: a pool's provider configuration references a
-        # relay, so a first boot from definition documents needs the relay to
-        # exist before the pool that points at it.
+        # Contributed documents before pools: a pool's provider configuration
+        # may reference what they declare, so a first boot from definition
+        # documents needs it to exist before the pool that points at it.
         ComputeProvisioningStartupStep(
-            "import-relay-definitions", import_relay_definitions_if_configured
+            "import-contributed-definitions",
+            import_contributed_definitions_if_configured,
         ),
         ComputeProvisioningStartupStep(
             "import-pool-definitions", import_pool_definitions_if_configured
@@ -234,24 +257,15 @@ def startup_steps() -> tuple[ComputeProvisioningStartupStep, ...]:
 
 
 def _fulfillment_is_terminal(owner_kind: str, owner_id: str) -> bool:
-    """Whether a lease's owner has finished, for reconciliation to act on.
+    """Whether a port lease's owner has finished, for reconciliation to act on.
 
     Supplied to the allocator rather than queried inside it: what makes a
-    fulfillment terminal belongs to fulfillment, not to port accounting, and
-    an allocator that knew would have to be changed whenever that did.
+    fulfillment terminal belongs to fulfillment, not to port accounting.
     """
-    if owner_kind != "fulfillment":
+    if owner_kind != FULFILLMENT_OWNER_KIND:
         return False
-    terminal = {
-        SettlementRecordState.failed.value,
-        SettlementRecordState.torn_down.value,
-        SettlementRecordState.abandoned.value,
-    }
-    session_factory = _container_module.resolved_session_factory
-    with session_factory() as db:
-        record = db.get(SettlementRecord, owner_id)
-        # A lease whose owner has vanished is orphaned by definition.
-        return record is None or record.state in terminal
+    with _container_module.resolved_session_factory() as db:
+        return fulfillment_is_terminal(db, owner_id)
 
 
 def background_tasks() -> tuple[ComputeProvisioningBackgroundTask, ...]:
@@ -387,6 +401,10 @@ def background_tasks() -> tuple[ComputeProvisioningBackgroundTask, ...]:
             "(fulfillment_convergence_watchdog_enabled=false)"
         )
 
+    contributed = _container_module.resolved_background_tasks
+    if contributed is None:
+        raise RuntimeError("contributed background tasks are not composed")
+    tasks.extend(contributed)
     return tuple(tasks)
 
 

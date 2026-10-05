@@ -400,3 +400,26 @@ class RelayPortAllocator:
             .scalar()
             or 0
         )
+
+
+#: The owner kind a fulfillment's port lease records.
+FULFILLMENT_OWNER_KIND = "fulfillment"
+
+
+def release_fulfillment_ports(db: Session, capacity_reservation_id: str, state: str) -> None:
+    """The fulfillment terminal effect: return the record's relay port.
+
+    A terminal record has no VM reachable through its tunnel, so the remote
+    port goes back to the relay's window, in the transaction that made the
+    record terminal.
+    """
+    released = RelayPortAllocator.release_in_session(
+        db, owner_kind=FULFILLMENT_OWNER_KIND, owner_id=capacity_reservation_id
+    )
+    if released:
+        logger.info(
+            "Released %d relay port lease(s) for %s on reaching %s",
+            released,
+            capacity_reservation_id,
+            state,
+        )

@@ -50,7 +50,7 @@ from compute_provisioning_service.middleware.auth import (
     SqlAlchemyProvisioningReplayStore,
 )
 from compute_provisioning.jobs.queue import AsyncJobQueue
-from compute_provisioning import compose_adapter_bundles
+from compute_provisioning import FulfillmentTerminalHooks, compose_adapter_bundles
 from compute_provisioning_service.services.deal_event_sink import (
     SqlAlchemyCapacityReleaseOutbox,
     StorefrontLifecycleEventSink,
@@ -58,7 +58,10 @@ from compute_provisioning_service.services.deal_event_sink import (
 )
 from compute_provisioning_service.services.capacity_reservation_watchdog import CapacityReservationWatchdog
 from compute_provisioning_service.services.fulfillment_convergence import FulfillmentConvergenceWatchdog
-from compute_provisioning_service.services.relay_port_allocator import RelayPortAllocator
+from compute_provisioning_service.services.relay_port_allocator import (
+    RelayPortAllocator,
+    release_fulfillment_ports,
+)
 from compute_provisioning_service.services.job_retry import retry_policy_from
 from compute_provisioning_service.services.system_status import SystemStatusService
 from compute_provisioning_service.services.lease_watchdog import LeaseWatchdog
@@ -215,11 +218,28 @@ def _make_job_engine(session_factory, job_executors, host_authority, cfg):
     )
 
 
-def _compose_adapters(vm_bundle, bare_metal_bundle, host_requirement, job_executors):
+def _make_terminal_hooks():
+    """The one registry of fulfillment terminal effects.
+
+    Created empty, filled and frozen by adapter composition, and held by the
+    release guard and fulfillment convergence, the two writers that make a
+    fulfillment record terminal.
+    """
+    hooks = FulfillmentTerminalHooks()
+    # The relay-port release belongs to the relay administration this service
+    # holds, so the service registers it itself.
+    hooks.register(release_fulfillment_ports)
+    return hooks
+
+
+def _compose_adapters(
+    vm_bundle, bare_metal_bundle, host_requirement, job_executors, terminal_hooks
+):
     return compose_adapter_bundles(
         [vm_bundle, bare_metal_bundle],
         host_requirement=host_requirement,
         job_executors=job_executors,
+        terminal_hooks=terminal_hooks,
     )
 
 
@@ -301,6 +321,10 @@ class Container(containers.DeclarativeContainer):
 
     fulfillment_teardown_port = providers.Singleton(DeferredFulfillmentTeardownPort)
 
+    # Declared ahead of the ledger: the release guard runs it when it abandons
+    # an aggregate.
+    fulfillment_terminal_hooks = providers.Singleton(_make_terminal_hooks)
+
     host_requirement = providers.Object(
         _merge_host_requirements(VM_HOST_REQUIREMENT, BARE_METAL_HOST_REQUIREMENT)
     )
@@ -319,6 +343,7 @@ class Container(containers.DeclarativeContainer):
         release_guard=providers.Singleton(
             FulfillmentReleaseGuard,
             settlement_repository=settlement_repository,
+            terminal_hooks=fulfillment_terminal_hooks,
         ),
     )
 
@@ -423,6 +448,7 @@ class Container(containers.DeclarativeContainer):
         bare_metal_bundle=bare_metal_adapter_bundle,
         host_requirement=host_requirement,
         job_executors=job_executor_table,
+        terminal_hooks=fulfillment_terminal_hooks,
     )
 
     inventory_views = providers.Singleton(
@@ -565,7 +591,7 @@ class Container(containers.DeclarativeContainer):
         repository=settlement_repository,
         provider_registry=provider_registry,
         settings=config,
-        port_allocator=relay_port_allocator,
+        terminal_hooks=fulfillment_terminal_hooks,
     )
 
     status_components = providers.Singleton(
@@ -604,6 +630,8 @@ resolved_ansible_service: Any | None = None
 resolved_job_queue: "AsyncJobQueue | None" = None
 resolved_system_status_service: "SystemStatusService | None" = None
 resolved_inventory_views: Any | None = None
+resolved_definition_documents: "tuple[Any, ...] | None" = None
+resolved_background_tasks: "tuple[Any, ...] | None" = None
 resolved_host_authority: "HostAuthority | None" = None
 resolved_connectivity_probes: Mapping[str, Any] | None = None
 resolved_vm_operations_service: Any | None = None

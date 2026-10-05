@@ -1,16 +1,17 @@
 """Reconciling mounted definition documents, gated on the document changing.
 
 Import treats its document as authoritative: it overwrites entries that differ
-from it and, for pools, disables entries it does not name. Capacity and relay
-documents retain the entries they do not name. That authority
+from it and, for pools, disables entries it does not name. Capacity documents
+retain the entries they do not name; a contributed document's own apply step
+decides what it does with them. That authority
 belongs to the act of an operator submitting a document. A process start is not
 a submission.
 
 The distinction is easy to lose because import is idempotent — but idempotent
 with respect to the *document*, not the *database*. Re-running it against state
 something else changed reverts that change, because a diff against the document
-is exactly what detects it. Applied on every startup, it would undo relay and
-pool administration on eviction, drain, and crash recovery: silently, with no
+is exactly what detects it. Applied on every startup, it would undo
+administration on eviction, drain, and crash recovery: silently, with no
 failure and no log line an operator would think to check.
 
 So the digest of the last reconciled document is recorded, and a startup
@@ -23,6 +24,7 @@ recorded before a crash.
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Sequence
 from contextlib import nullcontext
 import logging
 from dataclasses import dataclass
@@ -36,16 +38,14 @@ from market_site import (
     reconcile_capacity_definitions_in_session,
 )
 
+from compute_provisioning import DefinitionDocumentContribution
+
 from compute_provisioning_service.db.models import DefinitionDocumentImport
-from compute_provisioning_service.services.relay_definitions import (
-    import_relay_definitions_in_session,
-)
 
 logger = logging.getLogger(__name__)
 
 _CAPACITY = "capacity"
 _POOLS = "pools"
-_RELAYS = "relays"
 
 
 class CapacityDefinitionsRejected(ValueError):
@@ -86,27 +86,33 @@ class DefinitionDocumentImporter:
         session_factory: Any,
         settings: Any,
         pool_service: Any,
-        relay_service: Any,
+        contributed: Sequence[DefinitionDocumentContribution] = (),
         capacity_ledger: CapacityLedgerService | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._settings = settings
         self._pool_service = pool_service
-        self._relay_service = relay_service
+        self._contributed = tuple(contributed)
         self._capacity_ledger = capacity_ledger
 
     # ------------------------------------------------------------------
     # Entry points
     # ------------------------------------------------------------------
 
-    def import_relay_definitions(self) -> ImportOutcome:
-        """Reconcile relays. Relays run before pools, so a pool's reference
-        resolves on a first boot from documents."""
-        return self._import(
-            kind=_RELAYS,
-            path=getattr(self._settings, "resolved_relay_definitions_path", None),
-            label="Relay-definitions",
-            apply=self._apply_relays,
+    def import_contributed_definitions(self) -> tuple[ImportOutcome, ...]:
+        """Reconcile every contributed document kind, in contribution order.
+
+        They run before pools, because pool configuration may reference what
+        they declare: a first boot from documents then resolves it.
+        """
+        return tuple(
+            self._import(
+                kind=document.kind,
+                path=document.path,
+                label=document.label,
+                apply=document.apply,
+            )
+            for document in self._contributed
         )
 
     def import_pool_definitions(self) -> ImportOutcome:
@@ -192,24 +198,8 @@ class DefinitionDocumentImporter:
             # and no digest is recorded: the next startup retries.
             raise CapacityDefinitionsRejected(outcome.problems)
         # No "disabled" count: a declaration the document stops naming is
-        # retained, as a relay is.
+        # retained.
         diff = outcome.diff
-        return (
-            f"created={len(diff.created)} updated={len(diff.updated)} "
-            f"unchanged={len(diff.unchanged)}"
-        )
-
-    def _apply_relays(self, db: Any, yaml_text: str) -> str:
-        diff = import_relay_definitions_in_session(
-            db,
-            yaml_text,
-            relay_service=self._relay_service,
-            settings=self._settings,
-        )
-        # No "disabled" count: a relay the document stops naming is retained.
-        # Disabling one would break every pool referencing it and every live
-        # tunnel on it, which is not what an operator editing an unrelated
-        # entry is asking for.
         return (
             f"created={len(diff.created)} updated={len(diff.updated)} "
             f"unchanged={len(diff.unchanged)}"

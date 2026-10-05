@@ -35,7 +35,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-compute-provisioning"
-version = "0.13.0"
+version = "0.14.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-compute-provisioning-contracts" },
@@ -48,7 +48,7 @@ dependencies = [
     { name = "sqlalchemy" },
 ]
 wheels = [
-    { path = "arkhai_compute_provisioning-0.13.0-py3-none-any.whl" },
+    { path = "arkhai_compute_provisioning-0.14.0-py3-none-any.whl" },
 ]
 
 [[package]]

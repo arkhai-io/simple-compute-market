@@ -382,3 +382,101 @@ def test_a_duplicate_job_executor_names_the_bundle():
                 executors=(_with_jobs("vm", ("create",), FakeJobExecutor()),),
             ),
         ], host_requirement={}, job_executors=table)
+
+
+# ---------------------------------------------------------------------------
+# Terminal hooks, definition documents, and background tasks
+# ---------------------------------------------------------------------------
+
+from compute_provisioning import (  # noqa: E402
+    ComputeProvisioningBackgroundTask,
+    DefinitionDocumentContribution,
+    FulfillmentTerminalHooks,
+)
+
+
+def _hook(db, capacity_reservation_id, state):
+    return None
+
+
+def _document(kind: str) -> DefinitionDocumentContribution:
+    return DefinitionDocumentContribution(
+        kind=kind, label=kind, path=None, apply=lambda db, text: ""
+    )
+
+
+def _task(name: str) -> ComputeProvisioningBackgroundTask:
+    async def run():
+        return None
+
+    return ComputeProvisioningBackgroundTask(name, run)
+
+
+def _compose_contributions(*bundles, terminal_hooks=None):
+    return compose_adapter_bundles(
+        list(bundles),
+        host_requirement={},
+        job_executors=JobExecutorTable(),
+        terminal_hooks=terminal_hooks,
+    )
+
+
+def _bundle(name, mode, **contributions):
+    return ExecutorAdapterBundle(
+        name=name, executors=(contribution(mode, "act"),), **contributions
+    )
+
+
+def test_contributed_hooks_are_registered_and_the_registry_frozen():
+    calls = []
+    hooks = FulfillmentTerminalHooks()
+
+    def recording(db, capacity_reservation_id, state):
+        calls.append(capacity_reservation_id)
+
+    _compose_contributions(
+        _bundle("vm", "vm", fulfillment_terminal_hooks=(recording,)),
+        terminal_hooks=hooks,
+    )
+    hooks.run(object(), "cr-1", "torn_down")
+
+    assert hooks.frozen
+    assert calls == ["cr-1"]
+
+
+def test_a_contributed_hook_with_no_registry_is_refused_rather_than_dropped():
+    with pytest.raises(ValueError, match="no registry"):
+        _compose_contributions(_bundle("vm", "vm", fulfillment_terminal_hooks=(_hook,)))
+
+
+def test_documents_and_tasks_are_carried_in_bundle_order():
+    composed = _compose_contributions(
+        _bundle("vm", "vm", definition_documents=(_document("relays"),),
+                background_tasks=(_task("relay-port-reconciliation"),)),
+        _bundle("bare-metal", "bare_metal", definition_documents=(_document("machines"),)),
+    )
+
+    assert [d.kind for d in composed.definition_documents] == ["relays", "machines"]
+    assert [t.name for t in composed.background_tasks] == ["relay-port-reconciliation"]
+
+
+@pytest.mark.parametrize("kind", ["pools", "capacity"])
+def test_a_document_kind_the_service_imports_itself_is_refused(kind):
+    with pytest.raises(ValueError, match="service's own definition document kind"):
+        _compose_contributions(_bundle("vm", "vm", definition_documents=(_document(kind),)))
+
+
+def test_a_document_kind_declared_twice_is_refused():
+    with pytest.raises(ValueError, match="duplicate definition document kind 'relays'"):
+        _compose_contributions(
+            _bundle("vm", "vm", definition_documents=(_document("relays"),)),
+            _bundle("bare-metal", "bare_metal", definition_documents=(_document("relays"),)),
+        )
+
+
+def test_a_background_task_declared_twice_is_refused():
+    with pytest.raises(ValueError, match="duplicate background task 'reconcile'"):
+        _compose_contributions(
+            _bundle("vm", "vm", background_tasks=(_task("reconcile"),)),
+            _bundle("bare-metal", "bare_metal", background_tasks=(_task("reconcile"),)),
+        )

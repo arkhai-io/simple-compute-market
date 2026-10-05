@@ -1313,12 +1313,17 @@ def _held(session_factory) -> list[int]:
         )
 
 
-def _allocator(session_factory):
+def _relay_hooks():
+    """The terminal effects as the container composes them: the relay-port release."""
+    from compute_provisioning import FulfillmentTerminalHooks
     from compute_provisioning_service.services.relay_port_allocator import (
-        RelayPortAllocator,
+        release_fulfillment_ports,
     )
 
-    return RelayPortAllocator(session_factory)
+    hooks = FulfillmentTerminalHooks()
+    hooks.register(release_fulfillment_ports)
+    hooks.freeze()
+    return hooks
 
 
 async def test_a_failed_create_releases_the_relay_port(session_factory, repo):
@@ -1336,7 +1341,7 @@ async def test_a_failed_create_releases_the_relay_port(session_factory, repo):
         repository=repo,
         provider_registry=ProviderRegistry({"ansible": provider}),
         settings=_settings(),
-        port_allocator=_allocator(session_factory),
+        terminal_hooks=_relay_hooks(),
     )
 
     await watchdog.converge_creates()
@@ -1361,7 +1366,7 @@ async def test_a_successful_create_keeps_the_relay_port(session_factory, repo):
         repository=repo,
         provider_registry=ProviderRegistry({"ansible": provider}),
         settings=_settings(),
-        port_allocator=_allocator(session_factory),
+        terminal_hooks=_relay_hooks(),
     )
 
     await watchdog.converge_creates()
@@ -1369,11 +1374,11 @@ async def test_a_successful_create_keeps_the_relay_port(session_factory, repo):
     assert _held(session_factory) == [6100]
 
 
-async def test_a_deployment_with_no_allocator_converges_normally(
+async def test_a_composition_with_no_terminal_effects_converges_normally(
     session_factory, repo
 ):
-    """A deployment with no relay leases nothing, so the watchdog must not
-    require an allocator to reach a terminal state."""
+    """A composition owing nothing at a terminal state must not need a
+    registry to reach one."""
     _accepted_row(repo, session_factory)
     with session_factory() as db:
         repo.transition(db, "cr-1", SettlementRecordState.dispatching.value)
@@ -1417,7 +1422,7 @@ async def test_a_completed_teardown_releases_the_relay_port(session_factory, rep
         repository=repo,
         provider_registry=ProviderRegistry({"ansible": provider}),
         settings=_settings(),
-        port_allocator=_allocator(session_factory),
+        terminal_hooks=_relay_hooks(),
     )
 
     await watchdog.converge_teardowns()
@@ -1450,11 +1455,49 @@ async def test_a_failed_teardown_keeps_the_relay_port(session_factory, repo):
         repository=repo,
         provider_registry=ProviderRegistry({"ansible": provider}),
         settings=_settings(),
-        port_allocator=_allocator(session_factory),
+        terminal_hooks=_relay_hooks(),
     )
 
     await watchdog.converge_teardowns()
 
+    assert _held(session_factory) == [6100]
+
+
+async def test_a_failing_terminal_effect_leaves_the_record_as_it_was(
+    session_factory, repo
+):
+    """The effect and the terminal state commit together or not at all, so a
+    failed effect is retried with the transition on a later cycle rather than
+    lost behind a committed terminal state."""
+    from compute_provisioning import FulfillmentTerminalHooks
+
+    _accepted_row(repo, session_factory)
+    _relay_and_lease(session_factory)
+    with session_factory() as db:
+        repo.transition(db, "cr-1", SettlementRecordState.dispatching.value)
+        db.commit()
+
+    def failing(db, capacity_reservation_id, state):
+        raise RuntimeError("terminal effect failed")
+
+    hooks = FulfillmentTerminalHooks()
+    hooks.register(failing)
+    hooks.freeze()
+    provider = _StubProvider(
+        status=ProviderStatus(state=ProviderOperationState.failed, detail="provider said no")
+    )
+    watchdog = FulfillmentConvergenceWatchdog(
+        session_factory=session_factory,
+        repository=repo,
+        provider_registry=ProviderRegistry({"ansible": provider}),
+        settings=_settings(),
+        terminal_hooks=hooks,
+    )
+
+    await watchdog.converge_creates()
+
+    with session_factory() as db:
+        assert repo.get(db, "cr-1").state == SettlementRecordState.dispatching.value
     assert _held(session_factory) == [6100]
 
 

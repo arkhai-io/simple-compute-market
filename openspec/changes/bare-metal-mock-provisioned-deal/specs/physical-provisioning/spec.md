@@ -195,6 +195,37 @@ composed MUST answer 503.
 - **THEN** the routes resolve them through the accessors at request time, and a request
   arriving before composition answers 503
 
+### Requirement: Fulfillment terminal effects run in the terminal transaction
+
+A domain effect owed when a fulfillment record becomes terminal (`failed`, `torn_down`, or
+`abandoned`), such as returning a relay port, MUST be contributed by the domain's adapter
+and MUST run in the same transaction that makes the record terminal, on every path that
+does so: fulfillment convergence's transitions and the release guard's abandonment. The
+provisioning service MUST NOT name such an effect. A failing effect MUST leave the record
+as it was, so the transition is retried rather than committed without it.
+
+#### Scenario: A torn-down VM returns its relay port
+
+- **WHEN** convergence records a VM fulfillment `torn_down`
+- **THEN** its relay port is released in that transaction
+
+#### Scenario: An abandoned hold returns a port leased before dispatch
+
+- **WHEN** the release guard abandons an `assigned` aggregate whose create was prepared
+  and leased a relay port
+- **THEN** the port is released in the ledger's transaction, not left to reconciliation
+
+### Requirement: Relay administration admits only the administrator
+
+The relay routes MUST admit only the administrator role: creating, reading, updating,
+enabling, disabling, and rotating the token of a relay are operator infrastructure, and no
+storefront calls them.
+
+#### Scenario: A storefront signs a relay request
+
+- **WHEN** a request to a relay route is signed under the seller role
+- **THEN** it is refused before reaching relay administration
+
 ### Requirement: Every provisioning route admits the administrator
 
 Every route on the provisioning service's route table MUST admit the `admin` role, in

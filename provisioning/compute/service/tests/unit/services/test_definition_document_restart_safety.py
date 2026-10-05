@@ -101,7 +101,12 @@ class _Deployment:
             _container_module, "resolved_relay_service", relay_service, raising=False
         )
         monkeypatch.setattr(app_runtime, "settings", self.settings, raising=False)
-        app_runtime.import_relay_definitions_if_configured()
+        # No adapter contributes a document here: the relay document is the
+        # one under test.
+        monkeypatch.setattr(
+            _container_module, "resolved_definition_documents", (), raising=False
+        )
+        app_runtime.import_contributed_definitions_if_configured()
         return relay_service
 
 

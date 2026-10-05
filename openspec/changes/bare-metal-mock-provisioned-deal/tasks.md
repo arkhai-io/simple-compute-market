@@ -2240,20 +2240,122 @@ re-verifies them by grep before each move.
           `domains/apicredits/storefront` (platform markers only). `make check-locks` and
           `make check-packaging` pass.
         - Not yet run end to end.
-- [ ] 5B.9 Relays to VM: `relay_rebinding.py`, `relay_port_allocator.py`, and
-      `relay_execution.py` from the service's `services/` into the VM adapter; the relay,
-      relay-port-lease, and Ansible pool-configuration table metadata into VM-owned
-      metadata the service composes (the relay models, route declarations, and client
-      methods already moved to `vm_provisioning_operator` in 5B.8.A0.7, and
-      `relays_controller.py` moves with the services into the VM adapter as an
-      accessor-taking router factory); VM's relay rebinding is the pool-change hook VM
-      exports since 5B.8.A.1. Review
-      the relay routes' seller-only roles while moving them. VM's
-      `ansible_pool_config_handler.py` then imports `AnsiblePoolConfig`, `Relay`, and
-      relay rebinding from VM's own modules, not the service's.
-      When done, update `relay-vm-access-without-a-dashboard` (its "Pending move" note
-      and its open tasks) to the relay code's new paths, as the reconciliation of
-      2026-10-05 recorded there.
+- [ ] 5B.9 Relays to VM. Amended 2026-10-05 before implementation, after the design review
+      (`design.md`, "Relays to VM (5B.9)", points A–D): the relay code, its tables, and its
+      routes move to VM's adapter, behind three contribution seams the move needs. Two
+      slices, each its own checkpoint, gated like 5B.8's.
+  - [x] 5B.9.A Seams (points A and B). Behaviour-neutral: the service still contributes
+        the relay release, the relay document kind, and the reconciliation task itself.
+        - Family kit (`provisioning/compute/src/compute_provisioning/`):
+          - new `fulfillment_terminal.py`: `FULFILLMENT_TERMINAL_STATES`,
+            `fulfillment_is_terminal(db, capacity_reservation_id)`, the
+            `FulfillmentTerminalHook` shape (session, reservation id, terminal state), and
+            the `FulfillmentTerminalHooks` registry (register, freeze, run in order;
+            nothing registers once frozen);
+          - new `definition_documents.py`: `DefinitionDocumentContribution` (kind, label,
+            path, `apply(db, yaml_text)` returning its summary);
+          - `composition.py`: the bundle gains `fulfillment_terminal_hooks`,
+            `definition_documents`, and `background_tasks`; `compose_adapter_bundles`
+            takes the registry, registers every hook, and freezes it; the composed result
+            carries the document kinds and tasks, refusing a kind declared twice or one
+            the service reserves (`pools`, `capacity`);
+          - `release.py`: `FulfillmentReleaseGuard` takes the registry and runs it in the
+            ledger's session after it abandons an aggregate, never when it refuses.
+        - Service (`provisioning/compute/service/src/compute_provisioning_service/`):
+          - `services/fulfillment_convergence.py`: `terminal_hooks` replaces
+            `port_allocator`; every terminal transition runs the hooks in its transaction;
+          - `services/definition_documents.py`: the importer runs contributed kinds before
+            pools, each under the existing digest guard, and loses its relay step;
+          - `container.py`: one registry, passed to the guard, convergence, and
+            composition; until B it registers the service's relay-port release itself;
+          - `app_runtime.py`: one `import-contributed-definitions` startup step replaces
+            the relay step; composed background tasks start with the service's; the
+            reconciliation's predicate is the family kit's; until B the relay document
+            kind and reconciliation task are built here.
+        - Tests:
+          - family kit unit: the registry, and composition's new contributions and
+            refusals;
+          - family kit integration `tests/integration/test_release.py`: an abandoning
+            guard runs the hooks in its session, a refusing one runs none;
+          - service unit `services/test_fulfillment_convergence.py`: hooks run in each
+            terminal transaction, and a failing hook leaves the record unchanged;
+            `services/test_definition_document_restart_safety.py`: contributed kinds run
+            before pools under their digests.
+        Done 2026-10-05.
+        - `compute_provisioning.fulfillment_terminal` (`FULFILLMENT_TERMINAL_STATES`,
+          `fulfillment_is_terminal`, `FulfillmentTerminalHook`, `FulfillmentTerminalHooks`)
+          and `compute_provisioning.definition_documents`
+          (`DefinitionDocumentContribution`). The bundle's three new fields; composition
+          registers hooks and freezes the registry with the executor table, refuses a
+          contributed hook with no registry to receive it, a document kind the service
+          imports itself or one declared twice, and a background task declared twice.
+        - The release guard runs the hooks after it abandons an aggregate, in the
+          ledger's session; a failing hook aborts the reclaim. Convergence runs them on
+          every terminal transition it writes, and names no relay. A registry stays
+          optional on both, absent meaning no domain effects, as the port allocator was.
+        - The service: one registry (`fulfillment_terminal_hooks`) reaching the guard,
+          convergence, and composition, with the relay-port release
+          (`release_fulfillment_ports`, beside the allocator) registered by the service; the
+          importer runs contributed kinds, the relay document becoming one
+          (`relay_definitions_document`, kind `relays` kept); composition's documents and
+          tasks are resolved at startup (`resolved_definition_documents`,
+          `resolved_background_tasks`); one `import-contributed-definitions` step; the
+          reconciliation predicate reads the family kit's `fulfillment_is_terminal`.
+        - Tests: family kit `test_fulfillment_terminal.py` and six composition cases;
+          `tests/integration/test_release.py` (an abandoning guard's effect commits with
+          the reclaim, a failing effect aborts it and abandons nothing, no effect when
+          nothing is abandoned); the service's convergence suite on the registry and a
+          failing effect leaving the record unchanged, the contributed step's order, and
+          one registry reaching both writers (`test_authority_composition.py`). The
+          integration harness composes the registry as production does.
+        - Versions: compute-provisioning 0.14.0, compute-provisioning-service 0.11.0
+          (its family-kit floor raised); the family kit, Ansible distribution, both
+          adapters, and the service relocked.
+        - Validation: family kit 203 (unit and integration); Ansible 88; bare-metal
+          adapter 31; VM adapter target 45; provisioning service 862 unit and 276
+          integration. The root `make -k test` aggregate passes its 44 suites, failing
+          only where this environment cannot run a suite (as in slice C); the four locks
+          its reinit rewrites were restored. `make check-locks`, `make check-packaging`,
+          comment hygiene, documentation citations, and OpenSpec strict validation pass.
+          Not run end to end; 9.A changes no wire, route, or deployment behaviour.
+  - [ ] 5B.9.B The move (points A–D).
+        - VM adapter (`domains/vms/provisioning/adapter/src/vm_provisioning_adapter/`):
+          - new `db.py`: VM's metadata with `Relay`, `RelayPortLease`, and
+            `AnsiblePoolConfig`;
+          - from the service's `services/`: `relay_rebinding.py`,
+            `relay_port_allocator.py`, `relay_execution.py`, `relay_service.py`, and
+            `relay_definitions.py`, into `services/`;
+          - `controllers/relays_controller.py`, a router factory over an accessor for the
+            relay service; `routers.py`'s `vm_router_mounts` takes it;
+          - `runtime.py` builds one port allocator and the relay service and contributes
+            the relay-port terminal hook, the `relays` document kind, and the
+            reconciliation task (its settings keys unchanged); `bundle.py` carries them;
+          - `ansible_pool_config_handler.py`, `inventory_views.py`, and
+            `services/ansible_fulfillment_provider.py` import from VM's own modules.
+        - VM operator client: the relay route declarations admit only `admin`.
+        - Service: tombstone the five relay services and `controllers/relays_controller.py`;
+          `db/models.py` loses the three models; `db/database.py` creates VM's metadata
+          after the pool tables, and `db/migrations.py` reads the models from VM's
+          `db.py`; `container.py`, `app_runtime.py`, `main.py`, and `config.py` lose their
+          relay wiring.
+        - Boundary test: the (file, module) allowlist gains `db/database.py` and
+          `db/migrations.py` reading `vm_provisioning_adapter.db` and loses
+          `relays_controller.py`'s exception.
+        - Tests: the service-hosted relay tests import VM's modules
+          (`unit/services/test_relay_administration.py`, `test_relay_port_allocator.py`,
+          `test_relay_port_leases.py`, `test_ansible_pool_config_handler.py`,
+          `test_definition_document_restart_safety.py`, `test_fulfillment_convergence.py`,
+          `test_capacity_inventory.py`, `test_vm_inventory_views.py`; `unit/test_database.py`,
+          `test_pool_offering_mode_migration.py`; `integration/conftest.py`,
+          `test_relays_api.py`, `test_capacity_api.py`, `test_fulfillment_api.py`,
+          `test_host_pool_moves_api.py`, `test_pool_declaration_startup.py`,
+          `test_pools_api.py`, `test_test_controller.py`), and VM's adapter target runs the
+          relay files it hosts; `test_relays_api.py` gains the seller's refusal.
+        - Spec delta (`physical-provisioning`): fulfillment terminal effects run in the
+          terminal transaction, and relay administration admits only the administrator.
+        - When done, update `relay-vm-access-without-a-dashboard` (its "Pending move" note
+          and its open tasks) to the relay code's new paths, as the reconciliation of
+          2026-10-05 recorded there.
 - [ ] 5B.10 Boundary check: remove `arkhai-compute-provisioning-service` from both
       adapters' dependencies, and `arkhai-vms-provisioning-adapter` and the unused
       `arkhai-vms-provisioning-operator-client` from bare metal's; add

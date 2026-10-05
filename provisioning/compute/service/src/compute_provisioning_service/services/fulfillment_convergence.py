@@ -16,6 +16,7 @@ from market_fulfillment import (
     SettlementRecordState,
     SettlementResource,
 )
+from compute_provisioning import FulfillmentTerminalHooks
 from market_core import VersionedEnvelope
 from market_fulfillment.provider import ProviderConfigInvalidError
 from market_fulfillment.settlement_repository import begin_sqlite_write_transaction
@@ -36,14 +37,15 @@ class FulfillmentConvergenceWatchdog:
     """Claim durable work, perform provider I/O, and commit guarded outcomes."""
 
     def __init__(self, *, session_factory, repository, provider_registry, settings,
-                 port_allocator=None,
+                 terminal_hooks: FulfillmentTerminalHooks | None = None,
                  worker_id: str | None = None) -> None:
         self._session_factory = session_factory
         self._repository = repository
         self._providers = provider_registry
         self._settings = settings
-        # Optional: a deployment with no relay leases nothing to release.
-        self._port_allocator = port_allocator
+        # The domains' terminal effects; a composition with none owes nothing
+        # when a record becomes terminal.
+        self._terminal_hooks = terminal_hooks
         self._worker_id = worker_id or f"fulfillment-watchdog:{uuid.uuid4()}"
         self._limit = int(getattr(settings, "fulfillment_convergence_batch_size", 50))
         self._backoff = Backoff(
@@ -393,19 +395,6 @@ class FulfillmentConvergenceWatchdog:
             failure_message=detail,
         )
 
-    # States after which no VM remains reachable through the relay, so the
-    # remote port it held must go back to the window. `succeeded` is
-    # deliberately absent: a created VM is live and its buyer is using that
-    # port. `teardown_failed` is absent because it is not terminal — recovery
-    # may retry, and the proxy may still be registered on the relay.
-    _LEASE_RELEASING_STATES = frozenset(
-        {
-            SettlementRecordState.failed.value,
-            SettlementRecordState.torn_down.value,
-            SettlementRecordState.abandoned.value,
-        }
-    )
-
     def _apply_transition(
         self,
         reservation_id: str,
@@ -415,37 +404,24 @@ class FulfillmentConvergenceWatchdog:
     ) -> None:
         def apply(db) -> None:
             self._repository.transition(db, reservation_id, target_state, **updates)
-            self._release_relay_port(db, reservation_id, target_state)
+            self._run_terminal_hooks(db, reservation_id, target_state)
 
         self._with_owned_record(reservation_id, expected_state, apply)
 
-    def _release_relay_port(self, db, reservation_id: str, target_state: str) -> None:
-        """Return this fulfillment's relay port when it can no longer be reached.
+    def _run_terminal_hooks(self, db, reservation_id: str, target_state: str) -> None:
+        """Run the domains' terminal effects if this transition is terminal.
 
-        Inside the caller's transaction, so the release and the state that
+        Inside the caller's transaction, so each effect and the state that
         justifies it commit together. Outside it, a crash between the two
-        leaves a port nothing claims — the leak reconciliation exists to bound
-        for unenumerated paths, reintroduced on the enumerated one.
+        leaves what the effect would have returned claimed by nothing.
 
         Attached here rather than to teardown, cancellation, and expiry
         individually because a set of call sites is never provably complete and
-        the one that is missed is the one nobody thought of. This is the single
-        place a record becomes terminal.
+        the one that is missed is the one nobody thought of. Every terminal
+        transition convergence writes passes through here.
         """
-        if target_state not in self._LEASE_RELEASING_STATES:
-            return
-        if self._port_allocator is None:
-            return
-        released = self._port_allocator.release_in_session(
-            db, owner_kind="fulfillment", owner_id=reservation_id
-        )
-        if released:
-            logger.info(
-                "Released %d relay port lease(s) for %s on reaching %s",
-                released,
-                reservation_id,
-                target_state,
-            )
+        if self._terminal_hooks is not None:
+            self._terminal_hooks.run(db, reservation_id, target_state)
 
     def _apply_create_success(self, reservation_id: str, refs: tuple[str, ...]) -> None:
         def apply(db) -> None:
@@ -479,10 +455,9 @@ class FulfillmentConvergenceWatchdog:
                 db, reservation_id, SettlementRecordState.torn_down.value
             )
             # This path writes its terminal state directly rather than through
-            # _apply_transition, so it needs the release explicitly. Same
-            # transaction, for the same reason: a crash between the two leaves
-            # a port nothing claims.
-            self._release_relay_port(
+            # _apply_transition, so it runs the terminal effects explicitly, in
+            # the same transaction for the same reason.
+            self._run_terminal_hooks(
                 db, reservation_id, SettlementRecordState.torn_down.value
             )
 

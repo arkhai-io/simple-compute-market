@@ -74,3 +74,19 @@ def test_release_is_composed_once_for_every_offering_mode():
     assert lifecycle_inputs["release_executor"] is container.release_executor
     assert lifecycle_inputs["release_status"] is container.release_status
     assert executor._teardown_port is container.fulfillment_teardown_port()
+
+
+def test_one_terminal_effect_registry_reaches_every_writer_of_a_terminal_record():
+    """The release guard and fulfillment convergence both make records
+    terminal, so both hold the registry composition fills; a second registry
+    would never be frozen, or would miss the bundles' effects."""
+    container = _container()
+    hooks = container.fulfillment_terminal_hooks()
+
+    guard = container.capacity_ledger_service()._release_guard
+    convergence = container.fulfillment_convergence_watchdog()
+    container.composed_adapters()
+
+    assert guard._terminal_hooks is hooks
+    assert convergence._terminal_hooks is hooks
+    assert hooks.frozen

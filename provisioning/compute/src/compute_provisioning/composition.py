@@ -15,8 +15,11 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .adapters import JobExecutorTable
+from .definition_documents import DefinitionDocumentContribution
+from .fulfillment_terminal import FulfillmentTerminalHook, FulfillmentTerminalHooks
 from .inventory_views import InventoryViewProjection, InventoryViews, compose_inventory_views
 from .jobs.executor import JobExecutor
+from .startup import ComputeProvisioningBackgroundTask
 from market_fulfillment import FulfillmentProvider, ProviderRegistry, provider_needs_host
 
 
@@ -43,6 +46,11 @@ class ExecutorAdapterBundle:
     builds the app, before any bundle exists, through the router factories the
     adapter exports. Execution readiness is not either: the composition root
     reports it from the executors it composed.
+
+    ``fulfillment_terminal_hooks`` run whenever a fulfillment record becomes
+    terminal, in that transaction; ``definition_documents`` are imported at
+    startup before the service's own documents; ``background_tasks`` start
+    with the service's own workers.
     """
 
     name: str
@@ -50,6 +58,9 @@ class ExecutorAdapterBundle:
     fulfillment_providers: Mapping[str, FulfillmentProvider] = field(default_factory=dict)
     pool_config_handlers: Mapping[str, Any] = field(default_factory=dict)
     inventory_views: tuple[InventoryViewProjection, ...] = ()
+    fulfillment_terminal_hooks: tuple[FulfillmentTerminalHook, ...] = ()
+    definition_documents: tuple[DefinitionDocumentContribution, ...] = ()
+    background_tasks: tuple[ComputeProvisioningBackgroundTask, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -58,6 +69,12 @@ class ComposedComputeAdapters:
     pool_config_handlers: Mapping[str, Any]
     inventory_views: InventoryViews
     job_executors: JobExecutorTable
+    definition_documents: tuple[DefinitionDocumentContribution, ...] = ()
+    background_tasks: tuple[ComputeProvisioningBackgroundTask, ...] = ()
+
+
+#: Document kinds the service imports itself; a contribution may not claim one.
+SERVICE_DEFINITION_DOCUMENT_KINDS = frozenset({"pools", "capacity"})
 
 
 def _validate_executor(bundle_name: str, contribution: ExecutorAdapterContribution) -> str:
@@ -184,6 +201,7 @@ def compose_adapter_bundles(
     *,
     host_requirement: Mapping[str, bool],
     job_executors: JobExecutorTable,
+    terminal_hooks: FulfillmentTerminalHooks | None = None,
 ) -> ComposedComputeAdapters:
     """Compose bundles and reject ambiguous registrations before startup.
 
@@ -191,7 +209,11 @@ def compose_adapter_bundles(
     site ledger and scheduler; it must match the registered providers exactly.
     ``job_executors`` is the table the job service was built with; every
     bundle's job executors are registered into it, refusing a key registered
-    twice, and it is frozen before composition returns.
+    twice, and it is frozen before composition returns. ``terminal_hooks`` is
+    the registry everything that makes a fulfillment record terminal holds; every
+    contributed hook is registered into it, and it is frozen with the table. A
+    contributed hook with no registry to receive it is refused rather than
+    dropped.
     """
 
     executor_owners: dict[str, str] = {}
@@ -200,6 +222,11 @@ def compose_adapter_bundles(
     providers: dict[str, FulfillmentProvider] = {}
     pool_config_handlers: dict[str, Any] = {}
     inventory_views: list[tuple[str, InventoryViewProjection]] = []
+    terminal_hooks_contributed: list[tuple[str, FulfillmentTerminalHook]] = []
+    document_owners: dict[str, str] = {}
+    definition_documents: list[DefinitionDocumentContribution] = []
+    task_owners: dict[str, str] = {}
+    background_tasks: list[ComputeProvisioningBackgroundTask] = []
 
     bundle_names: set[str] = set()
     for bundle in bundles:
@@ -264,9 +291,48 @@ def compose_adapter_bundles(
         inventory_views.extend(
             (bundle_name, projection) for projection in bundle.inventory_views
         )
+        terminal_hooks_contributed.extend(
+            (bundle_name, hook) for hook in bundle.fulfillment_terminal_hooks
+        )
+
+        for document in bundle.definition_documents:
+            if document.kind in SERVICE_DEFINITION_DOCUMENT_KINDS:
+                raise ValueError(
+                    f"adapter bundle {bundle_name!r} claims the service's own "
+                    f"definition document kind {document.kind!r}"
+                )
+            previous = document_owners.get(document.kind)
+            if previous is not None:
+                raise ValueError(
+                    f"duplicate definition document kind {document.kind!r}: "
+                    f"bundles {previous!r} and {bundle_name!r}"
+                )
+            document_owners[document.kind] = bundle_name
+            definition_documents.append(document)
+
+        for task in bundle.background_tasks:
+            previous = task_owners.get(task.name)
+            if previous is not None:
+                raise ValueError(
+                    f"duplicate background task {task.name!r}: "
+                    f"bundles {previous!r} and {bundle_name!r}"
+                )
+            task_owners[task.name] = bundle_name
+            background_tasks.append(task)
 
     _validate_host_requirement(providers, host_requirement)
     composed_views = compose_inventory_views(inventory_views)
+    if terminal_hooks_contributed and terminal_hooks is None:
+        owners = sorted({owner for owner, _ in terminal_hooks_contributed})
+        raise ValueError(
+            "fulfillment terminal hooks contributed by "
+            + ", ".join(repr(owner) for owner in owners)
+            + " but no registry was given to run them"
+        )
+    if terminal_hooks is not None:
+        for _owner, hook in terminal_hooks_contributed:
+            terminal_hooks.register(hook)
+        terminal_hooks.freeze()
     job_executors.freeze()
 
     return ComposedComputeAdapters(
@@ -274,4 +340,6 @@ def compose_adapter_bundles(
         pool_config_handlers=pool_config_handlers,
         inventory_views=composed_views,
         job_executors=job_executors,
+        definition_documents=tuple(definition_documents),
+        background_tasks=tuple(background_tasks),
     )

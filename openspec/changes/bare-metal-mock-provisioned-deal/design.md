@@ -1786,6 +1786,29 @@ and each point, with its refinements, was decided with the maintainer as recorde
 | Plan correction: C.4's allowlist said "nothing else", but A0's named exception (`relays_controller.py` reading `vm_provisioning_operator.relays`) stands until 5B.9 | Kept in the (file, module) allowlist. The adapters also keep importing the service's relay modules and table models until 5B.9 and 5B.10; C's acceptance is that no adapter imports `compute_provisioning_service.container` |
 | Plan correction: C.1 placed readiness in `probes.py` "becoming" `readiness.py`, but `probes.py` also holds the connectivity probe the root registers | `probes.py` keeps `probe_connectivity`; the readiness models and functions move to `readiness.py`, and their tests to `test_readiness.py` |
 
+### Relays to VM (5B.9)
+
+**Design review (2026-10-05).** 5B.9 was audited against the code before implementation.
+Its plan moved three service modules, the relays controller, and three tables into VM's
+adapter; relay ownership runs through four more places in the service, and moving only
+the named files would have left the service importing VM's internals, which 5B.10
+forbids. Each point was put to the maintainer with options and a recommendation and
+decided as recorded. The maintainer's ruling on scope: there is no value in the move
+until the dependency direction is resolved, so the seams it needs are part of it.
+
+| Finding | Decision |
+|---|---|
+| A. Fulfillment convergence holds VM's `RelayPortAllocator` and releases a fulfillment's relay port inside the transaction that makes its record terminal (`failed`, `torn_down`, `abandoned`), so the release and the state that justifies it commit together. Convergence is the service's domain-neutral worker | Option (a) of three (contributed terminal hooks; a provider-protocol method in `kit/fulfillment`, which would widen a repository-wide kit for one domain; one injected port). A bundle contributes **fulfillment terminal hooks**, each called with the session, the capacity reservation id, and the terminal state. The root creates one `FulfillmentTerminalHooks` registry, which composition fills and freezes as it does the executor table; convergence runs every hook in its terminal transaction, and names no relay |
+| A, continued: the VM provider leases a port in `prepare_create`, in its own transaction, before `begin` records `dispatch_pending`, and the release guard (slice B) can abandon an `assigned` aggregate outside convergence, so a port leased in that window was freed only by the reconciliation backstop | The release guard runs the same hooks, in the ledger's session, when it abandons an aggregate, so every path to a terminal record releases in the transaction that makes it terminal. Reconciliation stays as the backstop for anything else |
+| B. Relay administration extends past the three named services: `relay_service.py`, `relay_definitions.py`, the definition-document importer's relay step (run before pools, because pool configuration references relays), its startup step and `relay_definitions_path` setting, and the `relay-port-reconciliation` background task with its settings | Option (a) of three (move all of it behind contribution seams; move only what was named, leaving the service importing VM's internals; defer past 5B.10). All relay code moves to VM's adapter. Two more contribution seams: **definition-document kinds** (kind, label, path, an apply step over the session), which the importer runs before pools in bundle order under the same digest guard, the relay kind keeping the name `relays` so recorded digests stay valid; and **background tasks**, which the service starts with its own. A generic startup-step seam is not needed: the relay import is a document kind. The reconciliation's terminal predicate becomes the family kit's (`fulfillment_is_terminal`), since what makes a fulfillment terminal is fulfillment's, not VM's. Settings keys are unchanged, so no deployment changes |
+| C. `Relay`, `RelayPortLease`, and `AnsiblePoolConfig` are declared on the service's base, created by its migrations, and seeded for the default pool by one of them | The models move to VM-owned metadata (`vm_provisioning_adapter/db.py`). The service's schema creation and the integration harness create that metadata after the pool tables it references. The existing migrations stay in the service's chain as its history and read the models from VM's module, an allowlisted (file, module) pair beside `legacy_backfill` |
+| D. The relay routes admit seller and admin, from A0's old family default; only VM's operator client calls them, as admin | Admin only, as VM's operation routes are: relay creation, enabling and disabling, and token rotation are operator infrastructure |
+
+Sequencing: **5B.9.A** adds the three seams and moves convergence and the release guard
+onto terminal hooks, behaviour-neutral (the service still contributes the relay release
+itself until B); **5B.9.B** moves the code, tables, controller, and tests to VM and
+narrows the roles.
+
 ### Implementation-review fixes for Sections 4–5
 
 Decided with the maintainer after the 2026-10-02 implementation review. The successful

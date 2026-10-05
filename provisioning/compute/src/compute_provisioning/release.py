@@ -43,6 +43,7 @@ from market_fulfillment import SettlementEntityNotFoundError, SettlementRecordSt
 from market_site.db import CapacityReservation
 from sqlalchemy.orm import Session
 
+from compute_provisioning.fulfillment_terminal import FulfillmentTerminalHooks
 from compute_provisioning.jobs.db import job_bound_to_reservation
 
 logger = logging.getLogger(__name__)
@@ -99,10 +100,21 @@ class FulfillmentReleaseGuard:
     guard refuses. A job or a create handle exists only after an aggregate has
     left ``assigned``, so checking before the compare-and-set loses nothing, and
     a refusal writes nothing.
+
+    Abandoning makes the record terminal, so the guard runs ``terminal_hooks``
+    in the same session: a domain's terminal effects, such as returning a port
+    leased while the create was prepared, commit with the abandonment. A hook
+    that raises aborts the reclaim with it.
     """
 
-    def __init__(self, settlement_repository: Any) -> None:
+    def __init__(
+        self,
+        settlement_repository: Any,
+        *,
+        terminal_hooks: FulfillmentTerminalHooks | None = None,
+    ) -> None:
         self._settlement_repository = settlement_repository
+        self._terminal_hooks = terminal_hooks
 
     def __call__(self, db: Session, capacity_reservation_id: str) -> bool:
         record = self._settlement_repository.get(db, capacity_reservation_id)
@@ -114,9 +126,14 @@ class FulfillmentReleaseGuard:
         if _dispatched(db, capacity_reservation_id):
             return False
         if state == _State.assigned.value:
-            return self._settlement_repository.abandon_if_assigned(
+            abandoned = self._settlement_repository.abandon_if_assigned(
                 db, capacity_reservation_id
             )
+            if abandoned and self._terminal_hooks is not None:
+                self._terminal_hooks.run(
+                    db, capacity_reservation_id, _State.abandoned.value
+                )
+            return abandoned
         return True
 
 

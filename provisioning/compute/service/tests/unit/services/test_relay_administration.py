@@ -413,7 +413,6 @@ class TestTheDigestGate:
             session_factory=session_factory,
             settings=settings,
             pool_service=None,
-            relay_service=None,
         )
 
     def test_nothing_is_recorded_before_a_first_import(self, session_factory):

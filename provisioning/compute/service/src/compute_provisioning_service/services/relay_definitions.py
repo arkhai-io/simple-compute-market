@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 import yaml
+from compute_provisioning import DefinitionDocumentContribution
 
 
 class RelayDefinitionError(ValueError):
@@ -238,3 +239,35 @@ def _resolve_token(definition: RelayDefinition, settings: Any) -> str | None:
             "which the secrets profile does not carry a value for"
         )
     return str(value)
+
+
+#: The relay document's kind, which names its recorded digest. It must not
+#: change: a renamed kind makes the next startup reapply the document over any
+#: administration done since.
+RELAY_DOCUMENT_KIND = "relays"
+
+
+def relay_definitions_document(
+    *, relay_service: Any, settings: Any, path: Any
+) -> DefinitionDocumentContribution:
+    """The relay definitions document, imported before pools reference relays."""
+
+    def apply(db: Any, yaml_text: str) -> str:
+        diff = import_relay_definitions_in_session(
+            db, yaml_text, relay_service=relay_service, settings=settings
+        )
+        # No "disabled" count: a relay the document stops naming is retained.
+        # Disabling one would break every pool referencing it and every live
+        # tunnel on it, which is not what an operator editing an unrelated
+        # entry is asking for.
+        return (
+            f"created={len(diff.created)} updated={len(diff.updated)} "
+            f"unchanged={len(diff.unchanged)}"
+        )
+
+    return DefinitionDocumentContribution(
+        kind=RELAY_DOCUMENT_KIND,
+        label="Relay-definitions",
+        path=path,
+        apply=apply,
+    )
