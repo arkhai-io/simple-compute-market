@@ -33,7 +33,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-contact-exchange"
-version = "0.2.1"
+version = "0.2.2"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-core" },
@@ -53,7 +53,7 @@ dev = [
 requires-dist = [
     { name = "arkhai-core", specifier = "==0.4.0" },
     { name = "arkhai-kit-identity", specifier = "==0.3.0" },
-    { name = "arkhai-kit-settlement-runtime", specifier = "==0.2.1" },
+    { name = "arkhai-kit-settlement-runtime", specifier = "==0.3.0" },
     { name = "pydantic", specifier = ">=2.7" },
     { name = "typer", specifier = ">=0.12.0" },
 ]
@@ -81,7 +81,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-settlement-runtime"
-version = "0.2.1"
+version = "0.3.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -89,7 +89,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_settlement_runtime-0.2.1-py3-none-any.whl" },
+    { path = "arkhai_kit_settlement_runtime-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]

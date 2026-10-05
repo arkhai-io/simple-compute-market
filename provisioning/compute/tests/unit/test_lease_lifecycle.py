@@ -47,26 +47,50 @@ class FakeSiteAuthority:
         return self.reservations.get(capacity_reservation_id)
 
     def list_reservations(self, *, state=None):
-        return [r for r in self.reservations.values() if state is None or r["state"] == state]
+        """Copies, as the site returns: a cycle works from what it read."""
+        return [
+            dict(r) for r in self.reservations.values() if state is None or r["state"] == state
+        ]
 
     def list_time_bounded_reservations_due(self, now):
         return self.due
 
+    # The ledger's conditional transitions: each write is refused, returning
+    # None and writing nothing, from a state it may not leave.
+
     def begin_release(self, capacity_reservation_id, *, release_job_id):
-        """As the ledger does: entering ``releasing`` records when it began."""
+        """Entering ``releasing`` records when it began."""
         reservation = self.reservations[capacity_reservation_id]
-        if reservation["state"] != "releasing":
-            reservation["release_requested_at"] = datetime.now(timezone.utc).isoformat()
+        if reservation["state"] == "releasing":
+            if reservation.get("release_job_id") not in (None, release_job_id):
+                return None
+            return reservation
+        if reservation["state"] not in {"reserved", "provisioning", "leased", "release_failed"}:
+            return None
+        reservation["release_requested_at"] = datetime.now(timezone.utc).isoformat()
         reservation.update(state="releasing", release_job_id=release_job_id)
         return reservation
 
-    def record_release_failure(self, capacity_reservation_id, *, reason, message=None):
+    def record_release_failure(
+        self, capacity_reservation_id, *, reason, message=None, release_job_id=None
+    ):
         reservation = self.reservations[capacity_reservation_id]
+        if reservation["state"] not in {"reserved", "provisioning", "leased", "releasing"}:
+            return None
+        if (
+            reservation["state"] == "releasing"
+            and release_job_id is not None
+            and reservation.get("release_job_id") != release_job_id
+        ):
+            return None
         reservation.update(state="release_failed", failure_reason=reason, failure_message=message)
         return reservation
 
     def record_release_success(self, capacity_reservation_id, *, forced=False, reason=None, message=None):
-        if not forced and not self.permit_release:
+        if not forced and (
+            not self.permit_release
+            or self.reservations[capacity_reservation_id]["state"] == "unmanaged"
+        ):
             return None
         reservation = self.reservations[capacity_reservation_id]
         reservation.update(state="force_released" if forced else "released", failure_reason=reason)
@@ -74,6 +98,8 @@ class FakeSiteAuthority:
 
     def record_unmanaged(self, capacity_reservation_id, *, reason, message=None):
         reservation = self.reservations[capacity_reservation_id]
+        if reservation["state"] != "leased":
+            return None
         reservation.update(state="unmanaged", failure_reason=reason)
         return reservation
 
@@ -365,3 +391,97 @@ async def test_force_release_is_the_operator_s_override_whatever_the_guard_says(
     )
 
     assert released["state"] == "force_released"
+
+
+class _OperatorActsDuring:
+    """A collaborator whose call lets an operator act on the lease first, so
+    the lifecycle's next write rests on a read that is now stale."""
+
+    def __init__(self, inner, site, act):
+        self._inner = inner
+        self._site = site
+        self._act = act
+
+    async def submit_release(self, reservation):
+        decision = await self._inner.submit_release(reservation)
+        self._act(self._site.reservations["alloc-1"])
+        return decision
+
+    async def begin_teardown(self, fulfillment_id):
+        return await self._inner.begin_teardown(fulfillment_id)
+
+    def get_status(self, fulfillment_id):
+        status = self._inner.get_status(fulfillment_id)
+        self._act(self._site.reservations["alloc-1"])
+        return status
+
+
+@pytest.mark.asyncio
+async def test_a_stale_cycle_does_not_take_back_a_lease_an_operator_took_over():
+    """The cycle read the lease as due; before it recorded ``releasing``, an
+    operator took it over. The site refuses the transition, nothing is torn
+    down, and the lease stays the operator's."""
+    site = FakeSiteAuthority()
+    site.due = [dict(site.reservations["alloc-1"])]
+    inner = ScriptedExecutor(_decision(ReleaseAction.TEARDOWN))
+    executor = _OperatorActsDuring(inner, site, lambda r: r.update(state="unmanaged"))
+
+    summary = await _lifecycle(site, executor).check_leases()
+
+    assert site.reservations["alloc-1"]["state"] == "unmanaged"
+    assert inner.teardowns == []
+    assert summary["skipped"] == 1
+
+
+@pytest.mark.asyncio
+async def test_a_stale_teardown_failure_does_not_undo_a_force_release():
+    """The cycle read the lease releasing and its teardown failed; meanwhile an
+    operator force-released it. The failure is refused, and the capacity the
+    force-release freed stays free."""
+    site = FakeSiteAuthority(state="releasing")
+    site.reservations["alloc-1"]["release_job_id"] = "f-1"
+    status = _OperatorActsDuring(
+        ScriptedStatus(ReleaseStatus(ReleaseProgress.FAILED, reason="teardown_failed")),
+        site,
+        lambda r: r.update(state="force_released"),
+    )
+
+    summary = await _lifecycle(site, ScriptedExecutor(_decision(ReleaseAction.TEARDOWN)), status).check_leases()
+
+    assert site.reservations["alloc-1"]["state"] == "force_released"
+    assert summary["release_failed"] == 0
+
+
+@pytest.mark.asyncio
+async def test_a_failure_for_another_release_attempt_is_refused():
+    """A failure observed under one handle cannot land on a release now
+    running under another."""
+    site = FakeSiteAuthority(state="releasing")
+    site.reservations["alloc-1"]["release_job_id"] = "f-1"
+    status = _OperatorActsDuring(
+        ScriptedStatus(ReleaseStatus(ReleaseProgress.FAILED, reason="teardown_failed")),
+        site,
+        lambda r: r.update(release_job_id="f-2"),
+    )
+
+    await _lifecycle(site, ScriptedExecutor(_decision(ReleaseAction.TEARDOWN)), status).check_leases()
+
+    assert site.reservations["alloc-1"]["state"] == "releasing"
+
+
+@pytest.mark.asyncio
+async def test_oversight_of_a_lease_the_lifecycle_began_releasing_is_a_conflict():
+    site = FakeSiteAuthority(lease_end=_FUTURE)
+    lifecycle = _lifecycle(site, ScriptedExecutor(_decision(ReleaseAction.TEARDOWN)))
+    original_get = site.get_reservation
+
+    def read_then_lose_the_race(capacity_reservation_id):
+        snapshot = dict(original_get(capacity_reservation_id))
+        site.reservations["alloc-1"].update(state="releasing", release_job_id="f-1")
+        return snapshot
+
+    site.get_reservation = read_then_lose_the_race
+    with pytest.raises(InvalidLeaseStateError):
+        lifecycle.release_oversight("alloc-1", SimpleNamespace(reason="manual"))
+
+    assert site.reservations["alloc-1"]["state"] == "releasing"

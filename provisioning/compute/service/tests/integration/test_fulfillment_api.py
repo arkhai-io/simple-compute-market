@@ -374,6 +374,36 @@ class TestBeginPersistsPreparedCreateInput:
             assert record.provider_metadata["create_job_id"] == first_job_id
 
 
+class TestARepeatedBeginAdoptsTheAcceptedFulfillment:
+    async def test_beginning_again_with_the_same_request_returns_the_same_fulfillment(
+        self, fulfillment: FulfillmentApi
+    ):
+        """A storefront that retries a deal from the start (a hosted VM deal
+        deferred after provisioning, say) begins fulfillment again for the same
+        reservation with the same request; it gets the fulfillment already
+        accepted back, and nothing is dispatched a second time."""
+        capacity_reservation_id = await _scheduled_reservation()
+
+        first = await fulfillment.begin(capacity_reservation_id, "vms", _fulfillment_request())
+        again = await fulfillment.begin(capacity_reservation_id, "vms", _fulfillment_request())
+
+        assert again["fulfillment_id"] == first["fulfillment_id"]
+        from compute_provisioning.jobs.db import JobRecord
+
+        with _container_module.resolved_session_factory() as db:
+            record = SettlementRepository().get(db, capacity_reservation_id)
+            assert record.fulfillment_id == first["fulfillment_id"]
+            creates = (
+                db.query(JobRecord)
+                .filter(
+                    JobRecord.capacity_reservation_id == capacity_reservation_id,
+                    JobRecord.action_kind == "create",
+                )
+                .count()
+            )
+        assert creates == 1
+
+
 class TestValidateIsSideEffectFree:
     async def test_validate_persists_and_dispatches_nothing(
         self, fulfillment: FulfillmentApi

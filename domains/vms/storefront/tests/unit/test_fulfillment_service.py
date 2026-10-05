@@ -143,7 +143,7 @@ def _compute_listing(*, gpu_count: int = 1) -> dict:
 
 
 @pytest.mark.asyncio
-async def test_fulfill_compute_obligation_reports_error_when_onchain_fulfillment_fails(
+async def test_fulfill_compute_obligation_defers_when_onchain_fulfillment_fails(
     client,
     monkeypatch,
 ):
@@ -200,7 +200,9 @@ async def test_fulfill_compute_obligation_reports_error_when_onchain_fulfillment
             listing_id="listing-1",
         )
 
-    assert result["status"] == "error"
+    # The VM is running, so a failed evidence publication defers the deal for
+    # the fulfillment resume pass rather than failing it.
+    assert result["status"] == "deferred"
     assert "contract reverted" in result["message"]
     assert result["connection_details"] is None
     alkahest.oracle.request_arbitration.assert_not_called()

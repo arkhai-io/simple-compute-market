@@ -1860,6 +1860,71 @@ re-verifies them by grep before each move.
             escrow lookups found their reservations, and each expired lease went
             `releasing` under its fulfillment and was released on a later cycle with the
             storefront notified; none timed out.
+  - [x] 5B.8.B.9 Fixes from the slice B re-review (2026-10-05; both findings agreed with
+        the maintainer; `design.md`, "Slice B re-review").
+        - Conditional lifecycle writes (high):
+          - `kit/site`'s ledger gains `record_release_failed` and `record_unmanaged`, and
+            `begin_releasing` becomes conditional. Entering `releasing` is allowed from
+            `reserved`, `provisioning`, `leased`, and `release_failed`, idempotent under
+            the same handle, refused under another. A failure is allowed from `reserved`,
+            `provisioning`, `leased`, and `releasing` under the observed handle.
+            `unmanaged` is allowed only from `leased`. An unforced release refuses
+            `unmanaged`.
+          - The site authority's failure and oversight writes use these, and no longer the
+            unconditional `update_reservation_state`.
+          - The lease lifecycle checks every write's result. A refused write re-reads the
+            reservation and leaves it as recorded (counted as skipped), and a refused begin
+            starts no teardown. Release oversight that loses the race answers a conflict.
+        - VM lease registration made durable (medium; option A, which needed a deferred
+          settlement outcome):
+          - `kit/settlement-runtime`'s `FulfillmentOutcome` gains `deferred`, persisted
+            without binding or waking servicing.
+          - The VM main path returns `deferred` when the commit records no window, when
+            registration fails, and when publishing the fulfillment evidence fails. The
+            last was taken as the maintainer's "defer the on-chain submission failure"
+            (rather than recording it for closeout).
+          - `settlement_composition.py` maps it to a deferred outcome that leaves the
+            escrow open.
+          - The resume pass raises, rather than proceeds, when its commit records no window
+            or registration fails, so no evidence is published before the lease is
+            registered.
+          - Hosted VM deals already retry a non-fulfilled outcome through the settlement
+            runtime.
+        - Tests:
+          - `kit/site`, real SQLite:
+            - a stale begin after oversight refused;
+            - a stale failure after force-release refused, capacity unchanged;
+            - an unforced release of `unmanaged` refused;
+            - handle idempotency, and failures only for their own attempt;
+            - oversight refused once releasing or released.
+          - Family kit: the lifecycle under each race, through a collaborator that lets
+            the operator act mid-cycle, over a fake enforcing the same transitions.
+          - Settlement runtime: a deferred job persisted, not bound, not woken.
+          - VM storefront:
+            - the main path deferring in each case, and publishing nothing before
+              registration;
+            - the deferred outcome leaving the escrow open;
+            - the resume pass blocking on each failure, then registering and publishing
+              once provisioning answers.
+          - Provisioning service: a repeated `begin` for the same reservation returns the
+            accepted fulfillment with one create job, which a hosted retry relies on.
+        - Versions:
+          - arkhai-kit-settlement-runtime 0.3.0;
+          - its exact pins moved, with patch bumps: kit-config 0.1.5, kit-hosted-settlement
+            0.1.7, kit-contact-exchange 0.2.2, core-buyer 0.3.5, vms-buyer 0.5.2,
+            bare-metal-buyer 0.4.2;
+          - the VM and bare-metal storefronts keep their unreleased slice B versions, with
+            the VM storefront's settlement-runtime floor raised to 0.3.0.
+        - Validation:
+          - `kit/site` 280; family kit 175; settlement runtime 117;
+          - provisioning service 836 unit and 284 integration; bare-metal storefront 230;
+          - VM storefront by frozen sync: 1109 unit and 348 integration (the two known
+            `test_alkahest` failures);
+          - e2e unit 236 (the known 10.1 failure), and 155 scenarios collect.
+          - The root aggregate passes its 44 suites, failing only where this environment
+            cannot run a suite. `make check-packaging`, comment hygiene, documentation
+            citations, and OpenSpec strict validation pass.
+          - Not yet run end to end.
       Slice B done 2026-10-05 (`design.md`, "Slice B implementation findings", for what
       implementation settled or found).
       - B.1:

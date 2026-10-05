@@ -589,6 +589,23 @@ _REGISTRABLE_STATES = frozenset(
         ReservationState.leased.value,
     }
 )
+# The lease lifecycle's conditional transitions: the states each may leave.
+_BEGIN_RELEASING_FROM = frozenset(
+    {
+        ReservationState.reserved.value,
+        ReservationState.provisioning.value,
+        ReservationState.leased.value,
+        ReservationState.release_failed.value,
+    }
+)
+_RECORD_RELEASE_FAILED_FROM = frozenset(
+    {
+        ReservationState.reserved.value,
+        ReservationState.provisioning.value,
+        ReservationState.leased.value,
+        ReservationState.releasing.value,
+    }
+)
 # The lifecycle's own states, which neither registration nor a commit may undo.
 _REGISTRATION_REFUSED_STATES = frozenset(
     {
@@ -1465,7 +1482,9 @@ class CapacityLedgerService:
 
         Returns ``None`` when no reservation matches, when it is not held, and
         when the release guard refuses; a refusal changes nothing. A release to
-        ``force_released`` is an operator's override and is not guarded.
+        ``force_released`` is an operator's override and is not guarded, and it
+        alone frees an ``unmanaged`` reservation, which an operator has taken
+        over from the lease lifecycle.
         """
         escrow_uid = dict(deal_ref or {}).get("escrow_uid")
         with self.serialized(), self._session_factory() as db:
@@ -1488,12 +1507,14 @@ class CapacityLedgerService:
                 return self._reservation_payload(reservation)
             if reservation.state not in HELD_RESERVATION_STATES:
                 return None
+            forced = state == ReservationState.force_released.value
+            if not forced and reservation.state == ReservationState.unmanaged.value:
+                return None
             # A forced release is the operator's recorded override after
             # verifying the host themselves; every other release needs the
             # guard's proof.
-            if (
-                state != ReservationState.force_released.value
-                and not self._release_permitted(db, reservation.capacity_reservation_id)
+            if not forced and not self._release_permitted(
+                db, reservation.capacity_reservation_id
             ):
                 return None
             reservation.state = state
@@ -1813,25 +1834,95 @@ class CapacityLedgerService:
         *,
         release_job_id: str | None = None,
     ) -> dict[str, Any] | None:
-        """Transition a held reservation to releasing (teardown in flight).
+        """Move a reservation into ``releasing``, if its state still allows it.
 
-        Entering ``releasing`` records when this release attempt began (a
-        retry after ``release_failed`` begins a new one); recording the handle
-        on a reservation already releasing keeps the time it began. No
-        capacity event: releasing still holds the units — the workload may
-        not be torn down yet.
+        A conditional transition, so a lease lifecycle acting on a stale read
+        cannot undo what an operator or a completed release recorded: allowed
+        from ``reserved``, ``provisioning``, ``leased``, and ``release_failed``
+        (a retry); a reservation already ``releasing`` under the same handle is
+        returned unchanged. ``None`` means the transition was refused (an
+        ``unmanaged`` or released reservation, or one releasing under another
+        handle) and nothing was written; the caller re-reads it.
+
+        Entering ``releasing`` records when this release attempt began. No
+        capacity event: releasing still holds the units — the workload may not
+        be torn down yet.
         """
         with self.serialized(), self._session_factory() as db:
             reservation = db.get(CapacityReservation, capacity_reservation_id)
-            if reservation is None or reservation.state not in HELD_RESERVATION_STATES:
+            if reservation is None:
                 return None
-            if reservation.state != ReservationState.releasing.value:
-                reservation.release_requested_at = datetime.now(timezone.utc).isoformat()
+            if reservation.state == ReservationState.releasing.value:
+                if release_job_id is not None and reservation.release_job_id not in (
+                    None,
+                    release_job_id,
+                ):
+                    return None
+                self._set_release_job_id(reservation, release_job_id=release_job_id)
+                db.commit()
+                return self._reservation_payload(reservation)
+            if reservation.state not in _BEGIN_RELEASING_FROM:
+                return None
+            reservation.release_requested_at = datetime.now(timezone.utc).isoformat()
             reservation.state = ReservationState.releasing.value
-            self._set_release_job_id(
-                reservation,
-                release_job_id=release_job_id,
-            )
+            self._set_release_job_id(reservation, release_job_id=release_job_id)
+            db.commit()
+            return self._reservation_payload(reservation)
+
+    def record_release_failed(
+        self,
+        capacity_reservation_id: str,
+        *,
+        reason: str,
+        message: str | None = None,
+        release_job_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Record that a release failed, if the reservation is still releasable.
+
+        A conditional transition: allowed from ``reserved``, ``provisioning``,
+        ``leased``, and ``releasing``; a ``releasing`` reservation must still be
+        releasing under ``release_job_id`` when one is given. A stale failure
+        cannot reach a reservation an operator took over or force-released, nor
+        one already released. ``None`` means refused, and nothing was written.
+        No capacity event: a failed release still holds the units.
+        """
+        with self.serialized(), self._session_factory() as db:
+            reservation = db.get(CapacityReservation, capacity_reservation_id)
+            if reservation is None or reservation.state not in _RECORD_RELEASE_FAILED_FROM:
+                return None
+            if (
+                reservation.state == ReservationState.releasing.value
+                and release_job_id is not None
+                and reservation.release_job_id != release_job_id
+            ):
+                return None
+            reservation.state = ReservationState.release_failed.value
+            reservation.failure_reason = reason
+            reservation.failure_message = message
+            db.commit()
+            return self._reservation_payload(reservation)
+
+    def record_unmanaged(
+        self,
+        capacity_reservation_id: str,
+        *,
+        reason: str,
+        message: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Hand a leased reservation to an operator, if it is still ``leased``.
+
+        A conditional transition: a lease the lifecycle has begun releasing, or
+        that is released, is not handed over. ``None`` means refused, and
+        nothing was written. The units stay held until an operator
+        force-releases them.
+        """
+        with self.serialized(), self._session_factory() as db:
+            reservation = db.get(CapacityReservation, capacity_reservation_id)
+            if reservation is None or reservation.state != ReservationState.leased.value:
+                return None
+            reservation.state = ReservationState.unmanaged.value
+            reservation.failure_reason = reason
+            reservation.failure_message = message
             db.commit()
             return self._reservation_payload(reservation)
 

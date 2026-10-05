@@ -614,6 +614,13 @@ async def fulfill_vm_settlement(
         if isinstance(lifecycle.domain_result, Mapping)
         else {}
     )
+    if lifecycle.state == "deferred":
+        return FulfillmentOutcome(
+            status="deferred",
+            public_result={"status": "provisioning", "message": result.get("message")},
+            private_result=result,
+            reason=result.get("message") or "fulfillment deferred after provisioning",
+        )
     if lifecycle.state != "fulfilled":
         return FulfillmentOutcome(
             status="failed",
@@ -705,6 +712,15 @@ async def persist_vm_settlement_outcome(
             obligation_index=context.obligation_index,
         )
         logger.info("[SETTLE_JOB] Escrow %s provisioning complete", context.escrow_uid)
+        return
+    if outcome.status == "deferred":
+        # The VM exists and a step after it is pending: the escrow stays open
+        # for the fulfillment resume pass, which owns finishing it.
+        logger.info(
+            "[SETTLE_JOB] Escrow %s left open for the fulfillment resume pass: %s",
+            context.escrow_uid,
+            outcome.reason,
+        )
         return
     reason = outcome.reason or private.get("message") or "provisioning failed"
     await context.sqlite_client.update_escrow(

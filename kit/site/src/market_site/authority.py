@@ -26,6 +26,11 @@ class SiteAuthorityPort(Protocol):
         lease_end_utc: str | None = None,
     ) -> dict[str, Any] | None: ...
 
+    # The lifecycle writes below are conditional transitions: each returns
+    # ``None``, having written nothing, when the reservation's current state does
+    # not allow it, so a lifecycle acting on a stale read re-reads instead of
+    # undoing what an operator or a completed release recorded.
+
     def begin_release(
         self, capacity_reservation_id: str, *, release_job_id: str
     ) -> dict[str, Any] | None: ...
@@ -36,6 +41,7 @@ class SiteAuthorityPort(Protocol):
         *,
         reason: str,
         message: str | None = None,
+        release_job_id: str | None = None,
     ) -> dict[str, Any] | None: ...
 
     def record_release_success(
@@ -141,12 +147,14 @@ class LedgerSiteAuthority:
         *,
         reason: str,
         message: str | None = None,
+        release_job_id: str | None = None,
     ) -> dict[str, Any] | None:
-        return self._ledger.update_reservation_state(
+        """Record a failed release; refused once an operator or a release won."""
+        return self._ledger.record_release_failed(
             capacity_reservation_id,
-            state="release_failed",
-            failure_reason=reason,
-            failure_message=message,
+            reason=reason,
+            message=message,
+            release_job_id=release_job_id,
         )
 
     def record_release_success(
@@ -171,11 +179,9 @@ class LedgerSiteAuthority:
     def record_unmanaged(
         self, capacity_reservation_id: str, *, reason: str, message: str | None = None
     ) -> dict[str, Any] | None:
-        return self._ledger.update_reservation_state(
-            capacity_reservation_id,
-            state="unmanaged",
-            failure_reason=reason,
-            failure_message=message,
+        """Hand a ``leased`` reservation to an operator; refused in any other state."""
+        return self._ledger.record_unmanaged(
+            capacity_reservation_id, reason=reason, message=message
         )
 
     def capacity_events_after(

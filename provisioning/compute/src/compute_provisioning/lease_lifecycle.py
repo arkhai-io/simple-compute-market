@@ -207,11 +207,23 @@ class LeaseLifecycleService:
                 f"Lease '{lease_id}' is {state}; only leased reservations can release oversight.",
                 state=state,
             )
-        return self._site_authority.record_unmanaged(
+        handed = self._site_authority.record_unmanaged(
             lease_id,
             reason="oversight_released",
             message=body.reason,
-        ) or self.get_lease(lease_id)
+        )
+        if handed is not None:
+            return handed
+        # The lease changed between the read and the hand-over (the lifecycle
+        # began releasing it, say); the site refused and wrote nothing.
+        current = self.get_lease(lease_id)
+        state = str(current.get("state"))
+        if state == "unmanaged":
+            return current
+        raise InvalidLeaseStateError(
+            f"Lease '{lease_id}' is {state}; only leased reservations can release oversight.",
+            state=state,
+        )
 
     async def retry_release(self, lease_id: str, body: Any | None = None) -> dict[str, Any]:
         """Ask the fulfillment again: adopt its teardown, or free what it proves free."""
@@ -280,19 +292,26 @@ class LeaseLifecycleService:
                     "[LEASE_LIFECYCLE] Failed to begin release for reservation %s: %s",
                     reservation.get("capacity_reservation_id"), exc,
                 )
-                self._mark_release_failed(
-                    reservation,
-                    reason="release_submit_error",
-                    message=str(exc),
-                )
-                release_failed += 1
+                if (
+                    self._mark_release_failed(
+                        reservation,
+                        reason="release_submit_error",
+                        message=str(exc),
+                    )
+                    == "release_failed"
+                ):
+                    release_failed += 1
+                else:
+                    skipped += 1
                 continue
             if outcome == "releasing":
                 checked += 1
             elif outcome == "released":
                 released += 1
-            else:
+            elif outcome == "release_failed":
                 release_failed += 1
+            else:
+                skipped += 1
 
         for reservation in self._site_authority.list_reservations(state="releasing"):
             try:
@@ -341,7 +360,7 @@ class LeaseLifecycleService:
             if decision.action is ReleaseAction.FREE:
                 if await self._finish_release(reservation):
                     return "released"
-                self._mark_release_failed(
+                return self._mark_release_failed(
                     reservation,
                     reason="release_unproven",
                     message=(
@@ -349,14 +368,15 @@ class LeaseLifecycleService:
                         "provenance does not prove that nothing was dispatched"
                     ),
                 )
-                return "release_failed"
         if decision.action in (ReleaseAction.TEARDOWN, ReleaseAction.CREATE_IN_FLIGHT):
             # Recorded first: a crash before teardown begins leaves a lease the
             # releasing pass resumes, never a teardown the lease knows nothing of.
-            self._site_authority.begin_release(
+            began = self._site_authority.begin_release(
                 capacity_reservation_id,
                 release_job_id=str(decision.fulfillment_id),
             )
+            if began is None:
+                return self._yield_to_current_state(capacity_reservation_id, "begin releasing")
             logger.info(
                 "[LEASE_LIFECYCLE] Reservation %s releasing under fulfillment %s (%s)",
                 capacity_reservation_id,
@@ -368,12 +388,11 @@ class LeaseLifecycleService:
                     capacity_reservation_id, str(decision.fulfillment_id)
                 )
             return "releasing"
-        self._mark_release_failed(
+        return self._mark_release_failed(
             reservation,
             reason=decision.reason or "release_unproven",
             message=decision.message,
         )
-        return "release_failed"
 
     async def _begin_recorded_teardown(
         self, capacity_reservation_id: str, fulfillment_id: str
@@ -400,12 +419,11 @@ class LeaseLifecycleService:
     ) -> str:
         fulfillment_id = reservation.get("release_job_id")
         if not fulfillment_id:
-            self._mark_release_failed(
+            return self._mark_release_failed(
                 reservation,
                 reason="teardown_failed",
                 message="the releasing reservation records no release handle",
             )
-            return "release_failed"
 
         try:
             status = self._release_status.get_status(str(fulfillment_id))
@@ -422,12 +440,11 @@ class LeaseLifecycleService:
                     return "skipped"
                 return "released"
             if status.progress is ReleaseProgress.FAILED:
-                self._mark_release_failed(
+                return self._mark_release_failed(
                     reservation,
                     reason=status.reason or "teardown_failed",
                     message=status.error,
                 )
-                return "release_failed"
             if status.progress is ReleaseProgress.READY_FOR_TEARDOWN:
                 await self._release_executor.begin_teardown(str(fulfillment_id))
                 return "skipped"
@@ -448,25 +465,54 @@ class LeaseLifecycleService:
         )
         if now < began + timedelta(seconds=grace_seconds):
             return "skipped"
-        self._mark_release_failed(
+        return self._mark_release_failed(
             reservation,
             reason="teardown_timeout",
             message="teardown did not complete before the watchdog grace period elapsed",
         )
-        return "release_failed"
 
     def _mark_release_failed(
         self, reservation: dict[str, Any], *, reason: str, message: str | None,
-    ) -> None:
-        logger.error(
-            "[LEASE_LIFECYCLE] Release failed for reservation %s: %s %s",
-            reservation.get("capacity_reservation_id"), reason, message or "",
+    ) -> str:
+        """Record the release as failed, unless the reservation moved on.
+
+        A releasing reservation is failed only under the handle this cycle
+        read, so a failure observed for one release attempt cannot land on
+        another. The site refuses a failure for a reservation an operator took
+        over or force-released, or that was released; the lifecycle then
+        leaves it as it is.
+        """
+        capacity_reservation_id = reservation["capacity_reservation_id"]
+        expected_handle = (
+            reservation.get("release_job_id")
+            if str(reservation.get("state")) == "releasing"
+            else None
         )
-        self._site_authority.record_release_failure(
-            reservation["capacity_reservation_id"],
+        recorded = self._site_authority.record_release_failure(
+            capacity_reservation_id,
             reason=reason,
             message=message,
+            release_job_id=expected_handle,
         )
+        if recorded is None:
+            return self._yield_to_current_state(capacity_reservation_id, "record a failure")
+        logger.error(
+            "[LEASE_LIFECYCLE] Release failed for reservation %s: %s %s",
+            capacity_reservation_id, reason, message or "",
+        )
+        return "release_failed"
+
+    def _yield_to_current_state(self, capacity_reservation_id: str, write: str) -> str:
+        """Honour a state another actor recorded since this cycle read the lease."""
+        current = self._site_authority.get_reservation(capacity_reservation_id) or {}
+        logger.info(
+            "[LEASE_LIFECYCLE] Reservation %s is now %s; the site refused to %s for "
+            "a stale read, and the lifecycle leaves it as it is",
+            capacity_reservation_id,
+            current.get("state", "absent"),
+            write,
+        )
+        return "skipped"
 
     async def _finish_release(self, reservation: dict[str, Any]) -> bool:
         capacity_reservation_id = reservation["capacity_reservation_id"]

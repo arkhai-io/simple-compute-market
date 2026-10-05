@@ -624,3 +624,103 @@ async def test_post_provision_commit_and_lease_registration_do_not_require_resou
     assert register_lease.await_args.kwargs["capacity_reservation_id"] == "reservation-1"
     assert register_lease.await_args.kwargs["resource_id"] is None
     assert register_lease.await_args.kwargs["vm_host"] is None
+
+
+_RECORDED_WINDOW = {
+    "capacity_reservation_id": "reservation-1",
+    "state": "leased",
+    "lease_start_utc": "2026-01-01T00:00:00+00:00",
+    "lease_end_utc": "2026-01-01 01:00",
+}
+
+
+async def _fulfil_after_provisioning(monkeypatch, tmp_path, *, commit, register_lease):
+    """Run the VM main path to past provisioning with the given commit and
+    registration; the VM itself is always provisioned."""
+    plan = SimpleNamespace(order_id="listing-1", required_attributes={"vcpu_count": 2})
+    monkeypatch.setattr(vfs, "build_vm_fulfillment_plan", lambda **_: plan)
+    lifecycle = await make_vm_lifecycle_fixture(tmp_path / "deferral.db")
+    sqlite_client = lifecycle.db
+
+    async def capacity_binding_for_listing(repository, listing_id):
+        return lifecycle.capacity_binding
+
+    monkeypatch.setattr(
+        "market_storefront.services.capacity_client.capacity_binding_for_listing",
+        capacity_binding_for_listing,
+    )
+    capacity = SimpleNamespace(
+        reserve=AsyncMock(return_value={"capacity_reservation_id": "reservation-1", "site": "site-1"}),
+        commit=commit,
+    )
+    provisioned: list[str] = []
+
+    async def provision_vm(ssh_public_key, *, vm_target, on_job_submitted, **_):
+        await on_job_submitted("fulfillment-1")
+        provisioned.append(vm_target)
+        return {"vm_name": vm_target, "authentication": {}}
+
+    result = await vfs.fulfill_vm_obligation(
+        client=None,
+        escrow_uid="escrow-1",
+        ssh_public_key="ssh-ed25519 test",
+        order={"listing_id": "listing-1"},
+        listing_id="listing-1",
+        site_id="site-1",
+        get_sqlite_client=lambda: sqlite_client,
+        capacity=capacity,
+        stage_event=lambda *args, **kwargs: None,
+        provision_vm=provision_vm,
+        schedule_shutdown=AsyncMock(),
+        register_lease=register_lease,
+    )
+    await asyncio.sleep(0)
+    assert provisioned, "the VM was provisioned"
+    return result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("commit", "register_lease"),
+    [
+        (AsyncMock(return_value={"capacity_reservation_id": "reservation-1"}), AsyncMock()),
+        (AsyncMock(return_value=_RECORDED_WINDOW), AsyncMock(side_effect=RuntimeError("down"))),
+    ],
+    ids=["commit records no window", "registration fails"],
+)
+async def test_a_deal_whose_lease_is_not_registered_is_deferred_not_published(
+    monkeypatch, tmp_path, commit, register_lease
+):
+    """The VM is running but its lease is not registered: the deal is deferred
+    for the resume pass, and its evidence is not published yet."""
+    submit = AsyncMock(return_value="fulfillment-uid")
+    monkeypatch.setattr(vfs, "submit_compute_fulfillment", submit)
+
+    result = await _fulfil_after_provisioning(
+        monkeypatch, tmp_path, commit=commit, register_lease=register_lease
+    )
+
+    assert result["status"] == "deferred"
+    assert "lease registration" in result["message"]
+    submit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_failed_evidence_publication_after_provisioning_is_deferred(
+    monkeypatch, tmp_path
+):
+    """Publishing the fulfillment is retried by the resume pass rather than
+    failing a deal whose VM is running."""
+    monkeypatch.setattr(
+        vfs, "submit_compute_fulfillment", AsyncMock(side_effect=RuntimeError("rpc down"))
+    )
+
+    result = await _fulfil_after_provisioning(
+        monkeypatch,
+        tmp_path,
+        commit=AsyncMock(return_value=_RECORDED_WINDOW),
+        register_lease=AsyncMock(),
+    )
+
+    assert result["status"] == "deferred"
+    assert "evidence publication" in result["message"]

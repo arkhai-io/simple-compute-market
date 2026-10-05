@@ -645,27 +645,49 @@ async def fulfill_vm_obligation(
                 cred_err,
             )
 
-    if (
-        reserved_capacity_reservation_id
-        and vm_target
-        and escrow_uid
-        and committed_window is None
-    ):
+    def _deferred(step: str, error: Any) -> dict[str, Any]:
+        """The VM exists, but a step after it did not complete.
+
+        Settlement leaves the deal open rather than failing it with a running
+        VM; the fulfillment resume pass finishes it from the recorded
+        fulfillment, re-committing, registering, and submitting the evidence,
+        without provisioning again.
+        """
         logger.warning(
-            "[LEASE] Reservation %s recorded no lease window at commit; "
-            "the lease is not registered",
-            reserved_capacity_reservation_id,
+            "[SETTLEMENT] Escrow %s deferred after provisioning: %s did not "
+            "complete (%s); the fulfillment resume pass finishes it",
+            escrow_uid,
+            step,
+            error,
         )
-    elif reserved_capacity_reservation_id and vm_target and escrow_uid:
-        # register_lease's downstream LeaseRegistration call does not read
-        # resource_id/vm_host at all (executor_ref self-heals from the
-        # commit-time-written reservation.vm_host instead -- see
-        # openspec/specs/physical-provisioning/spec.md's lease-registration
-        # requirement). Requiring them here would make lease registration,
-        # and therefore the watchdog's ability to auto-release this VM,
-        # depend on the negotiation having pinned a specific physical
-        # resource -- which is the exception, not the ordinary pool-scoped
-        # capacity-reservation case this path exists to serve.
+        stage_event(
+            "settlement",
+            "deferred_after_provisioning",
+            listing_id=order_id,
+            escrow_uid=escrow_uid,
+            capacity_reservation_id=reserved_capacity_reservation_id,
+            step=step,
+            error=str(error),
+        )
+        return {
+            "status": "deferred",
+            "message": f"{step} did not complete after provisioning: {error}",
+            "escrow_uid": escrow_uid,
+            "capacity_reservation_id": reserved_capacity_reservation_id,
+            "connection_details": None,
+            "ssh_public_key": ssh_public_key,
+        }
+
+    if reserved_capacity_reservation_id and vm_target and escrow_uid:
+        # The lease is the family's: registering it records its executor
+        # target and correlates the reservation with the deal's escrow. It is
+        # an obligation of a delivered deal, so a deal whose lease is not
+        # registered is not complete.
+        if committed_window is None:
+            return _deferred(
+                "lease registration",
+                "the reservation's commit recorded no lease window",
+            )
         try:
             await register_lease(
                 resource_id=reserved_resource_id,
@@ -676,22 +698,15 @@ async def fulfill_vm_obligation(
                 lease_start_utc=committed_window[0],
                 lease_end_utc=committed_window[1],
             )
-            logger.info(
-                "[LEASE] Registered lease with provisioning service "
-                "(reservation=%s escrow=%s expires=%s)",
-                reserved_capacity_reservation_id,
-                escrow_uid,
-                lease_end_utc,
-            )
         except Exception as lease_err:
-            logger.warning(
-                "[LEASE] Failed to register lease with provisioning service "
-                "(reservation=%s escrow=%s): %s - watchdog will not auto-release "
-                "this resource",
-                reserved_capacity_reservation_id,
-                escrow_uid,
-                lease_err,
-            )
+            return _deferred("lease registration", lease_err)
+        logger.info(
+            "[LEASE] Registered lease with provisioning service "
+            "(reservation=%s escrow=%s expires=%s)",
+            reserved_capacity_reservation_id,
+            escrow_uid,
+            committed_window[1],
+        )
 
     async def _schedule_shutdown_best_effort() -> None:
         try:
@@ -721,32 +736,9 @@ async def fulfill_vm_obligation(
             connection_details=connection_details,
         )
     except Exception as error:
-        logger.error(
-            "[SETTLEMENT] EVENT=settlement_failed_after_provisioning "
-            "escrow_uid=%s listing_id=%s resource_id=%s capacity_reservation_id=%s "
-            "error=%s",
-            escrow_uid,
-            order_id,
-            reserved_resource_id,
-            reserved_capacity_reservation_id,
-            error,
-        )
-        stage_event(
-            "settlement",
-            "failed_after_provisioning",
-            listing_id=order_id,
-            escrow_uid=escrow_uid,
-            resource_id=reserved_resource_id,
-            capacity_reservation_id=reserved_capacity_reservation_id,
-            error=str(error),
-        )
-        return {
-            "status": "error",
-            "message": f"Fulfillment evidence publication failed after provisioning: {error}",
-            "escrow_uid": escrow_uid,
-            "connection_details": None,
-            "ssh_public_key": ssh_public_key,
-        }
+        # The VM is running: publishing its evidence is retried by the
+        # fulfillment resume pass, never answered by failing the deal.
+        return _deferred("fulfillment evidence publication", error)
 
     if order_id:
         try:

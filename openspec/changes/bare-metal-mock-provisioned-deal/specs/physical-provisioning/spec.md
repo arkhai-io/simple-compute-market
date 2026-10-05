@@ -282,7 +282,10 @@ a release MUST NOT write: the reservation MUST be recorded `releasing`, with the
 as its release handle, before teardown is begun, so that a restart between the two resumes
 the release from `releasing`, and a failure to begin teardown leaves it for the lease
 lifecycle's next cycle. The grace period after which a stalled teardown is marked failed
-MUST run from when the reservation entered `releasing`, not from the lease's end.
+MUST run from when the reservation entered `releasing`, not from the lease's end. When the
+site refuses one of the lifecycle's writes because the reservation changed since it was
+read, the lifecycle MUST re-read the reservation and leave it in the state another actor
+recorded; in particular, it MUST NOT begin teardown after a refused move to `releasing`.
 
 - An `active` aggregate MUST be torn down before capacity returns.
 - An aggregate whose teardown has already begun — `teardown_dispatch_pending`, `tearing_down`, or `teardown_failed` — MUST have that teardown adopted, not a second one begun.

@@ -77,25 +77,28 @@ async def _refresh_capacity_lease(
 
     Once the lease is registered, the site keeps its recorded window whatever
     this commit names, so the returned window, not the one computed here, is
-    what a registration must repeat. ``None`` when the commit did not happen.
+    what a registration must repeat. ``None`` only when there is nothing to
+    commit (no capacity client or no reservation). A commit that fails, or
+    that records no window, raises: the lease cannot be registered without
+    it, and the deal is not finished until it is, so the pass stops here and
+    the next one retries.
     """
     if capacity_client is None or not reservation_id or not resource_id:
         return None
-    try:
-        committed = await capacity_client.commit(
-            resource_id=resource_id,
-            capacity_reservation_id=reservation_id,
-            lease_start_utc=lease_start_utc,
-            lease_end_utc=lease_end_utc,
-            idempotency_ref=escrow_uid,
-            site_id=site_id,
+    committed = await capacity_client.commit(
+        resource_id=resource_id,
+        capacity_reservation_id=reservation_id,
+        lease_start_utc=lease_start_utc,
+        lease_end_utc=lease_end_utc,
+        idempotency_ref=escrow_uid,
+        site_id=site_id,
+    )
+    window = committed_lease_window(committed)
+    if window is None:
+        raise RuntimeError(
+            f"the commit of reservation {reservation_id!r} recorded no lease window"
         )
-    except Exception:
-        logger.exception(
-            "[FULFILLMENT_RESUME] Lease refresh failed for escrow %s", escrow_uid
-        )
-        return None
-    return committed_lease_window(committed)
+    return window
 
 
 async def _store_fulfillment_credentials(
@@ -150,21 +153,17 @@ async def _register_recovered_vm_lease(
         register_lease and reservation_id and resource_id and vm_host and vm_target
     ):
         return
-    try:
-        await register_lease(
-            resource_id=resource_id,
-            capacity_reservation_id=reservation_id,
-            escrow_uid=escrow_uid,
-            vm_host=str(vm_host),
-            vm_target=str(vm_target),
-            lease_start_utc=lease_start_utc,
-            lease_end_utc=lease_end_utc,
-        )
-    except Exception:
-        logger.exception(
-            "[FULFILLMENT_RESUME] Provisioning lease registration failed for escrow %s",
-            escrow_uid,
-        )
+    # A failure propagates: the deal's lease must be registered before its
+    # evidence is published, so the pass stops and the next one retries.
+    await register_lease(
+        resource_id=resource_id,
+        capacity_reservation_id=reservation_id,
+        escrow_uid=escrow_uid,
+        vm_host=str(vm_host),
+        vm_target=str(vm_target),
+        lease_start_utc=lease_start_utc,
+        lease_end_utc=lease_end_utc,
+    )
 
 
 async def _ensure_onchain_fulfillment(

@@ -46,6 +46,34 @@ a recorded create handle MUST NOT be replaced.
 - **WHEN** a registration names a reservation that is `releasing`
 - **THEN** it is refused, and the reservation stays `releasing`
 
+### Requirement: The lease lifecycle's writes are conditional transitions
+
+Each write the lease lifecycle makes to a reservation MUST be a transition conditioned on
+the reservation's current state, refused, with nothing written, from any other state, so
+that a lifecycle acting on a stale read cannot undo what an operator or a completed release
+recorded:
+
+- Entering `releasing` MUST be allowed from `reserved`, `provisioning`, `leased`, and
+  `release_failed` (a retry). A reservation already `releasing` under the same release
+  handle MUST be returned unchanged; one releasing under another handle MUST be refused.
+- Recording a release failure MUST be allowed from `reserved`, `provisioning`, `leased`, and
+  `releasing`. A `releasing` reservation MUST still be releasing under the handle the
+  failure was observed for.
+- Handing a reservation to an operator (`unmanaged`) MUST be allowed only from `leased`.
+- Only a forced release MAY free an `unmanaged` reservation.
+
+#### Scenario: A stale cycle meets a lease an operator took over
+
+- **WHEN** a lease cycle that read a lease as `leased` asks to begin releasing it after an
+  operator has taken it over
+- **THEN** the transition is refused, and the reservation stays `unmanaged`
+
+#### Scenario: A stale failure meets a force-released lease
+
+- **WHEN** a release failure observed before an operator force-released the lease is
+  recorded afterwards
+- **THEN** it is refused, the reservation stays `force_released`, and its capacity stays free
+
 ### Requirement: Commit neither resurrects a lease nor moves a registered lease's window
 
 Committing a reservation MUST be refused when the reservation is `releasing`,

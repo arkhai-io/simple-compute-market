@@ -2050,3 +2050,89 @@ def test_a_settlement_assignment_outside_the_serialized_region_is_refused():
             )
 
     assert ledger.get_reservation(reserved["capacity_reservation_id"])["settlement_resource_id"] is None
+
+
+# ----------------------------------------------------------------------
+# The lease lifecycle's writes are conditional transitions: a write resting on
+# a stale read is refused once an operator or a completed release has acted.
+# ----------------------------------------------------------------------
+
+
+def test_a_stale_begin_cannot_take_back_a_lease_an_operator_took_over(
+    seeded: CapacityLedgerService,
+):
+    reservation_id = _committed(seeded, "0xstale-begin")
+    seeded.record_unmanaged(reservation_id, reason="oversight_released", message="manual")
+
+    assert seeded.begin_releasing(reservation_id, release_job_id="f-1") is None
+    assert seeded.get_reservation(reservation_id)["state"] == "unmanaged"
+
+
+def test_a_stale_failure_cannot_undo_a_force_release(seeded: CapacityLedgerService):
+    reservation_id = _committed(seeded, "0xstale-failure")
+    seeded.begin_releasing(reservation_id, release_job_id="f-1")
+    seeded.release(capacity_reservation_id=reservation_id, state="force_released")
+    capacity_after_force_release = seeded.snapshot()
+
+    refused = seeded.record_release_failed(
+        reservation_id, reason="teardown_failed", release_job_id="f-1"
+    )
+
+    assert refused is None
+    assert seeded.get_reservation(reservation_id)["state"] == "force_released"
+    assert seeded.snapshot() == capacity_after_force_release
+
+
+def test_only_a_force_release_frees_a_lease_an_operator_took_over(
+    seeded: CapacityLedgerService,
+):
+    reservation_id = _committed(seeded, "0xstale-release")
+    seeded.record_unmanaged(reservation_id, reason="oversight_released")
+
+    assert seeded.release(capacity_reservation_id=reservation_id) is None
+    assert seeded.get_reservation(reservation_id)["state"] == "unmanaged"
+    forced = seeded.release(capacity_reservation_id=reservation_id, state="force_released")
+    assert forced["state"] == "force_released"
+
+
+def test_begin_releasing_is_idempotent_under_its_handle_and_refused_under_another(
+    seeded: CapacityLedgerService,
+):
+    reservation_id = _committed(seeded, "0xhandle")
+    first = seeded.begin_releasing(reservation_id, release_job_id="f-1")
+
+    again = seeded.begin_releasing(reservation_id, release_job_id="f-1")
+    other = seeded.begin_releasing(reservation_id, release_job_id="f-2")
+
+    assert again["release_requested_at"] == first["release_requested_at"]
+    assert other is None
+    assert seeded.get_reservation(reservation_id)["release_job_id"] == "f-1"
+
+
+def test_a_failure_lands_only_on_the_release_attempt_it_was_observed_for(
+    seeded: CapacityLedgerService,
+):
+    reservation_id = _committed(seeded, "0xattempt")
+    seeded.begin_releasing(reservation_id, release_job_id="f-1")
+
+    assert (
+        seeded.record_release_failed(reservation_id, reason="teardown_failed", release_job_id="f-2")
+        is None
+    )
+    failed = seeded.record_release_failed(
+        reservation_id, reason="teardown_failed", release_job_id="f-1"
+    )
+    assert failed["state"] == "release_failed"
+
+
+@pytest.mark.parametrize("state", ["releasing", "released"])
+def test_oversight_is_refused_once_the_lease_is_not_leased(
+    seeded: CapacityLedgerService, state: str
+):
+    reservation_id = _committed(seeded, f"0xoversight-{state}")
+    seeded.begin_releasing(reservation_id, release_job_id="f-1")
+    if state == "released":
+        seeded.release(capacity_reservation_id=reservation_id)
+
+    assert seeded.record_unmanaged(reservation_id, reason="oversight_released") is None
+    assert seeded.get_reservation(reservation_id)["state"] == state

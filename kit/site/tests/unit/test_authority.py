@@ -29,9 +29,13 @@ class FakeLedger:
         self.calls.append(("begin_releasing", {"capacity_reservation_id": capacity_reservation_id, **kwargs}))
         return {**self.reservation, "state": "releasing", **kwargs}
 
-    def update_reservation_state(self, capacity_reservation_id, **kwargs):
-        self.calls.append(("update_reservation_state", {"capacity_reservation_id": capacity_reservation_id, **kwargs}))
-        return {**self.reservation, **kwargs}
+    def record_release_failed(self, capacity_reservation_id, **kwargs):
+        self.calls.append(("record_release_failed", {"capacity_reservation_id": capacity_reservation_id, **kwargs}))
+        return {**self.reservation, "state": "release_failed"}
+
+    def record_unmanaged(self, capacity_reservation_id, **kwargs):
+        self.calls.append(("record_unmanaged", {"capacity_reservation_id": capacity_reservation_id, **kwargs}))
+        return {**self.reservation, "state": "unmanaged"}
 
     def release(self, **kwargs):
         self.calls.append(("release", kwargs))
@@ -99,7 +103,7 @@ def test_authority_exposes_semantic_release_operations():
     assert forced["state"] == "force_released"
     assert [call[0] for call in ledger.calls] == [
         "begin_releasing",
-        "update_reservation_state",
+        "record_release_failed",
         "begin_releasing",
         "release",
         "release",
