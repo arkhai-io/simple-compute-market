@@ -197,15 +197,9 @@ Chain and provider dependencies enter only after a composition root selects a co
 
 Arkhai payment authentication is independent of marketplace request signing: headless calls use owner-scoped WorkOS API keys, and receipts use the service's Ed25519 `arkhai.payments.receipt.v1` framing. Generated wire models and identity-kit verification preserve the published service boundary without importing service code.
 
-
-
 ## Current limits
 
 The composition contract covers the shipped role protocols and versioned domain contracts; it is not a claim that every possible market shape fits the current phases. Auctions, sealed-bid protocols, arbitrary settlement plans, and a universal storefront executable require explicit changes rather than inference from the extension points.
-
-API-credit standalone negotiation still constructs Alkahest prerequisites and
-proposals directly. This surface does not establish the same-table admission
-contract.
 
 The frozen-registry, binding, and dispatch seams have deterministic repository
 evidence, but complete live VM/bare-metal restart, teardown, and

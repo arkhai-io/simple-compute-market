@@ -4,7 +4,7 @@ Final implementation and post-review closeout checklist. Completed task IDs and
 ownership are retained; detailed implementation/review history is in Git and
 [final joined evidence](../../../docs/attachments/route-settlement-closeout/final.md).
 No escrow-carrier/runtime extraction or public listing/registry wire cutover is
-included. Task 8.2 remains a behavioral acceptance blocker, not an unrun audit.
+included. All tasks are complete; the change is ready to archive after code review.
 
 ## 1. Shared core and buyer dispatch
 
@@ -115,9 +115,9 @@ Owner: joined post-review closeout. Exact commands/counts/readiness/limits are i
 `docs/attachments/route-settlement-closeout/final.md` and final-inventory.md.
 
 - [x] 8.1 Clean `make dist`, consuming reinit, all original named suites and four repair-worker entries pass. Original primary groups 680; expanded selections cover 723 distinct cases. Integration slices30/25/4/3, storage12/6/14/13, four payment vectors, generated models and core/payment typing pass.
-- [ ] 8.2 Full ID/proposal/config-key and generic control-flow inventory remains blocked: standalone `market credits negotiate` bypasses its buyer table (B1); bare-metal accepted contact reveal/re-read requires current enablement (B2). No common delivery/authority switch remains. Behavioral repair/re-drive is required; do not tick from passing greps/suites alone.
+- [x] 8.2 Full ID/proposal/config-key and generic control-flow inventory: no common delivery/authority switch remains. Its two failures were repaired with production-surface tests that fail on the prior code: B1 `market credits negotiate` dispatches through the buyer table and negotiates payment-only wallet-free (23 buyer tests, `docs/attachments/apicredits-negotiate/`); B2 accepted contact reveal/re-read resolves the stored Agreement's seller entry with contact disabled while fresh contact stays refused (6 + 53 tests, `docs/attachments/contact-disablement/`).
 - [x] 8.3 VM/credit controlled first use, actual accepted-run CLI and bare-metal HTTP recovery/contact replays pass and clean owned state. No owned ready live target supplied; VM/API-credit/bare-metal complete-deal deployment lanes remain unavailable, not qualified.
 - [x] 8.4 Comment hygiene passes; directly read added/touched comments/docstrings, removed provenance wording, no production dependency on active change docs.
 - [x] 8.5 Added/touched local imports reviewed. API-credit imports moved and real suites pass; two VM cycles reproduced against actual imports/wheels, publication operator-config load deliberately lazy with local reasons.
 - [x] 8.6 Six capability deltas synchronized; existing companions/repository architecture promoted and current limits disclosed. Tasks/design compressed with baseline inventory and detailed evidence retained in attachments; no new companion/index edit needed.
-- [x] 8.7 Goal6 and active change status reflect repaired core/evidence boundaries and precise B1/B2 blockers while retaining carrier/wire/live gaps. Promotion record complete; residuals owned by move-escrow proposal and GitHub ideas #261/#262. Strict change/spec validation passes. Do not archive while 8.2 is unchecked.
+- [x] 8.7 Goal6 and active change status reflect repaired core/evidence boundaries and precise B1/B2 blockers while retaining carrier/wire/live gaps. Promotion record complete; residuals owned by move-escrow proposal and GitHub ideas #261/#262. Strict change/spec validation passes. Archive with `--skip-specs` after review; specs were promoted directly.

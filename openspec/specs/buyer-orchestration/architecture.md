@@ -77,8 +77,11 @@ verified evidence.
 
 The buyer preserves exact Agreement bytes and opaque settlement data in accepted run state. Its `payer_account` travels in selection params, independently of the profile signer. It validates the seller-derived mandate against that Agreement and local policy, approves and polls the same transaction ID, then calls seller settlement with only the negotiation ID. Resume does not reconstruct the Agreement or use current priority to fail over.
 
-VM `market negotiate` uses the same entry for selection enrichment, accepted
-artifacts, pricing/prerequisite resolution and proposal construction. Fresh VM
+VM `market negotiate` and API-credit `market credits negotiate` use their
+respective buyer tables for selection enrichment, accepted artifacts,
+pricing/prerequisite resolution and proposal construction. Interrupted rounds
+retain the recorded selection, provision terms and scaled opening/ceiling
+rather than applying fresh admission or token scaling. Fresh VM
 acceptance requires an explicit advertised settlement selection; accepted
 recovery uses the exact Agreement and persisted concrete Alkahest proposal when
 applicable, not current publication policy.
@@ -95,12 +98,6 @@ The installed bare-metal contribution preserves the selected profile signer, exa
 API-credit buys preserve the accepted option, exact Agreement, and mandate rather than reconstructing a partial listing. Approval and polling retain transaction identity, and seller settle calls identify only the negotiation. Seller receipt verification precedes recoverable, idempotent credits issuance. Credentials use the private buyer result channel; a missing credential response is not permission to charge or issue again.
 
 ## Current limits
-
-The standalone `market credits negotiate` command remains an escrow-only path:
-it resolves wallet/chain, selects `accepted_escrows` and constructs an Alkahest
-proposal directly rather than using the buyer table. It is not wallet-free
-payment negotiation or evidence of the same-table admission boundary. API-credit
-buy and accepted-run settlement use the table.
 
 The plugin boundary and shipped export contracts do not prove that every arbitrary third-party command composes without collision. Persisted recovery covers documented stages; it is not a universal exactly-once transaction spanning registries, storefronts, and settlement mechanisms.
 

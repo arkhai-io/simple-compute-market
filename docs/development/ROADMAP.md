@@ -222,14 +222,10 @@ Each recipient can deliver its revealed introduction: each side hands its own co
 
 Current limits: escrow claimant, expiration, and condition fields remain in existing core carriers, and `kit/settlement-runtime` remains shared by Alkahest and contact exchange. Moving those escrow semantics fully into Alkahest is a separate refactor. The legacy `/api/v1/settle/{escrow_uid}` family remains the Alkahest surface.
 Payment evidence and delivery/issuance progress no longer occupy escrow rows.
-Standalone API-credit negotiation still bypasses the buyer table, and accepted
-bare-metal contact reveal/re-read still depends on current enablement; these
-specific inventory failures remain with settlement dispatch closeout.
 
 | Open gap | Owned by |
 |---|---|
 | Live Arkhai payment and domain delivery qualification | [`settle-through-arkhai-payments`](../../openspec/changes/settle-through-arkhai-payments/) |
-| Standalone API-credit negotiation's Alkahest-only path and disabled-contact accepted reveal/re-read still bypass the declared admission/recovery boundary | [`route-settlement-by-mechanism`](../../openspec/changes/route-settlement-by-mechanism/) |
 | Isolate escrow carriers and the conditional-escrow port fully within Alkahest | [`move-escrow-into-alkahest`](../../openspec/changes/move-escrow-into-alkahest/) |
 | Escrow fields in listing, registry and storefront-client wire formats | [`drop-escrow-from-shared-wire`](../../openspec/changes/drop-escrow-from-shared-wire/) |
 | Cross-domain contact-exchange composition beyond bare metal; contact-payload retention automation | Unowned — needs a new change; background in [`contact-exchange-settlement-mechanism`](../../openspec/changes/archive/2026-08-19-contact-exchange-settlement-mechanism/) |

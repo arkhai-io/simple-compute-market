@@ -73,22 +73,9 @@ wiring, not live ledger/hardware qualification. No owned ready external target
 was supplied. Live qualification stays with its existing private-payment/domain
 owners; it is not substituted with mocked success.
 
-## Remaining inventory failures
+## Final inventory
 
-Task 8.2 is not satisfied. [Final inventory](../../../docs/attachments/route-settlement-closeout/final-inventory.md)
-finds two behavioral gaps outside mechanical closeout repair authority:
-
-- `market credits negotiate` still directly resolves Alkahest wallet/chain,
-  escrow selection, price scaling and proposal construction, bypassing the
-  buyer table (including the normal `--from` surface).
-- Bare-metal introductions factory requires current contact enablement for
-  accepted reveal/re-read, rather than separating fresh admission from retained
-  accepted support. This was visible but unassigned in the earlier inventory.
-
-Permanent architecture names these current limitations without weakening the
-normative same-table/accepted-recovery contract. The change remains implemented
-with closeout blocked, not ready to archive. Behavioral repair/re-drive is owed
-before 8.2 can be checked.
+The [final inventory](../../../docs/attachments/route-settlement-closeout/final-inventory.md) found two surfaces outside the tables: `market credits negotiate` resolved Alkahest wallet, chain, escrow selection, price scaling and proposal itself (B1), and bare-metal introductions required current contact enablement for accepted reveal/re-read (B2). Both now go through the declared stages: B1 in [apicredits-negotiate](../../../docs/attachments/apicredits-negotiate/index.md), B2 in [contact-disablement](../../../docs/attachments/contact-disablement/index.md). No other mechanism dispatch remains outside a stage.
 
 ## Deferred residuals
 
@@ -111,4 +98,4 @@ before 8.2 can be checked.
 | Credits authorization/authority, uniform grant replay, separate issuance/private results | `openspec/specs/api-credits/spec.md`; `architecture.md#authority-boundaries` / `#idempotency-boundaries` / `#payment-composition-and-recovery` / `#failure-and-compensation`; repository `ARCHITECTURE.md#authority-boundaries` | Permanent, promoted |
 | Opt-in convention has a future kit home, no mandatory adapter | `openspec/specs/market-composition/architecture.md#settlement-runtime-composition`; `openspec/specs/settlement-configuration/architecture.md#registration-and-ownership` | Boundary permanent/promoted; implementation deferred; core protocol rejected |
 | Explicit fresh-database reset, no compatibility adoption | Three domain specs; VM `architecture.md#explicit-database-reset`, physical `architecture.md#explicit-storefront-database-reset`, API credits `architecture.md#explicit-database-reset`; repository `ARCHITECTURE.md#build-packaging-and-initialization` | Current reset contract permanent/promoted; in-place migration method temporary provenance |
-| Goal 6 current-state and gap mapping | `docs/development/ROADMAP.md#goal-6--make-the-settlement-mechanism-a-composed-choice` | Updated: core/delivery gaps closed, B1/B2 plus carrier/wire/live gaps retained |
+| Goal 6 current-state and gap mapping | `docs/development/ROADMAP.md#goal-6--make-the-settlement-mechanism-a-composed-choice` | Updated: core/delivery and B1/B2 gaps closed; carrier/wire/live gaps retained |
