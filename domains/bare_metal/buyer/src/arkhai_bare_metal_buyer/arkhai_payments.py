@@ -93,7 +93,7 @@ class BareMetalArkhaiPaymentsBuyer:
         if service_identity is None:
             raise ValueError("payments service identity is not configured")
 
-        with payments_client_for_owner(self.config, payer_account) as client:
+        with payments_client_for_owner(self.config, self.payer_account) as client:
             approved = client.approve(mandate, agreement=agreement_wire)
             if not verify_receipt(
                 approved,

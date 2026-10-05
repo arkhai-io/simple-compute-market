@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import base64
 import os
 import time
 import webbrowser
@@ -291,7 +290,9 @@ def buy_bare_metal(
         stage = BUYER_STAGES[selected.mechanism]
         stage.validate_option(selected)
     except (KeyError, ValueError) as exc:
-        raise typer.BadParameter("buy requires a supported priced settlement option") from exc
+        raise typer.BadParameter(
+            "buy requires a supported priced settlement option"
+        ) from exc
     rate = selected.rates[0]
     amount = compute_rate_total(rate, duration_seconds)
     payment_buyer = BareMetalArkhaiPaymentsBuyer(
@@ -338,7 +339,9 @@ def buy_bare_metal(
         ),
         settlement_selection=selection,
         max_rounds=buyer_config.default_max_rounds,
-        validate_acceptance=lambda accepted: stage.validate_acceptance(accepted, payment_buyer),
+        validate_acceptance=lambda accepted: stage.validate_acceptance(
+            accepted, payment_buyer
+        ),
     )
     if outcome.status != "agreed" or outcome.negotiation_id is None:
         run_log.end("exited", reason=outcome.reason)
@@ -366,8 +369,11 @@ def buy_bare_metal(
         timeout=buyer_config.timeout_seconds,
     )
     transaction = stage.settle(
-        outcome=outcome, buyer=payment_buyer, transport=settlement,
-        timeout=payment_timeout_seconds, run_log=run_log,
+        outcome=outcome,
+        buyer=payment_buyer,
+        transport=settlement,
+        timeout=payment_timeout_seconds,
+        run_log=run_log,
     )
     fulfillment = BareMetalFulfillmentTransport(
         seller_url=listing.storefront_url,

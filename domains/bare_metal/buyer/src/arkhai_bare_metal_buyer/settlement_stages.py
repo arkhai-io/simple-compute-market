@@ -24,15 +24,28 @@ class PaymentStage:
 
     @staticmethod
     def validate_acceptance(outcome: Any, buyer: BareMetalArkhaiPaymentsBuyer) -> None:
-        if outcome.agreement is None or outcome.settlement_data is None or not outcome.agreement_bytes:
-            raise ValueError("accepted payment negotiation omitted its Agreement or mandate")
+        if (
+            outcome.agreement is None
+            or outcome.settlement_data is None
+            or not outcome.agreement_bytes
+        ):
+            raise ValueError(
+                "accepted payment negotiation omitted its Agreement or mandate"
+            )
         buyer.validate_acceptance(
             agreement=outcome.agreement,
             settlement_data=outcome.settlement_data,
         )
 
-    def settle(self, *, outcome: Any, buyer: BareMetalArkhaiPaymentsBuyer,
-               transport: Any, timeout: float, run_log: Any) -> str:
+    def settle(
+        self,
+        *,
+        outcome: Any,
+        buyer: BareMetalArkhaiPaymentsBuyer,
+        transport: Any,
+        timeout: float,
+        run_log: Any,
+    ) -> str:
         self.validate_acceptance(outcome, buyer)
         transaction = buyer.approve(
             agreement=outcome.agreement,
@@ -45,11 +58,15 @@ class PaymentStage:
             settled = transport.settle(outcome.negotiation_id)
             if settled.get("status") == "settlement_verified":
                 if settled.get("escrow_uid") != transaction:
-                    raise RuntimeError("seller verified a different payment transaction")
+                    raise RuntimeError(
+                        "seller verified a different payment transaction"
+                    )
                 return transaction
             if settled.get("status") != "settlement_pending":
                 raise RuntimeError("seller returned an unexpected settlement status")
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise TimeoutError("seller has not observed the verified payment receipt")
+                raise TimeoutError(
+                    "seller has not observed the verified payment receipt"
+                )
             time.sleep(min(1.0, remaining))

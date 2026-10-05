@@ -37,7 +37,8 @@ def _buyer_market_domain() -> MarketDomainContract:
     return replace(
         base,
         declared_capabilities=frozenset(
-            set(base.declared_capabilities) | {DomainCapability.BUYER, DomainCapability.SETTLEMENT}
+            set(base.declared_capabilities)
+            | {DomainCapability.BUYER, DomainCapability.SETTLEMENT}
         ),
         buyer=buyer,
         settlement=ImmutableSettlementCapability(buyer_stages=BUYER_STAGES),
