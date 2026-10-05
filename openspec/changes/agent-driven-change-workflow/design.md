@@ -85,6 +85,51 @@ design, preserving completed tasks and amending rather than replacing them, and
 builds on `openspec-update-change`, which already keeps a change's artifacts
 coherent with one another without touching code.
 
+Planning also sizes the work. Every section ends at a verification point and is
+sized to be implemented within one fresh session; see the next decision for why.
+A section that cannot be finished without the session compacting is a planning
+defect, the same way `openspec/README.md` treats an unusually large closeout task
+as a scope signal.
+
+### Implementation runs one section per fresh session
+
+Compliance with the development guidance degrades as an implementation session
+grows, and sharply after it compacts. `AGENTS.md` is loaded as system context and
+survives compaction, but the documents it requires reading —
+`ARCHITECTURE.md`, `TESTING.md`, `openspec/README.md` — enter through tool calls,
+are ordinary conversation, and are summarized away; the summary keeps task state
+and drops the rules. Before compaction, the same rules sit ever further behind tool
+output. The owner currently compensates by finding natural breakpoints and
+restarting sessions by hand.
+
+A fresh context is therefore the unit of implementation rather than an
+intervention. `change-implement` implements one `tasks.md` section per session,
+starting from the required documents, the change, and that section. Nothing a
+later session needs may live only in the conversation:
+
+- **Handoff.** Before a section's session ends, it records in that section's task
+  notes whatever the next session would otherwise rediscover — a seam that resisted,
+  an approach that failed and why. Narrative compression at closeout trims these.
+- **Fresh-context compliance check.** Before committing, a subagent with a fresh
+  context checks only the section's diff against `AGENTS.md`, `TESTING.md`, and
+  `openspec/README.md`, alongside `make check-comment-hygiene` and the scoped
+  `make check-doc-citations`. A fresh reader does not share the implementer's
+  degradation; it is the documentation and testing lenses of a review, applied to
+  one slice before anyone else sees it.
+- **Clean stop.** When discovered code invalidates the plan, the session records
+  why, commits nothing partial, and stops, leaving the change `blocked in
+  implementation` or returning it to design. A session that cannot ask the owner
+  mid-task needs a clean exit rather than a guess.
+
+Sessions are started by the owner, one per section, until the orchestrator exists;
+a driver that runs sections in sequence is the orchestrator's job. Within a session,
+a Claude Code hook that runs when a session resumes after compaction re-reads the
+required documents and restates the change and section. It is a backstop for a
+section that outgrew its plan, not the mechanism: it re-injects the documents
+themselves, never a digest of their rules, which would be a second copy that drifts.
+Codex has no equivalent, so the backstop is Claude Code's alone; the section sizing
+and fresh sessions apply to both harnesses.
+
 ### Reviews are exchanged as files, not as a continued session
 
 The reviewer harness writes each review into the change's `reviews/` directory. A
@@ -193,8 +238,11 @@ presented to the owner, ordered by lens with `direction` first, then by severity
 Nothing is applied until the owner has recorded a disposition.
 
 On each disposition, one line is appended to the change's
-`interventions.jsonl`: the review kind, lens, basis, severity, the agent's
-position, the owner's disposition, and a one-line summary of the finding. Unlike
+`interventions.jsonl`: the review kind, the `tasks.md` section the finding concerns
+when it concerns one, lens, basis, severity, the agent's position, the owner's
+disposition, and a one-line summary of the finding. The section lets the owner see
+whether findings still cluster in particular slices, which would mean those slices
+were sized too large. Unlike
 `reviews/`, the ledger is tracked. It sits in the change directory so it travels
 with the change through archival, and it must be tracked to do so reliably: a
 change worked in its own worktree loses every untracked file when the worktree is

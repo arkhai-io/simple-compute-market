@@ -69,7 +69,8 @@ MUST be presented to the owner, none withheld for being minor or uncontested.
 ### Requirement: Intervention ledger
 
 Each disposition the owner records MUST be appended as one entry to the change's
-`interventions.jsonl`, stating the review, the finding's lens, basis, and severity,
+`interventions.jsonl`, stating the review, the `tasks.md` section the finding
+concerns when it concerns one, the finding's lens, basis, and severity,
 the implementing agent's position, the owner's disposition, and a one-line summary.
 The ledger MUST be tracked by version control, MUST remain in the change directory,
 and MUST be archived with the change.
@@ -79,6 +80,30 @@ and MUST be archived with the change.
 - **WHEN** a change whose findings were dispositioned is archived
 - **THEN** its `reviews/` directory is gone and its intervention ledger is in the
   archived change directory
+
+### Requirement: One implementation section per fresh session
+
+Each `tasks.md` section MUST be planned to be implementable within one agent session
+without compaction, and MUST end at a verification point. Each section MUST be
+implemented in a session that begins with no prior conversation, by reading the
+repository guidance documents, the change, and that section. Anything a later
+session needs MUST be recorded in the change's files before the session ends. Before
+a section is committed, its diff MUST be checked against the repository guidance by
+an agent whose context contains no part of the implementing session. When discovered
+code invalidates the plan, the session MUST record why and stop without committing
+partial work.
+
+#### Scenario: A section is finished
+
+- **WHEN** an implementation session completes a section's tasks
+- **THEN** it records any handoff in the section's task notes, a fresh-context
+  check of the section's diff passes, and the section is committed; the next
+  section starts in a new session
+
+#### Scenario: The plan's premise fails mid-section
+
+- **WHEN** an implementation session finds code that invalidates the section's plan
+- **THEN** it records the finding in the change, commits no partial work, and stops
 
 ### Requirement: Validation observes a committed slice
 

@@ -49,7 +49,9 @@ to repair by hand.
 - [ ] 4.1 Write the `change-plan` skill on top of `openspec-update-change`: tasks
       from the settled design, completed tasks preserved and amended rather than
       replaced, the files each accepted decision touches, the validation each
-      section owes, each decision's permanent destination, and the closeout task.
+      section owes, each decision's permanent destination, and the closeout task;
+      each section ending at a verification point and sized to be implemented in
+      one fresh session.
 - [ ] 4.2 Pilot: amend `capacity-shape-envelope`'s existing plan to its settled
       design.
 - [ ] 4.3 Pilot: plan `add-full-stack-ci-job` from nothing.
@@ -75,18 +77,28 @@ to repair by hand.
 - [ ] 6.1 Write the `change-triage` skill: a position with evidence on every
       finding, every finding presented ordered by lens then severity, owner
       dispositions recorded in the triage file, one line per disposition appended
-      to the change's tracked `interventions.jsonl`, and accepted outcomes folded
+      to the change's tracked `interventions.jsonl` naming the `tasks.md` section
+      it concerns, and accepted outcomes folded
       into `design.md` or `tasks.md`.
 - [ ] 6.2 Pilot: triage the 5.3 review.
 
 ## 7. Implementation
 
-- [ ] 7.1 Write the `change-implement` skill: one `tasks.md` section per slice,
-      preserving completed tasks, stopping for design when discovered code
-      invalidates the plan, comment rules stated locally, and ending with
-      `make lock` and `make check-packaging` before committing the finished slice
-      unreviewed. Decide whether it wraps or replaces `openspec-apply-change`.
-- [ ] 7.2 Pilot: implement the first section of `capacity-shape-envelope`.
+- [ ] 7.1 Write the `change-implement` skill: one `tasks.md` section per fresh
+      session, starting from the guidance documents, the change, and that section;
+      preserving completed tasks; comment rules stated locally; a clean stop that
+      records why and commits nothing partial when discovered code invalidates the
+      plan; a handoff in the section's task notes; and, before committing the
+      finished slice unreviewed, `make lock`, `make check-packaging`,
+      `make check-comment-hygiene`, the scoped `make check-doc-citations`, and a
+      fresh-context subagent checking the section's diff against `AGENTS.md`,
+      `TESTING.md`, and `openspec/README.md`. Decide whether it wraps or replaces
+      `openspec-apply-change`.
+- [ ] 7.2 Add a committed Claude Code project hook that, when a session resumes
+      after compaction, re-reads the required guidance documents and restates the
+      change and section being worked.
+- [ ] 7.3 Pilot: implement the first section of `capacity-shape-envelope` in its
+      own session, recording what the fresh-context check caught.
 
 ## 8. Pre-review validation
 
@@ -105,7 +117,7 @@ to repair by hand.
       unforward); `make check-push-ready`, pushing exactly `HEAD` unforced, the
       end-to-end workflow, and its logs; diagnosis of a failing scenario from its
       logs; and `reviews/NN-validation.md`.
-- [ ] 8.5 Pilot: validate the 7.2 slice, then run an implementation review and
+- [ ] 8.5 Pilot: validate the 7.3 slice, then run an implementation review and
       triage on it with the section 5 and 6 skills.
 
 ## 9. Closeout and archival
@@ -117,7 +129,8 @@ to repair by hand.
       and `reviews/` deleted, and drafting the commit message and pull request
       description from the proposal, the promotion record, and the validation
       evidence.
-- [ ] 9.3 Pilot: implement `capacity-shape-envelope`'s remaining sections, then
+- [ ] 9.3 Pilot: implement `capacity-shape-envelope`'s remaining sections, one
+      session each, then
       pre-closeout review and triage, closeout, closeout review and triage, and
       archival.
 

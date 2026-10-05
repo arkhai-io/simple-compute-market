@@ -33,6 +33,11 @@ directly in the repository is told to write tombstones instead of deleting files
   a review is produced by one agent and read by another without passing through
   the owner's clipboard. A review is one Markdown file whose findings each carry a
   lens, a basis, and a defined severity.
+- Implement one `tasks.md` section per fresh agent session, with planning sizing
+  each section to fit one, a handoff recorded in the section's task notes, and a
+  fresh-context compliance check of the section's diff before it is committed, so
+  that guidance compliance does not degrade as a session grows or compacts. A
+  Claude Code hook re-reads the required documents after compaction as a backstop.
 - Record every owner disposition of a finding in the change's tracked intervention
   ledger, which is archived with the change and feeds periodic guidance refinement.
 - Automate the validation run before every implementation review, as an
@@ -55,6 +60,9 @@ directly in the repository is told to write tombstones instead of deleting files
   every phase, and surveys all changes to direct the owner to the next blocking
   item, is the intended end state. It is designed once the leaf skills exist and
   their failure modes are known, as its own change.
+- **A per-section driver.** Running a change's sections in sequence, each in a
+  fresh session, belongs to the orchestrator; until then the owner starts each
+  section's session.
 - **Campaign priority.** Choosing which campaign to work first has no consumer
   until the orchestrator exists, and belongs to that change.
 - **A machine parser for the index.** The index is read by agents; a fixed
@@ -96,8 +104,10 @@ directly in the repository is told to write tombstones instead of deleting files
 ### Knowledge to promote
 
 - Phases, owner gates, review records, finding lens/basis/severity, triage, the
-  intervention ledger, observational validation, push guards, and single-source
-  skills — `openspec/specs/change-workflow/spec.md`.
+  intervention ledger, one section per fresh session, observational validation,
+  push guards, and single-source skills — `openspec/specs/change-workflow/spec.md`.
+- Why compliance degrades with session length and why fresh sessions, not a
+  re-injected digest, are the remedy — `openspec/specs/change-workflow/architecture.md`.
 - Why lens and basis are separate axes, why reviews are exchanged as files rather
   than continued sessions, and why validation must not relock —
   `openspec/specs/change-workflow/architecture.md`.
@@ -113,7 +123,8 @@ directly in the repository is told to write tombstones instead of deleting files
 - **Contributor workflow.** `AGENTS.md` no longer describes filesets or
   tombstones; the `openspec/README.md` completion checklist loses its tombstone
   item; closeout part 6 gains the dependency-landing step.
-- **Repository layout.** A shared skill source under `.agents/skills/` with
+- **Repository layout.** A committed Claude Code project settings file carrying
+  the post-compaction hook; a shared skill source under `.agents/skills/` with
   per-harness links; `.gitignore` gains change `reviews/` directories; each worked
   change gains a tracked `interventions.jsonl`.
 - **Index format.** Every change row in `openspec/changes/README.md` is checked
