@@ -9,8 +9,6 @@ A buy run MUST compose discovery, candidate filtering/aggregation, negotiation a
 - **WHEN** the run log contains accepted terms and a deal reference
 - **THEN** recovery inspects or resumes that Agreement's same table entry and operation without renegotiating a second agreement
 
-## ADDED Requirements
-
 ### Requirement: Fresh and resumed buyers use the same stage declaration
 
 A domain's buy, settle-from-run and resume surfaces MUST use the same buyer-role table. Stages MUST receive exact accepted Agreement bytes, opaque settlement data and the recorded profile signer. Selection prerequisites and acceptance validation specific to a mechanism MUST be owned by its entry, and core MUST NOT require an escrow proposal or buyer-first action.

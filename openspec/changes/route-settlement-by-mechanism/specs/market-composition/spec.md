@@ -66,8 +66,6 @@ Core buyer settlement MUST select the composing domain's role-table entry using 
 - **WHEN** accepted durable work names an unavailable role-table entry
 - **THEN** settlement fails actionably before a mutation and never falls through to another mechanism
 
-## ADDED Requirements
-
 ### Requirement: One settlement declaration per domain role
 
 Each settlement-capable domain role MUST declare one immutable table from canonical mechanism ID to domain-owned stage. Core MUST require only the table and evidence carrier, not shared stage methods. Mechanism IDs MUST NOT select behavior elsewhere in domain orchestration; mechanism-owned input validation inside an entry remains permitted. Fresh admission MUST expose only supported entries.
