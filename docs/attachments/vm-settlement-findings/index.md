@@ -140,7 +140,7 @@ Proving tests:
 The runnable entry point from the repository root is:
 
 ```sh
-bash domains/vms/docs/replay-settlement-findings.sh
+bash docs/attachments/vm-settlement-findings/replay.sh
 ```
 
 Rebuilt all internal wheels and consuming VM environments before suites.

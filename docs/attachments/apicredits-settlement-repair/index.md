@@ -1,6 +1,6 @@
 # API-credit settlement repair evidence
 
-Base: `49b9fff3`; checkout-owned branch `fix-apicredits`. Hacking self-checks for the assigned code-review findings, not independent acceptance or live payment qualification. All changes and this packet are under `domains/apicredits/`; permanent specification promotion remains with campaign closeout.
+Base: `49b9fff3`; checkout-owned branch `fix-apicredits`. Hacking self-checks for the assigned code-review findings, not independent acceptance or live payment qualification. Production changes are under `domains/apicredits/`; permanent specification promotion is recorded in `openspec/changes/route-settlement-by-mechanism`.
 
 ## Setup
 

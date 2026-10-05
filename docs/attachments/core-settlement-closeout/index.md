@@ -25,7 +25,7 @@ After another `make dist`, buyer reinit and core sync/reinstall, all **11 new ca
 
 ## Replay
 
-Run `bash core/docs/settlement-closeout/replay.sh` from the repository root. It rebuilds wheels, reinstalls consumers and opens the library/run-log recovery surface plus the existing VM `market settle --from <run>` CLI replay. The CLI replay seeds its own exact accepted Agreement/mandate and uses controlled approval/signed seller HTTP. It does not claim live receipt, ledger or physical-delivery qualification.
+Run `bash docs/attachments/core-settlement-closeout/replay.sh` from the repository root. It rebuilds wheels, reinstalls consumers and opens the library/run-log recovery surface plus the existing VM `market settle --from <run>` CLI replay. The CLI replay seeds its own exact accepted Agreement/mandate and uses controlled approval/signed seller HTTP. It does not claim live receipt, ledger or physical-delivery qualification.
 
 The complete committed script was re-driven successfully: **26 carrier/boundary**, **51 buyer**, and **2 CLI checks**, plus mypy, comment hygiene and strict change validation. These repeat the focused measurements above, not additional unique coverage. Final buyer/domain-buyer grep returned no `SettlementEvidence` or `settlement_evidence` matches. Generated lock changes were restored; all processes finished and no external resources remain.
 
