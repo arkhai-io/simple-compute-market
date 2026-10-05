@@ -55,12 +55,23 @@ The storefront MUST re-drive nonterminal issuance using accepted negotiation, ve
 
 ### Requirement: API-credit role tables own settlement dispatch
 
-The API-credit buyer and seller MUST each compose one supported-mechanism table. Buy, accepted-run settlement, seller acceptance hooks and seller settlement MUST use the corresponding entry. Mechanism-specific option, mandate, expiry and post-issuance behavior MUST stay inside entries rather than controllers, negotiation orchestration or common credit issuance.
+The API-credit buyer and seller MUST each compose one supported-mechanism table. Buy, standalone negotiation (including `--from`), accepted-run settlement, seller acceptance hooks and seller settlement MUST use the corresponding entry. Mechanism-specific option, mandate, expiry and post-issuance behavior MUST stay inside entries rather than controllers, negotiation orchestration or common credit issuance.
 
 #### Scenario: Both payment and Alkahest are supported
 
 - **WHEN** accepted API-credit Agreements select either supported mechanism
 - **THEN** the same role declaration selects its stage and common issuance receives verified evidence without a mechanism switch
+
+#### Scenario: Payment-only standalone negotiation
+
+- **WHEN** `market credits negotiate` selects an advertised payment option
+- **THEN** its buyer entry supplies the payer account and unscaled payment prices without requiring wallet, chain or token inputs
+- **AND** the run retains exact Agreement bytes and settlement data for accepted-run settlement
+
+#### Scenario: Standalone negotiation resumes
+
+- **WHEN** an interrupted round loop resumes after fresh mechanism admission changes
+- **THEN** it retains the recorded selection, provision terms and scaled opening/ceiling without reselecting a mechanism or scaling prices again
 
 ### Requirement: Credits service consumes issuance authorization only
 

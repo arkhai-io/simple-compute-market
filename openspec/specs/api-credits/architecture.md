@@ -121,10 +121,6 @@ fallbacks — see `docs/development/ARCHITECTURE.md#wheel-based-development`.
 
 Current metering charges one fixed configured amount per admitted request; route-specific or variable-cost metering is not established. Possession-challenge protocols for existing keys are not implemented. Verification caching means revocation is not globally instantaneous, and optional batching must not be described as a strict zero-overdraft guarantee.
 
-Standalone `market credits negotiate` remains escrow-only and directly resolves
-Alkahest wallet/chain/proposal inputs, unlike table-routed buy and accepted-run
-settlement. Its wallet-free payment negotiation is not qualified.
-
 API credits intentionally has no compute-provisioning capability. A non-physical market does not acquire VM, lease-executor, or fulfillment-scheduler dependencies merely to conform to physical delivery architecture.
 
 ## Related contracts
@@ -142,6 +138,17 @@ Buyer and seller compose immutable role tables for Alkahest and
 matching role entry exists; accepted work dispatches from the exact Agreement,
 not current priority, escrow presence or configuration keys. Alkahest and
 `arkhai.payments.v1` are peer registrations. The payment path uses Ed25519 marketplace identity and owner-scoped payment credentials without constructing a wallet or chain client. Acceptance stores exact Agreement bytes and the seller-derived mandate in shared negotiation `settlement_data`.
+
+Standalone `market credits negotiate` uses that buyer table for selection
+preparation, accepted artifacts, price prerequisites and proposal construction.
+Payment prices remain in their advertised asset units and the entry supplies
+`payer_account`; no wallet or chain is needed. The entry projects advertised
+rate fields into the scalar policy's opening shape; the policy still determines
+the bid. The Alkahest entry retains
+chain/token constraints, address and policy guards, token-decimal scaling of
+explicit prices, and the existing escrow proposal shape. Derived prices use only
+the selected option and are already in base units. Interrupted rounds recover
+recorded selection, provision terms and scaled bounds, not current admission.
 
 The buyer validates and approves the mandate, polls its deterministic transaction ID, then calls seller settlement with only the negotiation ID. The seller reloads accepted state and verifies the matching signed receipt before credit issuance. A pending transaction returns retryable pending without a grant.
 

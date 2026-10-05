@@ -10,6 +10,7 @@ the provision terms, exactly like the VM lease duration.
 from __future__ import annotations
 
 import json
+import time
 from typing import Any, Optional
 
 import typer
@@ -19,11 +20,36 @@ from rich.table import Table
 
 import domains.apicredits.negotiation.buyer_policies as buyer_policies  # registers answer_key_challenge
 from .buyer_client import ResumeState, load_buyer_chain, negotiate_with_seller
-from core_buyer.deal_helpers import load_negotiation_resume_point
+from core_buyer.cli import assume_yes_option, parse_key_value_options, register_policy_verb
+from core_buyer.deal_helpers import load_negotiation_resume_point, settlement_acceptance_fields
+from core_buyer.orchestration import make_publisher_trust_resolver
+from core_buyer.orchestrator import BuyConfig, fetch_listing_dict
+from core_buyer.policy_surface import configured_buyer_policy
+from market_identity import TrustedIdentitySet
+from market_core.schemas import SettlementSelection
 from core_buyer.run_log import RunLog
-from domains.apicredits.negotiation import make_api_credits_provision_terms
+from domains.apicredits.negotiation import (
+    make_api_credits_provision_terms,
+    provision_key_id,
+    provision_key_mode,
+    provision_quantity,
+)
 
 from .cli_helpers import resolve_prices_from_matches
+from .settlement_composition import BUYER_STAGES, resolve_buyer_settlement_policy
+from .common import (
+    APICREDITS_SCHEMA_ID,
+    make_run_publisher_principals_refresh,
+    resolve_discovery_timeout,
+    resolve_fresh_buyer_identity,
+    resolve_indexer_urls,
+    resolve_indexer_urls_for_schema,
+    resolve_key_disposition,
+    resolve_negotiation_config,
+    resolve_recovery_buyer_identity,
+    resolve_registry_api_keys,
+    resolve_registry_authorities,
+)
 
 
 def register(credits_app: typer.Typer) -> None:
@@ -34,9 +60,6 @@ def register(credits_app: typer.Typer) -> None:
     app assembly — the scalar policies contribute --initial-price/
     --max-price/--price-markup, plus the --policy-param escape hatch.
     """
-    from core_buyer.cli import assume_yes_option, register_policy_verb
-    from core_buyer.policy_surface import configured_buyer_policy
-
     _policy = configured_buyer_policy()
 
     def negotiate(  # registered below after policy-param injection
@@ -143,8 +166,6 @@ def register(credits_app: typer.Typer) -> None:
         """
         console = Console()
 
-        from core_buyer.cli import parse_key_value_options
-
         policy_params_all: dict[str, Any] = {
             k: v for k, v in policy_values.items() if k != "policy_param"
         }
@@ -163,14 +184,6 @@ def register(credits_app: typer.Typer) -> None:
         _initial_explicit = initial_price is not None
         _max_explicit = max_price is not None
 
-        from .common import (
-            make_run_publisher_principals_refresh,
-            resolve_buyer_wallet,
-            resolve_fresh_buyer_identity,
-            resolve_key_disposition,
-            resolve_recovery_buyer_identity,
-        )
-
         identity = (
             resolve_recovery_buyer_identity(from_run)
             if from_run
@@ -178,18 +191,6 @@ def register(credits_app: typer.Typer) -> None:
         )
         signer = identity.signer
         principal = identity.principal
-        evm_addr, _evm_key = resolve_buyer_wallet(
-            override_addr=evm_address,
-            override_pk=evm_private_key,
-        )
-        if not evm_addr:
-            typer.secho(
-                "Missing EVM address required to select and inspect the Alkahest "
-                "escrow. Pass --evm-address or configure wallet.address.",
-                err=True,
-                fg=typer.colors.RED,
-            )
-            raise typer.Exit(2)
 
         key_mode, resolved_key_id = resolve_key_disposition(
             new_key=new_key,
@@ -209,54 +210,68 @@ def register(credits_app: typer.Typer) -> None:
             )
             seller_url = seller_url or resume_point.seller_url
             listing_id = listing_id or resume_point.listing_id
-            if max_price is None:
-                typer.secho(
-                    "--max-price is required when resuming (the strategy "
-                    "needs the buyer's ceiling).",
-                    err=True,
-                    fg=typer.colors.RED,
+            if initial_price is not None or max_price is not None:
+                raise typer.BadParameter(
+                    "price options apply only to fresh negotiation; resume uses "
+                    "the persisted scaled opening and ceiling"
                 )
-                raise typer.Exit(2)
+            initial_price = resume_point.initial_price
+            max_price = resume_point.max_price
+            quantity = provision_quantity(resume_point.accepted_provision_terms)
+            if quantity is None or quantity < 1:
+                raise typer.BadParameter("run has no recorded credit quantity")
+            key_mode = provision_key_mode(resume_point.accepted_provision_terms)
+            resolved_key_id = provision_key_id(resume_point.accepted_provision_terms)
             resume_state = ResumeState(
                 negotiation_id=resume_point.negotiation_id,
                 transcript=resume_point.transcript,
                 last_seller_proposal=resume_point.last_seller_proposal,
                 rounds_completed=resume_point.rounds_completed,
+                accepted_provision_terms=resume_point.accepted_provision_terms,
+                accepted_escrow_proposal=resume_point.accepted_escrow_proposal,
+                settlement_selection=resume_point.settlement_selection,
+                settlement_plan=resume_point.settlement_plan,
+                accepted_escrow_terms=resume_point.accepted_escrow_terms,
             )
+            if resume_point.settlement_selection is None:
+                raise typer.BadParameter("run has no recorded settlement selection")
+            mechanism = SettlementSelection.model_validate(
+                resume_point.settlement_selection,
+            ).mechanism
+            if mechanism not in BUYER_STAGES:
+                raise typer.BadParameter("unsupported recorded API-credit settlement mechanism")
 
-        from .common import (
-            APICREDITS_SCHEMA_ID,
-            resolve_discovery_timeout,
-            resolve_indexer_urls,
-            resolve_indexer_urls_for_schema,
-            resolve_registry_api_keys,
-            resolve_registry_authorities,
-        )
-
-        deadline = resolve_discovery_timeout(override=discovery_timeout)
-        candidate_urls = resolve_indexer_urls(override=registry_urls)
-        registry_authorities = resolve_registry_authorities(candidate_urls)
-        reg_urls = resolve_indexer_urls_for_schema(
-            APICREDITS_SCHEMA_ID,
-            signer=signer,
-            registry_authorities=registry_authorities,
-            override=registry_urls,
-            timeout=deadline,
-        )
-        registry_authorities = {url: registry_authorities[url] for url in reg_urls}
-        all_registry_api_keys = resolve_registry_api_keys()
-        registry_api_keys = {
-            url: all_registry_api_keys[url]
-            for url in reg_urls
-            if url in all_registry_api_keys
-        }
+        if resume_state is None:
+            deadline = resolve_discovery_timeout(override=discovery_timeout)
+            candidate_urls = resolve_indexer_urls(override=registry_urls)
+            registry_authorities = resolve_registry_authorities(candidate_urls)
+            reg_urls = resolve_indexer_urls_for_schema(
+                APICREDITS_SCHEMA_ID,
+                signer=signer,
+                registry_authorities=registry_authorities,
+                override=registry_urls,
+                timeout=deadline,
+            )
+            registry_authorities = {url: registry_authorities[url] for url in reg_urls}
+            all_registry_api_keys = resolve_registry_api_keys()
+            registry_api_keys = {
+                url: all_registry_api_keys[url]
+                for url in reg_urls
+                if url in all_registry_api_keys
+            }
+        else:
+            deadline = resolve_discovery_timeout(override=discovery_timeout)
+            reg_urls = [resume_point.source_registry_url]
+            registry_authorities = resolve_registry_authorities(reg_urls)
+            registry_api_keys = {
+                url: key for url, key in resolve_registry_api_keys().items()
+                if url in registry_authorities
+            }
 
         # Fetch the listing — needed for both --seller auto-resolution
         # and picking an accepted_escrows entry. Skipped in resume mode.
         listing_dict: Optional[dict] = None
         if listing_id and resume_state is None:
-            from core_buyer.orchestrator import fetch_listing_dict
-
             last_error: RuntimeError | None = None
             for registry_url in reg_urls:
                 try:
@@ -302,16 +317,6 @@ def register(credits_app: typer.Typer) -> None:
                         fg=typer.colors.RED,
                     )
                     raise typer.Exit(2)
-            # Fill missing prices from the listing's advertised rate —
-            # same listed-price default as `market credits buy`.
-            if initial_price is None or max_price is None:
-                initial_price, max_price = resolve_prices_from_matches(
-                    matches=[listing_dict],
-                    console=console,
-                    params=policy_params_all,
-                )
-                if initial_price is None or max_price is None:
-                    raise typer.Exit(2)
 
         if not seller_url or not listing_id:
             typer.secho(
@@ -322,14 +327,6 @@ def register(credits_app: typer.Typer) -> None:
             )
             raise typer.Exit(2)
 
-        if resume_state is None and (initial_price is None or max_price is None):
-            typer.secho(
-                "Fresh runs require --initial-price and --max-price (or a "
-                "registry-discoverable listing_id with an advertised rate).",
-                err=True,
-                fg=typer.colors.RED,
-            )
-            raise typer.Exit(2)
         if resume_state is None and (quantity is None or quantity < 1):
             typer.secho(
                 "Fresh runs require --quantity >= 1 (how many credits to buy).",
@@ -338,87 +335,53 @@ def register(credits_app: typer.Typer) -> None:
             )
             raise typer.Exit(2)
 
-        # Pick one accepted_escrows entry — token, escrow contract, and
-        # chain all come from the listing. ``--token-contract`` (when
-        # set) filters entries to one ERC-20.
-        from .escrow_selection import select_escrow_entry
-        from .common import select_chain_for_listing
-
-        picked_entry: Optional[dict] = None
-        chain_cfg = None
+        selected_settlement = None
+        selected_stage = None
+        picked_entry = None
         if listing_dict is not None:
-            chain_cfg = select_chain_for_listing(
-                listing=listing_dict,
-                override=chain_name,
-                yes=assume_yes,
-            )
-
-            picked_entry = select_escrow_entry(
-                listing_dict,
-                chain_name=chain_cfg.name,
-                token_contract_filter=token_contract,
-                assume_yes=assume_yes,
-                rpc_url=chain_cfg.rpc_url,
-                buyer_address=evm_addr,
-                console=console,
-                compatible=_policy.compatible,
-                preference=_policy.prefer_settlement,
-            )
-            if picked_entry is None:
-                msg = (
-                    f"Listing {listing_id!r} has no accepted_escrows entry on "
-                    f"chain {chain_cfg.name!r}"
+            try:
+                settlement_policy = resolve_buyer_settlement_policy(identity=identity)
+                selected_settlement = settlement_policy.select(
+                    listing_dict, expiration_unix=int(time.time()) + 3600,
                 )
-                if token_contract:
-                    msg += f" with token {token_contract}"
-                typer.secho(msg + ".", err=True, fg=typer.colors.RED)
-                raise typer.Exit(2)
-            from market_alkahest.schemas import accepted_token_address
-
-            entry_token = accepted_token_address(picked_entry)
-            if isinstance(entry_token, str) and entry_token.startswith("0x"):
-                token_contract = entry_token
-
-        # Scale explicit --initial-price / --max-price from human /
-        # whole-token units to base units. Sellers publish per-token
-        # rates in base units; buyer ceilings need the same scale.
-        if _initial_explicit or _max_explicit:
-            decimals: Optional[int] = (
-                int(token_decimals) if token_decimals is not None else None
-            )
-            if decimals is None:
-                from market_alkahest.token import (
-                    resolve_token,
-                    TokenResolutionError,
+                if selected_settlement is None:
+                    raise ValueError(
+                        f"listing {listing_id!r} has no installed, enabled, compatible "
+                        "settlement option"
+                    )
+                selected_stage = BUYER_STAGES[selected_settlement.selection.mechanism]
+                selected_settlement = selected_stage.prepare_selection(
+                    selected_settlement, listing=listing_dict,
+                    settlement_policy=settlement_policy, policy=_policy,
+                    chain_name=chain_name, token_contract=token_contract,
+                    evm_address=evm_address, evm_private_key=evm_private_key,
+                    assume_yes=assume_yes, console=console,
                 )
-
-                tc = token_contract
-                if tc and chain_cfg is not None:
-                    try:
-                        meta = resolve_token(
-                            tc,
-                            rpc_url=chain_cfg.rpc_url,
-                            chain_id=chain_cfg.chain_id,
-                        )
-                        decimals = meta.decimals
-                    except (TokenResolutionError, RuntimeError):
-                        decimals = None
-            if decimals is None:
-                typer.secho(
-                    "Could not resolve token decimals to scale prices. "
-                    "Pass --token-decimals or ensure the listing's accepted "
-                    "chain is configured in [chains.<name>].",
-                    err=True,
-                    fg=typer.colors.RED,
+                picked_entry = selected_stage.accepted_entry(selected_settlement)
+                initial_price, max_price = selected_stage.negotiation_prices(
+                    selected_settlement, initial_price=initial_price, max_price=max_price,
+                    initial_explicit=_initial_explicit, max_explicit=_max_explicit,
+                    token_decimals=token_decimals,
                 )
-                raise typer.Exit(2)
-            scale = 10 ** int(decimals)
-            if _initial_explicit and initial_price is not None:
-                initial_price = initial_price * scale
-            if _max_explicit and max_price is not None:
-                max_price = max_price * scale
+            except ValueError as exc:
+                raise typer.BadParameter(str(exc)) from exc
 
-        from market_identity import TrustedIdentitySet
+            if initial_price is None or max_price is None:
+                pricing_listing = dict(listing_dict)
+                pricing_listing["settlement_options"] = [
+                    selected_settlement.option.model_dump(mode="json"),
+                ]
+                pricing_listing["accepted_escrows"] = [picked_entry] if picked_entry else []
+                pricing_params = dict(policy_params_all)
+                if _initial_explicit:
+                    pricing_params["initial_price"] = initial_price
+                if _max_explicit:
+                    pricing_params["max_price"] = max_price
+                initial_price, max_price = resolve_prices_from_matches(
+                    matches=[pricing_listing], console=console, params=pricing_params,
+                )
+                if initial_price is None or max_price is None:
+                    raise typer.Exit(2)
 
         expected_seller_principals = (
             resume_point.publisher_principals
@@ -481,11 +444,8 @@ def register(credits_app: typer.Typer) -> None:
             token_contract=token_contract,
             token_decimals=token_decimals,
             resumed_from=from_run,
-            chain_name=(chain_cfg.name if chain_cfg is not None else None),
+            chain_name=(picked_entry.get("chain_name") if picked_entry else None),
         )
-        from core_buyer.orchestration import make_publisher_trust_resolver
-        from core_buyer.orchestrator import BuyConfig
-
         resolve_seller_principals = make_publisher_trust_resolver(
             config=BuyConfig.from_resolved_identity(
                 identity=identity,
@@ -541,59 +501,67 @@ def register(credits_app: typer.Typer) -> None:
                 str(their_amount),
             )
 
-        # Build provision + escrow proposal for the negotiate request.
-        from market_alkahest.proposals import escrow_proposal_from_accepted_entry
-        import time as _time
-
         provision_terms = None
         escrow_proposal = None
+        settlement_selection = None
         if resume_state is None:
             assert quantity is not None  # gated above
-            assert picked_entry is not None  # listing fetched + entry picked above
+            assert selected_settlement is not None
+            assert selected_stage is not None
             provision_terms = make_api_credits_provision_terms(
                 quantity=int(quantity),
                 key_mode=key_mode,
                 key_id=resolved_key_id,
             )
-            escrow_proposal = escrow_proposal_from_accepted_entry(
-                listing=listing_dict or {},
-                entry=picked_entry,
-                expiration_unix=int(_time.time()) + 3600,
-            )
+            proposal = selected_stage.proposal(listing_dict or {}, selected_settlement)
+            if isinstance(proposal, SettlementSelection):
+                settlement_selection = proposal
+            else:
+                escrow_proposal = proposal
 
         # Honor optional [negotiation] policies / policy_mode overrides
         # in buyer.toml; a resume continues under the policy that opened
         # the negotiation. Either way the chain is loaded with the
         # API-credits default guards so answer_key_challenge always rides.
-        from .common import resolve_negotiation_config
-
-        policies, policy_mode = resolve_negotiation_config()
-        if resume_state is not None and not (policies or policy_mode):
-            policy_mode_from_log = getattr(resume_point, "policy", None)
-            if policy_mode_from_log:
-                policy_mode = str(policy_mode_from_log)
+        if resume_state is not None:
+            policies, policy_mode = None, resume_point.policy
+        else:
+            policies, policy_mode = resolve_negotiation_config()
         chain = load_buyer_chain(
             policies=policies,
             policy_mode=policy_mode,
             default_guards=buyer_policies.APICREDITS_BUYER_GUARDS,
         )
 
+        if selected_stage is not None:
+            chain = selected_stage.prepare_chain(chain, selected_settlement)
+
+        negotiation_policy_params = dict(policy_params_all)
+        if selected_settlement is not None:
+            negotiation_policy_params["_selected_settlement_option"] = (
+                selected_settlement.option.model_dump(mode="json")
+            )
+
+        # Fresh core rounds scale per-credit bounds; resumed core rounds expect
+        # absolute bounds because their opening proposal is already persisted.
+        resume_units = float(quantity) if resume_state is not None else 1.0
         try:
             outcome = negotiate_with_seller(
                 seller_url=seller_url,
                 principal=principal,
                 signer=signer,
                 listing_id=listing_id,
-                initial_price=initial_price or 0,
-                max_price=max_price,
+                initial_price=(initial_price or 0) * resume_units,
+                max_price=max_price * resume_units,
                 unit_count=(float(quantity) if resume_state is None else None),
                 provision_terms=provision_terms,
                 escrow_proposal=escrow_proposal,
+                settlement_selection=settlement_selection,
                 max_rounds=max_rounds,
                 on_round=_observe,
                 resume=resume_state,
                 chain=chain,
-                policy_params=policy_params_all,
+                policy_params=negotiation_policy_params,
                 resolve_seller_principals=resolve_seller_principals,
             )
         except RuntimeError as exc:
@@ -607,6 +575,13 @@ def register(credits_app: typer.Typer) -> None:
             agreed_amount=outcome.agreed_amount,
             rounds=outcome.rounds,
             reason=outcome.reason,
+            **settlement_acceptance_fields(
+                negotiation_id=outcome.negotiation_id or "",
+                selection=outcome.settlement_selection,
+                plan=outcome.settlement_plan,
+            ),
+            agreement_bytes=outcome.agreement_bytes,
+            settlement_data=outcome.settlement_data,
             accepted_escrow_proposal=(
                 outcome.accepted_escrow_proposal.model_dump()
                 if outcome.accepted_escrow_proposal is not None
