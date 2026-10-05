@@ -70,9 +70,10 @@ proposal presence nor absence selects it.
 Prerequisites are late-bound: Arkhai payments uses trusted service policy and
 owner-scoped credentials, while Alkahest resolves its own EVM inputs.
 Mechanism-specific continuations stay with the selected entry, not a common
-buyer-first sequence. Optional `BuyResult.settlement_evidence` is persisted as
-a secret-free run projection and recovered against the accepted negotiation,
-mechanism and established reference. It does not authorize seller delivery.
+buyer-first sequence. Buyer recovery uses the recorded settlement reference,
+exact Agreement bytes and domain settlement data; the buyer keeps no
+SettlementEvidence. Seller delivery is authorized only by the storefront's
+verified evidence.
 
 The buyer preserves exact Agreement bytes and opaque settlement data in accepted run state. Its `payer_account` travels in selection params, independently of the profile signer. It validates the seller-derived mandate against that Agreement and local policy, approves and polls the same transaction ID, then calls seller settlement with only the negotiation ID. Resume does not reconstruct the Agreement or use current priority to fail over.
 
