@@ -65,7 +65,7 @@ def _future_dt(hours: int = 2) -> datetime:
 
 
 def _ensure_bare_metal_host(name: str = "bm-node-1", *, enabled: bool = True) -> None:
-    host_service = _container_module.resolved_host_service
+    host_service = _container_module.resolved_host_authority
     existing = host_service.get_host(name)
     if existing is None:
         host_service.register_host(

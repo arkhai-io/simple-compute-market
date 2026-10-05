@@ -19,8 +19,13 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
-from compute_provisioning_contracts import ProvisioningErrorEnvelope
-from compute_provisioning.jobs import JobFailure, JobOutcome, JobRun, JobSuccess
+from compute_provisioning.jobs import (
+    JobFailure,
+    JobOutcome,
+    JobRun,
+    JobSuccess,
+    ProvisioningErrorEnvelope,
+)
 
 from .codec import AnsibleJobCodec, matches_any, write_extra_vars
 from .runner import AnsibleError, inventory_target, redact_ansible_output

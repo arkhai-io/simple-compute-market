@@ -1280,6 +1280,9 @@ would force consumers to install what they do not use. So:
   an implementation's, or a capability's typed client signs its routes from that owner's
   contracts through an `authenticated_request` transport. Both sides use the same
   contributed contract data, so operation, resource binding, and roles cannot diverge.
+  Qualified at the A0 checkpoint review: the site capacity authority keeps separate server
+  and client declarations (decision 11), so for its routes a contract-parity test holds the
+  two equal instead; the delta requirement says so.
 - **A route-ownership matrix opens A0** (design review): every route the provisioning
   service serves is assigned its owner (compute family, Ansible implementation, VM, bare
   metal, resource pools, site, or the provisioning service itself) before anything moves,
@@ -1431,8 +1434,12 @@ asked for seven corrections, each verified in code and discussed with the mainta
   and the VM storefront depended on `arkhai-compute-provisioning`, and `kit-site` depends on
   `kit-resource-pools`, none of which `.github/workflows/publish-pypi.yml` publishes. After A0
   the storefronts, `kit-site`, VM listings, and the API-credit service depend on the new thin
-  packages, which are unpublished too, so the gap keeps its shape; the thin packages are the
-  natural ones to publish. Outside this change.
+  packages, which are unpublished too, so the gap keeps its shape. 13 of the 31 published
+  packages depend on an unpublished internal package, so publishing the thin packages alone
+  would not make the graph installable from PyPI, and each newly published package needs its
+  one-time trusted-publisher setup. Ruled at the A0 checkpoint review: fixed in this change,
+  before closeout, for the whole graph (`tasks.md`, 2.0); until then the thin packages are
+  deliberately unpublished.
 
 **Slice A0 implementation findings (2026-10-04).** Verified in code during A0; each corrects
 the plan, not a decision above. The first two, and the publishing gap above, were reviewed
@@ -1450,7 +1457,8 @@ with the maintainer at the A0 checkpoint's start; the rest are open for review.
 | VM's and Ansible's extension clients need only the transport's `authenticated_request` | They depend on the contracts and duck-type the transport, as `kit/pool-overrides` does, not on the client distribution |
 | The service's import-boundary test forbids `vm_provisioning_operator`, while its relay controller reads VM's relay models until 5B.9 | A named (file, module) allowlist entry, the mechanism C.4 plans, for that one import |
 | System status, health, readiness, and worker controls return dicts in VM's client, and callers index them | The family client keeps dicts for those until C types status as `SystemStatusResponse`; fulfillment, lease, job, host, and version methods return contract models |
-| The bare-metal adapter declared dependencies on VM's adapter and VM's client it never imports | Both removed |
+| The bare-metal adapter declared dependencies on VM's adapter and VM's client it never imports | VM's client removed; VM's adapter restored at the gate, because the service module the adapter reads its collaborators from loads VM's adapter at import |
+| Checkpoint review: `ExecutorActionEnvelope` stayed in the thin contracts package after the action route's deletion, and four contract-job models lost their only route | Maintainer decision: the envelope becomes the job authority's internal `JobActionRequest`, the error envelope moves beside `JobFailure`, and the dead models go (5B.8.A.5) |
 
 ### Implementation-review fixes for Sections 4–5
 

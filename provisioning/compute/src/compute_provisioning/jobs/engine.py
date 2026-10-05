@@ -33,7 +33,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from compute_provisioning.adapters import JobExecutorResolver, UnsupportedExecutorActionError
-from compute_provisioning_contracts import CredentialEnvelope, ExecutorActionEnvelope
+from compute_provisioning_contracts import CredentialEnvelope
+from compute_provisioning.jobs.action_request import JobActionRequest
 from compute_provisioning.hosts.execution import ExecutionHost
 
 from .db import TERMINAL_JOB_STATUSES, JobCredential, JobRecord, JobStatus
@@ -83,7 +84,7 @@ class JobEngine:
         job_queue,
         escrow_uid: str | None = None,
         max_retries: int | None = None,
-        contract: ExecutorActionEnvelope | None = None,
+        contract: JobActionRequest | None = None,
         operation_id: str | None = None,
     ) -> JobSubmitResponse:
         """Persist and enqueue a job, deduplicating contracts and request operations.
@@ -147,7 +148,7 @@ class JobEngine:
         return JobSubmitResponse(job_id=job_id, status=JobStatus.queued.value)
 
     @staticmethod
-    def _contract_job(db: Session, contract: ExecutorActionEnvelope) -> JobRecord | None:
+    def _contract_job(db: Session, contract: JobActionRequest) -> JobRecord | None:
         return (
             db.query(JobRecord)
             .filter(

@@ -16,8 +16,8 @@ from __future__ import annotations
 from typing import Any
 
 from arkhai_bare_metal import BARE_METAL_ACCESS_ACTIONS
+from compute_provisioning.route_errors import ProvisioningRouteError
 from compute_provisioning.jobs.executor_mock import (
-    MockRouteError,
     MockRuleRouteService,
     MockRuleSet,
 )
@@ -62,7 +62,7 @@ _rule_routes = MockRuleRouteService(_bare_metal_mock_rules)
 def _routed(call):
     try:
         return call()
-    except MockRouteError as exc:
+    except ProvisioningRouteError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
@@ -95,7 +95,7 @@ def resume_mock_rule(rule_id: str) -> dict:
 )
 def evaluate_job(body: BareMetalEvaluateJobRequest) -> BareMetalEvaluateJobResponse:
     rules = _routed(lambda: _rule_routes_rule_set())
-    host_service = _container_module.resolved_host_service
+    host_service = _container_module.resolved_host_authority
     if host_service is None:
         raise HTTPException(status_code=503, detail="HostService not available")
     # Shaped as a submitted job's stored parameters, which rules match.
@@ -119,7 +119,7 @@ def evaluate_job(body: BareMetalEvaluateJobRequest) -> BareMetalEvaluateJobRespo
 def _rule_routes_rule_set() -> MockRuleSet:
     rules = _bare_metal_mock_rules()
     if rules is None:
-        raise MockRouteError(
+        raise ProvisioningRouteError(
             503, "the bare-metal mock executor is not active (ACTIVE_PROFILES != mock)"
         )
     return rules

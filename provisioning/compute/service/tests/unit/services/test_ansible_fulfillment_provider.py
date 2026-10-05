@@ -92,7 +92,10 @@ def job_service():
 @pytest.fixture
 def provider(job_service):
     return AnsibleFulfillmentProvider(
-        job_service=job_service,
+        # One double stands in for VM's submitter and the job authority it
+        # submits to: the provider submits through one and reads the other.
+        job_submitter=job_service,
+        jobs=job_service,
         job_queue_provider=lambda: MagicMock(),
         reserved_var_keys=VmAnsibleCodec().reserved_var_keys,
     )
@@ -287,7 +290,8 @@ class TestRelayAccessPath:
         back by the job endpoints.
         """
         provider = AnsibleFulfillmentProvider(
-            job_service=job_service,
+            job_submitter=job_service,
+            jobs=job_service,
             job_queue_provider=lambda: MagicMock(),
             reserved_var_keys=VmAnsibleCodec().reserved_var_keys,
             port_allocator=self._Allocator(),
@@ -314,7 +318,8 @@ class TestRelayAccessPath:
     ):
         allocator = self._Allocator(port=6142)
         provider = AnsibleFulfillmentProvider(
-            job_service=job_service,
+            job_submitter=job_service,
+            jobs=job_service,
             job_queue_provider=lambda: MagicMock(),
             reserved_var_keys=VmAnsibleCodec().reserved_var_keys,
             port_allocator=allocator,
@@ -340,7 +345,8 @@ class TestRelayAccessPath:
         window without a single accepted fulfillment."""
         allocator = self._Allocator()
         provider = AnsibleFulfillmentProvider(
-            job_service=job_service,
+            job_submitter=job_service,
+            jobs=job_service,
             job_queue_provider=lambda: MagicMock(),
             reserved_var_keys=VmAnsibleCodec().reserved_var_keys,
             port_allocator=allocator,
@@ -357,7 +363,8 @@ class TestRelayAccessPath:
         acceptance performs must still run, or validation stops answering the
         question it exists for."""
         provider = AnsibleFulfillmentProvider(
-            job_service=job_service,
+            job_submitter=job_service,
+            jobs=job_service,
             job_queue_provider=lambda: MagicMock(),
             reserved_var_keys=VmAnsibleCodec().reserved_var_keys,
             port_allocator=self._Allocator(),
@@ -379,7 +386,8 @@ class TestRelayAccessPath:
         """
         allocator = self._Allocator()
         provider = AnsibleFulfillmentProvider(
-            job_service=job_service,
+            job_submitter=job_service,
+            jobs=job_service,
             job_queue_provider=lambda: MagicMock(),
             reserved_var_keys=VmAnsibleCodec().reserved_var_keys,
             port_allocator=allocator,
@@ -398,7 +406,8 @@ class TestRelayAccessPath:
         port bound on the relay that no record claims."""
         allocator = self._Allocator()
         provider = AnsibleFulfillmentProvider(
-            job_service=job_service,
+            job_submitter=job_service,
+            jobs=job_service,
             job_queue_provider=lambda: MagicMock(),
             reserved_var_keys=VmAnsibleCodec().reserved_var_keys,
             port_allocator=allocator,
@@ -426,7 +435,8 @@ class TestRelayAccessPath:
         self, job_service, missing, expected
     ):
         provider = AnsibleFulfillmentProvider(
-            job_service=job_service,
+            job_submitter=job_service,
+            jobs=job_service,
             job_queue_provider=lambda: MagicMock(),
             reserved_var_keys=VmAnsibleCodec().reserved_var_keys,
             port_allocator=self._Allocator(),
@@ -647,7 +657,8 @@ class TestTeardownReadsTheLease:
         """The pool now points at site-b; the VM's port is bound on site-a."""
         allocator = self._Allocator(relay_id="site-a")
         provider = AnsibleFulfillmentProvider(
-            job_service=job_service,
+            job_submitter=job_service,
+            jobs=job_service,
             job_queue_provider=lambda: MagicMock(),
             reserved_var_keys=VmAnsibleCodec().reserved_var_keys,
             port_allocator=allocator,
@@ -662,7 +673,8 @@ class TestTeardownReadsTheLease:
 
     def test_teardown_of_a_direct_nat_vm_names_no_relay(self, job_service):
         provider = AnsibleFulfillmentProvider(
-            job_service=job_service,
+            job_submitter=job_service,
+            jobs=job_service,
             job_queue_provider=lambda: MagicMock(),
             reserved_var_keys=VmAnsibleCodec().reserved_var_keys,
             port_allocator=self._NoLeaseAllocator(),
@@ -676,7 +688,8 @@ class TestTeardownReadsTheLease:
         """A released lease means the relay work is already done; teardown has
         nothing further to reload."""
         provider = AnsibleFulfillmentProvider(
-            job_service=job_service,
+            job_submitter=job_service,
+            jobs=job_service,
             job_queue_provider=lambda: MagicMock(),
             reserved_var_keys=VmAnsibleCodec().reserved_var_keys,
             port_allocator=self._NoLeaseAllocator(),

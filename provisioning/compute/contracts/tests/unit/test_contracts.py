@@ -5,34 +5,25 @@ import pytest
 from pydantic import ValidationError
 from compute_provisioning_contracts import (
     PROVISIONING_ROUTE_CONTRACTS,
-    ExecutorActionEnvelope,
+    LeaseTermination,
     resolve_provisioning_route,
 )
 
 
-def _action(**overrides):
-    values = {
-        "capacity_reservation_id": "alloc-1",
-        "deal_ref": {"escrow_uid": "escrow-1"},
-        "offering_mode": "vm",
-        "action_kind": "create",
-        "idempotency_key": "request-1",
-        "parameters": {"vm_target": "tenant-1"},
-    }
-    values.update(overrides)
-    return ExecutorActionEnvelope(**values)
+def _termination(**overrides):
+    return LeaseTermination(**overrides)
 
 
 def test_contract_rejects_the_retired_major_version():
     """A 1.x caller carries the retired offering-mode spelling, so the
     contract refuses it rather than coercing it."""
     with pytest.raises(ValidationError, match="supported majors: 2"):
-        _action(contract_version="1.0")
+        _termination(contract_version="1.0")
 
 
 def test_contract_rejects_an_unsupported_future_major_version():
     with pytest.raises(ValidationError, match="supported majors: 2"):
-        _action(contract_version="3.0")
+        _termination(contract_version="3.0")
 
 
 @pytest.mark.parametrize(

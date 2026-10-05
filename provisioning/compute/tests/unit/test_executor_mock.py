@@ -4,8 +4,8 @@ import asyncio
 
 import pytest
 
+from compute_provisioning.route_errors import ProvisioningRouteError
 from compute_provisioning.jobs.executor_mock import (
-    MockRouteError,
     MockRule,
     MockRuleRouteService,
     MockRuleSet,
@@ -178,7 +178,7 @@ def test_route_service_refuses_resume_of_a_rule_without_a_gate() -> None:
     routes.add({"rule_id": "open", "match": {}})
 
     assert routes.resume("gated") == {"rule_id": "gated", "resumed": True}
-    with pytest.raises(MockRouteError) as refused:
+    with pytest.raises(ProvisioningRouteError) as refused:
         routes.resume("open")
     assert refused.value.status_code == 404
 
@@ -186,7 +186,7 @@ def test_route_service_refuses_resume_of_a_rule_without_a_gate() -> None:
 def test_route_service_without_an_active_mock_is_unavailable() -> None:
     routes = MockRuleRouteService(lambda: None)
 
-    with pytest.raises(MockRouteError) as refused:
+    with pytest.raises(ProvisioningRouteError) as refused:
         routes.list()
     assert refused.value.status_code == 503
 

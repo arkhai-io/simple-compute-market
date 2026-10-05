@@ -23,6 +23,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from compute_provisioning.route_errors import ProvisioningRouteError
+
 
 @dataclass
 class MockRule:
@@ -195,15 +197,6 @@ class MockRuleSet:
         }
 
 
-class MockRouteError(RuntimeError):
-    """HTTP-shaped failure raised without depending on a web framework."""
-
-    def __init__(self, status_code: int, detail: Any) -> None:
-        super().__init__(str(detail))
-        self.status_code = status_code
-        self.detail = detail
-
-
 class MockRuleRouteService:
     """Add, list, delete, and resume one adapter's mock rules.
 
@@ -217,7 +210,7 @@ class MockRuleRouteService:
     def _rule_set(self) -> MockRuleSet:
         rule_set = self._rules()
         if rule_set is None:
-            raise MockRouteError(
+            raise ProvisioningRouteError(
                 503, "the mock executor is not active (ACTIVE_PROFILES != mock)"
             )
         return rule_set
@@ -242,12 +235,11 @@ class MockRuleRouteService:
 
     def resume(self, rule_id: str) -> dict[str, Any]:
         if not self._rule_set().resume(rule_id):
-            raise MockRouteError(404, f"Rule {rule_id!r} not found or not paused")
+            raise ProvisioningRouteError(404, f"Rule {rule_id!r} not found or not paused")
         return {"rule_id": rule_id, "resumed": True}
 
 
 __all__ = [
-    "MockRouteError",
     "MockRule",
     "MockRuleRouteService",
     "MockRuleSet",

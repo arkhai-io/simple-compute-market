@@ -76,7 +76,8 @@ def prepare_historical_vm_teardown(
     """
 
     provider = AnsibleFulfillmentProvider(
-        job_service=None,
+        job_submitter=None,
+        jobs=None,
         job_queue_provider=lambda: None,
         reserved_var_keys=VmAnsibleCodec().reserved_var_keys,
     )

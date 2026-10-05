@@ -15,7 +15,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Protocol
 
+from compute_provisioning.hosts.service import HostAuthority
+from compute_provisioning.route_errors import ProvisioningRouteError
 from compute_provisioning_contracts import HostListResponse
+
+from .inventory import parse_inventory_ini
 
 HOST_IMPORT_PATH = "/api/v1/hosts/import"
 
@@ -28,6 +32,30 @@ HOST_IMPORT_ROUTES = (
     },
 )
 
+
+
+class AnsibleHostImportRouteService:
+    """Import hosts from an uploaded INI inventory, without a web framework.
+
+    Upsert, append-only: every host the file lists is inserted or updated,
+    whatever section lists it, and a host the file does not list is untouched.
+    """
+
+    def __init__(self, host_authority: HostAuthority) -> None:
+        self._hosts = host_authority
+
+    def import_hosts(self, content: bytes, ssh_key_type: str = "path") -> HostListResponse:
+        try:
+            ini_text = content.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ProvisioningRouteError(400, f"Could not read uploaded file: {exc}") from exc
+        try:
+            hosts = list(
+                self._hosts.apply_inventory(parse_inventory_ini(ini_text, key_material=ssh_key_type))
+            )
+        except ValueError as exc:
+            raise ProvisioningRouteError(400, str(exc)) from exc
+        return HostListResponse(hosts=hosts, total=len(hosts))
 
 
 class _Transport(Protocol):
@@ -96,6 +124,7 @@ class SyncAnsibleHostImportClient:
 
 __all__ = [
     "AnsibleHostImportClient",
+    "AnsibleHostImportRouteService",
     "HOST_IMPORT_PATH",
     "HOST_IMPORT_ROUTES",
     "SyncAnsibleHostImportClient",

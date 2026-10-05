@@ -42,7 +42,7 @@ def bare_metal_runner():
 
 
 def _register_host() -> None:
-    _container_module.resolved_host_service.register_host(
+    _container_module.resolved_host_authority.register_host(
         HostCreate(
             host_id=HOST_ID,
             connection=ssh_connection(ssh_host=SSH_HOST, ssh_user="root", ssh_port=2201, key_path="/fake/id_ed25519"),
@@ -151,7 +151,7 @@ async def test_a_held_grant_runs_through_the_bare_metal_mock(
     assert rules[0]["paused"] is True
     assert rules[0]["waiting"] == 1
     assert await test_client.list_mock_rules() == []
-    job = _container_module.resolved_job_service.get_job(grant_job_id)
+    job = _container_module.resolved_job_engine.get_job(grant_job_id)
     assert job.status not in {"succeeded", "failed"}
 
     await test_client.resume_bare_metal_rule("grant-gate")
@@ -205,7 +205,7 @@ async def test_cancelling_a_held_grant_ends_its_execution_without_a_resume(
     assert (rules[0]["paused"], rules[0]["waiting"]) == (True, 0)
     # The run ended as a failed playbook after the cancellation was committed;
     # that late outcome does not replace it.
-    job = _container_module.resolved_job_service.get_job(grant_job_id)
+    job = _container_module.resolved_job_engine.get_job(grant_job_id)
     assert job.status == "cancelled"
 
 async def test_a_bare_metal_rule_can_fail_a_grant(

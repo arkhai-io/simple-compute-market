@@ -13,10 +13,10 @@ Endpoints
 ``GET  /test/mock-rules``                List active rules
 ``DELETE /test/mock-rules/{rule_id}``    Remove a rule
 ``POST /test/mock-rules/{rule_id}/resume`` Release a paused job gate
+``POST /test/evaluate-job``              Dry-run a VM job against the rules
 
-``GET  /test/jobs/drain``               Long-poll until all jobs terminal
-``GET  /test/jobs/summary``             Status counts (no blocking)
-``GET  /test/jobs/{job_id}/wait``       Long-poll until one job is terminal
+The job observation routes (``/test/jobs/*``) are the compute family's,
+mounted by the provisioning service under the same profile.
 
 Rule schema (POST /test/mock-rules body)
 ----------------------------------------
@@ -44,22 +44,20 @@ from __future__ import annotations
 
 import dataclasses
 
-import asyncio
 import logging
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from compute_provisioning.route_errors import ProvisioningRouteError
 from compute_provisioning.jobs.executor_mock import (
-    MockRouteError,
     MockRuleRouteService,
     MockRuleSet,
 )
 from compute_provisioning_ansible import MockAnsibleRunner
 from compute_provisioning_service import container as _container_module
 from vm_provisioning_adapter.models.system_model import EvaluateJobRequest, EvaluateJobResponse  # server-only test controller models
-from vm_provisioning_adapter.services.job_service import AnsibleJobService
 
 logger = logging.getLogger(__name__)
 
@@ -100,12 +98,8 @@ _rule_routes = MockRuleRouteService(_vm_mock_rules)
 def _routed(call):
     try:
         return call()
-    except MockRouteError as exc:
+    except ProvisioningRouteError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
-
-
-def _get_job_service() -> AnsibleJobService:
-    return _container_module.resolved_job_service
 
 
 # ---------------------------------------------------------------------------
@@ -145,96 +139,6 @@ def resume_mock_rule(rule_id: str) -> dict:
     return _routed(lambda: _rule_routes.resume(rule_id))
 
 
-# ---------------------------------------------------------------------------
-# Job observation endpoints
-# ---------------------------------------------------------------------------
-
-
-TERMINAL_STATUSES = {"succeeded", "failed", "cancelled"}
-
-
-@router.get("/jobs/summary", summary="Job status counts")
-def job_summary(
-    job_service: AnsibleJobService = Depends(_get_job_service),
-) -> dict:
-    """Return counts of jobs by status — non-blocking diagnostic snapshot."""
-    result = job_service.list_jobs(limit=1000)
-    counts: dict[str, int] = {}
-    for job in result.jobs:
-        counts[job.status] = counts.get(job.status, 0) + 1
-    total_terminal = sum(
-        v for k, v in counts.items() if k in TERMINAL_STATUSES
-    )
-    total_active = sum(
-        v for k, v in counts.items() if k not in TERMINAL_STATUSES
-    )
-    return {
-        "counts": counts,
-        "total": result.total,
-        "total_terminal": total_terminal,
-        "total_active": total_active,
-    }
-
-
-@router.get("/jobs/drain", summary="Wait until all jobs are terminal")
-async def drain_jobs(
-    timeout: float = Query(default=30.0, description="Max seconds to wait"),
-    job_service: AnsibleJobService = Depends(_get_job_service),
-) -> dict:
-    """Long-poll until every job in the queue has reached a terminal state.
-
-    Returns immediately if all jobs are already terminal.  Times out with
-    HTTP 408 if active jobs remain after ``timeout`` seconds.
-
-    Useful for test teardown: call drain before making final assertions to
-    ensure no background jobs are still running.
-    """
-    deadline = asyncio.get_event_loop().time() + timeout
-    while True:
-        result = job_service.list_jobs(limit=1000)
-        active = [j for j in result.jobs if j.status not in TERMINAL_STATUSES]
-        if not active:
-            summary = {}
-            for j in result.jobs:
-                summary[j.status] = summary.get(j.status, 0) + 1
-            return {"drained": True, "counts": summary}
-        remaining = deadline - asyncio.get_event_loop().time()
-        if remaining <= 0:
-            raise HTTPException(
-                status_code=408,
-                detail=f"Drain timed out: {len(active)} job(s) still active after {timeout}s",
-            )
-        await asyncio.sleep(min(0.25, remaining))
-
-
-@router.get("/jobs/{job_id}/wait", summary="Wait for a specific job to reach terminal state")
-async def wait_for_job(
-    job_id: str,
-    timeout: float = Query(default=10.0, description="Max seconds to wait"),
-    job_service: AnsibleJobService = Depends(_get_job_service),
-) -> dict:
-    """Wait until ``job_id`` reaches a terminal status.
-
-    Returns the final job status immediately if already terminal; answers 404
-    if the job does not exist by the deadline and 408 if it is not terminal by
-    then. The job authority signals completion in-process, and re-reads the job
-    for one finished elsewhere.
-
-    This is the replacement for ``asyncio.sleep`` polling loops in tests.
-    """
-    try:
-        job = await job_service.wait_for_terminal(job_id, timeout)
-    except LookupError:
-        raise HTTPException(status_code=404, detail=f"Job {job_id!r} not found")
-    except TimeoutError as exc:
-        raise HTTPException(status_code=408, detail=str(exc))
-    return {
-        "job_id": job_id,
-        "status": job.status,
-        "result": job.result.model_dump(mode="json") if job.result is not None else None,
-        "error": job.error,
-    }
-
 @router.post(
     "/evaluate-job",
     response_model=EvaluateJobResponse,
@@ -249,7 +153,7 @@ async def evaluate_job(body: EvaluateJobRequest) -> EvaluateJobResponse:
     from vm_provisioning_adapter.models.jobs_model import VmJobParams
 
     ansible_svc = _container_module.resolved_ansible_service
-    host_svc = _container_module.resolved_host_service
+    host_svc = _container_module.resolved_host_authority
 
     if not isinstance(ansible_svc, MockAnsibleRunner):
         raise HTTPException(

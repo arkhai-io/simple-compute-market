@@ -61,14 +61,15 @@ def resolve_request_path_services() -> None:
     # can retrieve them via a simple lambda, avoiding any provider
     # machinery on the request path (prevents asyncio.get_event_loop()
     # errors in AnyIO worker threads).
-    _container_module.resolved_job_service = container.job_service()
+    _container_module.resolved_job_engine = container.job_engine()
     fulfillment_service = container.fulfillment_service()
     container.fulfillment_teardown_port().bind(fulfillment_service)
     _container_module.resolved_fulfillment_service = fulfillment_service
     _container_module.resolved_session_factory = container.session_factory()
     _container_module.resolved_ansible_service = container.ansible_service()
     _container_module.resolved_system_service = container.system_service()
-    _container_module.resolved_host_service = container.host_service()
+    _container_module.resolved_host_authority = container.host_authority()
+    _container_module.resolved_connectivity_probes = container.connectivity_probes()
     _container_module.resolved_vm_operations_service = container.vm_operations_service()
     _container_module.resolved_host_operations_service = container.host_operations_service()
     _container_module.resolved_lease_lifecycle_service = container.lease_lifecycle_service()
@@ -117,7 +118,7 @@ def seed_inventory_if_empty() -> None:
     # Seeding also declares capacity for each seeded host with GPUs that no
     # capacity declaration names, in the same transaction as the hosts.
     # ------------------------------------------------------------------
-    host_service = _container_module.resolved_host_service
+    host_service = _container_module.resolved_host_authority
     existing_hosts = host_service.list_hosts(enabled_only=False)
     if existing_hosts:
         logger.info(
@@ -259,7 +260,7 @@ def background_tasks() -> tuple[ComputeProvisioningBackgroundTask, ...]:
         ComputeProvisioningBackgroundTask(
             "job-processing-loop",
             lambda: job_queue.start(
-                _container_module.resolved_job_service.process_job
+                _container_module.resolved_job_engine.process_job
             ),
             "Job processing loop started (max_concurrent=%d)",
             (settings.max_concurrent_jobs,),
@@ -275,7 +276,7 @@ def background_tasks() -> tuple[ComputeProvisioningBackgroundTask, ...]:
     tasks.append(
         ComputeProvisioningBackgroundTask(
             "retry-scheduler",
-            lambda: _container_module.resolved_job_service.run_retry_scheduler(
+            lambda: _container_module.resolved_job_engine.run_retry_scheduler(
                 job_queue, retry_poll_interval
             ),
             "Retry scheduler started (interval=%ds)",

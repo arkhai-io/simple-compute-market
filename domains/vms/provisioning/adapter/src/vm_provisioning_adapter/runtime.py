@@ -7,9 +7,9 @@ from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
 from compute_provisioning import JobExecutorResolver
-from compute_provisioning.hosts import ConnectionCodecs
 from compute_provisioning.hosts.service import HostAuthority
-from compute_provisioning_ansible import AnsibleJobExecutor, SshConnectionCodec
+from compute_provisioning.jobs.engine import JobEngine
+from compute_provisioning_ansible import AnsibleJobExecutor
 from compute_provisioning_ansible.runner import AnsibleRunner
 from compute_provisioning_service.services.relay_rebinding import check_host_pool_change
 from vm_provisioning_adapter.bundle import HOST_REQUIREMENT, build_vm_adapter_bundle
@@ -30,7 +30,7 @@ from vm_provisioning_adapter.services.ansible_pool_config_handler import (
 from vm_provisioning_adapter.services.host_operations_service import (
     HostOperationsService,
 )
-from vm_provisioning_adapter.services.job_service import AnsibleJobService
+from vm_provisioning_adapter.services.job_submitter import VmJobSubmitter
 from vm_provisioning_adapter.services.vm_operations_service import VmOperationsService
 
 
@@ -43,19 +43,15 @@ class VmProvisioningRuntime:
     # under the mock profile the programmable mock.
     ansible_service: Any
     codec: VmAnsibleCodec
-    host_service: HostAuthority
+    host_authority: HostAuthority
     pool_config_handler: AnsiblePoolConfigHandler
-    job_service: AnsibleJobService
+    job_engine: JobEngine
+    job_submitter: VmJobSubmitter
     vm_operations_service: VmOperationsService
     host_operations_service: HostOperationsService
     settlement_repository: Any
     teardown_port: Any
     job_executors: Any = None
-
-    @property
-    def job_engine(self):
-        """The compute family's job authority every domain submits to."""
-        return self.job_service.engine
 
     def job_executor(self) -> AnsibleJobExecutor:
         """What runs every VM job action: this runtime's runner, codec, and playbook."""
@@ -69,7 +65,8 @@ class VmProvisioningRuntime:
 
     def fulfillment_provider(self):
         return AnsibleFulfillmentProvider(
-            job_service=self.job_service,
+            job_submitter=self.job_submitter,
+            jobs=self.job_engine,
             job_queue_provider=self.job_queue_provider,
             reserved_var_keys=self.codec.reserved_var_keys,
             port_allocator=RelayPortAllocator(self.session_factory),
@@ -105,7 +102,7 @@ class VmProvisioningRuntime:
         return SystemService(
             ansible_service=self.ansible_service,
             settings=self.config,
-            host_service=self.host_service,
+            host_service=self.host_authority,
             session_factory=self.session_factory,
             job_queue_provider=self.job_queue_provider,
             lease_lifecycle_service=lease_lifecycle_service,
@@ -146,6 +143,12 @@ def _relay_pool_change(db, host_id: str, current_pool_id: str, new_pool_id: str)
     )
 
 
+#: The host pool-change checks VM contributes to the one host authority the
+#: composition root builds, which exists before any runtime does; the root
+#: merges each adapter's declaration as it merges ``HOST_REQUIREMENT``.
+HOST_POOL_CHANGE_HOOKS = (_relay_pool_change,)
+
+
 def build_vm_runtime(
     *,
     config,
@@ -153,7 +156,8 @@ def build_vm_runtime(
     job_queue_provider: Callable[[], Any],
     settlement_repository,
     teardown_port: Any,
-    capacity_derivation: Any,
+    host_authority: HostAuthority,
+    job_engine: JobEngine,
     job_executors: JobExecutorResolver,
 ) -> VmProvisioningRuntime:
     active = [
@@ -169,20 +173,11 @@ def build_vm_runtime(
     else:
         ansible_service = AnsibleRunner(config)
 
-    host_service = HostAuthority(
-        session_factory,
-        codecs=ConnectionCodecs([SshConnectionCodec(config.ssh_decryption_key)]),
-        capacity_derivation=capacity_derivation,
-        pool_change_hooks=(_relay_pool_change,),
-    )
-    job_service = AnsibleJobService(
-        settings=config,
-        session_factory=session_factory,
-        executors=job_executors,
-        host_service=host_service,
+    job_submitter = VmJobSubmitter(
+        job_engine, default_host_id=config.default_host_id
     )
     vm_operations_service = VmOperationsService(
-        job_service=job_service,
+        job_submitter=job_submitter,
         job_queue_provider=job_queue_provider,
     )
     codec = VmAnsibleCodec(
@@ -204,14 +199,14 @@ def build_vm_runtime(
         job_queue_provider=job_queue_provider,
         ansible_service=ansible_service,
         codec=codec,
-        host_service=host_service,
+        host_authority=host_authority,
         pool_config_handler=AnsiblePoolConfigHandler(settings=config),
-        job_service=job_service,
+        job_engine=job_engine,
+        job_submitter=job_submitter,
         vm_operations_service=vm_operations_service,
         host_operations_service=HostOperationsService(
-            ansible_service=ansible_service,
-            host_service=host_service,
-            job_service=job_service,
+            host_service=host_authority,
+            job_submitter=job_submitter,
             job_queue_provider=job_queue_provider,
         ),
         settlement_repository=settlement_repository,

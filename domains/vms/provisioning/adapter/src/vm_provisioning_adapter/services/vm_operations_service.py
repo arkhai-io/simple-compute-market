@@ -11,14 +11,13 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Optional
 
-from compute_provisioning_contracts import ExecutorActionEnvelope
 from vm_provisioning_operator.models import CreateVmRequest, VmActionRequest
 from compute_provisioning_contracts import JobSubmitResponse
 from vm_provisioning_adapter.models.vm_request_model import build_create_params, build_simple_params
 from compute_provisioning.jobs.queue import AsyncJobQueue
 
 if TYPE_CHECKING:
-    from vm_provisioning_adapter.services.job_service import AnsibleJobService
+    from vm_provisioning_adapter.services.job_submitter import VmJobSubmitter
 
 
 class VmOperationsService:
@@ -27,10 +26,10 @@ class VmOperationsService:
     def __init__(
         self,
         *,
-        job_service: "AnsibleJobService",
+        job_submitter: "VmJobSubmitter",
         job_queue_provider: Callable[[], AsyncJobQueue],
     ) -> None:
-        self._job_service = job_service
+        self._job_submitter = job_submitter
         self._job_queue_provider = job_queue_provider
 
     async def create_vm(
@@ -38,14 +37,12 @@ class VmOperationsService:
         *,
         host: str,
         body: CreateVmRequest,
-        contract: ExecutorActionEnvelope | None = None,
         operation_id: str | None = None,
     ) -> JobSubmitResponse:
         """Submit a VM creation job for ``host``."""
-        return await self._job_service.submit(
+        return await self._job_submitter.submit(
             build_create_params(host, body),
             self._job_queue_provider(),
-            contract=contract,
             operation_id=operation_id,
         )
 
@@ -92,7 +89,7 @@ class VmOperationsService:
         operation_id: str | None = None,
     ) -> JobSubmitResponse:
         params = build_simple_params(action, host, body, vm_name)
-        return await self._job_service.submit(
+        return await self._job_submitter.submit(
             params,
             self._job_queue_provider(),
             operation_id=operation_id,

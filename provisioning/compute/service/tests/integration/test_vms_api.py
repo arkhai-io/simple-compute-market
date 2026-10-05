@@ -264,9 +264,11 @@ class TestDispatchRequiresARegisteredHost:
             "[kvm_hosts]\n"
             "unregistered-kvm  ansible_host=198.51.100.7  ansible_user=root\n"
         )
+        from compute_provisioning_service.main import app
+
         # Service-internal state setup: no API configures the inventory path.
         monkeypatch.setattr(
-            _container_module.resolved_job_service._settings,
+            app.container.vm_runtime().config,
             "resolved_inventory_path",
             inventory,
         )

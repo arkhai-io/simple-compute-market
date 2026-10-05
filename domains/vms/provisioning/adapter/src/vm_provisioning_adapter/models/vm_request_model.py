@@ -4,7 +4,7 @@
 package (``vm_provisioning_operator.models``).
 
 This file retains the server-side conversion helpers that produce the
-internal ``VmJobParams`` DTO consumed by ``AnsibleJobService``.
+internal ``VmJobParams`` DTO ``VmJobSubmitter`` submits.
 These helpers take path parameters (``host``, ``vm_name``) that come from
 URL routing and are never part of the request body.
 

@@ -3,7 +3,7 @@
 Exercises ``POST /api/v1/fulfillment/{validate,begin}`` end to end: a real
 FastAPI app, a real SQLite-backed ``FulfillmentUnitOfWork``, a real
 ``AnsibleFulfillmentProvider``, and a real ``AsyncJobQueue``-backed
-``AnsibleJobService`` (only ``AnsibleService`` itself is mocked, per this
+job authority (only the Ansible runner itself is mocked, per this
 suite's usual boundary). Unlike the unit suites (``kit/fulfillment``'s
 orchestration tests, and this service's ``AnsibleFulfillmentProvider`` unit
 tests), nothing here is a fake or a mock of the persistence/dispatch path
@@ -27,7 +27,7 @@ Teardown dispatch through the durable orchestrator has its own HTTP
 endpoint, ``POST /fulfillment/{fulfillment_id}/begin-teardown``, covered by
 ``test_compute_contract_api.py``. The teardown test below instead drives
 ``AnsibleFulfillmentProvider`` directly against this fixture's real
-``job_service``/session, proving the provider-level contract the endpoint
+job engine and session, proving the provider-level contract the endpoint
 calls into.
 """
 
@@ -138,7 +138,7 @@ class FulfillmentApi:
         serves; it is read from the engine the app composed, so it is the state
         the app wrote.
         """
-        engine = _container_module.resolved_job_service.engine
+        engine = _container_module.resolved_job_engine
         return engine.get_contract_job_record(job_id)
 
     async def status(self, fulfillment_id: str) -> httpx.Response:
@@ -400,7 +400,7 @@ class TestValidateIsSideEffectFree:
 
 class TestTeardownPreparation:
     """AnsibleFulfillmentProvider.prepare_teardown/dispatch_teardown, driven
-    directly against this fixture's real job_service/session -- see module
+    directly against this fixture's real job engine and session -- see module
     docstring for why there is no HTTP path to exercise yet.
     """
 
@@ -431,7 +431,8 @@ class TestTeardownPreparation:
         )
 
         provider = AnsibleFulfillmentProvider(
-            job_service=_container_module.resolved_job_service,
+            job_submitter=app.container.vm_runtime().job_submitter,
+            jobs=_container_module.resolved_job_engine,
             job_queue_provider=lambda: _container_module.resolved_job_queue,
             reserved_var_keys=VmAnsibleCodec().reserved_var_keys,
         )
@@ -466,7 +467,7 @@ class TestTeardownPreparation:
         from compute_provisioning_contracts import HostCreate
         from compute_provisioning_ansible import ssh_connection
 
-        _container_module.resolved_host_service.register_host(HostCreate(
+        _container_module.resolved_host_authority.register_host(HostCreate(
             host_id="kvm-fulfillment-1",
             connection=ssh_connection(ssh_host="192.0.2.30", key_path="/keys/id"),
             pool_id=pool_id,
@@ -485,7 +486,7 @@ class TestTeardownPreparation:
 
         # The contract action is "teardown"; the job runs the executor action
         # its parameters name, which has a registered executor.
-        processed = await _container_module.resolved_job_service.wait_for_terminal(
+        processed = await _container_module.resolved_job_engine.wait_for_terminal(
             teardown_job_id, timeout=5
         )
         assert processed.status == "succeeded", processed.error
@@ -583,7 +584,8 @@ class TestAcknowledgementFailureRecovery:
         session_factory = _container_module.resolved_session_factory
         resource_pool_service = _container_module.resolved_resource_pool_service
         provider = AnsibleFulfillmentProvider(
-            job_service=_container_module.resolved_job_service,
+            job_submitter=app.container.vm_runtime().job_submitter,
+            jobs=_container_module.resolved_job_engine,
             job_queue_provider=lambda: _container_module.resolved_job_queue,
             reserved_var_keys=VmAnsibleCodec().reserved_var_keys,
         )
@@ -706,7 +708,7 @@ class TestStatusAndResultQueries:
         )
         fulfillment_id = begun["fulfillment_id"]
 
-        # The job pipeline (mocked Ansible, real job_service) already wrote
+        # The job pipeline (mocked Ansible, real job engine) already wrote
         # real root/tenant Credential rows for this job when it succeeded
         # during `begin`; this section is only responsible for exposing
         # them through the pull endpoint, not for generating them.

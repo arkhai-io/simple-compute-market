@@ -19,7 +19,7 @@ from arkhai_bare_metal import (
     NODE_RECLAIM_ACCESS_ACTION,
     bare_metal_executor_ref,
 )
-from compute_provisioning_contracts import ExecutorActionEnvelope
+from compute_provisioning.jobs import JobActionRequest
 from compute_provisioning.hosts.service import HostAuthority
 from compute_provisioning_contracts import JobSubmitResponse
 from compute_provisioning.jobs.engine import JobEngine
@@ -66,7 +66,7 @@ class BareMetalOperationsService:
         self,
         body: BareMetalLeaseCreate,
         *,
-        contract: ExecutorActionEnvelope | None = None,
+        contract: JobActionRequest | None = None,
         operation_id: str | None = None,
     ) -> JobSubmitResponse:
         self._validate_host(body.host_id)
@@ -120,7 +120,7 @@ class BareMetalOperationsService:
         self,
         reservation: dict[str, Any],
         *,
-        contract: ExecutorActionEnvelope | None = None,
+        contract: JobActionRequest | None = None,
         operation_id: str | None = None,
     ) -> JobSubmitResponse:
         host_id = str(reservation.get("executor_target") or "")
@@ -162,7 +162,7 @@ class BareMetalOperationsService:
         self,
         params: BareMetalJobParams,
         *,
-        contract: ExecutorActionEnvelope | None,
+        contract: JobActionRequest | None,
         operation_id: str,
     ) -> JobSubmitResponse:
         return await self._jobs.submit(

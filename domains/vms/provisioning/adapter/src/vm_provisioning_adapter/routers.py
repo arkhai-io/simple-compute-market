@@ -20,9 +20,6 @@ def vm_mock_router():
 
 def vm_router_mounts() -> tuple[ComputeProvisioningRouterMount, ...]:
     from vm_provisioning_adapter.controllers.hosts_controller import HostController
-    from vm_provisioning_adapter.controllers.jobs_controller import (
-        AnsibleJobsController,
-    )
     from vm_provisioning_adapter.controllers.leases_controller import (
         AdminLeasesController,
         LeasesController,
@@ -34,10 +31,6 @@ def vm_router_mounts() -> tuple[ComputeProvisioningRouterMount, ...]:
         ComputeProvisioningRouterMount(SystemController.make_health_router()),
         ComputeProvisioningRouterMount(
             SystemController.make_system_router(),
-            "/api/v1",
-        ),
-        ComputeProvisioningRouterMount(
-            AnsibleJobsController.make_router(),
             "/api/v1",
         ),
         ComputeProvisioningRouterMount(HostController.make_router(), "/api/v1"),

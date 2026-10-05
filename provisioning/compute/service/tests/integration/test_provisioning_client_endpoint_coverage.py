@@ -255,7 +255,7 @@ class TestBareMetalTestRouteCoverage:
 
 
 def _register_host_record(host_id: str) -> None:
-    _container_module.resolved_host_service.register_host(
+    _container_module.resolved_host_authority.register_host(
         HostCreate(
             host_id=host_id,
             connection=ssh_connection(ssh_host="192.0.2.10", ssh_user="root", key_path="/fake/id_ed25519"),

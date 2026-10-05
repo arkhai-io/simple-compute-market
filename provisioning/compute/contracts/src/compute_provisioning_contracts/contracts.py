@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -42,14 +42,6 @@ class VersionedContractModel(BaseModel):
         return self
 
 
-class JobState(str, Enum):
-    QUEUED = "queued"
-    RUNNING = "running"
-    SUCCEEDED = "succeeded"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-
-
 class LeaseState(str, Enum):
     PENDING = "pending"
     ACTIVE = "active"
@@ -59,8 +51,6 @@ class LeaseState(str, Enum):
     UNMANAGED = "unmanaged"
     PROVISIONING_FAILED = "provisioning_failed"
     FORCE_RELEASED = "force_released"
-
-
 
 
 _RESERVATION_TO_LEASE_STATE: dict[str, LeaseState] = {
@@ -83,38 +73,6 @@ def lease_state_for_reservation_state(state: str) -> LeaseState:
         raise ValueError(f"unsupported reservation state for lease projection: {state!r}") from exc
 
 
-class ExecutorActionEnvelope(VersionedContractModel):
-    capacity_reservation_id: str = Field(min_length=1)
-    deal_ref: dict[str, Any]
-    offering_mode: str = Field(min_length=1)
-    action_kind: str = Field(min_length=1)
-    idempotency_key: str = Field(min_length=1)
-    parameters: dict[str, Any]
-
-
-
-class JobAccepted(VersionedContractModel):
-    job_id: str
-    status: JobState = JobState.QUEUED
-    capacity_reservation_id: str
-    deal_ref: dict[str, Any]
-    offering_mode: str
-    action_kind: str
-    idempotency_key: str
-
-
-class ProvisioningErrorEnvelope(BaseModel):
-    code: str
-    message: str
-    retryable: bool = False
-    details: dict[str, Any] = Field(default_factory=dict)
-
-
-class LogsReference(BaseModel):
-    kind: Literal["inline", "url", "object"]
-    reference: str
-
-
 class CredentialEnvelope(BaseModel):
     offering_mode: str
     credential_kind: str
@@ -125,24 +83,6 @@ class ResultEnvelope(BaseModel):
     offering_mode: str
     result_kind: str
     value: dict[str, Any]
-
-
-class ProvisioningJob(VersionedContractModel):
-    job_id: str
-    status: JobState
-    capacity_reservation_id: str
-    deal_ref: dict[str, Any]
-    offering_mode: str
-    action_kind: str
-    idempotency_key: str
-    result: ResultEnvelope | None = None
-    credentials: list[CredentialEnvelope] = Field(default_factory=list)
-    error: ProvisioningErrorEnvelope | None = None
-    logs_reference: LogsReference | None = None
-    retry_count: int = 0
-    max_retries: int = 0
-    created_at: datetime | None = None
-    updated_at: datetime | None = None
 
 
 class LeaseRegistration(VersionedContractModel):

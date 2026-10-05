@@ -6,7 +6,7 @@ import dataclasses
 import logging
 from typing import TYPE_CHECKING, Any, Callable
 
-from compute_provisioning_contracts import ExecutorActionEnvelope
+from compute_provisioning.jobs import JobActionRequest
 from market_fulfillment import (
     CredentialFetchFailedError,
     ProvisionedResourceDescriptor,
@@ -43,7 +43,8 @@ _VM_OFFERING_MODE = "vm"
 
 if TYPE_CHECKING:
     from compute_provisioning.jobs.queue import AsyncJobQueue
-    from vm_provisioning_adapter.services.job_service import AnsibleJobService
+    from compute_provisioning.jobs.engine import JobEngine
+    from vm_provisioning_adapter.services.job_submitter import VmJobSubmitter
 
 _CREATE_KIND = "vm.ansible.create.v1"
 _TEARDOWN_KIND = "vm.ansible.teardown.v1"
@@ -68,12 +69,16 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
     def __init__(
         self,
         *,
-        job_service: "AnsibleJobService",
+        job_submitter: "VmJobSubmitter",
+        jobs: "JobEngine",
         job_queue_provider: Callable[[], "AsyncJobQueue"],
         reserved_var_keys: Callable[[VmJobParams], frozenset[str]],
         port_allocator: Any | None = None,
     ) -> None:
-        self._job_service = job_service
+        # VM's jobs are submitted through VM's submitter and read back from the
+        # family's job authority.
+        self._job_submitter = job_submitter
+        self._jobs = jobs
         self._job_queue_provider = job_queue_provider
         # The variable names a job sets itself (the VM codec's answer), so a
         # pool's extra variables that would replace one are refused when the
@@ -313,7 +318,7 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
                     f"invalid Ansible create envelope: {exc}"
                 ) from exc
             params = self._job_params(operation.parameters)
-            contract = ExecutorActionEnvelope(
+            contract = JobActionRequest(
                 capacity_reservation_id=operation.capacity_reservation_id,
                 deal_ref={},
                 offering_mode=params.offering_mode,
@@ -321,7 +326,7 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
                 idempotency_key=f"{operation.capacity_reservation_id}:create",
                 parameters=operation.parameters.model_dump(mode="json"),
             )
-            response = await self._job_service.submit(
+            response = await self._job_submitter.submit(
                 params,
                 self._job_queue_provider(),
                 contract=contract,
@@ -412,7 +417,7 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
                     f"invalid Ansible teardown envelope: {exc}"
                 ) from exc
             params = self._job_params(operation.parameters)
-            contract = ExecutorActionEnvelope(
+            contract = JobActionRequest(
                 capacity_reservation_id=operation.capacity_reservation_id,
                 deal_ref={},
                 offering_mode=params.offering_mode,
@@ -420,7 +425,7 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
                 idempotency_key=f"{operation.capacity_reservation_id}:teardown",
                 parameters=operation.parameters.model_dump(mode="json"),
             )
-            response = await self._job_service.submit(
+            response = await self._job_submitter.submit(
                 params,
                 self._job_queue_provider(),
                 contract=contract,
@@ -470,7 +475,7 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
             )
 
         try:
-            job = self._job_service.get_job(job_id)
+            job = self._jobs.get_job(job_id)
         except LookupError:
             return ProviderStatus(
                 ProviderOperationState.unknown,
@@ -497,7 +502,7 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
         Declared async to satisfy the provider-neutral interface, which must
         accommodate providers whose credential store is a real network
         dependency; this adapter's own credential store is the local
-        ``AnsibleJobService`` database, so no ``await`` is needed internally
+        job authority's database, so no ``await`` is needed internally
         -- the same shape ``get_status`` already has with ``get_job``.
         """
 
@@ -510,7 +515,7 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
             ) from exc
 
         try:
-            response = self._job_service.get_credentials(job_id)
+            response = self._jobs.get_credentials(job_id)
         except LookupError as exc:
             raise CredentialFetchFailedError(f"job {job_id} not found") from exc
         except Exception as exc:
@@ -523,7 +528,7 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
         # field on VmConnectionInfo is optional for exactly this reason.
         result: dict[str, Any] = {}
         try:
-            job = self._job_service.get_job(job_id)
+            job = self._jobs.get_job(job_id)
             if job.result is not None:
                 result = dict(job.result.value)
         except Exception as exc:

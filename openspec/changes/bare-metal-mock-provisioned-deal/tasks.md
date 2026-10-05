@@ -1137,7 +1137,10 @@ re-verifies them by grep before each move.
       site's capacity routes.
 
       **Slice A0: the action surface goes, and contracts and clients move to their owners.**
-      Changes no wire beyond removing the action surface.
+      Changes no wire beyond removing the action surface. Amended at the A0 checkpoint review
+      (2026-10-04): it also admits `admin` on the site capacity routes the provisioning service
+      serves, which were seller-only there, and relays admit seller and admin, under the
+      maintainer's administrator ruling (`design.md`, "Slice A0 implementation findings").
 
   - [x] 5B.8.A0.1 Delete the generic action surface (decision 10). Remove
         `POST /api/v1/actions` and `GET /api/v1/jobs/{id}/contract`, `.../credentials`, and
@@ -1207,7 +1210,10 @@ re-verifies them by grep before each move.
         (`dist-compute-provisioning-contracts`, ahead of `dist-compute-provisioning`),
         and `.github/workflows/publish-pypi.yml` and `docs/development/RELEASING.md` wherever
         its siblings are listed; the service image derives its internal packages from the
-        lock, which `make check-packaging` confirms.
+        lock, which `make check-packaging` confirms. Amended at the A0 checkpoint review: neither
+        file lists the siblings, so the new contracts distribution, like the compute client and
+        the two resource-pool packages, is deliberately unpublished until closeout task 2.0
+        fixes the published dependency graph as a whole.
   - [x] 5B.8.A0.4 Compute client distribution (decision 8). New
         `provisioning/compute/client/` (`arkhai-compute-provisioning-client`,
         `compute_provisioning_client`; depends on the contracts, `arkhai-kit-identity`, httpx)
@@ -1265,7 +1271,11 @@ re-verifies them by grep before each move.
         `/api/v1/hosts/import` declaration and an `AnsibleHostImportClient` (async and sync)
         over the family transport; `provisioning/compute/ansible/pyproject.toml` depends on the
         compute client. `arkhai_bare_metal`'s `BareMetalLeaseClient` imports its transport
-        protocol from the compute client until B deletes it.
+        protocol from the compute client until B deletes it. Amended at the A0 checkpoint
+        review: as landed, `vm_provisioning_operator` and the Ansible host-import client depend
+        on the compute contracts only and accept any transport offering `authenticated_request`
+        (the `kit/pool-overrides` shape), not the client distribution; `BareMetalLeaseClient`
+        already declared its own transport protocol and imports nothing.
   - [x] 5B.8.A0.8 Callers. Storefronts: `domains/vms/storefront` (`services/capacity_client.py`,
         `fulfillment_service.py`, `fulfillment_resume_runtime.py`, `system_service.py`, and
         `tests/unit/test_fulfillment_service.py`) and `domains/bare_metal/storefront`
@@ -1346,9 +1356,13 @@ re-verifies them by grep before each move.
         Exact pins moved, with patch bumps: kit-settlement-runtime 0.2.1,
         kit-hosted-settlement 0.1.6, kit-contact-exchange 0.2.1, kit-config 0.1.4,
         core-registry-client 0.12.1, core-registry 0.3.1, core-buyer 0.3.4, vms-buyer 0.5.1,
-        vms-storefront 0.9.1, bare-metal-buyer 0.4.1, bare-metal-storefront 0.7.1. Every lockable
-        project relocked; `domains/vms/storefront` and `domains/vms/buyer` hand-edited (PyTorch
-        index 403); `kit/policy` cannot lock here either, and nothing in its lock changed. The
+        vms-storefront 0.9.1, bare-metal-buyer 0.4.1, bare-metal-storefront 0.7.1. Every project
+        the implementation environment could lock was relocked with `scripts/uv_project.py
+        lock`. Amended at the A0 checkpoint review: `domains/vms/storefront` and
+        `domains/vms/buyer` could not be (the PyTorch index refused access), so their locks were
+        hand-edited to the rebuilt wheels and are unverified by a real relock; `kit/policy`
+        could not be relocked either, and nothing in its lock changed. Closeout task 2.2
+        relocks all three where the index is reachable. The
         bare-metal adapter's unused dependency on VM's client is removed; its dependency on VM's
         adapter stays, because the service module it imports loads VM's adapter.
       - A0.9 validation: core 182 (2 skipped) + 44 and buyer, registry, registry-client;
@@ -1360,10 +1374,22 @@ re-verifies them by grep before each move.
         integration (the two known `test_alkahest` failures); e2e unit 236 (the known task-10.1
         failure), and the e2e and smoke suites collect (178). `make check-locks`, comment
         hygiene, documentation citations, OpenSpec strict, and `make check-packaging` pass.
+      - A0.9 correction (checkpoint verification): the gate ran each touched project's suite,
+        not the root `make test` aggregate, and missed
+        `domains/apicredits/tests/test_distribution_install.py`. Its wheel fixture builds a
+        listed set, which lacked `kit/resource-pools-contracts` (the API-credit service, the
+        pool kit, and the site kit now depend on it); the fixture now builds it. The root
+        aggregate then passes except where this environment cannot run a suite: `kit/policy`,
+        the VM storefront, and the VM buyer cannot reinit (PyTorch index; their frozen-sync
+        runs pass: 47, 1101 and 345, 206), and the Rust middleware needs Cargo. Later gates run
+        the root aggregate.
+      - A0 end-to-end evidence (checkpoint verification): the pipeline passed on the A0
+        checkpoint, VM lane 135 passed and bare-metal lane 16 passed, with no traceback, 5xx,
+        401, or 403 in either lane's service logs.
 
       **Slice A: the authorities at the root, and the job and host routes.**
 
-  - [ ] 5B.8.A.1 Authorities at the root (decision 5). `container.py` builds one
+  - [x] 5B.8.A.1 Authorities at the root (decision 5). `container.py` builds one
         `HostAuthority` (codecs from `compute_provisioning_ansible`'s `SshConnectionCodec` with
         the decryption key, capacity derivation, merged pool-change hooks) and one `JobEngine`
         (the executor table, `host_authority.lookup`, the retry policy). `retry_policy_from`
@@ -1382,7 +1408,7 @@ re-verifies them by grep before each move.
         `unit/services/test_job_service.py` becomes `test_job_submitter.py`; new
         `provisioning/compute/service/tests/unit/test_authority_composition.py` asserts one
         engine and one host authority reach both runtimes; `test_retry_scheduler.py` follows.
-  - [ ] 5B.8.A.2 Route services (decision 4). `compute_provisioning/route_errors.py` defines
+  - [x] 5B.8.A.2 Route services (decision 4). `compute_provisioning/route_errors.py` defines
         `ProvisioningRouteError(status_code, detail)`; `jobs/executor_mock.py`'s
         `MockRouteError` is folded into it, and both adapters' test controllers map it.
         New `compute_provisioning/jobs/route_service.py` (`JobRouteService`: list, get, logs,
@@ -1391,7 +1417,7 @@ re-verifies them by grep before each move.
         disable, connectivity through probes keyed by connection kind, refusing an unknown
         kind with 422). New `compute_provisioning_ansible/host_import.py`'s
         `AnsibleHostImportRouteService` over the host authority and `parse_inventory_ini`.
-  - [ ] 5B.8.A.3 Bindings. New service controllers `controllers/jobs_controller.py`,
+  - [x] 5B.8.A.3 Bindings. New service controllers `controllers/jobs_controller.py`,
         `hosts_controller.py`, `test_jobs_controller.py` (mounted under the mock profile), and
         `host_import_controller.py`, mounted from `main.py` and resolving collaborators from the
         container. VM's `controllers/jobs_controller.py` is tombstoned; VM's
@@ -1401,7 +1427,7 @@ re-verifies them by grep before each move.
         The root builds the probe runner (`AnsibleRunner`, or `MockAnsibleRunner` under the mock
         profile) and registers `ssh` → `probe_connectivity` over it. Both adapters'
         `pyproject.toml` declare FastAPI and `fastapi-utils`, which they import.
-  - [ ] 5B.8.A.4 Drift guard and tests. New
+  - [x] 5B.8.A.4 Drift guard and tests. New
         `provisioning/compute/service/tests/unit/test_route_binding.py`: every route the app
         mounts resolves to exactly one contract in the assembled table, and every contract to a
         mounted route. Route services get unit tests in `provisioning/compute/tests/unit/`
@@ -1409,6 +1435,58 @@ re-verifies them by grep before each move.
         `provisioning/compute/ansible/tests/unit/test_host_import.py`; `test_hosts_api.py`,
         `test_system_api.py`, and `test_test_controller.py` cover the bound routes through the
         typed clients. Gate as above.
+
+  - [x] 5B.8.A.5 Added at the A0 checkpoint review (2026-10-04, maintainer decision): the
+        action surface's deletion left its job-record vocabulary in the thin contracts
+        package. `ExecutorActionEnvelope` becomes `compute_provisioning.jobs.JobActionRequest`
+        (`jobs/action_request.py`), the job authority's own correlation and idempotency record,
+        which no route accepts; `ProvisioningErrorEnvelope` moves beside `JobFailure` in
+        `jobs/executor.py`. `JobState`, `JobAccepted`, `ProvisioningJob`, and `LogsReference`,
+        which only the deleted contract-job routes used, are deleted, as is
+        `VmOperationsService.create_vm`'s `contract` argument, which only the deleted VM compute
+        adapter supplied. The persisted `contract_version` keeps marking a job fulfillment
+        submitted. compute-provisioning-contracts 0.2.0. Validation: the family suites and the
+        service (885 unit, 287 integration) pass.
+      Slice A done 2026-10-04.
+      - A.1: the container builds one `HostAuthority` (`_make_host_authority`: the `ssh`
+        codec with the decryption key, capacity derivation, `HOST_POOL_CHANGE_HOOKS` merged)
+        and one `JobEngine` (`_make_job_engine`); `retry_policy_from` is
+        `compute_provisioning_service/services/job_retry.py`. VM's `job_service.py` is replaced
+        by `services/job_submitter.py` (`VmJobSubmitter`); the fulfillment provider submits
+        through it and reads jobs from the engine; both runtimes receive the authorities. The
+        container's `resolved_job_engine`, `resolved_host_authority`, and
+        `resolved_connectivity_probes` replace the job and host services.
+      - A.2: `compute_provisioning/route_errors.py` (`ProvisioningRouteError`, into which
+        `MockRouteError` folds), `jobs/route_service.py` (`JobRouteService`,
+        `JobTestRouteService`), `hosts/route_service.py` (`HostRouteService`, probes keyed by
+        connection kind, 422 for a kind with none), and `AnsibleHostImportRouteService` in
+        `compute_provisioning_ansible/host_import.py`. A duplicate host registration now answers
+        409 naming the host; VM's controller formatted a field `HostCreate` lacks.
+      - A.3: the service's `controllers/jobs_controller.py`, `hosts_controller.py`,
+        `host_import_controller.py`, `test_jobs_controller.py` (mock profile), and
+        `route_errors.py`; the container builds the probe runner (`AnsibleRunner`, or under the
+        mock profile `MockAnsibleRunner`) and registers `ssh`. VM keeps only its capacity host
+        route and its operations service only the capacity check; its test controller no
+        longer serves `/test/jobs`. Both adapters declare FastAPI, fastapi-utils, and
+        typing-inspect (imported by fastapi-utils, undeclared by it).
+      - A.4: `tests/unit/test_route_binding.py` reads mounted routes from the app's OpenAPI
+        document (FastAPI 0.139 keeps included routers lazily, so `app.routes` does not list
+        them); `test_authority_composition.py`; route-service unit tests in
+        `provisioning/compute/tests/unit/` and the Ansible distribution's `test_host_import.py`;
+        a duplicate-registration integration test. The two host-operations connectivity unit
+        tests were dropped: the Ansible probe tests cover the same behaviour.
+      - Versions: compute-provisioning 0.10.0, compute-provisioning-ansible 0.3.0,
+        compute-provisioning-service 0.7.0, vms-provisioning-adapter 0.7.0,
+        bare-metal-provisioning-adapter 0.5.0; floors raised to match.
+      - Validation (with A.5): compute contracts 40, client 29, family kit 125, Ansible 83, VM
+        adapter 39, bare-metal adapter 22, service 885 unit and 287 integration, API-credit
+        service 65. The root `make test` aggregate passes 44 suites; its only failures are
+        environmental: `kit/policy`, the VM storefront, and the VM buyer cannot reinit (PyTorch
+        index), and their frozen-sync runs pass (47; 1101 unit and 345 integration with the two
+        known `test_alkahest` failures; 206), and the Rust middleware needs Cargo.
+        `make check-locks`, `make check-packaging`, comment hygiene, documentation citations,
+        and OpenSpec strict validation pass. Slice A has not yet run through the end-to-end
+        pipeline.
 
       **Slice B: the lease surface and mode-agnostic release** (decisions 1–3, 9, and 7.3).
 
@@ -1781,10 +1859,23 @@ service code.
 - [ ] 2.1 **Comment hygiene.** Run `make check-comment-hygiene` and resolve every match,
       then read the comments this change adds for references to the review or
       migration that introduced them. Amended 2026-10-01 from a placeholder.
+- [ ] 2.0 **Published dependency graph.** Ruled at the A0 checkpoint review (`design.md`,
+      "Findings recorded for closeout"): before closeout, every package
+      `.github/workflows/publish-pypi.yml` publishes must depend only on published packages.
+      Enumerate the published packages' internal dependency closure, add each unpublished
+      member (the four thin packages from 5B.8.A0 among them) to the workflow's `PACKAGES`
+      table and path filters and to `docs/development/RELEASING.md`'s table, and list for the
+      maintainer the trusted-publisher setup each new package needs before its first release.
+      A check that fails when a published package depends on an unpublished one belongs beside
+      the workflow, if it can run without network access.
 - [ ] 2.2 **Packaging.** Run `make check-packaging` and resolve every failure it
       reports: environment and image installs derive their internal packages from
       their locks, every lock is current, and every Python version selection reads
-      the root declaration.
+      the root declaration. Relock with `scripts/uv_project.py lock` the projects whose locks
+      could not be regenerated in the implementation environment (the PyTorch index refused
+      access): `domains/vms/storefront` and `domains/vms/buyer`, whose locks were hand-edited
+      and are unverified by a real relock, and `kit/policy`; confirm each relock produces no
+      diff, or commit the diff it produces.
 - [ ] 2.3 **Import placement.** For each function-level import this change adds or
       touches, move it to module level unless a verified circular import or a documented
       lazy-load reason keeps it; verify each move against the real suites.
@@ -1805,8 +1896,7 @@ service code.
       service, and route the findings under "Controls and routes (5B.8)" (`kit/site`'s own
       router, VM's literal pool-override path, the site's duplicated server and client
       contracts, bare metal's untyped mock-rule routes, the unreachable `provisioning`
-      state, path templates in the family contracts, and published packages depending on
-      unpublished ones, the new thin packages among them).
+      state, path templates in the family contracts).
 - [ ] 2.7 **Campaign index currency.** Update this change's row and the Goal 3, 4, and 7
       graphs in `openspec/changes/README.md`, and the rows of
       `bare-metal-and-credits-domain-stacks`, `kit-owned-storefront-shell`,

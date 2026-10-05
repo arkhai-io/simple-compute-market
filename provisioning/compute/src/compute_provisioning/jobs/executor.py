@@ -21,12 +21,23 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol, Union
 
-from compute_provisioning_contracts import (
-    CredentialEnvelope,
-    ProvisioningErrorEnvelope,
-    ResultEnvelope,
-)
+from compute_provisioning_contracts import CredentialEnvelope, ResultEnvelope
+from pydantic import BaseModel, Field
+
 from compute_provisioning.hosts.execution import ExecutionHost
+
+
+class ProvisioningErrorEnvelope(BaseModel):
+    """Why a job failed, as its executor classified it.
+
+    ``retryable`` is the executor's judgement, the only one that knows what the
+    failure means; whether and when a retry happens is the job authority's.
+    """
+
+    code: str
+    message: str
+    retryable: bool = False
+    details: dict[str, Any] = Field(default_factory=dict)
 
 
 @dataclass(frozen=True)

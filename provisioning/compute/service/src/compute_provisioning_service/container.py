@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
 from types import MappingProxyType
 from typing import Any
@@ -8,6 +9,16 @@ from dependency_injector import containers, providers
 from compute_provisioning.lease_lifecycle import LeaseLifecycleService
 from compute_provisioning.executor_leases import ExecutorLeaseService
 from compute_provisioning import JobExecutorTable
+from compute_provisioning.hosts import ConnectionCodecs
+from compute_provisioning.hosts.service import HostAuthority
+from compute_provisioning.jobs.engine import JobEngine
+from compute_provisioning_ansible import (
+    SSH_CONNECTION_KIND,
+    MockAnsibleRunner,
+    SshConnectionCodec,
+    probe_connectivity,
+)
+from compute_provisioning_ansible.runner import AnsibleRunner
 from compute_provisioning.release import ReleaseJobDispatcher
 from market_resource_pools import ResourcePoolService
 from market_site.authority import LedgerSiteAuthority
@@ -18,6 +29,7 @@ from bare_metal_provisioning_adapter.runtime import (
     build_bare_metal_runtime,
 )
 from vm_provisioning_adapter.runtime import (
+    HOST_POOL_CHANGE_HOOKS as VM_HOST_POOL_CHANGE_HOOKS,
     HOST_REQUIREMENT as VM_HOST_REQUIREMENT,
     build_vm_runtime,
 )
@@ -41,6 +53,7 @@ from compute_provisioning_service.services.deal_event_sink import (
 from compute_provisioning_service.services.capacity_reservation_watchdog import CapacityReservationWatchdog
 from compute_provisioning_service.services.fulfillment_convergence import FulfillmentConvergenceWatchdog
 from compute_provisioning_service.services.relay_port_allocator import RelayPortAllocator
+from compute_provisioning_service.services.job_retry import retry_policy_from
 from compute_provisioning_service.services.lease_watchdog import LeaseWatchdog
 from compute_provisioning_service.services.principal_authority import (
     SqlAlchemyProvisioningPrincipalAuthority,
@@ -127,6 +140,61 @@ def _merge_host_requirements(*requirements: Mapping[str, bool]) -> Mapping[str, 
     return MappingProxyType(merged)
 
 
+def _make_host_authority(session_factory, cfg, capacity_derivation, pool_change_hooks):
+    """The one host authority: every connection kind's codec and every hook.
+
+    The ``ssh`` codec is the Ansible implementation's, protecting a submitted
+    key with the service's decryption key; pool-change hooks are the adapters'
+    static declarations, merged here because the authority exists before any
+    runtime does.
+    """
+    return HostAuthority(
+        session_factory,
+        codecs=ConnectionCodecs([SshConnectionCodec(cfg.ssh_decryption_key)]),
+        capacity_derivation=capacity_derivation,
+        pool_change_hooks=tuple(pool_change_hooks),
+    )
+
+
+def _mock_profile_active() -> bool:
+    profiles = os.environ.get("ACTIVE_PROFILES", "")
+    return "mock" in {profile.strip() for profile in profiles.split(",")}
+
+
+def _probe_only(playbook) -> str:
+    raise RuntimeError("the connectivity probe runner runs no playbook")
+
+
+def _make_probe_runner(cfg):
+    """The runner connectivity probes use, belonging to no domain.
+
+    The real Ansible runner, or under the mock profile the mock, whose every
+    registered host is reachable. It probes; it never runs a playbook.
+    """
+    if _mock_profile_active():
+        return MockAnsibleRunner(default_output=_probe_only)
+    return AnsibleRunner(cfg)
+
+
+def _make_connectivity_probes(runner) -> Mapping[str, Any]:
+    """Each connection kind's probe; the Ansible implementation probes ``ssh``."""
+
+    async def probe_ssh(host):
+        return await probe_connectivity(runner, host)
+
+    return MappingProxyType({SSH_CONNECTION_KIND: probe_ssh})
+
+
+def _make_job_engine(session_factory, job_executors, host_authority, cfg):
+    """The one job authority every domain submits to and every route reads."""
+    return JobEngine(
+        session_factory,
+        executors=job_executors,
+        host_lookup=host_authority.lookup,
+        retry_policy=retry_policy_from(cfg),
+    )
+
+
 def _compose_adapters(vm_bundle, bare_metal_bundle, host_requirement, job_executors):
     return compose_adapter_bundles(
         [vm_bundle, bare_metal_bundle],
@@ -147,7 +215,7 @@ def _release_dispatcher(composed_adapters):
     return composed_adapters.release_dispatcher
 
 
-def _make_release_job_dispatcher(vm_runtime, job_service):
+def _make_release_job_dispatcher(vm_runtime, job_engine):
     """Route release-job status reads: VM through the fulfillment
     aggregate, bare-metal through the shared job queue, unchanged.
 
@@ -161,7 +229,7 @@ def _make_release_job_dispatcher(vm_runtime, job_service):
     return ReleaseJobDispatcher(
         {
             "vm": vm_runtime.release_job_port(),
-            "bare_metal": job_service,
+            "bare_metal": job_engine,
         },
     )
 
@@ -267,9 +335,33 @@ class Container(containers.DeclarativeContainer):
         ledger=capacity_ledger_service,
     )
 
-    # Filled and frozen by adapter composition; the job service resolves each
-    # job's runner and playbook through it.
+    # Filled and frozen by adapter composition; the job engine resolves each
+    # job's executor through it.
     job_executor_table = providers.Singleton(JobExecutorTable)
+
+    host_pool_change_hooks = providers.Object(VM_HOST_POOL_CHANGE_HOOKS)
+
+    host_authority = providers.Singleton(
+        _make_host_authority,
+        session_factory=session_factory,
+        cfg=config,
+        capacity_derivation=capacity_derivation,
+        pool_change_hooks=host_pool_change_hooks,
+    )
+
+    probe_runner = providers.Singleton(_make_probe_runner, cfg=config)
+
+    connectivity_probes = providers.Singleton(
+        _make_connectivity_probes, runner=probe_runner
+    )
+
+    job_engine = providers.Singleton(
+        _make_job_engine,
+        session_factory=session_factory,
+        job_executors=job_executor_table,
+        host_authority=host_authority,
+        cfg=config,
+    )
 
     vm_runtime = providers.Singleton(
         build_vm_runtime,
@@ -278,7 +370,8 @@ class Container(containers.DeclarativeContainer):
         job_queue_provider=providers.Object(_resolved_job_queue),
         settlement_repository=settlement_repository,
         teardown_port=fulfillment_teardown_port,
-        capacity_derivation=capacity_derivation,
+        host_authority=host_authority,
+        job_engine=job_engine,
         job_executors=job_executor_table,
     )
 
@@ -287,20 +380,10 @@ class Container(containers.DeclarativeContainer):
         runtime=vm_runtime,
         name=providers.Object("ansible_service"),
     )
-    host_service = providers.Callable(
-        _runtime_value,
-        runtime=vm_runtime,
-        name=providers.Object("host_service"),
-    )
     ansible_pool_config_handler = providers.Callable(
         _runtime_value,
         runtime=vm_runtime,
         name=providers.Object("pool_config_handler"),
-    )
-    job_service = providers.Callable(
-        _runtime_value,
-        runtime=vm_runtime,
-        name=providers.Object("job_service"),
     )
     vm_operations_service = providers.Callable(
         _runtime_value,
@@ -318,20 +401,13 @@ class Container(containers.DeclarativeContainer):
         ledger=capacity_ledger_service,
     )
 
-    # Bare metal submits to the job authority directly; it is built inside VM's
-    # job service until the composition root builds it.
-    job_engine = providers.Callable(
-        _runtime_value,
-        runtime=vm_runtime,
-        name=providers.Object("job_engine"),
-    )
     bare_metal_runtime = providers.Singleton(
         build_bare_metal_runtime,
         site_authority=site_authority,
         job_engine=job_engine,
         job_queue_provider=providers.Object(_resolved_job_queue),
         config=config,
-        host_service=host_service,
+        host_authority=host_authority,
     )
     bare_metal_lease_service = providers.Callable(
         _runtime_value,
@@ -424,7 +500,7 @@ class Container(containers.DeclarativeContainer):
     release_job_dispatcher = providers.Singleton(
         _make_release_job_dispatcher,
         vm_runtime=vm_runtime,
-        job_service=job_service,
+        job_engine=job_engine,
     )
 
     fulfillment_unit_of_work = providers.Singleton(
@@ -519,12 +595,13 @@ container = Container()
 # ---------------------------------------------------------------------------
 from sqlalchemy.orm import sessionmaker, Session  # noqa: E402
 
-resolved_job_service: Any | None = None
+resolved_job_engine: "JobEngine | None" = None
 resolved_session_factory: "sessionmaker[Session] | None" = None
 resolved_ansible_service: Any | None = None
 resolved_job_queue: "AsyncJobQueue | None" = None
 resolved_system_service: Any | None = None
-resolved_host_service: Any | None = None
+resolved_host_authority: "HostAuthority | None" = None
+resolved_connectivity_probes: Mapping[str, Any] | None = None
 resolved_vm_operations_service: Any | None = None
 resolved_host_operations_service: Any | None = None
 resolved_lease_lifecycle_service: "LeaseLifecycleService | None" = None

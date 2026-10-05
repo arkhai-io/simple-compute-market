@@ -87,7 +87,7 @@ def build_bare_metal_runtime(
     job_engine,
     job_queue_provider: Callable[[], Any],
     config,
-    host_service,
+    host_authority,
 ) -> BareMetalProvisioningRuntime:
     active = [
         profile.strip()
@@ -105,7 +105,7 @@ def build_bare_metal_runtime(
     operations_service = BareMetalOperationsService(
         jobs=job_engine,
         job_queue_provider=job_queue_provider,
-        host_service=host_service,
+        host_service=host_authority,
         reclaim_policy=getattr(config, "bare_metal_reclaim_policy", None),
     )
     return BareMetalProvisioningRuntime(

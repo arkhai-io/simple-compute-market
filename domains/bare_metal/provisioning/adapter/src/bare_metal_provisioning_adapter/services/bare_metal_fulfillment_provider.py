@@ -15,7 +15,7 @@ from arkhai_bare_metal import (
     bare_metal_executor_ref,
     materialization_to_lease_create,
 )
-from compute_provisioning_contracts import ExecutorActionEnvelope
+from compute_provisioning.jobs import JobActionRequest
 from market_fulfillment import (
     CredentialFetchFailedError,
     FulfillmentCreateFailedError,
@@ -265,7 +265,7 @@ class BareMetalFulfillmentProvider(FulfillmentProvider):
                 expected_action="create",
             )
             lease = operation.lease
-            contract = ExecutorActionEnvelope(
+            contract = JobActionRequest(
                 capacity_reservation_id=operation.capacity_reservation_id,
                 deal_ref={lease.settlement_identity_kind: lease.settlement_identity},
                 offering_mode=BARE_METAL_OFFERING_MODE,
@@ -349,7 +349,7 @@ class BareMetalFulfillmentProvider(FulfillmentProvider):
                 expected_action="teardown",
             )
             lease = operation.lease
-            contract = ExecutorActionEnvelope(
+            contract = JobActionRequest(
                 capacity_reservation_id=operation.capacity_reservation_id,
                 deal_ref={lease.settlement_identity_kind: lease.settlement_identity},
                 offering_mode=BARE_METAL_OFFERING_MODE,

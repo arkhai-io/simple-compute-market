@@ -367,7 +367,10 @@ from compute_provisioning_service.services.capacity_derivation import (
     LegacyHostCapacityDerivation,
 )
 from vm_provisioning_adapter.codec import VmAnsibleCodec
-from vm_provisioning_adapter.services.job_service import AnsibleJobService
+from compute_provisioning.jobs.engine import JobEngine
+from compute_provisioning_ansible import probe_connectivity
+from compute_provisioning_service.services.job_retry import retry_policy_from
+from vm_provisioning_adapter.services.job_submitter import VmJobSubmitter
 from compute_provisioning_ansible import MockAnsibleRunner
 from vm_provisioning_adapter.services.mock_output import vm_mock_output
 from vm_provisioning_adapter.services.system_service import SystemService
@@ -630,7 +633,7 @@ async def client_and_queue(
         host_requirement=host_requirement,
     )
 
-    host_service = HostAuthority(
+    host_authority = HostAuthority(
         session_factory,
         codecs=ConnectionCodecs([SshConnectionCodec(TEST_CONNECTION_KEY)]),
         capacity_derivation=LegacyHostCapacityDerivation(capacity_ledger_service),
@@ -650,14 +653,21 @@ async def client_and_queue(
         },
     )
 
-    job_service = AnsibleJobService(
-        settings=mock_settings,
-        session_factory=session_factory,
+    # The one job authority and host authority the composition root builds.
+    job_engine = JobEngine(
+        session_factory,
         executors=_job_executor_table(
             fake_ansible, mock_settings, bare_metal_runner=bare_metal_runner
         ),
-        host_service=host_service,
+        host_lookup=host_authority.lookup,
+        retry_policy=retry_policy_from(mock_settings),
     )
+    job_submitter = VmJobSubmitter(job_engine, default_host_id=mock_settings.default_host_id)
+
+    async def probe_ssh(host):
+        return await probe_connectivity(fake_ansible, host)
+
+    connectivity_probes = {"ssh": probe_ssh}
 
     from market_fulfillment import PhysicalSettlementScheduler
     physical_settlement_scheduler = PhysicalSettlementScheduler(
@@ -682,9 +692,9 @@ async def client_and_queue(
 
     from bare_metal_provisioning_adapter.services.bare_metal_operations_service import BareMetalOperationsService
     bare_metal_operations_service = BareMetalOperationsService(
-        jobs=job_service.engine,
+        jobs=job_engine,
         job_queue_provider=lambda: job_queue,
-        host_service=host_service,
+        host_service=host_authority,
         reclaim_policy=mock_settings.bare_metal_reclaim_policy,
     )
 
@@ -702,7 +712,8 @@ async def client_and_queue(
     job_queue = AsyncJobQueue(max_concurrent=2)
 
     ansible_fulfillment_provider = AnsibleFulfillmentProvider(
-        job_service=job_service,
+        job_submitter=job_submitter,
+        jobs=job_engine,
         job_queue_provider=lambda: job_queue,
         reserved_var_keys=VmAnsibleCodec().reserved_var_keys,
         # Without this a relay-backed pool cannot lease a port, so every
@@ -745,7 +756,7 @@ async def client_and_queue(
         VM_OFFERING_MODE: VmFulfillmentReleaseJobPort(
             teardown_port=FulfillmentServiceTeardownPort(lambda: fulfillment_service),
         ),
-        BARE_METAL_OFFERING_MODE: job_service,
+        BARE_METAL_OFFERING_MODE: job_engine,
     })
 
     from compute_provisioning.lease_lifecycle import LeaseLifecycleService
@@ -775,17 +786,17 @@ async def client_and_queue(
         job_queue_provider=lambda: job_queue,
         ansible_service=fake_ansible,
         codec=VmAnsibleCodec(),
-        host_service=host_service,
+        host_authority=host_authority,
         pool_config_handler=AnsiblePoolConfigHandler(settings=mock_settings),
-        job_service=job_service,
+        job_engine=job_engine,
+        job_submitter=job_submitter,
         vm_operations_service=VmOperationsService(
-            job_service=job_service,
+            job_submitter=job_submitter,
             job_queue_provider=lambda: job_queue,
         ),
         host_operations_service=HostOperationsService(
-            ansible_service=fake_ansible,
-            host_service=host_service,
-            job_service=job_service,
+            host_service=host_authority,
+            job_submitter=job_submitter,
             job_queue_provider=lambda: job_queue,
         ),
         settlement_repository=SettlementRepository(),
@@ -795,7 +806,7 @@ async def client_and_queue(
     system_service = SystemService(
         ansible_service=fake_ansible,
         settings=mock_settings,
-        host_service=host_service,
+        host_service=host_authority,
         session_factory=session_factory,
         job_queue_provider=lambda: job_queue,
         lease_lifecycle_service=lease_lifecycle_service,
@@ -804,10 +815,11 @@ async def client_and_queue(
     # Override container providers
     app.container.vm_runtime.override(vm_runtime)
     app.container.ansible_service.override(fake_ansible)
-    app.container.job_service.override(job_service)
+    app.container.job_engine.override(job_engine)
     app.container.system_service.override(system_service)
     app.container.session_factory.override(session_factory)
-    app.container.host_service.override(host_service)
+    app.container.host_authority.override(host_authority)
+    app.container.connectivity_probes.override(connectivity_probes)
     app.container.site_authority.override(site_authority)
     app.container.bare_metal_lease_service.override(bare_metal_lease_service)
     app.container.bare_metal_operations_service.override(bare_metal_operations_service)
@@ -823,11 +835,12 @@ async def client_and_queue(
     app.container.provisioning_replay_store.override(replay_store)
     app.container.capacity_release_outbox.override(capacity_release_outbox)
     # Wire resolved module-level variables
-    _container_module.resolved_job_service = job_service
+    _container_module.resolved_job_engine = job_engine
     _container_module.resolved_session_factory = session_factory
     _container_module.resolved_ansible_service = fake_ansible
     _container_module.resolved_system_service = system_service
-    _container_module.resolved_host_service = host_service
+    _container_module.resolved_host_authority = host_authority
+    _container_module.resolved_connectivity_probes = connectivity_probes
     _container_module.resolved_bare_metal_lease_service = bare_metal_lease_service
     _container_module.resolved_bare_metal_operations_service = bare_metal_operations_service
     _container_module.resolved_bare_metal_mock_executor = (
@@ -862,7 +875,7 @@ async def client_and_queue(
     _container_module.resolved_host_operations_service = app.container.host_operations_service()
 
     processing_task = asyncio.create_task(
-        job_queue.start(job_service.process_job),
+        job_queue.start(job_engine.process_job),
         name="test-job-processing-loop",
     )
 
@@ -898,10 +911,11 @@ async def client_and_queue(
     # Reset container overrides
     app.container.vm_runtime.reset_override()
     app.container.ansible_service.reset_override()
-    app.container.job_service.reset_override()
+    app.container.job_engine.reset_override()
     app.container.system_service.reset_override()
     app.container.session_factory.reset_override()
-    app.container.host_service.reset_override()
+    app.container.host_authority.reset_override()
+    app.container.connectivity_probes.reset_override()
     app.container.site_authority.reset_override()
     app.container.bare_metal_lease_service.reset_override()
     app.container.bare_metal_operations_service.reset_override()

@@ -10,14 +10,15 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from compute_provisioning import JobExecutorTable
-from compute_provisioning_contracts import (
-    CredentialEnvelope,
-    ExecutorActionEnvelope,
-    ProvisioningErrorEnvelope,
-    ResultEnvelope,
-)
+from compute_provisioning_contracts import CredentialEnvelope, ResultEnvelope
 from compute_provisioning.hosts import ConnectionEnvelope, ExecutionHost
-from compute_provisioning.jobs import JobFailure, JobRetryPolicy, JobSuccess
+from compute_provisioning.jobs import (
+    JobFailure,
+    JobRetryPolicy,
+    JobSuccess,
+    JobActionRequest,
+    ProvisioningErrorEnvelope,
+)
 from compute_provisioning.jobs.db import Base as JobsBase
 from compute_provisioning.jobs.db import JobCredential, JobRecord
 from compute_provisioning.jobs.engine import JobEngine
@@ -222,7 +223,7 @@ async def test_submissions_are_deduplicated_by_operation_and_by_contract() -> No
     with pytest.raises(ValueError, match="different job parameters"):
         await _submit(engine, queue, operation_id="op-1", params={"p": 2})
 
-    contract = ExecutorActionEnvelope(
+    contract = JobActionRequest(
         capacity_reservation_id="r-1",
         deal_ref={"deal": "d"},
         offering_mode="fake",
@@ -257,7 +258,7 @@ async def test_a_contract_action_runs_as_the_executor_action_it_was_submitted_wi
     executor action."""
     executor = _Executor()
     engine, factory = _engine(executor)
-    contract = ExecutorActionEnvelope(
+    contract = JobActionRequest(
         capacity_reservation_id="r-2",
         deal_ref={},
         offering_mode="fake",

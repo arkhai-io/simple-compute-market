@@ -75,7 +75,7 @@ async def test_a_failure_before_the_derivation_commits_leaves_neither(
 ):
     """The upsert and the derivation are one transaction."""
     client, _ = client_and_queue
-    derivation = _container_module.resolved_host_service._capacity_derivation
+    derivation = _container_module.resolved_host_authority._capacity_derivation
     derive = derivation.derive_in_session
 
     def derive_then_fail(db, host_ids=None):

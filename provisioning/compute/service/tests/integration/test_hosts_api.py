@@ -90,6 +90,19 @@ class TestRegisterHost:
         assert any(h.host_id == "kvm1" for h in result.hosts)
         assert result.total == len(result.hosts)
 
+    async def test_registering_a_host_twice_is_a_conflict_naming_it(self, client_and_queue):
+        """A second registration of one host id is refused as a conflict, and the
+        first registration is untouched."""
+        client, _ = client_and_queue
+        await _register(client)
+
+        with pytest.raises(ComputeProvisioningError) as refused:
+            await _register(client)
+
+        assert refused.value.status_code == 409
+        assert _SAMPLE_HOST.host_id in str(refused.value)
+        assert (await client.family.get_host(_SAMPLE_HOST.host_id)).gpu_count == 2
+
     async def test_register_host_client_contract(self, client_and_queue):
         """register_host return value is a typed HostResponse — contract enforced."""
         client, _ = client_and_queue
