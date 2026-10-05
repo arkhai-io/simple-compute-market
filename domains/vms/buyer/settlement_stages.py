@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from types import SimpleNamespace
@@ -17,7 +16,6 @@ from core_buyer.orchestration import (
     submit_settlement_request,
     wait_for_settlement,
 )
-from market_alkahest.alkahest import get_erc20_escrow_obligation_default
 from market_alkahest.plans import escrow_terms_from_settlement_plan
 from market_alkahest.schemas import (
     EscrowProposal,
@@ -88,6 +86,14 @@ class AlkahestBuyerStage:
             raise RuntimeError("seller omitted accepted_escrow_proposal for Alkahest")
         if outcome.settlement_selection is not None and outcome.settlement_plan is None:
             raise RuntimeError("seller omitted settlement_plan for Alkahest")
+
+    def readiness_resources(self):
+        chains = common.buyer_chains()
+        address, _private_key = common.resolve_buyer_wallet()
+        resources = {"chains": chains, "wallet": {"address": address}}
+        if len(chains) == 1:
+            resources["default_chain"] = next(iter(chains))
+        return resources
 
     def prepare_selection(self, selected):
         return selected
@@ -179,6 +185,9 @@ class PaymentsBuyerStage:
         if not isinstance(data.get("mandate"), Mapping):
             raise RuntimeError("seller did not supply a payment mandate")
         Mandate.model_validate(data["mandate"])
+
+    def readiness_resources(self):
+        return {}
 
     def prepare_selection(self, selected):
         return payer_selection(selected)
@@ -295,6 +304,12 @@ def _resume_alkahest(context: BuyerResumeContext) -> dict:
     resolve_seller_principals = context.resolve_seller_principals
     poll_interval, settlement_timeout = context.poll_interval, context.timeout
     console = context.console
+    if (
+        not deal.escrow_uid
+        and deal.accepted_escrow_proposal is None
+        and deal.accepted_escrow_terms is None
+    ):
+        raise typer.BadParameter("accepted Alkahest work has no escrow artifacts; recovery will not synthesize them")
     alkahest_address_config_path = context.resolve_address_config()
     accepted_ssh_public_key, effective_duration = _accepted_provision_inputs(deal)
     effective_token = deal.token_contract
@@ -394,19 +409,8 @@ def _resume_alkahest(context: BuyerResumeContext) -> dict:
             escrow_terms_list = [
                 EscrowTerms.model_validate(item) for item in deal.accepted_escrow_terms
             ]
-        elif deal.accepted_escrow_proposal is not None:
-            proposal = EscrowProposal(**deal.accepted_escrow_proposal)
         else:
-            escrow_address = get_erc20_escrow_obligation_default(
-                chain.chain_name, config_path=chain.alkahest_addr_config or None
-            )
-            proposal = EscrowProposal(
-                chain_name=chain.chain_name,
-                escrow_address=escrow_address,
-                fields={"token": chain.token_contract},
-                literal_fields={"token": chain.token_contract},
-                expiration_unix=int(time.time()) + 3600,
-            )
+            proposal = EscrowProposal(**deal.accepted_escrow_proposal)
         if deal.accepted_escrow_terms is None:
             build_terms = make_buyer_payment_escrow_terms_fn(
                 chain_name=chain.chain_name, addr_config_path=chain.alkahest_addr_config

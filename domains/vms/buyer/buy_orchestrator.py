@@ -33,7 +33,6 @@ from core_buyer.orchestration import (  # noqa: F401 — re-exports
     submit_settlement_request,
     wait_for_settlement,
 )
-from core_buyer.orchestration import AgreedTerms as CoreAgreedTerms
 from core_buyer.orchestration import (
     make_negotiate_hook as _core_make_negotiate_hook,
 )

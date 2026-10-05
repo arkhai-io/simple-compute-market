@@ -7,10 +7,12 @@ and materializes the selected chain and token metadata.
 
 from __future__ import annotations
 
+import base64
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import typer
+from market_core.schemas import Agreement
 from core_buyer.deal_helpers import (  # noqa: F401 — re-exports
     DealContext,
     NegotiationResumePoint,
@@ -90,6 +92,21 @@ def load_deal_context(run_id: str, *, signer):
         signer=signer,
         refresh_publisher_principals=_publisher_trust_refresh(signer),
     )
+    if deal.agreement_bytes is not None:
+        try:
+            agreement = Agreement.model_validate_json(
+                base64.b64decode(deal.agreement_bytes, validate=True)
+            )
+            if (
+                agreement.negotiation_id != deal.negotiation_id
+                or agreement.listing_id != deal.listing_id
+                or agreement.buyer != deal.buyer_principal.model_dump(mode="json")
+                or (deal.agreement is not None and Agreement.model_validate(deal.agreement) != agreement)
+            ):
+                raise ValueError("accepted Agreement bytes conflict with recovered ownership or terms")
+        except (TypeError, ValueError) as exc:
+            raise typer.BadParameter(str(exc)) from exc
+        deal.agreement = agreement.model_dump(mode="json", exclude_none=True)
     # The table's adapters consume ChainSettings from this module, so resolve
     # their composition after the recovery helpers have finished importing.
     from .settlement_composition import buyer_stage

@@ -32,8 +32,8 @@ def run_settle_from_log(
     """Resolve accepted support before any mechanism resources or seller effects."""
     identity = identity or common.resolve_recovery_buyer_identity(run_id)
     signer = identity.signer
-    deal = load_deal_context(run_id, signer=signer)
     try:
+        deal = load_deal_context(run_id, signer=signer)
         stage = buyer_stage(accepted_settlement_mechanism(deal))
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc

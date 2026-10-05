@@ -20,10 +20,6 @@ from market_settlement_runtime import (
 )
 
 from .chain_cli import chain_app
-from .common import (
-    buyer_chains,
-    resolve_buyer_wallet,
-)
 from .escrow_cli import escrow_app
 from .settlement_stages import AlkahestBuyerStage, PaymentsBuyerStage
 
@@ -83,14 +79,8 @@ async def buyer_settlement_readiness() -> tuple[
     config = policy.config
     resources: dict[str, Any] = {}
 
-    alkahest = config.mechanism_config("alkahest")
-    if alkahest is not None and getattr(alkahest, "enabled", False):
-        chains = buyer_chains()
-        address, _private_key = resolve_buyer_wallet()
-        resources["chains"] = chains
-        resources["wallet"] = {"address": address}
-        if len(chains) == 1:
-            resources["default_chain"] = next(iter(chains))
+    for registration in policy.ordered_registrations():
+        resources.update(buyer_stage(registration.mechanism_id).readiness_resources())
 
     statuses = await policy.registry.ordered_readiness(
         config,

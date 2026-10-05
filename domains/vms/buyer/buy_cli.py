@@ -229,6 +229,8 @@ def _run_resume_from(
             if outcome.accepted_escrow_proposal is not None
             else None,
             **accepted_settlement,
+            agreement=outcome.agreement.model_dump(mode="json", exclude_none=True)
+            if outcome.agreement is not None else None,
             agreement_bytes=outcome.agreement_bytes,
             settlement_data=outcome.settlement_data,
             accepted_escrow_terms=[
