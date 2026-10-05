@@ -4,11 +4,19 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import sqlite3
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
 
 from market_core import SettlementEvidence
+
+from market_storefront.services.vm_fulfillment_planner import build_vm_fulfillment_plan
+
+
+class VmSettlementEvidenceConflict(ValueError):
+    """An accepted negotiation or established reference cannot be retargeted."""
 
 
 def add_vm_settlement_records(conn: Any) -> None:
@@ -87,6 +95,22 @@ class VmSettlementRepository:
                 "VM evidence requires versioned accepted Agreement identity"
             )
         digest = payload["agreement_sha256"]
+        if evidence.status == "verified":
+            if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+                raise ValueError("verified VM evidence requires a sha256 Agreement digest")
+            source = payload.get("source")
+            if not isinstance(source, Mapping) or not source:
+                raise ValueError("verified VM evidence requires an authoritative source")
+            delivery = payload.get("delivery")
+            if (
+                not isinstance(delivery, Mapping)
+                or delivery.get("kind") != "vm.delivery-facts"
+                or type(delivery.get("schema_version")) is not int
+                or delivery.get("schema_version") != 1
+                or not isinstance(delivery.get("payload"), Mapping)
+            ):
+                raise ValueError("verified VM evidence requires supported delivery facts")
+            build_vm_fulfillment_plan(evidence=evidence)
         wire = _json(payload)
 
         def save():
@@ -109,7 +133,7 @@ class VmSettlementRepository:
                             and (current[3] != evidence.status or current[4] != wire)
                         )
                     ):
-                        raise ValueError(
+                        raise VmSettlementEvidenceConflict(
                             "settlement evidence conflicts with accepted Agreement"
                         )
                     conn.execute(

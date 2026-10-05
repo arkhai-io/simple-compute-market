@@ -10,12 +10,11 @@ exists to exercise /negotiate/new + /negotiate/{id} directly.
 
 from __future__ import annotations
 
+import json
 import time
 from typing import Any
 
 import typer
-from market_alkahest.schemas import accepted_token_address
-from market_alkahest.token import TokenResolutionError, resolve_token
 from market_core.schemas import SettlementSelection
 from market_identity import TrustedIdentitySet
 from market_settlement_runtime import CompiledSettlementClause
@@ -23,11 +22,10 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from .arkhai_payments import payer_selection
 from .buy_orchestrator import fetch_listing_dict
 from .buyer_client import ResumeState, load_buyer_chain, negotiate_with_seller
 from .cli_helpers import resolve_prices_from_matches
-from .common import chain_by_name, resolve_buyer_wallet, resolve_negotiation_config
+from .common import resolve_negotiation_config
 from .deal_helpers import (
     load_negotiation_resume_point,
     make_publisher_trust_resolver,
@@ -35,7 +33,7 @@ from .deal_helpers import (
 from .listing_cli import settlement_clause_error_message
 from .run_log import RunLog
 from .settlement_composition import (
-    alkahest_entry_from_selection,
+    buyer_stage,
     resolve_buyer_settlement_policy,
 )
 
@@ -361,7 +359,7 @@ def register(app: typer.Typer) -> None:
 
         selected_settlement = None
         picked_entry: dict | None = None
-        chain_cfg = None
+        selected_stage = None
         if listing_dict is not None:
             assert settlement_policy is not None
             try:
@@ -378,45 +376,17 @@ def register(app: typer.Typer) -> None:
                     "settlement option"
                 )
 
-            selected_settlement = payer_selection(selected_settlement)
-            if selected_settlement.registration.config_key == "alkahest":
-                picked_entry = alkahest_entry_from_selection(selected_settlement)
-                if picked_entry is None:
-                    raise typer.BadParameter(
-                        "selected Alkahest option has no accepted escrow"
-                    )
-                if not _policy.compatible(picked_entry):
-                    raise typer.BadParameter(
-                        "selected Alkahest option is incompatible with buyer policy"
-                    )
-                advertised_chain = picked_entry.get("chain_name")
-                if not isinstance(advertised_chain, str) or not advertised_chain:
-                    raise typer.BadParameter(
-                        "selected Alkahest option has no chain identity"
-                    )
-                chain_cfg = chain_by_name(advertised_chain)
-                addr, pk = resolve_buyer_wallet()
-                if not addr or not pk:
-                    raise typer.BadParameter(
-                        "selected Alkahest settlement requires [Wallet] credentials"
-                    )
-                entry_token = accepted_token_address(picked_entry)
-                if _initial_explicit or _max_explicit:
-                    try:
-                        decimals = resolve_token(
-                            entry_token,
-                            rpc_url=chain_cfg.rpc_url,
-                            chain_id=chain_cfg.chain_id,
-                        ).decimals
-                    except (TokenResolutionError, RuntimeError) as exc:
-                        raise typer.BadParameter(
-                            "could not resolve selected Alkahest token decimals"
-                        ) from exc
-                    scale = 10**decimals
-                    if _initial_explicit and initial_price is not None:
-                        initial_price = initial_price * scale
-                    if _max_explicit and max_price is not None:
-                        max_price = max_price * scale
+            selected_stage = buyer_stage(selected_settlement.selection.mechanism)
+            try:
+                selected_settlement = selected_stage.prepare_selection(selected_settlement)
+                picked_entry = selected_stage.accepted_entry(selected_settlement)
+                initial_price, max_price = selected_stage.negotiation_prices(
+                    selected_settlement, policy=_policy,
+                    initial_price=initial_price, max_price=max_price,
+                    initial_explicit=_initial_explicit, max_explicit=_max_explicit,
+                )
+            except ValueError as exc:
+                raise typer.BadParameter(str(exc)) from exc
 
             if initial_price is None or max_price is None:
                 pricing_params = dict(policy_params_all)
@@ -444,8 +414,8 @@ def register(app: typer.Typer) -> None:
             typer.secho(message, err=True, fg=typer.colors.RED)
             raise typer.Exit(2)
         if listing_dict is not None:
-            expected_seller_principals = TrustedIdentitySet.model_validate(
-                listing_dict.get("publisher_principals")
+            expected_seller_principals = TrustedIdentitySet.model_validate_json(
+                json.dumps(listing_dict.get("publisher_principals"))
             )
             publisher_id = str(listing_dict.get("publisher_id") or "").strip()
             source_registry_url = str(
@@ -521,15 +491,10 @@ def register(app: typer.Typer) -> None:
                 str(reply.get("price", "-")),
             )
 
-        # Build provision + escrow proposal for the negotiate request.
-        # The standalone `market negotiate` subcommand doesn't reach
-        # settlement, so the escrow proposal is largely a formality
-        # (the seller still validates it). Resume mode skips the
-        # round-0 send and these fields are ignored.
+        # Project the selected stage's proposal onto the existing wire carriers.
+        # Resume skips round zero and reuses its persisted accepted artifacts.
         from arkhai_vms import VmProvisionTerms, make_vm_provision_terms
         from market_alkahest.schemas import EscrowProposal
-
-        from domains.vms.settlement import escrow_proposal_from_accepted_entry
 
         provision_terms: VmProvisionTerms | None = None
         escrow_proposal: EscrowProposal | None = None
@@ -544,13 +509,12 @@ def register(app: typer.Typer) -> None:
                 ssh_public_key=resolved_ssh_public_key,
             )
 
-            if picked_entry is None:
-                settlement_selection = selected_settlement.selection
+            assert selected_stage is not None
+            proposal = selected_stage.proposal(listing_dict or {}, selected_settlement)
+            if isinstance(proposal, SettlementSelection):
+                settlement_selection = proposal
             else:
-                escrow_proposal = escrow_proposal_from_accepted_entry(
-                    listing=listing_dict or {}, entry=picked_entry,
-                    expiration_unix=selected_settlement.selection.expiration_unix,
-                )
+                escrow_proposal = proposal
 
         # Honor optional [negotiation] policies / policy_mode overrides
         # in buyer.toml, mirroring the seller's [negotiation] knob.
