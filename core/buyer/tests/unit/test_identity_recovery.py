@@ -11,8 +11,12 @@ import core_buyer.run_log as run_log_module
 import pytest
 from core_buyer.buyer_config import BuyerProfileResolver, ResolvedBuyerIdentity
 from core_buyer.deal_helpers import (
+    load_deal_context,
     load_negotiation_resume_point,
 )
+from market_core import SettlementEvidence
+from market_core.schemas import Agreement, SettlementOption, derive_settlement_option_id
+import typer
 from core_buyer.profile_service import BuyerProfileService, ProfileServiceError
 from core_buyer.run_log import (
     RUN_LOG_VERSION,
@@ -124,6 +128,70 @@ def test_ed25519_run_log_v3_and_resume_need_no_wallet(
     assert events[0]["buyer_profile_id"] == str(profile_id)
     assert events[0]["buyer_principal"] == signer.identity.model_dump(mode="json")
     assert "buyer_address" not in json.dumps(events)
+
+
+@pytest.mark.parametrize("changed", (None, "negotiation_id", "mechanism", "settlement_ref"))
+def test_evidence_recovery_retains_accepted_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    changed: str | None,
+) -> None:
+    _state_dir(monkeypatch, tmp_path)
+    signer = Ed25519Signer(b"\x15" * 32)
+    publisher = Ed25519Signer(b"\x16" * 32)
+    option = SettlementOption(
+        mechanism="example.payment.v1", asset="usd",
+        option_id=derive_settlement_option_id(
+            mechanism="example.payment.v1", asset="usd", rates=[], params={},
+        ),
+    )
+    agreement = Agreement(
+        negotiation_id="neg-1", listing_id="listing-1", listing_hash="0" * 64,
+        buyer=signer.identity.model_dump(mode="json"),
+        seller=publisher.identity.model_dump(mode="json"), amount=12,
+        duration_seconds=3600, start_utc="2026-01-01T00:00:00Z",
+        accepted_at="2026-01-01T00:00:00Z", asset="usd", settlement=option,
+    )
+    log = RunLog.start(
+        profile_id=uuid.uuid4(), principal=signer.identity,
+        seller_url="http://seller", listing_id="listing-1",
+        publisher_principals=_trust(publisher).model_dump(mode="json"),
+        publisher_id="publisher-1", source_registry_url="http://registry",
+        source_registry_authority="registry",
+    )
+    log.event(
+        "negotiation_completed", status="agreed", negotiation_id="neg-1",
+        agreed_amount=12, agreement=agreement.model_dump(mode="json", exclude_none=True),
+        agreement_bytes=base64.b64encode(
+            agreement.model_dump_json(exclude_none=True).encode()
+        ).decode(),
+    )
+    evidence = SettlementEvidence(
+        negotiation_id="neg-1", mechanism=option.mechanism, settlement_ref="txn-1",
+        status="approved", evidence={"proof": "public-only"},
+    )
+    log.event("settlement_started", settlement_ref="txn-1")
+    log.event("settlement_evidence", settlement_evidence=evidence.to_dict())
+    if changed:
+        conflicting = evidence.to_dict()
+        conflicting[changed] = "different"
+        log.event("settlement_evidence", settlement_evidence=conflicting)
+
+    def load():
+        return load_deal_context(
+            log.run_id, signer=signer,
+            refresh_publisher_principals=lambda *_binding: _trust(publisher),
+        )
+
+    if changed:
+        with pytest.raises(typer.BadParameter, match="settlement evidence"):
+            load()
+    else:
+        deal = load()
+        assert deal.settlement_evidence == evidence
+        assert deal.settlement_ref == "txn-1"
+        assert deal.escrow_uid is None
+        assert deal.buyer_principal == signer.identity
 
 
 def test_recovery_rejects_another_signer_or_profile(

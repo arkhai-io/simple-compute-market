@@ -447,8 +447,6 @@ def _validate_settlement_acceptance(
             buyer_principal=buyer_principal,
             trusted_seller_principals=trusted_seller_principals,
         )
-        if expected_selection.mechanism == "alkahest.v1":
-            raise RuntimeError("Alkahest accept state omitted the settlement_plan")
         return
 
     if expected_selection.expiration_unix is None:
@@ -814,6 +812,7 @@ def negotiate_with_seller(
     resume: Optional[ResumeState] = None,
     policy_params: Optional[dict[str, Any]] = None,
     validate_advertised_plan: Callable[[SettlementPlan], None] | None = None,
+    validate_acceptance: Callable[[NegotiationOutcome], None] | None = None,
 ) -> NegotiationOutcome:
     """Run a synchronous negotiation with one seller, round-by-round.
 
@@ -848,11 +847,39 @@ def negotiate_with_seller(
     asset, mechanism, and expiry checks always run first; the callback owns the
     remaining obligation params, conditions, and service-term correspondence.
 
+    ``validate_acceptance`` is the domain entry's acceptance guard. It receives
+    the exact outcome after generic identity/Agreement checks and before an
+    accepted round is observed or persisted. Required mechanism artifacts and
+    prerequisites are its responsibility, not core's.
+
     Synchronous everything: the seller responds in-line on each POST.
     Returns a NegotiationOutcome describing how it ended; the seller's
     accepted_* echo is parsed back so settlement-time escrow construction
     can use the agreed (not local-proposed) values.
     """
+    def _accept(
+        outcome: NegotiationOutcome,
+        round_idx: int,
+        body: dict[str, Any],
+        reply: dict[str, Any],
+    ) -> NegotiationOutcome:
+        assert outcome.agreement is not None
+        _validate_agreement_acceptance(
+            agreement=outcome.agreement,
+            expected_listing_id=listing_id,
+            reply=reply,
+            expected_selection=expected_selection,
+            advertised_option=advertised_option,
+            agreed_amount=outcome.agreed_amount,
+            buyer_principal=principal,
+            trusted_seller_principals=trusted_seller_principals,
+        )
+        if validate_acceptance is not None:
+            validate_acceptance(outcome)
+        if on_round:
+            on_round(round_idx, body, reply)
+        return outcome
+
     seller_url = seller_url.rstrip("/")
     if signer.identity != principal:
         raise ValueError("buyer signer identity does not match negotiation principal")
@@ -1122,11 +1149,11 @@ def negotiate_with_seller(
                     trusted_seller_principals=trusted_seller_principals,
                     validate_advertised_plan=validate_advertised_plan,
                 )
-        if on_round:
+        if on_round and seller_action != "accept":
             on_round(0, new_body, reply)
 
         if seller_action == "accept":
-            return NegotiationOutcome(
+            return _accept(NegotiationOutcome(
                 status="agreed",
                 negotiation_id=neg_id,
                 agreed_amount=agreed_amount,
@@ -1140,7 +1167,7 @@ def negotiate_with_seller(
                 agreement=accepted_agreement,
                 agreement_bytes=accepted_agreement_bytes,
                 settlement_data=accepted_settlement_data,
-            )
+            ), 0, new_body, reply)
         # On non-agreed paths we still carry forward what the seller
         # validated — used if the negotiation ends up agreed in later
         # rounds (seller doesn't re-echo accepted_* on /continue).
@@ -1331,9 +1358,7 @@ def negotiate_with_seller(
                         trusted_seller_principals=trusted_seller_principals,
                         validate_advertised_plan=validate_advertised_plan,
                     )
-                if on_round:
-                    on_round(round_idx, body, reply)
-                return NegotiationOutcome(
+                return _accept(NegotiationOutcome(
                     status="agreed",
                     negotiation_id=neg_id,
                     agreed_amount=agreed_amount,
@@ -1359,7 +1384,7 @@ def negotiate_with_seller(
                         if reply_settlement_data is not None
                         else accepted_settlement_data
                     ),
-                )
+                ), round_idx, body, reply)
             # Non-accept reply to our accept is anomalous but treat as terminal.
             if on_round:
                 on_round(round_idx, body, reply)
@@ -1440,9 +1465,7 @@ def negotiate_with_seller(
                     trusted_seller_principals=trusted_seller_principals,
                     validate_advertised_plan=validate_advertised_plan,
                 )
-            if on_round:
-                on_round(round_idx, body, reply)
-            return NegotiationOutcome(
+            return _accept(NegotiationOutcome(
                 status="agreed",
                 negotiation_id=neg_id,
                 agreed_amount=agreed_amount,
@@ -1468,7 +1491,7 @@ def negotiate_with_seller(
                     if reply_settlement_data is not None
                     else accepted_settlement_data
                 ),
-            )
+            ), round_idx, body, reply)
         if seller_action in ("exit", "reject"):
             if on_round:
                 on_round(round_idx, body, reply)

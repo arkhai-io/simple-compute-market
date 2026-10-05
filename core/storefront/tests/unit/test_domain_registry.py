@@ -13,6 +13,7 @@ from market_core import (
     ImmutableStorefrontCapability,
     MARKET_DOMAIN_CONTRACT_VERSION,
     MarketDomainContract,
+    SettlementStageTable,
 )
 from core_storefront.domain_registry import (
     StorefrontDomainBinding,
@@ -66,7 +67,9 @@ def _contract(
         settlement=(
             None
             if missing is DomainCapability.SETTLEMENT
-            else ImmutableSettlementCapability(verify=_identity, build_plan=_identity)
+            else ImmutableSettlementCapability(
+                seller_stages=SettlementStageTable({"example.settlement.v1": object()})
+            )
         ),
         fulfillment=(
             None
