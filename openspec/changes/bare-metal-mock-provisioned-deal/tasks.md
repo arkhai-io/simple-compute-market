@@ -1492,6 +1492,66 @@ re-verifies them by grep before each move.
         service logs (the only non-2xx statuses were the scenarios' expected 402, 404, and
         410).
 
+  - [x] 5B.8.A.6 Added at the slice A implementation review (2026-10-05, maintainer decision;
+        `design.md`, "Controls and routes (5B.8)", "Slice A implementation review").
+        - Inventory pool moves:
+          - `compute_provisioning/hosts/service.py`: `apply_inventory` moves an existing
+            host through `_move_to_pool`; `_move_to_pool` runs the hooks only on a real move;
+            new `PoolChangeRefusedError`, which a hook raises.
+          - `hosts/route_service.py` and `compute_provisioning_ansible/host_import.py` answer
+            a refused move with 409.
+          - VM's `runtime.py` hook adapter translates `RelayRebindingRefused` into the
+            family's refusal.
+          - The service's integration `conftest.py` builds its host authority with the
+            container's pool-change hooks.
+        - Job list order: `compute_provisioning_contracts` gains `JobListSort`; both clients'
+          `list_jobs` take `sort`; `JobRouteService` validates against `JobListSort`.
+        - Job identity:
+          - `jobs/action_request.py`: `JobActionRequest` is a plain frozen identity model
+            without `parameters`.
+          - `jobs/engine.py`: `JobIdentityConflictError` for a repeated `operation_id` or
+            contract identity naming different parameters; `get_contract_job_record`
+            deleted.
+          - `jobs/db.py` drops `contract_version`; the service's migration
+            `20261005_001_drop_job_contract_version` removes the column.
+          - Both fulfillment providers stop passing `parameters`.
+        - Tests:
+          - `provisioning/compute/tests/integration/test_host_authority.py`: an import move
+            runs the hooks; a refused import move leaves every named host unchanged;
+            reassigning the current pool is not a move.
+          - `test_job_authority.py`: a conflicting contract identity is refused; the identity
+            record rejects job content.
+          - `tests/unit/test_host_route_service.py` and the Ansible distribution's
+            `test_host_import.py`: refusals answer 409.
+          - The service's new `integration/test_host_pool_moves_api.py`, through the
+            canonical clients: an import and an update that would move a tunnelled host to
+            another relay answer 409 and change nothing, and a drained host moves by import.
+            Reverting the `apply_inventory` fix fails exactly the import case.
+          - `test_provisioning_client_endpoint_coverage.py`: the job list in both orders.
+          - `unit/test_database.py`: the column is gone after migration, and a migration test
+            shows job rows, their identity, and the contract-identity uniqueness survive the
+            drop.
+          - The client parity test covers `sort` through the signatures.
+        - Versions:
+          - compute-provisioning-contracts 0.3.0 and compute-provisioning-client 0.2.0
+            (new public API);
+          - compute-provisioning 0.11.0 and compute-provisioning-service 0.8.0
+            (incompatible);
+          - compute-provisioning-ansible 0.3.1, vms-provisioning-adapter 0.7.1, and
+            bare-metal-provisioning-adapter 0.5.1;
+          - floors raised where a consumer needs the new behaviour;
+          - every affected project relocked (the VM storefront with the hand-lock tool, as
+            before).
+        - Validation: contracts 40, client 29, family kit 131, Ansible 84, VM adapter 39,
+          bare-metal adapter 22, service 886 unit and 291 integration. The root `make test`
+          aggregate passes its 44 suites; its only failures are the known environmental ones
+          (`kit/policy`, the VM storefront, and the VM buyer cannot reinit from the PyTorch
+          index, and the API-credit middleware needs Cargo). The VM storefront's frozen-sync
+          run passes 1101 unit and 345 integration tests (the two `test_alkahest` failures
+          need Node and Anvil); `kit/policy` and the VM buyer depend on no changed package.
+          `make check-packaging`, comment hygiene, documentation citations, and OpenSpec
+          strict validation pass.
+
       **Slice B: the lease surface and mode-agnostic release** (decisions 1–3, 9, and 7.3).
       Amended 2026-10-05 before implementation, after the slice B design review
       (`design.md`, "Controls and routes (5B.8)", "Slice B design review", points 1–5):

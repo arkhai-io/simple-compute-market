@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from arkhai_bare_metal import NODE_GRANT_ACCESS_ACTION
 from bare_metal_provisioning_adapter.services.mock_output import bare_metal_mock_output
 from compute_provisioning_ansible import MockAnsibleRunner
+from compute_provisioning.jobs.db import JobRecord
 from compute_provisioning_service import container as _container_module
 import pytest
 
@@ -86,6 +87,31 @@ class TestJobClientEndpointCoverage:
         cancel = await client.family.cancel_job(submit.job_id)
         assert cancel["job_id"] == submit.job_id
         assert "status" in cancel
+
+    async def test_the_job_list_reads_in_either_creation_order(self, client_and_queue):
+        """Two jobs are given distinct creation times, since two submissions in
+        quick succession may share one; the list then reads them in each order."""
+        client, _ = client_and_queue
+        older = await client.vm.create_vm(HOST, CreateVmRequest(vm_target="vm-older"))
+        newer = await client.vm.create_vm(HOST, CreateVmRequest(vm_target="vm-newer"))
+        with _container_module.resolved_session_factory() as db, db.begin():
+            for job_id, minute in ((older.job_id, 1), (newer.job_id, 2)):
+                db.get(JobRecord, job_id).created_at = datetime(
+                    2026, 1, 1, 0, minute, tzinfo=timezone.utc
+                )
+
+        ascending = await client.family.list_jobs(sort="created_at_asc", limit=10)
+        descending = await client.family.list_jobs(sort="created_at_desc", limit=10)
+
+        ours = {older.job_id, newer.job_id}
+        assert [j.job_id for j in ascending.jobs if j.job_id in ours] == [
+            older.job_id,
+            newer.job_id,
+        ]
+        assert [j.job_id for j in descending.jobs if j.job_id in ours] == [
+            newer.job_id,
+            older.job_id,
+        ]
 
 
 class TestSystemClientEndpointCoverage:

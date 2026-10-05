@@ -15,7 +15,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Protocol
 
-from compute_provisioning.hosts.service import HostAuthority
+from compute_provisioning.hosts.service import HostAuthority, PoolChangeRefusedError
 from compute_provisioning.route_errors import ProvisioningRouteError
 from compute_provisioning_contracts import HostListResponse
 
@@ -39,6 +39,8 @@ class AnsibleHostImportRouteService:
 
     Upsert, append-only: every host the file lists is inserted or updated,
     whatever section lists it, and a host the file does not list is untouched.
+    The import is one transaction: a pool move a pool-change hook refuses
+    answers 409 and leaves every host as it was.
     """
 
     def __init__(self, host_authority: HostAuthority) -> None:
@@ -53,6 +55,8 @@ class AnsibleHostImportRouteService:
             hosts = list(
                 self._hosts.apply_inventory(parse_inventory_ini(ini_text, key_material=ssh_key_type))
             )
+        except PoolChangeRefusedError as exc:
+            raise ProvisioningRouteError(409, str(exc)) from exc
         except ValueError as exc:
             raise ProvisioningRouteError(400, str(exc)) from exc
         return HostListResponse(hosts=hosts, total=len(hosts))

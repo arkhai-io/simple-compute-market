@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 
 from compute_provisioning.hosts import ConnectionEnvelope, ExecutionHost
 from compute_provisioning.hosts.route_service import HostRouteService
-from compute_provisioning.hosts.service import HostNotFoundError
+from compute_provisioning.hosts.service import HostNotFoundError, PoolChangeRefusedError
 from compute_provisioning.route_errors import ProvisioningRouteError
 
 _CREATE = HostCreate(host_id="node-1", connection={"kind": "ssh", "public": {"ssh_host": "192.0.2.1"}})
@@ -43,6 +43,19 @@ def test_a_connection_its_codec_refuses_is_a_bad_request():
     hosts.register_host.side_effect = ValueError("ssh_host is required")
 
     assert _refusal(lambda: HostRouteService(hosts, {}).register_host(_CREATE)).status_code == 400
+
+
+def test_a_refused_pool_move_is_a_conflict_carrying_the_subscriber_s_reason():
+    """The move is well formed and may succeed once what the subscriber protects
+    is gone, so it conflicts with current state rather than being a bad request."""
+    hosts = MagicMock()
+    hosts.update_host.side_effect = PoolChangeRefusedError("drain the relay first")
+
+    refusal = _refusal(
+        lambda: HostRouteService(hosts, {}).update_host("node-1", HostUpdate(pool_id="gpu"))
+    )
+
+    assert (refusal.status_code, refusal.detail) == (409, "drain the relay first")
 
 
 def test_an_unknown_host_is_not_found_on_every_read_and_write():

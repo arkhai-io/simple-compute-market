@@ -9,11 +9,12 @@ mock-profile deployment mounts for tests. Each reports a refusal as a
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import Any, get_args
 
 from compute_provisioning_contracts import (
     JobCredentialsResponse,
     JobListResponse,
+    JobListSort,
     JobLogsResponse,
     JobStatusResponse,
 )
@@ -23,7 +24,7 @@ from compute_provisioning.route_errors import ProvisioningRouteError
 
 #: The statuses after which a job changes no more.
 TERMINAL_STATUSES = frozenset({"succeeded", "failed", "cancelled"})
-_SORTS = frozenset({"created_at_asc", "created_at_desc"})
+_SORTS = frozenset(get_args(JobListSort))
 
 # How many jobs the observation routes read at once: a test deployment's whole
 # history, not a page of production traffic.

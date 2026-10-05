@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from compute_provisioning.hosts.service import PoolChangeRefusedError
 from compute_provisioning.route_errors import ProvisioningRouteError
 
 from compute_provisioning_ansible.host_import import (
@@ -48,6 +49,17 @@ def test_a_refused_inventory_is_a_bad_request():
         AnsibleHostImportRouteService(_Refusing()).import_hosts(_INVENTORY, "path")
 
     assert (refused.value.status_code, refused.value.detail) == (400, "pool 'missing' does not exist")
+
+
+def test_an_inventory_moving_a_host_a_subscriber_protects_is_a_conflict():
+    class _Refusing(_Hosts):
+        def apply_inventory(self, entries):
+            raise PoolChangeRefusedError("drain the relay first")
+
+    with pytest.raises(ProvisioningRouteError) as refused:
+        AnsibleHostImportRouteService(_Refusing()).import_hosts(_INVENTORY, "path")
+
+    assert (refused.value.status_code, refused.value.detail) == (409, "drain the relay first")
 
 
 def test_the_route_declaration_admits_admin_at_the_import_path():

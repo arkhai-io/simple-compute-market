@@ -637,6 +637,9 @@ async def client_and_queue(
         session_factory,
         codecs=ConnectionCodecs([SshConnectionCodec(TEST_CONNECTION_KEY)]),
         capacity_derivation=LegacyHostCapacityDerivation(capacity_ledger_service),
+        # The pool-change hooks exactly as the production container merges them,
+        # so a move refused there is refused here, by every host route.
+        pool_change_hooks=_container_module.Container.host_pool_change_hooks(),
     )
 
     from market_resource_pools import ResourcePoolService

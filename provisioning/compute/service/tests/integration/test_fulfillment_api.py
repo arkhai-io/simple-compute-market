@@ -42,6 +42,7 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
+from compute_provisioning.jobs.db import JobRecord
 from compute_provisioning_service import container as _container_module
 from compute_provisioning_client import (
     ComputeProvisioningClient,
@@ -131,15 +132,22 @@ class FulfillmentApi:
 
     @staticmethod
     def dispatched_job(job_id: str) -> dict:
-        """The contract record of a job the provider dispatched.
+        """The correlation identity of a job the provider dispatched.
 
-        The correlation it carries (``deal_ref``, ``idempotency_key``,
-        ``action_kind``) is the job authority's own state, which no route
-        serves; it is read from the engine the app composed, so it is the state
-        the app wrote.
+        The identity (``deal_ref``, ``idempotency_key``, ``action_kind``) is the
+        job authority's own state, which no route serves; it is read from the
+        database the app composed, so it is the state the app wrote.
         """
-        engine = _container_module.resolved_job_engine
-        return engine.get_contract_job_record(job_id)
+        with _container_module.resolved_session_factory() as db:
+            job = db.get(JobRecord, job_id)
+            assert job is not None, f"no job {job_id!r}"
+            return {
+                "capacity_reservation_id": job.capacity_reservation_id,
+                "deal_ref": dict(job.deal_ref or {}),
+                "offering_mode": job.offering_mode,
+                "action_kind": job.action_kind,
+                "idempotency_key": job.idempotency_key,
+            }
 
     async def status(self, fulfillment_id: str) -> httpx.Response:
         """Raw for the same reason as `begin_raw`: callers assert 404."""

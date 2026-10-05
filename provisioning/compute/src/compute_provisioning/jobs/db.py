@@ -59,7 +59,6 @@ class JobRecord(Base):
     max_retries = Column(Integer, default=3, nullable=False)
     next_retry_at = Column(DateTime(timezone=True), nullable=True)
     escrow_uid = Column(String, nullable=True, index=True)
-    contract_version = Column(String, nullable=True)
     capacity_reservation_id = Column(String, nullable=True, index=True)
     deal_ref = Column(JSON, nullable=True)
     offering_mode = Column(String, nullable=True)

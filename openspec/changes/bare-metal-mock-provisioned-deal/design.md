@@ -1474,6 +1474,68 @@ with the maintainer at the A0 checkpoint's start; the rest are open for review.
 | The bare-metal adapter declared dependencies on VM's adapter and VM's client it never imports | VM's client removed; VM's adapter restored at the gate, because the service module the adapter reads its collaborators from loads VM's adapter at import |
 | Checkpoint review: `ExecutorActionEnvelope` stayed in the thin contracts package after the action route's deletion, and four contract-job models lost their only route | Maintainer decision: the envelope becomes the job authority's internal `JobActionRequest`, the error envelope moves beside `JobFailure`, and the dead models go (5B.8.A.5) |
 
+**Slice A implementation review (2026-10-05).** A code review of slice A approved its
+direction and raised three findings, each verified in code and decided with the maintainer
+before any change. They are fixed in 5B.8.A.6, ahead of slice B.
+
+1. **An imported inventory moved hosts around the pool-change hooks.** `update_host` moved a
+   host through `_move_to_pool`, which runs every contributed hook, but `apply_inventory`
+   assigned the pool directly. An operator could bypass VM's relay rule — a host whose VM
+   tunnels a buyer holds may not move to a pool dialling another relay — by importing an
+   inventory. It also contradicted this design's own statement that the host authority
+   applies an inventory "with its pool-change and capacity effects".
+
+   Decided:
+   - Every change of an existing host's pool goes through the hooks, on either path.
+   - Assigning a host its current pool is not a move and runs no hook (`update_host` used to
+     run them anyway).
+   - The import is one transaction, so a refusal leaves every host it names unchanged.
+   - A refusal is a conflict, not a bad request. `compute_provisioning.hosts` gains
+     `PoolChangeRefusedError`, which a hook raises, and both the host update route and the
+     Ansible import route answer it with 409. VM's hook adapter translates the relay
+     module's `RelayRebindingRefused` into it. The relay route already answered that
+     refusal with 409, on the same reasoning: the request is valid once the host is drained.
+
+   The service's integration harness had built its host authority without hooks, so no
+   service-level test could have caught this. It now takes the hooks from the production
+   container.
+
+2. **The job list's `sort` had no client method argument.** The route and its route service
+   accepted `created_at_asc` and `created_at_desc`; neither client could send them, against
+   the "a method for every route" rule of the five-piece pattern. Decided: the order
+   vocabulary is defined once in the contracts package (`JobListSort`), the clients send it,
+   and the route service validates against it.
+
+3. **`JobActionRequest` was half wire contract.** It carried `parameters`, which the engine
+   never persisted or compared, beside the parameters the engine did run; and it still
+   derived from the versioned wire-contract base. The two identity mechanisms also disagreed:
+   - a repeated `operation_id` with different parameters was refused;
+   - a repeated contract identity returned the existing job without looking at content.
+
+   The providers inherited the difference. Bare metal, which derives an `operation_id` from
+   its idempotency key, refused the case; VM, which submits under the contract identity
+   alone, did not. Fulfillment replays a frozen prepared operation, so neither case occurs
+   today, but the model should not depend on that.
+
+   Decided:
+   - `JobActionRequest` is the identity record only: reservation, deal reference, offering
+     mode, action, and idempotency key, as a plain frozen model.
+   - Either identity, repeated with the same parameters, returns the job; with different
+     parameters it raises `JobIdentityConflictError`.
+   - `contract_version`, read only by `JobEngine.get_contract_job_record`, which had no
+     caller once the contract-job routes went, is dropped with that method; migration
+     `20261005_001_drop_job_contract_version` removes the column as
+     `20260927_001_drop_reservation_release_mirror` removed the release mirror.
+   - Bare metal's derived `operation_id` stays: it is now redundant, and removing it would
+     only change its job ids.
+
+   This corrects A.5's description of the record as purely the job authority's
+   "correlation and idempotency record", which the extra field and base class contradicted.
+
+The review also asked for an end-to-end run at the slice A boundary. The maintainer's run on
+the A checkpoint already provided one (`tasks.md`, 5B.8.A notes), and A.6 is covered by its
+integration tests, so the next pipeline run is slice B's checkpoint.
+
 **Slice B design review (2026-10-05).** Slice B was audited against the code before any of
 it was implemented. Decisions 2 and 9 rested on premises the code does not hold, and
 several states and callers they did not consider needed a ruling. Each point was discussed

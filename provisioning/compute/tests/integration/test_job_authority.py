@@ -21,7 +21,7 @@ from compute_provisioning.jobs import (
 )
 from compute_provisioning.jobs.db import Base as JobsBase
 from compute_provisioning.jobs.db import JobCredential, JobRecord
-from compute_provisioning.jobs.engine import JobEngine
+from compute_provisioning.jobs.engine import JobEngine, JobIdentityConflictError
 
 _HOST = ExecutionHost("h1", "default", ConnectionEnvelope(kind="fake", version=1))
 
@@ -220,7 +220,7 @@ async def test_submissions_are_deduplicated_by_operation_and_by_contract() -> No
 
     first = await _submit(engine, queue, operation_id="op-1")
     again = await _submit(engine, queue, operation_id="op-1")
-    with pytest.raises(ValueError, match="different job parameters"):
+    with pytest.raises(JobIdentityConflictError, match="different parameters"):
         await _submit(engine, queue, operation_id="op-1", params={"p": 2})
 
     contract = JobActionRequest(
@@ -229,7 +229,6 @@ async def test_submissions_are_deduplicated_by_operation_and_by_contract() -> No
         offering_mode="fake",
         action_kind="make",
         idempotency_key="k-1",
-        parameters={},
     )
     by_contract = await _submit(engine, queue, contract=contract)
     repeated = await _submit(engine, queue, contract=contract)
@@ -237,7 +236,45 @@ async def test_submissions_are_deduplicated_by_operation_and_by_contract() -> No
     assert again.job_id == first.job_id == "op-1"
     assert repeated.job_id == by_contract.job_id
     assert queue.enqueued == ["op-1", by_contract.job_id]
-    assert engine.get_contract_job_record(by_contract.job_id)["action_kind"] == "make"
+
+
+@pytest.mark.asyncio
+async def test_a_repeated_contract_identity_with_different_parameters_is_refused() -> None:
+    """A contract identity stands for one job's content, as an operation id does:
+    a retry naming other parameters is refused, not answered with a job that
+    does not run them, and nothing new is recorded or enqueued."""
+    engine, factory = _engine(_Executor())
+    queue = _Queue()
+    contract = JobActionRequest(
+        capacity_reservation_id="r-3",
+        deal_ref={},
+        offering_mode="fake",
+        action_kind="make",
+        idempotency_key="r-3:make",
+    )
+    first = await _submit(engine, queue, contract=contract)
+
+    with pytest.raises(JobIdentityConflictError, match="contract identity"):
+        await _submit(engine, queue, contract=contract, params={"p": 2})
+
+    assert queue.enqueued == [first.job_id]
+    with factory() as db:
+        assert db.query(JobRecord).count() == 1
+        assert db.get(JobRecord, first.job_id).params == {"p": 1}
+
+
+def test_a_job_identity_record_carries_no_job_content() -> None:
+    """The identity record names who a job acts for; its parameters are submitted
+    beside it, so an identity cannot disagree with the job that runs."""
+    with pytest.raises(ValueError):
+        JobActionRequest(
+            capacity_reservation_id="r-4",
+            deal_ref={},
+            offering_mode="fake",
+            action_kind="make",
+            idempotency_key="r-4:make",
+            parameters={"p": 1},
+        )
 
 
 @pytest.mark.asyncio
@@ -264,7 +301,6 @@ async def test_a_contract_action_runs_as_the_executor_action_it_was_submitted_wi
         offering_mode="fake",
         action_kind="release",
         idempotency_key="r-2:release",
-        parameters={},
     )
     job = await _submit(engine, _Queue(), contract=contract)
 
@@ -272,9 +308,10 @@ async def test_a_contract_action_runs_as_the_executor_action_it_was_submitted_wi
 
     assert executor.runs == 1
     assert engine.get_job(job.job_id).status == "succeeded"
-    assert engine.get_contract_job_record(job.job_id)["action_kind"] == "release"
     with factory() as db:
-        assert db.get(JobRecord, job.job_id).executor_action == "make"
+        record = db.get(JobRecord, job.job_id)
+        assert record.action_kind == "release"
+        assert record.executor_action == "make"
 
 
 

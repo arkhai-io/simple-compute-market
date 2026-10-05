@@ -61,13 +61,24 @@ by `host_id` and MUST NOT own provisioning connection information. The provision
 service's composition root MUST build exactly one job authority and one host authority
 and supply both to every adapter runtime; no adapter runtime builds or owns either. The
 root supplies the connection codecs a deployment supports, and a domain contributes its
-host pool-change hooks as declarations the root merges.
+host pool-change hooks as declarations the root merges. Every change of a registered host's
+pool MUST go through those hooks, whether it arrives as a host update or in an imported
+inventory, and assigning a host the pool it already has is not a move. A hook MAY refuse a
+move; a refused move MUST leave every host the operation names unchanged, and a provisioning
+route MUST answer it as a conflict (409).
 
 #### Scenario: A host changes pool
 
 - **WHEN** an operator moves a registered host to another pool
 - **THEN** the host authority records it and notifies subscribers, and a domain's
   dependent state (such as VM relay rebinding) reacts through that notification
+
+#### Scenario: An imported inventory moves a host a subscriber protects
+
+- **WHEN** an operator imports an inventory that moves a host, whose VM tunnels a buyer
+  holds, to a pool dialling another relay
+- **THEN** VM's hook refuses the move, the import answers 409, and no host the inventory
+  names is created or changed
 
 #### Scenario: An executor reports a non-retryable failure
 - **WHEN** a job's executor returns a failure it classifies as not retryable

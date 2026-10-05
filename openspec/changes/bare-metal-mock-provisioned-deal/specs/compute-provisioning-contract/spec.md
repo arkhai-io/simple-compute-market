@@ -16,12 +16,17 @@ action envelope as each job's contract record. Contract-major refusal remains un
 
 ### Requirement: Idempotent durable jobs
 
-Job submission MUST be idempotent within allocation/action scope, and every submitted job MUST expose durable queued, running, succeeded, failed, or cancelled state with structured result or error evidence. Jobs are submitted by fulfillment providers on behalf of a fulfillment, not by callers of the contract.
+Job submission MUST be idempotent within allocation/action scope, and every submitted job MUST expose durable queued, running, succeeded, failed, or cancelled state with structured result or error evidence. Jobs are submitted by fulfillment providers on behalf of a fulfillment, not by callers of the contract. A job identity — a request's operation identity, or the reservation, action, and idempotency key a fulfillment provider submits under — stands for one job's content: a repeat with the same job parameters MUST return the original job, and a repeat with different parameters MUST be refused. The identity a provider submits under carries no job content of its own.
 
 #### Scenario: Submission is retried
 
 - **WHEN** a fulfillment provider repeats a job submission with the same operation identity
 - **THEN** the job authority returns the original job identity and does not submit a second executor action
+
+#### Scenario: A retried submission names different parameters
+
+- **WHEN** a fulfillment provider repeats a submission under the same identity with different job parameters
+- **THEN** the job authority refuses it, records no second job, and the original job is unchanged
 
 #### Scenario: Job fails
 

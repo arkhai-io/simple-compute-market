@@ -22,7 +22,11 @@ from compute_provisioning_contracts import (
 from sqlalchemy.exc import IntegrityError
 
 from compute_provisioning.hosts.execution import ExecutionHost
-from compute_provisioning.hosts.service import HostAuthority, HostNotFoundError
+from compute_provisioning.hosts.service import (
+    HostAuthority,
+    HostNotFoundError,
+    PoolChangeRefusedError,
+)
 from compute_provisioning.route_errors import ProvisioningRouteError
 
 ConnectivityProbe = Callable[[ExecutionHost], Awaitable[ConnectivityResult]]
@@ -69,6 +73,8 @@ class HostRouteService:
             return self._hosts.update_host(host_id, body)
         except HostNotFoundError as exc:
             raise _missing(host_id) from exc
+        except PoolChangeRefusedError as exc:
+            raise ProvisioningRouteError(409, str(exc)) from exc
         except ValueError as exc:
             raise ProvisioningRouteError(400, str(exc)) from exc
 

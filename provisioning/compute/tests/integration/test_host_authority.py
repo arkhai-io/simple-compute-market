@@ -28,6 +28,7 @@ from compute_provisioning.hosts.service import (
     HostAuthority,
     HostNotFoundError,
     InventoryHost,
+    PoolChangeRefusedError,
 )
 
 
@@ -96,7 +97,7 @@ def moves():
 def authority(session_factory, derivation, moves):
     def record_move(db, host_id, current, new):
         if new == "refused":
-            raise ValueError("move refused")
+            raise PoolChangeRefusedError("move refused")
         moves.append((host_id, current, new))
 
     return HostAuthority(
@@ -199,10 +200,21 @@ def test_a_hook_refusing_a_move_leaves_the_host_where_it_was(authority, session_
         db.add(ResourcePool(id="refused", label="refused", provider="test", policy_tags={}))
         db.commit()
 
-    with pytest.raises(ValueError, match="refused"):
+    with pytest.raises(PoolChangeRefusedError, match="refused"):
         authority.update_host("h1", HostUpdate(pool_id="refused"))
 
     assert authority.get_host("h1").pool_id == "default"
+
+
+def test_assigning_a_host_its_current_pool_is_not_a_move(authority, moves) -> None:
+    authority.register_host(HostCreate(host_id="h1", connection=_connection(), pool_id="gpu"))
+
+    authority.update_host("h1", HostUpdate(pool_id="gpu"))
+    authority.apply_inventory(
+        [InventoryHost(host_id="h1", connection=_connection(), pool_id="gpu")]
+    )
+
+    assert moves == []
 
 
 def test_listing_filters_disabled_hosts_and_searches_by_id(authority) -> None:
@@ -235,6 +247,50 @@ def test_an_inventory_upserts_its_hosts_and_derives_their_capacity(authority, de
     assert (again[0].gpu_count, again[0].pool_id) == (4, "default")
     assert authority.get_host("untouched") is not None
     assert derivation.derived == [["kvm1", "kvm2"], ["kvm1"]]
+
+
+def test_an_inventory_moving_a_host_runs_the_pool_change_hooks(authority, moves) -> None:
+    """An imported inventory moves an existing host as an update does: the
+    pool-change hooks see the move, so no subscriber's rule is bypassed."""
+    authority.apply_inventory(
+        [InventoryHost(host_id="kvm1", connection=_connection(), pool_id="gpu")]
+    )
+    assert moves == []
+
+    authority.apply_inventory([InventoryHost(host_id="kvm1", connection=_connection())])
+
+    assert moves == [("kvm1", "gpu", "default")]
+    assert authority.get_host("kvm1").pool_id == "default"
+
+
+def test_a_hook_refusing_an_inventory_move_applies_nothing(
+    authority, session_factory, derivation
+) -> None:
+    """The import is one transaction: one refused move leaves every host it
+    names as it was, including hosts it would have created or reconnected."""
+    authority.apply_inventory(
+        [InventoryHost(host_id="kvm1", connection=_connection("192.0.2.10"), gpu_count=1)]
+    )
+    with session_factory() as db:
+        db.add(ResourcePool(id="refused", label="refused", provider="test", policy_tags={}))
+        db.commit()
+
+    with pytest.raises(PoolChangeRefusedError, match="refused"):
+        authority.apply_inventory([
+            InventoryHost(host_id="kvm2", connection=_connection("192.0.2.11")),
+            InventoryHost(
+                host_id="kvm1",
+                connection=_connection("192.0.2.99"),
+                gpu_count=8,
+                pool_id="refused",
+            ),
+        ])
+
+    kvm1 = authority.get_host("kvm1")
+    assert (kvm1.pool_id, kvm1.gpu_count) == ("default", 1)
+    assert kvm1.connection.public["address"] == "192.0.2.10"
+    assert authority.get_host("kvm2") is None
+    assert derivation.derived == [["kvm1"]]
 
 
 def test_an_inventory_naming_an_unknown_pool_applies_nothing(authority, session_factory) -> None:

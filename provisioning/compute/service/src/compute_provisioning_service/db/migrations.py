@@ -2831,6 +2831,19 @@ def _migrate_job_envelopes(engine: Engine, *, default_host_id: str | None = None
         )
 
 
+def _migrate_drop_job_contract_version(engine: Engine) -> None:
+    """Drop ``ansible_jobs.contract_version``.
+
+    A job's correlation identity is its reservation, offering mode, action, and
+    idempotency key; no route serves a job's record by a contract version, so
+    the column records nothing a reader uses. Every other column, and the
+    reservation index and contract-identity uniqueness that reference them, is
+    kept.
+    """
+    if _table_exists(engine, "ansible_jobs"):
+        _drop_columns_via_table_rebuild(engine, "ansible_jobs", ["contract_version"])
+
+
 # The parameters a bare-metal access job stores, in the order the bare-metal
 # adapter writes them.
 _BARE_METAL_JOB_PARAMETERS = (
@@ -2987,5 +3000,9 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20261002_003_bare_metal_job_shapes",
         _migrate_bare_metal_job_shapes,
+    ),
+    Migration(
+        "20261005_001_drop_job_contract_version",
+        _migrate_drop_job_contract_version,
     ),
 )

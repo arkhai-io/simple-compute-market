@@ -41,6 +41,7 @@ from .hosts import (
 from .jobs import (
     JobCredentialsResponse,
     JobListResponse,
+    JobListSort,
     JobLogsResponse,
     JobStatusResponse,
     JobSubmitResponse,
@@ -101,6 +102,7 @@ __all__ = [
     "HostUpdate",
     "JobCredentialsResponse",
     "JobListResponse",
+    "JobListSort",
     "JobLogsResponse",
     "JobStatusResponse",
     "JobSubmitResponse",

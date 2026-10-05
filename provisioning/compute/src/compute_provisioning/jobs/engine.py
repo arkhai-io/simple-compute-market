@@ -54,6 +54,17 @@ HostLookup = Callable[[str], ExecutionHost | None]
 _UNSET = object()
 
 
+class JobIdentityConflictError(ValueError):
+    """A repeated job identity names different job parameters.
+
+    A job identity, whether a request's ``operation_id`` or a contract's
+    reservation, action, and idempotency key, stands for one job's content: a
+    retry with the same parameters returns the job already recorded, and one
+    with different parameters is refused rather than answered with a job that
+    does not run what it asked for.
+    """
+
+
 class JobEngine:
     def __init__(
         self,
@@ -89,9 +100,9 @@ class JobEngine:
     ) -> JobSubmitResponse:
         """Persist and enqueue a job, deduplicating contracts and request operations.
 
-        A repeated ``operation_id`` returns the job it already names, provided
-        its parameters are the same; a repeated contract identity returns the
-        job it already created.
+        A repeated ``operation_id`` or contract identity returns the job it
+        already names when the parameters are the same, and raises
+        ``JobIdentityConflictError`` when they differ.
         """
         raw_params = dict(params)
         job_id = operation_id or str(uuid.uuid4())
@@ -102,15 +113,11 @@ class JobEngine:
             if operation_id is not None:
                 existing = db.get(JobRecord, operation_id)
                 if existing is not None:
-                    if existing.params != raw_params:
-                        raise ValueError(
-                            "operation_id is already bound to different job parameters"
-                        )
-                    return JobSubmitResponse(job_id=existing.id, status=existing.status)
+                    return _repeat(existing, raw_params, "operation_id")
             if contract is not None:
                 existing = self._contract_job(db, contract)
                 if existing is not None:
-                    return JobSubmitResponse(job_id=existing.id, status=existing.status)
+                    return _repeat(existing, raw_params, "contract identity")
             db.add(JobRecord(
                 id=job_id,
                 status=JobStatus.queued.value,
@@ -120,7 +127,6 @@ class JobEngine:
                 retry_count=0,
                 max_retries=max_retries,
                 next_retry_at=None,
-                contract_version=contract.contract_version if contract else None,
                 capacity_reservation_id=contract.capacity_reservation_id if contract else None,
                 deal_ref=contract.deal_ref if contract else None,
                 offering_mode=contract.offering_mode if contract else offering_mode,
@@ -134,15 +140,15 @@ class JobEngine:
                 db.rollback()
                 if operation_id is not None:
                     existing = db.get(JobRecord, operation_id)
-                    if existing is None or existing.params != raw_params:
+                    if existing is None:
                         raise
-                    return JobSubmitResponse(job_id=existing.id, status=existing.status)
+                    return _repeat(existing, raw_params, "operation_id")
                 if contract is None:
                     raise
                 existing = self._contract_job(db, contract)
                 if existing is None:
                     raise
-                return JobSubmitResponse(job_id=existing.id, status=existing.status)
+                return _repeat(existing, raw_params, "contract identity")
 
         await job_queue.enqueue(job_id)
         return JobSubmitResponse(job_id=job_id, status=JobStatus.queued.value)
@@ -262,33 +268,6 @@ class JobEngine:
                     for credential in self._credentials(db, job_id)
                 ],
             )
-
-    def get_contract_job_record(self, job_id: str) -> dict:
-        """A contract job's correlation, state, and stored envelopes."""
-        with self._session_factory() as db:
-            job = self._require(db, job_id)
-            if not job.contract_version:
-                raise LookupError(f"Job {job_id} is not a contract job")
-            return {
-                "contract_version": job.contract_version,
-                "job_id": job.id,
-                "status": job.status,
-                "capacity_reservation_id": job.capacity_reservation_id,
-                "deal_ref": dict(job.deal_ref or {}),
-                "offering_mode": job.offering_mode,
-                "action_kind": job.action_kind,
-                "idempotency_key": job.idempotency_key,
-                "result": dict(job.result) if job.result is not None else None,
-                "credentials": [
-                    dict(credential.envelope) for credential in self._credentials(db, job_id)
-                ],
-                "error": job.error,
-                "logs": job.logs,
-                "retry_count": job.retry_count,
-                "max_retries": job.max_retries,
-                "created_at": job.created_at,
-                "updated_at": job.updated_at,
-            }
 
     async def wait_for_terminal(self, job_id: str, timeout: float) -> JobStatusResponse:
         """Return a job's status once it is terminal.
@@ -644,4 +623,13 @@ class JobEngine:
         )
 
 
-__all__ = ["HostLookup", "JobEngine"]
+
+def _repeat(existing: JobRecord, params: dict[str, Any], identity: str) -> JobSubmitResponse:
+    """The job a repeated identity names, provided it asks for the same content."""
+    if existing.params != params:
+        raise JobIdentityConflictError(
+            f"{identity} is already bound to job {existing.id} with different parameters"
+        )
+    return JobSubmitResponse(job_id=existing.id, status=existing.status)
+
+__all__ = ["HostLookup", "JobEngine", "JobIdentityConflictError"]

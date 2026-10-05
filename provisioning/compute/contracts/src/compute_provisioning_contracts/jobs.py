@@ -8,7 +8,7 @@ domain whose executor ran the job.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -71,6 +71,10 @@ class JobLogsResponse(BaseModel):
     )
 
 
+#: The orders a job listing may be read in, by creation time.
+JobListSort = Literal["created_at_asc", "created_at_desc"]
+
+
 class JobListResponse(BaseModel):
     """Paginated list of provisioning jobs."""
 
@@ -81,6 +85,7 @@ class JobListResponse(BaseModel):
 
 
 __all__ = [
+    "JobListSort",
     "JobCredentialsResponse",
     "JobListResponse",
     "JobLogsResponse",

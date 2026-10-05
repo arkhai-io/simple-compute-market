@@ -7,11 +7,14 @@ from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
 from compute_provisioning import JobExecutorResolver
-from compute_provisioning.hosts.service import HostAuthority
+from compute_provisioning.hosts.service import HostAuthority, PoolChangeRefusedError
 from compute_provisioning.jobs.engine import JobEngine
 from compute_provisioning_ansible import AnsibleJobExecutor
 from compute_provisioning_ansible.runner import AnsibleRunner
-from compute_provisioning_service.services.relay_rebinding import check_host_pool_change
+from compute_provisioning_service.services.relay_rebinding import (
+    RelayRebindingRefused,
+    check_host_pool_change,
+)
 from vm_provisioning_adapter.bundle import HOST_REQUIREMENT, build_vm_adapter_bundle
 from vm_provisioning_adapter.codec import GoldenImageCredentials, VmAnsibleCodec
 from vm_provisioning_adapter.release import VmFulfillmentReleaseJobPort, VmReleaseExecutor
@@ -134,13 +137,17 @@ def project_ansible_pool_defaults(raw_view: Mapping[str, Any]) -> dict[str, Any]
 
 def _relay_pool_change(db, host_id: str, current_pool_id: str, new_pool_id: str) -> None:
     # A host moving to a pool on a different relay while it holds leases would
-    # strand its VMs' buyers on the old address; the move is refused.
-    check_host_pool_change(
-        db,
-        host_id=host_id,
-        current_pool_id=current_pool_id,
-        new_pool_id=new_pool_id,
-    )
+    # strand its VMs' buyers on the old address; the move is refused, in the
+    # host authority's own refusal so every host route answers it alike.
+    try:
+        check_host_pool_change(
+            db,
+            host_id=host_id,
+            current_pool_id=current_pool_id,
+            new_pool_id=new_pool_id,
+        )
+    except RelayRebindingRefused as exc:
+        raise PoolChangeRefusedError(str(exc)) from exc
 
 
 #: The host pool-change checks VM contributes to the one host authority the

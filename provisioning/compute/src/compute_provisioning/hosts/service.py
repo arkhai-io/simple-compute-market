@@ -34,6 +34,15 @@ class HostNotFoundError(Exception):
     """Raised when a requested host_id does not exist."""
 
 
+class PoolChangeRefusedError(ValueError):
+    """A pool-change hook refused moving a host to another pool.
+
+    The request is well formed and may succeed once whatever the subscriber
+    protects is gone, so it is a conflict with current state rather than a bad
+    request.
+    """
+
+
 class HostCapacityDerivation(Protocol):
     """Derives capacity declarations from hosts' legacy capacity.
 
@@ -55,8 +64,11 @@ class HostCapacityDerivation(Protocol):
 
 
 #: Called inside the transaction moving a host between pools, before it
-#: commits, with ``(db, host_id, current_pool_id, new_pool_id)``; raising
-#: refuses the move.
+#: commits, with ``(db, host_id, current_pool_id, new_pool_id)``. A hook refuses
+#: the move by raising ``PoolChangeRefusedError``, which rolls back the whole
+#: transaction. Every pool assignment of an existing host goes through the hooks,
+#: whether it comes from an update or an imported inventory, so no path moves a
+#: host around a subscriber.
 PoolChangeHook = Callable[[Session, str, str, str], None]
 
 
@@ -198,7 +210,9 @@ class HostAuthority:
         Idempotent for the same input. Capacity is derived for the upserted
         hosts in the same transaction, so a host applied from an inventory and
         the declaration derived from its legacy capacity land together. A
-        declaration already naming a host keeps it.
+        declaration already naming a host keeps it. An existing host's pool
+        changes through the pool-change hooks, as an update's does; a hook's
+        refusal rolls back the whole inventory.
         """
         if not entries:
             logger.warning("apply_inventory: no host entries to apply")
@@ -217,7 +231,7 @@ class HostAuthority:
                     host.set_connection(
                         self._build(entry.connection, previous=existing.connection())
                     )
-                    host.pool_id = entry.pool_id
+                    self._move_to_pool(db, host, entry.pool_id)
                 host.gpu_count = entry.gpu_count
                 host.gpu_model = entry.gpu_model
                 applied.append(entry.host_id)
@@ -255,7 +269,10 @@ class HostAuthority:
         )
 
     def _move_to_pool(self, db: Session, host: Host, pool_id: str) -> None:
+        """Assign ``pool_id`` to an existing host; a real move runs the hooks."""
         self._require_pool_exists(db, pool_id)
+        if host.pool_id == pool_id:
+            return
         for hook in self._pool_change_hooks:
             hook(db, host.host_id, host.pool_id, pool_id)
         host.pool_id = pool_id

@@ -33,6 +33,7 @@ from compute_provisioning_contracts import (
     HostUpdate,
     JobCredentialsResponse,
     JobListResponse,
+    JobListSort,
     JobLogsResponse,
     JobStatusResponse,
     LeaseForceRelease,
@@ -139,11 +140,19 @@ def _lease_action(capacity_reservation_id: str, action: str, body: Any) -> _Call
 # Jobs.
 
 
-def _list_jobs(status: str | None, offset: int, limit: int, escrow_uid: str | None) -> _Call:
+def _list_jobs(
+    status: str | None, offset: int, limit: int, escrow_uid: str | None, sort: str
+) -> _Call:
     return _Call(
         "GET",
         "/api/v1/jobs/",
-        query={"offset": offset, "limit": limit, "status": status, "escrow_uid": escrow_uid},
+        query={
+            "offset": offset,
+            "limit": limit,
+            "status": status,
+            "escrow_uid": escrow_uid,
+            "sort": sort,
+        },
         parse=_model(JobListResponse),
     )
 
@@ -427,9 +436,10 @@ class ComputeProvisioningClient(SigningBase):
         offset: int = 0,
         limit: int = 20,
         escrow_uid: str | None = None,
+        sort: JobListSort = "created_at_desc",
         request_id: str | None = None,
     ) -> JobListResponse:
-        return await self._run(_list_jobs(status, offset, limit, escrow_uid), request_id)
+        return await self._run(_list_jobs(status, offset, limit, escrow_uid, sort), request_id)
 
     async def get_job(self, job_id: str, *, request_id: str | None = None) -> JobStatusResponse:
         return await self._run(_get_job(job_id), request_id)
@@ -689,9 +699,10 @@ class SyncComputeProvisioningClient(SigningBase):
         offset: int = 0,
         limit: int = 20,
         escrow_uid: str | None = None,
+        sort: JobListSort = "created_at_desc",
         request_id: str | None = None,
     ) -> JobListResponse:
-        return self._run(_list_jobs(status, offset, limit, escrow_uid), request_id)
+        return self._run(_list_jobs(status, offset, limit, escrow_uid, sort), request_id)
 
     def get_job(self, job_id: str, *, request_id: str | None = None) -> JobStatusResponse:
         return self._run(_get_job(job_id), request_id)

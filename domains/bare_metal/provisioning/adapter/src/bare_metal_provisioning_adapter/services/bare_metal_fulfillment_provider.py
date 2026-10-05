@@ -271,7 +271,6 @@ class BareMetalFulfillmentProvider(FulfillmentProvider):
                 offering_mode=BARE_METAL_OFFERING_MODE,
                 action_kind=NODE_GRANT_ACCESS_ACTION,
                 idempotency_key=f"{operation.capacity_reservation_id}:grant-access",
-                parameters=lease.model_dump(mode="json", exclude_none=True),
             )
             response = await self._operations.grant_access(lease, contract=contract)
             return FulfillmentResult(
@@ -355,7 +354,6 @@ class BareMetalFulfillmentProvider(FulfillmentProvider):
                 offering_mode=BARE_METAL_OFFERING_MODE,
                 action_kind=NODE_RECLAIM_ACCESS_ACTION,
                 idempotency_key=f"{operation.capacity_reservation_id}:reclaim-access",
-                parameters=lease.model_dump(mode="json", exclude_none=True),
             )
             response = await self._operations.reclaim_access(
                 {

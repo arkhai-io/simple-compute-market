@@ -324,7 +324,6 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
                 offering_mode=params.offering_mode,
                 action_kind="create",
                 idempotency_key=f"{operation.capacity_reservation_id}:create",
-                parameters=operation.parameters.model_dump(mode="json"),
             )
             response = await self._job_submitter.submit(
                 params,
@@ -423,7 +422,6 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
                 offering_mode=params.offering_mode,
                 action_kind="teardown",
                 idempotency_key=f"{operation.capacity_reservation_id}:teardown",
-                parameters=operation.parameters.model_dump(mode="json"),
             )
             response = await self._job_submitter.submit(
                 params,
