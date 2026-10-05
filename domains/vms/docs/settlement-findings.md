@@ -73,3 +73,34 @@ cd domains/vms/storefront
 
 Fresh bootstrap, rerun and restart suite: **7 passed** (one existing agent-ID
 configuration warning).
+
+## Standalone buyer stage dispatch (verify F2)
+
+`market negotiate` resolves the declared buyer stage once, then uses its
+selection, accepted-entry, negotiation-price/prerequisite and proposal hooks.
+The Alkahest stage owns escrow parsing, buyer-policy compatibility, chain and
+wallet guards, and explicit token-price scaling. Advertised prices are not
+scaled again. The payment stage supplies payer selection without wallet or
+chain effects. The CLI only projects the resulting proposal into its wire
+carrier; it never branches on a mechanism config key or escrow absence.
+
+Replay/proving entry: fresh `CliRunner` invocation for both supported entries,
+explicit and derived prices, and wallet refusal in
+`test_negotiate_stage_dispatch.py`. It uses owned temporary run logs,
+synthetic Ed25519 identity, controlled registry/config/token input, and a
+capturing negotiation boundary; no payment/chain mutation is performed.
+
+```sh
+cd domains/vms/buyer
+.venv/bin/python -m pytest tests/test_negotiate_stage_dispatch.py \
+  tests/test_buy_resume_cli.py tests/test_policy_cli_injection.py \
+  tests/test_buy_pricing_and_filters.py -q
+```
+
+Focused suite: **36 passed**. Inspection of `negotiate_cli.py` found no remaining
+`config_key`, payment payer helper, Alkahest token resolver or wallet resolver.
+
+Two first-use blockers were fixed separately: registry publisher pins are
+parsed as JSON arrays, not Python tuples (`e97d81bf`); payment payer enrichment
+accepts selection `params=None` as empty. Both are covered by the fresh CLI
+replay above.

@@ -24,6 +24,7 @@ from market_alkahest.schemas import (
     accepted_token_address,
 )
 from market_arkhai_payments import Mandate
+from market_alkahest.token import TokenResolutionError, resolve_token
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -103,6 +104,35 @@ class AlkahestBuyerStage:
         if not isinstance(value, Mapping):
             raise ValueError("selected Alkahest option has no accepted escrow payload")
         return dict(value)
+
+    def negotiation_prices(
+        self, selected, *, policy, initial_price, max_price,
+        initial_explicit, max_explicit,
+    ):
+        entry = self.accepted_entry(selected)
+        if not policy.compatible(entry):
+            raise ValueError("selected Alkahest option is incompatible with buyer policy")
+        name = entry.get("chain_name")
+        if not isinstance(name, str) or not name:
+            raise ValueError("selected Alkahest option has no chain identity")
+        chain = common.chain_by_name(name)
+        address, private_key = common.resolve_buyer_wallet()
+        if not address or not private_key:
+            raise ValueError("selected Alkahest settlement requires [Wallet] credentials")
+        if initial_explicit or max_explicit:
+            try:
+                decimals = resolve_token(
+                    accepted_token_address(entry), rpc_url=chain.rpc_url,
+                    chain_id=chain.chain_id,
+                ).decimals
+            except (TokenResolutionError, RuntimeError) as exc:
+                raise ValueError("could not resolve selected Alkahest token decimals") from exc
+            scale = 10**decimals
+            if initial_explicit and initial_price is not None:
+                initial_price *= scale
+            if max_explicit and max_price is not None:
+                max_price *= scale
+        return initial_price, max_price
 
     def proposal(self, match, selected):
         return escrow_proposal_from_accepted_entry(
@@ -194,6 +224,9 @@ class PaymentsBuyerStage:
 
     def accepted_entry(self, selected):
         return None
+
+    def negotiation_prices(self, selected, *, initial_price, max_price, **_):
+        return initial_price, max_price
 
     def proposal(self, match, selected):
         return selected.selection
