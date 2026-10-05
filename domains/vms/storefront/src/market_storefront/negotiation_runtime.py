@@ -25,9 +25,9 @@ from domains.vms.negotiation import storefront_round as vm_storefront_round
 from domains.vms.negotiation.policies import _amount_from_proposal
 from domains.vms.negotiation.storefront_round import SellerRoundHook, SellerRoundResult
 from domains.vms.settlement.proposals import accepted_escrow_artifacts_from_proposal
-from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM
 from market_capacity_publication import CapacityBinding, CapacityRuntime
 from market_core import MarketDomainContract
+from market_storefront.settlement_stages import resolve_proposal_stage
 from market_core.schemas import (
     Agreement,
     SettlementObligation,
@@ -312,6 +312,7 @@ def _build_accepted_escrow_artifacts(
             seller_wallet_address=get_evm_wallet_address() or None,
             chain_config_paths=_chain_config_paths(),
         ),
+        build_plan=resolve_proposal_stage(domain.settlement.seller_stages, proposal).build_plan,
     )
     return {
         **dict(artifacts.supplemental),
@@ -489,7 +490,7 @@ def _accepted_settlement_artifacts(
             buyer_principal=buyer_principal,
             seller_principal=seller_principal,
         )
-    return _build_accepted_escrow_artifacts(
+    artifacts = _build_accepted_escrow_artifacts(
         domain=domain,
         capacity_binding=capacity_binding,
         negotiation_id=negotiation_id,
@@ -501,6 +502,9 @@ def _accepted_settlement_artifacts(
         buyer_principal=buyer_principal,
         seller_principal=seller_principal,
     )
+    stage = resolve_proposal_stage(domain.settlement.seller_stages, proposal)
+    artifacts["_agreement_settlement_option"] = stage.proposal_option(proposal, listing)
+    return artifacts
 
 
 def _json_compatible(value: Any) -> Any:
@@ -599,36 +603,38 @@ def _build_response_artifacts(
             ),
         )
         agreement = artifacts["agreement"]
-        if agreement.settlement is not None and agreement.settlement.mechanism == ARKHAI_PAYMENTS_MECHANISM:
-            if payments_stage is None:
-                raise OfferUnfulfillableError("payments_settlement_unavailable")
-            artifacts["settlement_data"] = {"mandate": payments_stage.mandate_for_agreement(
-                agreement.model_dump(mode="json", exclude_none=True)
-            )}
+        if agreement.settlement is None:
+            raise OfferUnfulfillableError("accepted_settlement_unavailable")
+        try:
+            stage = domain.settlement.seller_stages[agreement.settlement.mechanism]
+            data = stage.accepted_data(agreement, payments_stage)
+        except (KeyError, ValueError) as exc:
+            raise OfferUnfulfillableError(str(exc)) from exc
+        if data:
+            artifacts["settlement_data"] = data
         return artifacts
     state = acceptance.policy_state
     if not isinstance(state, Mapping):
         return {}
     proposal = state.get("accepted_escrow_proposal")
     if isinstance(proposal, Mapping):
-        artifacts = _build_accepted_escrow_artifacts(
+        artifacts = _accepted_settlement_artifacts(
+            dispatch,
             domain=domain,
             capacity_binding=acceptance.binding,
             negotiation_id=acceptance.negotiation_id,
             listing_id=acceptance.listing_id,
             proposal=proposal,
+            listing=acceptance.listing_record,
+            provision_terms=acceptance.terms.decoded,
             agreed_amount=acceptance.agreed_amount,
             duration_seconds=acceptance.agreement.duration_seconds,
             uses_scalar_amount=acceptance.uses_scalar_amount,
             buyer_principal=acceptance.buyer_principal,
             seller_principal=acceptance.seller_principal,
         )
-        accepted_proposal = artifacts.get("accepted_escrow_proposal")
-        return (
-            {"accepted_escrow_proposal": accepted_proposal}
-            if accepted_proposal is not None
-            else {}
-        )
+        return {key: artifacts[key] for key in ("accepted_escrow_proposal", "settlement_selection")
+                if artifacts.get(key) is not None}
     selection = state.get("accepted_settlement_selection")
     option = state.get("accepted_settlement_option")
     if isinstance(selection, Mapping) and isinstance(option, Mapping):
@@ -791,7 +797,9 @@ def build_vm_negotiation_runtime(
     """Compose the shared lifecycle with the exact registered VM contract."""
 
     dispatch = (
-        accepted_obligation_dispatch if accepted_obligation_dispatch is not None else {}
+        {mechanism: build for mechanism, build in accepted_obligation_dispatch.items()
+         if mechanism in domain.settlement.seller_stages}
+        if accepted_obligation_dispatch is not None else {}
     )
 
     if not isinstance(registry, StorefrontDomainRegistry):

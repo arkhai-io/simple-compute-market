@@ -302,6 +302,8 @@ class TestNegotiateNew:
             initial_amount=5000,
             provision_terms=_vm_provision(),
             token=_TOKEN,
+            chain_name="anvil",
+            escrow_address="0x" + "11" * 20,
         )
         _assert_canonical_owners(result)
         assert "negotiation_id" in result
@@ -320,6 +322,8 @@ class TestNegotiateNew:
             initial_amount=5000,
             provision_terms=_vm_provision(),
             token=_TOKEN,
+            chain_name="anvil",
+            escrow_address="0x" + "11" * 20,
         )
         _assert_canonical_owners(result)
         assert "negotiation_id" in result
@@ -336,6 +340,8 @@ class TestNegotiateNew:
             proposal_fields={"amount": str(large_amount)},
             provision_terms=_vm_provision(),
             token=_TOKEN,
+            chain_name="anvil",
+            escrow_address="0x" + "11" * 20,
         )
         _assert_canonical_owners(result)
 

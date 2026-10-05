@@ -80,7 +80,7 @@ def _incompatible_domains() -> list[tuple[str, object, str]]:
                     build_plan=None,
                 ),
             ),
-            "capability 'settlement' is incomplete",
+            "settlement requires non-empty role tables",
         ),
     ]
 

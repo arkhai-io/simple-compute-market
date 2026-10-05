@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -13,6 +14,7 @@ import market_storefront.container as _container
 from market_storefront.controllers.settle_controller import SettleController
 from market_storefront.middleware import buyer_auth
 from market_storefront.models.settle_models import VmSettleRequest
+from market_storefront.domain_runtime import build_vm_storefront_domain
 
 _BUYER = Ed25519Signer(b"\x71" * 32).identity
 _OTHER_BUYER = Ed25519Signer(b"\x72" * 32).identity
@@ -35,6 +37,7 @@ def _thread() -> dict:
     return {
         "negotiation_id": "neg-1",
         "terminal_state": "success",
+        "agreement_bytes": json.dumps({"settlement": {"mechanism": "alkahest.v1"}}).encode(),
         "buyer_principal": _BUYER.model_dump(mode="json"),
         "buyer_escrow_proposal": {
             "chain_name": "anvil",
@@ -94,6 +97,9 @@ async def test_settlement_start_rejects_ssh_key_substitution(monkeypatch) -> Non
         AsyncMock(return_value=SimpleNamespace(exact_retry=False)),
     )
 
+    monkeypatch.setattr(_container, "resolved_settlement_composition", SimpleNamespace(
+        seller_stages=build_vm_storefront_domain().settlement.seller_stages,
+    ))
     with pytest.raises(HTTPException) as exc_info:
         await _controller(db).settle_escrow(
             "escrow-1",
@@ -130,6 +136,7 @@ async def test_settlement_start_passes_only_persisted_inputs_to_coordinator(
     )
     composition = SimpleNamespace(
         coordinator=coordinator,
+        seller_stages=build_vm_storefront_domain().settlement.seller_stages,
         mechanism_clients={"alkahest.v1": object()},
         local_principal=_SELLER,
     )

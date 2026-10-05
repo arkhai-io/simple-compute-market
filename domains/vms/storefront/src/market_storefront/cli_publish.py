@@ -949,12 +949,14 @@ def _demands_for_publication_clauses(
     *,
     wallet_address: str,
 ) -> list[dict[str, Any]]:
-    chain_names = {
-        str(clause.mechanism_input["chain"])
-        for clause in clauses
-        if clause.mechanism == "alkahest.v1"
-        and isinstance(clause.mechanism_input.get("chain"), str)
-    }
+    from .domain_runtime import build_vm_seller_stages
+
+    stages = build_vm_seller_stages()
+    chain_names: set[str] = set()
+    for mechanism, stage in stages.items():
+        chain_names.update(stage.publication_chains(
+            [clause for clause in clauses if clause.mechanism == mechanism]
+        ))
     if not chain_names:
         return []
     from .utils.config import CHAINS
