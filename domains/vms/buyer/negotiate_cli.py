@@ -10,6 +10,7 @@ exists to exercise /negotiate/new + /negotiate/{id} directly.
 
 from __future__ import annotations
 
+import json
 import time
 from typing import Any
 
@@ -444,8 +445,8 @@ def register(app: typer.Typer) -> None:
             typer.secho(message, err=True, fg=typer.colors.RED)
             raise typer.Exit(2)
         if listing_dict is not None:
-            expected_seller_principals = TrustedIdentitySet.model_validate(
-                listing_dict.get("publisher_principals")
+            expected_seller_principals = TrustedIdentitySet.model_validate_json(
+                json.dumps(listing_dict.get("publisher_principals"))
             )
             publisher_id = str(listing_dict.get("publisher_id") or "").strip()
             source_registry_url = str(
