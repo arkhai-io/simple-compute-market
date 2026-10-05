@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -13,14 +14,11 @@ from market_resource_pools import DEFAULT_POOL_ID, ResourcePool
 from market_resource_pools.db import Base as PoolsBase
 from market_site.db import Base as SiteBase
 from market_site.ledger import CapacityLedgerService
-from db.models import ApiKey, Base, CreditGrant
+from db.models import Base
 from models.keys_model import (
-    LEGACY_ISSUANCE_RESOURCE_ID,
-    LEGACY_ISSUANCE_SERVICE,
     KeyDisposition,
     derive_credit_fulfillment_id,
     issuance_request_digest,
-    legacy_issuance_request_digest,
 )
 from services.keys_service import IssuanceError, KeysService, derive_key_id
 
@@ -41,96 +39,43 @@ ED25519_BUYER = {
 def _issue(
     service: KeysService,
     *,
-    escrow_uid: str,
+    negotiation_id: str,
     quantity: int,
     key_mode: str,
     key_id: str | None = None,
     buyer_scheme: str | None = None,
     buyer_id: str | None = None,
     capacity_reservation_id: str | None = None,
+    issuance_service: str = "test-service",
+    resource_id: str = "svc-quota",
 ) -> dict:
     if buyer_scheme is None or buyer_id is None:
         raise ValueError("canonical owner is required")
     owner = Identity(scheme=IdentityScheme(buyer_scheme), identifier=buyer_id)
-    fulfillment_id = derive_credit_fulfillment_id(escrow_uid)
+    fulfillment_id = derive_credit_fulfillment_id(negotiation_id)
     key = KeyDisposition(mode=key_mode, key_id=key_id)
     digest = issuance_request_digest(
         fulfillment_id=fulfillment_id,
-        obligation_ref=escrow_uid,
-        mechanism="alkahest.v1",
+        negotiation_id=negotiation_id,
         owner=owner,
-        service="test-service",
-        resource_id="svc-quota",
+        service=issuance_service,
+        resource_id=resource_id,
         quantity=quantity,
         key=key,
     )
     return service.issue(
         fulfillment_id=fulfillment_id,
-        obligation_ref=escrow_uid,
-        mechanism="alkahest.v1",
+        negotiation_id=negotiation_id,
         owner_scheme=owner.scheme.value,
         owner_id=owner.identifier,
-        service="test-service",
-        resource_id="svc-quota",
+        service=issuance_service,
+        resource_id=resource_id,
         quantity=quantity,
         key_mode=key_mode,
         key_id=key_id,
         request_digest=digest,
         capacity_reservation_id=capacity_reservation_id,
     )
-
-
-def _insert_migrated_legacy_grant(
-    engine,
-    *,
-    escrow_uid: str,
-    quantity: int,
-    key_mode: str = "existing",
-) -> None:
-    owner = Identity(
-        scheme=IdentityScheme(BUYER["buyer_scheme"]),
-        identifier=BUYER["buyer_id"],
-    )
-    fulfillment_id = derive_credit_fulfillment_id(escrow_uid)
-    key_id = (
-        derive_key_id(escrow_uid) if key_mode == "new" else f"legacy-key-{escrow_uid}"
-    )
-    with Session(engine) as db, db.begin():
-        db.add(
-            ApiKey(
-                key_id=key_id,
-                secret_hash="legacy-secret-hash",
-                owner_scheme=owner.scheme.value,
-                owner_id=owner.identifier,
-                status="active",
-                balance=quantity,
-            )
-        )
-        db.add(
-            CreditGrant(
-                key_id=key_id,
-                fulfillment_id=fulfillment_id,
-                obligation_ref=escrow_uid,
-                mechanism="alkahest.v1",
-                service=LEGACY_ISSUANCE_SERVICE,
-                resource_id=LEGACY_ISSUANCE_RESOURCE_ID,
-                key_mode=key_mode,
-                key_target_id=key_id if key_mode == "existing" else None,
-                owner_scheme=owner.scheme.value,
-                owner_id=owner.identifier,
-                request_digest=legacy_issuance_request_digest(
-                    fulfillment_id=fulfillment_id,
-                    obligation_ref=escrow_uid,
-                    key_id=key_id,
-                    key_mode=key_mode,
-                    owner=owner,
-                    quantity=quantity,
-                ),
-                escrow_uid=escrow_uid,
-                quantity=quantity,
-                reason="issuance",
-            )
-        )
 
 
 @pytest.fixture
@@ -177,111 +122,10 @@ def service(ledger_and_service) -> KeysService:
     return ledger_and_service[1]
 
 
-def test_migrated_legacy_grant_is_adopted_once_for_exact_recovery(
-    ledger_and_service,
-):
-    ledger, service, engine = ledger_and_service
-    escrow_uid = "0xlegacy-resume"
-    quantity = 7
-    _insert_migrated_legacy_grant(
-        engine,
-        escrow_uid=escrow_uid,
-        quantity=quantity,
-        key_mode="new",
-    )
-    key_id = derive_key_id(escrow_uid)
-
-    resumed = _issue(
-        service,
-        escrow_uid=escrow_uid,
-        quantity=quantity,
-        key_mode="new",
-        key_id=None,
-        **BUYER,
-    )
-
-    assert resumed["fulfillment_id"] == derive_credit_fulfillment_id(escrow_uid)
-    assert resumed["key_id"] == key_id
-    assert resumed["already_issued"] is True
-    assert resumed["secret"] is not None
-    assert (
-        service.verify(
-            key_id=key_id,
-            secret=resumed["secret"],
-        )["valid"]
-        is True
-    )
-    assert resumed["balance"] == quantity
-    assert ledger.snapshot()[0]["available_units"] == 1000
-    with Session(engine) as db:
-        grant = db.query(CreditGrant).one()
-        owner = Identity(
-            scheme=IdentityScheme(BUYER["buyer_scheme"]),
-            identifier=BUYER["buyer_id"],
-        )
-        expected_digest = issuance_request_digest(
-            fulfillment_id=derive_credit_fulfillment_id(escrow_uid),
-            obligation_ref=escrow_uid,
-            mechanism="alkahest.v1",
-            owner=owner,
-            service="test-service",
-            resource_id="svc-quota",
-            quantity=quantity,
-            key=KeyDisposition(mode="new"),
-        )
-        assert (grant.service, grant.resource_id, grant.request_digest) == (
-            "test-service",
-            "svc-quota",
-            expected_digest,
-        )
-
-    assert (
-        _issue(
-            service,
-            escrow_uid=escrow_uid,
-            quantity=quantity,
-            key_mode="new",
-            key_id=None,
-            **BUYER,
-        )["already_issued"]
-        is True
-    )
-
-
-def test_migrated_legacy_grant_rejects_mismatched_recovery(
-    ledger_and_service,
-):
-    _ledger, service, engine = ledger_and_service
-    escrow_uid = "0xlegacy-mismatch"
-    _insert_migrated_legacy_grant(engine, escrow_uid=escrow_uid, quantity=7)
-    key_id = f"legacy-key-{escrow_uid}"
-
-    with pytest.raises(IssuanceError) as caught:
-        _issue(
-            service,
-            escrow_uid=escrow_uid,
-            quantity=8,
-            key_mode="existing",
-            key_id=key_id,
-            **BUYER,
-        )
-
-    assert caught.value.reason == "fulfillment_conflict"
-    with Session(engine) as db:
-        grant = db.query(CreditGrant).one()
-        assert (
-            grant.service,
-            grant.resource_id,
-        ) == (
-            LEGACY_ISSUANCE_SERVICE,
-            LEGACY_ISSUANCE_RESOURCE_ID,
-        )
-
-
 def test_issue_new_key_grants_and_commits_quota(service, ledger):
     result = _issue(
         service,
-        escrow_uid="0xe1",
+        negotiation_id="0xe1",
         quantity=100,
         key_mode="new",
         **BUYER,
@@ -303,9 +147,9 @@ def test_issue_new_key_grants_and_commits_quota(service, ledger):
     assert reservation["lease_end_utc"] is None
 
 
-def test_issue_is_idempotent_on_escrow_uid(service, ledger):
-    first = _issue(service, escrow_uid="0xe2", quantity=50, key_mode="new", **BUYER)
-    again = _issue(service, escrow_uid="0xe2", quantity=50, key_mode="new", **BUYER)
+def test_issue_is_idempotent_on_negotiation_id(service, ledger):
+    first = _issue(service, negotiation_id="0xe2", quantity=50, key_mode="new", **BUYER)
+    again = _issue(service, negotiation_id="0xe2", quantity=50, key_mode="new", **BUYER)
     assert again["already_issued"] is True
     assert again["balance"] == 50  # no double grant
     assert ledger.snapshot()[0]["available_units"] == 950  # no double quota
@@ -320,27 +164,38 @@ def test_issue_is_idempotent_on_escrow_uid(service, ledger):
     # Once the key has consumed, the buyer evidently holds the secret:
     # no rotation, nothing returned.
     service.consume(key_id=key_id, amount=1)
-    third = _issue(service, escrow_uid="0xe2", quantity=50, key_mode="new", **BUYER)
+    third = _issue(service, negotiation_id="0xe2", quantity=50, key_mode="new", **BUYER)
     assert third["secret"] is None
     assert service.verify(key_id=key_id, secret=again["secret"])["valid"] is True
 
 
-def test_changed_fulfillment_reuse_conflicts_before_mutation(service, ledger):
+@pytest.mark.parametrize(
+    "changed",
+    [
+        {"quantity": 21},
+        {"buyer_id": OTHER["buyer_id"]},
+        {"issuance_service": "different-service"},
+        {"resource_id": "different-quota"},
+        {"key_mode": "existing", "key_id": "another-key"},
+    ],
+)
+def test_changed_fulfillment_reuse_conflicts_before_mutation(service, ledger, changed):
     first = _issue(
         service,
-        escrow_uid="0xchanged",
+        negotiation_id="0xchanged",
         quantity=20,
         key_mode="new",
         **BUYER,
     )
+    replay = {
+        "negotiation_id": "0xchanged",
+        "quantity": 20,
+        "key_mode": "new",
+        **BUYER,
+        **changed,
+    }
     with pytest.raises(IssuanceError) as caught:
-        _issue(
-            service,
-            escrow_uid="0xchanged",
-            quantity=21,
-            key_mode="new",
-            **BUYER,
-        )
+        _issue(service, **replay)
     assert caught.value.reason == "fulfillment_conflict"
     assert service.get_key(first["key_id"])["balance"] == 20
     assert ledger.snapshot()[0]["available_units"] == 980
@@ -350,7 +205,7 @@ def test_concurrent_exact_retry_commits_one_grant(service, ledger):
     def issue_once() -> dict:
         return _issue(
             service,
-            escrow_uid="0xconcurrent",
+            negotiation_id="0xconcurrent",
             quantity=25,
             key_mode="new",
             **BUYER,
@@ -364,13 +219,13 @@ def test_concurrent_exact_retry_commits_one_grant(service, ledger):
 
 
 def test_existing_key_top_up_rechecks_ownership(service):
-    new = _issue(service, escrow_uid="0xe3", quantity=10, key_mode="new", **BUYER)
+    new = _issue(service, negotiation_id="0xe3", quantity=10, key_mode="new", **BUYER)
     key_id = new["key_id"]
 
     # The same EIP-191 address is normalized before exact-principal comparison.
     topped = _issue(
         service,
-        escrow_uid="0xe4",
+        negotiation_id="0xe4",
         quantity=5,
         key_mode="existing",
         key_id=key_id,
@@ -383,7 +238,7 @@ def test_existing_key_top_up_rechecks_ownership(service):
     with pytest.raises(IssuanceError) as exc:
         _issue(
             service,
-            escrow_uid="0xe5",
+            negotiation_id="0xe5",
             quantity=5,
             key_mode="existing",
             key_id=key_id,
@@ -394,7 +249,7 @@ def test_existing_key_top_up_rechecks_ownership(service):
     with pytest.raises(IssuanceError) as exc:
         _issue(
             service,
-            escrow_uid="0xe5-ed25519",
+            negotiation_id="0xe5-ed25519",
             quantity=5,
             key_mode="existing",
             key_id=key_id,
@@ -405,7 +260,7 @@ def test_existing_key_top_up_rechecks_ownership(service):
     with pytest.raises(IssuanceError) as exc:
         _issue(
             service,
-            escrow_uid="0xe6",
+            negotiation_id="0xe6",
             quantity=5,
             key_mode="existing",
             key_id="ak_missing",
@@ -417,7 +272,7 @@ def test_existing_key_top_up_rechecks_ownership(service):
     with pytest.raises(IssuanceError) as exc:
         _issue(
             service,
-            escrow_uid="0xe7",
+            negotiation_id="0xe7",
             quantity=5,
             key_mode="existing",
             key_id=key_id,
@@ -428,18 +283,18 @@ def test_existing_key_top_up_rechecks_ownership(service):
 
 def test_issue_requires_a_complete_canonical_owner(service):
     with pytest.raises(ValueError, match="canonical owner"):
-        _issue(service, escrow_uid="0xe8", quantity=10, key_mode="new")
+        _issue(service, negotiation_id="0xe8", quantity=10, key_mode="new")
 
 
 def test_issue_commits_negotiation_hold_instead_of_reserving(service, ledger):
     hold = ledger.reserve(
         claim={"executor_kind": "api_credits", "units": 200},
-        deal_ref={"escrow_uid": "0xheld"},
+        deal_ref={"negotiation_id": "0xheld"},
         ttl_seconds=900,
     )
     result = _issue(
         service,
-        escrow_uid="0xheld",
+        negotiation_id="0xheld",
         quantity=200,
         key_mode="new",
         capacity_reservation_id=hold["capacity_reservation_id"],
@@ -451,9 +306,60 @@ def test_issue_commits_negotiation_hold_instead_of_reserving(service, ledger):
     assert ledger.get_reservation(hold["capacity_reservation_id"])["state"] == "leased"
 
 
+def test_quota_hold_is_bound_to_purchase(service, ledger):
+    hold = ledger.reserve(
+        claim={"executor_kind": "api_credits", "units": 1},
+        deal_ref={"negotiation_id": "neg-other"},
+        ttl_seconds=900,
+    )
+    with pytest.raises(IssuanceError) as caught:
+        _issue(
+            service,
+            negotiation_id="neg-purchase",
+            quantity=200,
+            key_mode="new",
+            capacity_reservation_id=hold["capacity_reservation_id"],
+            **BUYER,
+        )
+    assert caught.value.reason == "fulfillment_conflict"
+    assert service.get_key(
+        derive_key_id(derive_credit_fulfillment_id("neg-purchase"))
+    ) is None
+    assert ledger.snapshot()[0]["available_units"] == 999
+
+
+def test_expired_hold_replaced_and_replay_does_not_commit_twice(service, ledger):
+    hold = ledger.reserve(
+        claim={"executor_kind": "api_credits", "units": 200},
+        deal_ref={"negotiation_id": "neg-expired"},
+        ttl_seconds=-1,
+    )
+    issued = _issue(
+        service,
+        negotiation_id="neg-expired",
+        quantity=200,
+        key_mode="new",
+        capacity_reservation_id=hold["capacity_reservation_id"],
+        **BUYER,
+    )
+    assert issued["capacity_reservation_id"] != hold["capacity_reservation_id"]
+    assert ledger.get_reservation(hold["capacity_reservation_id"])["state"] == "released"
+    replay = _issue(
+        service,
+        negotiation_id="neg-expired",
+        quantity=200,
+        key_mode="new",
+        capacity_reservation_id="missing-replacement-hint",
+        **BUYER,
+    )
+    assert replay["request_digest"] == issued["request_digest"]
+    assert replay["already_issued"] and replay["balance"] == 200
+    assert ledger.snapshot()[0]["available_units"] == 800
+
+
 def test_issue_quota_exhausted_persists_nothing(service, ledger):
     with pytest.raises(IssuanceError) as exc:
-        _issue(service, escrow_uid="0xbig", quantity=2000, key_mode="new", **BUYER)
+        _issue(service, negotiation_id="0xbig", quantity=2000, key_mode="new", **BUYER)
     assert exc.value.reason == "quota_exhausted"
     missing_key_id = derive_key_id(derive_credit_fulfillment_id("0xbig"))
     assert service.get_key(missing_key_id) is None
@@ -462,7 +368,7 @@ def test_issue_quota_exhausted_persists_nothing(service, ledger):
 
 
 def test_consume_decrements_with_402_and_idempotency(service):
-    new = _issue(service, escrow_uid="0xc1", quantity=3, key_mode="new", **BUYER)
+    new = _issue(service, negotiation_id="0xc1", quantity=3, key_mode="new", **BUYER)
     key_id = new["key_id"]
 
     assert service.consume(key_id=key_id, amount=2) == {
@@ -488,7 +394,7 @@ def test_consume_decrements_with_402_and_idempotency(service):
 
 
 def test_consume_batch_keeps_order_and_isolates_failures(service):
-    a = _issue(service, escrow_uid="0xb1", quantity=5, key_mode="new", **BUYER)
+    a = _issue(service, negotiation_id="0xb1", quantity=5, key_mode="new", **BUYER)
     results = service.consume_batch(
         [
             {"key_id": a["key_id"], "amount": 3, "idempotency_key": "r1"},
@@ -502,7 +408,7 @@ def test_consume_batch_keeps_order_and_isolates_failures(service):
 
 
 def test_verify_checks_secret_and_status(service):
-    new = _issue(service, escrow_uid="0xv1", quantity=1, key_mode="new", **BUYER)
+    new = _issue(service, negotiation_id="0xv1", quantity=1, key_mode="new", **BUYER)
     key_id, secret = new["key_id"], new["secret"]
 
     assert service.verify(key_id=key_id, secret=secret)["valid"] is True
@@ -515,7 +421,7 @@ def test_verify_checks_secret_and_status(service):
 
 
 def test_adjust_records_grant_and_refuses_negative_balance(service):
-    new = _issue(service, escrow_uid="0xa1", quantity=10, key_mode="new", **BUYER)
+    new = _issue(service, negotiation_id="0xa1", quantity=10, key_mode="new", **BUYER)
     key_id = new["key_id"]
 
     adjusted = service.adjust(key_id=key_id, delta=5, reason="goodwill")
@@ -530,11 +436,11 @@ def test_adjust_records_grant_and_refuses_negative_balance(service):
         (10, "issuance"),
         (5, "goodwill"),
     ]
-    assert grants[0]["escrow_uid"] == "0xa1" and grants[1]["escrow_uid"] is None
+    assert grants[0]["negotiation_id"] == "0xa1" and grants[1]["negotiation_id"] is None
 
 
 def test_usage_log_pages_by_event_id(service):
-    new = _issue(service, escrow_uid="0xu1", quantity=10, key_mode="new", **BUYER)
+    new = _issue(service, negotiation_id="0xu1", quantity=10, key_mode="new", **BUYER)
     for i in range(4):
         service.consume(key_id=new["key_id"], amount=1, idempotency_key=f"r{i}")
     events = service.list_usage(new["key_id"])

@@ -5,7 +5,7 @@ and adoption of a database that predates this migration system.
 from __future__ import annotations
 
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.pool import StaticPool
 
 from db.database import create_db_engine, run_migrations
@@ -15,7 +15,6 @@ from db.migrations import (
     check_schema_version,
 )
 from db.models import Base
-from models.keys_model import derive_credit_fulfillment_id
 
 
 def _sqlite_memory_engine():
@@ -31,9 +30,18 @@ class TestRunMigrationsFreshBootstrap:
         engine = _sqlite_memory_engine()
         run_migrations(engine)
 
-        from sqlalchemy import inspect
-
         tables = set(inspect(engine).get_table_names())
+        columns = {
+            column["name"] for column in inspect(engine).get_columns("credit_grants")
+        }
+        assert columns == set(Base.metadata.tables["credit_grants"].columns.keys())
+        assert "negotiation_id" in columns
+        assert {"escrow_uid", "obligation_ref", "mechanism"}.isdisjoint(columns)
+        unique_columns = {
+            tuple(constraint["column_names"])
+            for constraint in inspect(engine).get_unique_constraints("credit_grants")
+        }
+        assert {("fulfillment_id",), ("negotiation_id",)} <= unique_columns
         assert {
             "api_keys",
             "credit_grants",
@@ -89,8 +97,6 @@ class TestAdoptingAPreCreateAllOnlyDatabase:
         from market_site.db import Base as SiteBase
 
         SiteBase.metadata.create_all(bind=engine)
-
-        from sqlalchemy import inspect
 
         assert "schema_migrations" not in set(inspect(engine).get_table_names())
 
@@ -155,87 +161,20 @@ class TestAdoptingAPreCreateAllOnlyDatabase:
             "0xabcdef0000000000000000000000000000000001",
         )
 
-    def test_backfills_historical_alkahest_grant_identity_and_digest(self):
+    def test_incompatible_grant_schema_requires_explicit_reset(self):
         engine = _sqlite_memory_engine()
-        Base.metadata.create_all(bind=engine)
-        from market_site.db import Base as SiteBase
-
-        SiteBase.metadata.create_all(bind=engine)
-        with engine.begin() as connection:
-            connection.execute(
-                text(
-                    "INSERT INTO api_keys "
-                    "(key_id, secret_hash, owner_scheme, owner_id, status, balance, "
-                    "created_at, updated_at) VALUES "
-                    "('legacy-key', 'hash1', 'wallet', "
-                    "'0xABCDEF0000000000000000000000000000000001', "
-                    "'active', 7, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
-                )
-            )
-            connection.execute(
-                text(
-                    "INSERT INTO credit_grants "
-                    "(key_id, escrow_uid, quantity, reason, granted_at) VALUES "
-                    "('legacy-key', '0xlegacy', 7, 'issuance', CURRENT_TIMESTAMP)"
-                )
-            )
-
         run_migrations(engine)
-
-        with engine.begin() as connection:
-            row = connection.execute(
-                text(
-                    "SELECT fulfillment_id, obligation_ref, mechanism, owner_scheme, "
-                    "owner_id, request_digest FROM credit_grants"
-                )
-            ).one()
-        assert row[:5] == (
-            derive_credit_fulfillment_id("0xlegacy"),
-            "0xlegacy",
-            "alkahest.v1",
-            "eip191",
-            "0xabcdef0000000000000000000000000000000001",
-        )
-        assert row[5].startswith("sha256:")
-
-    def test_ambiguous_grant_backfill_rolls_back_every_grant_update(self):
-        engine = _sqlite_memory_engine()
-        Base.metadata.create_all(bind=engine)
-        from market_site.db import Base as SiteBase
-
-        SiteBase.metadata.create_all(bind=engine)
         with engine.begin() as connection:
             connection.execute(
-                text(
-                    "INSERT INTO api_keys "
-                    "(key_id, secret_hash, status, balance, created_at, updated_at) "
-                    "VALUES ('legacy-key', 'hash1', 'active', 7, "
-                    "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
-                )
-            )
-            connection.execute(
-                text(
-                    "INSERT INTO credit_grants "
-                    "(key_id, escrow_uid, quantity, reason, granted_at) VALUES "
-                    "('legacy-key', '0xvalid', 3, 'issuance', CURRENT_TIMESTAMP), "
-                    "('legacy-key', NULL, 4, 'issuance', CURRENT_TIMESTAMP)"
-                )
+                text("ALTER TABLE credit_grants ADD COLUMN escrow_uid VARCHAR")
             )
 
-        with pytest.raises(SchemaDriftError, match="no historical escrow"):
-            run_migrations(engine)
-
-        with engine.begin() as connection:
-            rows = connection.execute(
-                text(
-                    "SELECT escrow_uid, fulfillment_id, request_digest "
-                    "FROM credit_grants ORDER BY id"
-                )
-            ).fetchall()
-        assert rows == [
-            ("0xvalid", None, None),
-            (None, None, None),
-        ]
+        for check in (run_migrations, check_schema_version):
+            with pytest.raises(SchemaDriftError, match="explicitly reset"):
+                check(engine)
+        assert "escrow_uid" in {
+            column["name"] for column in inspect(engine).get_columns("credit_grants")
+        }
 
     def test_malformed_owner_rolls_back_principal_migration(self):
         engine = _sqlite_memory_engine()
