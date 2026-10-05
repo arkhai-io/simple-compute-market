@@ -1485,83 +1485,236 @@ re-verifies them by grep before each move.
         index), and their frozen-sync runs pass (47; 1101 unit and 345 integration with the two
         known `test_alkahest` failures; 206), and the Rust middleware needs Cargo.
         `make check-locks`, `make check-packaging`, comment hygiene, documentation citations,
-        and OpenSpec strict validation pass. Slice A has not yet run through the end-to-end
-        pipeline.
+        and OpenSpec strict validation pass.
+      - A end-to-end evidence (checkpoint verification, 2026-10-05): the root `make test`
+        passed on the A checkpoint, and the pipeline passed, VM lane 135 passed and
+        bare-metal lane 16 passed, with no traceback, 5xx, 401, or 403 in either lane's
+        service logs (the only non-2xx statuses were the scenarios' expected 402, 404, and
+        410).
 
       **Slice B: the lease surface and mode-agnostic release** (decisions 1–3, 9, and 7.3).
+      Amended 2026-10-05 before implementation, after the slice B design review
+      (`design.md`, "Controls and routes (5B.8)", "Slice B design review", points 1–5):
+      registration keyed on the executor target, `commit`'s guards, registration with the
+      committed window, release by every aggregate state, the release guard, and the plan
+      corrections. A first draft of B.1's ledger and authority changes is in the previous
+      session's working notes; it predates points 2 and 4.
 
-  - [ ] 5B.8.B.1 Ledger (`kit/site/src/market_site/ledger.py`, `authority.py`):
-        `attach_lease` writes the lease tail once (first attachment only on an unleased held
-        reservation; an equal repeat returns it unchanged and never moves the end; a different
-        target or start refused; `releasing`, `release_failed`, `unmanaged` refused; a recorded
-        create handle never replaced); `truncate_lease` refuses `reserved`, `provisioning`,
-        `releasing`, `release_failed`, `unmanaged`, and a later end, and never sets the state.
-        Tests in `kit/site/tests/integration/test_ledger.py`.
-  - [ ] 5B.8.B.2 Lease contract and route service. `compute_provisioning_contracts`'
-        `LeaseRegistration` drops `offering_mode`; it gains `LeaseListResponse` and the
-        release-oversight request; the family table gains list and release-oversight with the
-        roles of decision 1 (register, get, terminate: seller and admin; list, oversight,
-        retry, force: admin), the default for an unlisted operation becomes seller and admin,
-        the dual-role set is removed, and `route_contract_from_declaration` refuses a
-        declaration without `admin`. New `compute_provisioning/leases.py` (`LeaseRouteService`:
-        register, get, list filtered by status and offering mode, terminate, release-oversight,
-        retry-release, force-release) over `ExecutorLeaseService` (no mode scoping, no update)
-        and `LeaseLifecycleService` (no `update_lease`). The service's
-        `controllers/leases_controller.py` binds it at `/api/v1/contract/leases`;
-        `compute_contract_controller.py` and `services/compute_contract_service.py` are
-        tombstoned. The client gains `list_leases` and `release_lease_oversight`.
-  - [ ] 5B.8.B.3 Release (decision 9, absorbing 7.3). `compute_provisioning/release.py`
-        receives `FulfillmentTeardownPort`, `FulfillmentServiceTeardownPort`, and the release
-        executor and status port from `vm_provisioning_adapter/release.py` (tombstoned) as
-        `FulfillmentReleaseExecutor` and `FulfillmentReleaseJobPort`, and loses
-        `ExecutorReleaseDispatcher` and `ReleaseJobDispatcher`. The executor decides by the
-        aggregate's state: `active` begins teardown; absent or `assigned` with provenance
-        proving no dispatch (no aggregate past `assigned`, no create handle on the reservation,
-        no job for the reservation — `JobEngine` gains `has_job_for_reservation`) abandons an
-        `assigned` aggregate through the settlement repository and returns a
-        nothing-delivered outcome the lifecycle finishes as a completed release;
-        `dispatch_pending` or `dispatching` returns a pending outcome; `failed`, or no proof,
-        returns an unreleasable outcome. `lease_lifecycle.py`: the watchdog and terminate move a
-        pending release to `releasing` with the fulfillment id as release handle; the
-        releasing pass begins teardown once the aggregate is `active`, records `release_failed`
-        if it ends `failed`, and skips the grace timeout while the create is in flight; the
-        `direct-release` sentinel and its branch go; failure reasons become `teardown_failed`
-        and `teardown_timeout`. `composition.py` drops `release_executor` from the contribution
-        and `release_dispatcher` from the composed result; `container.py` builds the one
-        executor and port. Tombstone
-        `bare_metal_provisioning_adapter/release.py`. Tests:
-        `provisioning/compute/tests/unit/test_release.py` (every aggregate state, the
-        provenance proof's three parts), `test_lease_lifecycle.py` (pending release survives a
-        restarted lifecycle; teardown begins at `active`; no grace timeout in flight),
-        `provisioning/compute/service/tests/unit/services/test_release_executors.py`,
-        `test_ledger_lease_lifecycle.py`, `integration/test_legacy_backfill_teardown.py`, and a
-        new `integration/test_lease_release_api.py` covering a bare-metal expiry through the
-        aggregate, a never-dispatched lease released directly, and a lease terminated while
-        its create is in flight.
-  - [ ] 5B.8.B.4 Deletions (decision 1). VM: `controllers/leases_controller.py` (tombstoned),
-        the lease route declarations in `vm_provisioning_operator/routes.py`, the `Lease*`
-        models in `vm_provisioning_operator/models.py`, and the extension client's lease
-        methods. Bare metal: `controllers/bare_metal_leases_controller.py`,
-        `services/bare_metal_lease_service.py` (tombstoned), `BARE_METAL_LEASE_ROUTES` and
-        `BareMetalLeaseClient` in `arkhai_bare_metal/provisioning_client.py`, `BareMetalLeaseView`
-        and `bare_metal_access_ref` in `arkhai_bare_metal`; `BareMetalLeaseCreate` renamed
-        `BareMetalAccessGrant` in the provider and operations service. Both `routers.py`
-        follow. Tests: `test_leases_api.py` becomes the family lease API test (list filters,
-        roles, write-once registration, no update route);
-        `integration/test_bare_metal_leases_api.py` and `unit/services/test_bare_metal_lease_service.py`
-        are tombstoned; `test_bare_metal_mock_profile.py` drives grants through
-        `begin_fulfillment`; `domains/bare_metal/tests/test_provisioning_client.py` keeps only
-        the test-route declarations.
-  - [ ] 5B.8.B.5 The VM storefront's uncommitted hold (decision 9).
-        `domains/vms/storefront/src/market_storefront/settlement_composition.py`'s
-        terminal-settlement path releases a `reserved` reservation through the capacity
-        runtime's `release` instead of truncating it; `admin_controller.py`'s interruption keeps
-        its 409 on refusal. Test: `tests/integration/test_abandon_truncation.py`.
-  - [ ] 5B.8.B.6 e2e. `scenarios/vms/conftest.py`'s `DealLease` reads leases through
-        `SyncComputeProvisioningClient` and backdates through `SiteCapacityClient.truncate_lease`
-        signed as admin; `test_full_deal.py`, `test_full_deal_buyer_cli.py`, and
-        `test_buy_oneshot_buyer_cli.py` follow. Gate as above, plus `kit/site` and the VM
-        storefront.
+  - [ ] 5B.8.B.1 Ledger and lease windows (points 1, 2, and 4).
+        - `kit/site/src/market_site/ledger.py`:
+          - `attach_lease(*, capacity_reservation_id, executor_target, executor_ref=None,
+            lease_start_utc=None, lease_end_utc=None, create_job_id=None)` registers by
+            executor target (point 1): no `escrow_uid` lookup and no `offering_mode`; refusals
+            raise `CapacityConflictError`; `None` for no live reservation. The registrable
+            and refused states are module constants.
+          - `commit` refuses `releasing`, `release_failed`, and `unmanaged` with
+            `CapacityConflictError`, and returns a registered lease unchanged; before
+            registration it re-records the window as today.
+          - `truncate_lease` accepts only `leased` and an earlier or equal end, never sets
+            the state, and returns `None` for every refusal.
+          - `CapacityReleaseGuard` replaces `SettlementAbandonmentHook` (the constructor
+            takes `release_guard=`). It is consulted with the ledger's session in `release`,
+            `resize_reservation`'s supersede step, and TTL-hold expiry. A refused reclaim
+            changes nothing: `release` and `resize_reservation` return `None`, and a lapsed
+            hold waits for the next sweep. An already-released reservation is still offered
+            to the guard and returned.
+          - `update_lease_fields` and `update_lease_fields_in_session` become
+            `record_create_handle_in_session(db, capacity_reservation_id, create_job_id)`,
+            which never replaces a recorded handle.
+        - `kit/site/src/market_site/authority.py`:
+          - `SiteAuthorityPort` and `LedgerSiteAuthority` take the new `attach_lease_reservation`
+            signature, lose `update_reservation_fields` and `get_reservation_by_escrow`, and
+            gain `release` for the lifecycle's guarded release.
+          - The ledger keeps `get_reservation_by_escrow` for the API-credit service.
+        - `kit/site/src/market_site/router.py`: the release route documents a refused release
+          as `reservation: null`; `commit`'s new refusals use the existing 409 mapping.
+        - `kit/fulfillment/src/market_fulfillment/fulfillment_persistence.py`:
+          `attach_executor_job` calls `record_create_handle_in_session`.
+        - `provisioning/compute/service/src/compute_provisioning_service/container.py` passes
+          `release_guard=`. Until B.3 composes the proof guard, the guard abandons an
+          `assigned` aggregate and permits, which is today's behaviour.
+        - VM storefront, registering with the committed window (point 2):
+          - `domains/vms/storefront/src/market_storefront/services/vm_fulfillment_service.py`
+            registers with the window its post-provision commit returned, and skips
+            registration when that commit failed.
+          - `services/fulfillment_resume_runtime.py`: `_refresh_capacity_lease` returns the
+            committed record, and `_register_recovered_vm_lease` registers with its window, or
+            not at all.
+          - `services/fulfillment_service.py`: `_register_vm_lease_with_settings` accepts the
+            returned window in either stored form (ISO or minute precision).
+        - Tests:
+          - `kit/site/tests/integration/test_ledger.py`:
+            - registration: first registration on `reserved` and on committed `leased`,
+              equal repeat, never-moves-end after truncation, different target or start, the
+              refused states, a create handle never replaced;
+            - `commit`: refuses the lifecycle's states, returns a registered lease unchanged,
+              moves an unregistered window;
+            - truncation: refusals;
+            - the guard: permits, refuses with nothing changed and nothing abandoned, a
+              refused resize, a refused TTL lapse, an already-released reservation;
+            - the existing abandonment-hook tests become guard tests;
+              `test_update_lease_fields_*` become create-handle tests; the three tests calling
+              the old `attach_lease` signature follow.
+          - `kit/site/tests/unit/test_authority.py`.
+          - `kit/fulfillment/tests/unit/test_fulfillment_persistence.py`.
+          - The VM storefront's `tests/unit/test_fulfillment_resume_runtime.py`,
+            `test_fulfillment_service.py`, `test_fulfillment_provisioning.py`, and
+            `test_fulfill_vm_obligation_error_handling.py`: registration uses the committed
+            window, and a failed commit skips registration.
+  - [ ] 5B.8.B.2 Lease contract and route service.
+        - Contracts (`compute_provisioning_contracts`): `LeaseRegistration` drops
+          `offering_mode`, and `LeaseView` declares it, reporting the reservation's mode.
+          New `LeaseListResponse` and the release-oversight request.
+        - Route table (`compute_provisioning_contracts/routes.py`):
+          - list and release-oversight are added with decision 1's roles (register, get,
+            terminate: seller and admin; list, oversight, retry, force: admin);
+          - an unlisted operation defaults to seller and admin, and
+            `DUAL_ROLE_PROVISIONING_OPERATIONS` is removed;
+          - `route_contract_from_declaration` refuses a declaration without `admin`, enabled
+            only after every existing declaration (VM's, bare metal's, the pool, host-import,
+            and relay declarations) is verified to admit it (point 5).
+        - New `compute_provisioning/leases.py`: `LeaseRouteService` (register, get, list
+          filtered by status and offering mode, terminate, release-oversight, retry-release,
+          force-release), mapping a registration refusal to 409 and a missing reservation to
+          404.
+        - `executor_leases.py`: `ExecutorLeaseService` loses mode scoping, the by-escrow
+          lookup, and `update_lease`; `ExecutorLeaseRegistration` drops `escrow_uid` and
+          `offering_mode`; `ExecutorLeaseUpdate` is deleted.
+        - `lease_lifecycle.py`: `LeaseLifecycleService` loses `update_lease`,
+          `get_lease_by_escrow`, `list_leases`, and `register_lease`.
+        - The service's `controllers/leases_controller.py` binds the route service at
+          `/api/v1/contract/leases`. `compute_contract_controller.py` and
+          `services/compute_contract_service.py` are tombstoned.
+        - The client gains `list_leases` and `release_lease_oversight`. The VM storefront's
+          `fulfillment_service.py` stops sending `offering_mode`.
+        - Tests:
+          - `provisioning/compute/tests/unit/test_executor_leases.py`,
+            `test_lease_lifecycle.py`, and new `test_lease_route_service.py`;
+          - the contracts package's `tests/unit/test_route_table.py` (roles, the refused
+            declaration);
+          - the client's parity test;
+          - the service's `tests/unit/test_route_binding.py` and
+            `tests/integration/test_compute_contract_api.py`.
+  - [ ] 5B.8.B.3 Release (decision 9 and points 3 and 4, absorbing 7.3).
+        - `compute_provisioning/release.py`:
+          - It receives `FulfillmentTeardownPort` and `FulfillmentServiceTeardownPort` from
+            `vm_provisioning_adapter/release.py`, and loses `ExecutorReleaseDispatcher` and
+            `ReleaseJobDispatcher`.
+          - New `FulfillmentReleaseGuard`, the site's `CapacityReleaseGuard` over the
+            settlement repository and a session-accepting
+            `job_bound_to_reservation(db, capacity_reservation_id)` beside the job rows in
+            `compute_provisioning/jobs/db.py`. It abandons an `assigned` aggregate before
+            checking the proof; it permits `torn_down`, and an absent, `assigned`, or
+            `abandoned` aggregate when the proof holds; it refuses everything else.
+          - `FulfillmentReleaseExecutor.submit_release` returns a typed outcome (teardown
+            begun or adopted, released, create in flight, or unreleasable with its reason),
+            following point 3's table. It frees capacity directly only through the site
+            authority's guarded `release`, and reads the aggregate once more if the guard
+            refuses.
+          - `FulfillmentReleaseJobPort.get_job` reports:
+            - `torn_down` as succeeded;
+            - `teardown_failed` and `failed` as failed;
+            - `active` as ready for teardown;
+            - `dispatch_pending` and `dispatching` as create in flight;
+            - every other teardown state as running.
+        - `lease_lifecycle.py`:
+          - The watchdog and terminate move a teardown or create-in-flight outcome to
+            `releasing`, with the fulfillment id as release handle.
+          - A released outcome reserves the outbox entry and delivers the capacity-released
+            notification.
+          - An unreleasable outcome records `release_failed`.
+          - The releasing pass begins teardown once the aggregate is `active`, records
+            `release_failed` at `failed` or `teardown_failed` (point 3(a)), and skips the grace
+            timeout while the create is in flight.
+          - The `direct-release` sentinel and its branch go.
+          - Failure reasons become neutral: `teardown_failed`, `teardown_timeout`,
+            `fulfillment_failed` (a `failed` aggregate), and `release_unproven` (no aggregate
+            past `assigned` but the proof does not hold).
+        - `composition.py` drops `release_executor` from the contribution and
+          `release_dispatcher` from the composed result. `container.py` builds the guard (in
+          place of B.1's interim one), the executor, and the port, and passes the guard to
+          the ledger.
+        - Bare metal:
+          - `runtime.py` stops building a release delegate;
+          - `services/bare_metal_operations_service.py` loses its reservation-shaped
+            release-delegate method;
+          - `reclaim_access` takes explicit parameters (point 5), which the provider's
+            `dispatch_teardown` supplies.
+        - Tombstone `vm_provisioning_adapter/release.py` and
+          `bare_metal_provisioning_adapter/release.py` (with `get_physical_host_id`).
+        - Tests:
+          - `provisioning/compute/tests/unit/test_release.py`: every aggregate state in
+            point 3's table, the proof's parts, abandon-then-prove under a concurrent
+            dispatch, a refused direct release re-read once;
+          - `test_lease_lifecycle.py`: a pending release survives a restarted lifecycle;
+            teardown begins at `active`; no grace timeout in flight; `teardown_failed` while
+            releasing ends `release_failed`, and retry-release then adopts `torn_down`;
+          - the service's `tests/unit/services/test_release_executors.py`,
+            `test_ledger_lease_lifecycle.py`, `test_authority_composition.py` (the guard
+            reaches the ledger), and `integration/test_legacy_backfill_teardown.py`;
+          - `integration/test_capacity_api.py`: release of a committed reservation under the
+            guard, both permitted and refused;
+          - a new `integration/test_lease_release_api.py` covering:
+            - a bare-metal expiry through the aggregate;
+            - a never-dispatched lease released directly;
+            - a lease terminated while its create is in flight;
+            - a site release refused for an `active` aggregate;
+            - a `failed` aggregate ending `release_failed`.
+  - [ ] 5B.8.B.4 Deletions (decision 1; point 5).
+        - VM:
+          - `controllers/leases_controller.py` (tombstoned);
+          - the lease route declarations in `vm_provisioning_operator/routes.py`;
+          - the `Lease*` models in `vm_provisioning_operator/models.py`;
+          - the extension client's lease methods.
+        - Bare metal:
+          - `controllers/bare_metal_leases_controller.py` and
+            `services/bare_metal_lease_service.py` (tombstoned, taking
+            `bare_metal_access_ref` with it);
+          - `BARE_METAL_LEASE_ROUTES` and `BareMetalLeaseClient` in
+            `arkhai_bare_metal/provisioning_client.py`, and `BareMetalLeaseView` in
+            `arkhai_bare_metal`;
+          - `BareMetalLeaseCreate` is renamed `BareMetalAccessGrant` in `arkhai_bare_metal`,
+            the provider, and the operations service;
+          - `bare_metal_executor_ref` and `PHYSICAL_HOST_ID_REF_KEY` stay: they build the
+            job's `executor_ref`.
+        - Both `routers.py` follow.
+        - Tests:
+          - `test_leases_api.py` becomes the family lease API test (list filters, roles,
+            write-once registration, no update route);
+          - `integration/test_bare_metal_leases_api.py` and
+            `unit/services/test_bare_metal_lease_service.py` are tombstoned;
+          - `test_bare_metal_mock_profile.py` drives grants through `begin_fulfillment`;
+          - `domains/bare_metal/tests/test_provisioning_client.py` keeps only the test-route
+            declarations;
+          - `test_schema.py` follows the rename;
+          - the service's `tests/unit/test_lease_models.py` loses the deleted models;
+          - `tests/integration/conftest.py` loses `BareMetalLeaseClient`.
+  - [ ] 5B.8.B.5 Storefronts (decision 9 and point 4).
+        - VM:
+          - `domains/vms/storefront/src/market_storefront/settlement_composition.py`'s
+            terminal-settlement path asks the capacity runtime to `release` the reservation,
+            and truncates only if the release returns `None`; its stage events say which
+            happened.
+          - `hosted_routes.py` follows.
+          - `admin_controller.py`'s interruption keeps its 409 on refusal.
+        - Bare metal: `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/hosted_lifecycle.py`'s
+          `_teardown` treats a `None` release as not released in its no-fulfillment branch,
+          and raises so the lifecycle retries.
+        - Unchanged code, changed behaviour (point 4): the VM admin bulk release and the VM
+          failure-policy release no longer free a delivered lease.
+        - Tests:
+          - VM `tests/integration/test_abandon_truncation.py`: a `reserved` hold is released;
+            a delivered lease is truncated;
+          - the bare-metal storefront's `tests/test_hosted_lifecycle.py`: a refused release
+            leaves the lifecycle unreleased.
+  - [ ] 5B.8.B.6 e2e.
+        - `scenarios/vms/conftest.py`'s `DealLease` reads leases through
+          `SyncComputeProvisioningClient`, and backdates through
+          `SiteCapacityClient.truncate_lease` signed as admin.
+        - `test_full_deal.py`, `test_full_deal_buyer_cli.py`, and
+          `test_buy_oneshot_buyer_cli.py` follow.
+        - Gate as above, plus `kit/site`, `kit/fulfillment`, both storefronts, and the
+          API-credit service (which composes the site ledger without a guard).
 
       **Slice C: the system split and the last `container` reach** (decisions 4 and 7).
 
@@ -1694,8 +1847,9 @@ paths and provider-neutral release in provisioning.
       `domains/bare_metal/buyer/src/arkhai_bare_metal_buyer/fulfillment.py`.
 - [ ] 7.2 Commit and register: `fulfillment_service.py` commits the reservation with the
       materialized lease window before scheduling, as `hosted_lifecycle.py` does, and
-      registers the lease (executor target and window; registration names no offering
-      mode since 5B.8.B.2) once fulfillment is active; `site_clients.py`'s
+      registers the lease (executor target and the window its commit returned, per
+      `design.md`'s slice B design review, point 2; registration names no offering mode
+      since 5B.8.B.2) once fulfillment is active; `site_clients.py`'s
       `SelectedSiteFulfillmentClient` gains `register_lease`, `terminate_lease`, and
       `get_lease` over `compute_provisioning_client`, routed by the reservation's recorded
       site.
@@ -1837,7 +1991,8 @@ service code.
       contracts and client distributions, and kit layers the resource-pool contracts and
       client; `VersionedEnvelope` is named among `arkhai-core`'s contents and leaves the
       fulfillment kit's carrier list; "Release" says release follows the fulfillment
-      aggregate's state. The route-contract section was promoted during design.
+      aggregate's state, and that capacity is freed only behind the release guard the
+      provisioning composition supplies to the site authority. The route-contract section was promoted during design.
 - [ ] 11.2 `docs/development/TESTING.md`: three lanes on images built once; the loop table
       gains the bare-metal publication preview; shared compute deal stages and the
       per-domain driver; the mock profile's per-adapter executors and rule routes; the
@@ -1896,7 +2051,9 @@ service code.
       service, and route the findings under "Controls and routes (5B.8)" (`kit/site`'s own
       router, VM's literal pool-override path, the site's duplicated server and client
       contracts, bare metal's untyped mock-rule routes, the unreachable `provisioning`
-      state, path templates in the family contracts).
+      state, path templates in the family contracts, the uncalled
+      `find_active_lease_by_vm_target`, and a lease truncated before registration remaining
+      extendable).
 - [ ] 2.7 **Campaign index currency.** Update this change's row and the Goal 3, 4, and 7
       graphs in `openspec/changes/README.md`, and the rows of
       `bare-metal-and-credits-domain-stacks`, `kit-owned-storefront-shell`,
@@ -1934,7 +2091,7 @@ service code.
 | Compute provisioning owns jobs and hosts; executors are complete; adapters contribute preparation and meaning and import neither each other nor the deployed service | `openspec/specs/physical-provisioning/spec.md` — "Adapter-owned compute execution", "Compute-owned caller contract", "Compute provisioning owns the job and host authorities", "Provisioning adapters import neither each other nor the deployed service"; `docs/development/ARCHITECTURE.md` |
 | A capability's HTTP surface is five pieces (wire models, route contract, typed client, route service, HTTP binding), the binding owned by whatever composes the process | `docs/development/ARCHITECTURE.md` — "Route contracts and their HTTP binding" (promoted 2026-10-04, during design, at the maintainer's request) |
 | Leases have one family surface that records and releases and never delivers; leases are keyed by reservation id; the lease routes' roles | `openspec/specs/physical-provisioning/spec.md` — "Leases have one family surface that records and releases" |
-| A lease's executor identity and evidence are fixed at registration; its end moves only through site truncation | `openspec/specs/physical-provisioning/spec.md` — "A lease's executor identity and evidence are fixed at registration"; `openspec/specs/site-capacity/spec.md` — "A reservation's lease tail is written once", "Lease truncation neither resurrects nor extends a lease" |
+| A lease's executor identity and evidence are fixed at registration, which is keyed on the executor target; once registered, its end moves only through site truncation; `commit` refuses the lifecycle's states and leaves a registered lease's window alone; a storefront registers with the committed window | `openspec/specs/physical-provisioning/spec.md` — "A lease's executor identity and evidence are fixed at registration"; `openspec/specs/site-capacity/spec.md` — "A reservation's lease tail is written once", "Commit neither resurrects a lease nor moves a registered lease's window", "Lease truncation neither resurrects nor extends a lease" |
 | The lease lifecycle is mode-agnostic: one provider-neutral release executor and status port | `openspec/specs/physical-provisioning/spec.md` — "Executor-dispatched lifecycle", "Site-backed release lifecycle", "Lease release delegates to durable fulfillment teardown"; `docs/development/ARCHITECTURE.md` "Release" |
 | Every provisioning route admits the administrator (a repository-wide stance applied to this service) | `openspec/specs/physical-provisioning/spec.md` — "Every provisioning route admits the administrator"; `docs/development/ROADMAP.md` (the repository-wide gap) |
 | The composition root builds the one job authority and the one host authority | `openspec/specs/physical-provisioning/spec.md` — "Compute provisioning owns the job and host authorities"; `docs/development/ARCHITECTURE.md` "Family kits" |
@@ -1943,6 +2100,7 @@ service code.
 | `VersionedEnvelope` lives in `arkhai-core` | `openspec/specs/fulfillment/spec.md` — "Versioned envelopes"; `docs/development/ARCHITECTURE.md` (the fulfillment kit's carrier modules) |
 | Delivery happens only through fulfillment; the executor-action submission is removed | `openspec/specs/physical-provisioning/spec.md` — "Delivery happens only through fulfillment", "Validated executor registration"; `openspec/specs/compute-provisioning-contract/spec.md` (the removed requirement and the purpose statement) |
 | An undelivered lease is released by what its fulfillment proves; an uncommitted hold is released, not truncated | `openspec/specs/physical-provisioning/spec.md` — "An undelivered lease is released by what its fulfillment proves"; `openspec/specs/site-capacity/spec.md` — "Lease truncation neither resurrects nor extends a lease" |
+| Release follows every fulfillment aggregate state; capacity is freed only behind a composition-supplied release guard, which replaces the settlement-abandonment hook | `openspec/specs/physical-provisioning/spec.md` — "An undelivered lease is released by what its fulfillment proves"; `openspec/specs/site-capacity/spec.md` — "Reservation supersede and the release guard"; `docs/development/ARCHITECTURE.md` "Release" |
 | Host import belongs to the implementation that reads its format | `openspec/specs/physical-provisioning/spec.md` — "Host import belongs to the execution implementation that reads its format" |
 | Resource pools and capacity definitions keep thin surfaces of their own | `openspec/specs/resource-pool-management/spec.md` — "The pool wire contract and client are thin distributions"; `openspec/specs/site-capacity/spec.md` — "Capacity-definition import has a thin typed client"; `docs/development/ARCHITECTURE.md` kit layers |
 | Findings recorded under "Controls and routes (5B.8)" | `docs/development/ROADMAP.md` or the change index, at closeout |

@@ -86,11 +86,14 @@ API-credit deal runs inside the VM lane.
   Ansible host import moves to the Ansible distribution.
 - Consolidate leases on one family surface that records and releases and never delivers:
   VM's lease routes are absorbed into it, bare metal's lease routes (and the access grant
-  they made outside fulfillment) are deleted, there is no lease update, a lease's end moves
-  only through the site's truncation, lease registration writes the lease tail once, and
-  the lease lifecycle and release are mode-agnostic. A lease that was never delivered is
+  they made outside fulfillment) are deleted, there is no lease update, a registered lease's
+  end moves only through the site's truncation, lease registration writes the lease tail
+  once, `commit` neither resurrects a lease nor moves a registered lease's window, and the
+  lease lifecycle and release are mode-agnostic. A lease that was never delivered is
   released by what its fulfillment proves, and an uncommitted hold is released rather than
-  truncated. Every route on the provisioning service admits the administrator.
+  truncated. The site authority frees capacity only behind a release guard the
+  provisioning composition supplies, replacing the settlement-abandonment hook. Every
+  route on the provisioning service admits the administrator.
 - Delete the generic executor-action route, its contract job routes, and the
   compute-adapter architecture behind them, so delivery happens only through fulfillment.
 - Serve the family's job, host, lease, and test-job routes from framework-free route
@@ -134,9 +137,11 @@ None.
   happens only through fulfillment; an undelivered lease is released by what its
   fulfillment proves; host import belongs to the implementation that reads its format;
   executor registration is the job executor table's.
-- `site-capacity`: a reservation's lease tail is written once; lease truncation neither
-  resurrects nor extends a lease, and refuses an uncommitted hold; capacity-definition
-  import has a thin typed client.
+- `site-capacity`: a reservation's lease tail is written once; `commit` neither resurrects
+  a lease nor moves a registered lease's window; lease truncation neither resurrects nor
+  extends a lease, and refuses an uncommitted hold; every capacity reclaim consults a
+  composition-supplied release guard, which replaces the settlement-abandonment hook;
+  capacity-definition import has a thin typed client.
 - `compute-provisioning-contract`: the versioned executor action submission is removed;
   jobs are submitted by fulfillment providers.
 - `resource-pool-management`: the pool wire contract and client are thin distributions.
@@ -176,7 +181,9 @@ None.
   extension client over the family client.
 - `core` (`arkhai-core`): `VersionedEnvelope`. `kit/fulfillment` and its importers take it
   from there.
-- `kit/site`: write-once lease attachment and guarded truncation.
+- `kit/site`: write-once lease attachment, guarded commit and truncation, and the release
+  guard in place of the settlement-abandonment hook. `kit/fulfillment` records the create
+  handle through the ledger's narrowed create-handle write.
 - `provisioning/compute/service`: Dockerfile and settings copy each domain's `iac`; the
   service composes contributed diagnostics and mounts the moved route services.
 - `provisioning/compute`: the `(offering_mode, action)` executor table, the
@@ -260,8 +267,10 @@ None.
   connectivity is probed by connection kind; the family's wire contract and client are
   thin distributions — `openspec/specs/physical-provisioning/spec.md`,
   `docs/development/ARCHITECTURE.md`.
-- A lease tail is written once and truncation neither resurrects nor extends a lease, nor
-  ends an uncommitted hold; capacity-definition import has a thin client —
+- A lease tail is written once; `commit` neither resurrects a lease nor moves a registered
+  lease's window; truncation neither resurrects nor extends a lease, nor ends an
+  uncommitted hold; capacity reclaims consult a release guard; capacity-definition import
+  has a thin client —
   `openspec/specs/site-capacity/spec.md`.
 - Delivery happens only through fulfillment; an undelivered lease is released by what its
   fulfillment proves; host import belongs to its implementation —

@@ -1050,7 +1050,8 @@ Decisions:
   at the site, including other storefronts'. Retry-release and force-release lose the
   seller role the contract routes gave them; no production code calls them as seller.
 
-**2. No lease update; a lease's end moves only through the site's truncate-lease.**
+**2. No lease update; a registered lease's end moves only through the site's truncate-lease.**
+(Amended at the slice B design review, below: registration and `commit` rules.)
 
 VM's `PATCH /api/v1/leases/{id}` wrote any non-terminal reservation, `releasing` included.
 It is removed rather than reproduced, field by field:
@@ -1092,13 +1093,18 @@ Three defects in it are fixed:
 and overwrote the target, `executor_ref`, start, end, and `create_job_id`, setting the
 state to `leased`; the VM storefront's fulfillment-resume pass re-registers with the
 deal's original window, which would restore a truncated end or flip a releasing lease back
-to `leased`. Now: a first registration applies only to a reservation not yet leased; a
-repeat on a `leased` reservation is idempotent when its target and start match, returns
-the record unchanged, and never moves the end; a repeat with a different target or start
+to `leased`. Now a lease is registered once its executor target is recorded: a first
+registration (no target recorded) on a `reserved`, `provisioning`, or `leased` reservation
+records the tail and leaves it `leased`; a repeat with the same target and start returns
+the record unchanged and never moves the end; a repeat with a different target or start
 is refused (409); registration on `releasing`, `release_failed`, or `unmanaged` is
-refused; a recorded `create_job_id` is never replaced. The maintainer weighed accepting
-that an operator can break things through admin routes, and chose consistency with
-decision 2.
+refused; a recorded `create_job_id` is never replaced. `commit` gets the matching guards:
+it refuses the lifecycle's states and leaves a registered lease's window alone. The
+maintainer weighed accepting that an operator can break things through admin routes, and
+chose consistency with decision 2. (The first sentence of this rule originally said a
+first registration applies only to a reservation not yet leased; the slice B design
+review found that `commit` always leaves the reservation `leased` first, and keyed
+registration on the executor target instead.)
 
 **3. Leases are keyed only by reservation id.** `escrow_uid` is Alkahest's mechanism
 reference, not the universal deal identity (`obligation_ref`); the site lifts it out of
@@ -1192,9 +1198,9 @@ comment hygiene, and a checkpoint:
   runner; adapters' web dependencies; the drift-guard test.
 - **B, the lease surface and mode-agnostic release** (decisions 1–3, 9, and 7.3): the lease
   route service and roles; registration without `offering_mode`; `attach_lease` write-once
-  and the truncation guards in `kit/site`; one release executor and status port, deciding
-  by the aggregate's state; the VM storefront releasing an uncommitted hold instead of
-  truncating it; VM's and bare metal's lease surfaces deleted; grants only through
+  and the truncation and commit guards in `kit/site`; the release guard where capacity is
+  freed; one release executor and status port, deciding by the aggregate's state; the VM
+  storefront releasing an uncommitted hold instead of truncating it; VM's and bare metal's lease surfaces deleted; grants only through
   fulfillment; e2e `DealLease` through the family client and the site client.
 - **C, the system split and the last `container` reach**: health, status, version, and the
   worker controls bound by the service; status with the execution section and contributed
@@ -1325,32 +1331,36 @@ would force consumers to install what they do not use. So:
 **9. A lease that was never delivered is released by what its fulfillment proves**
 (design review). In this codebase `commit` moves a reservation straight from `reserved` to
 `leased`, and nothing sets `provisioning`; so `leased` spans everything from "committed,
-fulfillment never begun" to "active". Fulfillment teardown can begin only from `active` (or
-be retried from `teardown_failed`); the settlement-abandonment hook abandons only an
-`assigned` aggregate; and `failed` arises only when a provider reported a create as
-succeeded but its resource identity could not be resolved, so a workload may exist. Under
+fulfillment never begun" to "active". Fulfillment teardown can begin only from `active`
+(convergence retries it from `teardown_failed`); the settlement-abandonment hook abandons
+only an `assigned` aggregate; and a `failed` aggregate may have left a workload (the slice B
+design review corrected the causes first recorded here: see its point 3). Under
 mode-agnostic release every undelivered lease would therefore end in `release_failed`. The
 review proposed releasing `reserved` and `provisioning` directly and truncating `leased`; the
 first half is adopted, the second does not hold, because a `leased` reservation is not
 necessarily delivered. Decided:
 
 - **An uncommitted hold is released, not truncated.** The VM storefront's
-  terminal-settlement path releases a `reserved` reservation through the capacity runtime's
-  release, which offers the abandonment hook its chance; truncation refuses `reserved` (and
-  `provisioning`).
-- **Release follows the aggregate's state:**
+  terminal-settlement path asks the capacity runtime to release the reservation and
+  truncates only if the release is refused; the site's release guard (slice B design
+  review, point 4) frees an uncommitted hold and refuses a delivered lease. Truncation
+  refuses `reserved` (and `provisioning`).
+- **Release follows the aggregate's state.** The complete table, by every aggregate state,
+  is the slice B design review's point 3; in summary:
 
   | Aggregate | Release |
   |---|---|
-  | `active` | begin teardown, as today |
-  | absent or `assigned`, with provenance proving no dispatch | abandon an `assigned` aggregate and release the capacity directly, as a completed release |
+  | `active`, or teardown already begun | begin or adopt teardown |
+  | absent, `assigned`, or `abandoned`, with provenance proving no dispatch; or `torn_down` | free the capacity directly, as a completed release, through the release guard |
   | `dispatch_pending` or `dispatching` | the release is remembered and waits for the create to settle |
-  | `failed`, or absent or `assigned` without that proof | `release_failed`, for an operator to verify the host and force-release |
+  | `failed`, or absent, `assigned`, or `abandoned` without that proof | `release_failed`, for an operator to verify the host and force-release |
 
-- **Provenance proving no dispatch** is all three of: the aggregate is absent or `assigned`;
-  the reservation records no create handle; the job authority holds no job bound to the
-  reservation (job rows carry an indexed `capacity_reservation_id`). With the generic action
-  route deleted, fulfillment is the only path that puts a job on a reservation.
+- **Provenance proving no dispatch** is all three of: the aggregate is absent, `assigned`, or
+  `abandoned`; the reservation records no create handle; the job authority holds no job
+  bound to the reservation (job rows carry an indexed `capacity_reservation_id`). With the
+  generic action route deleted, fulfillment is the only path that puts a job on a
+  reservation. The proof is checked by the release guard inside the transaction that frees
+  the capacity (slice B design review, point 4).
 - **An in-flight termination is remembered by the lease lifecycle** (option (a), chosen over
   a teardown intent on the aggregate). Expiry or terminate moves the reservation to
   `releasing` at once, with the fulfillment id as its release handle; `releasing` is already
@@ -1430,6 +1440,10 @@ asked for seven corrections, each verified in code and discussed with the mainta
 - "An administrator can do everything" holds only on the provisioning service's route
   table; the repository-wide stance is a roadmap gap.
 - Path templates in the family route contracts (decision 4, option 2).
+- `CapacityLedgerService.find_active_lease_by_vm_target` has no production caller and
+  carries VM vocabulary in `kit/site`.
+- A lease truncated after commit but before registration can still be extended (slice B
+  design review, point 2).
 - Published packages depend on unpublished ones (found in A0): `arkhai-compute-provisioning-service`
   and the VM storefront depended on `arkhai-compute-provisioning`, and `kit-site` depends on
   `kit-resource-pools`, none of which `.github/workflows/publish-pypi.yml` publishes. After A0
@@ -1459,6 +1473,198 @@ with the maintainer at the A0 checkpoint's start; the rest are open for review.
 | System status, health, readiness, and worker controls return dicts in VM's client, and callers index them | The family client keeps dicts for those until C types status as `SystemStatusResponse`; fulfillment, lease, job, host, and version methods return contract models |
 | The bare-metal adapter declared dependencies on VM's adapter and VM's client it never imports | VM's client removed; VM's adapter restored at the gate, because the service module the adapter reads its collaborators from loads VM's adapter at import |
 | Checkpoint review: `ExecutorActionEnvelope` stayed in the thin contracts package after the action route's deletion, and four contract-job models lost their only route | Maintainer decision: the envelope becomes the job authority's internal `JobActionRequest`, the error envelope moves beside `JobFailure`, and the dead models go (5B.8.A.5) |
+
+**Slice B design review (2026-10-05).** Slice B was audited against the code before any of
+it was implemented. Decisions 2 and 9 rested on premises the code does not hold, and
+several states and callers they did not consider needed a ruling. Each point was discussed
+with the maintainer and decided as recorded here; decisions 2 and 9 above are amended in
+place where they stated the overturned rule.
+
+1. **Registration is recorded by executor target.** Decision 2 said a first registration
+   applies only to a reservation not yet leased. `commit` moves a reservation from
+   `reserved` straight to `leased` and records its window, and every storefront commits
+   before it registers, so read literally every first registration would be refused.
+   Decided: a lease counts as registered once the reservation records an executor target.
+   - A first registration (no target recorded) on a `reserved`, `provisioning`, or `leased`
+     reservation records the executor target and reference, the window it names, and the
+     create handle (never replacing a recorded one), and leaves the reservation `leased`.
+   - A repeat with the same target and start returns the record unchanged and never moves
+     the end.
+   - A repeat with a different target or start, or any registration on a `releasing`,
+     `release_failed`, or `unmanaged` reservation, raises `CapacityConflictError` (409).
+   - `None` means no such live reservation.
+
+   Every guarantee decision 2 states is kept.
+
+2. **`commit` is a second writer of the lease window.** `HELD_RESERVATION_STATES` includes
+   `releasing`, `release_failed`, and `unmanaged`, and `commit` set every held state back to
+   `leased` while rewriting the window: the defect decision 2 fixes in `attach_lease` and
+   `truncate_lease`. On a `leased` reservation it also rewrites start and end. The VM
+   storefront depends on that rewrite: it commits at settlement, commits again after
+   provisioning to move the window to provision-complete plus the duration, then registers.
+   Its resume pass re-commits before re-registering, and when the deal records no start it
+   recomputes the window from the current time, so it could undo a truncation or a release
+   however strict registration became.
+
+   Decided:
+   - `commit` refuses `releasing`, `release_failed`, and `unmanaged` with
+     `CapacityConflictError` (409), as it already refuses a state that is not held.
+   - On a `leased` reservation, `commit` re-records the window only until the lease is
+     registered. After registration it returns the record unchanged, whatever window it
+     names.
+   - The resulting invariant: once a lease is registered, its window moves only through
+     truncation, and only earlier. Before registration the window is the commit's.
+   - API credits commits through the same ledger but never registers a lease, so its
+     behaviour is unchanged.
+
+   The maintainer added one consequence. Write-once registration refuses a repeat whose
+   start differs, so a resume pass that registered with a start it computed from the
+   current time would have its own re-registration refused. Both registration paths
+   therefore register with the window `commit` returns rather than one they computed:
+   - before registration that is the window the commit just recorded;
+   - after registration it is the recorded window, so the repeat matches;
+   - when the commit fails, the pass skips registration and leaves it to the next pass,
+     rather than registering a window `commit` never recorded.
+
+   This applies to the VM storefront's post-provision path, its resume pass, and the
+   bare-metal registration task 7.2 adds.
+
+   **Recorded gap.** A lease truncated after commit but before registration can still be
+   extended, by a later pre-registration commit or by the first registration, which records
+   the window it names. The maintainer accepted this as negligible. Closing it would need
+   the reservation to record that it was truncated.
+
+3. **Release covers every aggregate state.** Decision 9's table named five aggregate
+   conditions; the aggregate has ten states. The code corrected two premises.
+   - **`teardown_failed` is not terminal.** Convergence requeues it every cycle with no
+     attempt ceiling. `begin_fulfillment_teardown` treats it, like every state from
+     `teardown_dispatch_pending` on, as already initiated: it returns the current view and
+     starts nothing. The lifecycle therefore never restarts a teardown; it adopts one.
+   - **`failed` has more causes than decision 9 recorded.** It also arises when the
+     provider reports the create failed, when the provider reports success but the metadata
+     cannot resolve to a resource identity, and through a permanent dispatch failure. Each
+     may leave a partial workload. `failed` has no outgoing transition, so no automated
+     teardown exists, and the outcome decision 9 gave it, `release_failed`, stands.
+
+   A dispatch failure that can be retried leaves the aggregate `dispatch_pending`, possibly
+   after the job reached the provider. The create handle reaches the reservation only when
+   the dispatch is acknowledged, and that write is best-effort (`attach_executor_job`
+   swallows its failure). So the aggregate's state, not the handle, is the primary evidence
+   that nothing was dispatched.
+
+   Decided, by the aggregate's state when expiry or termination asks for release:
+
+   | Aggregate | How it arises | At expiry or terminate | While `releasing` |
+   |---|---|---|---|
+   | none | committed, never scheduled | free directly if the proof holds | — |
+   | `assigned` | scheduled, `begin` never called | abandon, then free directly if the proof holds | — |
+   | `abandoned` | abandoned before dispatch (only `assigned` can be) | free directly if the proof holds | — |
+   | `dispatch_pending` | `begin` accepted, dispatch not acknowledged; may have reached the provider | `releasing`, release handle the fulfillment id | wait; no grace timeout |
+   | `dispatching` | dispatch acknowledged, create running | as above | wait, no grace; at `active` begin teardown; at `failed`, `release_failed` |
+   | `active` | delivered | begin teardown; `releasing` | wait; grace timeout applies |
+   | `teardown_dispatch_pending`, `tearing_down` | teardown begun elsewhere | adopt it (begin is idempotent); `releasing` | wait; grace timeout applies |
+   | `teardown_failed` | teardown failed; convergence retries | adopt it; `releasing` | `release_failed` |
+   | `torn_down` | torn down elsewhere, capacity not yet freed | free directly (teardown proven) | released |
+   | `failed` | see above | `release_failed` | `release_failed` |
+
+   "The proof" is decision 9's provenance: no create handle on the reservation and no job
+   bound to it. For `assigned` the order matters: abandon first, then check. Abandonment is
+   a compare-and-set, and once an aggregate is abandoned nothing can dispatch it, so a
+   concurrent dispatch cannot outrun the check. If dispatch wins, release follows the new
+   state. Freeing directly goes through the release guard (point 4); if the guard refuses
+   because the state moved, the release executor reads the aggregate once more and follows
+   its new state.
+
+   Rulings on the questions the table raised:
+   - **(a) `teardown_failed` while `releasing` keeps today's mapping to `release_failed`.**
+     Convergence keeps retrying, so the aggregate may reach `torn_down` while the lease is
+     `release_failed`. An operator's retry-release then adopts the finished teardown and
+     releases. The alternative, treating it as still in flight, would need a new state,
+     because the grace timeout is anchored at the lease's end and termination does not move
+     the end.
+   - **(b) A dispatch that never succeeds leaves the lease `releasing` indefinitely.** No
+     grace timeout runs while a create is in flight, as decision 9 decided, and convergence
+     has no attempt ceiling. Accepted; the stuck aggregate stays visible through
+     convergence's recovery diagnostics.
+   - **(c) Existing `releasing` rows** whose release handle is a legacy job id or the
+     `direct-release` sentinel resolve to no fulfillment and end `release_failed`. Accepted
+     under "Pre-release wire and schema changes are accepted".
+   - **(d) Decision 9's rationale for `failed` is corrected** as above; its outcome is
+     unchanged.
+
+4. **Capacity is freed only behind a release guard.** Releasing an uncommitted hold from
+   the storefront needs to know the hold is uncommitted. The site's `release` frees any
+   held state with no teardown proof, so reading the state and then releasing leaves a
+   window in which a concurrent commit and dispatch would have delivered capacity freed.
+   The maintainer proposed enforcing the rule where capacity is freed: it protects every
+   caller with no precondition to pass and less client work, and a refused release leaves
+   the hold to the lifecycle's teardown path.
+
+   A fixed rule in `kit/site` would break legitimate callers that free *committed*
+   reservations on proof the site cannot see. The bare-metal storefront releases after
+   proving `torn_down` (`fulfillment_service.py`, and the hosted lifecycle's `_teardown`)
+   and when no fulfillment ever began (the hosted `_teardown`). API credits composes the
+   same ledger and has no teardown at all.
+
+   Decided: the rule is enforced in the ledger, with the proof supplied by composition.
+   - **The guard replaces the abandonment hook.** `kit/site`'s
+     `SettlementAbandonmentHook` becomes a `CapacityReleaseGuard`, still a protocol that
+     names no fulfillment type. It is called in the reclaiming transaction, with the
+     ledger's session, in the same three places the hook runs: `release`, the supersede
+     step of `resize_reservation`, and TTL-hold expiry. It answers whether the capacity may
+     be freed and may abandon an `assigned` aggregate in that session; it never commits.
+   - **A refused reclaim changes nothing.** That includes no abandonment.
+     - A refused `release` returns `None`, as truncation does under decision 2, and every
+       existing caller already handles `None`.
+     - A refused resize leaves the old reservation as it was and returns `None`.
+     - A refused TTL expiry leaves the hold for the next sweep.
+     - For an already-released reservation the guard is still offered, for its abandonment,
+       and the record is returned, as the hook is today.
+   - **The compute provisioning composition supplies the guard.** It permits a `torn_down`
+     aggregate, and an absent, `assigned`, or `abandoned` one when the proof holds,
+     abandoning `assigned` first. It refuses every other state. It reads the fulfillment
+     repository and the job rows through the ledger's session, because that transaction
+     already holds SQLite's single writer slot; a second session would wait out the busy
+     timeout, which is why `fulfillment_persistence.py` writes the create handle in the
+     caller's session. So the job check is a session-accepting query beside the job
+     authority, not a `JobEngine` method opening its own session.
+   - **A composition with no guard frees as today.** API credits supplies none.
+   - **Force-release stays the operator's override.** It is recorded as forced, so audit
+     still distinguishes it from proven teardown.
+
+   Consequences:
+   - **One place for the proof.** Decision 9's provenance check lives in exactly one place.
+     The lease lifecycle's "nothing delivered" outcome is a guarded release, and the
+     storefront's terminal-settlement path becomes "release, and truncate if refused", with
+     no state read first. A storefront release attempt on a delivered lease is refused, so
+     it never frees delivered capacity, consistent with "Storefront teardown goes through
+     lease termination".
+   - **VM admin bulk release.** `/api/v1/admin/portfolio/release-reservations` no longer
+     frees delivered leases; they wait for expiry. An e2e module teardown calls it
+     best-effort, and the pipeline's fresh stacks are unaffected.
+   - **VM failure-policy release.** The `release_capacity` call after a failed create is
+     refused, so the capacity stays held until expiry and then goes to `release_failed`:
+     decision 9's stance for `failed`. No e2e scenario exercises it.
+   - **Bare metal's hosted no-fulfillment path.** The guard would rightly refuse when the
+     storefront crashed after dispatch but before recording the fulfillment id. That path
+     ignores `release`'s return today, so it now treats `None` as not released.
+
+5. **Plan corrections** (agreed; no design change).
+   - `bare_metal_access_ref` lives in the adapter's lease service, not in
+     `arkhai_bare_metal`.
+   - `BareMetalOperationsService.reclaim_access` takes a reservation-shaped dict, so it
+     takes explicit parameters once the lease service goes.
+   - `bare_metal_executor_ref` builds the job's `executor_ref`, which decision 1 permits,
+     and stays.
+   - `route_contract_from_declaration`'s admin check requires every existing declaration
+     to admit the administrator; implementation verifies each before enabling it.
+   - Two narrowings follow from decisions 2 and 3:
+     - The ledger's general field writer (`update_lease_fields`, its session form, and the
+       port's `update_reservation_fields`) loses its last route callers. Its one remaining
+       use is fulfillment recording the create handle, so it narrows to a session-accepting
+       create-handle write that never replaces a recorded handle.
+     - The site authority port's by-escrow lookup loses its compute callers. The ledger's
+       `get_reservation_by_escrow` stays for the API-credit service.
 
 ### Implementation-review fixes for Sections 4–5
 
@@ -1655,6 +1861,19 @@ Superseded by "Controls and routes (5B.8)" and its design review (2026-10-04):
   contracts distribution.
 - **Release status selected by offering mode, and the `direct-release` sentinel** → decision
   1: one release executor and status port.
+
+Superseded at the slice B design review (2026-10-05):
+
+- **A first lease registration applies only to a reservation not yet leased** (decision 2)
+  → point 1: registration is recorded by executor target.
+- **Truncation is the only operation that moves a recorded lease end** (decision 2) → point
+  2: once a lease is registered; before registration `commit` re-records the window.
+- **`JobEngine.has_job_for_reservation`** (planned for the provenance proof) → point 4: a
+  session-accepting query, because the proof runs inside the ledger's write transaction.
+- **The storefront releases a `reserved` hold after reading its state** (decision 9) →
+  point 4: it asks for release and truncates if the release guard refuses.
+- **The settlement-abandonment hook** → point 4: the release guard, which also decides
+  whether capacity may be freed.
 
 Superseded after the 2026-10-02 job and host design review:
 

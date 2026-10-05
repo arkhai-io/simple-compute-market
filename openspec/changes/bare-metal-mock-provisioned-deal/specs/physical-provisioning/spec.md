@@ -196,14 +196,16 @@ versioned projection.
 
 ### Requirement: A lease's executor identity and evidence are fixed at registration
 
-Lease registration MUST write a reservation's lease tail once. A first registration MUST
-apply only to a reservation not yet leased. A repeated registration on a leased
-reservation with the same executor target and lease start MUST return the lease unchanged
-and MUST NOT move its end; one naming a different target or start MUST be refused; a
-registration on a `releasing`, `release_failed`, or `unmanaged` reservation MUST be
-refused; a recorded create handle MUST NOT be replaced. No lease route MAY change a
-lease's executor identity, its start, or its create or release handles after registration.
-A lease's end MAY move only through the site authority's lease truncation.
+Lease registration MUST write a reservation's lease tail once, through the site authority's
+write-once registration: a lease is registered once its reservation records an executor
+target; a first registration MUST be accepted on a `reserved`, `provisioning`, or `leased`
+reservation; a repeated registration with the same executor target and lease start MUST
+return the lease unchanged and MUST NOT move its end; one naming a different target or start
+MUST be refused; a registration on a `releasing`, `release_failed`, or `unmanaged`
+reservation MUST be refused; a recorded create handle MUST NOT be replaced. No lease route
+MAY change a lease's executor identity, its start, or its create or release handles after
+registration. Once registered, a lease's end MAY move only through the site authority's
+lease truncation. A storefront MUST register a lease with the window its commit returned.
 
 #### Scenario: A storefront re-registers after a restart
 
@@ -261,7 +263,17 @@ No provisioning route MAY submit delivery work (creating a workload or granting 
 
 ### Requirement: An undelivered lease is released by what its fulfillment proves
 
-A lease's release MUST follow the state of its reservation's fulfillment aggregate. An `active` aggregate MUST be torn down before capacity returns. When the aggregate is absent or `assigned` and the reservation's provenance proves that nothing was dispatched — no aggregate past `assigned`, no create handle on the reservation, and no job bound to the reservation — the release MUST abandon an `assigned` aggregate and return the capacity directly, as a completed release. When the create is in flight, the release MUST be remembered durably, with the reservation `releasing`, and teardown MUST begin once the aggregate reaches `active`; the grace timeout MUST NOT run while the create is in flight. A `failed` aggregate, or an absent or `assigned` one without that proof, MUST put the lease in `release_failed` for an operator to verify and force-release.
+A lease's release MUST follow the state of its reservation's fulfillment aggregate:
+
+- An `active` aggregate MUST be torn down before capacity returns.
+- An aggregate whose teardown has already begun — `teardown_dispatch_pending`, `tearing_down`, or `teardown_failed` — MUST have that teardown adopted, not a second one begun.
+- A `torn_down` aggregate MUST return the capacity as a completed release.
+- An absent, `assigned`, or `abandoned` aggregate MUST return the capacity directly, as a completed release, only when the reservation's provenance proves nothing was dispatched: no create handle on the reservation and no job bound to the reservation. An `assigned` aggregate MUST be abandoned before the proof is checked, so a concurrent dispatch cannot outrun it.
+- When the create is in flight (`dispatch_pending` or `dispatching`), the release MUST be remembered durably, with the reservation `releasing` and the fulfillment as its release handle, and teardown MUST begin once the aggregate reaches `active`; the grace timeout MUST NOT run while the create is in flight.
+- A `failed` aggregate, or an absent, `assigned`, or `abandoned` one without that proof, MUST put the lease in `release_failed` for an operator to verify and force-release.
+- A teardown observed as `teardown_failed` while the lease is `releasing` MUST put the lease in `release_failed`; an operator's retry-release MUST re-observe the same aggregate.
+
+The compute provisioning composition MUST supply the site authority's release guard, which permits freeing a reservation's capacity only for a `torn_down` aggregate or for an absent, `assigned`, or `abandoned` one whose provenance proof holds, and MUST check that proof in the transaction that frees the capacity. Every direct capacity return, whether by the lease lifecycle or by any caller of the site's release, MUST pass that guard; force-release remains the operator's recorded override.
 
 #### Scenario: A committed lease whose fulfillment never began expires
 
@@ -273,10 +285,20 @@ A lease's release MUST follow the state of its reservation's fulfillment aggrega
 - **WHEN** a lease is terminated while its fulfillment is `dispatching`
 - **THEN** the reservation becomes `releasing` at once, survives a restart in that state, and its teardown begins when the aggregate reaches `active`
 
-#### Scenario: A create failed with an unresolvable resource
+#### Scenario: A create failed
 
 - **WHEN** a lease is released and its aggregate is `failed`
 - **THEN** the lease enters `release_failed`, and capacity stays held until an operator force-releases it
+
+#### Scenario: Teardown fails while the lease is releasing
+
+- **WHEN** a releasing lease's aggregate reaches `teardown_failed`
+- **THEN** the lease enters `release_failed`, and when convergence's retry later reaches `torn_down`, an operator's retry-release adopts that teardown and releases the capacity
+
+#### Scenario: A storefront releases a delivered lease
+
+- **WHEN** a storefront asks the site to release a reservation whose aggregate is `active`
+- **THEN** the release guard refuses, the reservation keeps its capacity and state, and the lease is released only through its lifecycle
 
 ### Requirement: Host import belongs to the execution implementation that reads its format
 
