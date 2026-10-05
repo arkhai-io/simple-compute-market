@@ -18,7 +18,8 @@ uv run --project domains/vms/storefront --locked --find-links .dist \
 ```
 
 The observed sequence is `pending` with zero deliveries before approval,
-`provisioning` after approval, and `ready` with one delivery on retry. This is a
+`provisioning` after approval, and `ready` with one delivery on retry. The final
+SQLite inspection observes zero `escrows` rows. This is a
 local diagnostic, not a live ledger or VM acceptance run. For the real payments
 service setup see [`kit/arkhai-payments/README.md`](../../../../kit/arkhai-payments/README.md#local-first-use).
 
@@ -77,5 +78,7 @@ authenticated `buyer_principal` for payments. It derives the transaction ID from
 the accepted mandate, waits for a matching signed receipt, and then invokes the
 existing selected-site VM fulfillment path. Retried approval uses the same
 mandate; retried settlement resumes the same durable physical request. VM
-progress uses the existing local progress table without a chain, escrow address,
-settlement plan, or settlement obligation.
+progress uses `vm_delivery_records`, keyed by negotiation, independently of
+`vm_settlement_evidence`. Neither record creates an escrow or settlement obligation.
+Existing databases from the payment-record schema require an explicit reset;
+there is no startup adoption or copy migration.

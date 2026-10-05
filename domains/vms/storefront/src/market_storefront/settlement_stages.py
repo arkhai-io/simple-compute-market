@@ -28,10 +28,12 @@ from market_core import SettlementEvidence, SettlementStageTable
 from market_core.schemas import RateValue, SettlementOption, derive_settlement_option_id
 from market_identity import Identity
 
-from market_storefront.services.vm_job_spec_service import compute_capacity_claim_from_order
 from market_storefront.models.settle_models import (
     VmPaymentsSettleRequest,
     VmSettleRequest,
+)
+from market_storefront.services.vm_job_spec_service import (
+    compute_capacity_claim_from_order,
 )
 from market_storefront.utils.escrow_verification import EscrowVerificationError
 

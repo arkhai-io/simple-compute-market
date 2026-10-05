@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import sqlite3
 import tempfile
 import time
 import uuid
@@ -143,11 +144,11 @@ async def main():
     async def deliver(*, context):
         deliveries.append(context.negotiation_id)
         await context.ports.repository.update_escrow(
-            escrow_uid=context.escrow_uid, fulfillment_id="vm-demo"
+            escrow_uid=context.settlement_ref, fulfillment_id="vm-demo"
         )
         return {
             "negotiation_id": context.negotiation_id,
-            "escrow_uid": context.escrow_uid,
+            "settlement_ref": context.settlement_ref,
             "site_id": context.site_id,
             "state": "fulfilled",
             "fulfillment_id": "vm-demo",
@@ -219,6 +220,7 @@ async def main():
             created_at=now,
             updated_at=now,
             offer_resource={
+                "pool_id": "pool-demo",
                 "gpu_model": "H200",
                 "gpu_count": 1,
                 "virtualization_type": "vm",
@@ -264,6 +266,7 @@ async def main():
         container.resolved_marketplace_signer = seller
         container.resolved_settlement_composition = SimpleNamespace(
             payments_coordinator=coordinator,
+            seller_stages=domain.settlement.seller_stages,
             local_principal=seller.identity,
             arkhai_payments_stage=stage,
         )
@@ -319,6 +322,11 @@ async def main():
             print("after approval:", (await settle())["status"])
             await coordinator.tasks["payment-demo"]
             print("retry:", (await settle())["status"], "deliveries:", len(deliveries))
+            with sqlite3.connect(db.db_path) as sql:
+                escrow_count = sql.execute("SELECT COUNT(*) FROM escrows").fetchone()[0]
+                print("payment escrow rows:", escrow_count)
+                assert escrow_count == 0
+            assert deliveries == ["payment-demo"]
         await coordinator.stop()
         container.clear_lifespan_state(registry=registry)
 
