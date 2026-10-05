@@ -115,6 +115,14 @@ Land shared core carriers/dispatch first. VM, bare-metal, API-credit storefront/
 
 Use fresh disposable databases and installed internal wheels. First use is the existing accepted-run `market settle --from <run>` surface for VM/API credits, the bare-metal purchase/result surface, and the existing controlled seller settlement/typed-credit-client paths. Preserve Alkahest and contact behavior as well as wallet-free payment dispatch. Check deployed readiness before complete-deal scenarios. A controlled local example establishes wiring only, not live ledger/hardware qualification; unavailable external prerequisites are reported rather than replaced with a mock success.
 
+## Credits-service implementation boundary
+
+The neutral client/service request keeps the issuance-request v1 schema and binds `negotiation_id`, uniformly derived `fulfillment_id`, canonical owner, service/resource, quantity, key target and request digest. The operational `capacity_reservation_id` is excluded from immutable intent. Request/result/grants contain no settlement mechanism or escrow/obligation reference; changed reuse conflicts and there is no historical grant adoption. Only the storefront owns verified SettlementEvidence and its stage revalidation. The credits service owns grant replay, key status/ownership and authoritative quota checks, including exact-purchase hold binding and expiry replacement.
+
+Fresh schema and real typed-client HTTP replay are recorded in [credits-service implementation evidence](../../../docs/attachments/credits-service-auth/index.md). Service tests currently consume the client wheel with `uv run --with arkhai-apicredits-domain`; adding a dev dependency and refresh target awaits file-ownership approval. This does not add a production settlement-kit dependency. The quota ledger's existing `escrow_uid` correlation API stores only the neutral fulfillment ID here, not a settlement grant alias or escrow-shaped payment progress.
+
+Post-review promotion destinations remain `openspec/specs/api-credits/spec.md` and `architecture.md#authority-boundaries` / `#idempotency-boundaries`; explicit disposable-database reset belongs in the architecture companion. Separate signed issuance evidence and private results remain storefront-owned. No permanent promotion is claimed in this section before review; roadmap closeout remains section 8.7.
+
 ## Planning validation
 
 - `openspec validate route-settlement-by-mechanism --strict`: passed.
