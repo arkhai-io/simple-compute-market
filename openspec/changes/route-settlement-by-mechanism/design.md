@@ -158,6 +158,16 @@ This is implementation self-check evidence, not independent or live domain
 qualification. Domain evidence schemas, seller revalidation and joined
 qualification remain with their assigned sections. Roadmap closeout is 8.7.
 
+## VM buyer implementation boundary
+
+Task 2.1 uses one immutable table from `buyer_settlement_stages()` for buyer admission, selected acceptance validation, fresh execution, deal enrichment and accepted-run recovery. The installed VM buyer contract exposes that exact table. `settlement_stages.py` owns its domain-specific stage/context shapes and explicitly binds the existing escrow helper or payment approval/transport; these methods are not a kit or core convention. Readiness inputs and selection/proposal hooks are entry-owned. Wallets, chain-effect factories and payment clients resolve only when their entry needs them.
+
+Recovery reads the exact persisted Agreement bytes, checks negotiation/listing/buyer and any existing Agreement projection, and then resolves the same table independently of current admission priority or enablement. Alkahest retains immutable SSH/escrow state and refuses absent artifacts instead of synthesizing a fresh proposal. Payment recovery retains the exact mandate, with stray escrow artifacts ignored by its entry. The local table import in `deal_helpers.py` remains because a module-level move produced a confirmed composition/adapters/recovery-helper import cycle.
+
+Implementation evidence and the committed wheel/CLI replay entry are in [`VM buyer evidence`](../../../docs/attachments/vm-buyer-dispatch/index.md): 101 focused tests passed after `make dist` and consuming reinit. The real v3 CLI replay also exposed a reserved `run_id` event-field write, repaired separately. No buyer schema migration or external target is required by this controlled lane; its temporary run logs clean up automatically. Receipt authority and physical exact-once delivery were not qualified here. Core/storefront files are unchanged, and tasks 2.2–2.6 remain open.
+
+Permanent buyer behavior is owned by `openspec/specs/buyer-orchestration/spec.md` and `architecture.md#configured-mechanism-choice-and-buyer-actions`; the existing promoted core contract already states the same-table and exact-state boundary. Any VM-specific post-review promotion joins task 2.6; no seller/evidence promotion is claimed by this buyer-only implementation.
+
 ## Planning validation
 
 - `openspec validate route-settlement-by-mechanism --strict`: passed.
