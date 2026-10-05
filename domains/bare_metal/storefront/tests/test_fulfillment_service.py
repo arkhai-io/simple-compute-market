@@ -292,7 +292,7 @@ async def test_selected_site_lifecycle_is_idempotent_and_restores_capacity() -> 
     begun = dict(db.lifecycle)
     repeated = await service.begin(
         negotiation_id="neg-a",
-        escrow_uid="escrow-a",
+        settlement_ref="escrow-a",
         buyer_principal=BUYER,
     )
 
@@ -363,14 +363,14 @@ async def test_begin_retry_reuses_immutable_materialization() -> None:
     with pytest.raises(RuntimeError, match="controlled failure"):
         await service.begin(
             negotiation_id="neg-a",
-            escrow_uid="escrow-a",
+            settlement_ref="escrow-a",
             buyer_principal=BUYER,
         )
     recorded = db.materialization
 
     retried = await service.begin(
         negotiation_id="neg-a",
-        escrow_uid="escrow-a",
+        settlement_ref="escrow-a",
         buyer_principal=BUYER,
     )
 
@@ -396,7 +396,7 @@ async def test_reservation_conflicting_site_fails_before_scheduling() -> None:
     with pytest.raises(BareMetalFulfillmentError, match="conflicting site"):
         await service.begin(
             negotiation_id="neg-a",
-            escrow_uid="escrow-a",
+            settlement_ref="escrow-a",
             buyer_principal=BUYER,
         )
 

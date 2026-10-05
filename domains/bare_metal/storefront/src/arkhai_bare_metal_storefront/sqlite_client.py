@@ -79,17 +79,19 @@ class SQLiteClient(CoreSQLiteClient):
             local_listing_principal=local_listing_principal,
             expected_legacy_sellers=expected_legacy_sellers,
         )
+        required_columns = {
+            "bare_metal_settlement_records": "evidence_json",
+            "bare_metal_fulfillment_lifecycle": "settlement_ref",
+        }
         with sqlite3.connect(self.db_path) as conn:
-            columns = {
-                row[1]
-                for row in conn.execute(
-                    "PRAGMA table_info(bare_metal_settlement_records)"
-                )
-            }
-        if "evidence_json" not in columns:
-            raise RuntimeError(
-                "bare-metal settlement schema requires an explicit database reset"
-            )
+            for table, required_column in required_columns.items():
+                columns = {
+                    row[1] for row in conn.execute(f"PRAGMA table_info({table})")
+                }
+                if required_column not in columns:
+                    raise RuntimeError(
+                        f"{table} schema requires an explicit database reset"
+                    )
 
     def _domain_migrations(self) -> tuple[MigrationLike, ...]:
         return (
@@ -721,7 +723,7 @@ class SQLiteClient(CoreSQLiteClient):
         self,
         *,
         negotiation_id: str,
-        escrow_uid: str,
+        settlement_ref: str,
         site_id: str,
         physical_resource_id: str,
     ) -> dict[str, Any]:
@@ -733,13 +735,13 @@ class SQLiteClient(CoreSQLiteClient):
                     conn.execute(
                         """
                         INSERT OR IGNORE INTO bare_metal_fulfillment_lifecycle(
-                          negotiation_id, escrow_uid, site_id,
+                          negotiation_id, settlement_ref, site_id,
                           physical_resource_id, state
                         ) VALUES (?, ?, ?, ?, 'planning')
                         """,
                         (
                             negotiation_id,
-                            escrow_uid,
+                            settlement_ref,
                             site_id,
                             physical_resource_id,
                         ),
@@ -753,7 +755,7 @@ class SQLiteClient(CoreSQLiteClient):
                     raise RuntimeError("bare-metal fulfillment lifecycle is missing")
                 result = dict(row)
                 expected = {
-                    "escrow_uid": escrow_uid,
+                    "settlement_ref": settlement_ref,
                     "site_id": site_id,
                     "physical_resource_id": physical_resource_id,
                 }

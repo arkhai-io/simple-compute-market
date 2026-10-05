@@ -136,6 +136,34 @@ def main() -> None:
                         "SELECT sql FROM sqlite_master WHERE name='bare_metal_settlement_records'"
                     ).fetchone()[0]
                 )
+                lifecycle_columns = [
+                    row[1]
+                    for row in conn.execute(
+                        "PRAGMA table_info(bare_metal_fulfillment_lifecycle)"
+                    )
+                ]
+                assert "settlement_ref" in lifecycle_columns
+                assert "escrow_uid" not in lifecycle_columns
+                print("fresh lifecycle columns:", ", ".join(lifecycle_columns))
+                print(
+                    conn.execute(
+                        "SELECT sql FROM sqlite_master WHERE name='bare_metal_fulfillment_lifecycle'"
+                    ).fetchone()[0]
+                )
+                conn.execute(
+                    "ALTER TABLE bare_metal_fulfillment_lifecycle RENAME COLUMN settlement_ref TO escrow_uid"
+                )
+            try:
+                sqlite.SQLiteClient(str(path), domain=contract)
+            except RuntimeError as exc:
+                assert "explicit database reset" in str(exc)
+                print("lifecycle schema drift refused:", exc)
+            else:
+                raise AssertionError("old lifecycle schema was silently accepted")
+            with sqlite3.connect(path) as conn:
+                conn.execute(
+                    "ALTER TABLE bare_metal_fulfillment_lifecycle RENAME COLUMN escrow_uid TO settlement_ref"
+                )
                 conn.execute(
                     "ALTER TABLE bare_metal_settlement_records RENAME COLUMN evidence_json TO receipt_json"
                 )

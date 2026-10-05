@@ -104,7 +104,7 @@ class BareMetalFulfillmentService:
         *,
         site_id: str,
         negotiation_id: str,
-        escrow_uid: str,
+        settlement_ref: str,
     ) -> dict[str, Any] | None:
         site_client = self.capacity_client.site(site_id)
         reservations = await site_client.list_reservations()
@@ -114,7 +114,7 @@ class BareMetalFulfillmentService:
             if reservation.get("deal_ref")
             == {
                 "negotiation_id": negotiation_id,
-                "escrow_uid": escrow_uid,
+                "escrow_uid": settlement_ref,
             }
         ]
         if len(matching) > 1:
@@ -136,7 +136,7 @@ class BareMetalFulfillmentService:
         self,
         *,
         negotiation_id: str,
-        escrow_uid: str | None = None,
+        settlement_ref: str | None = None,
         buyer_principal: Identity,
     ) -> dict[str, Any]:
         context = await self._owned_context(
@@ -148,15 +148,15 @@ class BareMetalFulfillmentService:
             buyer_principal=buyer_principal,
             context=context,
         )
-        if escrow_uid is not None and escrow_uid != evidence.settlement_ref:
+        if settlement_ref is not None and settlement_ref != evidence.settlement_ref:
             raise BareMetalFulfillmentError(
                 "requested settlement reference conflicts with verified evidence"
             )
-        escrow_uid = evidence.settlement_ref
+        settlement_ref = evidence.settlement_ref
 
         lifecycle = await self.db.ensure_bare_metal_fulfillment_lifecycle(
             negotiation_id=negotiation_id,
-            escrow_uid=escrow_uid,
+            settlement_ref=settlement_ref,
             site_id=str(context["site_id"]),
             physical_resource_id=str(context["physical_resource_id"]),
         )
@@ -168,7 +168,7 @@ class BareMetalFulfillmentService:
             recovered = await self._recover_reservation(
                 site_id=str(context["site_id"]),
                 negotiation_id=negotiation_id,
-                escrow_uid=escrow_uid,
+                settlement_ref=settlement_ref,
             )
             reserved = recovered or await self.capacity_client.reserve(
                 site=str(context["site_id"]),
@@ -179,7 +179,7 @@ class BareMetalFulfillmentService:
                 },
                 deal_ref={
                     "negotiation_id": negotiation_id,
-                    "escrow_uid": escrow_uid,
+                    "escrow_uid": settlement_ref,
                 },
                 lease_duration_seconds=terms.duration_seconds,
             )
@@ -249,7 +249,7 @@ class BareMetalFulfillmentService:
             else datetime.now(timezone.utc)
         )
         expected_materialization = BareMetalMaterialization(
-            escrow_uid=escrow_uid,
+            escrow_uid=settlement_ref,
             machine_id=terms.machine_id,
             physical_host_id=terms.physical_host_id,
             lease_start_utc=materialization_start,
@@ -348,7 +348,7 @@ class BareMetalFulfillmentService:
             context=context,
         )
         if lifecycle is not None and (
-            lifecycle["escrow_uid"] != evidence.settlement_ref
+            lifecycle["settlement_ref"] != evidence.settlement_ref
             or lifecycle["site_id"] != context["site_id"]
             or lifecycle["physical_resource_id"] != context["physical_resource_id"]
         ):
@@ -396,7 +396,7 @@ class BareMetalFulfillmentService:
                 capacity_reservation_id=str(reservation_id),
                 deal_ref={
                     "negotiation_id": negotiation_id,
-                    "escrow_uid": lifecycle["escrow_uid"],
+                    "escrow_uid": lifecycle["settlement_ref"],
                 },
             )
             self.capacity_client.reservation_sites.pop(
@@ -562,7 +562,7 @@ async def fulfill_bare_metal(
     )
     lifecycle = await service.begin(
         negotiation_id=context.negotiation_id,
-        escrow_uid=context.settlement_ref,
+        settlement_ref=context.settlement_ref,
         buyer_principal=context.buyer_principal,
     )
-    return {**lifecycle, "settlement_ref": lifecycle["escrow_uid"]}
+    return lifecycle

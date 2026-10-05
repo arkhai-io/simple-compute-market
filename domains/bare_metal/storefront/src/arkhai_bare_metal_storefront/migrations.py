@@ -124,7 +124,7 @@ def _add_fulfillment_lifecycle(conn: sqlite3.Connection) -> None:
         """
         CREATE TABLE bare_metal_fulfillment_lifecycle (
           negotiation_id TEXT PRIMARY KEY,
-          escrow_uid TEXT NOT NULL UNIQUE,
+          settlement_ref TEXT NOT NULL UNIQUE,
           site_id TEXT NOT NULL,
           physical_resource_id TEXT NOT NULL,
           capacity_reservation_id TEXT UNIQUE,
@@ -137,7 +137,7 @@ def _add_fulfillment_lifecycle(conn: sqlite3.Connection) -> None:
           updated_at TEXT NOT NULL
             DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
           CHECK (LENGTH(TRIM(negotiation_id)) > 0),
-          CHECK (LENGTH(TRIM(escrow_uid)) > 0),
+          CHECK (LENGTH(TRIM(settlement_ref)) > 0),
           CHECK (LENGTH(TRIM(site_id)) > 0),
           CHECK (LENGTH(TRIM(physical_resource_id)) > 0)
         )

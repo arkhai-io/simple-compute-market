@@ -491,10 +491,12 @@ async def begin_fulfillment(
         )
         lifecycle = await runtime.fulfillment_service().begin(
             negotiation_id=body.negotiation_id,
-            escrow_uid=body.escrow_uid,
+            settlement_ref=body.escrow_uid,
             buyer_principal=identity,
         )
-        return BareMetalFulfillmentResponse.model_validate(lifecycle)
+        return BareMetalFulfillmentResponse.model_validate(
+            {**lifecycle, "escrow_uid": lifecycle["settlement_ref"]}
+        )
     except BareMetalFulfillmentError as exc:
         raise HTTPException(
             status_code=exc.status_code,
@@ -522,7 +524,9 @@ async def fulfillment_status(
             negotiation_id=negotiation_id,
             buyer_principal=identity,
         )
-        return BareMetalFulfillmentResponse.model_validate(lifecycle)
+        return BareMetalFulfillmentResponse.model_validate(
+            {**lifecycle, "escrow_uid": lifecycle["settlement_ref"]}
+        )
     except BareMetalFulfillmentError as exc:
         raise HTTPException(
             status_code=exc.status_code,
@@ -631,7 +635,9 @@ async def teardown_fulfillment(
             negotiation_id=negotiation_id,
             buyer_principal=identity,
         )
-        return BareMetalFulfillmentResponse.model_validate(lifecycle)
+        return BareMetalFulfillmentResponse.model_validate(
+            {**lifecycle, "escrow_uid": lifecycle["settlement_ref"]}
+        )
     except BareMetalFulfillmentError as exc:
         raise HTTPException(
             status_code=exc.status_code,
