@@ -14,7 +14,6 @@ from typing import Any
 
 import typer
 from market_identity import Identity, Signer, TrustedIdentitySet
-from market_core import SettlementEvidence
 from market_core.schemas import Agreement, SettlementPlan
 
 from .run_log import RunLog, read_run, read_run_identity
@@ -35,7 +34,6 @@ class DealContext:
     agreed_amount: float
     escrow_uid: str | None = None
     settlement_ref: str | None = None
-    settlement_evidence: SettlementEvidence | None = None
     # Buyer's lease ask, in seconds. Captured at /negotiate/new time and
     # echoed by the seller in the agreement; settlement multiplies the
     # per-hour price by duration_seconds/3600 to compute total payment.
@@ -240,7 +238,6 @@ def load_deal_context(
     agreed_amount: float | None = None
     escrow_uid: str | None = None
     settlement_ref: str | None = None
-    settlement_evidence: SettlementEvidence | None = None
     duration_seconds: int = 3600
     seller_wallet_address: str | None = None
     token_contract: str | None = None
@@ -423,23 +420,6 @@ def load_deal_context(
 
     for ev in events:
         ev_type = ev.get("event")
-        raw_evidence = ev.get("settlement_evidence")
-        if raw_evidence is not None:
-            try:
-                if not isinstance(raw_evidence, dict):
-                    raise ValueError("evidence must be an object")
-                candidate = SettlementEvidence.from_dict(raw_evidence)
-                if settlement_evidence is not None:
-                    candidate.validate_identity(
-                        negotiation_id=settlement_evidence.negotiation_id,
-                        mechanism=settlement_evidence.mechanism,
-                        settlement_ref=settlement_evidence.settlement_ref,
-                    )
-                settlement_evidence = candidate
-            except (TypeError, ValueError) as exc:
-                raise typer.BadParameter(
-                    f"Run-log {run_id!r} has invalid settlement evidence: {exc}"
-                ) from exc
         if ev.get("settlement_ref") is not None:
             ref = ev["settlement_ref"]
             if not isinstance(ref, str) or not ref or ref != ref.strip():
@@ -556,26 +536,6 @@ def load_deal_context(
             f"Last status was {last_status!r}. Recovery requires a "
             f"prior `agreed` outcome."
         )
-    if settlement_evidence is not None:
-        try:
-            if accepted_agreement is None:
-                raise ValueError("settlement evidence has no accepted Agreement")
-            agreement = Agreement.model_validate(accepted_agreement)
-            if agreement.settlement is None:
-                raise ValueError("accepted Agreement has no settlement option")
-            settlement_evidence.validate_identity(
-                negotiation_id=negotiation_id,  # type: ignore[arg-type]
-                mechanism=agreement.settlement.mechanism,
-                settlement_ref=settlement_ref,
-            )
-            if agreement.negotiation_id != negotiation_id:
-                raise ValueError("accepted Agreement changed negotiation identity")
-            settlement_ref = settlement_evidence.settlement_ref
-        except (TypeError, ValueError) as exc:
-            raise typer.BadParameter(
-                f"Run-log {run_id!r} has conflicting settlement evidence: {exc}"
-            ) from exc
-
     publisher_principals = _refresh_publisher_trust(
         run_id,
         signer=signer,
@@ -623,7 +583,6 @@ def load_deal_context(
         agreed_amount=agreed_amount,  # type: ignore[arg-type]
         escrow_uid=escrow_uid,
         settlement_ref=settlement_ref,
-        settlement_evidence=settlement_evidence,
         duration_seconds=duration_seconds,
         seller_wallet_address=seller_wallet_address,
         token_contract=token_contract,

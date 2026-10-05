@@ -14,7 +14,6 @@ from core_buyer.deal_helpers import (
     load_deal_context,
     load_negotiation_resume_point,
 )
-from market_core import SettlementEvidence
 from market_core.schemas import Agreement, SettlementOption, derive_settlement_option_id
 import typer
 from core_buyer.profile_service import BuyerProfileService, ProfileServiceError
@@ -130,11 +129,11 @@ def test_ed25519_run_log_v3_and_resume_need_no_wallet(
     assert "buyer_address" not in json.dumps(events)
 
 
-@pytest.mark.parametrize("changed", (None, "negotiation_id", "mechanism", "settlement_ref"))
-def test_evidence_recovery_retains_accepted_identity(
+@pytest.mark.parametrize("repeated_ref", (None, "txn-1", "different"))
+def test_reference_recovery_retains_accepted_state(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    changed: str | None,
+    repeated_ref: str | None,
 ) -> None:
     _state_dir(monkeypatch, tmp_path)
     signer = Ed25519Signer(b"\x15" * 32)
@@ -166,16 +165,9 @@ def test_evidence_recovery_retains_accepted_identity(
             agreement.model_dump_json(exclude_none=True).encode()
         ).decode(),
     )
-    evidence = SettlementEvidence(
-        negotiation_id="neg-1", mechanism=option.mechanism, settlement_ref="txn-1",
-        status="approved", evidence={"proof": "public-only"},
-    )
     log.event("settlement_started", settlement_ref="txn-1")
-    log.event("settlement_evidence", settlement_evidence=evidence.to_dict())
-    if changed:
-        conflicting = evidence.to_dict()
-        conflicting[changed] = "different"
-        log.event("settlement_evidence", settlement_evidence=conflicting)
+    if repeated_ref is not None:
+        log.event("settlement_completed", settlement_ref=repeated_ref)
 
     def load():
         return load_deal_context(
@@ -183,12 +175,16 @@ def test_evidence_recovery_retains_accepted_identity(
             refresh_publisher_principals=lambda *_binding: _trust(publisher),
         )
 
-    if changed:
-        with pytest.raises(typer.BadParameter, match="settlement evidence"):
+    if repeated_ref not in (None, "txn-1"):
+        with pytest.raises(typer.BadParameter, match="conflicting settlement references"):
             load()
     else:
         deal = load()
-        assert deal.settlement_evidence == evidence
+        assert deal.negotiation_id == agreement.negotiation_id
+        assert deal.agreement == agreement.model_dump(mode="json", exclude_none=True)
+        assert deal.agreement_bytes == base64.b64encode(
+            agreement.model_dump_json(exclude_none=True).encode()
+        ).decode()
         assert deal.settlement_ref == "txn-1"
         assert deal.escrow_uid is None
         assert deal.buyer_principal == signer.identity

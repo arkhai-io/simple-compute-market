@@ -733,18 +733,7 @@ def make_settle_hook(
                 f"unsupported accepted settlement mechanism: {mechanism}; "
                 "restore its buyer stage to resume this Agreement"
             ) from exc
-        result = invoke(stage, negotiation, on_event)
-        if result.settlement_evidence is not None:
-            result.settlement_evidence.validate_identity(
-                negotiation_id=agreement.negotiation_id,
-                mechanism=mechanism,
-                settlement_ref=result.settlement_ref,
-            )
-            result.settlement_ref = result.settlement_evidence.settlement_ref
-            on_event("settlement_evidence", {
-                "settlement_evidence": result.settlement_evidence.to_dict(),
-            })
-        return result
+        return invoke(stage, negotiation, on_event)
 
     return _hook
 

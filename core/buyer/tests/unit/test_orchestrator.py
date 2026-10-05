@@ -4,7 +4,7 @@ import uuid
 from unittest.mock import patch
 
 import pytest
-from market_core import SettlementEvidence, SettlementStageTable
+from market_core import SettlementStageTable
 from market_core.schemas import (
     Agreement, SettlementOption, SettlementSelection, derive_settlement_option_id,
 )
@@ -176,10 +176,7 @@ def test_settle_hook_delegates_exact_agreement_to_declared_domain_stage(proposal
     )
     expected = BuyResult(
         status="ready", negotiation_id="N1",
-        settlement_evidence=SettlementEvidence(
-            negotiation_id="N1", mechanism=selection.mechanism,
-            settlement_ref="txn-1", status="approved", evidence={"public": "proof"},
-        ),
+        settlement_ref="txn-1",
     )
     delegated: list[NegotiationResult] = []
     events: list[tuple[str, dict]] = []
@@ -206,12 +203,9 @@ def test_settle_hook_delegates_exact_agreement_to_declared_domain_stage(proposal
     assert delegated[0].outcome.settlement_data == {"mandate": {"opaque": "to-core"}}
     assert events == [
         ("agreement_settlement", {"negotiation_id": "N1"}),
-        ("settlement_evidence", {
-            "settlement_evidence": expected.settlement_evidence.to_dict(),
-        }),
     ]
     assert result.settlement_ref == "txn-1"
-    assert result.to_dict()["settlement_evidence"] == expected.settlement_evidence.to_dict()
+    assert result.to_dict()["settlement_ref"] == "txn-1"
 
     legacy = NegotiationResult(
         match={"seller": "http://seller"},

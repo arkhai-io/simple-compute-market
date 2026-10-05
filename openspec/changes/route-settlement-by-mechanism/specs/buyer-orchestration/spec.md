@@ -35,9 +35,9 @@ A domain's buy, settle-from-run and resume surfaces MUST use the same buyer-role
 
 ### Requirement: Buyer evidence is separate from private delivery
 
-Buyer settlement progress MUST retain secret-free SettlementEvidence correlated to the accepted negotiation when supplied by the selected stage. Delivery results and credentials MUST remain in the domain's authenticated result handling and MUST NOT be substituted for settlement evidence or persisted as public run evidence.
+Buyer settlement progress MUST retain its recorded opaque settlement reference, exact accepted Agreement bytes and domain settlement data for recovery. Delivery results and credentials MUST remain in the domain's authenticated result handling and MUST NOT be substituted for accepted settlement state or persisted as public run evidence. Seller delivery authorization remains the storefront's verified SettlementEvidence, not buyer-local progress.
 
 #### Scenario: Buyer retrieves a delivered API key
 
 - **WHEN** the buyer retrieves a grant after settlement has completed
-- **THEN** settlement evidence retains its accepted reference while the bearer credential uses the private result boundary and stays out of the run log
+- **THEN** buyer recovery retains the accepted settlement reference while the bearer credential uses the private result boundary and stays out of the run log
