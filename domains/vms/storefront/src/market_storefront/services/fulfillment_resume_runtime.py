@@ -406,7 +406,7 @@ async def _load_active_physical_result(
             reason=status.failure_message or "physical fulfillment failed",
             fulfillment_phase="physical_failed",
         )
-        return ({"__failed__": True}, None)
+        return ({"__failed__": True, "failure_message": status.failure_message}, None)
     if status.state != "active":
         return None
     result_envelope = await fulfillment_client.get_fulfillment_result(
@@ -476,6 +476,7 @@ async def converge_delivery_once(
     register_lease: Callable[..., Awaitable[Any]] | None = None,
     evidence: SettlementEvidence,
     continuation: Callable[..., Awaitable[str]] | None = None,
+    failure_policy: Callable[..., Awaitable[Any]] | None = None,
 ) -> bool:
     """Advance one delivery by at most one externally observable phase."""
     if delivery.get("status") in _TERMINAL_DELIVERY_STATUSES:
@@ -558,6 +559,16 @@ async def converge_delivery_once(
         return False
     connection_details, authentication = physical
     if connection_details.pop("__failed__", False):
+        if failure_policy is not None:
+            await failure_policy(
+                negotiation_id=negotiation_id,
+                listing_id=plan.order_id,
+                capacity_reservation_id=reservation_id,
+                resource_id=resource_id,
+                reason="provisioning_failed",
+                message=connection_details.get("failure_message"),
+                source="fulfillment_resume",
+            )
         return True
     current = dict(delivery)
     current.update(
@@ -636,6 +647,7 @@ async def resume_incomplete_fulfillments_once(
                 delivery,
                 evidence=evidence,
                 continuation=continuation,
+                failure_policy=partial(stage.delivery_failed, evidence=evidence, db=db),
                 sqlite_client=db,
                 fulfillment_client=remote,
                 capacity_client=capacity,
