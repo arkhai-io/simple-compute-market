@@ -448,13 +448,24 @@ async def test_a_failed_create_leaves_the_lease_for_an_operator(session_factory,
     assert ledger.snapshot()[0]["available_units"] == 6
 
 
+def _release_began(session_factory, capacity_reservation_id: str, ago: timedelta) -> None:
+    """Move the release's recorded start back, as if it began ``ago``."""
+    from market_site.db import CapacityReservation
+
+    with session_factory() as db, db.begin():
+        db.get(CapacityReservation, capacity_reservation_id).release_requested_at = (
+            datetime.now(timezone.utc) - ago
+        ).isoformat()
+
+
 @pytest.mark.asyncio
-async def test_a_teardown_past_its_grace_period_times_out(session_factory, ledger):
-    """The grace period runs from the lease's end, and the releasing pass reads
-    the lease in the same cycle that begins its teardown: a lease that ended
-    longer ago than the grace period times out in that first cycle, and an
-    operator's retry-release adopts the teardown later."""
-    capacity_reservation_id = _leased(ledger, ended=timedelta(hours=2))
+async def test_a_teardown_stalled_past_the_grace_period_from_its_release_times_out(
+    session_factory, ledger
+):
+    """The grace period runs from when the release began, so a lease that
+    ended long ago is not timed out in the cycle its teardown begins, and a
+    teardown stalled past the grace period from its release is."""
+    capacity_reservation_id = _leased(ledger, ended=timedelta(days=2))
     _create_active_fulfillment(
         session_factory,
         capacity_reservation_id=capacity_reservation_id,
@@ -462,10 +473,17 @@ async def test_a_teardown_past_its_grace_period_times_out(session_factory, ledge
     )
     svc = _lifecycle(session_factory, ledger)
 
-    summary = await svc.force_check_leases()
+    first = await svc.force_check_leases()
+
+    assert first["release_failed"] == 0
+    assert ledger.get_reservation(capacity_reservation_id)["release_requested_at"]
+
+    _set_fulfillment_state(session_factory, capacity_reservation_id, _State.tearing_down.value)
+    _release_began(session_factory, capacity_reservation_id, timedelta(minutes=10))
+    stalled = await svc.force_check_leases()
 
     row = ledger.get_reservation(capacity_reservation_id)
-    assert summary["release_failed"] == 1
+    assert stalled["release_failed"] == 1
     assert (row["state"], row["failure_reason"]) == ("release_failed", "teardown_timeout")
 
 

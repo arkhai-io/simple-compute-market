@@ -58,7 +58,35 @@ class TestRunMigrationsFreshBootstrap:
             ("20260811_002_canonical_owner_principals",),
             ("20260815_003_fulfillment_grants",),
             ("20260922_004_pool_advertisement_and_backing",),
+            ("20261005_005_reservation_release_requested_at",),
         ]
+
+    def test_a_reservation_table_from_before_release_timing_gains_the_column(self):
+        """The site ledger this service composes records when a reservation
+        began releasing; a table created before that column existed gains it."""
+        engine = _sqlite_memory_engine()
+        run_migrations(engine)
+        with engine.begin() as connection:
+            connection.execute(
+                text("ALTER TABLE capacity_reservations DROP COLUMN release_requested_at")
+            )
+            connection.execute(
+                text(
+                    "DELETE FROM schema_migrations "
+                    "WHERE id = '20261005_005_reservation_release_requested_at'"
+                )
+            )
+
+        run_migrations(engine)
+
+        with engine.begin() as connection:
+            columns = {
+                row[1]
+                for row in connection.execute(
+                    text("PRAGMA table_info(capacity_reservations)")
+                ).fetchall()
+            }
+        assert "release_requested_at" in columns
 
 
 class TestRunMigrationsIsIdempotent:
@@ -71,7 +99,7 @@ class TestRunMigrationsIsIdempotent:
             count = connection.execute(
                 text("SELECT COUNT(*) FROM schema_migrations")
             ).scalar()
-        assert count == 4
+        assert count == 5
 
 
 class TestAdoptingAPreCreateAllOnlyDatabase:

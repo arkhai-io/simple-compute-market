@@ -53,7 +53,10 @@ class FakeSiteAuthority:
         return self.due
 
     def begin_release(self, capacity_reservation_id, *, release_job_id):
+        """As the ledger does: entering ``releasing`` records when it began."""
         reservation = self.reservations[capacity_reservation_id]
+        if reservation["state"] != "releasing":
+            reservation["release_requested_at"] = datetime.now(timezone.utc).isoformat()
         reservation.update(state="releasing", release_job_id=release_job_id)
         return reservation
 
@@ -76,12 +79,17 @@ class FakeSiteAuthority:
 
 
 class ScriptedExecutor:
-    """Returns its decisions in turn, repeating the last; records teardowns begun."""
+    """Returns its decisions in turn, repeating the last; records teardowns
+    begun, and the reservation's state at each, which shows whether the
+    release was recorded first. ``teardown_fails`` makes beginning one raise."""
 
-    def __init__(self, *decisions: ReleaseDecision):
+    def __init__(self, *decisions: ReleaseDecision, site=None, teardown_fails: bool = False):
         self.decisions = list(decisions)
         self.asked = 0
         self.teardowns: list[str] = []
+        self.states_at_teardown: list[str] = []
+        self.site = site
+        self.teardown_fails = teardown_fails
 
     async def submit_release(self, reservation):
         decision = self.decisions[min(self.asked, len(self.decisions) - 1)]
@@ -89,6 +97,10 @@ class ScriptedExecutor:
         return decision
 
     async def begin_teardown(self, fulfillment_id):
+        if self.site is not None:
+            self.states_at_teardown.append(self.site.reservations["alloc-1"]["state"])
+        if self.teardown_fails:
+            raise ConnectionError("fulfillment unreachable")
         self.teardowns.append(fulfillment_id)
         return fulfillment_id
 
@@ -125,13 +137,33 @@ def _decision(action: ReleaseAction, fulfillment_id: str | None = "f-1", **field
 
 
 @pytest.mark.asyncio
-async def test_terminate_begins_teardown_and_keeps_capacity_held():
+async def test_terminate_records_the_release_before_beginning_teardown():
     site = FakeSiteAuthority(lease_end=_FUTURE)
-    lifecycle = _lifecycle(site, ScriptedExecutor(_decision(ReleaseAction.TEARDOWN)))
+    executor = ScriptedExecutor(_decision(ReleaseAction.TEARDOWN), site=site)
+    lifecycle = _lifecycle(site, executor)
 
     lease = await lifecycle.terminate_lease("alloc-1")
 
     assert (lease["state"], lease["release_job_id"]) == ("releasing", "f-1")
+    assert executor.teardowns == ["f-1"]
+    assert executor.states_at_teardown == ["releasing"]
+
+
+@pytest.mark.asyncio
+async def test_a_teardown_that_fails_to_begin_leaves_the_release_for_the_next_cycle():
+    """The release is durable before teardown is asked for: a failure there
+    still answers ``releasing``, and the releasing pass begins the teardown
+    when the aggregate still reads ``active``."""
+    site = FakeSiteAuthority(lease_end=_FUTURE)
+    failing = ScriptedExecutor(_decision(ReleaseAction.TEARDOWN), site=site, teardown_fails=True)
+
+    lease = await _lifecycle(site, failing).terminate_lease("alloc-1")
+
+    assert (lease["state"], lease["release_job_id"]) == ("releasing", "f-1")
+    executor = ScriptedExecutor(_decision(ReleaseAction.TEARDOWN))
+    status = ScriptedStatus(ReleaseStatus(ReleaseProgress.READY_FOR_TEARDOWN))
+    await _lifecycle(site, executor, status).check_leases()
+    assert executor.teardowns == ["f-1"]
 
 
 @pytest.mark.asyncio
@@ -225,6 +257,37 @@ async def test_a_release_waiting_on_a_create_survives_a_restarted_lifecycle():
     assert began["release_failed"] == 0
     assert executor.teardowns == ["f-1"]
     assert site.reservations["alloc-1"]["state"] == "releasing"
+
+
+@pytest.mark.asyncio
+async def test_a_terminated_lease_s_teardown_is_timed_from_its_release_not_its_end():
+    """A lease terminated long before its end times out when its teardown
+    stalls past the grace period from the release, not past the far end."""
+    site = FakeSiteAuthority(state="releasing", lease_end=_FUTURE)
+    site.reservations["alloc-1"]["release_job_id"] = "f-1"
+    site.reservations["alloc-1"]["release_requested_at"] = (
+        datetime.now(timezone.utc) - timedelta(minutes=10)
+    ).isoformat()
+    lifecycle = _lifecycle(site, ScriptedExecutor(_decision(ReleaseAction.TEARDOWN)), grace=300)
+
+    await lifecycle.check_leases()
+
+    assert site.reservations["alloc-1"]["failure_reason"] == "teardown_timeout"
+
+
+@pytest.mark.asyncio
+async def test_a_long_expired_lease_is_not_timed_out_as_its_teardown_begins():
+    """A lease whose end is far behind (the watchdog was down, say) gets the
+    full grace period from its release."""
+    long_ago = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+    site = FakeSiteAuthority(lease_end=long_ago)
+    site.due = [site.reservations["alloc-1"]]
+    lifecycle = _lifecycle(site, ScriptedExecutor(_decision(ReleaseAction.TEARDOWN)), grace=300)
+
+    await lifecycle.check_leases()
+
+    assert site.reservations["alloc-1"]["state"] == "releasing"
+    assert site.reservations["alloc-1"].get("failure_reason") is None
 
 
 @pytest.mark.asyncio

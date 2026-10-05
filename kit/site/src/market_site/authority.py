@@ -21,9 +21,9 @@ class SiteAuthorityPort(Protocol):
         capacity_reservation_id: str,
         executor_target: str,
         executor_ref: dict[str, Any] | None = None,
+        deal_ref: dict[str, Any] | None = None,
         lease_start_utc: str | None = None,
         lease_end_utc: str | None = None,
-        create_job_id: str | None = None,
     ) -> dict[str, Any] | None: ...
 
     def begin_release(
@@ -115,17 +115,17 @@ class LedgerSiteAuthority:
         capacity_reservation_id: str,
         executor_target: str,
         executor_ref: dict[str, Any] | None = None,
+        deal_ref: dict[str, Any] | None = None,
         lease_start_utc: str | None = None,
         lease_end_utc: str | None = None,
-        create_job_id: str | None = None,
     ) -> dict[str, Any] | None:
         return self._ledger.attach_lease(
             capacity_reservation_id=capacity_reservation_id,
             executor_target=executor_target,
             executor_ref=executor_ref,
+            deal_ref=deal_ref,
             lease_start_utc=lease_start_utc,
             lease_end_utc=lease_end_utc,
-            create_job_id=create_job_id,
         )
 
     def begin_release(

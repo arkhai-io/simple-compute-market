@@ -6,7 +6,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from market_core import VersionedEnvelope
 
@@ -88,21 +88,34 @@ class ResultEnvelope(BaseModel):
 class LeaseRegistration(VersionedContractModel):
     """A lease's tail, registered once on its capacity reservation.
 
-    It names no offering mode: the mode is the reservation's, recorded when its
-    capacity was claimed. A storefront registers the window its commit
-    returned, since a registered lease keeps that window.
+    What a registration may assert: the executor target the lease's teardown
+    addresses; a window, recorded only where the reservation has none, since
+    a committed reservation's window is the site's; and the caller's deal
+    correlation, of which the site records only an escrow the reservation
+    lacks. It names no offering mode, which is the reservation's, and no
+    create or release handle, which are lifecycle evidence written only by
+    fulfillment and the lease lifecycle.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     capacity_reservation_id: str
     deal_ref: dict[str, Any]
     executor_target: str
     lease_start_utc: datetime | None = None
+    lease_end_utc: datetime | None = None
+
+
+class LeaseView(VersionedContractModel):
+    """A lease as the site records it: its tail, window, and lifecycle evidence."""
+
+    capacity_reservation_id: str
+    deal_ref: dict[str, Any]
+    offering_mode: str
+    executor_target: str
+    lease_start_utc: datetime | None = None
     lease_end_utc: datetime
     create_job_id: str | None = None
-
-
-class LeaseView(LeaseRegistration):
-    offering_mode: str
     status: LeaseState
     release_job_id: str | None = None
     failure_reason: str | None = None

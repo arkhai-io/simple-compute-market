@@ -466,6 +466,7 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
         "20261002_002_job_envelopes",
         "20261002_003_bare_metal_job_shapes",
         "20261005_001_drop_job_contract_version",
+        "20261005_002_reservation_release_requested_at",
     }
 
 
@@ -487,6 +488,7 @@ def test_run_migrations_is_idempotent():
 
     assert ansible_columns.count("escrow_uid") == 1
     assert ansible_columns.count("contract_version") == 0
+    assert reservation_columns.count("release_requested_at") == 1
     assert ansible_columns.count("capacity_reservation_id") == 1
     assert ansible_columns.count("deal_ref") == 1
     assert ansible_columns.count("offering_mode") == 1

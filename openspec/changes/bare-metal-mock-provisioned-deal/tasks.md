@@ -1702,16 +1702,21 @@ re-verifies them by grep before each move.
             `dispatch_teardown` supplies.
         - Tombstone `vm_provisioning_adapter/release.py` and
           `bare_metal_provisioning_adapter/release.py` (with `get_physical_host_id`).
-        - Tests:
-          - `provisioning/compute/tests/unit/test_release.py`: every aggregate state in
-            point 3's table, the proof's parts, abandon-then-prove under a concurrent
-            dispatch, a refused direct release re-read once;
-          - `test_lease_lifecycle.py`: a pending release survives a restarted lifecycle;
-            teardown begins at `active`; no grace timeout in flight; `teardown_failed` while
-            releasing ends `release_failed`, and retry-release then adopts `torn_down`;
-          - the service's `tests/unit/services/test_release_executors.py`,
-            `test_ledger_lease_lifecycle.py`, `test_authority_composition.py` (the guard
-            reaches the ledger), and `integration/test_legacy_backfill_teardown.py`;
+        - Tests, as implemented (this list was corrected by 5B.8.B.8; the plan had
+          named a unit `test_release.py` and the deleted `test_release_executors.py`):
+          - `provisioning/compute/tests/integration/test_release.py`, against real SQLite
+            with a fake teardown port: every aggregate state in point 3's table, the
+            proof's parts, and the guard writing nothing when it refuses; the race of a
+            dispatch against the guard's compare-and-set was added by 5B.8.B.8;
+          - `provisioning/compute/tests/unit/test_lease_lifecycle.py`, over fake ports: a
+            refused direct release re-read once; a pending release survives a restarted
+            lifecycle; teardown begins at `active`; no grace timeout in flight;
+            `teardown_failed` while releasing ends `release_failed`, and retry-release then
+            adopts `torn_down`;
+          - the service's `tests/unit/services/test_ledger_lease_lifecycle.py` (the
+            production guard, executor, and status port over real tables),
+            `test_authority_composition.py` (the guard reaches the ledger), and
+            `integration/test_legacy_backfill_teardown.py`;
           - `integration/test_capacity_api.py`: release of a committed reservation under the
             guard, both permitted and refused;
           - a new `integration/test_lease_release_api.py` covering:
@@ -1795,6 +1800,61 @@ re-verifies them by grep before each move.
         - Versions: arkhai-core-storefront 0.8.0, kit-site-client 0.8.0,
           kit-capacity-publication 0.5.0 (exact pins moved), apicredits-storefront 0.6.1 (its
           pin moved); floors raised in kit-capacity-publication and the VM storefront.
+  - [x] 5B.8.B.8 Fixes from the slice B implementation review (2026-10-05; findings 1–6,
+        each agreed with the maintainer; `design.md`, "Slice B implementation review").
+        - Release recorded before teardown (finding 1):
+          - `FulfillmentReleaseExecutor.submit_release` decides and writes nothing;
+          - the lease lifecycle records `releasing` with the fulfillment as its handle,
+            then begins teardown; a failure to begin it is left to the releasing pass,
+            which begins it while the aggregate reads `active`.
+        - Bare metal registers its lease (finding 2): `hosted_lifecycle.py` registers at
+          access readiness, the machine the grant reports as target, through
+          `SelectedSiteFulfillmentClient.register_lease`; the Alkahest path stays 7.2's.
+        - Registration contract (finding 3): `LeaseRegistration` forbids unknown fields and
+          names no create handle; `LeaseView` is its own model carrying the lifecycle
+          evidence. The window is optional. `deal_ref` is kept: registration records the
+          escrow it names once, the only source of it for a hold placed before the deal had
+          an escrow (found from the first end-to-end run's escrow lookups; A.6 had recorded
+          it at registration, and 5B.8.B.1 had dropped that with the escrow lookup).
+        - The committed window kept (finding 4): a first registration writes a window only
+          where none is recorded.
+        - Grace timed from the release (finding 5): `capacity_reservations` gains
+          `release_requested_at`, recorded when a reservation enters `releasing` (a retry
+          begins a new attempt), with migrations in the provisioning service
+          (`20261005_002`) and the API-credit service (`20261005_005`); the releasing pass
+          times a stalled teardown from it, or from the lease's end for a reservation that
+          began releasing before it existed.
+        - Evidence (finding 6): B.3's test list corrected above, and a race test added.
+        - Tests:
+          - `kit/site`: a late first registration after a truncation, a window written only
+            where none is recorded, the escrow recorded once, the release start;
+          - family kit: the release recorded before teardown, a teardown that fails to
+            begin, both directions of the grace clock, the decision writing nothing, and a
+            dispatch winning the race against the guard's compare-and-set (file-backed
+            SQLite, a test-only repository committing the dispatch from a second
+            connection);
+          - contracts: a registration naming lifecycle evidence is invalid;
+          - service integration: a release durable before teardown and resumed by a
+            rebuilt lifecycle; a bare-metal lease registered and read through the family
+            client (target, committed window, `bare_metal`); a hold found by its escrow once
+            registered; migration ids and the migrated column;
+          - bare-metal storefront: access readiness registers the lease before the deal is
+            recorded access-ready;
+          - API-credit service: the migration and a table from before the column.
+        - Versions: arkhai-apicredits-service 0.4.2, for its migration, with its
+          `arkhai-kit-site` floor raised to 0.8.0; every other package this touches was
+          bumped in slice B and is unreleased.
+        - Validation:
+          - `kit/site` 273; compute contracts 51; family kit 171;
+          - provisioning service 836 unit and 283 integration;
+          - bare-metal storefront 230; API-credit service 66;
+          - VM storefront by frozen sync: 1102 unit and 348 integration (the two known
+            `test_alkahest` failures);
+          - e2e unit 236 (the known 10.1 failure), and the scenarios collect.
+          - The root aggregate passes its 44 suites, failing only where this environment
+            cannot run a suite. `make check-packaging`, comment hygiene, documentation
+            citations, and OpenSpec strict validation pass.
+          - Not yet run end to end.
       Slice B done 2026-10-05 (`design.md`, "Slice B implementation findings", for what
       implementation settled or found).
       - B.1:
@@ -2003,12 +2063,14 @@ paths and provider-neutral release in provisioning.
       `domains/bare_metal/buyer/src/arkhai_bare_metal_buyer/fulfillment.py`.
 - [ ] 7.2 Commit and register: `fulfillment_service.py` commits the reservation with the
       materialized lease window before scheduling, as `hosted_lifecycle.py` does, and
-      registers the lease (executor target and the window its commit returned, per
-      `design.md`'s slice B design review, point 2; registration names no offering mode
-      since 5B.8.B.2) once fulfillment is active; `site_clients.py`'s
-      `SelectedSiteFulfillmentClient` gains `register_lease`, `terminate_lease`, and
-      `get_lease` over `compute_provisioning_client`, routed by the reservation's recorded
-      site.
+      registers the lease once fulfillment is active, as `hosted_lifecycle.py` does since
+      5B.8.B.8 (the machine as executor target; the site keeps the committed window, so
+      the registration need name none); `site_clients.py`'s
+      `SelectedSiteFulfillmentClient`, which gained `register_lease` in 5B.8.B.8, gains
+      `terminate_lease` and `get_lease` over `compute_provisioning_client`, routed by the
+      reservation's recorded site. Once both settlement paths register, the family lease
+      reads should count only registered leases (an executor target recorded), not every
+      reservation with a lease end (implementation review of slice B, finding 2).
 - [x] 7.3 **Migrated** to 5B.8.B.3 (`design.md`, "Controls and routes (5B.8)", decision
       1): provider-neutral release lands with the mode-agnostic lease lifecycle.
 - [ ] 7.4 Teardown through lease termination: `fulfillment_service.py`'s teardown calls
@@ -2208,9 +2270,8 @@ service code.
       router, VM's literal pool-override path, the site's duplicated server and client
       contracts, bare metal's untyped mock-rule routes, the unreachable `provisioning`
       state, path templates in the family contracts, the uncalled
-      `find_active_lease_by_vm_target`, a lease truncated before registration remaining
-      extendable, and the grace timeout anchored at a lease's end rather than at when its
-      release began).
+      `find_active_lease_by_vm_target`, and a commit before registration still able to
+      re-record a truncated window).
 - [ ] 2.7 **Campaign index currency.** Update this change's row and the Goal 3, 4, and 7
       graphs in `openspec/changes/README.md`, and the rows of
       `bare-metal-and-credits-domain-stacks`, `kit-owned-storefront-shell`,

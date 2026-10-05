@@ -19,7 +19,7 @@ from market_site.db import Base as SiteBase
 from market_site.ledger import CapacityLedgerService
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.pool import NullPool, StaticPool
 
 from compute_provisioning.jobs.db import Base as JobsBase
 from compute_provisioning.jobs.db import JobRecord
@@ -186,6 +186,62 @@ def test_dispatch_provenance_without_an_aggregate_refuses_and_abandons_nothing(w
     assert _state(factory, reservation_id) == _State.assigned.value
 
 
+class _DispatchWinsRepository(SettlementRepository):
+    """Lets a concurrent ``begin`` win between the guard's proof and its abandon.
+
+    Just before the guard's compare-and-set, another connection moves the
+    aggregate to ``dispatch_pending`` and commits, as a ``begin`` that read it
+    ``assigned`` at the same moment would. The compare-and-set then finds it
+    moved.
+    """
+
+    def __init__(self, other_connection_factory) -> None:
+        super().__init__()
+        self._other = other_connection_factory
+
+    def abandon_if_assigned(self, db, capacity_reservation_id: str) -> bool:
+        with self._other() as racing, racing.begin():
+            record = racing.get(SettlementRecord, capacity_reservation_id)
+            assert record.state == _State.assigned.value
+            record.state = _State.dispatch_pending.value
+        return super().abandon_if_assigned(db, capacity_reservation_id)
+
+
+def test_a_dispatch_that_wins_the_race_with_the_guard_keeps_the_capacity(tmp_path):
+    """The guard proves nothing was dispatched, then abandons the aggregate by
+    compare-and-set. A dispatch committed in between makes the compare-and-set
+    miss: the guard refuses, the reservation stays leased, and the aggregate
+    keeps the dispatch's state."""
+    engine = create_engine(f"sqlite:///{tmp_path / 'race.db'}", poolclass=NullPool)
+    for base in (PoolsBase, SiteBase, JobsBase, FulfillmentBase):
+        base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+    with factory() as db, db.begin():
+        db.add(
+            ResourcePool(
+                id=DEFAULT_POOL_ID,
+                label="default",
+                provider="test",
+                policy_tags={"deliverable_modes": ["vm"]},
+            )
+        )
+    ledger = CapacityLedgerService(
+        factory,
+        unit_claim_keys=("units", "gpu_count"),
+        mirror_dimension="gpu_count",
+        release_guard=FulfillmentReleaseGuard(_DispatchWinsRepository(factory)),
+    )
+    ledger.register_resource(resource_id="r1", total_units=4, pool_id=DEFAULT_POOL_ID)
+    reservation_id = _leased(ledger)
+    _aggregate(factory, reservation_id, _State.assigned.value, fulfillment_id=None)
+
+    released = ledger.release(capacity_reservation_id=reservation_id)
+
+    assert released is None
+    assert ledger.get_reservation(reservation_id)["state"] == "leased"
+    assert _state(factory, reservation_id) == _State.dispatch_pending.value
+
+
 # ----------------------------------------------------------------------
 # The executor: what a release does, by the aggregate's state
 # ----------------------------------------------------------------------
@@ -208,7 +264,9 @@ def test_dispatch_provenance_without_an_aggregate_refuses_and_abandons_nothing(w
         (_State.failed, ReleaseAction.UNRELEASABLE),
     ],
 )
-async def test_the_release_decision_follows_the_aggregate_state(world, state, action):
+async def test_the_release_decision_follows_the_aggregate_state_and_writes_nothing(
+    world, state, action
+):
     factory, ledger, executor, port = world
     reservation_id = _leased(ledger)
     if state is not None:
@@ -218,10 +276,11 @@ async def test_the_release_decision_follows_the_aggregate_state(world, state, ac
     decision = await executor.submit_release({"capacity_reservation_id": reservation_id})
 
     assert decision.action is action
+    # Deciding writes nothing: the lifecycle begins teardown once the release
+    # is recorded.
+    assert port.begun == []
     if action is ReleaseAction.TEARDOWN:
-        assert port.begun == ["f-1"]
-    else:
-        assert port.begun == []
+        assert decision.fulfillment_id == "f-1"
     if action is ReleaseAction.UNRELEASABLE:
         assert (decision.reason, decision.message) == ("fulfillment_failed", "create failed")
 

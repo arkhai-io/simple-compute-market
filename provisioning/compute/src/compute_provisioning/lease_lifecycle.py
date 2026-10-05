@@ -351,6 +351,8 @@ class LeaseLifecycleService:
                 )
                 return "release_failed"
         if decision.action in (ReleaseAction.TEARDOWN, ReleaseAction.CREATE_IN_FLIGHT):
+            # Recorded first: a crash before teardown begins leaves a lease the
+            # releasing pass resumes, never a teardown the lease knows nothing of.
             self._site_authority.begin_release(
                 capacity_reservation_id,
                 release_job_id=str(decision.fulfillment_id),
@@ -361,6 +363,10 @@ class LeaseLifecycleService:
                 decision.fulfillment_id,
                 decision.action.value,
             )
+            if decision.action is ReleaseAction.TEARDOWN:
+                await self._begin_recorded_teardown(
+                    capacity_reservation_id, str(decision.fulfillment_id)
+                )
             return "releasing"
         self._mark_release_failed(
             reservation,
@@ -368,6 +374,26 @@ class LeaseLifecycleService:
             message=decision.message,
         )
         return "release_failed"
+
+    async def _begin_recorded_teardown(
+        self, capacity_reservation_id: str, fulfillment_id: str
+    ) -> None:
+        """Begin the teardown of a release already recorded as ``releasing``.
+
+        A failure here is not the release's failure: the release is durable,
+        and the releasing pass begins the teardown on a later cycle when the
+        aggregate still reads ``active``.
+        """
+        try:
+            await self._release_executor.begin_teardown(fulfillment_id)
+        except Exception as exc:
+            logger.warning(
+                "[LEASE_LIFECYCLE] Teardown of fulfillment %s for reservation %s "
+                "did not begin; the releasing pass retries it: %s",
+                fulfillment_id,
+                capacity_reservation_id,
+                exc,
+            )
 
     async def _process_releasing_reservation(
         self, reservation: dict[str, Any], now: datetime, grace_seconds: int
@@ -410,8 +436,17 @@ class LeaseLifecycleService:
                 # period starts counting only once there is a teardown to wait on.
                 return "skipped"
 
-        lease_end = self._parse_utc(reservation.get("lease_end_utc")) or now
-        if now < lease_end + timedelta(seconds=grace_seconds):
+        # A stalled teardown is timed from when this release began, not from
+        # the lease's end: a lease terminated long before its end would
+        # otherwise wait that long, and one that ended long ago would time out
+        # as its teardown began. A reservation that entered ``releasing``
+        # before the start was recorded is timed from its end.
+        began = (
+            self._parse_utc(reservation.get("release_requested_at"))
+            or self._parse_utc(reservation.get("lease_end_utc"))
+            or now
+        )
+        if now < began + timedelta(seconds=grace_seconds):
             return "skipped"
         self._mark_release_failed(
             reservation,

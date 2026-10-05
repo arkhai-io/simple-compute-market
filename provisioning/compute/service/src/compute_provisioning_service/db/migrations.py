@@ -2831,6 +2831,18 @@ def _migrate_job_envelopes(engine: Engine, *, default_host_id: str | None = None
         )
 
 
+def _migrate_reservation_release_requested_at(engine: Engine) -> None:
+    """Add ``capacity_reservations.release_requested_at``.
+
+    The lease lifecycle times a stalled teardown from when release began.
+    Reservations already releasing have no recorded start; the lifecycle times
+    those from the lease's end, as it did before the column existed.
+    """
+    _add_column_if_missing(
+        engine, "capacity_reservations", "release_requested_at", "VARCHAR"
+    )
+
+
 def _migrate_drop_job_contract_version(engine: Engine) -> None:
     """Drop ``ansible_jobs.contract_version``.
 
@@ -3004,5 +3016,9 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20261005_001_drop_job_contract_version",
         _migrate_drop_job_contract_version,
+    ),
+    Migration(
+        "20261005_002_reservation_release_requested_at",
+        _migrate_reservation_release_requested_at,
     ),
 )

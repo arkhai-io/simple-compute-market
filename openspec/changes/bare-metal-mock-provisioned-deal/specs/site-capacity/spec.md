@@ -2,15 +2,19 @@
 
 ### Requirement: A reservation's lease tail is written once
 
-The site authority MUST record a reservation's lease tail (its executor target, executor
-reference, lease start and end, and create handle) once. A lease is registered once the
-reservation records an executor target. A first registration on a `reserved`,
-`provisioning`, or `leased` reservation MUST record the tail it names and leave the
-reservation `leased`. A repeated registration with the same executor target and lease start
-MUST return the reservation unchanged and MUST NOT move its lease end. A registration naming
-a different executor target or lease start MUST be refused. A registration on a `releasing`,
+The site authority MUST record a reservation's lease tail (its executor target and executor
+reference) once. A lease is registered once the reservation records an executor target. A
+first registration on a `reserved`, `provisioning`, or `leased` reservation MUST record the
+tail it names and leave the reservation `leased`. A window already recorded on the
+reservation is the site's: a first registration MUST NOT change it and MAY write a lease
+start or end only where none is recorded. A first registration MUST record the escrow its
+deal reference names when the reservation records none, and MUST NOT replace a recorded one.
+A repeated registration with the same executor target and lease start MUST return the
+reservation unchanged and MUST NOT move its lease end. A registration naming a different
+executor target or lease start MUST be refused. A registration on a `releasing`,
 `release_failed`, or `unmanaged` reservation MUST be refused and MUST NOT change its state.
-A recorded create handle MUST NOT be replaced, by registration or by any other write.
+The create and release handles are lifecycle evidence: no registration MAY write either, and
+a recorded create handle MUST NOT be replaced.
 
 #### Scenario: A lease is registered on a committed reservation
 
@@ -23,6 +27,19 @@ A recorded create handle MUST NOT be replaced, by registration or by any other w
 - **WHEN** a registration is repeated with the reservation's recorded target and start and
   its original end after the lease was truncated
 - **THEN** the reservation is returned with its truncated end
+
+#### Scenario: A late first registration names the original end after a truncation
+
+- **WHEN** a lease committed until T2 is truncated to T1 and its first registration then
+  arrives naming T2
+- **THEN** the registration is recorded and the lease ends at T1
+
+#### Scenario: A hold placed before the deal had an escrow is registered
+
+- **WHEN** a lease is registered on a reservation that records no escrow, with a deal
+  reference naming one
+- **THEN** the reservation records that escrow, and an operator finds it through the site's
+  escrow filter
 
 #### Scenario: A lease is registered on a releasing reservation
 

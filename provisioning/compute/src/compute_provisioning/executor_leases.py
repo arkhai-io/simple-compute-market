@@ -19,14 +19,20 @@ from market_site.authority import SiteAuthorityPort
 
 @dataclass(frozen=True)
 class ExecutorLeaseRegistration:
-    """The lease tail to record on a reservation."""
+    """The lease tail to record on a reservation.
+
+    ``deal_ref`` is the caller's correlation, of which the site records only
+    an escrow the reservation lacks. The create and release handles are not
+    here: they are lifecycle evidence, written by fulfillment and the lease
+    lifecycle alone.
+    """
 
     capacity_reservation_id: str
     executor_target: str
     executor_ref: dict[str, Any] | None = None
+    deal_ref: dict[str, Any] | None = None
     lease_start_utc: datetime | str | None = None
     lease_end_utc: datetime | str | None = None
-    create_job_id: str | None = None
 
 
 def lease_datetime_value(value: datetime | str | None) -> str | None:
@@ -75,9 +81,9 @@ class ExecutorLeaseService:
             capacity_reservation_id=registration.capacity_reservation_id,
             executor_target=registration.executor_target,
             executor_ref=registration.executor_ref,
+            deal_ref=registration.deal_ref,
             lease_start_utc=lease_datetime_value(registration.lease_start_utc),
             lease_end_utc=lease_datetime_value(registration.lease_end_utc),
-            create_job_id=registration.create_job_id,
         )
         if attached is None:
             raise LeaseNotFoundError(

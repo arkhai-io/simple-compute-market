@@ -1717,26 +1717,33 @@ class CapacityLedgerService:
         capacity_reservation_id: str,
         executor_target: str,
         executor_ref: Mapping[str, Any] | None = None,
+        deal_ref: Mapping[str, Any] | None = None,
         lease_start_utc: str | None = None,
         lease_end_utc: str | None = None,
-        create_job_id: str | None = None,
     ) -> dict[str, Any] | None:
         """Record a reservation's lease tail once.
 
-        The tail is the executor target and reference, the lease window, and
-        the create handle. Commit already leaves a reservation ``leased`` with
-        its window; registration is recorded by its executor target:
+        The tail is the executor target and reference. Commit already leaves a
+        reservation ``leased`` with its window, and that window is the site's:
+        registration is recorded by its executor target, and never moves a
+        recorded window.
 
-        - the first registration on a ``reserved``, ``provisioning``, or
-          ``leased`` reservation records the tail and leaves it ``leased``;
-        - a repeat naming the same target and start returns the record
-          unchanged, and never moves the end, so a re-registration with a
-          deal's original window cannot undo a truncation;
-        - a repeat naming a different target or start is refused, because
-          changing the executor identity could redirect teardown;
-        - a ``releasing``, ``release_failed``, or ``unmanaged`` reservation is
-          refused, so registration cannot undo what the lifecycle recorded;
-        - a recorded create handle is never replaced.
+        - The first registration on a ``reserved``, ``provisioning``, or
+          ``leased`` reservation records the target and reference and leaves
+          the reservation ``leased``. It writes the window it names only where
+          none is recorded, so a late registration cannot restore an end that
+          was since truncated. It records the escrow the caller's ``deal_ref``
+          names when the reservation records none, as ``reserve`` does: a hold
+          placed before the deal had an escrow is correlated with it here.
+        - A repeat naming the same target and start returns the record
+          unchanged.
+        - A repeat naming a different target or start is refused, because
+          changing the executor identity could redirect teardown.
+        - A ``releasing``, ``release_failed``, or ``unmanaged`` reservation is
+          refused, so registration cannot undo what the lifecycle recorded.
+
+        The create and release handles are lifecycle evidence, written only by
+        fulfillment and the lease lifecycle, never by a registration.
 
         Refusals raise ``CapacityConflictError``; ``None`` means no such live
         reservation. Emits no capacity event: availability moved at commit.
@@ -1769,12 +1776,13 @@ class CapacityLedgerService:
                 executor_target=executor_target,
                 executor_ref=executor_ref,
             )
-            if lease_start_utc:
+            if lease_start_utc and not reservation.lease_start_utc:
                 reservation.lease_start_utc = str(lease_start_utc)
-            if lease_end_utc:
+            if lease_end_utc and not reservation.lease_end_utc:
                 reservation.lease_end_utc = str(lease_end_utc)
-            if create_job_id and not reservation.create_job_id:
-                reservation.create_job_id = create_job_id
+            escrow_uid = dict(deal_ref or {}).get("escrow_uid")
+            if escrow_uid and not reservation.escrow_uid:
+                reservation.escrow_uid = str(escrow_uid)
             reservation.state = ReservationState.leased.value
             db.commit()
             return self._reservation_payload(reservation)
@@ -1805,15 +1813,20 @@ class CapacityLedgerService:
         *,
         release_job_id: str | None = None,
     ) -> dict[str, Any] | None:
-        """Transition a leased reservation to releasing (teardown in flight).
+        """Transition a held reservation to releasing (teardown in flight).
 
-        No capacity event: releasing still holds the units — the workload
-        may not be torn down yet.
+        Entering ``releasing`` records when this release attempt began (a
+        retry after ``release_failed`` begins a new one); recording the handle
+        on a reservation already releasing keeps the time it began. No
+        capacity event: releasing still holds the units — the workload may
+        not be torn down yet.
         """
         with self.serialized(), self._session_factory() as db:
             reservation = db.get(CapacityReservation, capacity_reservation_id)
             if reservation is None or reservation.state not in HELD_RESERVATION_STATES:
                 return None
+            if reservation.state != ReservationState.releasing.value:
+                reservation.release_requested_at = datetime.now(timezone.utc).isoformat()
             reservation.state = ReservationState.releasing.value
             self._set_release_job_id(
                 reservation,
@@ -2521,6 +2534,7 @@ class CapacityLedgerService:
             "failure_reason": reservation.failure_reason,
             "failure_message": reservation.failure_message,
             "released_at": reservation.released_at,
+            "release_requested_at": reservation.release_requested_at,
         }
 
     def _reservation_payload_for_reserve(

@@ -95,15 +95,16 @@ class LeaseRouteService:
 
     def register(self, body: LeaseRegistration) -> LeaseView:
         """Record a lease's tail once; a repeat naming the same target and start
-        returns it unchanged, and one naming another is refused."""
+        returns it unchanged, and one naming another is refused. A window the
+        site already recorded is kept."""
         try:
             reservation = self._leases.register_lease(
                 ExecutorLeaseRegistration(
                     capacity_reservation_id=body.capacity_reservation_id,
                     executor_target=body.executor_target,
+                    deal_ref=dict(body.deal_ref),
                     lease_start_utc=body.lease_start_utc,
                     lease_end_utc=body.lease_end_utc,
-                    create_job_id=body.create_job_id,
                 )
             )
         except (LeaseNotFoundError, CapacityConflictError) as exc:

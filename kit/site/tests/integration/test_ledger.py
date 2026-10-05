@@ -699,7 +699,6 @@ def test_a_first_registration_records_the_tail_on_a_committed_lease(
         executor_ref={"host_id": "kvm1"},
         lease_start_utc="2026-01-01T00:00:00+00:00",
         lease_end_utc="2099-01-01 00:00",
-        create_job_id="job-1",
     )
 
     assert attached["state"] == "leased"
@@ -707,7 +706,7 @@ def test_a_first_registration_records_the_tail_on_a_committed_lease(
     assert attached["offering_mode"] == "vm"
     assert attached["executor_target"] == "tenant-abcd"
     assert attached["executor_ref"] == {"host_id": "kvm1"}
-    assert attached["create_job_id"] == "job-1"
+    assert attached["create_job_id"] is None
     events_after, _ = seeded.events_after(0)
     assert len(events_after) == len(events_before)
     assert seeded.attach_lease(
@@ -731,27 +730,102 @@ def test_a_first_registration_on_an_uncommitted_hold_leases_it(
     assert (attached["state"], attached["executor_target"]) == ("leased", "tenant-r")
 
 
-def test_a_repeated_registration_never_moves_the_end_or_the_create_handle(
-    seeded: CapacityLedgerService,
-):
+def test_a_repeated_registration_never_moves_the_end(seeded: CapacityLedgerService):
     """A storefront re-registering with the deal's original window after a
-    truncation gets the truncated lease back, and a recorded create handle
-    stays the one recorded."""
+    truncation gets the truncated lease back."""
     reservation_id = _committed(seeded, "0xrepeat")
     first = dict(
         capacity_reservation_id=reservation_id,
         executor_target="tenant-x",
         lease_start_utc="2026-01-01T00:00:00+00:00",
         lease_end_utc="2099-01-01 00:00",
-        create_job_id="job-1",
     )
     seeded.attach_lease(**first)
     seeded.truncate_lease(capacity_reservation_id=reservation_id, lease_end_utc="2027-01-01 00:00")
 
-    again = seeded.attach_lease(**{**first, "create_job_id": "job-2"})
+    again = seeded.attach_lease(**first)
 
     assert again["lease_end_utc"] == "2027-01-01 00:00"
-    assert again["create_job_id"] == "job-1"
+
+
+def test_a_late_first_registration_cannot_restore_a_truncated_end(
+    seeded: CapacityLedgerService,
+):
+    """The committed window is the site's: a first registration arriving after
+    a truncation, naming the deal's original end, leaves the truncated one."""
+    reservation_id = _committed(seeded, "0xlate", end="2099-01-01 00:00")
+    seeded.truncate_lease(capacity_reservation_id=reservation_id, lease_end_utc="2027-01-01 00:00")
+
+    registered = seeded.attach_lease(
+        capacity_reservation_id=reservation_id,
+        executor_target="tenant-late",
+        lease_start_utc="2026-01-01T00:00:00+00:00",
+        lease_end_utc="2099-01-01 00:00",
+    )
+
+    assert registered["lease_end_utc"] == "2027-01-01 00:00"
+    assert registered["executor_target"] == "tenant-late"
+
+
+def test_a_first_registration_writes_a_window_only_where_none_is_recorded(
+    seeded: CapacityLedgerService,
+):
+    reserved = seeded.reserve(
+        claim={"offering_mode": "vm", "gpu_count": 1}, deal_ref={"listing_id": "l-open"}
+    )
+
+    registered = seeded.attach_lease(
+        capacity_reservation_id=reserved["capacity_reservation_id"],
+        executor_target="tenant-open",
+        lease_start_utc="2026-01-01T00:00:00+00:00",
+        lease_end_utc="2099-01-01 00:00",
+    )
+
+    assert registered["lease_end_utc"] == "2099-01-01 00:00"
+
+
+def test_a_registration_records_the_deal_s_escrow_once(seeded: CapacityLedgerService):
+    """A hold placed before the deal had an escrow is correlated with it at
+    registration, as ``reserve`` would have; a recorded escrow is never
+    replaced."""
+    held = seeded.reserve(
+        claim={"offering_mode": "vm", "gpu_count": 1}, deal_ref={"listing_id": "l-hold"}
+    )
+    reservation_id = held["capacity_reservation_id"]
+    seeded.commit(capacity_reservation_id=reservation_id, lease_end_utc="2099-01-01 00:00")
+
+    seeded.attach_lease(
+        capacity_reservation_id=reservation_id,
+        executor_target="tenant-esc",
+        deal_ref={"escrow_uid": "0xlate-escrow"},
+    )
+    seeded.attach_lease(
+        capacity_reservation_id=reservation_id,
+        executor_target="tenant-esc",
+        deal_ref={"escrow_uid": "0xother"},
+    )
+
+    found = seeded.get_reservation_by_escrow("0xlate-escrow")
+    assert found["capacity_reservation_id"] == reservation_id
+    assert seeded.get_reservation(reservation_id)["escrow_uid"] == "0xlate-escrow"
+
+
+def test_entering_releasing_records_when_the_release_began(seeded: CapacityLedgerService):
+    """Each release attempt is timed from its own start: recording the handle
+    again keeps it, and a retry after ``release_failed`` begins a new one."""
+    reservation_id = _committed(seeded, "0xbegan")
+
+    first = seeded.begin_releasing(reservation_id, release_job_id="f-1")
+    again = seeded.begin_releasing(reservation_id, release_job_id="f-1")
+    seeded.update_reservation_state(
+        reservation_id, state="release_failed", failure_reason="teardown_failed"
+    )
+    retried = seeded.begin_releasing(reservation_id, release_job_id="f-1")
+
+    assert first["release_requested_at"] is not None
+    assert again["release_requested_at"] == first["release_requested_at"]
+    assert retried["release_requested_at"] >= first["release_requested_at"]
+    assert retried["state"] == "releasing"
 
 
 @pytest.mark.parametrize(

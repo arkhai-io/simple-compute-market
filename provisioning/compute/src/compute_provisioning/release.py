@@ -21,10 +21,13 @@ reservation and no job bound to it. The proof is checked by
 ``FulfillmentReleaseGuard`` inside the transaction that frees the capacity, so
 every caller of the site's release is held to it, not only the lease lifecycle.
 
-Submission and completion are separate: ``FulfillmentReleaseExecutor`` decides
-what to do and begins or adopts teardown, but never frees capacity itself; the
-lease lifecycle does that through the guarded site release, and reads progress
-through ``FulfillmentReleaseStatusPort``. Fulfillment convergence owns teardown
+Deciding and acting are separate: ``FulfillmentReleaseExecutor`` decides what a
+release does and writes nothing. The lease lifecycle records the release
+durably (``releasing``, with the fulfillment as its handle) before it begins
+teardown, so a crash between the two leaves a release the next cycle resumes
+rather than a teardown the lease does not know about. The lifecycle frees
+capacity through the guarded site release and reads progress through
+``FulfillmentReleaseStatusPort``. Fulfillment convergence owns teardown
 dispatch, retry, and recovery.
 """
 
@@ -127,7 +130,8 @@ def _dispatched(db: Session, capacity_reservation_id: str) -> bool:
 class ReleaseAction(str, enum.Enum):
     """What the lease lifecycle does with a release request."""
 
-    #: Teardown has begun or was adopted; the lease is releasing under it.
+    #: There is something to tear down, or a teardown to adopt; the lease
+    #: releases under the fulfillment, and teardown begins once that is recorded.
     TEARDOWN = "teardown"
     #: Nothing remains delivered by the aggregate's own account; free the
     #: capacity through the guarded release, which checks provenance.
@@ -149,10 +153,12 @@ class ReleaseDecision:
 class FulfillmentReleaseExecutor:
     """Decide a reservation's release from its fulfillment aggregate's state.
 
-    Begins or adopts teardown where there is something to tear down, and
-    otherwise reports what the lease lifecycle should do. Never frees capacity
-    and never submits provider work: the lifecycle frees capacity through the
-    guarded site release, and fulfillment convergence dispatches teardown.
+    ``submit_release`` only reads: it reports what the lease lifecycle should
+    do, and the lifecycle acts once the release is durably recorded.
+    ``begin_teardown`` begins, or adopts, the aggregate's teardown and is
+    idempotent. Neither frees capacity or submits provider work: the lifecycle
+    frees capacity through the guarded site release, and fulfillment
+    convergence dispatches teardown.
     """
 
     def __init__(
@@ -184,8 +190,7 @@ class FulfillmentReleaseExecutor:
         if state is None or state in _UNDELIVERED_STATES or state == _State.torn_down.value:
             return ReleaseDecision(ReleaseAction.FREE, fulfillment_id=fulfillment_id)
         if state in _TEARDOWN_STATES:
-            begun = await self._teardown_port.begin_teardown(fulfillment_id)
-            return ReleaseDecision(ReleaseAction.TEARDOWN, fulfillment_id=begun)
+            return ReleaseDecision(ReleaseAction.TEARDOWN, fulfillment_id=fulfillment_id)
         if state in _CREATE_IN_FLIGHT_STATES:
             return ReleaseDecision(
                 ReleaseAction.CREATE_IN_FLIGHT, fulfillment_id=fulfillment_id
@@ -198,7 +203,7 @@ class FulfillmentReleaseExecutor:
         )
 
     async def begin_teardown(self, fulfillment_id: str) -> str:
-        """Begin teardown once a create in flight has settled as ``active``."""
+        """Begin the aggregate's teardown, or adopt one already begun."""
         return await self._teardown_port.begin_teardown(fulfillment_id)
 
 

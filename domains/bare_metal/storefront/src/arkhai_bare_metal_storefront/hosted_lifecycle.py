@@ -20,6 +20,7 @@ from arkhai_bare_metal import (
 from compute_provisioning_contracts import (
     FulfillmentRequestBody,
     FulfillmentScheduleRequest,
+    LeaseRegistration,
 )
 from market_core.schemas import SettlementObligation
 from market_core import VersionedEnvelope
@@ -798,6 +799,20 @@ class BareMetalHostedLifecycleCallbacks:
             raise BareMetalHostedLifecycleError(
                 "access-ready timestamp is not timezone-aware"
             )
+        # The lease is the family's: register its tail on the reservation, the
+        # machine the access was granted on as the target teardown addresses.
+        # The committed window is the site's and is kept; a repeat after a
+        # restart returns the registered lease unchanged.
+        await self.fulfillment_client.register_lease(
+            LeaseRegistration(
+                capacity_reservation_id=reservation_id,
+                deal_ref={
+                    "negotiation_id": binding.negotiation_id,
+                    "hosted_obligation_ref": binding.obligation_ref,
+                },
+                executor_target=access.host_id,
+            )
+        )
         public_result = BareMetalLeaseReadyResult(
             site_id=facts.site_id,
             offering_mode=facts.offering_mode,

@@ -176,6 +176,33 @@ class TestRegistration:
         assert refused.value.status_code == 409
         assert (await seller.get_lease(reservation_id)).executor_target == "tenant-1"
 
+    async def test_a_hold_placed_before_the_escrow_is_found_by_it_once_registered(
+        self, client_and_queue, seller
+    ):
+        """A storefront's acceptance hold is reserved before the deal has an
+        escrow; registration records the escrow its ``deal_ref`` names, so an
+        operator finds the lease through the site's escrow filter."""
+        clients, _ = client_and_queue
+        ledger = _container_module.resolved_capacity_ledger_service
+        _committed("0xdeclares-the-resource")  # declares the resource the hold claims
+        hold = ledger.reserve(
+            claim={"offering_mode": "vm", "gpu_count": 1, "host_id": "kvm1"},
+            deal_ref={"listing_id": "listing-hold"},
+        )
+        reservation_id = hold["capacity_reservation_id"]
+        ledger.commit(capacity_reservation_id=reservation_id, lease_end_utc=_END.isoformat())
+
+        await seller.register_lease(
+            LeaseRegistration(
+                capacity_reservation_id=reservation_id,
+                deal_ref={"escrow_uid": "0xlate-escrow"},
+                executor_target="tenant-hold",
+            )
+        )
+
+        found = await clients.site.list_reservations(escrow_uid="0xlate-escrow")
+        assert [row["capacity_reservation_id"] for row in found] == [reservation_id]
+
     def test_there_is_no_lease_update_route(self):
         """A lease's end moves only through the site's truncation, and its
         executor identity and handles are fixed at registration."""

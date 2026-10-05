@@ -18,7 +18,14 @@ from market_fulfillment import SettlementRecord, SettlementRecordState
 
 from bare_metal_provisioning_adapter.services.mock_output import bare_metal_mock_output
 from compute_provisioning_ansible import MockAnsibleRunner
-from compute_provisioning_contracts import LeaseState, LeaseTermination
+from compute_provisioning.lease_lifecycle import LeaseLifecycleService
+from compute_provisioning.release import (
+    FulfillmentReleaseExecutor,
+    FulfillmentReleaseStatusPort,
+    FulfillmentServiceTeardownPort,
+)
+from compute_provisioning_contracts import LeaseRegistration, LeaseState, LeaseTermination
+from market_fulfillment import FulfillmentOrchestrator, SettlementRepository
 from compute_provisioning_service import container as _container_module
 
 from .bare_metal_deal import (
@@ -178,3 +185,71 @@ async def test_a_failed_grant_leaves_the_lease_for_an_operator(
         LeaseState.RELEASE_FAILED,
         "fulfillment_failed",
     )
+
+
+async def test_a_release_is_durable_before_teardown_and_a_restart_resumes_it(
+    client_and_queue, monkeypatch
+):
+    """The lease records ``releasing`` before teardown is asked for. When
+    beginning teardown fails after that, the terminate still answers
+    ``releasing``, the aggregate is untouched, and a lifecycle rebuilt over the
+    same database, as after a restart, begins the teardown."""
+    clients, _ = client_and_queue
+    capacity_reservation_id, fulfillment_id = await _granted(clients, "escrow-bm-durable")
+
+    async def unreachable(self, fulfillment_id):
+        raise ConnectionError("fulfillment authority unreachable")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(FulfillmentOrchestrator, "begin_fulfillment_teardown", unreachable)
+        lease = await clients.family.terminate_lease(capacity_reservation_id, LeaseTermination())
+
+    assert (lease.status, lease.release_job_id) == (LeaseState.RELEASING, fulfillment_id)
+    assert _aggregate_state(capacity_reservation_id) == _State.active.value
+
+    session_factory = _container_module.resolved_session_factory
+    teardown_port = FulfillmentServiceTeardownPort(
+        lambda: _container_module.resolved_fulfillment_service
+    )
+    # Rebuilt from configuration only: nothing in memory survives the restart.
+    configured = _container_module.resolved_lease_lifecycle_service
+    restarted = LeaseLifecycleService(
+        settings=configured._settings,
+        site_authority=configured._site_authority,
+        release_executor=FulfillmentReleaseExecutor(
+            settlement_repository=SettlementRepository(),
+            session_factory=session_factory,
+            teardown_port=teardown_port,
+        ),
+        release_status=FulfillmentReleaseStatusPort(teardown_port),
+    )
+    await restarted.check_leases()
+
+    assert _aggregate_state(capacity_reservation_id) == _State.teardown_dispatch_pending.value
+    assert (await clients.family.get_lease(capacity_reservation_id)).status == (
+        LeaseState.RELEASING
+    )
+
+
+async def test_a_bare_metal_lease_is_registered_on_the_family_surface(client_and_queue):
+    """Bare metal registers its lease as VM does: the machine as the target,
+    with the site keeping the committed window, read back through the family
+    client as a bare-metal lease."""
+    clients, _ = client_and_queue
+    capacity_reservation_id, _ = await _granted(clients, "escrow-bm-register")
+    committed = _container_module.resolved_capacity_ledger_service.get_reservation(
+        capacity_reservation_id
+    )
+
+    lease = await clients.family.register_lease(
+        LeaseRegistration(
+            capacity_reservation_id=capacity_reservation_id,
+            deal_ref={"negotiation_id": "negotiation-bm-register"},
+            executor_target=HOST_ID,
+        )
+    )
+
+    assert lease.executor_target == HOST_ID
+    assert lease.offering_mode == "bare_metal"
+    assert lease.lease_end_utc == datetime.fromisoformat(committed["lease_end_utc"])
+    assert lease.create_job_id == create_job_id(capacity_reservation_id)

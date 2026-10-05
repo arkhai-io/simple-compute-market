@@ -17,6 +17,8 @@ from compute_provisioning_contracts import (
     FulfillmentScheduleRequest,
     FulfillmentScheduleResponse,
     FulfillmentStatusResponse,
+    LeaseRegistration,
+    LeaseView,
 )
 
 from core_storefront.aggregation import (
@@ -285,6 +287,12 @@ class SelectedSiteFulfillmentClient:
         return await self._client(
             capacity_reservation_id
         ).begin_fulfillment_teardown(fulfillment_id)
+
+    async def register_lease(self, registration: LeaseRegistration) -> LeaseView:
+        """Register the lease on its reservation, at the reservation's site."""
+        return await self._client(
+            registration.capacity_reservation_id
+        ).register_lease(registration)
 
 
 def build_trusted_site_clients(

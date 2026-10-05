@@ -5,6 +5,8 @@ from types import SimpleNamespace
 import pytest
 from market_identity import Ed25519Signer
 from market_settlement_runtime import SettlementObligationRecord
+from arkhai_bare_metal import bare_metal_digest
+from market_core import VersionedEnvelope
 
 from arkhai_bare_metal_storefront.hosted_lifecycle import (
     BareMetalHostedLifecycleCallbacks,
@@ -582,3 +584,134 @@ async def test_a_release_the_site_refuses_leaves_the_lease_unreleased() -> None:
 
     assert site.released == ["reservation-a"]
     assert not any(advance.get("teardown_state") == "released" for advance in db.advances)
+
+
+_KEY = "ssh-ed25519 AAAA tenant-a"
+
+
+class _AccessReadyDb(FakeLifecycleDb):
+    """A deal whose fulfillment was begun and is about to be reported active."""
+
+    def __init__(self, settlement: SettlementObligationRecord) -> None:
+        super().__init__(settlement)
+        self.lifecycle.accepted_binding.buyer_principal = BUYER
+        self.lifecycle.accepted_binding.seller_principal = SELLER
+        self.lifecycle.accepted_binding.claimant_principal = SELLER
+        self.lifecycle.accepted_binding.listing_id = "listing-a"
+        self.lifecycle.accepted_binding.access_public_digest = bare_metal_digest(
+            {"ssh_public_key": _KEY}
+        )
+        self.lifecycle.accepted_binding.option.facts.resource_selection = "fungible"
+        self.lifecycle.accepted_binding.option.facts.physical_resource_id = None
+        self.lifecycle.accepted_binding.option.facts.pool_id = "pool-a"
+        self.lifecycle.accepted_binding.option.facts.offering_mode = "bare_metal"
+        self.lifecycle.accepted_binding.option.facts.access_method = "ssh"
+        self.lifecycle.physical_state = "fulfillment_pending"
+        self.lifecycle.capacity_reservation_id = "reservation-a"
+        self.lifecycle.settlement_resource_id = "settlement-resource-a"
+        self.lifecycle.fulfillment_id = "fulfillment-a"
+        self.lifecycle.fulfillment_identity = "fulfillment-identity-a"
+        self.lifecycle.public_result = None
+
+    async def load_bare_metal_fulfillment_context(self, *, negotiation_id):
+        return {
+            "terminal_state": "success",
+            "buyer_scheme": BUYER.scheme.value,
+            "buyer_identifier": BUYER.identifier,
+            "seller_scheme": SELLER.scheme.value,
+            "seller_identifier": SELLER.identifier,
+            "site_id": "site-a",
+            "pool_id": "pool-a",
+            "claimed_attributes": {"gpu_model": "H200"},
+        }
+
+    async def load_bare_metal_terms(self, *, negotiation_id):
+        return SimpleNamespace(
+            access_method="ssh", ssh_public_key=_KEY, duration_seconds=3600, access_ref=None
+        )
+
+    async def advance_bare_metal_hosted_lifecycle(self, **fields):
+        self.advances.append(fields)
+        for name, value in fields.items():
+            if name != "obligation_ref":
+                setattr(self.lifecycle, name, value)
+        return self.lifecycle
+
+    async def ensure_bare_metal_fulfillment_lifecycle(self, **fields):
+        return None
+
+    async def update_bare_metal_fulfillment_lifecycle(self, **fields):
+        return None
+
+
+class _ActiveFulfillment:
+    """Reports the grant done on machine-1, and records lease registrations
+    with the reservation's state at the time."""
+
+    def __init__(self, db: _AccessReadyDb) -> None:
+        self.db = db
+        self.registrations: list[tuple[object, str]] = []
+
+    async def get_fulfillment_status(self, fulfillment_id, *, capacity_reservation_id):
+        return SimpleNamespace(state="active", failure_reason=None, failure_message=None)
+
+    async def get_fulfillment_result(self, fulfillment_id, *, capacity_reservation_id):
+        return VersionedEnvelope(
+            kind="fulfillment.result.v1",
+            schema_version=1,
+            payload={
+                "state": "active",
+                "domain_result": {
+                    "kind": "bare_metal.fulfillment.result.v1",
+                    "schema_version": 2,
+                    "payload": {
+                        "kind": "bare_metal.v2",
+                        "action": "node_grant_access",
+                        "status": "success",
+                        "host_id": "machine-1",
+                        "physical_host_id": "host-1",
+                        "access_grant_ref": "grant-a",
+                        "lease_expires_at": "2099-01-01T01:00:00+00:00",
+                        "timestamp": "2099-01-01T00:00:05+00:00",
+                    },
+                },
+            },
+        )
+
+    async def register_lease(self, registration):
+        self.registrations.append((registration, self.db.lifecycle.physical_state))
+        return registration
+
+
+@pytest.mark.asyncio
+async def test_access_readiness_registers_the_lease_on_the_family_surface() -> None:
+    """Once the grant is reported active, the lease is registered with the
+    machine as its target before the deal is recorded access-ready, so a
+    failed registration is retried with the rest of the step. It names no
+    window: the committed window is the site's."""
+    settlement = record(mechanism="fiat.stripe.v1", mechanism_status="succeeded")
+    db = _AccessReadyDb(settlement)
+    fulfillment = _ActiveFulfillment(db)
+    capacity = FakeCapacityClient(FakeSite())
+    capacity.reservation_sites = {}
+    lifecycle = BareMetalHostedLifecycleCallbacks(
+        db=db,
+        runtime=FakeRuntime(),
+        local_principal=SELLER,
+        capacity_client=capacity,
+        fulfillment_client=fulfillment,
+        publish_evidence=NoPhysicalEffects(),
+    )
+
+    ready = await lifecycle._ensure_access_ready(settlement)
+
+    ((registration, state_at_registration),) = fulfillment.registrations
+    assert registration.capacity_reservation_id == "reservation-a"
+    assert registration.executor_target == "machine-1"
+    assert (registration.lease_start_utc, registration.lease_end_utc) == (None, None)
+    assert registration.deal_ref == {
+        "negotiation_id": settlement.agreement_ref,
+        "hosted_obligation_ref": settlement.obligation_ref,
+    }
+    assert state_at_registration == "fulfillment_pending"
+    assert ready.physical_state == "access_ready"

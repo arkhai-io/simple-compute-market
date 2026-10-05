@@ -157,6 +157,9 @@ class CapacityReservation(Base):
     failure_reason = Column(String, nullable=True)
     failure_message = Column(Text, nullable=True)
     released_at = Column(String, nullable=True)
+    # When the reservation last entered ``releasing``: the start of the release
+    # attempt a stalled teardown is timed from, whatever the lease's end.
+    release_requested_at = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False

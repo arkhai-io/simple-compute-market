@@ -54,12 +54,14 @@ class FakeSiteAuthority:
         return reservation
 
 
-def test_a_registration_names_no_offering_mode_and_no_deal():
-    """The mode is the reservation's, recorded when its capacity was claimed,
-    and a lease is addressed by its reservation, never by a deal's identity."""
+def test_a_registration_names_no_offering_mode_and_no_lifecycle_evidence():
+    """The mode is the reservation's, recorded when its capacity was claimed;
+    the create and release handles are written by fulfillment and the lease
+    lifecycle alone; and a lease is addressed by its reservation, never by a
+    deal's identity."""
     names = {field.name for field in fields(ExecutorLeaseRegistration)}
 
-    assert not {"offering_mode", "escrow_uid", "deal_ref"} & names
+    assert not {"offering_mode", "escrow_uid", "create_job_id", "release_job_id"} & names
 
 
 def test_lease_datetime_value_serializes_datetimes():
@@ -78,12 +80,13 @@ def test_registration_passes_the_tail_to_the_site():
             capacity_reservation_id="vm",
             executor_target="tenant-1",
             lease_end_utc=datetime(2099, 1, 1, tzinfo=timezone.utc),
-            create_job_id="job-1",
+            deal_ref={"escrow_uid": "0x1"},
         )
     )
 
     assert attached["executor_target"] == "tenant-1"
     assert site.attached[0]["lease_end_utc"] == "2099-01-01T00:00:00+00:00"
+    assert site.attached[0]["deal_ref"] == {"escrow_uid": "0x1"}
 
 
 def test_registration_on_no_live_reservation_is_not_found():

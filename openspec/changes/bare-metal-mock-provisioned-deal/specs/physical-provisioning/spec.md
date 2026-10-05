@@ -213,10 +213,13 @@ target; a first registration MUST be accepted on a `reserved`, `provisioning`, o
 reservation; a repeated registration with the same executor target and lease start MUST
 return the lease unchanged and MUST NOT move its end; one naming a different target or start
 MUST be refused; a registration on a `releasing`, `release_failed`, or `unmanaged`
-reservation MUST be refused; a recorded create handle MUST NOT be replaced. No lease route
-MAY change a lease's executor identity, its start, or its create or release handles after
-registration. Once registered, a lease's end MAY move only through the site authority's
-lease truncation. A storefront MUST register a lease with the window its commit returned.
+reservation MUST be refused; a window the site already recorded MUST be kept. A
+registration MAY name the executor target, a window, and the caller's deal reference, and
+MUST NOT name a create or release handle: those are lifecycle evidence, written only by
+fulfillment and the lease lifecycle. No lease route MAY change a lease's executor identity,
+its start, or its create or release handles after registration. Once registered, a lease's
+end MAY move only through the site authority's lease truncation. A storefront that holds the
+window its commit returned MUST register that window, and MAY register without one.
 
 #### Scenario: A storefront re-registers after a restart
 
@@ -274,7 +277,12 @@ No provisioning route MAY submit delivery work (creating a workload or granting 
 
 ### Requirement: An undelivered lease is released by what its fulfillment proves
 
-A lease's release MUST follow the state of its reservation's fulfillment aggregate:
+A lease's release MUST follow the state of its reservation's fulfillment aggregate. Deciding
+a release MUST NOT write: the reservation MUST be recorded `releasing`, with the fulfillment
+as its release handle, before teardown is begun, so that a restart between the two resumes
+the release from `releasing`, and a failure to begin teardown leaves it for the lease
+lifecycle's next cycle. The grace period after which a stalled teardown is marked failed
+MUST run from when the reservation entered `releasing`, not from the lease's end.
 
 - An `active` aggregate MUST be torn down before capacity returns.
 - An aggregate whose teardown has already begun — `teardown_dispatch_pending`, `tearing_down`, or `teardown_failed` — MUST have that teardown adopted, not a second one begun.
@@ -412,8 +420,12 @@ Service composition MUST reject duplicate job-executor registrations for one `(o
 Market-managed leases MUST attach the executor target and the lease window to an existing committed site allocation. The allocation's offering mode is the one the site recorded when capacity was claimed; registration MUST NOT name an offering mode, and executor-specific reference data such as a physical-host identity MUST stay with the fulfillment that delivered the workload rather than the lease.
 
 #### Scenario: Bare-metal lease is registered
-- **WHEN** a caller registers a lease for a committed bare-metal allocation
-- **THEN** the allocation keeps its recorded `bare_metal` offering mode and records the machine target and lease window, and the physical-host identity stays in the fulfillment's metadata
+- **WHEN** a bare-metal storefront's fulfillment reports access granted for a committed allocation
+- **THEN** the storefront registers the lease with the machine as its target, and the allocation keeps its recorded `bare_metal` offering mode and committed window, with the physical-host identity staying in the fulfillment's metadata
+
+#### Scenario: Teardown cannot begin after the release is recorded
+- **WHEN** a lease is terminated and beginning its fulfillment's teardown fails
+- **THEN** the lease is `releasing` with the fulfillment as its handle, and the lease lifecycle begins the teardown on a later cycle, including after a restart
 
 ### Requirement: Executor-dispatched lifecycle
 Market-managed release MUST begin the reservation's fulfillment teardown through one provider-neutral release executor, whatever the reservation's offering mode; the fulfillment's provider dispatches the domain's teardown. Direct VM host administration endpoints MAY remain separate operator surfaces.
