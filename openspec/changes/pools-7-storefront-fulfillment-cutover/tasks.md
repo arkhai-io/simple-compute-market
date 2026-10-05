@@ -1781,6 +1781,18 @@ Per `openspec/README.md#plan-closeout-requirements`.
 - [ ] 13.7 **Promotion.** Complete the design-promotion record, mapping every accepted
       decision to its exact permanent heading, and verify no production source references
       `openspec/changes/pools-7-storefront-fulfillment-cutover`.
+      *Superseded decisions (2026-10-05, `bare-metal-mock-provisioned-deal` 5B.8):*
+      - Do not promote the following as current behaviour; record each as superseded by
+        that change instead:
+        - the VM-branded lease surface (`/api/v1/leases`, its `PATCH` update, and the
+          by-escrow lookup) and bare metal's lease surface;
+        - per-offering-mode release executors and their dispatchers;
+        - `offering_mode` on lease registration.
+      - The replacements: one family lease surface keyed by reservation id, release
+        decided by the fulfillment aggregate's state through a site-side release guard,
+        and registration written once by executor target.
+      - This change's own delta specs (atomic abandonment and release, scheduling,
+        fulfillment identity) remain compatible and promote as written.
 - [ ] 13.8 **Documentation citations.** Run
       `make check-doc-citations CHANGE=pools-7-storefront-fulfillment-cutover` and resolve every match.
       An unresolvable citation is a blocking defect under `AGENTS.md`'s

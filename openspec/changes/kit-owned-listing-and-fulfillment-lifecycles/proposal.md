@@ -17,6 +17,25 @@ executor reports with what the storefront recorded — is `fulfillment_resume_ru
 convergence mechanism is the same in each; the executor payload and the result
 decoding are the domain's.
 
+*Since written (2026-10-05, `bare-metal-mock-provisioned-deal` slices B and B.9):* the
+line counts above are stale, and the convergence these files implement gained obligations
+the kit must carry, so the copies are less alike than they were:
+
+- A fulfillment attempt has three outcomes in `kit/settlement-runtime` (`fulfilled`,
+  `failed`, `deferred`). VM returns `deferred` when the workload exists but a later step
+  failed (committing the reservation's window, registering the lease, or publishing the
+  evidence), and leaves the deal open for its resume pass.
+- VM's resume pass stops before publishing evidence until the reservation is committed
+  and the lease registered, retrying on the next pass.
+- Bare metal's hosted lifecycle registers the family lease (the machine as target)
+  before recording the deal access-ready, and treats a release the site refuses as not
+  released.
+- A registration records the escrow the deal names on a reservation placed before the
+  escrow existed.
+
+Each is a convergence obligation, not domain payload, so the kit-owned convergence
+should own it for every domain that registers a lease.
+
 The VM storefront also keeps `site_projection_cache` (270 lines) as its own view of
 per-site projection state, while bare metal reaches the same state through the
 capacity/publication kit's declaration reader and per-site hold.

@@ -11,6 +11,34 @@ Section 1 makes decrypted material owned; section 2 makes the renderers honest.
 Either order works, but 1 before 2 means the sentinel is removed from a code
 path that already cleans up after itself.
 
+## Reconciliation with `bare-metal-mock-provisioned-deal` (2026-10-05)
+
+That change moved the code this plan edits before this change started. The VM adapter's
+`services/ansible_service.py` and `services/host_service.py` no longer exist:
+
+- Ansible execution moved to the Ansible distribution: `provisioning/compute/ansible/src/compute_provisioning_ansible/runner.py`
+  (`AnsibleRunner`, `write_inventory`, `MaterializedInventory`) and
+  `provisioning/compute/ansible/src/compute_provisioning_ansible/executor.py` (the job path).
+- Connectivity probing moved to `provisioning/compute/ansible/src/compute_provisioning_ansible/probes.py`.
+- Hosts moved to the family kit, `provisioning/compute/src/compute_provisioning/hosts/`.
+- Key decryption is the `ssh` codec in `provisioning/compute/ansible/src/compute_provisioning_ansible/connection.py`,
+  which the provisioning service's composition root builds with its decryption key.
+
+Some of this plan may already hold in the moved code, and must be re-confirmed before
+starting:
+
+- Section 1. `write_inventory` returns a `MaterializedInventory` that owns the inventory
+  and every decrypted key file. It writes keys owner-only (created 0600, then made
+  read-only), removes what it wrote if writing fails part way, and is cleaned up in a
+  `finally` by the executor and as a context manager by the connectivity probe. It still
+  returns a list of key files rather than one directory (1.1 and 1.1a), and the job
+  path's extra-vars file is still a separate file the runner unlinks (1.2, 1.5a).
+- Section 2. The `__embedded_key_<name>__` sentinel and `render_inventory_ini` no longer
+  appear in the code, so 2.1 to 2.3 may be moot; confirm what renders inventories now.
+
+Re-plan the remaining tasks against these files before implementing; the task text below
+is unchanged and still names the old paths.
+
 ## 1. Own the decrypted key material
 
 - [ ] 1.1 Write the inventory and its companion key files into one directory

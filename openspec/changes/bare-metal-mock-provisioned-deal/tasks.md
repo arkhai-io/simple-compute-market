@@ -2002,6 +2002,38 @@ re-verifies them by grep before each move.
           failed 4, all from no lease being registered (5B.8.B.7, and the escrow record in
           5B.8.B.8). Second run, with B.7 and B.8: both lanes green (5B.8.B.8's validation).
 
+      **Reconciliation with other changes (2026-10-05, maintainer request before
+      slice C).**
+      - Every other active change was checked against this change's surfaces: vocabulary
+        scans, cited paths this change moved, and a read of each hit.
+      - Each affected change was given a dated note citing this change:
+        - `remove-dead-storefront-physical-surfaces`: a rebase note on 3.5, and a new
+          task 3.8 removing the dead expiry hook;
+        - `contain-embedded-host-key-material`: where the moved code lives, and which of
+          its tasks may already hold;
+        - `relay-vm-access-without-a-dashboard`: two completed tasks amended to the
+          moved code, and a pending-move note for 5B.9;
+        - `refactor-e2e-fulfillment-lifecycle`: `DealLease`'s new clients, and run
+          37298149909 as evidence for its task 2.6;
+        - `project-an-authoritative-funding-loss`: the release-first terminal path, and
+          bare metal's refused release;
+        - `capacity-reservation-lifecycle-hardening`: `release_failed` is not terminal;
+        - `kit-owned-listing-and-fulfillment-lifecycles`: the new convergence
+          obligations;
+        - `pools-7-storefront-fulfillment-cutover`: decisions not to promote;
+        - `add-bare-metal-hosted-settlement`: registration and release in its remaining
+          qualification lanes;
+        - `negotiation-driven-capacity-resize`: the guard at resize;
+        - `automate-seller-spot`: truncation only earlier, and the family lease surface;
+        - `bring-host-inventory-under-definition-documents`: host import is the Ansible
+          distribution's.
+      - The capacity-hold changes (`negotiation-time-capacity-hold`,
+        `billable-capacity-reservations`, `default-no-pre-settlement-capacity-hold`,
+        `negotiation-capacity-feasibility-probe`, `add-harness-scenario-contract`) and the
+        changes that only touch edited files (`multi-domain-storefront-composition`,
+        `settle-capacity-claim-vocabulary`) needed no note.
+      - 5B.9 now ends by updating `relay-vm-access-without-a-dashboard`.
+
       **Slice C: the system split and the last `container` reach** (decisions 4 and 7).
 
   - [ ] 5B.8.C.1 Status. `compute_provisioning_contracts` gains `SystemStatusResponse`
@@ -2049,6 +2081,9 @@ re-verifies them by grep before each move.
       the relay routes' seller-only roles while moving them. VM's
       `ansible_pool_config_handler.py` then imports `AnsiblePoolConfig`, `Relay`, and
       relay rebinding from VM's own modules, not the service's.
+      When done, update `relay-vm-access-without-a-dashboard` (its "Pending move" note
+      and its open tasks) to the relay code's new paths, as the reconciliation of
+      2026-10-05 recorded there.
 - [ ] 5B.10 Boundary check: remove `arkhai-compute-provisioning-service` from both
       adapters' dependencies, and `arkhai-vms-provisioning-adapter` and the unused
       `arkhai-vms-provisioning-operator-client` from bare metal's; add
@@ -2341,11 +2376,9 @@ service code.
       contracts, bare metal's untyped mock-rule routes, the unreachable `provisioning`
       state, path templates in the family contracts, the uncalled
       `find_active_lease_by_vm_target`, a commit before registration still able to
-      re-record a truncated window, and the VM storefront's `schedule_shutdown` hook, wired
-      to `fulfillment_service.py`'s `_do_shutdown`, which always raises because no
-      expiry-scheduling endpoint exists, so every VM deal logs "Failed to schedule VM
-      expiry" while the lease watchdog does the expiry; seen in every end-to-end run since
-      slice A).
+      re-record a truncated window). The VM storefront's dead `schedule_shutdown` hook,
+      first recorded here, was routed on 2026-10-05 to
+      `remove-dead-storefront-physical-surfaces` task 3.8.
 - [ ] 2.7 **Campaign index currency.** Update this change's row and the Goal 3, 4, and 7
       graphs in `openspec/changes/README.md`, and the rows of
       `bare-metal-and-credits-domain-stacks`, `kit-owned-storefront-shell`,

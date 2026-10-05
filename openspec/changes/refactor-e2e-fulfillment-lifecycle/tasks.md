@@ -37,6 +37,14 @@ never silently broken so much as never actually executed at all.
 - [x] 2.2 Confirm `test_full_deal.py` stages 10a-11b match the proposed sequence.
 - [x] 2.3 Confirm `test_full_deal_buyer_cli.py`'s equivalent stages match (word-for-word identical to 2.2).
 - [x] 2.4 Trace why `pools-7` believed this was still deferred: `reserved_resource_id`'s `require_state` precondition was unsatisfiable before Section 1's fix, so these stages silently skipped rather than ran and failed -- explaining why nobody observed them passing.
+      *Evidence (2026-10-05, from `bare-metal-mock-provisioned-deal`):*
+      - End-to-end run 37298149909 passed stages 08a to 11b of both
+        `test_full_deal.py` and `test_full_deal_buyer_cli.py` against the
+        composed services, which satisfies 2.6 and the `test_full_deal*` part of 1.12.
+      - `test_non_erc20_settlement.py` did not run in that lane, so 1.12 still needs
+        it.
+      - Those stages now read and back-date the lease through the family and site
+        clients (see `design.md`).
 - [ ] 2.5 Update `pools-7-storefront-fulfillment-cutover` task 10.14 to reflect this is resolved, not deferred (pending an actual passing run -- see 1.12/2.6).
 - [ ] 2.6 Run stages 10a-11b against live services (blocked on the same live-service constraint as task 1.12) to confirm they now execute and pass, not just that they're syntactically present and internally consistent.
 

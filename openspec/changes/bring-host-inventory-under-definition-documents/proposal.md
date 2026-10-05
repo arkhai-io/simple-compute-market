@@ -12,6 +12,13 @@ empty, and never again. An operator who edits the inventory of a running
 deployment and rolls it sees nothing happen: the new host is not registered,
 and no error says why. `POST /api/v1/hosts/import` is the only way to apply
 the edit.
+*Since 2026-10-05 (`bare-metal-mock-provisioned-deal` 5B.8 slice A):* the import keeps its
+path, but it is the Ansible distribution's operation, not the family's. Its route contract,
+`AnsibleHostImportRouteService`, and its typed client extension live in
+`provisioning/compute/ansible/src/compute_provisioning_ansible/host_import.py`, and the
+provisioning service only binds it. A pool move made by an import passes the same
+pool-change hooks as a host update, and a refused move fails the whole import. Hosts
+themselves are the family kit's (`provisioning/compute/src/compute_provisioning/hosts/`).
 
 That used to be partly hidden. Execution fell back to the inventory file when a
 host had no registered record, so a host added only to the file could still be
