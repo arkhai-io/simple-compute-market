@@ -175,6 +175,39 @@ class TestSystemStatus:
         assert (await client.family.get_system_status()).status == "degraded"
 
 
+class TestComponentFailure:
+    """A readiness component that fails is reported, not raised."""
+
+    async def test_a_raising_component_degrades_status_through_the_route(
+        self, client_and_queue, monkeypatch
+    ):
+        from compute_provisioning_service import container as _container_module
+        from compute_provisioning_service.services.system_status import (
+            COMPONENT_FAILURE_KIND,
+            StatusComponentProvider,
+        )
+
+        client, _ = client_and_queue
+        composed = _container_module.resolved_system_status_service
+
+        def raising():
+            raise RuntimeError("component exploded")
+
+        monkeypatch.setattr(
+            composed,
+            "_components",
+            (*composed._components, StatusComponentProvider("exploding", raising)),
+        )
+
+        resp = await client.family.get_system_status()
+
+        failed = resp.component("exploding")
+        assert failed is not None and failed.ready is False
+        assert failed.detail.kind == COMPONENT_FAILURE_KIND
+        assert resp.component(ANSIBLE_COMPONENT) is not None
+        assert resp.checks["execution"] == "degraded"
+
+
 class TestWorkerControls:
     """The convergence and lease-watchdog controls bind the composed workers."""
 

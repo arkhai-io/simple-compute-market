@@ -14,7 +14,11 @@ from compute_provisioning.jobs.executor_mock import MockRuleSet
 from compute_provisioning_contracts import SystemStatusComponent
 from market_core import envelope
 
-from compute_provisioning_service.services.system_status import SystemStatusService
+from compute_provisioning_service.services.system_status import (
+    COMPONENT_FAILURE_KIND,
+    StatusComponentProvider,
+    SystemStatusService,
+)
 
 
 class _Executor:
@@ -34,6 +38,10 @@ def _component(*, ready: bool, name: str = "fake") -> SystemStatusComponent:
     return SystemStatusComponent(
         name=name, ready=ready, detail=envelope("fake.readiness", 1, {"ready": ready})
     )
+
+
+def _provider(*, ready: bool, name: str = "fake") -> StatusComponentProvider:
+    return StatusComponentProvider(name=name, collect=lambda: _component(ready=ready, name=name))
 
 
 class _Session:
@@ -119,7 +127,7 @@ def test_execution_is_mocked_only_when_every_composed_executor_is(modes, mocked)
 
 async def test_a_component_not_ready_degrades_execution_and_status():
     status = await _service(
-        components=[lambda: _component(ready=True, name="a"), lambda: _component(ready=False)]
+        components=[_provider(ready=True, name="a"), _provider(ready=False)]
     ).status()
 
     assert status.checks["execution"] == "degraded"
@@ -128,7 +136,7 @@ async def test_a_component_not_ready_degrades_execution_and_status():
 
 
 async def test_every_component_ready_leaves_status_ok():
-    status = await _service(components=[lambda: _component(ready=True)]).status()
+    status = await _service(components=[_provider(ready=True)]).status()
 
     assert status.checks == {
         "storefront": "unconfigured",
@@ -157,3 +165,41 @@ def test_version_reports_the_active_profiles(monkeypatch):
 
     assert version.active_profiles == ["docker", "mock"]
     assert version.version
+
+
+async def test_a_provider_that_raises_is_reported_failed_and_status_degrades():
+    """One defective diagnostic degrades status rather than failing it, and
+    its failure discloses the exception's type, never its message."""
+
+    def raising():
+        raise RuntimeError("could not read /secrets/id_ed25519")
+
+    status = await _service(
+        components=[
+            _provider(ready=True, name="healthy"),
+            StatusComponentProvider(name="broken", collect=raising),
+        ]
+    ).status()
+
+    broken = status.component("broken")
+    assert status.component("healthy").ready is True
+    assert broken.ready is False
+    assert (broken.detail.kind, broken.detail.payload) == (
+        COMPONENT_FAILURE_KIND,
+        {"error": "RuntimeError"},
+    )
+    assert "secrets" not in status.model_dump_json()
+    assert (status.checks["execution"], status.status) == ("degraded", "degraded")
+
+
+async def test_a_provider_reporting_another_name_is_reported_failed_under_its_own():
+    """A provider cannot report a component it was not registered for."""
+    impostor = StatusComponentProvider(
+        name="ansible", collect=lambda: _component(ready=True, name="other")
+    )
+
+    status = await _service(components=[impostor]).status()
+
+    assert [c.name for c in status.components] == ["ansible"]
+    assert status.component("ansible").ready is False
+    assert status.component("ansible").detail.payload == {"error": "reported as 'other'"}

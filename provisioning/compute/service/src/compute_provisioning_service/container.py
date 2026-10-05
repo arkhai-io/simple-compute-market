@@ -13,6 +13,7 @@ from compute_provisioning.hosts import ConnectionCodecs
 from compute_provisioning.hosts.service import HostAuthority
 from compute_provisioning.jobs.engine import JobEngine
 from compute_provisioning_ansible import (
+    ANSIBLE_COMPONENT,
     SSH_CONNECTION_KIND,
     MockAnsibleRunner,
     SshConnectionCodec,
@@ -63,7 +64,10 @@ from compute_provisioning_service.services.relay_port_allocator import (
     release_fulfillment_ports,
 )
 from compute_provisioning_service.services.job_retry import retry_policy_from
-from compute_provisioning_service.services.system_status import SystemStatusService
+from compute_provisioning_service.services.system_status import (
+    StatusComponentProvider,
+    SystemStatusService,
+)
 from compute_provisioning_service.services.lease_watchdog import LeaseWatchdog
 from compute_provisioning_service.services.principal_authority import (
     SqlAlchemyProvisioningPrincipalAuthority,
@@ -138,7 +142,7 @@ def _make_status_components(job_executors, host_authority):
             list_hosts=lambda: host_authority.list_hosts(enabled_only=True),
         )
 
-    return (ansible,)
+    return (StatusComponentProvider(name=ANSIBLE_COMPONENT, collect=ansible),)
 
 
 def _inventory_views(composed_adapters):

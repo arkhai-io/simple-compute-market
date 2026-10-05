@@ -105,6 +105,9 @@ def test_a_missing_playbook_makes_the_component_not_ready(tmp_path):
     assert component.ready is False
     missing = [p for p in _detail(component).playbooks if not p.exists]
     assert [(p.offering_mode, p.sha256) for p in missing] == [("bare_metal", None)]
+    assert _detail(component).not_ready_reasons == [
+        f"the bare_metal playbook is missing: {tmp_path / 'absent.yaml'}"
+    ]
 
 
 def test_real_executors_without_ansible_are_not_ready(tmp_path):
@@ -118,6 +121,7 @@ def test_real_executors_without_ansible_are_not_ready(tmp_path):
     )
 
     assert component.ready is False
+    assert _detail(component).not_ready_reasons == ["ansible is not on PATH"]
 
 
 def test_mocked_executors_are_ready_without_ansible_or_playbooks(tmp_path):
@@ -131,18 +135,81 @@ def test_mocked_executors_are_ready_without_ansible_or_playbooks(tmp_path):
     assert [p.mocked for p in _detail(component).playbooks] == [True]
 
 
-def test_an_unreadable_host_registry_is_reported_not_raised(tmp_path):
+@pytest.mark.parametrize("mocked", [True, False], ids=["mocked", "real"])
+def test_an_unreadable_host_registry_is_not_ready_whatever_runs(tmp_path, mocked):
+    """Every job resolves its host in the registry, and the hosts' credentials
+    cannot be verified without it, so this holds even when execution is mocked."""
+    playbook = tmp_path / "vm.yaml"
+    playbook.write_text("- hosts: all\n")
+
     def failing():
         raise RuntimeError("database unavailable")
 
     component = ansible_readiness_component(
         version_probe=ansible_on_path,
-        executors_by_offering_mode={}, list_hosts=failing
+        executors_by_offering_mode={"vm": (_executor(playbook, mocked=mocked),)},
+        list_hosts=failing,
     )
     detail = _detail(component)
 
     assert (detail.host_registry_readable, detail.ssh_keys) == (False, [])
+    assert component.ready is False
+    assert detail.not_ready_reasons == ["the host registry could not be read"]
+
+
+def test_a_missing_key_file_blocks_real_execution(tmp_path):
+    playbook = tmp_path / "vm.yaml"
+    playbook.write_text("- hosts: all\n")
+    present = tmp_path / "id_present"
+    present.write_bytes(b"key")
+    missing = tmp_path / "id_missing"
+
+    component = ansible_readiness_component(
+        version_probe=ansible_on_path,
+        executors_by_offering_mode={"vm": (_executor(playbook, mocked=False),)},
+        list_hosts=lambda: [
+            _host("a", key_path=str(present)),
+            _host("b", key_path=str(missing)),
+            _host("c", embedded=True),
+        ],
+    )
+
+    assert component.ready is False
+    assert _detail(component).not_ready_reasons == [
+        f"the key file {missing} is missing (hosts: b)"
+    ]
+
+
+def test_a_missing_key_file_does_not_block_mocked_execution(tmp_path):
+    component = ansible_readiness_component(
+        version_probe=no_ansible,
+        executors_by_offering_mode={"vm": (_executor(tmp_path / "absent.yaml", mocked=True),)},
+        list_hosts=lambda: [_host("b", key_path=str(tmp_path / "id_missing"))],
+    )
+
     assert component.ready is True
+    assert _detail(component).not_ready_reasons == []
+
+
+def test_one_real_executor_makes_keys_count_for_the_mixed_deployment(tmp_path):
+    """A host's mode is its pool's, which the component does not see, so once
+    any executor is real every enabled host's key counts; a mocked executor's
+    missing playbook still does not."""
+    playbook = tmp_path / "vm.yaml"
+    playbook.write_text("- hosts: all\n")
+
+    component = ansible_readiness_component(
+        version_probe=ansible_on_path,
+        executors_by_offering_mode={
+            "vm": (_executor(playbook, mocked=False),),
+            "bare_metal": (_executor(tmp_path / "absent.yaml", mocked=True),),
+        },
+        list_hosts=lambda: [_host("node", key_path=str(tmp_path / "id_missing"))],
+    )
+
+    reasons = _detail(component).not_ready_reasons
+    assert component.ready is False
+    assert len(reasons) == 1 and reasons[0].startswith("the key file")
 
 
 def test_the_detail_discloses_no_key_material(tmp_path):

@@ -89,6 +89,10 @@ class AnsibleReadinessDetail(BaseModel):
     host_registry_readable: bool = Field(
         description="False when the registered hosts could not be listed",
     )
+    not_ready_reasons: list[str] = Field(
+        default_factory=list,
+        description="Why the component is not ready; empty when it is",
+    )
 
 
 def ansible_readiness_component(
@@ -97,12 +101,23 @@ def ansible_readiness_component(
     list_hosts: Callable[[], Iterable[Any]],
     version_probe: Callable[[], Optional[str]] | None = None,
 ) -> SystemStatusComponent:
-    """The ``ansible`` component over the composed executors and registered hosts.
+    """The ``ansible`` component over the composed executors and the enabled hosts.
 
-    Ready when every Ansible executor runs the mock, or has its playbook with
-    Ansible on ``PATH``. ``version_probe`` reports Ansible's version, ``None``
-    without it; it runs ``ansible --version`` unless given. This performs
-    filesystem and subprocess I/O; an async caller runs it in a thread.
+    Ready means a job can run through every composed Ansible executor:
+
+    - the host registry is readable, whatever runs, because every job resolves
+      its host there, and an unreadable registry leaves the hosts' credentials
+      unverified;
+    - when any Ansible executor is real, Ansible is on ``PATH``, every real
+      executor's playbook exists, and every key file an enabled host names
+      exists. A host's offering mode is its pool's, which this component does
+      not see, so a missing key counts once any executor is real.
+
+    Mocked executors need neither Ansible, nor playbooks, nor key files.
+    ``list_hosts`` lists the enabled registered hosts. ``version_probe`` reports
+    Ansible's version, ``None`` without it; it runs ``ansible --version`` unless
+    given. This performs filesystem and subprocess I/O; an async caller runs it
+    in a thread.
     """
     version = (version_probe or ansible_version)()
     playbooks: list[AnsiblePlaybookInfo] = []
@@ -127,25 +142,53 @@ def ansible_readiness_component(
     except Exception:
         ssh_keys = []
         readable = False
-    ready = all(
-        playbook.mocked or (playbook.exists and version is not None)
-        for playbook in playbooks
+    reasons = _not_ready_reasons(
+        version=version, playbooks=playbooks, ssh_keys=ssh_keys, readable=readable
     )
     detail = AnsibleReadinessDetail(
         ansible_version=version,
         playbooks=playbooks,
         ssh_keys=ssh_keys,
         host_registry_readable=readable,
+        not_ready_reasons=reasons,
     )
     return SystemStatusComponent(
         name=ANSIBLE_COMPONENT,
-        ready=ready,
+        ready=not reasons,
         detail=envelope(
             ANSIBLE_READINESS_KIND,
             ANSIBLE_READINESS_SCHEMA_VERSION,
             detail.model_dump(mode="json"),
         ),
     )
+
+
+def _not_ready_reasons(
+    *,
+    version: Optional[str],
+    playbooks: Sequence[AnsiblePlaybookInfo],
+    ssh_keys: Sequence[SshKeyInfo],
+    readable: bool,
+) -> list[str]:
+    reasons: list[str] = []
+    if not readable:
+        reasons.append("the host registry could not be read")
+    real = [playbook for playbook in playbooks if not playbook.mocked]
+    if not real:
+        return reasons
+    if version is None:
+        reasons.append("ansible is not on PATH")
+    reasons.extend(
+        f"the {playbook.offering_mode} playbook is missing: {playbook.path}"
+        for playbook in real
+        if not playbook.exists
+    )
+    reasons.extend(
+        f"the key file {key.path} is missing (hosts: {', '.join(key.referenced_by)})"
+        for key in ssh_keys
+        if key.key_type == "path" and not key.exists
+    )
+    return reasons
 
 
 def sha256_file(path: Path) -> Optional[str]:

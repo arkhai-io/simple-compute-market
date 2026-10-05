@@ -1786,6 +1786,18 @@ and each point, with its refinements, was decided with the maintainer as recorde
 | Plan correction: C.4's allowlist said "nothing else", but A0's named exception (`relays_controller.py` reading `vm_provisioning_operator.relays`) stands until 5B.9 | Kept in the (file, module) allowlist. The adapters also keep importing the service's relay modules and table models until 5B.9 and 5B.10; C's acceptance is that no adapter imports `compute_provisioning_service.container` |
 | Plan correction: C.1 placed readiness in `probes.py` "becoming" `readiness.py`, but `probes.py` also holds the connectivity probe the root registers | `probes.py` keeps `probe_connectivity`; the readiness models and functions move to `readiness.py`, and their tests to `test_readiness.py` |
 
+**Slice C implementation review (2026-10-05).** The review approved slice C's layering
+and design and raised four findings, each verified in code and agreed with the maintainer.
+5B.8.C.8 fixes them on top of 5B.9.A, which was already built; the maintainer ruled
+against reordering the checkpoints.
+
+| Finding | Decision |
+|---|---|
+| 1. High: the `ansible` component could report ready when real execution could not run. An unreadable host registry was reported but left the component ready, and a test codified that; a missing key file was reported (`exists=False`) but never counted | The component is ready only when the host registry is readable, whatever runs, since every job resolves its host there and the hosts' credentials cannot be verified without it; and, once any Ansible executor is real, Ansible is on `PATH`, every real executor's playbook exists, and every key file an enabled host names exists. A host's mode comes through its pool, which the component does not see, so a missing key counts once any executor is real. Mocked executors need none of these. The detail lists `not_ready_reasons`, so an operator reading a degraded status sees why |
+| 2. Medium: a contributed readiness provider that raised turned the status route into a 500 | Providers are registered with the name they report (`StatusComponentProvider`), and the status service owns the boundary: a provider that raises, or reports another name, is reported under its registered name, not ready, with a detail of its own kind naming only the exception's type (a message could carry a path or credential reference). Status degrades instead of failing |
+| 3. Medium: two checked task bullets described what was planned rather than what landed: status composed from the convergence watchdog (convergence is bound by the system controller), and VM's view tests in a VM test directory (they stay in the service tree until 5B.9.B moves `AnsiblePoolConfig`) | The bullets are corrected; no code change |
+| 4. Medium: the service's OpenAPI metadata still described a VM-only, seller-only service ("Asynchronous VM provisioning", "KVM host registry", "Ansible jobs", a SIGTERM on cancellation) | Rewritten to the compute family's service: contributed adapters, roles per route contract, execution hosts with typed connections, executor-neutral jobs and cancellation. The app's declared version, a stale literal, now reads the service's version |
+
 ### Relays to VM (5B.9)
 
 **Design review (2026-10-05).** 5B.9 was audited against the code before implementation.

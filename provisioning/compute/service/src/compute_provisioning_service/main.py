@@ -34,6 +34,7 @@ from compute_provisioning_service.controllers.pools_controller import PoolContro
 from compute_provisioning_service.controllers.relays_controller import RelayController
 from compute_provisioning_service.controllers.fulfillment_controller import FulfillmentController
 from compute_provisioning_service.controllers.system_controller import make_system_routers
+from compute_provisioning_service.services.system_status import SERVICE_VERSION
 from compute_provisioning_service.controllers import (
     host_import_controller,
     hosts_controller,
@@ -84,20 +85,24 @@ async def lifespan(_: FastAPI):
 
 
 PROVISIONING_DESCRIPTION = (
-    "Asynchronous VM provisioning for a multi-agent compute marketplace.\n\n"
+    "The compute family's provisioning service: a site's capacity authority, "
+    "resource pools, execution hosts, provisioning jobs, fulfillment, and lease "
+    "lifecycle, executing through the domain adapters composed into it (VM and "
+    "bare metal).\n\n"
     "## Authentication\n\n"
-    "Every non-health route uses the scheme-tagged marketplace request "
-    "signature v2 contract. Requests are body-bound to the configured "
-    "storefront principal and seller role; responses are signed by the "
-    "configured provisioning service principal. `/health`, `/docs`, and "
-    "`/redoc` remain open.\n\n"
+    "Every route but `/health`, `/docs`, and `/redoc` uses the scheme-tagged "
+    "marketplace request signature v2 contract. A request is body-bound to a "
+    "configured caller principal under the role it asserts, and each route "
+    "admits the roles its contract names: the seller (a storefront) and the "
+    "administrator, or the administrator alone. Responses are signed by the "
+    "configured provisioning service principal.\n\n"
     "## Job lifecycle\n\n"
     "```\n"
     "queued --> running --> succeeded\n"
     "              +-> failed  (non-retryable or max retries exceeded)\n"
     "              +-> queued  (retryable -- re-enqueued with backoff)\n"
-    "queued --> cancelled  (user-initiated)\n"
-    "running --> cancelled (user-initiated, SIGTERM sent)\n"
+    "queued --> cancelled  (operator-initiated)\n"
+    "running --> cancelled (operator-initiated; the job's executor stops it)\n"
     "```\n"
 )
 
@@ -112,11 +117,14 @@ PROVISIONING_OPENAPI_TAGS = [
     },
     {
         "name": "hosts",
-        "description": "KVM host registry — CRUD, capacity checks, and connectivity tests.",
+        "description": (
+            "Execution host registry — CRUD, enable and disable, and "
+            "connectivity checks over each host's typed connection."
+        ),
     },
     {
         "name": "jobs",
-        "description": "Query and cancel Ansible jobs.",
+        "description": "Query and cancel provisioning jobs, whichever executor runs them.",
     },
     {
         "name": "system",
@@ -224,7 +232,7 @@ provisioning_route_table = assemble_service_route_table(
 app = build_compute_provisioning_app(
     config=ComputeProvisioningAppConfig(
         title="Provisioning Service",
-        version="0.2.0",
+        version=SERVICE_VERSION,
         description=PROVISIONING_DESCRIPTION,
         openapi_tags=PROVISIONING_OPENAPI_TAGS,
     ),

@@ -2075,8 +2075,9 @@ re-verifies them by grep before each move.
           convergence and lease-watchdog controls, resolving collaborators through
           accessors; an uninitialised collaborator answers 503 and advance while
           convergence runs 409. `container.py` builds the status service from the executor
-          table, the lease lifecycle, the convergence watchdog, and the Ansible component
-          provider, and drops `system_service`; `app_runtime.py` and `main.py` follow.
+          table, the lease lifecycle, and the Ansible component provider (convergence is
+          bound by the system controller, not the status service), and drops
+          `system_service`; `app_runtime.py` and `main.py` follow.
         - VM adapter: tombstone `services/system_service.py` and
           `controllers/system_controller.py`; `runtime.py` loses `system_service()` and
           `readiness()`; `bundle.py` loses `readiness_check` and `router_mounts`. Bare
@@ -2108,9 +2109,11 @@ re-verifies them by grep before each move.
         - Service: `services/capacity_inventory.py` takes the composed views and imports
           neither adapter; `main.py`'s inventory and pool-directory accessors pass them.
         - Tests: the service's `unit/services/test_capacity_inventory.py` keeps the
-          neutral projection and gains a fake third domain's projection; the views' tests
-          move to `domains/bare_metal/provisioning/adapter/tests/test_inventory_views.py`
-          and `domains/vms/provisioning/adapter/tests/test_inventory_views.py`;
+          neutral projection and gains a fake third domain's projection; bare metal's view
+          tests are `domains/bare_metal/provisioning/adapter/tests/test_inventory_views.py`,
+          and VM's are the service-hosted `unit/services/test_vm_inventory_views.py` (VM's
+          adapter has no test directory, and the view reads `AnsiblePoolConfig`, which
+          5B.9.B moves to VM);
           `test_composition.py` covers the duplicate refusals;
           `integration/test_capacity_api.py` keeps proving both views through the site
           client.
@@ -2148,6 +2151,39 @@ re-verifies them by grep before each move.
         `make check-packaging`, comment hygiene, documentation citations, and OpenSpec
         strict validation. Versions bumped per slice, exact pins moved, changed projects
         relocked.
+  - [x] 5B.8.C.8 Fixes from the slice C implementation review (2026-10-05; findings 1–4,
+        each agreed with the maintainer; `design.md`, "Slice C implementation review").
+        Built on 5B.9.A, which preceded the review.
+        - Readiness (finding 1): `compute_provisioning_ansible.readiness` makes the
+          component ready only with a readable host registry, whatever runs, and, once any
+          Ansible executor is real, Ansible on `PATH`, every real executor's playbook, and
+          every key file an enabled host names; `AnsibleReadinessDetail` gains
+          `not_ready_reasons`.
+        - Component boundary (finding 2): `services/system_status.py`'s
+          `StatusComponentProvider` (name and `collect`); a provider that raises or reports
+          another name is reported under its own name, not ready, with a
+          `COMPONENT_FAILURE_KIND` detail naming only the exception's type. `container.py`
+          registers `ansible` that way.
+        - Records (finding 3): C.1's and C.2's bullets corrected.
+        - OpenAPI (finding 4): `main.py`'s description and the hosts and jobs tags
+          describe the compute family's service; the declared version reads
+          `SERVICE_VERSION`.
+        - Tests: Ansible `test_readiness.py` (an unreadable registry not ready, mocked or
+          real; a missing key blocking real execution and not mocked; a mixed deployment;
+          the reasons for a missing playbook and a missing Ansible; the case that had
+          codified the false ready rewritten); the service's
+          `unit/services/test_system_status.py` (a raising provider, a mislabelled one) and
+          `integration/test_system_api.py` (a raising component degrades status through
+          the route and the typed client, rather than failing it).
+        - Versions: none; every package touched was bumped in slice C or 5B.9.A, both
+          unreleased.
+        - Validation: Ansible 92; provisioning service 864 unit and 277 integration.
+          The root `make -k test` aggregate passes its 44 suites, failing only where this
+          environment cannot run a suite; the four locks its reinit rewrites were
+          restored. `make check-locks`, `make check-packaging`, comment hygiene,
+          documentation citations, and OpenSpec strict validation pass. Not yet run end
+          to end.
+
       Slice C done 2026-10-05 (`design.md`, "Slice C design review", for the rulings and
       the plan corrections).
       - C.1:
@@ -2239,7 +2275,12 @@ re-verifies them by grep before each move.
           `kit/alkahest`, `kit/config`, `kit/settlement-runtime`, and this time also
           `domains/apicredits/storefront` (platform markers only). `make check-locks` and
           `make check-packaging` pass.
-        - Not yet run end to end.
+        - End-to-end (run 37334863741, with slice C and 5B.9.A): the bare-metal lane
+          passed 16 and the VM lane 135, nothing failed or skipped, and neither lane's
+          service logs show a traceback, a 5xx, a 401, or a 403. The typed-status stages
+          (00c, 00c2, 00e, 00h, and the buyer-CLI equivalents) passed, provisioning's
+          status answered 200 throughout, expired leases were released, and "Failed to
+          schedule VM expiry" no longer appears.
 - [ ] 5B.9 Relays to VM. Amended 2026-10-05 before implementation, after the design review
       (`design.md`, "Relays to VM (5B.9)", points A–D): the relay code, its tables, and its
       routes move to VM's adapter, behind three contribution seams the move needs. Two
@@ -2317,7 +2358,7 @@ re-verifies them by grep before each move.
           only where this environment cannot run a suite (as in slice C); the four locks
           its reinit rewrites were restored. `make check-locks`, `make check-packaging`,
           comment hygiene, documentation citations, and OpenSpec strict validation pass.
-          Not run end to end; 9.A changes no wire, route, or deployment behaviour.
+          End-to-end: run 37334863741 (slice C's record) included 9.A.
   - [ ] 5B.9.B The move (points A–D).
         - VM adapter (`domains/vms/provisioning/adapter/src/vm_provisioning_adapter/`):
           - new `db.py`: VM's metadata with `Relay`, `RelayPortLease`, and
