@@ -1,7 +1,7 @@
 # VM payments first use
 
 `payment_smoke.py` uses the real buyer approval stage, seller receipt verifier,
-SQLite evidence/progress records, and signed seller HTTP settlement route. The
+SQLite evidence/progress records, the verified-facts VM planner, and signed seller HTTP settlement route. The
 payments HTTP service and VM delivery are controlled in-process. It creates and
 removes its own temporary database; no account credentials or running services
 are needed.
@@ -17,6 +17,8 @@ uv run --project domains/vms/storefront --locked --find-links .dist \
   python domains/vms/storefront/examples/payment_smoke.py
 ```
 
+The delivery double receives only verified settlement evidence; the planner reads
+its accepted VM facts without interpreting the mechanism or loading an escrow.
 The observed sequence is `pending` with zero deliveries before approval,
 `provisioning` after approval, and `ready` with one delivery on retry. The final
 SQLite inspection observes zero `escrows` rows. This is a
