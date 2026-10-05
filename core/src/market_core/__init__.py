@@ -1,5 +1,6 @@
 """Core market models shared by buyers, storefronts, and settlement kits."""
 
+from .settlement import SettlementEvidence, SettlementStageTable
 from .domain_contract import (
     MARKET_DOMAIN_CONTRACT_VERSION,
     SUPPORTED_MARKET_DOMAIN_CONTRACT_VERSIONS,
@@ -57,6 +58,8 @@ from .query_dsl import (
 )
 
 __all__ = [
+    "SettlementEvidence",
+    "SettlementStageTable",
     "MARKET_DOMAIN_CONTRACT_VERSION",
     "SUPPORTED_MARKET_DOMAIN_CONTRACT_VERSIONS",
     "BUYER_IDENTITY_INJECTION_CONTRACT",
