@@ -37,7 +37,6 @@ from .negotiation import default_seller_round_hook
 from .negotiation_service import BareMetalNegotiationService
 from .settlement import build_bare_metal_settlement_plan
 from .settlement_composition import (
-    ALKAHEST_MECHANISM,
     BareMetalStorefrontSettlementComposition,
 )
 from .settlement_service import BareMetalSettlementService
@@ -115,6 +114,7 @@ class BareMetalStorefrontRuntime:
                 if self.settlement_composition is not None
                 else {}
             ),
+            seller_stages=self.domain.settlement.seller_stages,
             settlement_data_dispatch=(
                 self.settlement_composition.settlement_data_dispatch()
                 if self.settlement_composition is not None
@@ -124,19 +124,11 @@ class BareMetalStorefrontRuntime:
 
     def settlement_service(self) -> BareMetalSettlementService:
         """Build commercial verification from explicitly configured chains."""
-        alkahest_enabled = (
-            self.settlement_composition is None
-            or ALKAHEST_MECHANISM in self.settlement_composition.enabled_mechanisms
-        )
-        if alkahest_enabled and not self.seller_evm_address:
-            raise RuntimeError("Alkahest settlement is not configured")
         arkhai_payments_stage = (
             self.settlement_composition.arkhai_payments_stage()
             if self.settlement_composition is not None
             else None
         )
-        if not alkahest_enabled and arkhai_payments_stage is None:
-            raise RuntimeError("no bare-metal settlement mechanism is configured")
         return BareMetalSettlementService(
             db=self.db,
             seller_wallet=self.seller_evm_address or None,
@@ -146,6 +138,7 @@ class BareMetalStorefrontRuntime:
             verify_escrow=self.escrow_verifier,
             settlement_runtime=self.settlement_runtime,
             arkhai_payments_stage=arkhai_payments_stage,
+            stages=self.domain.settlement.seller_stages,
         )
 
     def fulfillment_service(self) -> BareMetalFulfillmentService:
@@ -156,6 +149,7 @@ class BareMetalStorefrontRuntime:
             db=self.db,
             capacity_client=self.capacity_client,
             fulfillment_client=self.fulfillment_client,
+            read_verified_evidence=self.settlement_service().verified_evidence,
         )
 
     async def health(self) -> dict[str, object]:
@@ -319,22 +313,16 @@ def build_runtime_from_environment(
             raise RuntimeError(
                 "BARE_METAL_STOREFRONT_SETTLEMENT must be strict shared settlement config"
             ) from exc
-    alkahest_enabled = (
-        settlement_composition is None
-        or ALKAHEST_MECHANISM in settlement_composition.enabled_mechanisms
-    )
-    seller_evm_address = os.environ.get(
-        "BARE_METAL_STOREFRONT_EVM_ADDRESS",
-        "",
-    ).strip()
-    if alkahest_enabled and not seller_evm_address:
-        raise RuntimeError(
-            "BARE_METAL_STOREFRONT_EVM_ADDRESS is required when Alkahest is enabled",
-        )
-    if alkahest_enabled:
-        chain_clients, chain_config_paths = _build_chain_clients_from_environment()
-    else:
-        chain_clients, chain_config_paths = {}, {}
+    if settlement_composition is None:
+        raise RuntimeError("BARE_METAL_STOREFRONT_SETTLEMENT is required")
+    seller_evm_address = os.environ.get("BARE_METAL_STOREFRONT_EVM_ADDRESS", "").strip()
+    chain_clients, chain_config_paths = {}, {}
+    for mechanism in settlement_composition.enabled_mechanisms:
+        entry = settlement_composition.seller_stages[mechanism]
+        if entry.runtime_resources is not None:
+            chain_clients, chain_config_paths = entry.runtime_resources(
+                seller_evm_address, _build_chain_clients_from_environment
+            )
     if settlement_config is not None:
         raw_chains = json.loads(os.environ.get("BARE_METAL_STOREFRONT_CHAINS", "{}"))
         settlement_composition = (

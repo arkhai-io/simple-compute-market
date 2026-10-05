@@ -25,6 +25,7 @@ from market_settlement_runtime import (
 )
 
 from .sqlite_client import SQLiteClient
+from .settlement_composition import SELLER_STAGES
 
 
 async def _accepted_introduction(
@@ -147,6 +148,7 @@ def build_bare_metal_introduction_service(
             local_principal=agreement.seller_principal,
             worker_id=_worker("introduction-collect"),
         )
+        await SELLER_STAGES[CONTACT_MECHANISM].record_reveal(db, agreement)
 
     return IntroductionRouteService(
         callbacks=IntroductionRouteCallbacks(

@@ -10,13 +10,16 @@ from market_core import (
     BUYER_IDENTITY_INJECTION_CONTRACT,
     DomainCapability,
     ImmutableBuyerCapability,
+    ImmutableSettlementCapability,
     MarketDomainContract,
 )
 
 
-def _register_commands(app: object) -> None:
-    from .cli import register_commands
+from .cli import register_commands
+from .settlement_composition import BUYER_STAGES
 
+
+def _register_commands(app: object) -> None:
     register_commands(app)
 
 
@@ -34,9 +37,11 @@ def _buyer_market_domain() -> MarketDomainContract:
     return replace(
         base,
         declared_capabilities=frozenset(
-            set(base.declared_capabilities) | {DomainCapability.BUYER}
+            set(base.declared_capabilities)
+            | {DomainCapability.BUYER, DomainCapability.SETTLEMENT}
         ),
         buyer=buyer,
+        settlement=ImmutableSettlementCapability(buyer_stages=BUYER_STAGES),
     )
 
 

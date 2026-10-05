@@ -281,6 +281,18 @@ async def test_introduction_start_reveals_and_completes(tmp_path) -> None:
         assert seller_read.json()["counterparty_contact"] == _BUYER_CONTACT
     status = await runtime.settlement_runtime.get_status(negotiation_id)
     assert status.status == "complete"
+    evidence = await runtime.settlement_service().verified_evidence(
+        negotiation_id=negotiation_id, buyer_principal=BUYER_SIGNER.identity
+    )
+    assert evidence.settlement_ref == obligation_ref
+    assert evidence.evidence["delivery"] is None
+    assert evidence.evidence["source"] == {"obligation_ref": obligation_ref}
+    assert (
+        await runtime.db.load_bare_metal_fulfillment_lifecycle(
+            negotiation_id=negotiation_id
+        )
+        is None
+    )
 
 
 async def test_introduction_survives_a_storefront_restart(tmp_path) -> None:

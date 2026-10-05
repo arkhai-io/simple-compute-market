@@ -16,7 +16,13 @@ from arkhai_bare_metal_storefront.settlement_composition import (
 )
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 from core_storefront.models.negotiation_models import NegotiateNewRequest
+from market_core import SettlementStageTable
 from market_core.schemas import derive_settlement_option_id
+from arkhai_bare_metal_storefront.settlement_stages import (
+    SellerStage,
+    verify_contact,
+    revalidate_contact,
+)
 from market_identity import Eip191Signer
 from market_settlement_runtime import (
     AcceptedObligationArtifacts,
@@ -93,6 +99,16 @@ def _intro_registration() -> MechanismRegistration:
     )
 
 
+def _intro_stages():
+    return SettlementStageTable(
+        {
+            INTRO_MECHANISM: SellerStage(
+                _intro_registration, verify_contact, revalidate_contact, False
+            )
+        }
+    )
+
+
 def _intro_dispatch():
     registry = SettlementConfigurationRegistry((_intro_registration(),))
     config = SettlementConfig(
@@ -159,6 +175,7 @@ async def _service(tmp_path) -> tuple[BareMetalNegotiationService, dict[str, Any
         round_hook=None,  # type: ignore[arg-type]
         build_plan=lambda **kwargs: {},
         accepted_obligation_dispatch=_intro_dispatch(),
+        seller_stages=_intro_stages(),
     )
     return service, option
 
@@ -240,6 +257,7 @@ async def test_selection_must_exact_match_one_listing_option(tmp_path) -> None:
 def test_composition_dispatch_exposes_only_priority_builders() -> None:
     composition = BareMetalStorefrontSettlementComposition(
         registry=SettlementConfigurationRegistry((_intro_registration(),)),
+        seller_stages=_intro_stages(),
         config=SettlementConfig(
             priority=(INTRO_MECHANISM,),
             mechanisms={"demo_intro": DemoIntroConfig(enabled=True)},

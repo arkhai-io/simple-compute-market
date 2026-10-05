@@ -19,7 +19,7 @@ from core_storefront.models.negotiation_models import (
     NegotiateNewRequest,
     NegotiateNewResponse,
 )
-from market_core import MarketDomainContract
+from market_core import MarketDomainContract, SettlementStageTable
 from market_core.schemas import (
     AcceptedEscrow,
     Agreement,
@@ -36,6 +36,8 @@ from market_settlement_runtime import AcceptedObligationArtifacts
 
 from .negotiation import BareMetalSellerRoundHook
 from .sqlite_client import SQLiteClient
+from .settlement_stages import legacy_alkahest_option
+from .settlement_composition import SELLER_STAGES
 
 
 class NegotiationRequestError(ValueError):
@@ -192,6 +194,8 @@ class BareMetalNegotiationService:
         default_factory=dict
     )
 
+    seller_stages: SettlementStageTable[Any] = SELLER_STAGES
+
     async def open(
         self,
         *,
@@ -298,7 +302,9 @@ class BareMetalNegotiationService:
                 listing=listing,
                 buyer_principal=buyer_principal,
                 seller_principal=self.seller_principal,
-                settlement=None,
+                settlement=legacy_alkahest_option(
+                    proposal, artifacts.get("settlement_plan") or {}
+                ),
                 amount=agreed_amount or 0,
                 duration_seconds=terms.duration_seconds,
                 start_utc=accepted_at,
@@ -378,7 +384,10 @@ class BareMetalNegotiationService:
         provision a machine, and the plan's ``bare_metal.v1`` service terms.
         """
 
-        if selection.mechanism not in self.accepted_obligation_dispatch:
+        if (
+            selection.mechanism not in self.seller_stages
+            or selection.mechanism not in self.accepted_obligation_dispatch
+        ):
             raise NegotiationRequestError(
                 "exact settlement selection uses an unsupported mechanism",
                 status_code=400,
@@ -413,7 +422,7 @@ class BareMetalNegotiationService:
                 "selection does not exact-match one trusted listing option",
                 status_code=400,
             )
-        provisions_machine = "bare_metal" in selected_option.params
+        provisions_machine = self.seller_stages[selection.mechanism].physical
         terms: BareMetalTerms | None = None
         service_terms: dict[str, Any] = {}
         if provisions_machine:
@@ -505,7 +514,8 @@ class BareMetalNegotiationService:
         settlement_data = None
         data_builder = self.settlement_data_dispatch.get(selection.mechanism)
         if data_builder is not None:
-            settlement_data = dict(data_builder(json.loads(agreement_bytes)))
+            built_data = data_builder(json.loads(agreement_bytes))
+            settlement_data = dict(built_data) if built_data is not None else None
         await self.db.persist_bare_metal_opening(
             negotiation_id=negotiation_id,
             listing_id=request.listing_id,
@@ -657,7 +667,7 @@ class BareMetalNegotiationService:
         physical_terms = {
             "listing_id": request.listing_id,
             "option_id": selected_option.option_id,
-            "option_facts": listing_binding.model_dump(mode="json", exclude_none=True),
+            "option_facts": listing_binding.as_record(),
             "provision_terms": terms.model_dump(mode="json", exclude_none=True),
         }
         return terms, {"bare_metal.v1": physical_terms}
