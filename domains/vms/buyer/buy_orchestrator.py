@@ -1,18 +1,11 @@
-"""VM shim over the core buyer orchestration stages.
+"""VM composition of discovery, negotiation and declared settlement stages.
 
-The discover → negotiate → settle plumbing moved to
-``core_buyer.orchestration`` when the API-credits domain became the
-second schema plugin. This module keeps the VM instantiation: the
-legacy hook factories translate ``VmProvisionTerms`` into the core
-seams — ``unit_count`` (lease hours, ``duration_seconds / 3600``),
-``duration_seconds`` for escrow-terms materialization, and the SSH
-public key riding the settle request — and adapt the confirmation
-callback to the VM-flavoured :class:`AgreedTerms`.
+VM lease hours supply the core priced-unit count. The selected buyer entry
+owns accepted-artifact validation, resource resolution and settlement effects.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
 from arkhai_vms import VmProvisionTerms
@@ -40,7 +33,6 @@ from core_buyer.orchestration import (  # noqa: F401 — re-exports
     submit_settlement_request,
     wait_for_settlement,
 )
-from core_buyer.orchestration import AgreedTerms as CoreAgreedTerms
 from core_buyer.orchestration import (
     make_negotiate_hook as _core_make_negotiate_hook,
 )
@@ -50,30 +42,14 @@ from core_buyer.orchestration import (
 from core_buyer.policy_surface import extract_seller_min_price  # noqa: F401
 from market_alkahest.schemas import EscrowProposal, EscrowTerms
 
-from .escrow_client import (
-    BuildEscrowTermsFn,
-    CreateEscrowFn,
-    accepted_proposal_recipient,
-    encode_escrow_proposal,
-    looks_like_propagation_lag,
-    make_alkahest_settlement_payload_fn,
+from .arkhai_payments import AgreedTerms  # noqa: F401 — public VM summary
+from .escrow_client import BuildEscrowTermsFn, CreateEscrowFn, encode_escrow_proposal
+from .settlement_composition import (
+    buyer_settlement_stages,
+    resolve_buyer_settlement_policy,
+    validate_buyer_acceptance,
 )
-
-
-@dataclass
-class AgreedTerms:
-    """Human-facing summary of a finalized negotiation (VM reading).
-
-    Passed to the optional ``confirm_settlement`` callback so the user
-    can review what they're about to commit to before any chain write.
-    """
-
-    seller_url: str
-    seller_wallet_address: str
-    negotiation_id: str
-    listing_id: str
-    agreed_amount: int  # base units, absolute payment total
-    duration_seconds: int  # buyer's lease ask (negotiation init)
+from .settlement_stages import BuyerStageContext
 
 
 def make_legacy_negotiate_hook(
@@ -102,6 +78,7 @@ def make_legacy_negotiate_hook(
         derive_prices=derive_prices,
         chain=chain,
         revalidate_settlement=revalidate_settlement,
+        validate_acceptance=validate_buyer_acceptance,
     )
 
 
@@ -109,48 +86,27 @@ def make_legacy_settle_hook(
     *,
     config: "BuyConfig",
     provision: VmProvisionTerms,
-    buyer_evm_address: str,
-    build_escrow_terms: BuildEscrowTermsFn,
-    create_escrow: CreateEscrowFn,
+    buyer_evm_address: str = "",
+    build_escrow_terms: BuildEscrowTermsFn | None = None,
+    create_escrow: CreateEscrowFn | None = None,
     confirm_settlement: Optional[Callable[["AgreedTerms", dict[str, Any]], bool]],
     settlement_poll_interval: float,
     settlement_total_timeout: float,
     sleep: Callable[[float], None],
-    agreement_settlement: SettleFn | None = None,
+    settlement_policy=None,
 ) -> SettleFn:
-    """Build the compute-instantiated settlement hook over the core stage."""
-    adapted_confirm: Optional[Callable[[CoreAgreedTerms, dict[str, Any]], bool]] = None
-    if confirm_settlement is not None:
-
-        def adapted_confirm(core_terms: CoreAgreedTerms, match: dict[str, Any]) -> bool:
-            return confirm_settlement(
-                AgreedTerms(
-                    seller_url=core_terms.seller_url,
-                    seller_wallet_address=core_terms.seller_wallet_address,
-                    negotiation_id=core_terms.negotiation_id,
-                    listing_id=core_terms.listing_id,
-                    agreed_amount=core_terms.agreed_amount,
-                    duration_seconds=provision.duration_seconds,
-                ),
-                match,
-            )
-
+    """Bind VM stage invocation without constructing unselected resources."""
+    context = BuyerStageContext(
+        config=config, provision=provision,
+        resolve_policy=lambda: settlement_policy or resolve_buyer_settlement_policy(),
+        poll_interval=settlement_poll_interval, timeout=settlement_total_timeout,
+        sleep=sleep, confirm=confirm_settlement,
+        buyer_evm_address=buyer_evm_address,
+        build_escrow_terms=build_escrow_terms, create_escrow=create_escrow,
+    )
     return _core_make_settle_hook(
-        config=config,
-        unit_count=float(provision.duration_seconds) / 3600.0,
-        duration_seconds=provision.duration_seconds,
-        build_escrow_terms=build_escrow_terms,
-        create_escrow=create_escrow,
-        settlement_recipient=accepted_proposal_recipient,
-        build_settlement_payload=make_alkahest_settlement_payload_fn(
-            buyer_evm_address=buyer_evm_address,
-            ssh_public_key=provision.ssh_public_key,
+        stages=buyer_settlement_stages(),
+        invoke=lambda stage, negotiation, on_event: stage.settle(
+            context, negotiation, on_event,
         ),
-        settlement_submit_max_attempts=6,
-        settlement_submit_retryable=looks_like_propagation_lag,
-        confirm_settlement=adapted_confirm,
-        settlement_poll_interval=settlement_poll_interval,
-        settlement_total_timeout=settlement_total_timeout,
-        sleep=sleep,
-        agreement_settlement=agreement_settlement,
     )

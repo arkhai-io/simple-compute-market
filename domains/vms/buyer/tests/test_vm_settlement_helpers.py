@@ -13,6 +13,7 @@ from domains.vms.buyer import (
     common,
     settle_cli,
     settlement_composition,
+    settlement_stages,
 )
 from domains.vms.buyer.escrow_selection import select_escrow_entry
 from domains.vms.settlement import escrow_proposal_from_accepted_entry
@@ -108,6 +109,7 @@ def test_alkahest_resume_preserves_accepted_ssh_after_config_rotation(monkeypatc
     buyer = Ed25519Signer(b"\x34" * 32)
     accepted_ssh = "ssh-ed25519 accepted-key"
     deal = SimpleNamespace(
+        agreement=None,
         settlement_selection=None,
         settlement_plan={
             "obligations": [
@@ -178,17 +180,17 @@ def test_alkahest_resume_preserves_accepted_ssh_after_config_rotation(monkeypatc
     )
     monkeypatch.setattr(settle_cli, "open_run_log", lambda *_a, **_k: _Log())
     monkeypatch.setattr(
-        settlement_composition,
+        settle_cli,
         "resolve_alkahest_address_config_path",
         lambda: None,
     )
     monkeypatch.setattr(
-        settle_cli,
+        settlement_stages,
         "submit_settlement_request",
         lambda **kwargs: submitted.update(kwargs) or {"status": "provisioning"},
     )
     monkeypatch.setattr(
-        settle_cli,
+        settlement_stages,
         "wait_for_settlement",
         lambda **_kwargs: {"status": "ready"},
     )
@@ -219,7 +221,7 @@ def test_current_accepted_state_without_provision_terms_never_uses_config():
         typer.BadParameter,
         match="current configuration will not reinterpret this run",
     ):
-        settle_cli._accepted_provision_inputs(deal)
+        settlement_stages._accepted_provision_inputs(deal)
 
 
 def test_recovery_never_falls_back_for_uninstalled_accepted_mechanism(
@@ -227,6 +229,7 @@ def test_recovery_never_falls_back_for_uninstalled_accepted_mechanism(
 ):
     buyer = Ed25519Signer(b"\x31" * 32)
     deal = SimpleNamespace(
+        agreement=None,
         settlement_selection={
             "mechanism": "future.settlement.v1",
             "option_id": "a" * 64,

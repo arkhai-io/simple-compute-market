@@ -39,6 +39,7 @@ from market_identity import Identity, Signer, TrustedIdentitySet
 from arkhai_vms import VmProvisionTerms
 
 from .escrow_client import encode_escrow_proposal
+from .settlement_composition import validate_buyer_acceptance
 
 
 def _validate_model(model_type, value):
@@ -194,6 +195,7 @@ def negotiate_with_seller(
         resume=resume,
         policy_params=policy_params,
         validate_advertised_plan=validate_advertised_plan,
+        validate_acceptance=validate_buyer_acceptance,
         resolve_seller_principals=resolve_seller_principals,
     )
     values = {

@@ -6,12 +6,11 @@ CLI process:
     discover (registry) →
     negotiate each match (sync HTTP rounds) →
     pick agreed match →
-    create escrow on-chain (alkahest-py in-process) →
-    POST /settle/{uid} on seller →
-    poll /settle/{uid}/status until ready/failed.
+    invoke the accepted Agreement's buyer settlement entry →
+    submit to the seller →
+    poll until ready/failed.
 
-The orchestrator itself is in market.buy_orchestrator; this command
-just wires env → config → call.
+The command composes VM inputs over core buyer orchestration.
 """
 
 from __future__ import annotations
@@ -35,9 +34,6 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from domains.vms.settlement import escrow_proposal_from_accepted_entry
-
-from .arkhai_payments import make_payment_settle_hook, payer_selection
 from .buy_orchestrator import (
     BuyConfig,
     BuyConstraints,
@@ -64,7 +60,10 @@ from .deal_helpers import (
 from .listing_cli import settlement_clause_error_message
 from .run_log import RunLog
 from .settle_cli import run_settle_from_log
-from .settlement_composition import resolve_buyer_settlement_policy
+from .settlement_composition import (
+    buyer_stage,
+    resolve_buyer_settlement_policy,
+)
 
 
 def _normalize_start_utc(value: str | None) -> str | None:
@@ -230,6 +229,8 @@ def _run_resume_from(
             if outcome.accepted_escrow_proposal is not None
             else None,
             **accepted_settlement,
+            agreement=outcome.agreement.model_dump(mode="json", exclude_none=True)
+            if outcome.agreement is not None else None,
             agreement_bytes=outcome.agreement_bytes,
             settlement_data=outcome.settlement_data,
             accepted_escrow_terms=[
@@ -426,7 +427,6 @@ def register(app: typer.Typer) -> None:
             raise typer.Exit(2)
         from .common import (
             VMS_SCHEMA_ID,
-            resolve_buyer_wallet,
             resolve_discovery_timeout,
             resolve_fresh_buyer_identity,
             resolve_indexer_urls,
@@ -525,7 +525,7 @@ def register(app: typer.Typer) -> None:
         )
         matches = []
         for match, selected in selected_matches:
-            selected = payer_selection(selected)
+            selected = buyer_stage(selected.selection.mechanism).prepare_selection(selected)
             normalized = dict(match)
             normalized["_selected_settlement"] = selected
             normalized["settlement_options"] = [selected.option.model_dump(mode="json")]
@@ -541,17 +541,8 @@ def register(app: typer.Typer) -> None:
         chain_cfg = None
         selected_chain_name = ""
         rpc = ""
-        addr_cfg: str | None = None
-        addr = ""
-        pk = ""
-        build_escrow_terms = None
-        create_escrow = None
         from market_alkahest.schemas import accepted_token_address
 
-        from .escrow_client import (
-            make_buyer_payment_escrow_terms_fn,
-            make_create_escrow_fn,
-        )
         from .settlement_composition import alkahest_entry_from_selection
 
         evm_matches: list[dict[str, Any]] = []
@@ -575,7 +566,7 @@ def register(app: typer.Typer) -> None:
                 advertised_tokens.append(entry_token)
         matches = evm_matches
         available_chains = tuple(dict.fromkeys(advertised_chains))
-        if advertised_chains:
+        if advertised_chains and explicit_prices:
             if len(available_chains) != 1:
                 typer.secho(
                     "Selected Alkahest options span multiple chains; constrain selection with --settlement 'mechanism=alkahest alkahest.chain=<name>'.",
@@ -586,17 +577,6 @@ def register(app: typer.Typer) -> None:
             selected_chain_name = available_chains[0]
             chain_cfg = common.chain_by_name(selected_chain_name)
             rpc = chain_cfg.rpc_url
-            alkahest_section = settlement_policy.config.mechanism_config("alkahest")
-            raw_addr_cfg = getattr(alkahest_section, "address_config_path", None)
-            addr_cfg = raw_addr_cfg if isinstance(raw_addr_cfg, str) else None
-            addr, pk = resolve_buyer_wallet()
-            if not addr or not pk:
-                typer.secho(
-                    "Selected Alkahest settlement requires [Wallet] credentials.",
-                    err=True,
-                    fg=typer.colors.RED,
-                )
-                raise typer.Exit(2)
             if explicit_prices:
                 unique_tokens = tuple(
                     dict.fromkeys((token.lower() for token in advertised_tokens))
@@ -616,15 +596,6 @@ def register(app: typer.Typer) -> None:
                 scale = 10 ** int(token_decimals)
                 initial_price = initial_price * scale
                 max_price = max_price * scale
-            build_escrow_terms = make_buyer_payment_escrow_terms_fn(
-                chain_name=selected_chain_name, addr_config_path=addr_cfg or None
-            )
-            create_escrow = make_create_escrow_fn(
-                private_key=pk,
-                rpc_url=rpc,
-                chain_name=selected_chain_name,
-                addr_config_path=addr_cfg or None,
-            )
         if not explicit_prices:
             from core_buyer.cli import interactive_disposition
 
@@ -666,16 +637,7 @@ def register(app: typer.Typer) -> None:
             selected = match.get("_selected_settlement")
             if selected is None:
                 return None
-            from .settlement_composition import alkahest_entry_from_selection
-
-            entry = alkahest_entry_from_selection(selected)
-            if entry is None:
-                return selected.selection
-            return escrow_proposal_from_accepted_entry(
-                listing=match,
-                entry=entry,
-                expiration_unix=selected.selection.expiration_unix,
-            )
+            return buyer_stage(selected.selection.mechanism).proposal(match, selected)
 
         run_log = RunLog.start(
             command="market buy",
@@ -701,7 +663,6 @@ def register(app: typer.Typer) -> None:
             "Buyer principal",
             f"{identity.principal.scheme.value}:{identity.principal.identifier}",
         )
-        header.add_row("EVM wallet", addr)
         header.add_row("Opening bid / ceiling", f"{initial_price} / {max_price}")
         header.add_row("Max matches", str(max_matches))
         if resource_query is not None:
@@ -773,24 +734,14 @@ def register(app: typer.Typer) -> None:
             derive_prices=None,
             chain=negotiation_chain,
         )
-        def unavailable_escrow(*_args, **_kwargs):
-            raise ValueError("selected settlement has no Alkahest configuration")
-        build_escrow_terms = build_escrow_terms or unavailable_escrow
-        create_escrow = create_escrow or unavailable_escrow
         settle_hook = make_legacy_settle_hook(
             config=config,
             provision=provision,
-            buyer_evm_address=addr,
-            build_escrow_terms=build_escrow_terms,
-            create_escrow=create_escrow,
             confirm_settlement=confirm_settlement_cb,
             settlement_poll_interval=poll_interval,
             settlement_total_timeout=settlement_timeout,
             sleep=time.sleep,
-            agreement_settlement=make_payment_settle_hook(
-                config=config, policy=settlement_policy, timeout=settlement_timeout,
-                interval=poll_interval, confirm_settlement=confirm_settlement_cb,
-            ),
+            settlement_policy=settlement_policy,
         )
         try:
             result = run_buy(

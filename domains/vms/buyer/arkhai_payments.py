@@ -26,8 +26,19 @@ from market_config.config_loader import load_user_config
 from market_core.schemas import Agreement
 from market_identity import Identity, Signer, TrustedIdentitySet
 
-from .buy_orchestrator import AgreedTerms
 from .run_log import read_run
+
+
+@dataclass
+class AgreedTerms:
+    """VM settlement summary presented before the buyer commits an effect."""
+
+    seller_url: str
+    seller_wallet_address: str
+    negotiation_id: str
+    listing_id: str
+    agreed_amount: int
+    duration_seconds: int
 
 
 @dataclass(frozen=True, slots=True)
