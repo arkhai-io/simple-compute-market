@@ -20,6 +20,12 @@ SettlementEvidence = {negotiation_id, mechanism, settlement_ref, status, evidenc
 
 Compatibility stays explicit per domain and per mechanism. The difference is that it is declared in one place.
 
+Core requires only the table and the evidence record. It does not require any particular sequence: not every mechanism goes agree → buyer confirms → seller verifies, and in some the seller acts first. A stage is whatever the mechanism's own flow needs at that role.
+
+### Mechanisms may opt into a shared stage convention
+
+Mechanisms that want to be easy to integrate together may follow a common stage convention, so that a domain that integrates one gets most of the other for free. For example, `alkahest.v1` and `arkhai.payments.v1` can both follow the agree → buyer settle → seller verify shape above, and each can export ready-made stage adapters. This is an agreement between those kits and lives in a kit, not in core. A mechanism that doesn't follow the convention is still a full peer: its domains write their stages by hand.
+
 ### Evidence is the boundary after settlement
 
 Everything after settlement reads `SettlementEvidence`. Where provisioning needs mechanism-specific facts (for example, the receipt's hold expiry), the stage translates them into the domain's evidence fields at the point it produces the evidence. The mechanism ID stays on the record for audit and display only.
