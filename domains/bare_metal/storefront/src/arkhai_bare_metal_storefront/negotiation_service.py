@@ -657,7 +657,7 @@ class BareMetalNegotiationService:
         physical_terms = {
             "listing_id": request.listing_id,
             "option_id": selected_option.option_id,
-            "option_facts": listing_binding.model_dump(mode="json", exclude_none=True),
+            "option_facts": listing_binding.as_record(),
             "provision_terms": terms.model_dump(mode="json", exclude_none=True),
         }
         return terms, {"bare_metal.v1": physical_terms}
