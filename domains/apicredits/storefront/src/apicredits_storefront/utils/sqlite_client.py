@@ -2,9 +2,9 @@
 
 The domain-neutral market-state persistence lives in
 ``core_storefront.sqlite_client``. This subclass adds
-``credit_deal_terms`` and the immutable public-row link to the shared
-settlement obligation. Quantity and key disposition are fixed at round
-zero and read back when settlement submits issuance.
+accepted credit terms, negotiation-bound settlement evidence and issuance
+progress. Source evidence, shared Alkahest servicing and private delivery
+results have separate repositories.
 """
 
 from __future__ import annotations
@@ -18,6 +18,9 @@ from core_storefront.sqlite_client import SQLiteClient as CoreSQLiteClient
 from core_storefront.sqlite_migrations import MigrationLike
 from market_identity import Identity
 from market_settlement_runtime import settlement_migrations
+
+from apicredits_storefront.settlement_repository import SettlementRepository
+from market_core import SettlementEvidence
 
 from .config import settings
 from .migrations import APICREDITS_MIGRATIONS
@@ -47,6 +50,27 @@ class SQLiteClient(CoreSQLiteClient):
             )
             """
         )
+
+    def _ensure_domain_indexes(self, cur: sqlite3.Cursor) -> None:
+        for table, columns in {
+            "api_credit_settlement_evidence": {"negotiation_id", "mechanism", "agreement_digest", "settlement_ref", "status", "evidence"},
+            "api_credit_issuance_progress": {"negotiation_id", "public_ref", "status", "fulfillment_uid", "public_result", "credentials_ref"},
+        }.items():
+            actual = {str(row[1]) for row in cur.execute(f"PRAGMA table_info({table})")}
+            if not columns <= actual:
+                raise RuntimeError("incompatible API-credit settlement schema; explicitly reset the database")
+
+    async def save_settlement_evidence(self, evidence: SettlementEvidence) -> SettlementEvidence:
+        return await asyncio.to_thread(SettlementRepository(self.db_path).store, evidence)
+
+    async def load_settlement_evidence(self, *, negotiation_id: str) -> SettlementEvidence | None:
+        return await asyncio.to_thread(SettlementRepository(self.db_path).get, negotiation_id)
+
+    async def load_issuance_progress(self, *, reference: str) -> dict[str, Any] | None:
+        return await asyncio.to_thread(SettlementRepository(self.db_path).progress, reference)
+
+    async def save_issuance_progress(self, *, negotiation_id: str, **fields: Any) -> dict[str, Any]:
+        return await asyncio.to_thread(SettlementRepository(self.db_path).checkpoint, negotiation_id, **fields)
 
     async def save_credit_terms(
         self,

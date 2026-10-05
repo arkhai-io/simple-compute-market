@@ -1,17 +1,13 @@
-"""API-credit issuance after the selected settlement's authoritative gate.
-
-The credits service commits any negotiation-time quota hold with one
-idempotent issuance call. Alkahest then submits an on-chain fulfillment;
-payment-backed deals rely on the verified receipt and do not create an
-escrow fulfillment. The bearer secret never goes on chain; it returns once
-through the signed settlement-status credentials channel.
-"""
+"""Mechanism-neutral credit issuance from verified domain evidence."""
 
 from __future__ import annotations
 
 import json
 import logging
-import uuid
+from collections.abc import Mapping
+
+from market_core import SettlementEvidence
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, Awaitable, Callable
 
 from market_identity import Identity
@@ -29,37 +25,50 @@ StageEventFn = Callable[..., Any]
 ApplyFailurePolicyFn = Callable[..., Awaitable[None]]
 
 
+class CreditDelivery(BaseModel):
+    """Validated purchase inputs produced by the authoritative settlement stage."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    owner: Identity
+    offer_resource: dict[str, Any]
+    quantity: int = Field(ge=1)
+    key_mode: str
+    key_id: str | None = None
+    listing_id: str | None = None
+
+
+def credit_delivery(evidence: SettlementEvidence, *, require_verified: bool = True) -> CreditDelivery:
+    if require_verified and evidence.status != "verified":
+        raise ValueError("credit issuance requires verified settlement evidence")
+    payload = evidence.evidence
+    if payload.get("kind") != "api_credits.settlement-evidence.v1" or payload.get("schema_version") != 1:
+        raise ValueError("unsupported credit settlement evidence envelope")
+    digest = payload.get("agreement_digest")
+    if not isinstance(digest, str) or len(digest) != 64:
+        raise ValueError("credit settlement evidence requires its Agreement digest")
+    if not isinstance(payload.get("source"), Mapping):
+        raise ValueError("credit settlement evidence requires authoritative source state")
+    delivery = CreditDelivery.model_validate(payload.get("delivery"))
+    CreditKeyTarget.model_validate({"mode": delivery.key_mode, "key_id": delivery.key_id})
+    if not str(delivery.offer_resource.get("service_name") or "").strip() or not str(delivery.offer_resource.get("resource_id") or "").strip():
+        raise ValueError("credit settlement evidence requires service_name and quota resource")
+    return delivery
+
+
 def prepare_credit_issuance_request(
     *,
-    obligation_ref: str,
-    mechanism: str,
-    authoritative_gate: str,
-    owner: Identity,
-    service: str,
-    resource_id: str,
-    quantity: int,
-    key_mode: str,
-    key_id: str | None = None,
+    evidence: SettlementEvidence,
     capacity_reservation_id: str | None = None,
 ) -> CreditIssuanceRequest:
-    """Build one deterministic command only from an authoritative settlement gate."""
-
-    expected_gates = {
-        "alkahest.v1": "alkahest_verified",
-        "arkhai.payments.v1": "payments_receipt_verified",
-    }
-    if expected_gates.get(mechanism) != authoritative_gate:
-        raise ValueError(
-            "credit issuance requires the exact mechanism's authoritative funding gate"
-        )
+    """Authorize the exact validated purchase over the operator-authenticated channel."""
+    delivery = credit_delivery(evidence)
     return CreditIssuanceRequest.create(
-        obligation_ref=obligation_ref,
-        mechanism=mechanism,
-        owner=owner,
-        service=service,
-        resource_id=resource_id,
-        quantity=quantity,
-        key=CreditKeyTarget.model_validate({"mode": key_mode, "key_id": key_id}),
+        negotiation_id=evidence.negotiation_id,
+        owner=delivery.owner,
+        service=str(delivery.offer_resource["service_name"]),
+        resource_id=str(delivery.offer_resource["resource_id"]),
+        quantity=delivery.quantity,
+        key=CreditKeyTarget.model_validate({"mode": delivery.key_mode, "key_id": delivery.key_id}),
         capacity_reservation_id=capacity_reservation_id,
     )
 
@@ -82,47 +91,10 @@ def encode_credit_fulfillment(
     )
 
 
-async def _submit_token_fulfillment(
-    *,
-    client: Any | None,
-    escrow_uid: str,
-    payload: str,
-) -> str:
-    """Submit the fulfillment on-chain, or a simulated id in demo mode.
-
-    Submission only — arbitration and collection are the claims
-    engine's job, exactly as in the VM flow.
-    """
-    if not client:
-        fulfillment_uid = f"fulfill_{uuid.uuid4()}"
-        logger.info(
-            "[ALKAHEST] (Simulated) Fulfilled token obligation without on-chain client."
-        )
-        return fulfillment_uid
-
-    from market_alkahest.txlock import chain_tx_lock
-
-    async with chain_tx_lock(None):
-        fulfillment_uid = await client.string_obligation.do_obligation(
-            payload,
-            escrow_uid,
-        )
-    logger.info("[ALKAHEST] Fulfilled token obligation with on-chain client.")
-    return fulfillment_uid
-
-
 async def fulfill_api_credits_obligation(
     *,
-    client: Any | None,
-    escrow_uid: str,
-    mechanism: str = "alkahest.v1",
-    authoritative_gate: str = "alkahest_verified",
-    offer_resource: dict[str, Any],
-    quantity: int,
-    key_mode: str = "new",
-    key_id: str | None = None,
-    buyer_principal: Identity,
-    listing_id: str | None = None,
+    evidence: SettlementEvidence,
+    retry_uncertain: bool = False,
     credits_client: CreditsServiceClient | None = None,
     service_url: str | None = None,
     admin_key: str | None = None,
@@ -130,12 +102,12 @@ async def fulfill_api_credits_obligation(
     apply_failure_policy: ApplyFailurePolicyFn | None = None,
     held_reservation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Issue credits after the selected mechanism's authoritative gate.
-
-    Negotiation holds are committed by the idempotent issuance command. Alkahest
-    then submits its on-chain fulfillment; payment-backed deals rely on the
-    verified receipt and do not create an escrow fulfillment.
-    """
+    """Issue credits from verified purchase evidence; stage continuations own attestation."""
+    delivery = credit_delivery(evidence)
+    escrow_uid = evidence.settlement_ref
+    offer_resource = delivery.offer_resource
+    quantity, key_mode = delivery.quantity, delivery.key_mode
+    listing_id = delivery.listing_id
     capacity_reservation_id = (
         str(held_reservation.get("capacity_reservation_id"))
         if held_reservation and held_reservation.get("capacity_reservation_id")
@@ -187,15 +159,7 @@ async def fulfill_api_credits_obligation(
             "Issuance requires trusted service_name and resource_id",
         )
     request = prepare_credit_issuance_request(
-        obligation_ref=escrow_uid,
-        mechanism=mechanism,
-        authoritative_gate=authoritative_gate,
-        owner=buyer_principal,
-        service=service_name,
-        resource_id=str(resource_id),
-        quantity=quantity,
-        key_mode=key_mode,
-        key_id=key_id,
+        evidence=evidence,
         capacity_reservation_id=capacity_reservation_id,
     )
     try:
@@ -206,7 +170,7 @@ async def fulfill_api_credits_obligation(
             or error.status_code in {408, 425, 429}
             or error.status_code >= 500
         )
-        if mechanism == "arkhai.payments.v1" and retryable:
+        if retry_uncertain and retryable:
             stage_event(
                 "provision",
                 "issuance_retryable",
@@ -222,7 +186,7 @@ async def fulfill_api_credits_obligation(
             }
         return await _fail(error.reason, f"Issuance refused: {error}")
     except Exception as error:
-        if mechanism == "arkhai.payments.v1":
+        if retry_uncertain:
             stage_event(
                 "provision",
                 "issuance_retryable",
@@ -259,35 +223,7 @@ async def fulfill_api_credits_obligation(
         key_id=issued_key_id,
         quantity=quantity,
     )
-    if mechanism == "alkahest.v1":
-        try:
-            fulfillment_uid = await _submit_token_fulfillment(
-                client=client,
-                escrow_uid=escrow_uid,
-                payload=payload,
-            )
-        except Exception as error:
-            rollback = await credits_client.rollback_issuance(
-                escrow_uid=escrow_uid,
-                issuance={"key_id": issuance.key_id, "quantity": issuance.quantity},
-                key_mode=key_mode,
-            )
-            stage_event(
-                "settlement",
-                "failed_after_issuance",
-                escrow_uid=escrow_uid,
-                listing_id=listing_id,
-                key_id=issued_key_id,
-                rollback=rollback,
-                error=str(error),
-            )
-            return {
-                "status": "error",
-                "message": f"On-chain fulfillment failed after issuance: {error}",
-                "escrow_uid": escrow_uid,
-            }
-    else:
-        fulfillment_uid = issuance.fulfillment_id
+    fulfillment_uid = issuance.fulfillment_id
     stage_event(
         "provision",
         "fulfilled",
@@ -312,4 +248,5 @@ async def fulfill_api_credits_obligation(
         "fulfillment_uid": fulfillment_uid,
         "connection_details": payload,
         "tenant_credentials": credentials,
+        "issuance": issuance,
     }
