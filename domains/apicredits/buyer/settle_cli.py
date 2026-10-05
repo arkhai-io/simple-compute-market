@@ -32,7 +32,7 @@ from rich.table import Table
 from .deal_helpers import load_deal_context
 from .escrow_client import looks_like_propagation_lag
 from .payments import configured_payer_account, settle_api_credit_payment
-from .settlement_composition import resolve_buyer_settlement_policy
+from .settlement_composition import buyer_stage, resolve_buyer_settlement_policy
 
 
 def _chain_name_from_run_log(run_id: str, *, signer: Signer) -> Optional[str]:
@@ -137,7 +137,9 @@ def run_settle_from_log(
             run_id, signer=signer
         ),
     )
-    if (deal.settlement_selection or {}).get("mechanism") == "arkhai.payments.v1":
+    stage = buyer_stage(deal.agreement)
+
+    def _payment():
         if not deal.agreement or not deal.agreement_bytes:
             typer.secho(
                 "Run-log is missing the accepted Agreement required for payments.",
@@ -229,205 +231,210 @@ def run_settle_from_log(
             raise typer.Exit(7)
         return final
 
-    chain_cfg_name = (
-        chain_name
-        or _accepted_proposal_chain(deal)
-        or _chain_name_from_run_log(run_id, signer=signer)
-    )
-    if not chain_cfg_name:
-        typer.secho(
-            "Could not determine the chain from the run-log or deal context. Pass --chain to specify which configured chain to settle on.",
-            err=True,
-            fg=typer.colors.RED,
-        )
-        raise typer.Exit(2)
-    chain_cfg = chain_by_name(chain_cfg_name)
-    if deal.accepted_escrow_proposal is None and deal.accepted_escrow_terms is None:
-        typer.secho(
-            "Run-log carries no seller-accepted escrow proposal. Re-run negotiation so the accepted proposal is captured — token settlement always settles the seller-confirmed shape.",
-            err=True,
-            fg=typer.colors.RED,
-        )
-        raise typer.Exit(2)
-    resolved_evm_address, resolved_evm_private_key = resolve_buyer_wallet(
-        override_addr=evm_address, override_pk=evm_private_key
-    )
-    if not resolved_evm_address or not resolved_evm_private_key:
-        typer.secho(
-            "Missing explicit EVM settlement credentials: wallet.address and wallet.private_key are required for Alkahest.",
-            err=True,
-            fg=typer.colors.RED,
-        )
-        raise typer.Exit(2)
-    chain = SimpleNamespace(
-        buyer_address=resolved_evm_address,
-        buyer_private_key=resolved_evm_private_key,
-        rpc_url=chain_cfg.rpc_url,
-        chain_name=chain_cfg.name,
-        alkahest_addr_config=chain_cfg.alkahest_address_config_path,
-    )
-    log = open_run_log(run_id, signer=signer, profile_id=identity.profile_id)
-    log.event("settle_resumed")
-    registry_urls = resolve_indexer_urls()
-    registry_authorities = resolve_registry_authorities(registry_urls)
-    resolve_seller_principals = make_publisher_trust_resolver(
-        config=BuyConfig.from_resolved_identity(
-            identity=identity,
-            registry_urls=registry_urls,
-            registry_authorities=registry_authorities,
-            discovery_timeout=resolve_discovery_timeout(),
-            registry_api_keys=resolve_registry_api_keys(),
-        ),
-        listing={
-            "listing_id": deal.listing_id,
-            "publisher_id": deal.publisher_id,
-            "publisher_principals": deal.publisher_principals.model_dump(mode="json"),
-            "storefront_url": deal.seller_url,
-            "source_registry_url": deal.source_registry_url,
-            "source_registry_authority": deal.source_registry_authority,
-        },
-        on_update=lambda event, fields: log.event(event, **fields),
-    )
-    resolved_uid = escrow_uid or deal.escrow_uid
-    header = Table.grid(padding=(0, 2))
-    header.add_column(style="bold")
-    header.add_column()
-    header.add_row("Run ID", run_id)
-    header.add_row("Seller", deal.seller_url)
-    header.add_row("Negotiation", deal.negotiation_id)
-    header.add_row("Agreed amount (total)", str(deal.agreed_amount))
-    if resolved_uid:
-        header.add_row("Escrow UID", resolved_uid + " (skip create)")
-    console.print(Panel(header, title="market credits settle", border_style="cyan"))
-    if not resolved_uid:
-        from market_alkahest.schemas import EscrowProposal, EscrowTerms
 
-        from .escrow_client import (
-            make_buyer_payment_escrow_terms_fn,
-            make_create_escrow_fn,
+    def _alkahest():
+        chain_cfg_name = (
+            chain_name
+            or _accepted_proposal_chain(deal)
+            or _chain_name_from_run_log(run_id, signer=signer)
         )
-
-        log.event(
-            "escrow_create_start",
-            terms={
-                "seller_url": deal.seller_url,
-                "listing_id": deal.listing_id,
-                "negotiation_id": deal.negotiation_id,
-                "agreed_amount": deal.agreed_amount,
-                "duration_seconds": 0,
-            },
-        )
-        console.print("[dim]escrow.create[/dim]  approve + create on-chain…")
-        if deal.accepted_escrow_terms is not None:
-            escrow_terms_list = [
-                EscrowTerms.model_validate(item) for item in deal.accepted_escrow_terms
-            ]
-        else:
-            proposal = EscrowProposal(**deal.accepted_escrow_proposal)
-            build_terms = make_buyer_payment_escrow_terms_fn(
-                chain_name=chain.chain_name, addr_config_path=chain.alkahest_addr_config
-            )
-            escrow_terms_list = build_terms(
-                proposal, deal.seller_wallet_address, int(deal.agreed_amount), 0
-            )
-        create_escrow = make_create_escrow_fn(
-            private_key=chain.buyer_private_key,
-            rpc_url=chain.rpc_url,
-            chain_name=chain.chain_name,
-            addr_config_path=chain.alkahest_addr_config,
-        )
-        try:
-            uids = create_escrow(escrow_terms_list)
-        except Exception as exc:
-            log.event("escrow_create_failed", error=str(exc))
-            log.end("error", error=f"escrow_create: {exc}")
+        if not chain_cfg_name:
             typer.secho(
-                f"escrow.create failed on-chain: {exc}", err=True, fg=typer.colors.RED
-            )
-            raise typer.Exit(4) from exc
-        if not uids:
-            log.event("escrow_create_failed", error="no uid returned")
-            log.end("error", error="escrow_create: no uid returned")
-            typer.secho(
-                "escrow.create returned no uid — buyer terms list was empty.",
+                "Could not determine the chain from the run-log or deal context. Pass --chain to specify which configured chain to settle on.",
                 err=True,
                 fg=typer.colors.RED,
             )
-            raise typer.Exit(4)
-        resolved_uid = uids[0]
-        log.event(
-            "escrow_created", escrow_uid=resolved_uid, chain_name=chain.chain_name
+            raise typer.Exit(2)
+        chain_cfg = chain_by_name(chain_cfg_name)
+        if deal.accepted_escrow_proposal is None and deal.accepted_escrow_terms is None:
+            typer.secho(
+                "Run-log carries no seller-accepted escrow proposal. Re-run negotiation so the accepted proposal is captured — token settlement always settles the seller-confirmed shape.",
+                err=True,
+                fg=typer.colors.RED,
+            )
+            raise typer.Exit(2)
+        resolved_evm_address, resolved_evm_private_key = resolve_buyer_wallet(
+            override_addr=evm_address, override_pk=evm_private_key
         )
-        console.print(f"[green]escrow created[/green]  {resolved_uid}")
-    try:
-        submit_body = submit_settlement_request(
-            seller_url=deal.seller_url,
-            escrow_uid=resolved_uid,
-            payload={
-                "negotiation_id": deal.negotiation_id,
-                "buyer_evm_address": chain.buyer_address,
-                "chain_name": chain.chain_name,
+        if not resolved_evm_address or not resolved_evm_private_key:
+            typer.secho(
+                "Missing explicit EVM settlement credentials: wallet.address and wallet.private_key are required for Alkahest.",
+                err=True,
+                fg=typer.colors.RED,
+            )
+            raise typer.Exit(2)
+        chain = SimpleNamespace(
+            buyer_address=resolved_evm_address,
+            buyer_private_key=resolved_evm_private_key,
+            rpc_url=chain_cfg.rpc_url,
+            chain_name=chain_cfg.name,
+            alkahest_addr_config=chain_cfg.alkahest_address_config_path,
+        )
+        log = open_run_log(run_id, signer=signer, profile_id=identity.profile_id)
+        log.event("settle_resumed")
+        registry_urls = resolve_indexer_urls()
+        registry_authorities = resolve_registry_authorities(registry_urls)
+        resolve_seller_principals = make_publisher_trust_resolver(
+            config=BuyConfig.from_resolved_identity(
+                identity=identity,
+                registry_urls=registry_urls,
+                registry_authorities=registry_authorities,
+                discovery_timeout=resolve_discovery_timeout(),
+                registry_api_keys=resolve_registry_api_keys(),
+            ),
+            listing={
+                "listing_id": deal.listing_id,
+                "publisher_id": deal.publisher_id,
+                "publisher_principals": deal.publisher_principals.model_dump(mode="json"),
+                "storefront_url": deal.seller_url,
+                "source_registry_url": deal.source_registry_url,
+                "source_registry_authority": deal.source_registry_authority,
             },
-            principal=deal.buyer_principal,
-            signer=signer,
-            max_attempts=6,
-            retryable=looks_like_propagation_lag,
-            resolve_seller_principals=resolve_seller_principals,
+            on_update=lambda event, fields: log.event(event, **fields),
         )
-    except RuntimeError as exc:
-        log.event("settle_submit_failed", error=str(exc))
-        log.end("error", error=f"settle_submit: {exc}")
-        typer.secho(f"/settle submit failed: {exc}", err=True, fg=typer.colors.RED)
-        raise typer.Exit(5) from exc
-    log.event("settle_submitted", body=submit_body)
-    console.print(f"[dim]submitted[/dim]  initial body={submit_body}")
+        resolved_uid = escrow_uid or deal.escrow_uid
+        header = Table.grid(padding=(0, 2))
+        header.add_column(style="bold")
+        header.add_column()
+        header.add_row("Run ID", run_id)
+        header.add_row("Seller", deal.seller_url)
+        header.add_row("Negotiation", deal.negotiation_id)
+        header.add_row("Agreed amount (total)", str(deal.agreed_amount))
+        if resolved_uid:
+            header.add_row("Escrow UID", resolved_uid + " (skip create)")
+        console.print(Panel(header, title="market credits settle", border_style="cyan"))
+        if not resolved_uid:
+            from market_alkahest.schemas import EscrowProposal, EscrowTerms
 
-    def _on_poll(attempt: int, body: dict) -> None:
-        log.event("settle_status", attempt=attempt, body=body)
+            from .escrow_client import (
+                make_buyer_payment_escrow_terms_fn,
+                make_create_escrow_fn,
+            )
 
-    try:
-        final = wait_for_settlement(
-            seller_url=deal.seller_url,
+            log.event(
+                "escrow_create_start",
+                terms={
+                    "seller_url": deal.seller_url,
+                    "listing_id": deal.listing_id,
+                    "negotiation_id": deal.negotiation_id,
+                    "agreed_amount": deal.agreed_amount,
+                    "duration_seconds": 0,
+                },
+            )
+            console.print("[dim]escrow.create[/dim]  approve + create on-chain…")
+            if deal.accepted_escrow_terms is not None:
+                escrow_terms_list = [
+                    EscrowTerms.model_validate(item) for item in deal.accepted_escrow_terms
+                ]
+            else:
+                proposal = EscrowProposal(**deal.accepted_escrow_proposal)
+                build_terms = make_buyer_payment_escrow_terms_fn(
+                    chain_name=chain.chain_name, addr_config_path=chain.alkahest_addr_config
+                )
+                escrow_terms_list = build_terms(
+                    proposal, deal.seller_wallet_address, int(deal.agreed_amount), 0
+                )
+            create_escrow = make_create_escrow_fn(
+                private_key=chain.buyer_private_key,
+                rpc_url=chain.rpc_url,
+                chain_name=chain.chain_name,
+                addr_config_path=chain.alkahest_addr_config,
+            )
+            try:
+                uids = create_escrow(escrow_terms_list)
+            except Exception as exc:
+                log.event("escrow_create_failed", error=str(exc))
+                log.end("error", error=f"escrow_create: {exc}")
+                typer.secho(
+                    f"escrow.create failed on-chain: {exc}", err=True, fg=typer.colors.RED
+                )
+                raise typer.Exit(4) from exc
+            if not uids:
+                log.event("escrow_create_failed", error="no uid returned")
+                log.end("error", error="escrow_create: no uid returned")
+                typer.secho(
+                    "escrow.create returned no uid — buyer terms list was empty.",
+                    err=True,
+                    fg=typer.colors.RED,
+                )
+                raise typer.Exit(4)
+            resolved_uid = uids[0]
+            log.event(
+                "escrow_created", escrow_uid=resolved_uid, chain_name=chain.chain_name
+            )
+            console.print(f"[green]escrow created[/green]  {resolved_uid}")
+        try:
+            submit_body = submit_settlement_request(
+                seller_url=deal.seller_url,
+                escrow_uid=resolved_uid,
+                payload={
+                    "negotiation_id": deal.negotiation_id,
+                    "buyer_evm_address": chain.buyer_address,
+                    "chain_name": chain.chain_name,
+                },
+                principal=deal.buyer_principal,
+                signer=signer,
+                max_attempts=6,
+                retryable=looks_like_propagation_lag,
+                resolve_seller_principals=resolve_seller_principals,
+            )
+        except RuntimeError as exc:
+            log.event("settle_submit_failed", error=str(exc))
+            log.end("error", error=f"settle_submit: {exc}")
+            typer.secho(f"/settle submit failed: {exc}", err=True, fg=typer.colors.RED)
+            raise typer.Exit(5) from exc
+        log.event("settle_submitted", body=submit_body)
+        console.print(f"[dim]submitted[/dim]  initial body={submit_body}")
+
+        def _on_poll(attempt: int, body: dict) -> None:
+            log.event("settle_status", attempt=attempt, body=body)
+
+        try:
+            final = wait_for_settlement(
+                seller_url=deal.seller_url,
+                escrow_uid=resolved_uid,
+                principal=deal.buyer_principal,
+                signer=signer,
+                poll_interval=poll_interval,
+                total_timeout=settlement_timeout,
+                on_poll=_on_poll,
+                resolve_seller_principals=resolve_seller_principals,
+            )
+        except TimeoutError as exc:
+            log.event("settle_terminal", status="timeout", error=str(exc))
+            log.end("timeout", escrow_uid=resolved_uid, error=str(exc))
+            typer.secho(
+                f"settlement polling timed out: {exc}", err=True, fg=typer.colors.YELLOW
+            )
+            raise typer.Exit(6) from exc
+        log.event("settle_terminal", body=final)
+        credentials = final.get("tenant_credentials")
+        if isinstance(credentials, dict) and credentials:
+            log.event("credentials_delivered", credentials=credentials)
+        log.end(
+            final.get("status") or "unknown",
             escrow_uid=resolved_uid,
-            principal=deal.buyer_principal,
-            signer=signer,
-            poll_interval=poll_interval,
-            total_timeout=settlement_timeout,
-            on_poll=_on_poll,
-            resolve_seller_principals=resolve_seller_principals,
+            fulfillment_uid=final.get("fulfillment_uid"),
         )
-    except TimeoutError as exc:
-        log.event("settle_terminal", status="timeout", error=str(exc))
-        log.end("timeout", escrow_uid=resolved_uid, error=str(exc))
-        typer.secho(
-            f"settlement polling timed out: {exc}", err=True, fg=typer.colors.YELLOW
-        )
-        raise typer.Exit(6) from exc
-    log.event("settle_terminal", body=final)
-    credentials = final.get("tenant_credentials")
-    if isinstance(credentials, dict) and credentials:
-        log.event("credentials_delivered", credentials=credentials)
-    log.end(
-        final.get("status") or "unknown",
-        escrow_uid=resolved_uid,
-        fulfillment_uid=final.get("fulfillment_uid"),
-    )
-    result = Table.grid(padding=(0, 2))
-    result.add_column(style="bold")
-    result.add_column()
-    result.add_row("Status", str(final.get("status")))
-    result.add_row("Escrow UID", resolved_uid)
-    if final.get("fulfillment_uid"):
-        result.add_row("Fulfillment UID", str(final["fulfillment_uid"]))
-    if final.get("reason"):
-        result.add_row("Reason", str(final["reason"]))
-    border = "green" if final.get("status") == "ready" else "yellow"
-    console.print(Panel(result, title="Settlement complete", border_style=border))
-    if isinstance(credentials, dict) and credentials:
-        render_credentials(console, credentials)
-    if final.get("status") != "ready":
-        raise typer.Exit(7)
-    return final
+        result = Table.grid(padding=(0, 2))
+        result.add_column(style="bold")
+        result.add_column()
+        result.add_row("Status", str(final.get("status")))
+        result.add_row("Escrow UID", resolved_uid)
+        if final.get("fulfillment_uid"):
+            result.add_row("Fulfillment UID", str(final["fulfillment_uid"]))
+        if final.get("reason"):
+            result.add_row("Reason", str(final["reason"]))
+        border = "green" if final.get("status") == "ready" else "yellow"
+        console.print(Panel(result, title="Settlement complete", border_style=border))
+        if isinstance(credentials, dict) and credentials:
+            render_credentials(console, credentials)
+        if final.get("status") != "ready":
+            raise typer.Exit(7)
+        return final
+
+
+    return stage.resume(payment=_payment, alkahest=_alkahest)
 
 
 def register(credits_app: typer.Typer) -> None:

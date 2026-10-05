@@ -10,6 +10,29 @@ from core_buyer.settlement import BuyerSettlementPolicy
 from market_alkahest import create_alkahest_registration
 from market_arkhai_payments import create_arkhai_payments_registration
 from market_config.config_loader import load_user_config
+from market_core import SettlementStageTable
+from market_core.schemas import Agreement
+
+from .settlement_stages import AlkahestBuyerStage, PaymentBuyerStage
+
+BUYER_STAGES = SettlementStageTable({
+    "alkahest.v1": AlkahestBuyerStage(),
+    "arkhai.payments.v1": PaymentBuyerStage(),
+})
+
+
+def buyer_stage(agreement: Any) -> Any:
+    accepted = Agreement.model_validate(agreement)
+    if accepted.settlement is None:
+        raise ValueError("accepted Agreement has no settlement option")
+    try:
+        return BUYER_STAGES[accepted.settlement.mechanism]
+    except KeyError as exc:
+        raise ValueError("unsupported accepted API-credit settlement mechanism") from exc
+
+
+def validate_buyer_acceptance(outcome: Any) -> None:
+    buyer_stage(outcome.agreement).validate_acceptance(outcome)
 from market_settlement_runtime import (
     MechanismReadiness,
     SettlementConfig,
@@ -26,8 +49,21 @@ from .common import (
 def buyer_settlement_registry() -> SettlementConfigurationRegistry:
     """Return both installed API-credit settlement registrations."""
     return SettlementConfigurationRegistry(
-        (create_alkahest_registration(), create_arkhai_payments_registration())
+        tuple(stage.registration() for stage in BUYER_STAGES.values())
     )
+
+
+def select_buyer_proposal(policy: BuyerSettlementPolicy, listing: Mapping[str, Any], **context: Any) -> Any:
+    for registration in policy.registry.ordered_registrations(policy.config, role="buyer"):
+        section = policy.config.mechanism_config(registration.config_key)
+        if section is None or not getattr(section, "enabled", False):
+            continue
+        stage = BUYER_STAGES.get(registration.mechanism_id)
+        if stage is not None:
+            selected = stage.select(policy, listing, **context)
+            if selected is not None:
+                return selected
+    return None
 
 
 def resolve_buyer_settlement_policy(
@@ -51,6 +87,7 @@ def resolve_buyer_settlement_policy(
     return BuyerSettlementPolicy(
         config=settlement,
         registry=registry,
+        stages=BUYER_STAGES,
         public_context={},
     )
 
@@ -62,14 +99,11 @@ async def buyer_settlement_readiness() -> tuple[
     identity = resolve_fresh_buyer_identity()
     policy = resolve_buyer_settlement_policy(identity=identity)
     resources: dict[str, Any] = {}
-    alkahest = policy.config.mechanism_config("alkahest")
-    if alkahest is not None and getattr(alkahest, "enabled", False):
-        chains = buyer_chains()
-        address, _private_key = resolve_buyer_wallet()
-        resources["chains"] = chains
-        resources["wallet"] = {"address": address}
-        if len(chains) == 1:
-            resources["default_chain"] = next(iter(chains))
+    for registration in policy.registry.ordered_registrations(policy.config, role="buyer"):
+        stage = BUYER_STAGES.get(registration.mechanism_id)
+        section = policy.config.mechanism_config(registration.config_key)
+        if stage is not None and section is not None and getattr(section, "enabled", False):
+            resources.update(stage.resources())
     statuses = await policy.registry.ordered_readiness(
         policy.config,
         role="buyer",

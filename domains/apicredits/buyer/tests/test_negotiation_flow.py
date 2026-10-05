@@ -14,7 +14,7 @@ import json
 from dataclasses import dataclass
 from unittest.mock import patch
 
-from market_core.schemas import Agreement
+from market_core.schemas import Agreement, SettlementOption, derive_settlement_option_id
 from market_policy.negotiation_middleware import load_negotiation_chain
 
 from domains.apicredits.buyer.buyer_client import negotiate_with_seller
@@ -124,12 +124,23 @@ def _urlopen_fake(responses, captured=None):
             fields = proposal.get("fields") if isinstance(proposal, dict) else None
             amount = int(fields.get("amount", 0)) if isinstance(fields, dict) else 0
             negotiation_id = payload.get("negotiation_id") or req.full_url.rstrip("/").rsplit("/", 1)[-1]
+            params = {"accepted_escrow": payload.get("accepted_escrow_proposal") or _seller_proposal(amount)}
+            option = SettlementOption(
+                option_id=derive_settlement_option_id(mechanism="alkahest.v1", asset=_TOKEN, rates=[], params=params),
+                mechanism="alkahest.v1", asset=_TOKEN, rates=[], params=params,
+            )
+            payload.setdefault("accepted_escrow_proposal", _seller_proposal(amount))
+            payload.setdefault("settlement_plan", {
+                "obligations": [{"payer": "buyer", "claimant": "seller", "mechanism": "alkahest.v1",
+                                 "amount": str(amount), "asset": _TOKEN, "expiration_unix": 1_800_000_000}],
+            })
             agreement = Agreement(
                 negotiation_id=negotiation_id,
                 listing_id=state.get("listing_id") or request_body.get("listing_id") or "lst-credits-1",
                 listing_hash="0" * 64,
                 buyer=_BUYER_SIGNER.identity.model_dump(mode="json"),
                 seller=_SELLER_SIGNER.identity.model_dump(mode="json"),
+                settlement=option,
                 amount=amount,
                 asset=fields.get("token") if isinstance(fields, dict) else None,
                 duration_seconds=0,

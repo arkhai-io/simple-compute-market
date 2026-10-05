@@ -64,6 +64,7 @@ only-include = ["__init__.py"]
 "settle_cli.py" = "domains/apicredits/buyer/settle_cli.py"
 "payments.py" = "domains/apicredits/buyer/payments.py"
 "settlement_composition.py" = "domains/apicredits/buyer/settlement_composition.py"
+"settlement_stages.py" = "domains/apicredits/buyer/settlement_stages.py"
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
