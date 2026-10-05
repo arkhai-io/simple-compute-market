@@ -107,3 +107,8 @@ Mechanism-specific post-delivery attestation, claim binding, compensation and so
 
 - **WHEN** a payment stage resumes delivery after restart
 - **THEN** it revalidates its stored receipt before passing evidence to common recovery and reuses accepted operation identities
+
+#### Scenario: A stage requires seller action first
+
+- **WHEN** a domain composes a supporting stage whose first effect belongs to the seller
+- **THEN** core dispatches its role entry without requiring a prior buyer deposit, confirmation or escrow proposal
