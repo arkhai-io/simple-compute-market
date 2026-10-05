@@ -1,6 +1,6 @@
 # Bare-metal settlement dispatch — implementation evidence
 
-Tested code: `4d079333` on `baremetal-dispatch`, base `1fd0a4cd`. These are implementation self-checks, not independent acceptance or live payment/hardware qualification.
+Tested code: `eda05518` on `baremetal-dispatch`, base `1fd0a4cd`. These are implementation self-checks, not independent acceptance or live payment/hardware qualification.
 
 ## Setup and first use
 
@@ -20,7 +20,7 @@ The reproducible first-use surface is:
 cd domains/bare_metal/storefront && uv run --no-sync pytest tests/test_http_settlement.py tests/test_http_introductions.py -q
 ```
 
-This opens the controlled settlement → selected-site delivery/result/restart/teardown and authenticated contact-reveal paths. Each invocation creates fresh temporary databases and cleans them up. Do not reuse an existing storefront database: the introducing evidence migration changed in place, and startup refuses the old receipt-only schema with an explicit reset error. For an operator deployment, select a new owned `BARE_METAL_STOREFRONT_DB_PATH` and republish/re-negotiate; there is no adoption/copy/drop migration.
+This opens the controlled settlement → selected-site delivery/result/restart/teardown and authenticated contact-reveal paths. Each invocation creates fresh temporary databases and cleans them up. Do not reuse an existing storefront database: the introducing evidence and lifecycle migrations changed in place, and startup refuses old receipt-only evidence or escrow-named lifecycle schemas with an explicit reset error. For an operator deployment, select a new owned `BARE_METAL_STOREFRONT_DB_PATH` and republish/re-negotiate; there is no adoption/copy/drop migration.
 
 Environment startup now requires explicit `BARE_METAL_STOREFRONT_SETTLEMENT`. Alkahest's entry alone requests EVM/chain resources; payment and contact do not inherit that requirement. Existing site and identity configuration still applies. No inherited deployment selector was reused or seeded.
 
@@ -32,7 +32,7 @@ Environment startup now requires explicit `BARE_METAL_STOREFRONT_SETTLEMENT`. Al
 - Changed mechanism, Agreement digest, established reference or verified source payload is rejected by the real repository without modifying the original evidence.
 - A tampered persisted payment signature is rejected by the selected entry on recovery before any new physical effect. The HTTP fixture also refuses unverified evidence and exercises result/access/teardown on the original site.
 - Contact reveal remains authenticated, durable, recipient-delivered and retention-owned by its kit. Its evidence contains only the obligation reference and Agreement digest, no duplicated contact payload or physical delivery input; no physical lifecycle is created.
-- Fresh SQL inspection confirms negotiation-keyed evidence, unique opaque reference, status constraint and validated versioned payload storage. Physical progress and private/transient access remain separate.
+- Fresh SQL inspection confirms negotiation-keyed evidence, unique opaque reference, status constraint and validated versioned payload storage. Physical progress uses `bare_metal_fulfillment_lifecycle.settlement_ref`; private/transient access remains separate.
 
 The escrow-only status fixture now expects missing evidence (404), rather than treating an escrow row as authorization. No kept delivery or privacy assertion was weakened.
 
@@ -50,7 +50,7 @@ domains/bare_metal/buyer/.venv/bin/python docs/attachments/baremetal-dispatch/in
 domains/bare_metal/storefront/.venv/bin/python docs/attachments/baremetal-dispatch/inspect_wheels.py seller
 ```
 
-Observed fresh columns: `negotiation_id`, `mechanism`, `agreement_sha256`, `settlement_ref`, `status`, `evidence_json`, `created_at`, `updated_at`. No receipt-only column or payment escrow exists. The diagnostic removes its temporary database.
+Observed fresh columns: `negotiation_id`, `mechanism`, `agreement_sha256`, `settlement_ref`, `status`, `evidence_json`, `created_at`, `updated_at`. Lifecycle columns include `settlement_ref`, not `escrow_uid`, with the original non-empty/unique constraints. No receipt-only column or payment escrow exists. Both old evidence and old lifecycle schema shapes refuse startup. The diagnostic removes its temporary database.
 
 - Comment hygiene, touched module-import review, undefined/unused import checks and diff whitespace check: passed. Neither role package declares a static typing target or typing marker.
 - Initial implementation runs exposed an indentation error and an incorrectly wrapped test provision envelope; both were corrected. The payment first-use path also exposed the existing listing-binding serialization defect, repaired separately in `8d08d32e`. Final runs have no failures.
@@ -58,6 +58,6 @@ Observed fresh columns: `negotiation_id`, `mechanism`, `agreement_sha256`, `sett
 
 ## Integration and promotion
 
-`BareMetalFulfillmentService` receives `read_verified_evidence` from the settlement boundary. Generic `fulfill_bare_metal` callers supply that transient callable as `context.domain_input["read_verified_evidence"]`; it is never serialized. The hook consumes `context.settlement_evidence`/`settlement_ref` and returns the neutral reference, while existing public DTO and physical-progress coordinates still project it as `escrow_uid`.
+`BareMetalFulfillmentService` receives `read_verified_evidence` from the settlement boundary. Generic `fulfill_bare_metal` callers supply that transient callable as `context.domain_input["read_verified_evidence"]`; it is never serialized. The hook consumes `context.settlement_evidence`/`settlement_ref` and returns the neutral reference, while public DTOs still project it as `escrow_uid`. Bare-metal-owned physical-progress storage and helpers use `settlement_ref`; the public materialization/receipt DTOs and shared capacity `deal_ref` wire still name the field `escrow_uid`. Genuine Alkahest `escrows.escrow_uid` storage belongs to the shared settlement kit and remains unchanged.
 
 Permanent promotion remains pending review: physical-provisioning behavior and its bare-metal/signed-receipt architecture headings, and market-composition table rationale. The active change records these destinations and the reset requirement. No screenshots apply to these backend-only checks; independent drive/review and live complete-deal qualification remain separate.
