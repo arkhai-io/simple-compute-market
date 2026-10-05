@@ -3,16 +3,39 @@
 ### Requirement: Phases and owner gates
 
 A change MUST move through design, planning, implementation, and closeout, in that
-order, with reviews between them. The repository owner MUST decide when a design is
-settled, and every review — design, implementation, pre-closeout, and closeout —
-MUST stop for the owner's disposition of each finding before any finding is acted
-on. An agent MUST NOT treat its own or another agent's agreement with a finding as a
-disposition.
+order. The design phase MUST end with a design review, the implementation phase
+with a pre-closeout review, and the closeout phase with a closeout review; a phase
+ending in a review MUST NOT be treated as finished until that review has been
+triaged and the repository owner has recorded, in triage, that its gate is passed.
+Planning MUST NOT begin before the design review's gate is passed. Every review —
+design, implementation, pre-closeout, and closeout — MUST stop for the owner's
+disposition of each finding before any finding is acted on. An agent MUST NOT treat
+its own or another agent's agreement with a finding as a disposition.
 
 #### Scenario: A reviewer and the implementing agent agree
 
 - **WHEN** a reviewer raises a finding and the implementing agent agrees with it
 - **THEN** nothing is changed until the owner has recorded a disposition for it
+
+#### Scenario: A design review accepts a blocking finding
+
+- **WHEN** the owner accepts a `blocking` finding in a design review
+- **THEN** the change remains in design until the fix lands and the owner passes
+  the gate, and planning does not begin
+
+### Requirement: Index transitions are written by the step that makes them
+
+Each change of a change's phase or state MUST be written to its row in the
+active-change index by the skill that makes it, in the same step: design
+discussion starting, triage passing a phase-closing gate, planning starting and
+the owner accepting the plan, the first implementation section starting, closeout
+starting, and archival. An implementation review after a section MUST NOT change
+the status.
+
+#### Scenario: A pre-closeout gate is passed
+
+- **WHEN** the owner passes the gate of a change's pre-closeout review in triage
+- **THEN** the triage step sets the change's index row to `ready for closeout`
 
 ### Requirement: Review records
 

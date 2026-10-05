@@ -80,7 +80,11 @@ section owes, the permanent destination of every decision, and the closeout task
 `openspec/README.md#plan-closeout-requirements` requires. They are different work
 done at different times — a dependency landing can send a planned change back to
 design without discarding its plan — so the status model distinguishes them and
-`change-plan` performs the second. It writes or amends `tasks.md` from the settled
+`change-plan` performs the second. Planning starts only after the design has
+passed its review, so a review that redirects the design never discards a plan, and
+the plan is written against a design the owner has accepted. The plan itself has no
+review of its own; its sizing and closeout task are next examined by the first
+implementation review. `change-plan` writes or amends `tasks.md` from the reviewed
 design, preserving completed tasks and amending rather than replacing them, and
 builds on `openspec-update-change`, which already keeps a change's artifacts
 coherent with one another without touching code.
@@ -111,8 +115,10 @@ later session needs may live only in the conversation:
   notes whatever the next session would otherwise rediscover — a seam that resisted,
   an approach that failed and why. Narrative compression at closeout trims these.
 - **Fresh-context compliance check.** Before committing, a subagent with a fresh
-  context checks only the section's diff against `AGENTS.md`, `TESTING.md`, and
-  `openspec/README.md`, alongside `make check-comment-hygiene` and the scoped
+  context checks only the section's diff against `AGENTS.md` and every document it
+  requires reading — `ARCHITECTURE.md`, `TESTING.md`, `DEPLOYMENT_AND_CONFIG.md`,
+  and `openspec/README.md` — and against the permanent specification and
+  architecture companion of each capability the section touches, alongside `make check-comment-hygiene` and the scoped
   `make check-doc-citations`. A fresh reader does not share the implementer's
   degradation; it is the documentation and testing lenses of a review, applied to
   one slice before anyone else sees it.
@@ -336,7 +342,8 @@ phases, in order, are `design`, `planning`, `implementation`, and `closeout`:
 | `in <phase>` | The phase has started and is not finished |
 | `blocked in <phase>` | The phase cannot proceed for a reason that is not another change: an external input, real hardware, a pending owner decision. `Notes` names it |
 
-Three statuses fall outside the grid: `ready for archival` (closeout finished),
+Three statuses fall outside the grid: `ready for archival` (closeout finished and
+its review gate passed),
 `deferred` (no work until a recorded activation condition holds, named in
 `Notes`), and `archived`.
 
@@ -352,7 +359,8 @@ single task — is named in `Notes` instead, since it does not hold the change a
 whole. The campaign dependency graphs remain as illustration; the column is
 authoritative.
 
-A change held by a dependency may be designed, reviewed, and planned meanwhile, but
+A change held by a dependency that gates implementation may be designed, reviewed,
+and planned meanwhile, but
 the design it reaches rests on a codebase its dependency is about to change. When
 a dependency lands, every dependent's design is reverified before implementation
 begins, however far the dependent had progressed. The landing change does this
@@ -370,6 +378,33 @@ remembering it.
 
 `blocked in design` means the design cannot proceed without a decision from the
 owner.
+
+### Reviews are gates that close a phase
+
+Reviews get no status of their own. Each review belongs to the phase it follows,
+and that phase is not finished until the review has been triaged and the owner has
+said, in triage, that its gate is passed. Triage finishing is not enough: when the
+owner accepts a `blocking` finding, the change stays in its phase until the fix
+lands, and the owner decides whether the fix needs another review round. Each
+transition is written to the change's index row by the skill that makes it, in the
+same step:
+
+| From | To | When | Written by |
+|---|---|---|---|
+| `ready for design` | `in design` | Design discussion starts | `change-design` |
+| `in design` | `ready for planning` | The owner settles the design, its design review is triaged, and the owner passes the gate | `change-triage` |
+| `ready for planning` | `in planning` | Planning starts | `change-plan` |
+| `in planning` | `ready for implementation` | The owner accepts the plan | `change-plan` |
+| `ready for implementation` | `in implementation` | The first section starts | `change-implement` |
+| `in implementation` | `ready for closeout` | The pre-closeout review is triaged and the owner passes the gate | `change-triage` |
+| `ready for closeout` | `in closeout` | Closeout starts | `change-closeout` |
+| `in closeout` | `ready for archival` | The closeout review is triaged and the owner passes the gate | `change-triage` |
+| `ready for archival` | `archived` | The change is archived | `change-ship` |
+
+Implementation reviews after each section are not phase gates: the change stays
+`in implementation` through them. `blocked in <phase>` is entered and left by
+whichever skill or person finds and clears the blocker, and the dependency-landing
+rule above is applied by the landing change's closeout.
 
 Explanatory prose moves to a `Notes` column. The index is read by agents, which can
 reason over a fixed vocabulary and a dependency column without a parser; no `make`
@@ -421,7 +456,20 @@ outside this change. No skill names `docs/prompts/`.
 
 ## Open Questions
 
-None.
+- **Exporting session transcripts and review logs. Resolve at closeout.** Today the
+  owner shares design and implementation history by posting chat share links, and
+  a team Q&A bot answers questions about a change from them. Local harness
+  sessions produce no share link. The intended remedy is a session exporter that
+  renders a change's session transcripts, together with its full review logs, as
+  a page per change the bot can read. It is general tooling for any repository
+  and lives outside this one; a redaction step run when each session ends removes
+  local paths, environment values, and credentials before anything is exported.
+  Review logs stay untracked: the exported page is where they persist. Two
+  consequences for this change remain to be settled at closeout:
+  - `change-ship` deletes `reviews/` at archival, so the export must run before
+    that deletion, and `change-ship` has to know whether it has.
+  - Whether this change's own permanent documentation should say that sessions
+    and review logs are exported, without naming where they go.
 
 ## Pilot
 
@@ -430,11 +478,11 @@ through the browser process meanwhile. Each skill is written in the order the
 workflow uses it and proven on a pilot before the next is written.
 
 `capacity-shape-envelope` (Goal 2) runs the full sequence: design discussion of
-its open questions, planning against its existing plan of 24 tasks, design review,
-triage, an implementation slice, validation, implementation review, triage, then
+its open questions, design review, triage, planning against its existing plan of 24
+tasks, an implementation slice, validation, implementation review, triage, then
 pre-closeout review, closeout, closeout review, and archival.
-`add-full-stack-ci-job` has only a proposal, so it proves design discussion and
-planning from nothing, which the first pilot cannot.
+`add-full-stack-ci-job` has only a proposal, so it proves design discussion, design
+review, and planning from nothing, which the first pilot cannot.
 
 What counts as proven:
 
