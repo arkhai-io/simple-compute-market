@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from typing import Any
-from market_identity import Identity
+from market_settlement_runtime import derive_obligation_ref
+from apicredits_storefront.settlement_composition import SELLER_STAGES
+from apicredits_storefront.settlement_stages import (
+    accepted_agreement, ApiCreditsFulfillmentInput, ApiCreditsSettlementProjection,
+)
 
 from market_core import (
     DomainCapability,
@@ -26,10 +30,6 @@ def _build_market_domain_contract() -> MarketDomainContract:
     from apicredits_storefront.services.publication_service import (
         publish_order_to_registry,
     )
-    from apicredits_storefront.negotiation_runtime import (
-        build_api_credit_accepted_artifacts,
-    )
-    from market_alkahest import create_alkahest_registration
     from domains.apicredits.domain_runtime import market_domain
     from domains.apicredits.negotiation.storefront_round import (
         default_seller_round_hook,
@@ -53,8 +53,7 @@ def _build_market_domain_contract() -> MarketDomainContract:
                 publish=publish_order_to_registry,
             ),
             settlement=ImmutableSettlementCapability(
-                verify=create_alkahest_registration().settlement_verifier,
-                build_plan=build_api_credit_accepted_artifacts,
+                seller_stages=SELLER_STAGES,
             ),
             fulfillment=ImmutableFulfillmentCapability(
                 fulfill=fulfill_credit_obligation,
@@ -74,161 +73,19 @@ def get_market_domain_contract() -> MarketDomainContract:
     return APICREDITS_STOREFRONT_DOMAIN
 
 
-@dataclass(frozen=True)
-class ApiCreditsFulfillmentInput:
-    """Private-to-domain inputs retained only by the in-process job."""
-
-    chain_name: str
-    order: dict[str, Any]
-    quantity: int
-    key_mode: str
-    key_id: str | None
-    buyer_principal: Identity
-    listing_id: str | None
-    negotiation_id: str
-
-
-@dataclass(frozen=True)
-class ApiCreditsSettlementProjection:
-    """Public legacy-row metadata for the accepted settlement."""
-
-    chain_name: str
-    escrow_address: str | None
-
-
-async def prepare_api_credit_settlement(
-    *,
-    sqlite_client: Any,
-    local_principal: Identity,
-    escrow_uid: str,
-    negotiation_id: str,
-    mechanism_client: Any,
-    chain_name: str,
-    request: Any = None,
-) -> Any:
-    """Verify and snapshot the exact durationless API-credit obligation."""
-    if request is None:
-        raise ValueError("settlement request is required")
-    from market_alkahest.escrow_verification import verify_escrow_for_settlement
-    from market_core.schemas import EscrowProposal
-    from market_settlement_runtime import PreparedSettlement
-
-    from apicredits_storefront.utils.config import CHAINS, settings
-
-    chain = CHAINS.get(chain_name)
-    if chain is None:
-        raise ValueError(f"chain {chain_name!r} is not configured on this storefront")
-
-    thread = await sqlite_client.load_negotiation_thread_row(
-        negotiation_id=negotiation_id,
+async def prepare_api_credit_settlement(**context: Any) -> Any:
+    """Resolve only the exact accepted seller stage before verification."""
+    thread = await context["sqlite_client"].load_negotiation_thread_row(
+        negotiation_id=context["negotiation_id"],
     )
-    if not thread:
-        raise ValueError(f"Unknown negotiation {negotiation_id}")
-    if thread.get("terminal_state") != "success":
-        raise ValueError(
-            f"Negotiation {negotiation_id} is not terminal-success "
-            f"(terminal_state={thread.get('terminal_state')!r})"
-        )
-    if thread.get("agreed_price") is None:
-        raise ValueError(f"Negotiation {negotiation_id} has no agreed_price committed")
-    buyer_principal = Identity.model_validate(thread.get("buyer_principal"))
-    seller_principal = Identity.model_validate(thread.get("seller_principal"))
-    if request.buyer_principal != buyer_principal:
-        raise ValueError("settlement buyer principal does not match negotiation")
-    if seller_principal != local_principal:
-        raise ValueError("settlement seller principal does not match local identity")
-
-    listing_id = thread.get("our_listing_id")
-    order = (
-        await sqlite_client.load_listing(listing_id=listing_id) if listing_id else None
-    )
-    if not order:
-        raise ValueError(
-            f"Seller's order {listing_id!r} (from negotiation "
-            f"{negotiation_id}) is gone from the local DB"
-        )
-    terms = await sqlite_client.load_credit_terms(negotiation_id=negotiation_id)
-    if not terms:
-        raise ValueError(
-            f"Negotiation {negotiation_id} has no token terms recorded — "
-            "cannot issue without a quantity"
-        )
-
-    proposal_raw = thread.get("buyer_escrow_proposal")
-    proposal = (
-        EscrowProposal.model_validate(proposal_raw)
-        if isinstance(proposal_raw, dict)
-        else None
-    )
-    matched_index = await verify_escrow_for_settlement(
-        escrow_uid=escrow_uid,
-        seller_wallet=settings.wallet.address or "",
-        agreed_price=int(thread["agreed_price"]),
-        agreed_duration_seconds=0,
-        listing=order,
-        alkahest_client=mechanism_client,
-        chain_name=chain_name,
-        alkahest_address_config_path=chain.alkahest_address_config_path,
-        escrow_proposal=proposal,
-    )
-
-    settlement = get_market_domain_contract().settlement
-    assert settlement is not None
-    accepted = settlement.build_plan(
-        proposal=proposal,
-        agreed_amount=int(thread["agreed_price"]),
-        buyer_principal=buyer_principal,
-        seller_principal=seller_principal,
-    )
-    plan = accepted.get("settlement_plan")
-    obligations_raw = plan.get("obligations") if isinstance(plan, dict) else None
-    if not isinstance(obligations_raw, list) or not obligations_raw:
-        raise ValueError(
-            f"Negotiation {negotiation_id} has no accepted settlement obligations"
-        )
-    obligations = tuple(dict(obligation) for obligation in obligations_raw)
-    expected_payer = buyer_principal.model_dump(mode="json")
-    expected_claimant = seller_principal.model_dump(mode="json")
-    for obligation in obligations:
-        if obligation.get("payer_principal") != expected_payer:
-            raise ValueError("settlement obligation payer principal mismatch")
-        if obligation.get("claimant_principal") != expected_claimant:
-            raise ValueError("settlement obligation claimant principal mismatch")
-    if not isinstance(matched_index, int) or not 0 <= matched_index < len(obligations):
-        raise ValueError(
-            f"Verified obligation index {matched_index!r} is outside the accepted plan"
-        )
-
-    proposal_chain = proposal.chain_name if proposal is not None else None
-    escrow_address = proposal.escrow_address if proposal is not None else None
-    if proposal_chain is None or escrow_address is None:
-        accepted_escrows = order.get("accepted_escrows") or []
-        if accepted_escrows and isinstance(accepted_escrows[0], dict):
-            proposal_chain = proposal_chain or accepted_escrows[0].get("chain_name")
-            escrow_address = escrow_address or accepted_escrows[0].get("escrow_address")
-
-    return PreparedSettlement(
-        agreement_ref=negotiation_id,
-        local_principal=local_principal,
-        obligations=obligations,
-        selected_obligation_index=matched_index,
-        mechanism_ref=escrow_uid,
-        mechanism_receipt={"escrow_uid": escrow_uid},
-        fulfillment_input=ApiCreditsFulfillmentInput(
-            chain_name=proposal_chain or chain_name,
-            order=dict(order),
-            quantity=int(terms["quantity"]),
-            key_mode=str(terms.get("key_mode") or "new"),
-            key_id=terms.get("key_id"),
-            buyer_principal=buyer_principal,
-            listing_id=listing_id,
-            negotiation_id=negotiation_id,
-        ),
-        projection_context=ApiCreditsSettlementProjection(
-            chain_name=proposal_chain or chain_name,
-            escrow_address=escrow_address,
-        ),
-    )
+    if thread is None:
+        raise ValueError("accepted negotiation is unavailable")
+    agreement, _raw = accepted_agreement(thread)
+    try:
+        stage = SELLER_STAGES[agreement.settlement.mechanism]
+    except KeyError as exc:
+        raise ValueError("unsupported accepted settlement mechanism") from exc
+    return await stage.prepare(**context)
 
 
 async def reserve_api_credit_settlement(
@@ -241,8 +98,6 @@ async def reserve_api_credit_settlement(
     wake_servicing: Any,
 ) -> dict[str, Any] | None:
     """Create, bind, and recover the existing public settlement row."""
-    from market_settlement_runtime import derive_obligation_ref
-
     projection = prepared.projection_context
     inserted = await sqlite_client.insert_escrow(
         escrow_uid=escrow_uid,
@@ -275,53 +130,21 @@ async def reserve_api_credit_settlement(
             local_principal=prepared.local_principal,
         )
         await wake_servicing(obligation_ref)
-    return None if inserted else row
-
-
-async def fulfill_api_credit_settlement(
-    prepared: Any,
-    *,
-    mechanism_client: Any,
-) -> Any:
-    """Issue credits and return only the immutable public fulfillment ref."""
-    from market_settlement_runtime import FulfillmentOutcome
-
-    fulfillment = get_market_domain_contract().fulfillment
-    assert fulfillment is not None
-    params = prepared.fulfillment_input
-    try:
-        result = await fulfillment.fulfill(
-            client=mechanism_client,
-            escrow_uid=prepared.mechanism_ref,
-            order=params.order,
-            quantity=params.quantity,
-            key_mode=params.key_mode,
-            key_id=params.key_id,
-            buyer_principal=params.buyer_principal,
-            listing_id=params.listing_id,
-            negotiation_id=params.negotiation_id,
+    existing = await sqlite_client.load_issuance_progress(reference=escrow_uid)
+    if existing is None:
+        await sqlite_client.save_issuance_progress(
+            negotiation_id=negotiation_id, public_ref=escrow_uid, status="provisioning",
         )
-    except Exception as exc:
-        return FulfillmentOutcome(
-            status="failed",
-            reason=f"issuance_error: {exc}",
-        )
+    return row if existing is not None and existing["status"] in {"ready", "failed"} else None
 
-    if (result or {}).get("status") != "fulfilled":
-        return FulfillmentOutcome(
-            status="failed",
-            reason=(result or {}).get("message")
-            or f"status={(result or {}).get('status')!r}",
-        )
-    return FulfillmentOutcome(
-        status="fulfilled",
-        fulfillment_ref=result.get("fulfillment_uid"),
-        public_result={
-            key: result[key]
-            for key in ("connection_details",)
-            if result.get(key) is not None
-        },
-        private_result=result.get("tenant_credentials"),
+
+async def fulfill_api_credit_settlement(prepared: Any, *, mechanism_client: Any) -> Any:
+    """Reconstruct the selected continuation from the accepted Agreement."""
+    db = prepared.fulfillment_input.sqlite_client
+    thread = await db.load_negotiation_thread_row(negotiation_id=prepared.agreement_ref)
+    agreement, _raw = accepted_agreement(thread)
+    return await SELLER_STAGES[agreement.settlement.mechanism].deliver_prepared(
+        prepared, mechanism_client=mechanism_client,
     )
 
 
@@ -331,17 +154,18 @@ async def persist_api_credit_settlement_outcome(
     outcome: Any,
 ) -> None:
     """Project generic completion into the unchanged settle-status row."""
+    if outcome.status != "fulfilled":
+        await sqlite_client.save_issuance_progress(
+            negotiation_id=prepared.agreement_ref, public_ref=prepared.mechanism_ref,
+            status="failed", reason=outcome.reason or "fulfillment failed",
+        )
     if outcome.status == "fulfilled":
         await sqlite_client.update_escrow(
             escrow_uid=prepared.mechanism_ref,
             status="ready",
             fulfillment_uid=outcome.fulfillment_ref,
             connection_details=outcome.public_result.get("connection_details"),
-            tenant_credentials=(
-                json.dumps(outcome.private_result)
-                if outcome.private_result is not None
-                else None
-            ),
+            tenant_credentials=None,
         )
         return
     await sqlite_client.update_escrow(

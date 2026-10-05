@@ -7,18 +7,9 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from market_alkahest import (
-    AlkahestConditionalEscrowClient,
-    create_alkahest_registration,
-)
-from market_arkhai_payments import (
-    ARKHAI_PAYMENTS_CONFIG_KEY,
-    ARKHAI_PAYMENTS_MECHANISM,
-    create_arkhai_payments_registration,
-    derive_mandate,
-    transaction_id,
-)
-from market_core import MarketDomainContract
+from market_core import MarketDomainContract, SettlementStageTable
+from apicredits_storefront.settlement_stages import AlkahestSellerStage, PaymentSellerStage
+
 from market_identity import Identity, Signer, TrustedIdentitySet
 from market_settlement_runtime import (
     MechanismReadiness,
@@ -36,11 +27,12 @@ from apicredits_storefront.services.issuance_evidence import (
     IssuanceEvidenceRepository,
 )
 from apicredits_storefront.utils import config as storefront_config
-from domains.apicredits.settlement import (
-    CreditsServiceClient,
-    mandate_policy_from_agreement,
-)
-from domains.apicredits.settlement.payments import validate_payment_publication_clause
+from domains.apicredits.settlement import CreditsServiceClient
+
+SELLER_STAGES = SettlementStageTable({
+    "alkahest.v1": AlkahestSellerStage(),
+    "arkhai.payments.v1": PaymentSellerStage(),
+})
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +46,7 @@ def _mapping(value: Any) -> dict[str, Any]:
 def build_storefront_settlement_registry() -> SettlementConfigurationRegistry:
     """Install the Alkahest and Arkhai payments registrations."""
     return SettlementConfigurationRegistry(
-        (create_alkahest_registration(), create_arkhai_payments_registration())
+        tuple(stage.registration() for stage in SELLER_STAGES.values())
     )
 
 
@@ -74,24 +66,9 @@ class ApiCreditsSettlementComposition:
     private_results: ApiCreditPrivateResultRepository
     failure_policy: Any
 
-    def payment_settlement_artifacts(
-        self, agreement: Mapping[str, Any]
-    ) -> dict[str, Any]:
-        config = self.settlement_config.mechanism_config(ARKHAI_PAYMENTS_CONFIG_KEY)
-        if config is None or not getattr(config, "enabled", False):
-            raise ValueError("Arkhai payments is not enabled for API credits")
-        policy = mandate_policy_from_agreement(
-            agreement,
-            fee_bps=config.fee_bps,
-            dispute_authority=config.dispute_authority,
-        )
-        mandate = derive_mandate(dict(agreement), policy)
-        return {
-            "mandate": mandate.model_dump(
-                mode="json", by_alias=True, exclude_none=True
-            ),
-            "transaction_id": transaction_id(mandate),
-        }
+    def accepted_settlement_artifacts(self, agreement: Mapping[str, Any]) -> dict[str, Any]:
+        mechanism = agreement["settlement"]["mechanism"]
+        return SELLER_STAGES[mechanism].agreement_artifacts(agreement, self.settlement_config)
 
     async def readiness(self) -> tuple[MechanismReadiness, ...]:
         return await self.configuration_registry.ordered_readiness(
@@ -109,6 +86,8 @@ class ApiCreditsSettlementComposition:
             str, Callable[[Mapping[str, Any], Mapping[str, Any]], Any] | None
         ] = {}
         for mechanism_id in self.settlement_config.priority:
+            if mechanism_id not in SELLER_STAGES:
+                continue
             registration = self.configuration_registry.registration(mechanism_id)
             if registration.accepted_obligation_builder is None:
                 dispatch[mechanism_id] = None
@@ -155,26 +134,13 @@ class ApiCreditsSettlementComposition:
         )
         readiness_resources = merged_resources
         if compiled is not None:
-            alkahest_chains = tuple(
-                dict.fromkeys(
-                    str(clause.mechanism_input["chain"])
-                    for clause in compiled
-                    if clause.mechanism == "alkahest.v1"
-                    and isinstance(clause.mechanism_input.get("chain"), str)
-                )
-            )
-            readiness_resources = {
-                **merged_resources,
-                **(
-                    {
-                        "accepted_escrows": [
-                            {"chain_name": name} for name in alkahest_chains
-                        ]
-                    }
-                    if alkahest_chains
-                    else {}
-                ),
-            }
+            projected: dict[str, Any] = {}
+            for mechanism, stage in SELLER_STAGES.items():
+                projected.update(stage.readiness_resources(
+                    [clause for clause in compiled if clause.mechanism == mechanism],
+                    merged_resources,
+                ))
+            readiness_resources = {**merged_resources, **projected}
         readiness = await self.configuration_registry.ordered_readiness(
             self.settlement_config,
             role="seller",
@@ -210,10 +176,9 @@ class ApiCreditsSettlementComposition:
                     ",".join(blocker.code for blocker in status.blockers),
                 )
                 continue
-            if status.mechanism == ARKHAI_PAYMENTS_MECHANISM:
-                validate_payment_publication_clause(
-                    option_resources.get("publication_clause")
-                )
+            if status.mechanism not in SELLER_STAGES:
+                continue
+            SELLER_STAGES[status.mechanism].validate_publication(option_resources)
             envelope = self.configuration_registry.build_option(
                 status,
                 self.settlement_config,
@@ -264,17 +229,11 @@ def build_api_credit_settlement_composition(
         section = settlement_config.mechanism_config(registration.config_key)
         if section is None or not getattr(section, "enabled", False):
             continue
-        if registration.mechanism_id == "alkahest.v1":
-            mechanism_clients[registration.mechanism_id] = (
-                AlkahestConditionalEscrowClient(
-                    get_client=resources["get_client"],
-                    chain_config_paths={
-                        name: chain.alkahest_address_config_path
-                        for name, chain in storefront_config.CHAINS.items()
-                    },
-                    default_chain=resources["default_chain"],
-                )
-            )
+        stage = SELLER_STAGES.get(registration.mechanism_id)
+        if stage is not None:
+            client = stage.client(resources)
+            if client is not None:
+                mechanism_clients[registration.mechanism_id] = client
 
     runtime = SettlementRuntime(repository, mechanism_clients)
     credits_client = CreditsServiceClient(

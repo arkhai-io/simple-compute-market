@@ -10,6 +10,8 @@ once-only secret must land durably in the run-log
 from __future__ import annotations
 
 import json
+import base64
+from market_core.schemas import Agreement, SettlementOption, derive_settlement_option_id
 import uuid
 from types import SimpleNamespace
 
@@ -48,6 +50,22 @@ _CREDENTIALS = {
 
 
 def _run_event(run_id: str, event: str, **fields) -> dict:
+    if fields.get("status") == "agreed":
+        params = {"accepted_escrow": dict(_PROPOSAL)}
+        option = SettlementOption(
+            option_id=derive_settlement_option_id(mechanism="alkahest.v1", asset="token", rates=[], params=params),
+            mechanism="alkahest.v1", asset="token", rates=[], params=params,
+        )
+        agreement = Agreement(
+            negotiation_id=fields["negotiation_id"], listing_id="lst-1", listing_hash="0"*64,
+            buyer=_SIGNER.identity.model_dump(mode="json"), seller=_SELLER_SIGNER.identity.model_dump(mode="json"),
+            settlement=option, amount=300, asset="token", duration_seconds=0,
+            start_utc="2025-01-01T00:00:00Z", accepted_at="2025-01-01T00:00:00Z",
+        )
+        fields["agreement"] = agreement.model_dump(mode="json")
+        fields["agreement_bytes"] = base64.b64encode(agreement.model_dump_json().encode()).decode()
+        fields["settlement_selection"] = {"mechanism": option.mechanism, "option_id": option.option_id,
+                                          "expiration_unix": 1_800_000_000}
     return {
         "event": event,
         "run_id": run_id,

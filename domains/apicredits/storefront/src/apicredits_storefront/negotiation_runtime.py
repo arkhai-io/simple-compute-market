@@ -11,8 +11,8 @@ from dataclasses import replace
 from decimal import Decimal
 from typing import Any
 
-from market_alkahest.proposals import accepted_escrow_artifacts_from_proposal
-from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM
+from apicredits_storefront.settlement_composition import SELLER_STAGES
+from apicredits_storefront.settlement_stages import build_api_credit_accepted_artifacts
 from market_core import MarketDomainContract
 from market_core.schemas import (
     Agreement,
@@ -39,12 +39,9 @@ from market_policy.scalar_policies import _amount_from_proposal
 
 from apicredits_storefront.services.capacity_client import (
     build_capacity_client,
-    build_capacity_runtime,
-    capacity_binding_from_offer,
 )
 from apicredits_storefront.services.keys_lookup import lookup_key_record
 from apicredits_storefront.utils.config import CHAINS, settings
-from domains.apicredits.listings.models import coerce_resource_dict
 from domains.apicredits.listings.pricing import (
     determine_strategy_from_order,
     extract_unit_price_from_order,
@@ -55,7 +52,6 @@ from domains.apicredits.negotiation.terms import (
     provision_key_mode,
     provision_quantity,
 )
-from domains.apicredits.settlement import validate_payer_account
 
 logger = logging.getLogger(__name__)
 
@@ -305,41 +301,6 @@ def _reference_amount(
     return int(unit * int(quantity if quantity is not None else 1))
 
 
-def build_api_credit_accepted_artifacts(
-    *,
-    buyer_principal: Identity,
-    seller_principal: Identity,
-    proposal: Any,
-    agreed_amount: int,
-    uses_scalar_amount: bool = True,
-    duration_seconds: int = 0,
-    **_unused: Any,
-) -> dict[str, Any]:
-    """Materialize the domain's durationless accepted settlement artifacts."""
-
-    artifacts = accepted_escrow_artifacts_from_proposal(
-        proposal=proposal,
-        agreed_amount=agreed_amount,
-        duration_seconds=duration_seconds,
-        uses_scalar_amount=uses_scalar_amount,
-        seller_wallet_address=_seller_wallet_address(),
-        chain_config_paths=_chain_config_paths(),
-        heartbeat_interval_seconds=None,
-    )
-    error = artifacts.pop("accepted_escrow_terms_error", None)
-    if error:
-        logger.debug("Could not materialize accepted escrow terms: %s", error)
-    plan = artifacts.get("settlement_plan")
-    if isinstance(plan, dict):
-        buyer_wire = buyer_principal.model_dump(mode="json")
-        seller_wire = seller_principal.model_dump(mode="json")
-        plan["buyer_principal"] = buyer_wire
-        plan["seller_principal"] = seller_wire
-        for obligation in plan.get("obligations") or []:
-            if isinstance(obligation, dict):
-                obligation["payer_principal"] = buyer_wire
-                obligation["claimant_principal"] = seller_wire
-    return artifacts
 
 
 def _accepted_selection_artifacts(
@@ -368,14 +329,9 @@ def _accepted_selection_artifacts(
         or accepted.mechanism != advertised.mechanism
     ):
         raise OfferUnfulfillableError("settlement_selection_not_exact")
-    if accepted.mechanism == ARKHAI_PAYMENTS_MECHANISM:
-        params = accepted.params
-        if not isinstance(params, Mapping) or set(params) != {"payer_account"}:
-            raise OfferUnfulfillableError("payments_payer_account_missing")
-        try:
-            validate_payer_account(params.get("payer_account"))
-        except ValueError as exc:
-            raise OfferUnfulfillableError("payments_payer_account_invalid") from exc
+    stage = SELLER_STAGES.get(accepted.mechanism)
+    if stage is not None:
+        stage.validate_selection(accepted)
     if accepted.mechanism not in dispatch:
         raise OfferUnfulfillableError("settlement_mechanism_unsupported")
     build_obligation = dispatch[accepted.mechanism]
@@ -512,12 +468,14 @@ def _with_agreement(
     )
     agreement_bytes = agreement.model_dump_json(exclude_none=True).encode("utf-8")
     artifacts["agreement"] = agreement
-    if settlement is not None and settlement.mechanism == ARKHAI_PAYMENTS_MECHANISM:
-        if settlement_artifacts_builder is None:
-            raise RuntimeError("API-credit payments mandate builder is not composed")
-        artifacts["settlement_data"] = settlement_artifacts_builder(
-            agreement.model_dump(mode="json", exclude_none=True)
-        )
+    if settlement is not None:
+        builder = settlement_artifacts_builder
+        if builder is None:
+            stage = SELLER_STAGES[settlement.mechanism]
+            builder = lambda accepted: stage.agreement_artifacts(accepted, None)
+        data = builder(agreement.model_dump(mode="json", exclude_none=True))
+        if data:
+            artifacts["settlement_data"] = data
     artifacts["agreement_bytes"] = base64.b64encode(agreement_bytes).decode("ascii")
     return artifacts
 
@@ -552,6 +510,7 @@ def _build_response_artifacts(
         proposal=acceptance.pinned_proposal,
         agreed_amount=acceptance.agreed_amount,
         uses_scalar_amount=acceptance.uses_scalar_amount,
+        listing=acceptance.listing_record,
     )
     if accepted:
         return _with_agreement(acceptance, artifacts, settlement_artifacts_builder)
@@ -613,69 +572,12 @@ async def _place_quota_hold(
     """Place the API-credit domain's best-effort quota hold after acceptance."""
     state = _acceptance_policy_state(acceptance, dispatch)
     selection = state.get("accepted_settlement_selection")
-    if (
-        isinstance(selection, Mapping)
-        and selection.get("mechanism") != ARKHAI_PAYMENTS_MECHANISM
-    ):
+    if not isinstance(selection, Mapping):
         return
-
-    from core_storefront.stage_log import stage_event
-
-    quantity = provision_quantity(acceptance.terms.decoded)
-    ttl = float(settings.get("capacity.hold_ttl_seconds", 0) or 0)
-    if ttl <= 0 or not quantity:
-        return
-    try:
-        offer = coerce_resource_dict(acceptance.listing_record.get("offer_resource"))
-        claim: dict[str, Any] = {
-            "executor_kind": "api_credits",
-            "units": int(quantity),
-        }
-        if offer.get("resource_id"):
-            claim["resource_id"] = str(offer["resource_id"])
-        capacity = build_capacity_runtime(lambda: repository)
-        binding = capacity_binding_from_offer(offer)
-        held = await capacity.reserve(
-            binding,
-            claim=claim,
-            deal_ref={
-                "listing_id": acceptance.listing_id,
-                "negotiation_id": acceptance.negotiation_id,
-            },
-            ttl_seconds=ttl,
-        )
-    except Exception as exc:
-        logger.warning(
-            "[NEGOTIATION] Could not place quota hold for %s: %s",
-            acceptance.negotiation_id,
-            exc,
-        )
-        return
-    if not held:
-        stage_event(
-            "negotiation",
-            "capacity_hold_unavailable",
-            negotiation_id=acceptance.negotiation_id,
-            listing_id=acceptance.listing_id,
-        )
-        return
-    await repository.save_capacity_hold(
-        negotiation_id=acceptance.negotiation_id,
-        listing_id=acceptance.listing_id,
-        capacity_reservation_id=str(held["capacity_reservation_id"]),
-        payload=held,
-        expires_at=held.get("hold_expires_at"),
-    )
-    stage_event(
-        "negotiation",
-        "capacity_hold_placed",
-        negotiation_id=acceptance.negotiation_id,
-        listing_id=acceptance.listing_id,
-        capacity_reservation_id=held.get("capacity_reservation_id"),
-        resource_id=held.get("resource_id"),
-        site=held.get("site"),
-        hold_expires_at=held.get("hold_expires_at"),
-    )
+    stage = SELLER_STAGES.get(selection.get("mechanism"))
+    if stage is None:
+        raise OfferUnfulfillableError("settlement_mechanism_unsupported")
+    await stage.place_hold(repository, acceptance)
 
 
 async def _persist_artifacts(

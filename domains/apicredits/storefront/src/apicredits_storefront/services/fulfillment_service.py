@@ -1,4 +1,4 @@
-"""Credit fulfillment orchestration for settled escrows.
+"""Credit fulfillment orchestration from verified settlement evidence.
 
 Binds the concept module's ``fulfill_api_credits_obligation`` to this
 process's parts: settings, the capacity-hold lookup placed at
@@ -12,8 +12,9 @@ from typing import Any
 
 from core_storefront.stage_log import stage_event
 from domains.apicredits.settlement import fulfill_api_credits_obligation
+from domains.apicredits.settlement.fulfillment import credit_delivery
+from market_core import SettlementEvidence
 from market_settlement_runtime import FailurePolicy
-from market_identity import Identity
 
 from apicredits_storefront.services.credits_service_client import (
     get_credits_service_client,
@@ -155,61 +156,23 @@ async def _apply_fulfillment_failure_policy_adapter(
 
 
 async def fulfill_credit_obligation(
-    *,
-    client: Any | None,
-    escrow_uid: str,
-    order: dict[str, Any],
-    quantity: int,
-    key_mode: str = "new",
-    key_id: str | None = None,
-    buyer_principal: Identity,
-    listing_id: str | None = None,
-    negotiation_id: str | None = None,
-    mechanism: str = "alkahest.v1",
-    authoritative_gate: str = "alkahest_verified",
+    *, evidence: SettlementEvidence, retry_uncertain: bool = False,
+    db: Any | None = None, credits_client: Any | None = None,
 ) -> dict[str, Any]:
-    """Issue credits after the selected mechanism's verified settlement gate.
-
-    Any negotiation-time capacity hold accompanies the idempotent issuance
-    command. Alkahest additionally submits its on-chain fulfillment;
-    payment-backed deals use the signed receipt as their funding evidence.
-    """
-
-    from apicredits_storefront.domain_runtime import (
-        get_market_domain_contract,
-    )
-
-    held_reservation: dict | None = None
-    db = None
-    if negotiation_id:
-        db = get_sqlite_client()
-        hold = await db.load_capacity_hold(negotiation_id=negotiation_id)
-        if hold:
-            held_reservation = dict(hold.get("payload") or {})
-            held_reservation.setdefault(
-                "capacity_reservation_id", hold.get("capacity_reservation_id")
-            )
-    listing = get_market_domain_contract().codecs.listing(order)
+    """Issue from verified delivery inputs, independently of their source mechanism."""
+    credit_delivery(evidence)
+    db = db if db is not None else get_sqlite_client()
+    hold = await db.load_capacity_hold(negotiation_id=evidence.negotiation_id)
+    held_reservation = None
+    if hold:
+        held_reservation = dict(hold.get("payload") or {})
+        held_reservation.setdefault("capacity_reservation_id", hold.get("capacity_reservation_id"))
     result = await fulfill_api_credits_obligation(
-        client=client,
-        escrow_uid=escrow_uid,
-        offer_resource=listing.offer_resource.model_dump(mode="json"),
-        quantity=quantity,
-        key_mode=key_mode,
-        key_id=key_id,
-        buyer_principal=buyer_principal,
-        listing_id=listing_id,
-        credits_client=get_credits_service_client(),
-        stage_event=stage_event,
-        mechanism=mechanism,
-        authoritative_gate=authoritative_gate,
-        apply_failure_policy=_apply_fulfillment_failure_policy_adapter,
+        evidence=evidence, retry_uncertain=retry_uncertain,
+        credits_client=credits_client or get_credits_service_client(),
+        stage_event=stage_event, apply_failure_policy=_apply_fulfillment_failure_policy_adapter,
         held_reservation=held_reservation,
     )
-    if (
-        db is not None
-        and held_reservation is not None
-        and result.get("status") != "pending"
-    ):
-        await db.delete_capacity_hold(negotiation_id=negotiation_id)
+    if held_reservation is not None and result.get("status") != "pending":
+        await db.delete_capacity_hold(negotiation_id=evidence.negotiation_id)
     return result

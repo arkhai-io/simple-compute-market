@@ -175,7 +175,7 @@ def _build_api_credit_services(
         accepted_obligation_dispatch=(
             settlement_composition.accepted_obligation_dispatch()
         ),
-        settlement_artifacts_builder=settlement_composition.payment_settlement_artifacts,
+        settlement_artifacts_builder=settlement_composition.accepted_settlement_artifacts,
     )
     settlement_runtime = settlement_composition.runtime
     settlement_worker = settlement_composition.worker
@@ -186,6 +186,7 @@ def _build_api_credit_services(
             prepare_api_credit_settlement,
             sqlite_client=sqlite_client,
             local_principal=marketplace_signer.identity,
+            composition=settlement_composition,
         ),
         reserve_start=partial(
             reserve_api_credit_settlement,
