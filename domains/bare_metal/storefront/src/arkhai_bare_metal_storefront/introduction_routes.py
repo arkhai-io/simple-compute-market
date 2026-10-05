@@ -17,7 +17,8 @@ from market_contact_exchange import (
     IntroductionRouteCallbacks,
     IntroductionRouteService,
 )
-from market_core.schemas import SettlementObligation, SettlementPlan
+from market_core import SettlementStageTable
+from market_core.schemas import Agreement, SettlementObligation, SettlementPlan
 from market_identity import Identity
 from market_settlement_runtime import (
     SettlementObligationRecord,
@@ -32,15 +33,39 @@ async def _accepted_introduction(
     db: SQLiteClient,
     negotiation_id: str,
     obligation_ref: str,
-) -> tuple[IntroductionAgreement, SettlementObligation]:
+    seller_stages: SettlementStageTable[Any] = SELLER_STAGES,
+) -> tuple[IntroductionAgreement, SettlementObligation, Any]:
     thread = await db.load_negotiation_thread_row(negotiation_id=negotiation_id)
     if thread is None or thread.get("terminal_state") != "success":
         raise ValueError("introduction deal is not accepted")
+    try:
+        accepted = Agreement.model_validate_json(thread["agreement_bytes"])
+        if accepted.settlement is None:
+            raise ValueError("accepted Agreement has no settlement selection")
+        stage = seller_stages[accepted.settlement.mechanism]
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("accepted Agreement has no supported settlement stage") from exc
+    if (
+        accepted.negotiation_id != negotiation_id
+        or accepted.listing_id != thread.get("our_listing_id")
+        or Identity.model_validate(accepted.buyer)
+        != Identity.model_validate(thread.get("buyer_principal"))
+        or Identity.model_validate(accepted.seller)
+        != Identity.model_validate(thread.get("seller_principal"))
+    ):
+        raise ValueError("introduction Agreement differs from the accepted negotiation")
     plan = SettlementPlan.model_validate(thread.get("settlement_plan"))
     if len(plan.obligations) != 1:
         raise ValueError("introduction agreement must contain one obligation")
     obligation = plan.obligations[0]
-    if obligation.mechanism != CONTACT_MECHANISM:
+    if (
+        obligation.mechanism != CONTACT_MECHANISM
+        or obligation.mechanism != accepted.settlement.mechanism
+        or Identity.model_validate(obligation.payer_principal)
+        != Identity.model_validate(accepted.buyer)
+        or Identity.model_validate(obligation.claimant_principal)
+        != Identity.model_validate(accepted.seller)
+    ):
         raise ValueError("accepted deal is not an introduction")
     expected_ref = derive_obligation_ref(
         negotiation_id,
@@ -59,6 +84,7 @@ async def _accepted_introduction(
             introduction_package=dict(package) if isinstance(package, Mapping) else {},
         ),
         obligation,
+        stage,
     )
 
 
@@ -73,6 +99,7 @@ def build_bare_metal_introduction_service(
         Awaitable[AuthorizedIntroductionRequest],
     ],
     deliver: DeliverIntroduction | None = None,
+    seller_stages: SettlementStageTable[Any] = SELLER_STAGES,
 ) -> IntroductionRouteService:
     """Install bare-metal accepted-state interpretation into the reveal service."""
 
@@ -90,10 +117,11 @@ def build_bare_metal_introduction_service(
             negotiation_id = SettlementObligationRecord.model_validate(
                 row
             ).agreement_ref
-        agreement, _ = await _accepted_introduction(
+        agreement, _, _ = await _accepted_introduction(
             db,
             negotiation_id,
             obligation_ref,
+            seller_stages,
         )
         return agreement
 
@@ -119,10 +147,11 @@ def build_bare_metal_introduction_service(
         """Drive the one non-financial obligation to collected; every step is
         idempotent, so a retried start converges instead of failing."""
 
-        _, obligation = await _accepted_introduction(
+        _, obligation, stage = await _accepted_introduction(
             db,
             agreement.agreement_ref,
             agreement.obligation_ref,
+            seller_stages,
         )
         await settlement_runtime.register_plan(
             agreement_ref=agreement.agreement_ref,
@@ -148,7 +177,7 @@ def build_bare_metal_introduction_service(
             local_principal=agreement.seller_principal,
             worker_id=_worker("introduction-collect"),
         )
-        await SELLER_STAGES[CONTACT_MECHANISM].record_reveal(db, agreement)
+        await stage.record_reveal(db, agreement)
 
     return IntroductionRouteService(
         callbacks=IntroductionRouteCallbacks(
@@ -177,7 +206,7 @@ async def load_revealed_introduction(
     record = await db.load_contact_introduction(obligation_ref=obligation_ref)
     if record is None:
         raise ValueError("introduction has not been revealed")
-    agreement, _ = await _accepted_introduction(
+    agreement, _, _ = await _accepted_introduction(
         db,
         record.agreement_ref,
         obligation_ref,

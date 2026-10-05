@@ -204,9 +204,8 @@ Arkhai payment authentication is independent of marketplace request signing: hea
 The composition contract covers the shipped role protocols and versioned domain contracts; it is not a claim that every possible market shape fits the current phases. Auctions, sealed-bid protocols, arbitrary settlement plans, and a universal storefront executable require explicit changes rather than inference from the extension points.
 
 API-credit standalone negotiation still constructs Alkahest prerequisites and
-proposals directly, and bare-metal introduction routes require current contact
-enablement even for accepted reveal/re-read. These surfaces do not establish the
-same-table admission or disablement-independent accepted recovery contracts.
+proposals directly. This surface does not establish the same-table admission
+contract.
 
 The frozen-registry, binding, and dispatch seams have deterministic repository
 evidence, but complete live VM/bare-metal restart, teardown, and

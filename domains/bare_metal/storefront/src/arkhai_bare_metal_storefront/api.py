@@ -18,7 +18,6 @@ from core_storefront.models.negotiation_models import (
 )
 from core_storefront.models.system_models import AdminPauseResponse
 from fastapi import APIRouter, HTTPException, Query, Request
-from market_contact_exchange import MECHANISM as CONTACT_MECHANISM
 from market_contact_exchange import (
     AuthorizedIntroductionRequest,
     ContactSettlementConfig,
@@ -176,8 +175,11 @@ async def _authorize_introduction_request(
 def _introduction_service(request: Request) -> Any:
     runtime = _runtime(request)
     composition = runtime.settlement_composition
-    if composition is None or CONTACT_MECHANISM not in composition.enabled_mechanisms:
-        raise HTTPException(status_code=404, detail="contact exchange is disabled")
+    # Enablement governs fresh admission, not accepted introduction recovery.
+    if composition is None:
+        raise HTTPException(
+            status_code=503, detail="accepted settlement support is unavailable"
+        )
     section = composition.config.mechanism_config("contact")
     if not isinstance(section, ContactSettlementConfig) or not section.contact_payload:
         raise HTTPException(
@@ -188,6 +190,7 @@ def _introduction_service(request: Request) -> Any:
         db=runtime.db,
         repository=runtime.settlement_repository,
         settlement_runtime=runtime.settlement_runtime,
+        seller_stages=runtime.domain.settlement.seller_stages,
         seller_contact=section.contact_payload,
         authorize_request=_authorize_introduction_request,
         deliver=runtime.introduction_delivery,
