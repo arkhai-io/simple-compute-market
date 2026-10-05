@@ -21,7 +21,7 @@ Retained contact configuration supplies the first reveal's seller payload.
 From the repository checkout:
 
 ```sh
-bash domains/bare_metal/storefront/docs/attachments/contact-disablement/replay.sh
+bash docs/attachments/contact-disablement/replay.sh
 ```
 
 The command builds all wheels, reinstalls the storefront's internal dependencies,
