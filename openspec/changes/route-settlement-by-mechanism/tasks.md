@@ -4,7 +4,7 @@
 
 Planning only until this checklist is dispatched. Section 1 owns shared core files and freezes the evidence/table boundary. Sections 2–5 can then run in parallel by package ownership; section 4 consumes the authorization DTO owned by section 5, so their final producer/consumer drive joins after both land. Section 6 is a cross-domain storage checklist executed by those domain owners, not another worker editing their files. Section 7 records the deliberately deferred convention. Section 8 joins the work and closes the change.
 
-Use the existing tests named below; adapt existing fixtures and assertions for changed contracts. New test cases require maintainer approval before addition. Run focused suites, not the repository-wide integration gate. Builds, installs and suites use supervised processes. Rebuild changed internal wheels into `.dist` and run the consuming project's `reinit` before validation; do not inject editable sibling paths. No implementation task moves escrow carriers/runtime or changes listing/registry wire formats.
+Use the existing tests named below and adapt their fixtures and assertions for changed contracts. New tests are welcome where they prove a real boundary: table dispatch, evidence gating delivery, authorization replay. Don't add tests that only restate the implementation (mock-returns-what-it-was-told, field-copy checks). Run focused suites, not the repository-wide integration gate. Builds, installs and suites use supervised processes. Rebuild changed internal wheels into `.dist` and run the consuming project's `reinit` before validation; do not inject editable sibling paths. No implementation task moves escrow carriers/runtime or changes listing/registry wire formats.
 
 Each domain section's last task includes its closeout responsibilities; section 8 is the final joined closeout required by `openspec/README.md`. Promotion happens after code review, with destinations named now rather than invented at review.
 
@@ -77,6 +77,15 @@ No adapter implementation in this change; independent after section 1. Its home 
 
 - [ ] 7.1 After review record in `openspec/specs/market-composition/architecture.md#settlement-runtime-composition` and `openspec/specs/settlement-configuration/architecture.md#registration-and-ownership` that compatible kits can opt into a stage convention, it lives in a kit chosen when first implemented, and it is not required for contact/seller-first/fused stages. Verify the deltas require no convention protocol or adapter and no new module/dependency was created speculatively; record adapter extraction as deferred in `design.md`.
 - [ ] 7.2 Recheck core/domain imports with existing `core/tests/unit/test_carrier_purity.py`, VM `test_architecture_imports.py` and bare-metal `test_import_boundaries.py`; verify a stage can use its own kit API without conforming to the proposed convention. Check documentation placement and compress the completed convention notes; no runtime tests/build are owed for a docs-only convention disposition.
+
+## 9. Payment end-to-end scenarios
+
+Owner: one worker after sections 2–5 land. Mirrors the Alkahest complete-deal scenarios with settlement through the Arkhai payments service.
+
+- [ ] 9.1 Add the payments service and its Formance ledger to the e2e compose stack, behind a profile so the Alkahest stack runs without it. Run the service in development mode (header auth, operator test funds) with a fixed receipt key whose public half the storefronts are configured to trust. The payments service is a separate private repository, so decide and record how the stack obtains its image (published private image, or a build from a sibling checkout) and what an e2e run without access does: skip with a readiness reason, never mock.
+- [ ] 9.2 Add readiness checks alongside `00g Alkahest configured`: payments service healthy, ledger reachable, storefront configured for `arkhai.payments.v1`.
+- [ ] 9.3 Add `arkhai.payments.v1` complete-deal scenarios for VM (from `test_full_deal_buyer_cli.py`), API credits (from `test_credits_deal_buyer_cli.py`) and bare metal (from `test_bare_metal_deal.py`): fund the buyer through test funds, negotiate, approve, seller verifies the signed receipt, deliver, and assert one delivery after a repeated settle. Assert the ledger side through the service's balance and transaction reads (payer debited, payee hold, fee), not storefront internals. Share stage helpers with the Alkahest scenarios where the phases match; keep payment-specific phases separate rather than branching inside one test.
+- [ ] 9.4 Run the new scenarios and the existing Alkahest scenarios on the same stack and record both results in the change's evidence.
 
 ## 8. Joined validation and plan closeout
 
