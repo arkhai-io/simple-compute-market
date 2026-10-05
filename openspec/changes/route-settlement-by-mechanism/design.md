@@ -138,10 +138,11 @@ applicable entry, never a dispatch default. `validate_acceptance(outcome)` in
 observation; each domain resolves its same entry and owns required artifacts.
 `BuyerSettlementPolicy` requires the supported table as `stages=`.
 
-`BuyResult` and recovered `DealContext` carry optional `settlement_evidence`.
-The dispatcher emits a `settlement_evidence` event and recovery correlates it
-with the accepted Agreement and established reference. Storefront transient
-input can carry evidence; `StorefrontFulfillmentContext` requires it and exposes
+Buyer results and recovered deal context retain opaque `settlement_ref` and
+applicable `escrow_uid` coordinates. Buyer recovery uses exact accepted Agreement
+bytes and domain settlement data; no buyer domain produces `SettlementEvidence`,
+so core has no buyer evidence field or run-log event. Storefront transient input
+can carry evidence; `StorefrontFulfillmentContext` requires it and exposes
 `settlement_ref`, and `StorefrontFulfillmentLifecycle` returns that reference
 rather than `escrow_uid`. Public wire DTOs are unchanged. Domain boundaries
 project their legacy public coordinates explicitly.
