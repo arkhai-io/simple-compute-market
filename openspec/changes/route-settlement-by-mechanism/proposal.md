@@ -10,7 +10,7 @@ This conflicts with the pipeline decision from `settle-through-arkhai-payments`:
 - Core buyer orchestration dispatches on the Agreement's `settlement.mechanism` through the domain table. It no longer has a branch for "has an escrow proposal or not". Until `move-escrow-into-alkahest` lands, the Alkahest stage reads its escrow proposal from the outcome itself.
 - Settle stages produce domain settlement evidence keyed by negotiation ID: mechanism, settlement reference, status and mechanism-owned evidence. Stages after settlement (fulfillment planning, resume and credit issuance) read that evidence; the API-credits service reads only its issuance authorization. None compares mechanism IDs. Arkhai evidence and delivery progress use domain records rather than `escrows` rows.
 - The credits service receives only the storefront's authenticated, immutable issuance authorization, never raw settlement evidence or a mechanism allowlist. Its grant identity derives uniformly from negotiation ID.
-- An optional shared stage convention belongs in `kit/settlement-runtime`, not core. Its adapters are deferred; this change does not require mechanisms to adopt it.
+- An optional shared stage convention belongs in a kit, not core; its package is chosen when it is first implemented. Its adapters are deferred; this change does not require mechanisms to adopt it.
 - Seller settle routes dispatch the same way. `/api/v1/settle/{escrow_uid}` remains Alkahest's surface until `drop-escrow-from-shared-wire`.
 
 ## Capabilities

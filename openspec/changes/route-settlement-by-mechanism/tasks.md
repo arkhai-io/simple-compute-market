@@ -73,9 +73,9 @@ Execution belongs to sections 2–5's owners; no separate overlapping code worke
 
 ## 7. Opt-in convention boundary
 
-No adapter implementation in this change; independent after section 1. Proposed implementation home is `kit/settlement-runtime/src/market_settlement_runtime/stage_convention.py`, not core and not either mechanism package.
+No adapter implementation in this change; independent after section 1. Its home is decided when it is first implemented: a kit, not core, not either mechanism package, and not assumed to be `kit/settlement-runtime`.
 
-- [ ] 7.1 After review record in `openspec/specs/market-composition/architecture.md#settlement-runtime-composition` and `openspec/specs/settlement-configuration/architecture.md#registration-and-ownership` that compatible kits can opt into a stage convention, its home is the settlement-runtime foundation kit, and it is not required for contact/seller-first/fused stages. Verify the deltas require no convention protocol or adapter and no new module/dependency was created speculatively; record adapter extraction as deferred in `design.md`.
+- [ ] 7.1 After review record in `openspec/specs/market-composition/architecture.md#settlement-runtime-composition` and `openspec/specs/settlement-configuration/architecture.md#registration-and-ownership` that compatible kits can opt into a stage convention, it lives in a kit chosen when first implemented, and it is not required for contact/seller-first/fused stages. Verify the deltas require no convention protocol or adapter and no new module/dependency was created speculatively; record adapter extraction as deferred in `design.md`.
 - [ ] 7.2 Recheck core/domain imports with existing `core/tests/unit/test_carrier_purity.py`, VM `test_architecture_imports.py` and bare-metal `test_import_boundaries.py`; verify a stage can use its own kit API without conforming to the proposed convention. Check documentation placement and compress the completed convention notes; no runtime tests/build are owed for a docs-only convention disposition.
 
 ## 8. Joined validation and plan closeout
