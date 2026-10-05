@@ -83,7 +83,7 @@ The credits service MUST receive the storefront's existing authenticated immutab
 
 ### Requirement: API-credit settlement evidence has independent persistence
 
-The storefront MUST persist accepted-Agreement-bound SettlementEvidence and negotiation-scoped issuance progress independently of escrow rows, signed issuance evidence and private credentials. Mechanism, Agreement digest and an established reference MUST be conflict-protected. Schema cutover MUST edit introducing migrations in place and require fresh databases; old grant adoption and old issuance payloads MUST NOT remain compatibility paths.
+The storefront MUST persist accepted-Agreement-bound SettlementEvidence and negotiation-scoped issuance progress independently of escrow rows, signed issuance evidence and private credentials. Mechanism, Agreement digest and an established reference MUST be conflict-protected; verified status and source/delivery payload MUST NOT be downgraded or replaced. Incompatible evidence/grant schemas MUST require explicit database reset; startup MUST NOT adopt old grants or translate old issuance payloads.
 
 #### Scenario: Pending evidence exists
 
@@ -99,3 +99,14 @@ The storefront MUST persist accepted-Agreement-bound SettlementEvidence and nego
 
 - **WHEN** the introducing storefront and service migrations bootstrap empty databases
 - **THEN** evidence/progress and negotiation-derived grant identities exist without copying legacy escrow/grant populations
+
+#### Scenario: Verified receipt recovery survives unavailable polling
+
+- **WHEN** a payment grant acknowledgement is lost after verified evidence was persisted and payment polling is unavailable
+- **THEN** the stage revalidates the stored signed receipt and resumes the same issuance without replacing verified evidence with pending state
+
+#### Scenario: Prepared Alkahest delivery is issued
+
+- **WHEN** preparation has verified the authoritative escrow and saved matching delivery facts
+- **THEN** delivery consumes those facts without a second preparation inside terminal failure handling
+

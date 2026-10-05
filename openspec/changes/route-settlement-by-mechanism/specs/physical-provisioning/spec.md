@@ -37,7 +37,7 @@ Bare-metal buyer and seller roles MUST each declare exactly their supported sett
 
 ### Requirement: Bare-metal evidence is independent of escrow rows
 
-Bare-metal settlement stages MUST persist accepted-Agreement-bound SettlementEvidence by negotiation ID. Fulfillment and status MUST read that record's verified status/reference, not accept an escrow row as alternative proof or interpret a chain-name sentinel. Established identity/source evidence MUST be conflict-protected. Introducing migrations MUST be edited in place without legacy payment-row copying or fallback.
+Bare-metal settlement stages MUST persist accepted-Agreement-bound SettlementEvidence by negotiation ID. Fulfillment and status MUST read that record's verified status/reference, not accept an escrow row as alternative proof or interpret a chain-name sentinel. Established identity/source evidence MUST be conflict-protected. Incompatible evidence/lifecycle schemas MUST require explicit database reset without legacy payment-row copying or fallback. Before protected recovery effects, the selected stage MUST revalidate authoritative source evidence; an Alkahest journal's materialization identity alone MUST NOT authorize physical delivery.
 
 #### Scenario: A legacy payment sentinel is presented
 
@@ -53,3 +53,9 @@ Bare-metal settlement stages MUST persist accepted-Agreement-bound SettlementEvi
 
 - **WHEN** a record is reused with another mechanism, Agreement digest or established reference
 - **THEN** the write fails before capacity, access or provider mutation
+
+#### Scenario: Materialized Alkahest source is no longer active
+
+- **WHEN** recovery finds reclaim or collection in progress or completed, a non-ready mechanism status, or chain evidence no longer matching the accepted obligation
+- **THEN** it refuses before reservation, fulfillment, access or teardown effects
+

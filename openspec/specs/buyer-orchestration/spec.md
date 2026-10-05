@@ -13,9 +13,11 @@ The core `market` CLI MUST discover domain plugins through entry-point metadata 
 - **THEN** the plugin's verbs are registered without the core package importing that domain
 
 ### Requirement: Linear buy orchestration
+
 A buy run MUST compose discovery, candidate filtering/aggregation, negotiation and the domain-owned selected settlement hook, and persist results needed for inspection and recovery. Core MUST dispatch using the exact accepted Agreement's mechanism through the buyer-role table, not escrow-proposal presence. The selected stage owns its actor sequence and kit-specific prerequisites.
 
 #### Scenario: Settlement response is lost
+
 - **WHEN** the run log contains accepted terms and a deal reference
 - **THEN** recovery inspects or resumes that Agreement's same table entry and operation without renegotiating a second agreement
 
@@ -37,6 +39,11 @@ A domain's buy, settle-from-run and resume surfaces MUST use the same buyer-role
 
 - **WHEN** a buyer resumes a recorded accepted Agreement after another mechanism becomes first priority
 - **THEN** it uses the recorded mechanism, exact accepted inputs, profile principal and established operation identity
+
+#### Scenario: Role entry is absent
+
+- **WHEN** the recorded Agreement's mechanism cannot resolve in the domain's buyer-role table
+- **THEN** the command reports unsupported accepted work before wallet, payment or seller mutations
 
 ### Requirement: Buyer evidence is separate from private delivery
 
@@ -250,3 +257,4 @@ VM, bare-metal, and API-credit buyers selecting `arkhai.payments.v1` MUST retain
 
 - **WHEN** a verified payment has issued credits but the buyer did not observe credentials
 - **THEN** it retrieves the same grant through the authenticated seller boundary rather than approving or issuing again
+

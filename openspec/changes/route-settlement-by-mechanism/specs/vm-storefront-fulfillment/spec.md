@@ -73,7 +73,7 @@ VM buyer and seller roles MUST declare their supported settlement stages once an
 
 ### Requirement: VM evidence and delivery progress are not payment escrows
 
-VM settlement evidence and payment delivery checkpoints/claims MUST be domain-owned negotiation-scoped records, not `escrows` rows with absent or sentinel chain fields. Introducing migrations MUST be edited in place; no legacy-row copying or compatibility fallback is required. Real Alkahest escrow and obligation state MAY remain in their existing owners.
+VM settlement evidence and payment delivery checkpoints/claims MUST be domain-owned negotiation-scoped records, not `escrows` rows with absent or sentinel chain fields. Incompatible evidence/delivery schemas MUST require explicit database reset rather than legacy-row copying or compatibility fallback. Real Alkahest escrow and obligation state MAY remain in their existing owners.
 
 #### Scenario: Payment delivery is pending
 
@@ -89,3 +89,9 @@ VM settlement evidence and payment delivery checkpoints/claims MUST be domain-ow
 
 - **WHEN** its introducing migrations bootstrap a new database and rerun
 - **THEN** evidence/delivery tables exist idempotently without a copy-then-drop migration
+
+#### Scenario: Verified VM evidence is malformed
+
+- **WHEN** a write proposes verified evidence without a SHA-256 Agreement digest, authoritative source, or supported validated `vm.delivery-facts` version 1 payload
+- **THEN** storage refuses before freezing an authoritative record or creating delivery progress
+

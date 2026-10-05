@@ -305,20 +305,17 @@ binding is recorded.
 
 ### Requirement: Pre-terms mechanism dispatch is registration-owned
 
-The settlement mechanism for a deal MUST be resolved exactly once, from the buyer's
-settlement selection or the legacy flat-proposal coercion, and pre-terms option interpretation MUST use that registration. Domain composition MUST dispatch the accepted Agreement to its supported settlement stage; mechanism-specific mandate and provisioning translations belong to that composition, not schema-opaque core.
+The settlement mechanism for a deal MUST be resolved exactly once, from the buyer's settlement selection or the existing legacy flat-proposal coercion. Pre-terms option interpretation MUST use that registration and the domain's corresponding supported-stage entry. Domain composition MUST dispatch the accepted Agreement through its role table; mechanism-specific validation, mandate construction and settlement translations belong to that entry, not schema-opaque core or common delivery.
 
 #### Scenario: A third mechanism is composed
 
-- **WHEN** a new mechanism registration is added to a domain's composition root and
-  enabled in `[Settlement]`
-- **THEN** its options use the registration, and a supporting domain explicitly composes its settlement and provisioning stages
+- **WHEN** a new mechanism registration and supporting role stage are added to a domain and enabled in `[Settlement]`
+- **THEN** its options use the registration and its accepted Agreements use that domain's declared stage without another mechanism conditional
 
 #### Scenario: A mechanism conditional is sought in domain code
 
 - **WHEN** the pre-terms path of any composed domain is inspected
-- **THEN** no `if <mechanism> … else` branch on a concrete mechanism identifier exists
-  outside the composition root's registration list
+- **THEN** concrete-mechanism dispatch exists only in its role table, and any mechanism-specific validation is inside the selected entry's owned hooks
 
 ### Requirement: Deal identity is mechanism-neutral for every mechanism
 
@@ -377,22 +374,27 @@ A domain composition that supports Arkhai payments MUST register `arkhai.payment
 
 ### Requirement: Deals compose negotiate, settle, and provision stages
 
-A deal MUST pass its exact accepted Agreement to a selected domain settlement stage. Core MUST NOT prescribe the actors' order or require separate buyer-confirm and seller-verify steps. That stage MUST return its own SettlementEvidence; protected delivery MUST consume verified evidence rather than compare mechanism IDs or infer payment from an escrow's presence. A domain MUST compose only mechanism stages it supports, and each stage MUST understand its predecessor's output rather than a shared escrow adapter API. Settlement and provisioning MAY be fused when one mechanism provides both, as `contact-exchange.v1` does.
+Negotiation MUST pass its exact accepted Agreement to the domain's selected settlement stage. Protected delivery MUST consume that stage's verified SettlementEvidence rather than compare mechanism IDs or infer payment from an escrow's presence. Core MUST NOT prescribe the actors' order or require separate buyer-confirm and seller-verify steps. Domains MUST compose only supported stages; settlement and delivery MAY be fused.
 
 #### Scenario: Arkhai payment gates domain provisioning
 
 - **WHEN** the seller settles an accepted Agreement through `arkhai.payments.v1`
-- **THEN** VM, bare-metal, or API-credit provisioning remains blocked until the seller verifies a signed receipt matching the transaction ID and Agreement deal hash
+- **THEN** VM, bare-metal or API-credit delivery remains blocked until its stage verifies a signed receipt matching the transaction ID and Agreement deal hash and produces verified evidence
 
 #### Scenario: A domain composes two settlement mechanisms
 
 - **WHEN** a domain advertises both Alkahest and Arkhai payment options
-- **THEN** its composition routes each accepted Agreement to the selected mechanism stage and passes that stage's evidence to compatible provisioning without a new core mechanism conditional
+- **THEN** its role table routes each accepted Agreement to the selected stage and compatible delivery reads normalized evidence without a new core or delivery mechanism conditional
 
 #### Scenario: A settlement mechanism also provides the service
 
 - **WHEN** a deal selects `contact-exchange.v1`
-- **THEN** the composed mechanism may fuse settlement and provisioning into one stage that consumes the negotiation output
+- **THEN** the composed stage may fuse settlement and delivery, produce its introduction evidence and invoke no payment or physical-provisioning phase
+
+#### Scenario: A mechanism requires seller action first
+
+- **WHEN** a supporting domain composes a stage whose first effect belongs to the seller
+- **THEN** core dispatches that role's entry without requiring a prior buyer deposit, confirmation or escrow proposal
 
 ### Requirement: Arkhai payments authority remains external
 
@@ -409,17 +411,27 @@ Core buyer settlement MUST select the composing domain's role-table entry using 
 
 #### Scenario: Payments outcome has no escrow proposal
 
-- **WHEN** an accepted Agreement selects a declared payment stage, with or without a stray escrow proposal
-- **THEN** that payment entry receives the exact outcome and no Alkahest fallback is invoked
+- **WHEN** an accepted Agreement selects Arkhai payments and its outcome contains no escrow proposal
+- **THEN** the declared Arkhai buyer entry receives the exact accepted outcome
+
+#### Scenario: Alkahest outcome contains its proposal
+
+- **WHEN** an accepted Agreement selects Alkahest
+- **THEN** its declared buyer entry reads the proposal from the outcome and core does not use that field to choose the entry
+
+#### Scenario: Accepted mechanism has no stage
+
+- **WHEN** accepted durable work names an unavailable role-table entry
+- **THEN** settlement fails actionably before a mutation and never falls through to another mechanism
 
 ### Requirement: One settlement declaration per domain role
 
-Each settlement-capable domain role MUST declare one immutable table from canonical mechanism ID to domain-owned stage. Core MUST require only the table and evidence carrier, not shared stage methods. Fresh admission MUST expose only supported entries.
+Each settlement-capable domain role MUST declare one immutable table from canonical mechanism ID to domain-owned stage. Core MUST require only the table and evidence carrier, not shared stage methods. Mechanism IDs MUST NOT select behavior elsewhere in domain orchestration; mechanism-owned input validation inside an entry remains permitted. Fresh admission MUST expose only supported entries.
 
 #### Scenario: Role support differs
 
 - **WHEN** a domain's seller supports several stages but its buyer supports one
-- **THEN** each role exposes exactly its declared support and neither inherits another role's stage or default
+- **THEN** each role exposes exactly its declared support and neither role inherits another role's stage or default
 
 #### Scenario: Composition is incomplete
 
@@ -442,7 +454,17 @@ SettlementEvidence MUST carry `negotiation_id`, `mechanism`, opaque `settlement_
 
 ### Requirement: Mechanism continuation stays stage-owned
 
-Mechanism-specific post-delivery attestation, claim binding, compensation and source-evidence revalidation MUST remain in the selected stage's continuation. Core MUST NOT prescribe a common actor sequence or continuation API. Recovery MUST resolve the stage from accepted state, not current priority or serialized executable objects.
+Mechanism-specific post-delivery attestation, claim binding, compensation and source-evidence revalidation MUST remain in the selected stage's continuation. Common delivery and restart runtimes MUST consume validated evidence and domain results without comparing mechanism IDs. Recovery MUST resolve the stage from accepted state, not current priority or serialized executable objects.
+
+#### Scenario: Physical delivery needs an Alkahest attestation
+
+- **WHEN** common physical delivery returns its result to an Alkahest stage
+- **THEN** that stage handles its attestation and claim binding while the common delivery runtime recognizes no mechanism ID
+
+#### Scenario: Receipt-backed work resumes
+
+- **WHEN** a payment stage resumes delivery after restart
+- **THEN** it revalidates its stored receipt before passing evidence to common recovery and reuses accepted operation identities
 
 #### Scenario: A stage requires seller action first
 
@@ -455,3 +477,4 @@ Mechanism-specific post-delivery attestation, claim binding, compensation and so
 - Core CLI fallback and shipped plugin contracts: `core/buyer/tests/unit/test_cli.py`, `domains/vms/buyer/tests/test_plugin_export.py`, and `domains/apicredits/buyer/tests/test_plugin_export.py`.
 - Distribution entry points: `core/buyer/pyproject.toml`, `domains/vms/buyer/pyproject.toml`, and `domains/apicredits/buyer/pyproject.toml`.
 - Frozen storefront registry, startup discovery, record-bound lifecycle carriers, and exact-object resolution: `core/storefront/tests/unit/test_domain_registry.py`, `test_domain_plugins.py`, `test_app_composition.py`, and `test_domain_lifecycle.py`.
+

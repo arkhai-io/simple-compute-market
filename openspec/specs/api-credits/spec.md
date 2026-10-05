@@ -43,10 +43,12 @@ Negotiation-time quota and key checks MUST be advisory guards over captured view
 - **THEN** the credits service repeats authoritative quota and key checks before changing the balance
 
 ### Requirement: Idempotent credit issuance
-The credits service MUST own API-key hashes, balances, grants, and consumption records. A new key MUST be derived through the issuance operation, store only a hash of its bearer secret, and bind buyer identity when supplied. A credit grant MUST be unique by deterministic fulfillment identity derived from its accepted obligation reference (Alkahest `escrow_uid` or payment negotiation ID); retrying the same issuance MUST NOT grant credits or reserve quota twice. A retry for an unused newly issued key MAY rotate and return a replacement secret, but a retry after use MUST NOT reveal a bearer secret.
+
+The credits service MUST own API-key hashes, balances, grants and consumption records. A new key MUST be derived through issuance, store only a hash of its bearer secret and bind the canonical owner. A grant MUST be unique by deterministic fulfillment identity derived uniformly from negotiation ID; exact issuance retries MUST NOT grant or reserve quota twice. An unused new-key retry MAY rotate its secret; a retry after use MUST NOT reveal one.
 
 #### Scenario: Issuance is retried
-- **WHEN** the same deterministic fulfillment identity is issued more than once
+
+- **WHEN** the same deterministic fulfillment identity and immutable authorization are issued more than once
 - **THEN** balance and quota change only once while any replacement secret follows the unused-key rule
 
 ### Requirement: Finite quota commitment
@@ -57,15 +59,23 @@ Issued credits MUST commit finite authoritative quota through an open-ended rese
 - **THEN** the key balance decreases while the committed quota remains unavailable for another sale
 
 ### Requirement: Verified settlement fulfillment
-The API-credits storefront MUST verify accepted settlement evidence before authorizing credit issuance. A pending payment progress row MAY precede receipt verification but MUST authorize no grant. A successful job MUST persist the fulfillment reference and buyer credentials, while public fulfillment results MUST omit the bearer secret. If downstream on-chain fulfillment fails after issuance, the storefront MUST attempt compensating balance adjustment and MUST revoke a key newly created by that failed operation.
+
+The storefront MUST authorize issuance only after its selected settlement stage produces verified SettlementEvidence. Pending progress MUST authorize no grant. Successful delivery MUST persist fulfillment identity and private buyer credentials; public results MUST omit bearer secrets. If a stage's downstream attestation fails after issuance, that stage MUST attempt compensating balance adjustment and revoke a key newly created by the failed operation.
 
 #### Scenario: Settlement evidence is invalid
-- **WHEN** accepted escrow evidence fails verification
+
+- **WHEN** accepted escrow or payment evidence fails its stage's verification
 - **THEN** the storefront authorizes no issuance and creates no credit grant
 
 #### Scenario: New-key issuance succeeds
+
 - **WHEN** verified settlement produces a successful issuance job
 - **THEN** the storefront persists credentials for buyer retrieval and exposes a secret-free public fulfillment result
+
+#### Scenario: Attestation fails after issuance
+
+- **WHEN** the selected Alkahest stage fails its post-issuance on-chain fulfillment
+- **THEN** its continuation attempts balance compensation and new-key revocation without making common issuance compare mechanism IDs
 
 ### Requirement: Online bearer consumption
 An API gate MUST parse bearer credentials as `<key_id>.<secret>`, verify them through the credits service, and consume a configured fixed amount for each admitted request. Missing or invalid credentials MUST return unauthenticated status, revoked credentials MUST return forbidden status, and exhausted credentials MUST return payment-required status with purchase guidance. Service-side consumption MUST be idempotent per key when an idempotency key is supplied. Optional middleware caching or batching MUST remain subordinate to the credits service as balance authority.
@@ -80,7 +90,7 @@ An API gate MUST parse bearer credentials as `<key_id>.<secret>`, verify them th
 
 ### Requirement: Payment grants are principal-bound and exact once
 
-An accepted `arkhai.payments.v1` Agreement MUST bind service, positive quantity, key mode and optional key ID, canonical buyer and seller, amount, asset, and selected payment policy. The storefront MUST verify the signed receipt against its persisted mandate before issuance. The credits authority MUST accept `arkhai.payments.v1` and `alkahest.v1` issuance, key each grant by deterministic fulfillment identity, and reject changed reuse against its immutable request digest. Key ownership, balance, and quota remain authority-owned.
+The accepted Agreement MUST bind service, positive quantity, key mode and optional key ID, canonical parties, amount, asset and selected policy. The storefront's stage MUST verify authoritative settlement evidence before creating an immutable issuance authorization. The credits authority MUST key grants by negotiation-derived fulfillment identity and reject changed reuse against its request digest without recognizing settlement mechanisms. Key ownership, balance and quota remain authority-owned.
 
 #### Scenario: Issuance acknowledgement is lost
 
@@ -94,9 +104,67 @@ An accepted `arkhai.payments.v1` Agreement MUST bind service, positive quantity,
 
 ### Requirement: Payment progress and credentials remain separate
 
-The storefront MUST re-drive nonterminal payment issuance using the accepted negotiation and deterministic transaction/grant identities. Public payment state MUST omit bearer secrets; buyer credentials MUST be delivered through the authenticated private result boundary. A pending transaction or absent matching receipt MUST authorize no issuance.
+The storefront MUST re-drive nonterminal issuance using accepted negotiation, verified evidence and deterministic grant identity. Public progress MUST omit bearer secrets; credentials MUST use authenticated private results. Pending or unverified settlement MUST authorize no issuance. Progress and re-drive MUST read evidence and domain state rather than compare mechanism IDs or treat an escrow-shaped row as authorization.
 
 #### Scenario: Buyer retries provisioning state
 
-- **WHEN** seller state is nonterminal after a verified payment
+- **WHEN** seller state is nonterminal after verified settlement
 - **THEN** settlement resumes or retrieves the same issuance instead of returning pending forever
+
+### Requirement: API-credit role tables own settlement dispatch
+
+The API-credit buyer and seller MUST each compose one supported-mechanism table. Buy, accepted-run settlement, seller acceptance hooks and seller settlement MUST use the corresponding entry. Mechanism-specific option, mandate, expiry and post-issuance behavior MUST stay inside entries rather than controllers, negotiation orchestration or common credit issuance.
+
+#### Scenario: Both payment and Alkahest are supported
+
+- **WHEN** accepted API-credit Agreements select either supported mechanism
+- **THEN** the same role declaration selects its stage and common issuance receives verified evidence without a mechanism switch
+
+### Requirement: Credits service consumes issuance authorization only
+
+The credits service MUST receive the storefront's existing authenticated immutable issuance command, not raw settlement evidence, a mechanism ID or an escrow reference. The command MUST bind negotiation-derived fulfillment identity, canonical owner, service, quota resource, quantity, key target and request digest. The service MUST validate identity/digest and repeat authoritative quota and key checks before granting.
+
+#### Scenario: A new settlement mechanism authorizes the same purchase
+
+- **WHEN** its storefront stage produces verified evidence and constructs a valid authorized issuance command
+- **THEN** the credits service commits the grant without importing that mechanism, parsing its evidence or updating a mechanism allowlist
+
+#### Scenario: Authorization is changed on replay
+
+- **WHEN** an existing fulfillment identity is reused with changed owner, service, resource, quantity or key target
+- **THEN** the authority rejects the conflict before key, balance or quota mutation
+
+#### Scenario: Operational quota hold changes
+
+- **WHEN** an expired negotiation hold is replaced while the immutable authorization intent is unchanged
+- **THEN** issuance rechecks authoritative capacity and retains the same grant identity and intent digest
+
+### Requirement: API-credit settlement evidence has independent persistence
+
+The storefront MUST persist accepted-Agreement-bound SettlementEvidence and negotiation-scoped issuance progress independently of escrow rows, signed issuance evidence and private credentials. Mechanism, Agreement digest and an established reference MUST be conflict-protected; verified status and source/delivery payload MUST NOT be downgraded or replaced. Incompatible evidence/grant schemas MUST require explicit database reset; startup MUST NOT adopt old grants or translate old issuance payloads.
+
+#### Scenario: Pending evidence exists
+
+- **WHEN** a pending settlement record exists without verified authoritative source evidence
+- **THEN** it authorizes no grant and its progress remains retryable without creating a payment escrow
+
+#### Scenario: A verified grant is published as issuance evidence
+
+- **WHEN** delivery produces signed issuance evidence for an Alkahest condition
+- **THEN** it is stored separately from the pre-issuance settlement gate and contains no bearer secret
+
+#### Scenario: A fresh credits schema is created
+
+- **WHEN** the introducing storefront and service migrations bootstrap empty databases
+- **THEN** evidence/progress and negotiation-derived grant identities exist without copying legacy escrow/grant populations
+
+#### Scenario: Verified receipt recovery survives unavailable polling
+
+- **WHEN** a payment grant acknowledgement is lost after verified evidence was persisted and payment polling is unavailable
+- **THEN** the stage revalidates the stored signed receipt and resumes the same issuance without replacing verified evidence with pending state
+
+#### Scenario: Prepared Alkahest delivery is issued
+
+- **WHEN** preparation has verified the authoritative escrow and saved matching delivery facts
+- **THEN** delivery consumes those facts without a second preparation inside terminal failure handling
+

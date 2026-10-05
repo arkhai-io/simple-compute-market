@@ -315,7 +315,8 @@ Within a service, controllers stay thin: HTTP routing, request/response schemas,
 | Lease expiry and physical release | Provisioning lifecycle plus fulfillment convergence | Lease lifecycle owns the release decision; fulfillment convergence owns teardown dispatch/recovery — see "Release" and "Recovery workers" |
 | Escrow claims and obligation journal | Settlement-runtime and Alkahest kit | Domain codecs and fulfillment policy |
 | Payment transactions, ledger, hold release, fees, disputes, and cash movement | External Arkhai payments service | SCM consumes the published API and verified receipt, not provider state |
-| API keys, credit balances, grants, and consumption | API-credits service | Marketplace purchase ownership is distinct from bearer authorization for use |
+| Seller delivery authorization | Selected domain settlement stage | Revalidates authoritative source evidence; local materialization and buyer progress are not authority |
+| API keys, credit balances, grants, and consumption | API-credits service | Receives operator-authenticated neutral issuance intent, not raw settlement evidence or a mechanism allowlist |
 
 ### Storefront capacity boundary
 
@@ -404,7 +405,15 @@ Fulfillment lifecycle identifiers are opaque UUIDv7 strings. They are not encode
 | `site_id` | Explicit authority/routing identity; never encoded into another ID |
 | `pool_id` | Globally unique pool identity with explicit site ownership where required |
 
-Accepted deal identity is the negotiation ID and exact Agreement. Mechanisms using the obligation runtime correlate through `obligation_ref` in `settlement_obligations`, with escrow and introduction references as `mechanism_ref`. Arkhai payments instead stores the mandate in `negotiation_threads.settlement_data` and derives its transaction ID from it; it creates no plan or obligation. Domain receipt and delivery progress remain linked to the negotiation ID. Legacy escrow rows are backfilled only where persisted plans provide neutral obligation identity.
+Accepted deal identity is the negotiation ID and exact Agreement. Mechanisms using the obligation runtime correlate through `obligation_ref` in `settlement_obligations`, with escrow and introduction references as `mechanism_ref`. Arkhai payments instead stores the mandate in `negotiation_threads.settlement_data` and derives its transaction ID from it; it creates no plan or obligation. Seller SettlementEvidence is negotiation-keyed and bound to the exact Agreement
+digest, immutable established reference and versioned validated delivery facts.
+VM physical progress and API-credit issuance progress have independent domain
+records; bare-metal evidence and selected-site lifecycle remain separate.
+Payment progress never occupies an `escrows` row. API-credit grants derive one
+uniform fulfillment identity from negotiation ID, not mechanism or escrow UID.
+Buyer recovery retains opaque references and exact accepted inputs, not
+SettlementEvidence. Existing genuine escrow rows may be backfilled only where
+persisted plans provide neutral obligation identity.
 
 `fulfillment_uid` is a distinct, older identifier predating `fulfillment_id`: the on-chain settlement-claim identity a storefront's settlement mechanism (Alkahest today) issues for escrow arbitration. It is not part of the fulfillment-lifecycle UUIDv7 family above, is owned by the settlement mechanism rather than the fulfillment capability, and MUST NOT be confused with `fulfillment_id` — a storefront workflow row may legitimately carry both, for the same deal, meaning two different things.
 
@@ -452,7 +461,14 @@ The selected settlement stage consumes the exact Agreement and produces its own 
 
 The kit defines `deal = sha256(JCS(agreement))` and transaction ID `sha256(JCS(mandate))`. Hold intervals round up and approval expiry rounds down without rewriting fractional Agreement timestamps. The buyer validates/approves the mandate and polls that ID; its seller settle call carries only the negotiation ID. The seller loads accepted state, polls the same transaction, and verifies the signed receipt against the mandate before provisioning or issuing. Pending is retryable, completed delivery is idempotent, and nonterminal domain progress is re-driven. `make_settle_hook` dispatches the exact accepted outcome through the injected buyer-role table using `Agreement.settlement.mechanism`. Missing entries fail before effects; an escrow helper is reachable only from an explicitly bound entry.
 
-The payments service owns the ledger, fees, hold release, disputes, and cash providers. The kit has no servicing daemon, ledger, plan, or obligation; refund calls `reverse`. Domain receipt and delivery journals are local recovery state, not financial authority.
+The payments service owns the ledger, fees, hold release, disputes, and cash providers. The kit has no servicing daemon, ledger, plan, or obligation; refund calls `reverse`. Domain source evidence is the seller's verified delivery gate, distinct from
+mutable delivery journals and private results. Recovery resolves the same
+Agreement-selected stage and revalidates its source before protected effects.
+Common physical convergence and credit issuance read normalized facts only;
+attestation, claim binding, refunds and compensation return to the selected
+continuation. A journaled Alkahest materialization is adoption history, not
+current authority: recovery also checks active lifecycle and chain evidence.
+These records are not financial authority.
 
 ```text
 Alkahest: Agreement → SettlementPlan → active obligations → Receipt
@@ -560,7 +576,12 @@ Docker builds copy `.dist` from the build context in every stage that resolves i
 
 Aggregate Make targets must run every included subproject's default tests. A standalone subproject target remains useful for focused work, but the aggregate contract is complete coverage, not a curated subset.
 
-Schema changes are additive by default. Non-additive changes use expand/contract across releases. Config-driven operational seeding belongs in runtime initialization; migrations may seed only deterministic system rows required to satisfy a new schema constraint.
+Schema changes are additive by default. Non-additive changes use expand/contract
+across releases unless an explicit disposable-database reset contract applies.
+VM/bare-metal seller evidence/delivery and API-credit evidence/grant schemas
+require fresh owned databases when incompatible; startup rejects drift instead
+of silently copying/adopting old payment rows. Their capability architecture
+companions define quiesce, ownership and bootstrap boundaries. Config-driven operational seeding belongs in runtime initialization; migrations may seed only deterministic system rows required to satisfy a new schema constraint.
 
 See the [deployment and state specification](../../openspec/specs/deployment-state/spec.md).
 

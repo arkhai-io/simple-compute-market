@@ -80,6 +80,19 @@ without installing a servicing worker. Full servicing begins only after the
 composition can bind a real immutable fulfillment reference; a no-op executor
 would falsely advertise collectability.
 
+Each domain composes independent buyer and seller role tables. Registrations
+control fresh admission; accepted work resolves its recorded Agreement through
+the table even when publication is disabled. VM and API-credit tables bind
+Alkahest and payments; bare-metal purchase binds payments while its seller also
+binds Alkahest and fused contact exchange. Delivery consumes validated source
+and domain facts, not the mechanism ID or an escrow-shaped progress row.
+
+Compatible kits may opt into a stage convention, but no shared convention or
+adapter is required or implemented. Its package is chosen when concrete reuse
+justifies implementation: a kit, never core or either mechanism package. Contact,
+seller-first and fused stages need no adapter. The obligation runtime is not an
+assumed home for a convention consumed by non-escrow mechanisms.
+
 ## Settlement configuration registration
 
 Composition roots register installed settlement mechanisms explicitly. Each registration contributes its canonical ID, typed configuration, role applicability, preflight, client factory, listing-option builder, buyer compatibility, and optional command group. Core roles consume only ordered registrations and common readiness; they neither branch on mechanism IDs nor import concrete configuration models.
@@ -189,6 +202,11 @@ Arkhai payment authentication is independent of marketplace request signing: hea
 ## Current limits
 
 The composition contract covers the shipped role protocols and versioned domain contracts; it is not a claim that every possible market shape fits the current phases. Auctions, sealed-bid protocols, arbitrary settlement plans, and a universal storefront executable require explicit changes rather than inference from the extension points.
+
+API-credit standalone negotiation still constructs Alkahest prerequisites and
+proposals directly, and bare-metal introduction routes require current contact
+enablement even for accepted reveal/re-read. These surfaces do not establish the
+same-table admission or disablement-independent accepted recovery contracts.
 
 The frozen-registry, binding, and dispatch seams have deterministic repository
 evidence, but complete live VM/bare-metal restart, teardown, and
